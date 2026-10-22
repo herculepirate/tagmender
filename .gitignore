@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+# run output and personal data: never commit
+*.csv
+*.db
+*.log
+matching/
+covers/
+test_before/
+test_after/

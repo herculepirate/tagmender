@@ -46,20 +46,34 @@ try:
 except ImportError:
     sys.exit("mutagen is required: pip install mutagen")
 
-def _script_version():
-    """Changes whenever the matching code changes. Results made by an older
-    version are re-evaluated, so a fix reaches albums already marked auto."""
+def _script_version(plugin_files=()):
+    """Changes whenever the matching code changes, including the Discogs Enrichment
+    plugin code it uses. Results made by an older version are re-evaluated, so a fix
+    reaches albums already marked auto."""
     import hashlib
     h = hashlib.md5()
-    for name in ("match_core.py", "match_albums.py"):
+    for path in [HERE / "match_core.py", HERE / "match_albums.py", *plugin_files]:
         try:
-            h.update((HERE / name).read_bytes())
+            h.update(Path(path).read_bytes())
         except OSError:
             pass
     return h.hexdigest()[:12]
 
 
+def plugin_files(dm):
+    """The plugin modules the matcher's results depend on."""
+    d = Path(dm.__file__).resolve().parent
+    return [d / "discogs_mapping.py", d / "discogs_countries.py"]
+
+
 SCRIPT_VERSION = _script_version()
+_PLUGIN_STAMP = ""          # set in main() from the Discogs Enrichment code in use
+
+
+def result_version():
+    """Stored with every result: the matcher's version plus the plugin code's, so an
+    update to either re-evaluates every album."""
+    return f"{SCRIPT_VERSION}-{_PLUGIN_STAMP}" if _PLUGIN_STAMP else SCRIPT_VERSION
 
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv",
              ".ape", ".wav", ".aif", ".aiff", ".dsf", ".dff", ".wma", ".mpc"}
@@ -913,7 +927,7 @@ def process(row, http, cfg, dm, args):
                 c = s["cand"]
                 alts.append(f"{c['source']}:{c['id']} {s['confidence']} {c['artist']} - {c['title']} ({c['year']})")
     out.update(status=status, why=why, best=summarize(final), alts=alts,
-               margin=final.get("margin"), version=SCRIPT_VERSION)
+               margin=final.get("margin"), version=result_version())
     return out
 
 
@@ -1037,6 +1051,8 @@ def main():
         sys.exit("Set DISCOGS_TOKEN (discogs.com/settings/developers -> Generate token)")
 
     dm = load_plugin(args.plugin_dir)
+    global _PLUGIN_STAMP
+    _PLUGIN_STAMP = _script_version(plugin_files(dm))[:6]
     out_dir = Path(args.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     import fcntl
@@ -1078,7 +1094,7 @@ def main():
     retry = {s for s, on in (("nomatch", args.retry_nomatch), ("review", args.retry_review)) if on}
     for (p, b) in db.execute("SELECT path, result FROM results"):
         o = json.loads(b)
-        if not args.keep_old_results and o.get("version") != SCRIPT_VERSION:
+        if not args.keep_old_results and o.get("version") != result_version():
             redo[p] = o["status"]
         elif o["status"] in retry:
             redo[p] = o["status"]

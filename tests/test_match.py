@@ -392,6 +392,24 @@ class MovedFolders(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class VersionStamp(unittest.TestCase):
+    def test_plugin_code_is_part_of_the_version(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            f = tmp / "discogs_mapping.py"
+            f.write_text("A = 1\n")
+            v1 = ma._script_version([f])
+            f.write_text("A = 2\n")
+            self.assertNotEqual(v1, ma._script_version([f]))
+            self.assertNotEqual(ma._script_version(), v1)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_plugin_files_are_found_next_to_the_loaded_module(self):
+        names = [p.name for p in ma.plugin_files(ma.load_plugin(PLUGIN_DIR))]
+        self.assertEqual(names, ["discogs_mapping.py", "discogs_countries.py"])
+
+
 class Pipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

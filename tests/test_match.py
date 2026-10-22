@@ -411,6 +411,15 @@ class VersionStamp(unittest.TestCase):
         self.assertEqual(names, ["discogs_mapping.py", "discogs_countries.py"])
 
 
+class CatalogueZeros(unittest.TestCase):
+    def test_leading_zeros_inside_catalogue_numbers(self):
+        # Zoviet France - Norsch: CHARRMCD03 (MusicBrainz) is CHARRMCD3 (Discogs)
+        self.assertEqual(mc.norm_code("CHARRMCD03"), mc.norm_code("CHARRMCD3"))
+        self.assertEqual(mc.norm_code("BRC-067"), mc.norm_code("BRC 67"))
+        self.assertNotEqual(mc.norm_code("CHARRMCD31"), mc.norm_code("CHARRMCD3"))
+        self.assertNotEqual(mc.norm_code("CD100"), mc.norm_code("CD10"))
+
+
 class Pipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

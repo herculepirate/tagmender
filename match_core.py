@@ -311,7 +311,10 @@ def split_codes(value):
 
 
 def norm_code(value):
-    return re.sub(r"[\s\-.]", "", str(value or "")).casefold()
+    """Catalogue number for comparison: no spaces, dashes or dots, any case, and no
+    leading zeros inside numbers ("CHARRMCD03" is "CHARRMCD3" on Discogs)."""
+    text = re.sub(r"[\s\-.]", "", str(value or "")).casefold()
+    return re.sub(r"(?<!\d)0+(?=\d)", "", text)
 
 
 def barcode_key(value):

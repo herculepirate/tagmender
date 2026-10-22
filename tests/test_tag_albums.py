@@ -1,0 +1,278 @@
+# Tests for tag_albums.py, with fake_picard.py standing in for Picard.
+# Run: python3 test_tag_albums.py
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
+TESTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import mutagen  # noqa: E402
+from mutagen.flac import FLAC, Picture  # noqa: E402
+import tag_albums as ta  # noqa: E402
+
+MBID = "641b0578-7135-4567-a728-6ef74f322ccb"
+OTHER = "11111111-2222-4333-8444-555555555555"
+
+
+def audio(p, secs=1, **tags):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    meta = sum((["-metadata", f"{k}={v}"] for k, v in tags.items()), [])
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency={300 + secs}:duration={secs}",
+                    "-ar", "48000", *meta, str(p), "-y"], check=True)
+
+
+def all_tags(p):
+    f = mutagen.File(p)
+    tags = {str(k): [str(x) for x in (v if isinstance(v, list) else [v])] for k, v in (f.tags or {}).items()}
+    pics = [pic.data for pic in f.pictures] if isinstance(f, FLAC) else []
+    return tags, pics
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = self.tmp / "ambient_music"
+        self.album = self.root / "Old Artist" / "1989 - Old Album"
+        self.out = self.tmp / "tagging"
+        self.db = self.tmp / "match_state.db"
+        db = sqlite3.connect(self.db)
+        db.execute("CREATE TABLE results (path TEXT PRIMARY KEY, result TEXT)")
+        db.commit()
+        self.dbc = db
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def add_result(self, folder, status="auto", source="mb", mbid=MBID):
+        o = {"path": str(folder), "status": status, "best": {"source": source, "id": mbid, "artist": "A",
+                                                             "title": "T", "confidence": 100.0}}
+        self.dbc.execute("INSERT OR REPLACE INTO results VALUES (?,?)", (str(folder), json.dumps(o)))
+        self.dbc.commit()
+
+    def make_album(self):
+        audio(self.album / "001.TL.flac", 1, title="The Lorelei", artist="Old Artist", comment="keep me")
+        audio(self.album / "002.O.mp3", 2, title="Overture", artist="Old Artist")
+        audio(self.album / "003.X.m4a", 3, title="Third", artist="Old Artist")
+        audio(self.album / "004.Y.opus", 4, title="Fourth", artist="Old Artist")
+        f = FLAC(self.album / "001.TL.flac")
+        pic = Picture()
+        pic.type, pic.mime, pic.data = 3, "image/jpeg", b"\xff\xd8\xff old cover"
+        f.add_picture(pic)
+        f.save()
+        (self.album / "cover.jpg").write_bytes(b"jpg")
+        (self.album / "Covers").mkdir()
+        (self.album / "Covers" / "p0001.jpg").write_bytes(b"scan")
+        (self.album / "rip.log").write_text("log")
+        self.add_result(self.album)
+
+    def run_tool(self, *extra, skip=""):
+        env = dict(os.environ, FAKE_PICARD_ROOT=str(self.root), FAKE_PICARD_SKIP=skip,
+                   TAGMENDER_SKIP_PICARD_CHECK="1")
+        cmd = [sys.executable, str(HERE / "tag_albums.py"), "--matches-db", str(self.db), "--out-dir",
+               str(self.out), "--library-root", str(self.root),
+               "--picard", f"{sys.executable} {TESTS / 'fake_picard.py'}", *extra]
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        return r.returncode, r.stdout + r.stderr
+
+    def run_id(self):
+        return sorted(p.name for p in self.out.glob("run-*"))[-1][4:]
+
+
+class Seeding(Base):
+    def test_release_id_written_and_read_back_in_every_format(self):
+        self.make_album()
+        for p in ta.audio_files(self.album):
+            ta.write_albumid(p, MBID)
+            self.assertEqual(ta.read_ids(p)["albumid"], MBID, p.name)
+            self.assertEqual(ta.read_ids(p)["trackid"], "", p.name)
+
+    def test_audio_key_survives_a_retag(self):
+        self.make_album()
+        p = self.album / "001.TL.flac"
+        k = ta.audio_key(p)
+        ta.write_albumid(p, MBID)
+        self.assertEqual(ta.audio_key(p), k)
+
+
+class Selection(Base):
+    def test_only_confident_musicbrainz_matches_with_existing_folders(self):
+        self.make_album()
+        audio(self.root / "B" / "2000 - Review" / "01.flac", 1)
+        self.add_result(self.root / "B" / "2000 - Review", status="review")
+        audio(self.root / "C" / "2001 - Discogs" / "01.flac", 1)
+        self.add_result(self.root / "C" / "2001 - Discogs", source="discogs", mbid="123")
+        self.add_result(self.root / "D" / "gone")
+        albums, skipped = ta.select_albums(self.db)
+        self.assertEqual([a["path"] for a in albums], [str(self.album)])
+        self.assertIn("folder no longer exists", dict(skipped)[str(self.root / "D" / "gone")])
+
+    def test_album_carrying_another_release_is_left_alone(self):
+        self.make_album()
+        ta.write_albumid(self.album / "001.TL.flac", OTHER)
+        albums, skipped = ta.select_albums(self.db)
+        self.assertEqual(albums, [])
+        self.assertIn("another release", skipped[0][1])
+
+
+class Artwork(Base):
+    """Zoviet France - Norsch / Eostre: scans in subfolders were left in the old folder, and
+    loose scans were dropped next to the music."""
+    def test_scans_end_up_under_covers_and_nothing_is_left_behind(self):
+        self.make_album()
+        (self.album / "1983 LP release").mkdir()
+        (self.album / "1983 LP release" / "01. front.jpg").write_bytes(b"lp front")
+        (self.album / "01. zoviet - Eostre [front].jpg").write_bytes(b"loose scan")
+        rc, out = self.run_tool("--apply")
+        self.assertEqual(rc, 0, out)
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertFalse(self.album.exists(), "old folder must not be left with scans in it")
+        self.assertEqual((new / "covers" / "1983 LP release" / "01. front.jpg").read_bytes(), b"lp front")
+        self.assertEqual((new / "covers" / "Covers" / "p0001.jpg").read_bytes(), b"scan")
+        self.assertEqual((new / "covers" / "01. zoviet - Eostre [front].jpg").read_bytes(), b"loose scan")
+        self.assertTrue((new / "cover.jpg").exists())                 # Picard/players read this one
+        self.assertTrue((new / "rip.log").exists())                   # not artwork: stays put
+
+    def test_undo_puts_the_scans_back_where_they_were(self):
+        self.make_album()
+        (self.album / "1983 LP release").mkdir()
+        (self.album / "1983 LP release" / "01. front.jpg").write_bytes(b"lp front")
+        layout = sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*") if p.is_file())
+        self.run_tool("--apply")
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*") if p.is_file()), layout)
+        self.assertFalse((self.root / "New Artist").exists())
+
+    def test_tidy_an_earlier_run_then_undo(self):
+        self.make_album()
+        (self.album / "original LP").mkdir()
+        (self.album / "original LP" / "01. front.jpg").write_bytes(b"lp")
+        layout = sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*") if p.is_file())
+        self.run_tool("--apply", "--no-tidy")                 # like the run made before tidying existed
+        self.assertTrue((self.album / "original LP" / "01. front.jpg").exists())
+        rc, out = self.run_tool("--tidy", self.run_id())
+        self.assertEqual(rc, 0, out)
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertTrue((new / "covers" / "original LP" / "01. front.jpg").exists())
+        self.assertFalse(self.album.exists())
+        self.run_tool("--undo", self.run_id())
+        self.assertEqual(sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*") if p.is_file()), layout)
+
+    def test_folders_changed_during_the_run_are_found_without_walking_everything(self):
+        old = self.root / "Untouched" / "2000 - Old"
+        old.mkdir(parents=True)
+        t0 = __import__("time").time()
+        os.utime(old, (t0 - 1000, t0 - 1000))
+        os.utime(old.parent, (t0 - 1000, t0 - 1000))
+        new = self.root / "Fresh Artist" / "2001 - New" / "CD1"
+        new.mkdir(parents=True)
+        found = {str(p) for p in ta.changed_dirs(self.root, t0 - 5)}
+        self.assertIn(str(new), found)
+        self.assertNotIn(str(old), found)
+
+
+class Runs(Base):
+    def test_dry_run_changes_nothing(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Dry run", out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+        self.assertTrue((self.out / "tag_plan.csv").exists())
+
+    def test_apply_tags_with_picard_and_reports_where_it_went(self):
+        self.make_album()
+        rc, out = self.run_tool("--apply")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'tagged': 1", out)
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertEqual(len(ta.audio_files(new)), 4)
+        self.assertFalse(self.album.exists())
+        res = list((self.out / f"run-{self.run_id()}" / "results.csv").read_text().splitlines())
+        self.assertIn(str(new), res[1])
+
+    def test_undo_puts_everything_back_exactly(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        extras = sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*")
+                        if p.is_file() and p.suffix != ".flac" and p.suffix not in ta.AUDIO_EXT)
+        self.run_tool("--apply")
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        after = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        self.assertEqual(after, before)                      # tags, pictures, names, folder
+        self.assertEqual(sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*")
+                                if p.is_file() and p.suffix not in ta.AUDIO_EXT), extras)
+        self.assertFalse((self.root / "New Artist").exists())
+
+    def test_two_albums_in_one_batch_tag_and_undo(self):
+        self.make_album()
+        second = self.root / "Second Artist" / "2001 - Second Album"
+        audio(second / "01.flac", 5, title="One")
+        audio(second / "02.flac", 6, title="Two")
+        self.add_result(second, mbid=OTHER)
+        before = {p: all_tags(p) for p in ta.audio_files(self.album) + ta.audio_files(second)}
+        rc, out = self.run_tool("--apply")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'tagged': 2", out)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p: all_tags(p) for p in ta.audio_files(self.album) + ta.audio_files(second)}, before)
+
+    def test_album_picard_did_not_save_is_reported_and_undo_removes_the_seed(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--apply", skip="Old Album")
+        self.assertIn("'not saved': 1", out)
+        self.run_tool("--undo", self.run_id())
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_refuses_when_picard_is_open(self):
+        self.make_album()
+        orig = ta.picard_running
+        ta.picard_running = lambda: "123 /app/bin/picard"
+        try:
+            sys.argv = ["tag_albums.py", "--matches-db", str(self.db), "--out-dir", str(self.out),
+                        "--library-root", str(self.root), "--apply"]
+            with self.assertRaises(SystemExit) as cm:
+                ta.main()
+            self.assertIn("Picard is open", str(cm.exception))
+        finally:
+            ta.picard_running = orig
+        self.assertEqual(ta.read_ids(self.album / "001.TL.flac")["albumid"], "")
+
+    def test_picard_process_detection(self):
+        yes = ["bwrap --args 42 /app/bin/picard", "/usr/bin/python3 /usr/bin/picard -e LOAD x",
+               "picard", "/usr/bin/flatpak run --branch=stable org.musicbrainz.Picard"]
+        no = ["code /home/hp/Documents/Github/picard-discogs-enrichment",
+              "python3 tag_albums.py --picard flatpak run org.musicbrainz.Picard", "bash", "vim picard.txt"]
+        for c in yes:
+            self.assertTrue(ta.is_picard_process(c), c)
+        for c in no:
+            self.assertFalse(ta.is_picard_process(c), c)
+
+    def test_session_restore_is_refused(self):
+        ini = self.tmp / "Picard.ini"
+        ini.write_text("[setting]\nsession_load_last_on_startup=true\n")
+        self.assertTrue(ta.session_restore_on(ini))
+        ini.write_text("[setting]\nmove_files_to=/x\n")
+        self.assertFalse(ta.session_restore_on(ini))
+
+    def test_picard_commands_load_settle_save_quit(self):
+        cmds = ta.picard_commands(["/m/A B/1999 - X"], 10)
+        self.assertEqual(cmds[:3], ["-e", "LOAD", "/m/A B/1999 - X"])
+        joined = " ".join(cmds)
+        self.assertLess(joined.index("PAUSE"), joined.index("SAVE_MATCHED"))
+        self.assertTrue(joined.endswith("QUIT FORCE"))
+
+
+if __name__ == "__main__":
+    unittest.main(argv=[sys.argv[0]], verbosity=2)

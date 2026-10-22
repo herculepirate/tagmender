@@ -19,6 +19,7 @@ only folder names, some with scans of the sleeve and nothing else.
 | `dedupe_twins.py` | Finds duplicate copies of the same tracks in an album folder (same audio checksum, or same title and length), keeps the preferred one (FLAC over Opus, the tagged copy, the newer rip) and moves the others, with their `.log`/`.cue` from the same rip, to `<library>/2delete/`. | Moves files, only with `--apply`; `--undo` puts them back |
 | `match_albums.py` | Identifies each untagged album: MusicBrainz first, then Discogs, scored on artist, title, every track length, disc and track counts, year, barcode and catalogue number (including ones read by OCR from scans in the folder, and ones written in folder names such as `[DOMO 71063-2]`). Each album is filed as **auto** (confident), **review** (a person should decide — with the reason) or **nomatch**. | No — writes CSVs and a state database |
 | `match_loop.sh` | Keeps `match_albums.py` running over a whole library, and restarts it automatically when the matcher is updated, so a fix reaches every album already decided. | No |
+| `tag_albums.py` | Tags the confidently matched albums **with Picard itself**: writes the matched release ID into the files, runs Picard in batches (load, wait until every lookup is done, save, quit), then checks every file. Tags, file names, folders and images are exactly what Picard writes with your settings, naming script and plugins. Scans Picard leaves behind or drops next to the music are moved into `covers/`. | Yes, through Picard, only with `--apply`; `--undo <run>` restores tags, covers, names, folders and scans |
 | `coverup_batch.py` | Cover art in batch with CoverUp's own pipeline and your CoverUp settings: front, back and artist images, local hi-res scans first (an unfolded sleeve is cut to its front panel), online sources next, small images enlarged, and an AI-generated cover as a last resort for albums with no cover at all. | Writes image files and embeds the front, only with `--apply`; `--undo` restores |
 
 ## Matching rules worth knowing
@@ -80,8 +81,21 @@ Results land in `~/Downloads/matching/matches_auto.csv`, `matches_review.csv`,
 each with the matched release's link, the evidence and, for review, why it
 was not automatic.
 
-Writing the tags themselves is done in Picard, from the matched release, so
-the result is Picard's own. Batch tag writing from the *auto* list is planned.
+## Tagging
+
+```bash
+# Picard must be closed (its commands would otherwise go to your open Picard)
+python3 tag_albums.py                          # dry run: ~/Downloads/tagging/tag_plan.csv
+python3 tag_albums.py --apply --limit 2        # try two albums
+python3 tag_albums.py --apply                  # everything matched with confidence
+python3 tag_albums.py --undo <run-id>          # put a run back exactly as it was
+```
+
+Each run reports, per album: *tagged*, *tagged, no Discogs data*, *partly
+saved* or *not saved*, and where Picard moved it. Picard picks the cover from
+its own cover-art sources in their configured order: put **Local Files**
+first (Options → Cover Art) to keep the `cover.jpg`/`folder.jpg` already in
+an album folder.
 
 ## Safety
 
@@ -96,6 +110,7 @@ the result is Picard's own. Batch tag writing from the *auto* list is planned.
 ```bash
 python3 tests/test_match.py ~/Documents/Github/picard-discogs-enrichment
 python3 tests/test_dedupe.py
+python3 tests/test_tag_albums.py
 python3 tests/test_coverup_batch.py ~/Documents/Github/picard-coverup
 ```
 

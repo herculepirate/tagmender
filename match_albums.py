@@ -861,7 +861,7 @@ def process(row, http, cfg, dm, args):
         # Not a "no match": nobody looked it up. Its new folder is picked up by a fresh audit.
         return {"path": row["FullPath"], "artist_folder": row["AlbumArtistFolder"],
                 "album_folder": row["AlbumFolder"], "tag_artist": "", "tag_title": "", "tag_year": None,
-                "tracks": 0, "status": "moved", "best": None, "alts": [],
+                "tracks": 0, "status": "moved", "best": None, "alts": [], "version": result_version(),
                 "why": ["folder no longer exists (moved or renamed, e.g. by Picard after tagging); "
                         "run audit_untagged.py again to pick up its new folder"]}
     album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"])

@@ -374,6 +374,7 @@ class MovedFolders(unittest.TestCase):
         o = ma.process(row, FakeHttp(), CFG, None, types.SimpleNamespace(ocr=False))
         self.assertEqual(o["status"], "moved")
         self.assertIn("no longer exists", o["why"][0])
+        self.assertEqual(o["version"], ma.result_version())          # not redone every round
 
     def test_moved_albums_get_their_own_list(self):
         tmp = Path(tempfile.mkdtemp())

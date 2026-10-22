@@ -45,9 +45,15 @@ for folder in loads:
             f.tags["TITLE"] = [f"Song {n}"]
             f.save()
         shutil.move(str(p), str(dest / f"{n:02d}. Song {n}{p.suffix}"))
-    # Like Picard's "move additional files": only files next to the music, never subfolders
+    # Like Picard's "move additional files": files next to the music that match the pattern
+    # (FAKE_PICARD_LEAVE lists names that do not), and folders whose name matches it
+    # (FAKE_PICARD_MOVE_DIRS); other subfolders stay behind.
+    leave = {x.strip().casefold() for x in os.environ.get("FAKE_PICARD_LEAVE", "").split(",") if x.strip()}
+    move_dirs = {x.strip() for x in os.environ.get("FAKE_PICARD_MOVE_DIRS", "").split(",") if x.strip()}
     for rest in sorted(Path(folder).iterdir()):
-        if rest.is_file():
+        if rest.is_file() and rest.name.casefold() not in leave:
+            shutil.move(str(rest), str(dest / rest.name))
+        elif rest.is_dir() and rest.name in move_dirs:
             shutil.move(str(rest), str(dest / rest.name))
     # Like Picard's "delete empty directories": only if nothing is left
     try:

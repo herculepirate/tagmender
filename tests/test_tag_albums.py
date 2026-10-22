@@ -134,10 +134,64 @@ class Artwork(Base):
         new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
         self.assertFalse(self.album.exists(), "old folder must not be left with scans in it")
         self.assertEqual((new / "covers" / "1983 LP release" / "01. front.jpg").read_bytes(), b"lp front")
-        self.assertEqual((new / "covers" / "Covers" / "p0001.jpg").read_bytes(), b"scan")
+        self.assertEqual((new / "covers" / "p0001.jpg").read_bytes(), b"scan")    # Covers/ merged into covers/
         self.assertEqual((new / "covers" / "01. zoviet - Eostre [front].jpg").read_bytes(), b"loose scan")
         self.assertTrue((new / "cover.jpg").exists())                 # Picard/players read this one
         self.assertTrue((new / "rip.log").exists())                   # not artwork: stays put
+
+    def test_leftover_cover_and_log_go_next_to_the_music_not_into_covers(self):
+        # Eostre: Picard left Cover.jpg/folder.jpg and the log behind; they must sit with the music
+        self.make_album()
+        os.environ["FAKE_PICARD_LEAVE"] = "cover.jpg,rip.log"
+        try:
+            rc, out = self.run_tool("--apply")
+        finally:
+            os.environ.pop("FAKE_PICARD_LEAVE")
+        self.assertEqual(rc, 0, out)
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertTrue((new / "cover.jpg").exists())
+        self.assertTrue((new / "rip.log").exists())
+        self.assertFalse((new / "covers" / "cover.jpg").exists())
+        self.assertFalse(self.album.exists())
+
+    def test_scan_folder_picard_moved_goes_under_covers(self):
+        # Shadow, Thief of the Sun: Picard moved Scans/ (it matches the pattern) next to the music
+        self.make_album()
+        (self.album / "Scans").mkdir()
+        (self.album / "Scans" / "back.jpg").write_bytes(b"back")
+        os.environ["FAKE_PICARD_MOVE_DIRS"] = "Scans"
+        try:
+            rc, out = self.run_tool("--apply")
+        finally:
+            os.environ.pop("FAKE_PICARD_MOVE_DIRS")
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertEqual((new / "covers" / "Scans" / "back.jpg").read_bytes(), b"back", out)
+        self.assertFalse((new / "Scans").exists())
+
+    def test_cover_already_misplaced_in_covers_is_moved_back(self):
+        new = self.root / "A" / "2000 - B"
+        (new / "covers").mkdir(parents=True)
+        (new / "covers" / "Cover.jpg").write_bytes(b"c")
+        (new / "covers" / "folder.jpg").write_bytes(b"f")
+        moves = ta.tidy_artwork(str(self.root / "gone"), str(new), [])
+        self.assertTrue((new / "Cover.jpg").exists() and (new / "folder.jpg").exists())
+        self.assertEqual(len(moves), 2)
+
+    def test_every_file_from_the_source_ends_up_in_the_target(self):
+        self.make_album()
+        (self.album / "deep" / "deeper").mkdir(parents=True)
+        (self.album / "deep" / "deeper" / "x.txt").write_text("x")
+        (self.album / "notes.nfo").write_text("n")
+        names = sorted(p.name for p in self.album.rglob("*") if p.is_file())
+        os.environ["FAKE_PICARD_LEAVE"] = "notes.nfo"
+        try:
+            self.run_tool("--apply")
+        finally:
+            os.environ.pop("FAKE_PICARD_LEAVE")
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertFalse(self.album.exists())
+        got = sorted(p.name for p in new.rglob("*") if p.is_file())
+        self.assertEqual(len(got), len(names))
 
     def test_undo_puts_the_scans_back_where_they_were(self):
         self.make_album()
@@ -164,6 +218,24 @@ class Artwork(Base):
         self.assertFalse(self.album.exists())
         self.run_tool("--undo", self.run_id())
         self.assertEqual(sorted(str(p.relative_to(self.album)) for p in self.album.rglob("*") if p.is_file()), layout)
+
+    def test_tidy_finds_the_albums_of_an_interrupted_run(self):
+        self.make_album()
+        (self.album / "original LP").mkdir()
+        (self.album / "original LP" / "01. front.jpg").write_bytes(b"lp")
+        self.run_tool("--apply", "--no-tidy")
+        jpath = self.out / f"run-{self.run_id()}" / "journal.json"
+        j = json.loads(jpath.read_text())
+        for r in j[0]["files"]:
+            r.pop("new_path", None)                       # as if stopped before checking
+        jpath.write_text(json.dumps(j))
+        rc, out = self.run_tool("--tidy", self.run_id())
+        self.assertEqual(rc, 0, out)
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        self.assertTrue((new / "covers" / "original LP" / "01. front.jpg").exists(), out)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertTrue((self.album / "original LP" / "01. front.jpg").exists(), out)
+        self.assertEqual(len(ta.audio_files(self.album)), 4)
 
     def test_folders_changed_during_the_run_are_found_without_walking_everything(self):
         old = self.root / "Untouched" / "2000 - Old"

@@ -378,11 +378,18 @@ def _free(dest):
         n += 1
 
 
+def _is_cover_name(path):
+    return Path(path).suffix.lower() in IMAGE_EXT and Path(path).stem.casefold().startswith(COVER_NAME)
+
+
 def tidy_artwork(album_path, new_dir, extras):
-    """After Picard: everything it left in the old folder (it never moves subfolders) and the
-    loose scans it put next to the music go to <new album>/covers/, subfolder names kept.
-    cover.* / folder.* / albumart.* images stay where Picard and players read them.
-    Returns the moves [[from, to], ...] so --undo can reverse them."""
+    """After Picard, so that every file of the album is in the new folder, in its place:
+      - cover.* / folder.* / albumart.* images: next to the music (Picard and players read them);
+      - logs, cue sheets, text and other non-images: next to the music;
+      - all other artwork, scan folders included: under covers/, subfolder names kept.
+    Picard moves only matching files next to the music (and matching folders), so this takes
+    what it left in the old folder, the loose scans and scan folders it moved, and repairs a
+    cover image that ended up inside covers/. Returns [[from, to], ...] for --undo."""
     old, new = Path(album_path), Path(new_dir)
     covers = new / "covers"
     moves = []
@@ -393,22 +400,53 @@ def tidy_artwork(album_path, new_dir, extras):
         shutil.move(str(src), str(dest))
         moves.append([str(src), str(dest)])
 
+    def place(src, rel):
+        """Where a file of the album belongs, by its path relative to the album folder."""
+        rel = Path(rel)
+        top_level = len(rel.parts) == 1
+        if top_level and _is_cover_name(rel):
+            target = new / rel.name                    # one already there: keep this one in covers/
+            move(src, target if not target.exists() else covers / rel.name)
+        elif top_level and rel.suffix.lower() not in IMAGE_EXT:
+            move(src, new / rel.name)                  # logs, cue sheets, text: with the music
+        elif rel.parts[0].casefold() == "covers":      # the album's own Covers/ folder: merge
+            move(src, covers.joinpath(*rel.parts[1:]))
+        else:
+            move(src, covers / rel)
+
+    # 1. everything Picard left in the old folder
     if old.exists() and old.resolve() != new.resolve():
         if any(p.suffix.lower() in AUDIO_EXT for p in old.rglob("*") if p.is_file()):
-            return moves                                   # music still here: not ours to touch
+            return moves                               # music still here: not saved, leave it
         for p in sorted(old.rglob("*")):
             if p.is_file():
-                move(p, covers / p.relative_to(old))
+                place(p, p.relative_to(old))
         _remove_empty(old)
+    # 2. loose scans and scan folders Picard moved next to the music
     for rel in extras:
-        if "/" in rel or "\\" in rel:
+        rel = Path(rel)
+        if rel.parts[0].casefold() == "covers":
             continue
         p = new / rel
-        if (p.is_file() and p.suffix.lower() in IMAGE_EXT
-                and not p.stem.casefold().startswith(COVER_NAME)):
+        if not p.is_file():
+            continue
+        if len(rel.parts) > 1 or (p.suffix.lower() in IMAGE_EXT and not _is_cover_name(p)):
             move(p, covers / rel)
+    for p in list(new.iterdir()):                      # a Covers/ folder Picard moved: merge it
+        if p.is_dir() and p.name != "covers" and p.name.casefold() == "covers":
+            for f in sorted(p.rglob("*")):
+                if f.is_file():
+                    move(f, covers / f.relative_to(p))
+            _remove_empty(p, keep_parent=True)
+    for rel in {Path(r).parts[0] for r in extras if len(Path(r).parts) > 1}:
+        if rel.casefold() != "covers" and (new / rel).is_dir():
+            _remove_empty(new / rel, keep_parent=True)
+    # 3. a cover image misplaced inside covers/ goes back next to the music
+    if covers.is_dir() and not any(_is_cover_name(p) for p in new.iterdir() if p.is_file()):
+        for p in sorted(covers.iterdir()):
+            if p.is_file() and _is_cover_name(p):
+                move(p, new / p.name)
     return moves
-
 
 def verify(album, files_rec, candidates):
     """Find each original file (by its audio) in the folders that changed, and say whether
@@ -469,7 +507,7 @@ def main():
     if args.undo:
         return undo(out_dir, args.undo)
     if args.tidy:
-        return tidy_run(out_dir, args.tidy)
+        return tidy_run(out_dir, args.tidy, args.library_root or picard_move_target(args.picard_ini))
 
     root = args.library_root or picard_move_target(args.picard_ini)
     albums, skipped = select_albums(args.matches_db, args.limit, args.only)
@@ -602,12 +640,25 @@ def picard_move_target(ini):
         return None
 
 
-def tidy_run(out_dir, run_id):
-    """The artwork step for an earlier run (one made before it existed). Undo still works."""
+def tidy_run(out_dir, run_id, root=None):
+    """The artwork step for an earlier run (one made before it existed, or interrupted before
+    it recorded where Picard moved the files). Undo still works."""
     run_dir = out_dir / f"run-{run_id}"
     journal = json.loads((run_dir / "journal.json").read_text())
+    started = time.mktime(time.strptime(run_id, "%Y%m%d-%H%M%S"))
+    cands = None
     total = 0
     for album in journal:
+        if root and any(not r.get("new_path") for r in album["files"]):
+            # interrupted before checking: find where Picard put the files now
+            if cands is None:
+                cands = changed_dirs(root, started)
+            v = verify({"mbid": album["mbid"]}, album["files"], cands + [Path(album["album"])])
+            if any("new place not found" in x for x in v["not_saved"]):
+                v = verify({"mbid": album["mbid"]}, album["files"],
+                           changed_dirs(root, started, full=True) + [Path(album["album"])])
+            for r in album["files"]:
+                r["new_path"] = v["new_paths"].get(r["path"], "")
         new_dirs = sorted({str(Path(r["new_path"]).parent) for r in album["files"] if r.get("new_path")})
         if not new_dirs or any(not r.get("new_path") for r in album["files"]):
             print(f"  skipped (not fully saved): {album['album']}")
@@ -672,12 +723,14 @@ def undo(out_dir, run_id):
     return 0 if not failed else 1
 
 
-def _remove_empty(folder):
+def _remove_empty(folder, keep_parent=False):
     for dirpath, _dirs, _names in sorted(os.walk(folder), key=lambda x: -len(x[0])):
         try:
             os.rmdir(dirpath)
         except OSError:
             pass
+    if keep_parent:
+        return
     try:
         os.rmdir(Path(folder).parent)                    # the artist folder, if now empty
     except OSError:

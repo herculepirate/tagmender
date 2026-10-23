@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
-TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import mutagen  # noqa: E402
 from mutagen.flac import FLAC, Picture  # noqa: E402
@@ -77,7 +76,7 @@ class Base(unittest.TestCase):
                    TAGMENDER_SKIP_PICARD_CHECK="1")
         cmd = [sys.executable, str(HERE / "tag_albums.py"), "--matches-db", str(self.db), "--out-dir",
                str(self.out), "--library-root", str(self.root),
-               "--picard", f"{sys.executable} {TESTS / 'fake_picard.py'}", *extra]
+               "--picard", f"{sys.executable} {Path(__file__).resolve().parent / 'fake_picard.py'}", *extra]
         r = subprocess.run(cmd, capture_output=True, text=True, env=env)
         return r.returncode, r.stdout + r.stderr
 
@@ -337,6 +336,24 @@ class Runs(Base):
         self.assertTrue(ta.session_restore_on(ini))
         ini.write_text("[setting]\nmove_files_to=/x\n")
         self.assertFalse(ta.session_restore_on(ini))
+
+    def test_refuses_albums_picard_would_move_into_another_library(self):
+        extreme = self.tmp / "extreme_music" / "Band" / "1990 - Album"
+        audio(extreme / "01.flac", 7, title="One")
+        self.add_result(extreme)
+        ini = self.tmp / "Picard.ini"
+        ini.write_text(f"[setting]\nmove_files=true\nmove_files_to={self.root}\n")
+        rc, out = self.run_tool("--apply", "--picard-ini", str(ini))
+        self.assertNotEqual(rc, 0)
+        self.assertIn("another library", out)
+        self.assertEqual(ta.read_ids(extreme / "01.flac")["albumid"], "")   # nothing touched
+        self.assertTrue(extreme.exists())
+        rc, out = self.run_tool("--picard-ini", str(ini))                   # dry run warns
+        self.assertIn("WARNING", out)
+        ini.write_text(f"[setting]\nmove_files=true\nmove_files_to={self.tmp / 'extreme_music'}\n")
+        self.assertIsNone(ta.outside_move_target([{"path": str(extreme)}], ini))
+        ini.write_text(f"[setting]\nmove_files=false\nmove_files_to={self.root}\n")
+        self.assertIsNone(ta.outside_move_target([{"path": str(extreme)}], ini))
 
     def test_picard_commands_load_settle_save_quit(self):
         cmds = ta.picard_commands(["/m/A B/1999 - X"], 10)

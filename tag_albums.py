@@ -512,6 +512,16 @@ def main():
     root = args.library_root or picard_move_target(args.picard_ini)
     albums, skipped = select_albums(args.matches_db, args.limit, args.only)
     print(f"{len(albums)} album(s) to tag; {len(skipped)} skipped")
+    outside = outside_move_target(albums, args.picard_ini)
+    if outside:
+        target, paths = outside
+        msg = (f"Picard moves tagged files to {target}, but {len(paths)} of these album(s) are in another "
+               f"library, e.g.\n  {paths[0]}\nTagging them now would move them into {target}. In Picard: "
+               "Options > File Naming > 'Move files to this directory when saving': set it to the library "
+               "being tagged (and back afterwards), close Picard, and run again.")
+        if args.apply:
+            sys.exit(msg)
+        print("WARNING: " + msg)
     if not args.apply:
         plan = out_dir / "tag_plan.csv"
         with open(plan, "w", newline="", encoding="utf-8") as fh:
@@ -526,6 +536,12 @@ def main():
               "Run again with --apply (start with --limit 2), with Picard closed.")
         return 0
 
+    if not albums:
+        for p, why in skipped:
+            print(f"  skipped: {p}\n      {why}")
+        print("Nothing to tag.")
+        return 0
+
     running = picard_running()
     if running:
         sys.exit("Picard is open. Close it first: its commands would go to the open Picard and "
@@ -537,7 +553,11 @@ def main():
         sys.exit(f"Library folder Picard moves files to not found: {root!r}. Pass --library-root.")
 
     run_id = time.strftime("%Y%m%d-%H%M%S")
-    run_dir = out_dir / f"run-{run_id}"
+    run_dir, n = out_dir / f"run-{run_id}", 1
+    while run_dir.exists():                    # two runs in the same second
+        n += 1
+        run_dir = out_dir / f"run-{run_id}-{n}"
+    run_id = run_dir.name[len("run-"):]
     blob_dir = run_dir / "blobs"
     blob_dir.mkdir(parents=True)
     log = open(run_dir / "picard.log", "w", encoding="utf-8")
@@ -630,6 +650,24 @@ def extra_files(folder):
     return sorted(out)
 
 
+def outside_move_target(albums, ini):
+    """(target, [album paths]) for albums Picard would move out of their own library:
+    its 'move files' option is on and they are not under its move target. None if all is well."""
+    import configparser
+    cp = configparser.RawConfigParser(strict=False, interpolation=None)
+    try:
+        cp.read(Path(ini).expanduser(), encoding="utf-8")
+        moving = cp.get("setting", "move_files", fallback="false").strip().lower() == "true"
+        target = cp.get("setting", "move_files_to", fallback="")
+    except Exception:
+        return None
+    if not moving or not target:
+        return None
+    base = Path(target).expanduser().resolve()
+    bad = [a["path"] for a in albums if not Path(a["path"]).resolve().is_relative_to(base)]
+    return (str(base), bad) if bad else None
+
+
 def picard_move_target(ini):
     import configparser
     cp = configparser.RawConfigParser(strict=False, interpolation=None)
@@ -645,7 +683,7 @@ def tidy_run(out_dir, run_id, root=None):
     it recorded where Picard moved the files). Undo still works."""
     run_dir = out_dir / f"run-{run_id}"
     journal = json.loads((run_dir / "journal.json").read_text())
-    started = time.mktime(time.strptime(run_id, "%Y%m%d-%H%M%S"))
+    started = time.mktime(time.strptime(run_id[:15], "%Y%m%d-%H%M%S"))
     cands = None
     total = 0
     for album in journal:

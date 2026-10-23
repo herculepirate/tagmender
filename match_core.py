@@ -961,6 +961,10 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             avail += cfg["w_ocr"]
             notes.append(f"OCR text found {share:.0%} of artist/title words")
 
+    # the scans print the credited artist ("Arrangements and Orchestrations by Gustavo Dobles")
+    credit_words = [w for w in fold(cand.get("artist") or "").split() if len(w) > 2]
+    scans_name_artist = bool(ocr_text and credit_words and len(credit_words) >= 2 and
+                             f" {' '.join(credit_words)} " in f" {fold(ocr_text)} ")
     clues, clues_against = pressing_clues(ocr_text, cand)
     file_clues(album, cand, clues, clues_against)
     # A catalogue number the folder or tags name that this pressing does not carry:
@@ -985,7 +989,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "pressing_year": album.get("pressing_year"),
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "len_err": len_err, "titles_agree": titles_agree,
-        "own_catnos": own, "own_catno_absent": own_absent,
+        "own_catnos": own, "own_catno_absent": own_absent, "scans_name_artist": scans_name_artist,
     }
 
 
@@ -1034,6 +1038,8 @@ def classify(scored, cfg):
              "barcode" if best["code"] == "barcode" else
              "catalogue number" if best["code"] in ("catalogue number", "catalogue number (folder name)")
              else "")
+    if not proof and best.get("scans_name_artist") and best["title_sim"] >= cfg["exact_title_sim"]:
+        proof = "the scans naming this artist"           # only for the artist credit, below
     proven = bool(proof and best["tracks_ok"] and best["dur_frac"] is not None
                   and best["dur_frac"] >= cfg["auto_min_duration_frac"] and not best.get("conflict"))
     split_credit = bool(best.get("lacks"))     # a collaborator would be dropped: never

@@ -20,6 +20,7 @@ only folder names, some with scans of the sleeve and nothing else.
 | `match_albums.py` | Identifies each untagged album: MusicBrainz first, then Discogs, scored on artist, title, every track length, disc and track counts, year, barcode and catalogue number (including ones read by OCR from scans in the folder, and ones written in folder names such as `[DOMO 71063-2]`). Each album is filed as **auto** (confident), **review** (a person should decide — with the reason) or **nomatch**. | No — writes CSVs and a state database |
 | `match_loop.sh` | Keeps `match_albums.py` running over a whole library, and restarts it automatically when the matcher is updated, so a fix reaches every album already decided. | No |
 | `tag_albums.py` | Tags the confidently matched albums **with Picard itself**: writes the matched release ID into the files, runs Picard in batches (load, wait until every lookup is done, save, quit), then checks every file. Tags, file names, folders and images are exactly what Picard writes with your settings, naming script and plugins. Scans Picard leaves behind or drops next to the music are moved into `covers/`. | Yes, through Picard, only with `--apply`; `--undo <run>` restores tags, covers, names, folders and scans |
+| `web_tag.py` | The last resort for albums MusicBrainz and Discogs do not have: searches Deezer, Apple iTunes, Bandcamp (DuckDuckGo finds pages Bandcamp's own search misses) and Wikipedia; accepts a result only on the same proof as the matcher (artist, title, track count, track lengths; a different credited artist also needs the scans to name it, or a code, disc ID or fingerprint to agree), writes album, artists and contributing artists, titles, numbers, date, label, barcode and genre, with artist IDs from MusicBrainz (same-name artists told apart by their releases), Wikidata or Discogs, and files the album as your Picard naming script would. `TAGMENDER=Resolved` with the source, or `Unresolved` with the reason when nothing was found. | Writes tags and moves the album folder (and `cover.jpg` only into folders with no image), only with `--apply`; `--undo` restores; `--keep-folders` tags in place |
 | `coverup_batch.py` | Cover art in batch with CoverUp's own pipeline and your CoverUp settings: front, back and artist images, local hi-res scans first (an unfolded sleeve is cut to its front panel), online sources next, small images enlarged, and an AI-generated cover as a last resort for albums with no cover at all. | Writes image files and embeds the front, only with `--apply`; `--undo` restores |
 
 ## Matching rules worth knowing
@@ -158,6 +159,15 @@ its own cover-art sources in their configured order: put **Local Files**
 first (Options → Cover Art) to keep the `cover.jpg`/`folder.jpg` already in
 an album folder.
 
+## Albums no database has
+
+```bash
+python3 web_tag.py --matches-db ~/Downloads/matching_extreme/match_state.db                    # dry run
+python3 web_tag.py --matches-db ~/Downloads/matching_extreme/match_state.db --apply
+python3 web_tag.py --matches-db ~/Downloads/matching_extreme/match_state.db --include-review   # also review albums
+python3 web_tag.py --undo web-<run-id>
+```
+
 ## Safety
 
 - Matching only reads your files.
@@ -173,6 +183,7 @@ python3 tests/test_match.py ~/Documents/Github/picard-discogs-enrichment
 python3 tests/test_dedupe.py
 python3 tests/test_tag_albums.py
 python3 tests/test_coverup_batch.py ~/Documents/Github/picard-coverup
+python3 tests/test_web_tag.py
 ```
 
 ## Licence

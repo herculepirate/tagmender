@@ -830,6 +830,17 @@ class PressingEvidence(unittest.TestCase):
         self.assertEqual(r["status"], "auto", r["why"])
         self.assertIn("database title is used", " ".join(r["best"]["notes"]))
 
+    def test_scans_naming_the_credited_artist_prove_the_credit(self):
+        """Aghora's album is credited to its arranger, Gustavo Dobles, as the sleeve says."""
+        a = album(artist="Aghora", title="Aghora Entheogenic Frequencies Orchestral Representations")
+        c = cand(artist="Gustavo Dobles", title="Aghora Entheogenic Frequencies Orchestral Representations")
+        scan = "For Orchestra and Chorus  Arrangements and Orchestrations by Gustavo Dobles"
+        r = mc.classify([mc.score_candidate(a, c, CFG, ocr_text=scan)], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("credited as the database does", " ".join(r["best"]["notes"]))
+        r = mc.classify([mc.score_candidate(a, c, CFG, ocr_text="Aghora")], CFG)
+        self.assertEqual(r["status"], "review")
+
     def test_unproven_different_title_still_needs_a_person(self):
         r = self.pick(album(title="The Mediator"), cand(title="The Mediator Between Head and Hands Must Be the Heart"))
         self.assertEqual(r["status"], "review")

@@ -773,6 +773,8 @@ def mark_unresolved(args, out_dir):
             continue                                     # tagged by hand since
         if all(read_tagmender(p) == ("Unresolved", reason) for p in files):
             continue
+        if any(read_tagmender(p)[0] == "Resolved" for p in files):
+            continue                                     # tagged from the web since
         todo.append((path, reason, files))
     print(f"{len(todo)} album(s) to mark {TAGMENDER_TAG}=Unresolved")
     if not args.apply:

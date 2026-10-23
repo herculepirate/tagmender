@@ -903,14 +903,39 @@ def process(row, http, cfg, dm, args):
     if args.ocr and images and final["status"] != "auto":
         text = _cached(db, "text", img_key, lambda: ocr_text(images))
         if text.strip():
-            def rescore(res):
-                if not res:
-                    return None
-                scored = [mc.score_candidate(album, s["cand"], cfg, text) for s in res["scored"]]
+            # Barcodes and catalogue numbers printed on the scans are SEARCHED, not only
+            # compared: the release they identify may not be among what the title found.
+            codes = mc.codes_from_ocr_text(text)
+            known_b = {mc.barcode_key(b) for b in album["barcodes"]}
+            known_c = {mc.norm_code(c) for c in album.get("catno_search", [])}
+            new_b = [b for b in codes["barcodes"] if mc.barcode_key(b) not in known_b]
+            new_c = [c for c in codes["catnos"] if mc.norm_code(c) not in known_c]
+            extra = {"mb": [], "discogs": []}
+            if new_b or new_c:
+                out["codes_from_ocr"] = ";".join(new_b + new_c)
+                probe = dict(album, barcodes=set(new_b), catno_search=new_c)
+                extra["mb"] = mb_search(http, probe, cfg)
+                try:
+                    extra["discogs"] = discogs_search(http, probe, cfg, dm)
+                except AuthError:
+                    raise
+                except Exception as exc:
+                    source_notes.append(f"Discogs lookup of codes read from scans failed ({exc})")
+                if not album["barcodes"] and new_b:
+                    album["barcodes"] = set(new_b)       # as for barcodes decoded from the scans
+
+            def rescore(res, name):
+                cands = [s["cand"] for s in (res or {}).get("scored", [])]
+                ids = {c["id"] for c in cands}
+                cands += [c for c in extra[name] if c["id"] not in ids]
+                if not cands:
+                    return res
+                scored = [mc.score_candidate(album, c, cfg, text) for c in cands]
                 new = mc.classify(scored, cfg)
                 new["scored"] = scored
+                new["source"] = name
                 return new
-            mb_res, dg_res = rescore(mb_res), rescore(dg_res)
+            mb_res, dg_res = rescore(mb_res, "mb"), rescore(dg_res, "discogs")
             final = mc.combine(mb_res, dg_res)
 
     status = final["status"]
@@ -934,7 +959,7 @@ def process(row, http, cfg, dm, args):
 COLS = ["Status", "Confidence", "Source", "ID", "URL", "MatchedArtist", "MatchedTitle",
         "MatchedYear", "MatchedCountry", "MatchedLabel", "Margin", "Evidence",
         "WhyNotAuto", "Alternatives", "TagArtist", "TagAlbum", "TagYear", "Tracks",
-        "AlbumArtistFolder", "AlbumFolder", "FullPath", "BarcodeFromOCR", "LinkedDiscogsID",
+        "AlbumArtistFolder", "AlbumFolder", "FullPath", "BarcodeFromOCR", "CodesFromOCR", "LinkedDiscogsID",
         "Notes"]
 
 
@@ -951,6 +976,7 @@ def to_row(o):
             "Tracks": o["tracks"], "AlbumArtistFolder": o["artist_folder"],
             "AlbumFolder": o["album_folder"], "FullPath": o["path"],
             "BarcodeFromOCR": o.get("barcodes_from_ocr", ""),
+            "CodesFromOCR": o.get("codes_from_ocr", ""),
             "LinkedDiscogsID": b.get("discogs_id", ""),
             "Notes": " | ".join(filter(None, [
                 ("duplicate copies ignored: " + ", ".join(o["dropped_formats"]))
@@ -1061,7 +1087,7 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         sys.exit(f"Another match_albums.py is already working in {out_dir} "
-                 "(is match_loop.sh running?). Stop it first, or use a different --out-dir.")
+                 "(is auto_ambient.sh running?). Stop it first, or use a different --out-dir.")
     db = sqlite3.connect(out_dir / "match_state.db")
     db.execute("CREATE TABLE IF NOT EXISTS results (path TEXT PRIMARY KEY, result TEXT)")
     if args.redo:

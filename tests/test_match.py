@@ -420,6 +420,68 @@ class CatalogueZeros(unittest.TestCase):
         self.assertNotEqual(mc.norm_code("CD100"), mc.norm_code("CD10"))
 
 
+class OcrCodes(unittest.TestCase):
+    TEXT = ("SOVIET FRANCE  Norsch\nCat. No. MASO CD 90041   LC 01234   Made in Italy\n"
+            "Recorded 1990. Tel 0191 2611 234  BWV 1001  Track 12  Disc 2\n"
+            "8 012957 004125\n 1 234567 890123")
+
+    def test_catalogue_numbers_and_barcodes_are_read_from_scan_text(self):
+        codes = mc.codes_from_ocr_text(self.TEXT)
+        self.assertIn("MASO CD 90041", codes["catnos"])
+        for bad in ("LC 01234", "BWV 1001", "Track 12", "Disc 2"):
+            self.assertNotIn(bad, codes["catnos"])
+        self.assertEqual(codes["barcodes"], ["8012957004125"])        # check digit valid; the other is not
+        self.assertEqual(mc.codes_from_ocr_text("CHARRMCD03 and BRC-657")["catnos"], ["CHARRMCD03", "BRC-657"])
+        self.assertEqual(mc.codes_from_ocr_text(""), {"barcodes": [], "catnos": []})
+        # real catalogue numbers from your scans are kept, real noise from them is not
+        kept = mc.codes_from_ocr_text("ECM 1349  WARPCD211  SICCD 087  EFA 08872-2  HMU 907608  ALKEOS 201340", limit=10)["catnos"]
+        self.assertEqual(kept, ["ECM 1349", "WARPCD211", "SICCD 087", "EFA 08872-2", "HMU 907608", "ALKEOS 201340"])
+        noise = "Santa Monica CA 90064  NY 11576  POSTFACH 600331  COPY 11  RETURNING 43  GALERIE 213"
+        self.assertEqual(mc.codes_from_ocr_text(noise)["catnos"], [])
+
+    def test_a_catalogue_number_on_a_scan_finds_the_release(self):
+        # The title search finds nothing; only the catalogue number printed on the scan does.
+        class CatnoOnlyHttp(FakeHttp):
+            def __init__(self):
+                super().__init__()
+                rel = mb_release("mb-scan", "Scan Artist", "Scan Album", 2001, [10000, 20000, 30000])
+                rel["label-info"] = [{"catalog-number": "ZZQ-4471", "label": {"name": "L"}}]
+                self.mb, self.dg, self.dg_search = {"mb-scan": rel}, {}, {}
+                self.rel = rel
+
+            def get_json(self, url, host):
+                import urllib.parse as up
+                if host == "mb" and "/ws/2/release/?" in url:
+                    q = up.unquote(url.split("query=")[1].split("&")[0])
+                    return {"releases": [mb_hit(self.rel)] if 'catno:"ZZQ-4471"' in q else []}
+                if host == "discogs" and "database/search" in url:
+                    return {"results": []}
+                return super().get_json(url, host)
+
+        tmp = Path(tempfile.mkdtemp())
+        saved = (ma.list_images, ma.ocr_barcodes, ma.ocr_text)
+        try:
+            d = tmp / "Scan Artist" / "2001 - Scan Album Untitled"
+            d.mkdir(parents=True)
+            for i in range(3):
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                                f"sine=frequency={300 + 50 * i}:duration={10 * (i + 1)}", "-ar", "8000", "-ac", "1",
+                                "-metadata", f"title=T{i}", "-metadata", f"track={i + 1}",
+                                str(d / f"{i + 1:02d}.flac"), "-y"], check=True)
+            (d / "back.jpg").write_bytes(b"x")
+            ma.list_images = lambda base, n: ([d / "back.jpg"], "k1")
+            ma.ocr_barcodes = lambda imgs: set()
+            ma.ocr_text = lambda imgs: "Scan Artist  Cat. No. ZZQ-4471  Made in EU"
+            row = {"AlbumArtistFolder": "Scan Artist", "AlbumFolder": d.name, "FullPath": str(d),
+                   "Status": "untagged", "OcrCandidateImages": ""}
+            o = ma.process(row, CatnoOnlyHttp(), CFG, ma.load_plugin(PLUGIN_DIR), types.SimpleNamespace(ocr=True, max_images=15))
+            self.assertEqual(((o.get("best") or {}).get("id"), o["status"]), ("mb-scan", "auto"), o.get("why"))
+            self.assertIn("ZZQ-4471", o.get("codes_from_ocr", ""))
+        finally:
+            ma.list_images, ma.ocr_barcodes, ma.ocr_text = saved
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class Pipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

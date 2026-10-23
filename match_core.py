@@ -310,6 +310,74 @@ def split_codes(value):
     return [c.strip() for c in re.split(r"\s*;\s*|\s+\|\s+", str(value or "")) if c.strip()]
 
 
+def valid_barcode(code):
+    """EAN-13 / UPC-A check digit, so a phone number or a run of noise is not a barcode."""
+    code = str(code or "")
+    if not code.isdigit() or len(code) not in (12, 13):
+        return False
+    digits = [int(c) for c in code]
+    body, check = digits[:-1], digits[-1]
+    total = sum(d * (3 if i % 2 == (len(body) - 1) % 2 else 1) for i, d in enumerate(body))
+    return (10 - total % 10) % 10 == check
+
+
+# Words that come before a number on sleeves without it being a catalogue number:
+# label codes, rights societies, work catalogues, track/disc/side numbering, phone numbers.
+_OCR_NOT_CATNO = {"lc", "cd", "lp", "disc", "disk", "side", "track", "tracks", "vol", "volume", "part",
+                  "no", "nr", "op", "opus", "bwv", "kv", "k", "rv", "hwv", "hob", "d", "isbn", "isrc",
+                  "tel", "fax", "phone", "ddd", "add", "aad", "stereo", "mono", "mcps", "biem", "gema",
+                  "siae", "sacem", "sabam", "sgae", "stemra", "jasrac", "prs", "po", "box", "ch",
+                  "uk", "usa", "us", "eu", "made", "in", "p", "c", "the", "and", "of", "at", "by",
+                  "page", "pages", "issue", "edition", "remaster", "remastered", "recorded", "year",
+                  "dvd", "bonus", "mix", "version", "take", "bar", "bars", "min", "mins", "sec",
+                  "copy", "time", "for", "suite", "route", "room", "postfach", "postbus", "cedex", "pmb", "box"}
+# US state + ZIP code ("CA 90064", "NY 11576") on label addresses
+_US_STATES = set("al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv "
+                 "nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc".split())
+_OCR_CATNO_RE = re.compile(
+    r"(?<![A-Za-z0-9])([A-Z][A-Za-z]{1,9}(?:[ -]?(?:CD|LP|DVD|SACD|MC|CDR|DA))?[ -]?\d{2,7}(?:[-/]\d{1,3})?)"
+    r"(?![A-Za-z0-9])")
+_OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ ]?\d){10,12})(?!\d)")
+
+
+def codes_from_ocr_text(text, limit=5):
+    """Barcodes and catalogue numbers printed on scans, for searching.
+    Barcodes must pass the check digit. Catalogue numbers need a capitalised label
+    word (or letters run into the number: "CHARRMCD03") and a number that is not a
+    year; label codes ("LC 01234"), work numbers ("BWV 1001"), track, disc and
+    phone numbers are skipped. At most `limit` of each, in the order printed."""
+    out = {"barcodes": [], "catnos": []}
+    text = str(text or "")
+    for m in _OCR_BARCODE_RE.finditer(text):
+        code = m.group(1).replace(" ", "")
+        if valid_barcode(code) and code not in out["barcodes"]:
+            out["barcodes"].append(code)
+    seen = set()
+    for m in _OCR_CATNO_RE.finditer(text):
+        cand = m.group(1).strip()
+        word = re.match(r"[A-Za-z]+", cand).group(0)
+        number = re.search(r"\d[\d/-]*$", cand).group(0)
+        if word.casefold() in _OCR_NOT_CATNO:
+            continue
+        if not (word.isupper() or re.search(r"[A-Za-z]\d", cand)):
+            continue                                   # "Track 12", "Made 2003": ordinary words
+        if _YEAR.match(number) and not re.search(r"[A-Za-z]\d", cand):
+            continue                                   # "Berlin 1990"
+        if word.casefold() in _US_STATES and re.fullmatch(r"\d{5}", number):
+            continue                                   # an address: "CA 90064"
+        spaced = not re.search(r"[A-Za-z]\d", cand)
+        if (spaced and len(word) >= 5 and len(re.sub(r"\D", "", number)) <= 3
+                and not re.search(r"cd|lp", word, re.I)):
+            continue                                   # a word and a small number: "RETURNING 43"
+        key = norm_code(cand)
+        if key not in seen:
+            seen.add(key)
+            out["catnos"].append(cand)
+    out["barcodes"] = out["barcodes"][:limit]
+    out["catnos"] = out["catnos"][:limit]
+    return out
+
+
 def norm_code(value):
     """Catalogue number for comparison: no spaces, dashes or dots, any case, and no
     leading zeros inside numbers ("CHARRMCD03" is "CHARRMCD3" on Discogs)."""

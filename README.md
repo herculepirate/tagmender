@@ -208,6 +208,60 @@ python3 web_tag.py --matches-db ~/Downloads/matching_extreme/match_state.db --in
 python3 web_tag.py --undo web-<run-id>
 ```
 
+### What the folder name says is a rule
+
+A format (`[Vinyl Rip 24bit 192khz]`, `[2CD]`), country (`Germany`) or catalogue
+number in the folder name is a statement about your copy. A release that contradicts
+it is never picked automatically, however well its track lengths fit. When no release
+of the album fits, the album goes to review. A folder catalogue number found on no
+release at all is not held against them (it may not be a catalogue number).
+
+`tag_albums.py` also leaves out matches made by an older matcher
+(`--allow-old-matches` overrides) and re-checks each album just before Picard saves it.
+To audit albums already tagged against their original folder names:
+
+```bash
+python3 check_tagged.py        # writes ~/Downloads/tagged_check.csv; changes nothing
+```
+
+## Ignore and skip rules
+
+Rules keep TagMender away from files or whole albums: no matching, tags,
+artwork, lyrics, renames or moves. Every tool checks them before any lookup,
+and again once an album is identified (so a rule can match a title only the
+database knows). Results, CSVs and the history name the rule.
+
+- **Ignore**: left alone in every run while the rule applies. A watched
+  folder does not queue it again until its files or the rules change.
+- **Skip**: left alone in this run only.
+- **Target**: the matching file, or its whole album. Albums are grouped by
+  their tags, so in a mixed folder only that album is excluded.
+- Matching is literal and ignores case: `[no vox]` means exactly those
+  characters, brackets included. `glob` and `regex` only when chosen.
+- Fields: album, title, artist, albumartist, genre, filename, folder, path,
+  format, or any tag as `tag:NAME`. Operators: contains, equals, starts_with,
+  ends_with, glob, regex. Combine with `--any` (OR; default AND), or nest with `--when JSON`.
+
+A default rule ignores `[no vox]` albums (by album tag, folder name or path).
+
+```bash
+./tagmender.py rules list
+./tagmender.py rules add --name "Live albums" --action skip --target album \
+    --cond album contains "(live)" --cond folder contains "[live]" --any
+./tagmender.py rules test /media/unraidmedia2/music/extreme_music      # preview; changes nothing
+./tagmender.py rules test ~/Music/Inbox --rule live-albums -v           # one rule, even disabled
+./tagmender.py rules disable no-vox        # enable / remove the same way
+./tagmender.py rules allow "/path/to/Album"   # process anyway (undo: rules disallow)
+./tagmender.py rules ignored               # remembered ignores
+./tagmender.py rules history
+./tagmender.py --profile Lossy rules add ...  # profile rules add to the global ones
+```
+
+Every tool also takes `--process-anyway` for one run. Rules live in
+`~/.config/tagmender/exclusions.json` (profiles: `~/.config/tagmender/profiles/NAME.json`,
+key `exclusions`); remembered ignores and history in `~/.local/state/tagmender/state.db`.
+`./tagmender.py match|tag|web|enrich|inbox|coverup|...` runs the tools themselves.
+
 ## Safety
 
 - Matching only reads your files.
@@ -227,6 +281,8 @@ python3 tests/test_web_tag.py
 python3 tests/test_enrich.py
 python3 tests/test_inbox.py
 python3 tests/test_tools.py
+python3 tests/test_exclusions.py
+python3 tests/test_cli.py
 ```
 
 ## Licence

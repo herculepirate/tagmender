@@ -11,6 +11,10 @@ import types
 import unittest
 from pathlib import Path
 
+# TagMender settings and state of the tests never touch the real ones
+import os as _os, tempfile as _tempfile  # noqa: E402
+_os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
+_os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
 COVERUP = sys.argv[1] if len(sys.argv) > 1 else "~/Documents/Github/picard-coverup"
@@ -186,7 +190,8 @@ class LocalFirst(Base):
         art(1, 600).save(self.album / "folder.jpg", quality=92)
         FakeOnline.ONLINE = [(ArtType.FRONT, art(1, 1800))]               # bigger vocal-edition cover
         o = self.run_album(apply=True)
-        self.assertEqual([r for r in o["rows"] if r["type"] == "front"], [])
+        self.assertEqual(o["status"], "ignored")                         # the no-vox rule: no artwork at all
+        self.assertEqual(o["rows"], [])
         self.assertIn("[no vox]", o["note"])
         self.assertEqual(Image.open(self.album / "folder.jpg").size, (600, 600))
         self.assertEqual(cb.read_ids_and_art(self.album / "01.flac")[1], [])

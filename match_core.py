@@ -442,6 +442,34 @@ def norm_code(value):
     return re.sub(r"(?<!\d)0+(?=\d)", "", text)
 
 
+_EUROPE = {"DE", "GB", "FR", "NL", "BE", "AT", "CH", "IT", "ES", "PT", "SE", "NO", "DK", "FI", "PL", "CZ",
+           "GR", "IE", "HU", "LU", "XE"}
+
+
+def catno_same(a, b):
+    """Two normalised catalogue numbers for one product: equal, or one with a format
+    word added ("SPV 260222" / "SPV 260222 CD", "CG-0004" / "DIGICD CG-0004"), or a
+    long number with and without its check digit ("99833708" / "9983370")."""
+    a, b = norm_code(a), norm_code(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    if (len(short) >= 3 and re.search(r"[a-z]", short) and re.search(r"\d", short)
+            and (long_.startswith(short) or long_.endswith(short))):
+        extra = long_[len(short):] if long_.startswith(short) else long_[:-len(short)]
+        if re.fullmatch(r"(cd|lp|dcd|\dcd|digicd|digi|mc|dvd|ltd|jewel)", extra):
+            return True
+    if a.isdigit() and b.isdigit() and len(short) >= 7 and long_[:-1] == short:
+        return True
+    return False
+
+
+def catnos_agree(mine, theirs):
+    return any(catno_same(x, y) for x in mine or () for y in theirs or ())
+
+
 def barcode_key(value):
     """UPC-A (12 digits) and EAN-13 (the same code with a leading 0) are one
     barcode; compare on the digits without leading zeros."""
@@ -708,7 +736,8 @@ def file_clues(album, cand, clues, against):
         if named and cc and cc != "XW":
             if cc in named:
                 clues.setdefault("country", f"{_readable_country(cc)} in the folder name")
-            else:
+            elif not (cc == "XE" and named & _EUROPE) and not ("XE" in named and cc in _EUROPE):
+                # "Germany" on a European pressing (made there, sold across Europe) agrees
                 against.append(f"folder name says {'/'.join(sorted(named))}, "
                                f"this pressing is from {cand.get('country')}")
     # what it was made from: folder name, then the audio itself
@@ -1004,6 +1033,10 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "len_err": len_err, "titles_agree": titles_agree,
         "own_catnos": own, "own_catno_absent": own_absent, "scans_name_artist": scans_name_artist,
+        "has_folder_catno": bool(album.get("catnos_from_folder")),
+        "folder_catno_agrees": catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
+        "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos")
+                                    and not catnos_agree(album.get("catnos_from_folder"), cand.get("catnos"))),
     }
 
 
@@ -1019,6 +1052,49 @@ def classify(scored, cfg):
     def barcode_agrees(s):
         return s["code"].startswith("barcode")
 
+    # What your folder name states about the copy is a rule, not a hint: its format
+    # ("[Vinyl Rip 24bit 192khz]", "[2CD]"), country ("Germany") and catalogue number.
+    # Releases that contradict it are another product. When the same album is listed
+    # in a form that fits, the others drop out (however well their lengths fit); when
+    # none fits, a person decides.
+    # A folder catalogue number counts only when some release carries it: one on none
+    # of them may not be a catalogue number at all ("[Tatman Music TM 050426]").
+    catno_real = any(s.get("folder_catno_absent") is False and (s["cand"].get("catnos"))
+                     and s.get("has_folder_catno") for s in scored)
+
+    def folder_says(s):
+        out = [x for x in s.get("clues_against") or () if x.startswith("folder name says")]
+        if s.get("folder_catno_agrees"):     # the folder's own number is on it: that is the pressing
+            out = [x for x in out if re.match(r"folder name says (vinyl|cd),", x)]
+        if catno_real and s.get("folder_catno_absent"):
+            out.append("folder catalogue number is not on it")
+        return out
+    if any(folder_says(s) for s in scored):
+        fitting = [s for s in scored if not folder_says(s)]
+        same_album = [s for s in fitting if s["tracks_ok"] and s["artist_sim"] >= cfg["auto_min_artist"]
+                      and s["title_sim"] >= cfg["auto_min_title"]]
+        said = sorted({x.split(",")[0] for s in scored for x in folder_says(s)})
+        if same_album:
+            dropped = len(scored) - len(fitting)
+            unlisted = all(s.get("own_catno_absent") for s in scored)
+            scored = fitting
+            for s in same_album:
+                s["notes"] = s["notes"] + [f"{dropped} release(s) left out: {'; '.join(said)}"]
+            # Leaving releases out never makes an unlisted pressing a match: your copy's
+            # catalogue number is on none of them, so only hard proof (a disc ID, your
+            # files' link, ISRC, fingerprint, barcode) decides.
+            if unlisted:
+                hard = ("disc TOC", "source link", "isrc", "fingerprint")
+                own = next((x for s in scored for x in s.get("own_catnos") or ()), "")
+                scored = [s if (any(k in (s.get("clues") or {}) for k in hard) or s["code"].startswith("barcode"))
+                          else dict(s, media_why=f"catalogue number {own.upper()} from your folder/tags is on "
+                                                 "none of these pressings") for s in scored]
+        else:
+            best0 = max(scored, key=lambda s: s["confidence"])
+            media_why = (f"{'; '.join(folder_says(best0))}; no release of this album found that fits "
+                         "what the folder name says")
+            scored = [dict(s, media_why=media_why) for s in scored]
+
     def number_agrees(s):
         """Barcode, or a catalogue number from the tags or folder name (not one
         merely found somewhere in OCR text)."""
@@ -1032,8 +1108,12 @@ def classify(scored, cfg):
     # (a label, "Made in Germany", a catalogue number printed on the back).
     tied = [s for s in ranked if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
     scan_pick = None
-    if not number_agrees(best):
-        scan_pick = choose_pressing(tied, cfg.get("preferred_countries"))
+    # A number decides only when it is the ONLY one that agrees. When several tied
+    # pressings each match a number (King Diamond: the tags carry Metal Blade's
+    # 3984-14359-2, the folder FONO's FO40CD), the other evidence decides.
+    numbered = [s for s in tied if number_agrees(s)]
+    if not numbered or len(numbered) > 1:
+        scan_pick = choose_pressing(numbered or tied, cfg.get("preferred_countries"))
         if scan_pick:
             pick = scan_pick[0]
             ranked = [pick] + [s for s in ranked if s is not pick]
@@ -1041,7 +1121,7 @@ def classify(scored, cfg):
     runner = ranked[1] if len(ranked) > 1 else None
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
 
-    why = []
+    why = [best["media_why"]] if best.get("media_why") else []
     # The album is PROVEN when its disc ID, barcode, or a catalogue number from
     # its tags or folder name agrees and every track length agrees too. A title
     # or artist that differs from the folder's is then the database's own
@@ -1166,6 +1246,7 @@ def classify(scored, cfg):
         related = (best["artist_sim"] >= 0.5 or best["title_sim"] >= 0.5 or bool(best["code"]))
         status = "review" if (related and (best["confidence"] >= cfg["review_min_confidence"]
                                            or near_miss or content_match)) else "nomatch"
+    best["notes"] = list(dict.fromkeys(best["notes"]))     # classified twice: each note once
     return {"status": status, "best": best, "runner_up": runner,
             "margin": round(margin, 1), "why": why}
 

@@ -40,6 +40,7 @@ sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
 import match_albums as ma  # noqa: E402
 import tag_albums as ta  # noqa: E402
+import exclusions  # noqa: E402
 
 import mutagen  # noqa: E402
 
@@ -195,8 +196,60 @@ def genres_for(http, files):
 # --------------------------------------------------------------------------
 # Lyrics (LRCLIB)
 # --------------------------------------------------------------------------
+# Genres whose albums have no words to look up (add your own in genres.json: "instrumental")
+INSTRUMENTAL_GENRES = ("ambient", "drone", "dark ambient", "new age", "instrumental", "soundtrack", "score",
+                       "classical", "neoclassical", "minimal", "field recording", "electroacoustic",
+                       "space music", "berlin school", "meditation", "post-rock")
+
+
+def _rules():
+    try:
+        return json.loads((CONFIG / "rules.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_instrumental(artist):
+    """An artist whose album had no lyrics anywhere: skipped from now on
+    (stored in rules.json as "no_lyrics_artists"; delete an entry to look again)."""
+    if not artist:
+        return
+    rules = _rules()
+    names = rules.setdefault("no_lyrics_artists", [])
+    if mc.fold(artist) not in {mc.fold(n) for n in names}:
+        names.append(artist)
+        try:
+            CONFIG.mkdir(parents=True, exist_ok=True)
+            (CONFIG / "rules.json").write_text(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+
+def instrumental(folder, files):
+    """No lyrics to look for: an instrumental genre in the tags or the library's
+    name ("ambient_music"), a 'no vox' edition, or an artist known to have none."""
+    genre = mc.fold(get(files[0], "GENRE"))
+    extra = [mc.fold(g) for g in (genre_map().get("instrumental") or [])]
+    if any(g in genre for g in [mc.fold(x) for x in INSTRUMENTAL_GENRES] + extra if g):
+        return True
+    path = mc.fold(str(folder))
+    if "ambient" in path or re.search(r"no ?vox|instrumental", path):
+        return True
+    artist = mc.fold(get(files[0], "ALBUMARTIST") or get(files[0], "ARTIST") or folder.parent.name)
+    return artist in {mc.fold(n) for n in _rules().get("no_lyrics_artists") or []}
+
+
 def lyrics_for(http, path):
-    """(synced or plain lyrics, synced?) for one track, or ("", False)."""
+    """(synced or plain lyrics, synced?) for one track, or ("", False) - also when
+    LRCLIB is down or busy (the next run tries again)."""
+    try:
+        return _lyrics_for(http, path)
+    except Exception as exc:
+        print(f"    lyrics lookup failed for {Path(path).name}: {exc}", file=sys.stderr)
+        return "", False
+
+
+def _lyrics_for(http, path):
     artist, title, album = get(path, "ARTIST"), get(path, "TITLE"), get(path, "ALBUM")
     if not artist or not title:
         return "", False
@@ -223,9 +276,10 @@ def spectrum_cliff(path, seconds=40):
         import numpy as np
     except ImportError:
         return None
-    rate = int(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
-                               "stream=sample_rate", "-of", "csv=p=0", str(path)],
-                              capture_output=True, text=True).stdout.strip() or 0)
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+                            "stream=sample_rate", "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
+    m = re.search(r"\d+", probe)                       # "44100" or "44100," depending on the file
+    rate = int(m.group(0)) if m else 0
     raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", "20", "-t", str(seconds), "-i", str(path), "-ac", "1",
                           "-f", "f32le", "-"], capture_output=True).stdout
     if not raw:
@@ -311,6 +365,63 @@ def album_dirs(roots):
                 yield Path(dirpath), files
 
 
+def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
+    dec = exclusions.gate(files, "enrich", process_anyway=args.process_anyway)
+    if dec.all_excluded:                                  # no ReplayGain, genres, lyrics or quality tags
+        report.append({"album": str(folder), "changes": dec.summary().reason(), "quality": ""})
+        print(f"  × {folder.name}: {dec.summary().reason()}")
+        return
+    files = dec.kept
+    planned = {p: {} for p in files}
+    created = []
+    if args.replaygain and (args.overwrite or not get(files[0], "REPLAYGAIN_ALBUM_GAIN")):
+        if args.apply:
+            for p, tags in replaygain(files).items():
+                planned[p].update(tags)
+        else:                                       # measuring takes a while: only when writing
+            for p in files:
+                planned[p]["REPLAYGAIN_*"] = "measured with --apply"
+    if args.genres and (args.overwrite or not get(files[0], "GENRE")):
+        g = genres_for(http, files)
+        if g:
+            for p in files:
+                planned[p]["GENRE"] = g
+    if args.lyrics and not instrumental(folder, files):
+        found_any = False
+        for i, p in enumerate(files):
+            if args.overwrite or not get(p, "LYRICS"):
+                text, synced = lyrics_for(http, p)
+                if text:
+                    found_any = True
+                    planned[p]["LYRICS"] = text
+                    if synced and args.lrc and not p.with_suffix(".lrc").exists():
+                        created.append((p.with_suffix(".lrc"), text))
+                elif i == 2 and not found_any:
+                    break                                 # three tracks without lyrics: an instrumental album
+        if not found_any:
+            remember_instrumental(get(files[0], "ALBUMARTIST") or get(files[0], "ARTIST") or folder.parent.name)
+    finding = quality(files) if args.quality else ""
+    if finding:
+        for p in files:
+            planned[p]["TAGMENDER_QUALITY"] = finding
+    changes = {p: v for p, v in planned.items() if v}
+    summary = sorted({k for v in changes.values() for k in v})
+    report.append({"album": str(folder), "changes": ", ".join(summary), "quality": finding})
+    print(f"  {'+' if args.apply else '?'} {folder.name}: {', '.join(summary) or 'nothing to add'}"
+          + (f"  [{finding}]" if finding else ""))
+    if args.apply and changes:
+        recs = [{"path": str(p), "new_path": str(p), "key": "", "backup": ta.backup_tags(p, blob_dir)}
+                for p in changes]
+        journal.append({"album": str(folder), "mbid": None, "files": recs, "extras": [], "moves": [],
+                        "created": [str(c) for c, _t in created]})
+        with open(run_dir / "journal.json", "w") as fh:
+            json.dump(journal, fh)
+        for p, tags in changes.items():
+            put(p, tags)
+        for c, text in created:
+            c.write_text(text, encoding="utf-8")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("roots", nargs="*")
@@ -319,6 +430,8 @@ def main(argv=None):
     ap.add_argument("--lrc", action="store_true", help="also save time-synced lyrics as .lrc files")
     ap.add_argument("--overwrite", action="store_true", help="replace values the files already have")
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--process-anyway", action="store_true",
+                    help="also albums an Ignore/Skip rule excludes (this run only)")
     ap.add_argument("--undo", help="restore a run")
     ap.add_argument("--only", help="only folders whose path contains this text")
     ap.add_argument("--out-dir", default="~/Downloads/tagging")
@@ -347,44 +460,11 @@ def main(argv=None):
     for folder, files in album_dirs(args.roots):
         if args.only and args.only.casefold() not in str(folder).casefold():
             continue
-        planned = {p: {} for p in files}
-        created = []
-        if args.replaygain and (args.overwrite or not get(files[0], "REPLAYGAIN_ALBUM_GAIN")):
-            for p, tags in replaygain(files).items():
-                planned[p].update(tags)
-        if args.genres and (args.overwrite or not get(files[0], "GENRE")):
-            g = genres_for(http, files)
-            if g:
-                for p in files:
-                    planned[p]["GENRE"] = g
-        if args.lyrics:
-            for p in files:
-                if args.overwrite or not get(p, "LYRICS"):
-                    text, synced = lyrics_for(http, p)
-                    if text:
-                        planned[p]["LYRICS"] = text
-                        if synced and args.lrc and not p.with_suffix(".lrc").exists():
-                            created.append((p.with_suffix(".lrc"), text))
-        finding = quality(files) if args.quality else ""
-        if finding:
-            for p in files:
-                planned[p]["TAGMENDER_QUALITY"] = finding
-        changes = {p: v for p, v in planned.items() if v}
-        summary = sorted({k for v in changes.values() for k in v})
-        report.append({"album": str(folder), "changes": ", ".join(summary), "quality": finding})
-        print(f"  {'+' if args.apply else '?'} {folder.name}: {', '.join(summary) or 'nothing to add'}"
-              + (f"  [{finding}]" if finding else ""))
-        if args.apply and changes:
-            recs = [{"path": str(p), "new_path": str(p), "key": "", "backup": ta.backup_tags(p, blob_dir)}
-                    for p in changes]
-            journal.append({"album": str(folder), "mbid": None, "files": recs, "extras": [], "moves": [],
-                            "created": [str(c) for c, _t in created]})
-            with open(run_dir / "journal.json", "w") as fh:
-                json.dump(journal, fh)
-            for p, tags in changes.items():
-                put(p, tags)
-            for c, text in created:
-                c.write_text(text, encoding="utf-8")
+        try:
+            enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report)
+        except Exception as exc:                          # one album's problem never stops the run
+            print(f"  ! {folder.name}: skipped ({type(exc).__name__}: {exc})")
+            report.append({"album": str(folder), "changes": f"skipped: {exc}", "quality": ""})
     path = (run_dir or out_dir) / "enrich_report.csv"
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["album", "changes", "quality"])

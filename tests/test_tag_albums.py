@@ -10,6 +10,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# TagMender settings and state of the tests never touch the real ones
+import os as _os, tempfile as _tempfile  # noqa: E402
+_os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
+_os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
+_os.environ["TAGMENDER_NO_FETCH"] = "1"          # release data only from recorded responses
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
 import mutagen  # noqa: E402
@@ -50,8 +55,8 @@ class Base(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def add_result(self, folder, status="auto", source="mb", mbid=MBID):
-        o = {"path": str(folder), "status": status, "best": {"source": source, "id": mbid, "artist": "A",
-                                                             "title": "T", "confidence": 100.0}}
+        o = {"path": str(folder), "status": status, "version": ta.matcher_version(),
+             "best": {"source": source, "id": mbid, "artist": "A", "title": "T", "confidence": 100.0}}
         self.dbc.execute("INSERT OR REPLACE INTO results VALUES (?,?)", (str(folder), json.dumps(o)))
         self.dbc.commit()
 
@@ -118,6 +123,78 @@ class Selection(Base):
         albums, skipped = ta.select_albums(self.db)
         self.assertEqual(albums, [])
         self.assertIn("another release", skipped[0][1])
+
+
+class Exclusions(Base):
+    """The default no-vox rule (Ignore, whole album) and --process-anyway."""
+
+    def test_mixed_folder_is_left_whole_because_picard_tags_folders(self):
+        folder = self.root / "BTBAM" / "Unsorted"
+        audio(folder / "a.flac", 1, album="Colors [No Vox]", albumartist="BTBAM")
+        audio(folder / "b.flac", 2, album="Alaska", albumartist="BTBAM")
+        self.add_result(folder)
+        albums, skipped = ta.select_albums(self.db)
+        self.assertEqual(albums, [])
+        why = dict(skipped)[str(folder)]
+        self.assertIn("Ignored by rule", why)
+        self.assertIn("1 of 2 files", why)
+        albums, _ = ta.select_albums(self.db, process_anyway=True)
+        self.assertEqual([a["path"] for a in albums], [str(folder)])
+
+    def test_identified_release_title_excludes_the_album(self):
+        self.make_album()
+        o = {"path": str(self.album), "status": "auto", "version": ta.matcher_version(),
+             "best": {"source": "mb", "id": MBID, "artist": "A", "title": "Colors [No Vox]", "confidence": 100.0}}
+        self.dbc.execute("INSERT OR REPLACE INTO results VALUES (?,?)", (str(self.album), json.dumps(o)))
+        self.dbc.commit()
+        albums, skipped = ta.select_albums(self.db)
+        self.assertEqual(albums, [])
+        self.assertIn("identified release", dict(skipped)[str(self.album)])
+
+
+class Safeguards(Base):
+    """Nothing is tagged from a stale match or one the folder name contradicts."""
+
+    def releases_with(self, rel):
+        self.dbc.execute("CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, body TEXT, ts REAL)")
+        self.dbc.execute("INSERT OR REPLACE INTO http_cache VALUES (?,?,0)",
+                         (f"https://musicbrainz.org/ws/2/release/{MBID}?inc=recordings+labels&fmt=json",
+                          json.dumps(rel)))
+        self.dbc.commit()
+        import check_tagged
+        return check_tagged.Releases([self.db])
+
+    def test_match_from_an_older_matcher_is_not_tagged(self):
+        self.make_album()
+        self.dbc.execute("UPDATE results SET result=json_set(result, '$.version', 'oldversion1')")
+        self.dbc.commit()
+        albums, skipped = ta.select_albums(self.db)
+        self.assertEqual(albums, [])
+        self.assertIn("older version of the matcher", skipped[0][1])
+        self.assertEqual(len(ta.select_albums(self.db, allow_old=True)[0]), 1)
+
+    def test_vinyl_rip_matched_to_a_digital_release_is_not_tagged(self):
+        folder = self.root / "Sunn O))) & Ulver" / "2014 - Terrestrials [Vinyl Rip 24bit 192khz]"
+        audio(folder / "01.flac", 1)
+        self.add_result(folder)
+        rel = {"id": MBID, "title": "Terrestrials", "country": "US", "date": "2014-02-03",
+               "label-info": [{"label": {"name": "Southern Lord"}, "catalog-number": "SUNN200"}],
+               "media": [{"format": "Digital Media", "track-count": 3}]}
+        albums, skipped = ta.select_albums(self.db, releases=self.releases_with(rel))
+        self.assertEqual(albums, [])
+        self.assertIn("folder name says vinyl, this pressing is digital", dict(skipped)[str(folder)])
+        rel["media"] = [{"format": '12" Vinyl', "track-count": 3}]
+        albums, _ = ta.select_albums(self.db, releases=self.releases_with(rel))
+        self.assertEqual(len(albums), 1)
+
+    def test_a_pick_the_matcher_changed_during_the_run_is_skipped(self):
+        self.make_album()
+        a = ta.select_albums(self.db)[0][0]
+        self.assertEqual(ta.recheck(self.db, a), "")
+        self.add_result(self.album, mbid=OTHER)                          # the loop re-matched it
+        self.assertIn("another release", ta.recheck(self.db, a))
+        self.add_result(self.album, status="review")
+        self.assertIn("now says review", ta.recheck(self.db, a))
 
 
 class Artwork(Base):

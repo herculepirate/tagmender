@@ -16,6 +16,10 @@ import re
 import unittest
 from pathlib import Path
 
+# TagMender settings and state of the tests never touch the real ones
+import os as _os, tempfile as _tempfile  # noqa: E402
+_os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
+_os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
@@ -541,6 +545,58 @@ class PressingFromScans(unittest.TestCase):
             ma.list_images, ma.ocr_barcodes, ma.ocr_text, ma.ocr_spines = saved
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_excluded_album_makes_no_lookups_and_is_labelled(self):
+        """A '[No Vox]' album: Ignored by the rule before any network request."""
+        class NoNetwork(FakeHttp):
+            def get_json(self, url, host):
+                raise AssertionError(f"looked up {url}")
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            d = tmp / "BTBAM" / "2007 - Colors [No Vox]"
+            d.mkdir(parents=True)
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=2",
+                            "-metadata", "album=Colors [No Vox]", str(d / "01.flac"), "-y"], check=True)
+            row = {"AlbumArtistFolder": "BTBAM", "AlbumFolder": d.name, "FullPath": str(d), "Status": "untagged"}
+            o = ma.process(row, NoNetwork(), CFG, None, types.SimpleNamespace(ocr=True, max_images=15))
+            self.assertEqual(o["status"], "ignored")
+            self.assertIn("Ignored by rule", o["why"][0])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_rule_matches_the_identified_release(self):
+        """Untagged files; MusicBrainz identifies them as 'Coma Ecliptic [No Vox]': Ignored before tagging."""
+        rel = mb_release("nv", "Band", "Coma Ecliptic [No Vox]", 2015, [10000, 20000])
+
+        class H(FakeHttp):
+            def __init__(self):
+                super().__init__()
+                self.mb, self.dg, self.dg_search = {"nv": rel}, {}, {}
+
+            def get_json(self, url, host):
+                if host == "mb" and "/ws/2/release/?" in url:
+                    return {"releases": [mb_hit(rel)]}
+                if host == "discogs":
+                    return {"results": []}
+                return super().get_json(url, host)
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            d = tmp / "Band" / "2015 - Coma Ecliptic"
+            d.mkdir(parents=True)
+            for i in range(2):
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                                f"sine=frequency={300 + 50 * i}:duration={10 * (i + 1)}", "-ar", "8000",
+                                "-metadata", f"title=T{i}", "-metadata", f"track={i + 1}",
+                                str(d / f"{i + 1:02d}.flac"), "-y"], check=True)
+            row = {"AlbumArtistFolder": "Band", "AlbumFolder": d.name, "FullPath": str(d), "Status": "untagged"}
+            o = ma.process(row, H(), CFG, ma.load_plugin(PLUGIN_DIR), types.SimpleNamespace(ocr=False, max_images=15))
+            self.assertEqual(o["status"], "ignored", o.get("why"))
+            self.assertIn("identified release", o["why"][0])
+            o = ma.process(row, H(), CFG, ma.load_plugin(PLUGIN_DIR),
+                           types.SimpleNamespace(ocr=False, max_images=15, process_anyway=True))
+            self.assertEqual(o["status"], "auto", o.get("why"))          # "process anyway"
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_label_and_country_on_the_back_pick_the_pressing(self):
         r = self.classify(self.BACK,
                           cand(id="us", country="US", label="Century Media"),
@@ -679,6 +735,61 @@ class PressingEvidence(unittest.TestCase):
         r = self.pick(a, cand(id="cd", formats={"cd"}), cand(id="lp", formats={"vinyl"}))
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "lp"), r["why"])
 
+    def test_vinyl_rip_is_never_tagged_as_the_digital_release(self):
+        """Sunn O))) & Ulver - Terrestrials [Vinyl Rip 24bit 192khz]: the digital release's
+        lengths agree better than the 12" vinyl's, but the folder says vinyl."""
+        a = album(folder="2014 - Terrestrials [Vinyl Rip 24bit 192khz]", media_hint="vinyl", discs=2,
+                  audio={"hires": True, "cd_frames": False})
+        far = [{"disc": 1, "title": f"T{i}", "secs": s} for i, s in enumerate((215, 290, 430))]
+        r = self.pick(a, cand(id="web", formats={"digital"}), cand(id="lp", formats={"vinyl"}, tracks=far))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "lp"), r["why"])
+        self.assertIn("folder name says vinyl", " ".join(r["best"]["notes"]))
+        r = self.pick(a, cand(id="web", formats={"digital"}))            # no vinyl listed: a person decides
+        self.assertEqual(r["status"], "review")
+        self.assertIn("no release of this album found that fits", " ".join(r["why"]))
+
+    # Folder statements are rules: the wrong release scoring HIGHER must still lose.
+    def off(self, *secs):
+        return [{"disc": 1, "title": f"T{i}", "secs": x} for i, x in enumerate(secs)]
+
+    def test_folder_country_beats_better_fitting_lengths(self):
+        a = album(folder="2007 - Fiction [Century Media, Germany]")
+        r = self.pick(a, cand(id="us", country="US", label="Century Media"),
+                      cand(id="de", country="DE", label="Century Media", tracks=self.off(200, 305, 416)))
+        self.assertNotEqual(r["best"]["cand"]["id"], "us", r["why"])
+        self.assertEqual(r["best"]["cand"]["id"], "de")
+        r = self.pick(a, cand(id="us", country="US", label="Century Media"))     # Germany not listed
+        self.assertEqual(r["status"], "review")
+
+    def test_folder_catalogue_number_beats_better_fitting_lengths(self):
+        nb = mc.norm_code("NB 1234-2")
+        a = album(folder="2010 - First Light [Nuclear Blast, NB 1234-2]", catnos={nb}, catnos_from_folder={nb})
+        r = self.pick(a, cand(id="other", catnos={mc.norm_code("NB 9999-2")}),
+                      cand(id="mine", catnos={mc.norm_code("NB 1234-2 CD")}, tracks=self.off(200, 305, 416)))
+        self.assertEqual(r["best"]["cand"]["id"], "mine", r["why"])
+
+    def test_folder_number_on_the_release_outweighs_its_country(self):
+        """Kreator Phantom Antichrist (Nuclear Blast, 27361 25880, Germany): the European
+        pressing carries that number; Coroner (Noise, NZCDP 4, USA) is listed as German."""
+        k = mc.norm_code("27361 25880")
+        a = album(folder="2012 - First Light (Nuclear Blast, 27361 25880, Germany)", catnos={k},
+                  catnos_from_folder={k})
+        r = self.pick(a, cand(id="eu", country="XE", label="Nuclear Blast", catnos={k}),
+                      cand(id="us", country="US", label="Nuclear Blast", catnos={"nb1"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "eu"), r["why"])
+        r = self.pick(album(folder="2010 - First Light [Century Media, Germany]"),
+                      cand(id="eu", country="XE", label="Century Media"))
+        self.assertEqual(r["status"], "auto", r["why"])                # Germany is in Europe
+
+    def test_catalogue_numbers_written_differently(self):
+        same = mc.catno_same
+        self.assertTrue(same("SPV 260222", "SPV 260222 CD"))
+        self.assertTrue(same("CG-0004", "DIGICD CG-0004"))
+        self.assertTrue(same("99833708", "9983370"))
+        self.assertTrue(same("FO40CD", "FO 40 CD"))
+        self.assertFalse(same("NB 1234-2", "NB 1234-3"))
+        self.assertFalse(same("SOM299", "SOM2990"))
+
     def test_clearly_closest_track_lengths(self):
         r = self.pick(album(), cand(id="far", tracks=[{"disc": 1, "title": f"T{i}", "secs": s}
                                                        for i, s in enumerate((203, 308, 413))]),
@@ -697,6 +808,24 @@ class PressingEvidence(unittest.TestCase):
         r = self.pick(dict(a, toc_releases={"re"}), cand(id="noise", country="DE", catnos={"n0177"}),
                       cand(id="re", country="DE", catnos={"n01772"}))
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "re"))   # a disc ID still decides
+
+    def test_tag_and_folder_numbers_on_different_pressings(self):
+        """King Diamond 20 Years Ago (ФОНО, FO40CD, Russia): the tags carry Metal Blade's
+        3984-14359-2 (on the US and German CDs), the folder FONO's FO40CD. Each pressing
+        matches a number, so the folder's label and country decide: FONO."""
+        a = album(folder="2001 - 20 Years Ago - A Night Of Rehearsal (ФОНО, FO40CD, Russia)",
+                  catnos={mc.norm_code("3984-14359-2"), mc.norm_code("FO40CD")},
+                  catnos_from_folder={mc.norm_code("FO40CD")}, tag_label="Metal Blade",
+                  toc_releases={"de", "us", "ru"})
+        mb = {mc.norm_code("3984-14359-2")}
+        r = self.pick(a, cand(id="de", country="DE", label="Metal Blade Records", catnos=mb),
+                      cand(id="us", country="US", label="Metal Blade Records", catnos=mb),
+                      cand(id="ru", country="RU", label="Фоно", catnos={mc.norm_code("FO40CD")}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "ru"), r["why"])
+        # a pressing matching no number never wins over those that do
+        r = self.pick(album(catnos={"abc123"}), cand(id="a", catnos={"abc123"}, country="DE"),
+                      cand(id="b", catnos={"abc123"}, country="US"), cand(id="c", country="CA"))
+        self.assertNotEqual(r["best"]["cand"]["id"], "c")
 
     def test_year_label_and_number_in_brackets(self):
         f = "1989 - Practice What You Preach (2013, Warner, 8122796510-3)"
@@ -1003,7 +1132,7 @@ class Pipeline(unittest.TestCase):
         for o in self.out.values():
             db.execute("INSERT INTO results VALUES (?,?)", (o["path"], json.dumps(o, default=list)))
         counts = ma.export(db, self.tmp)
-        self.assertEqual(counts, {"auto": 2, "review": 3, "nomatch": 1, "moved": 0})
+        self.assertEqual(counts, {"auto": 2, "review": 3, "nomatch": 1, "moved": 0, "excluded": 0})
         with open(Path(self.tmp) / "matches_auto.csv", encoding="utf-8") as fh:
             ids = {r["ID"] for r in csv.DictReader(fh)}
         self.assertEqual(ids, {"mb-alpha", "501"})

@@ -7,6 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# TagMender settings and state of the tests never touch the real ones
+import os as _os, tempfile as _tempfile  # noqa: E402
+_os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
+_os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
 import enrich as en  # noqa: E402
@@ -29,8 +33,10 @@ class Enrich(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.album = self.tmp / "lib" / "Band" / "2020 - Album"
+        self.saved_config, en.CONFIG = en.CONFIG, self.tmp / "config"     # never touch the real settings
 
     def tearDown(self):
+        en.CONFIG = self.saved_config
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_replaygain_track_and_album(self):
@@ -69,7 +75,8 @@ class Enrich(unittest.TestCase):
                          ["Death Metal", "Technical Death Metal"])
 
     def test_lyrics_and_lrc_with_undo(self):
-        make(self.album / "01.flac", "sine=frequency=440:duration=4", artist="Band", title="Song", album="Album")
+        make(self.album / "01.flac", "sine=frequency=440:duration=4", artist="Band", title="Song", album="Album",
+             genre="Death Metal")
         before = sorted(mutagen.File(self.album / "01.flac").tags.items())
 
         class Web:
@@ -96,6 +103,41 @@ class Enrich(unittest.TestCase):
             self.assertEqual(en.get(self.album / name, "GENRE"), "Doom Metal", name)
             self.assertEqual(en.get(self.album / name, "TAGMENDER_QUALITY"), "x", name)
             self.assertEqual(en.get(self.album / name, "LYRICS"), "la", name)
+
+    def test_a_failing_lyrics_site_never_stops_the_run(self):
+        make(self.album / "01.flac", "sine=frequency=440:duration=2", artist="Band", title="Song", album="Album")
+
+        class Down:
+            def get_json(self, url, host):
+                raise RuntimeError("giving up on lrclib")
+        orig = en.ma.Http
+        en.ma.Http = lambda db, cfg, tok: Down()
+        try:
+            rc = en.main([str(self.tmp / "lib"), "--lyrics", "--replaygain", "--quality",
+                          "--out-dir", str(self.tmp / "out"), "--cache-db", str(self.tmp / "c.db")])
+        finally:
+            en.ma.Http = orig
+        self.assertEqual(rc, 0)
+        report = (self.tmp / "out" / "enrich_report.csv").read_text()
+        self.assertIn("REPLAYGAIN_*", report)                  # dry run: planned, not measured
+
+    def test_instrumental_music_is_not_looked_up(self):
+        orig = en.CONFIG
+        en.CONFIG = self.tmp / "cfg"
+        try:
+            amb = self.tmp / "ambient_music" / "Steve Roach" / "1984 - Structures"
+            make(amb / "01.flac", "sine=frequency=440:duration=1", artist="Steve Roach", title="A")
+            self.assertTrue(en.instrumental(amb, [amb / "01.flac"]))          # the ambient library
+            met = self.tmp / "extreme" / "Band" / "2001 - X"
+            make(met / "01.flac", "sine=frequency=440:duration=1", artist="Band", title="A", genre="Drone")
+            self.assertTrue(en.instrumental(met, [met / "01.flac"]))          # an instrumental genre
+            voc = self.tmp / "extreme" / "Singer" / "2001 - Y"
+            make(voc / "01.flac", "sine=frequency=440:duration=1", artist="Singer", title="A", genre="Death Metal")
+            self.assertFalse(en.instrumental(voc, [voc / "01.flac"]))
+            en.remember_instrumental("Singer")                                # no lyrics found once
+            self.assertTrue(en.instrumental(voc, [voc / "01.flac"]))
+        finally:
+            en.CONFIG = orig
 
     def test_navidrome_needs_its_settings(self):
         orig = en.CONFIG

@@ -39,6 +39,7 @@ sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
 import match_albums as ma  # noqa: E402
 import tag_albums as ta  # noqa: E402
+import exclusions  # noqa: E402
 
 USER_AGENT = "TagMender/0.1 +https://github.com/herculepirate/tagmender"
 q = urllib.parse.quote
@@ -680,6 +681,8 @@ def main(argv=None):
                     help="also albums left for review (not only those with no match)")
     ap.add_argument("--only", help="only folders whose path contains this text")
     ap.add_argument("--apply", action="store_true", help="write the tags (default: dry run)")
+    ap.add_argument("--process-anyway", action="store_true",
+                    help="also albums an Ignore/Skip rule excludes (this run only)")
     ap.add_argument("--undo", help="restore a run")
     ap.add_argument("--no-cover", action="store_true", help="do not save cover.jpg into folders without images")
     ap.add_argument("--library", help="library folder to file albums into (default: the one they are in)")
@@ -699,6 +702,7 @@ def main(argv=None):
     http = ma.Http(db, cfg, "")
     ma.USER_AGENT = USER_AGENT
     albums = unresolved(args.matches_db, args.only, args.include_review, not args.no_discogs)
+    rules = exclusions.load_rules()
     print(f"{len(albums)} album(s) without a MusicBrainz/Discogs match")
     run_dir = blob_dir = None
     journal, report, cache = [], [], {}
@@ -712,7 +716,14 @@ def main(argv=None):
         blob_dir.mkdir(parents=True)
     for o in albums:
         base = Path(o["path"])
-        album = ma.read_album(base, o.get("artist_folder") or base.parent.name, o.get("album_folder") or base.name)
+        pre = exclusions.gate(base, "web", rules, process_anyway=args.process_anyway)
+        if pre.all_excluded:
+            print(f"  ×   {base.parent.name} | {base.name}: {pre.summary().reason()}")
+            report.append({"album": o["path"], "source": "", "page": "", "matched": "", "confidence": "",
+                           "result": pre.summary().reason()})
+            continue
+        album = ma.read_album(base, o.get("artist_folder") or base.parent.name, o.get("album_folder") or base.name,
+                              exclude=pre.excluded)
         if not album["tracks"]:
             continue
         source, best, why = find(http, album, cfg, cached_ocr(db, base), o)
@@ -734,6 +745,17 @@ def main(argv=None):
                     json.dump(journal, fh)
                 for p in files:
                     ta.write_tagmender(p, "Unresolved", reason)
+            report.append(row)
+            continue
+        c = best["cand"]
+        dec = exclusions.gate([Path(t["path"]) for t in album["tracks"]], "web", rules,
+                              release={"album": [c.get("title") or ""], "albumartist": [c.get("artist") or ""],
+                                       "artist": [c.get("artist") or ""], "genre": [c.get("genre") or ""]},
+                              process_anyway=args.process_anyway)
+        if dec.excluded:                                 # what the web found is excluded: no writes at all
+            whole = dec.summary() or next(iter(dec.excluded.values()))
+            row["result"] = whole.reason()
+            print(f"  ×   {base.parent.name} | {base.name}: {whole.reason()}")
             report.append(row)
             continue
         tags = tags_for(album, best["cand"], http, cache, source, token)

@@ -8,6 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# TagMender settings and state of the tests never touch the real ones
+import os as _os, tempfile as _tempfile  # noqa: E402
+_os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
+_os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
 import web_tag as wt  # noqa: E402

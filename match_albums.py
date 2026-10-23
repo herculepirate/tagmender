@@ -39,6 +39,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
+import exclusions  # noqa: E402
 
 try:
     import mutagen
@@ -464,12 +465,13 @@ def _drop_duplicate_tracks(files, info):
     return [p for p in files if p not in gone_set], sorted(p.name for p in gone_set)
 
 
-def read_album(album_dir, artist_folder, album_folder):
+def read_album(album_dir, artist_folder, album_folder, exclude=()):
     files = []
+    exclude = {str(x) for x in exclude}
     for dirpath, _d, names in os.walk(album_dir):
         for n in names:
             p = Path(dirpath) / n
-            if p.suffix.lower() in AUDIO_EXT:
+            if p.suffix.lower() in AUDIO_EXT and str(p) not in exclude:
                 files.append(p)
     info = {p: read_file(p) for p in files}
     names_from_files([(p, info[p]) for p in files])
@@ -1479,11 +1481,25 @@ def _process(row, http, cfg, dm, args, full_cfg):
                 "tracks": 0, "status": "moved", "best": None, "alts": [], "version": result_version(),
                 "why": ["folder no longer exists (moved or renamed, e.g. by Picard after tagging); "
                         "run audit_untagged.py again to pick up its new folder"]}
-    album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"])
+    # Ignore/Skip rules, as early as the files' own tags and names allow: no
+    # lookups, fingerprints or OCR for what is excluded anyway.
+    anyway = getattr(args, "process_anyway", False)
+    rules = exclusions.load_rules()
+    dec = exclusions.gate(base, "match", rules, process_anyway=anyway)
+    if dec.all_excluded:
+        whole = dec.summary()
+        return {"path": row["FullPath"], "artist_folder": row["AlbumArtistFolder"],
+                "album_folder": row["AlbumFolder"], "tag_artist": "", "tag_title": "", "tag_year": None,
+                "tracks": len(dec.excluded), "status": "ignored" if whole.action == "ignore" else "skipped",
+                "best": None, "alts": [], "why": [whole.reason()], "excluded_by": whole.rule.id,
+                "rules_hash": exclusions.rules_hash(rules), "version": result_version(), "checked": round(time.time())}
+    album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"], exclude=dec.excluded)
     out = {"path": row["FullPath"], "artist_folder": row["AlbumArtistFolder"],
            "album_folder": row["AlbumFolder"], "tag_artist": album["artist"],
            "tag_title": album["title"], "tag_year": album["year"],
            "tracks": len(album["tracks"])}
+    if dec.excluded:                                     # a mixed folder: the rest is still matched
+        out["excluded_files"] = [[p.name, e.label, e.rule.name] for p, e in dec.excluded.items()]
     if not album["tracks"]:
         out.update(status="nomatch", why=["no audio files"], best=None, alts=[])
         return out
@@ -1630,6 +1646,20 @@ def _process(row, http, cfg, dm, args, full_cfg):
         mb_res, dg_res = again
         final = mc.combine(mb_res, dg_res)
 
+    # The rules again, with what identification found (a release titled "[no vox]")
+    if final.get("best") and not anyway:
+        c = final["best"]["cand"]
+        release = {"album": [c.get("title") or ""], "albumartist": [c.get("artist") or ""],
+                   "artist": [c.get("artist") or ""], "genre": [c.get("genre") or ""]}
+        kept = [Path(t["path"]) for t in album["tracks"] if t.get("path")]
+        dec2 = exclusions.gate(kept, "match", rules, release=release) if kept else None
+        if dec2 is not None and dec2.all_excluded:
+            whole = dec2.summary()
+            out.update(status="ignored" if whole.action == "ignore" else "skipped", why=[whole.reason()],
+                       best=summarize(final), alts=[], excluded_by=whole.rule.id,
+                       rules_hash=exclusions.rules_hash(rules), version=result_version(), checked=round(time.time()))
+            return out
+
     status = final["status"]
     why = list(final["why"]) + source_notes
     if source_notes and status == "nomatch":
@@ -1680,10 +1710,14 @@ def to_row(o):
 
 def export(db, out_dir):
     out_dir = Path(out_dir)
-    rows = {"auto": [], "review": [], "nomatch": [], "moved": []}
+    rows = {"auto": [], "review": [], "nomatch": [], "moved": [], "excluded": []}
     for (blob,) in db.execute("SELECT result FROM results"):
         o = json.loads(blob)
-        if o["status"] in rows:
+        if o["status"] in ("ignored", "skipped"):
+            r = to_row(o)
+            r["Status"] = "Ignored" if o["status"] == "ignored" else "Skipped"
+            rows["excluded"].append(r)
+        elif o["status"] in rows:
             rows[o["status"]].append(to_row(o))
     # Discs MusicBrainz has no disc ID for: one link each to attach it (you check
     # the release on the MusicBrainz page and confirm; nothing is sent from here).
@@ -1769,6 +1803,8 @@ def main():
     ap.add_argument("--retry-review", action="store_true",
                     help="re-evaluate albums previously filed as review (cheap: lookups "
                          "come from the cache)")
+    ap.add_argument("--process-anyway", action="store_true",
+                    help="ignore the Ignore/Skip rules for this run (exclusions.json, profiles)")
     ap.add_argument("--recheck-days", type=float,
                     help="look up again, with fresh data, the review/nomatch albums last checked more than "
                          "this many days ago (MusicBrainz and Discogs grow daily); e.g. 30")
@@ -1841,6 +1877,7 @@ def main():
     #     unless --keep-old-results; lookups and OCR come from the caches;
     #   - with --retry-nomatch / --retry-review, results with that status.
     redo = {}
+    current_rules = exclusions.rules_hash(exclusions.load_rules())
     retry = {s for s, on in (("nomatch", args.retry_nomatch), ("review", args.retry_review)) if on}
     for (p, b) in db.execute("SELECT path, result FROM results"):
         o = json.loads(b)
@@ -1853,6 +1890,10 @@ def main():
             redo[p] = o["status"]
         elif o["status"] == "moved" and Path(p).is_dir():
             redo[p] = o["status"]                    # the folder is back: match it
+        elif o["status"] == "skipped" or args.process_anyway:
+            redo[p] = o["status"]                    # a skip lasts one job only
+        elif o["status"] == "ignored" and o.get("rules_hash") != current_rules:
+            redo[p] = o["status"]                    # the rules changed: does it still apply?
     if redo:
         print(f"Re-evaluating {len(redo)} albums ("
               + ", ".join(f"{n} {s}" for s, n in sorted(Counter(redo.values()).items())) + ")")

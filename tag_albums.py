@@ -39,6 +39,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import exclusions  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv", ".ape", ".mpc", ".dsf", ".wma"}
 DEFAULT_PICARD = "flatpak run org.musicbrainz.Picard"
@@ -315,19 +318,74 @@ def restore_tags(path, rec, blob_dir):
 # --------------------------------------------------------------------------
 # Which albums
 # --------------------------------------------------------------------------
-# Instrumental "[no vox]" editions keep their own album title and front cover: Picard would
-# retitle them to the vocal release (and file them into the vocal album's folder).
-NO_VOX = re.compile(r"no[\s._-]?vox", re.I)
-
-
 def is_no_vox(path, titles=()):
-    return bool(NO_VOX.search(str(path)) or any(NO_VOX.search(t or "") for t in titles))
+    """Kept for older callers: the "[no vox]" rule now lives in exclusions.json (rule no-vox)."""
+    meta = {"path": [str(path)], "folder": [Path(path).name], "album": [t for t in titles if t]}
+    return any(r.id == "no-vox" and exclusions.matches(r.when, meta) for r in exclusions.load_rules())
 
 
-def select_albums(matches_db, limit=None, only=None):
+def matcher_version():
+    """The version stamp match_albums.py gives its results (its code and match_core's)."""
+    h = hashlib.md5()
+    for name in ("match_core.py", "match_albums.py"):
+        try:
+            h.update((HERE / name).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:12]
+
+
+def stale_reason(o, allow_old=False):
+    """Why a saved match must not be tagged as it is: made by an older matcher (a fix
+    since may pick another release)."""
+    v = str(o.get("version") or "").split("-")[0]
+    if not allow_old and v != matcher_version():
+        return ("matched by an older version of the matcher; let match_albums.py check it again "
+                "first (or --allow-old-matches)")
+    return ""
+
+
+def folder_contradictions(folder, mbid, releases):
+    """What the folder name states (format, catalogue number, country, edition year)
+    that the release contradicts. Empty when they agree or the release data is unknown."""
+    try:
+        import check_tagged
+    except ImportError:
+        return []
+    rel = releases.mb(mbid) if releases else None
+    if not rel:
+        return []
+    return check_tagged.check(Path(folder).name, rel)[0]
+
+
+def recheck(matches_db, album, allow_old=False):
+    """Just before tagging: the saved match again (the matcher may have changed its pick
+    since the run began). Returns a reason to skip, or ''."""
+    try:
+        db = sqlite3.connect(f"file:{Path(matches_db).expanduser()}?mode=ro", uri=True, timeout=30)
+        row = db.execute("SELECT result FROM results WHERE path=?", (album["path"],)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return ""
+    if not row:
+        return ""
+    o = json.loads(row[0])
+    b = o.get("best") or {}
+    if o.get("status") != "auto":
+        return f"the matcher now says {o.get('status')}: " + "; ".join((o.get("why") or [])[:2])
+    if b.get("id") != album["mbid"]:
+        return f"the matcher now picks another release ({b.get('id')})"
+    return stale_reason(o, allow_old)
+
+
+def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow_old=False, releases=None):
     """Confident MusicBrainz matches whose folder still exists and that Picard has not
-    tagged since (no file carries a different release ID, none is saved by Picard)."""
+    tagged since (no file carries a different release ID, none is saved by Picard),
+    and that no Ignore/Skip rule excludes, checked again here before anything is written.
+    Also left out: matches made by an older matcher, and releases the folder name
+    contradicts ("[Vinyl Rip]" on a digital release, another catalogue number or country)."""
     db = sqlite3.connect(Path(matches_db).expanduser())
+    rules = exclusions.load_rules()
     out, skipped = [], []
     for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
         o = json.loads(blob)
@@ -335,6 +393,14 @@ def select_albums(matches_db, limit=None, only=None):
         if o.get("status") != "auto" or b.get("source") != "mb":
             continue
         if only and only.casefold() not in path.casefold():
+            continue
+        stale = stale_reason(o, allow_old)
+        if stale:
+            skipped.append((path, stale))
+            continue
+        bad = folder_contradictions(path, b["id"], releases)
+        if bad:
+            skipped.append((path, "the folder name contradicts the matched release: " + "; ".join(bad)))
             continue
         folder = Path(path)
         if not folder.is_dir():
@@ -344,8 +410,16 @@ def select_albums(matches_db, limit=None, only=None):
         if not files:
             skipped.append((path, "no audio files"))
             continue
-        if is_no_vox(path, [read_album_title(p) for p in files[:1]]):
-            skipped.append((path, "[no vox] edition: its album title and front cover are left as they are"))
+        release = {"album": [b.get("title") or ""], "albumartist": [b.get("artist") or ""],
+                   "artist": [b.get("artist") or ""]}
+        dec = exclusions.gate(files, "tag", rules, process_anyway=process_anyway)
+        if not dec.excluded and not process_anyway:
+            dec = exclusions.gate(files, "tag", rules, release=release)
+        if dec.excluded:
+            whole = dec.summary() or next(iter(dec.excluded.values()))
+            skipped.append((path, whole.reason() if dec.all_excluded else
+                            f"{whole.reason()} for {len(dec.excluded)} of {len(files)} files: Picard tags whole "
+                            "folders, so the album is left for you (or use --process-anyway)"))
             continue
         ids = [read_ids(p) for p in files]
         other = {i["albumid"] for i in ids if i["albumid"] and i["albumid"] != b["id"]}
@@ -588,8 +662,12 @@ def main():
                          "or with no match (with --apply; undoable)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only", help="only folders whose path contains this text")
+    ap.add_argument("--process-anyway", action="store_true",
+                    help="tag albums even when an Ignore/Skip rule excludes them (this run only)")
     ap.add_argument("--into", help="albums come from outside the library (an inbox) and Picard files them "
                                    "into this library folder, which must be Picard's 'Move files to' folder")
+    ap.add_argument("--allow-old-matches", action="store_true",
+                    help="also tag matches made by an older version of the matcher")
     ap.add_argument("--batch", type=int, default=10, help="albums per Picard run (default 10)")
     ap.add_argument("--settle", type=int, default=10, help="seconds Picard is left idle before saving")
     ap.add_argument("--undo", help="restore a run: its files' tags, names and folders")
@@ -611,7 +689,13 @@ def main():
         return tidy_run(out_dir, args.tidy, args.library_root or picard_move_target(args.picard_ini))
 
     root = args.library_root or picard_move_target(args.picard_ini)
-    albums, skipped = select_albums(args.matches_db, args.limit, args.only)
+    try:
+        import check_tagged
+        releases = check_tagged.Releases([Path(args.matches_db).expanduser()])
+    except ImportError:
+        releases = None
+    albums, skipped = select_albums(args.matches_db, args.limit, args.only, args.process_anyway,
+                                    args.allow_old_matches, releases)
     print(f"{len(albums)} album(s) to tag; {len(skipped)} skipped")
     outside = outside_move_target(albums, args.picard_ini)
     if outside and args.into and Path(args.into).expanduser().resolve() == Path(outside[0]).resolve():
@@ -669,7 +753,17 @@ def main():
     print(f"Run {run_id}: backups and log in {run_dir}")
     try:
         for start in range(0, len(albums), args.batch):
-            batch = albums[start:start + args.batch]
+            batch = []
+            for a in albums[start:start + args.batch]:        # 0: the match is still the matcher's pick
+                why = recheck(args.matches_db, a, args.allow_old_matches)
+                if why:
+                    print(f"    skipped {Path(a['path']).parent.name} | {Path(a['path']).name}: {why}")
+                    results.append({"album": a["path"], "state": "skipped", "saved": 0, "files": len(a["files"]),
+                                    "discogs": 0, "now_in": "", "release": a["mbid"], "not_saved": why})
+                else:
+                    batch.append(a)
+            if not batch:
+                continue
             for a in batch:                                   # 1+2: back up, then seed
                 a["extras"] = extra_files(a["path"])
                 a["records"] = []

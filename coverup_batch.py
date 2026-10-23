@@ -792,8 +792,17 @@ def process_album(album_dir, ctx, args):
     from coverup.pipeline import Pipeline
     from coverup import imaging
     ma, mc, s, http, log = ctx["ma"], ctx["mc"], ctx["s"], ctx["http"], ctx["log"]
-    info = album_info(album_dir, ma, mc, ctx.get("match_db"))
     out = {"path": str(album_dir), "rows": [], "status": "", "note": ""}
+    import exclusions                                    # Ignore/Skip rules: no artwork at all
+    dec = exclusions.gate(album_dir, "artwork", process_anyway=getattr(args, "process_anyway", False))
+    if dec.all_excluded:
+        whole = dec.summary()
+        out.update(status="ignored" if whole.action == "ignore" else "skipped", note=whole.reason())
+        return out
+    info = album_info(album_dir, ma, mc, ctx.get("match_db"))
+    if dec.excluded:
+        info["files"] = [f for f in info["files"] if Path(f) not in dec.excluded]
+        out["note"] = f"{len(dec.excluded)} file(s) left out by a rule"
     if not info["files"]:
         out.update(status="skipped", note="no audio files")
         return out
@@ -811,12 +820,8 @@ def process_album(album_dir, ctx, args):
         pipe.select(res)
         res._had_generated = True
     actions, notes = decide(pipe, res, info, s, args, log)
-    if info.get("no_vox"):
-        if any(a["type"] == "front" for a in actions):
-            notes.append("[no vox] edition: front cover left as it is")
-        actions = [a for a in actions if a["type"] != "front"]
     gen_note = ""
-    if (getattr(args, "generate", False) and not info.get("no_vox")
+    if (getattr(args, "generate", False)
             and not any(a["type"] == "front" for a in actions)):
         g = generation_plan(res, info, args, int(s["hamming_threshold"]))
         if g is not None:
@@ -973,6 +978,8 @@ def main():
     ap.add_argument("--root", action="append", help="or scan <root>/<Album Artist>/<Album>/")
     ap.add_argument("--pass", dest="pass_name", choices=("missing", "full"), default="missing")
     ap.add_argument("--apply", action="store_true", help="write images and embed (default: plan only)")
+    ap.add_argument("--process-anyway", action="store_true",
+                    help="also albums an Ignore/Skip rule excludes (this run only)")
     ap.add_argument("--undo", help="undo an applied batch by its id")
     ap.add_argument("--local-min", type=int, default=1000, help="local image short side for 'local first'")
     ap.add_argument("--upscale-to", type=int, default=500,

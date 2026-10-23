@@ -38,6 +38,7 @@ sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
 import match_albums as ma  # noqa: E402
 import tag_albums as ta  # noqa: E402
+import exclusions  # noqa: E402
 
 _DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*\d+\b|^\d{1,2}$", re.I)
 
@@ -98,9 +99,12 @@ def handle(folder, args, http, cfg, dm, db, log):
     folder = Path(folder)
     row = {"FullPath": str(folder), "AlbumArtistFolder": folder.parent.name if folder.parent != Path(args.inbox)
            else "", "AlbumFolder": folder.name, "Status": "untagged"}
-    out = ma.process(row, http, cfg, dm, SimpleNamespace(ocr=True, max_images=15))
+    out = ma.process(row, http, cfg, dm, SimpleNamespace(ocr=True, max_images=15, process_anyway=False))
     save_result(db, out)
     best = out.get("best") or {}
+    if out["status"] in ("ignored", "skipped"):          # a rule excludes it: nothing is written or moved
+        log(f"{folder.name}: {out['why'][0]}")
+        return out["status"]
     log(f"{folder.name}: {out['status']} {best.get('source', '')} {best.get('artist', '')} - {best.get('title', '')}")
     py = sys.executable
     if out["status"] == "auto" and best.get("source") == "mb":
@@ -166,15 +170,25 @@ def main(argv=None):
         logf.flush()
 
     log(f"watching {args.inbox} -> {args.library}")
+    state = exclusions.State()
+    skipped_seen = {}                                     # folder -> signature: a skip is logged once per change
     while True:
         try:
             group_loose(args.inbox, http, db)
+            rules = exclusions.load_rules()
+            rh = exclusions.rules_hash(rules)
             for folder in album_folders(args.inbox):
-                if settled(folder, args.settle_minutes):
-                    try:
-                        handle(folder, args, http, cfg, dm, db, log)
-                    except Exception as exc:                       # one bad album never stops the inbox
-                        log(f"{folder.name}: failed ({type(exc).__name__}: {exc})")
+                if not settled(folder, args.settle_minutes):
+                    continue
+                sig = exclusions.signature(exclusions.audio_files(folder))
+                if state.still_ignored(folder, sig, rh) or skipped_seen.get(str(folder)) == (sig, rh):
+                    continue                              # unchanged, and the rules too: not queued again
+                try:
+                    result = handle(folder, args, http, cfg, dm, db, log)
+                    if result == "skipped":
+                        skipped_seen[str(folder)] = (sig, rh)
+                except Exception as exc:                       # one bad album never stops the inbox
+                    log(f"{folder.name}: failed ({type(exc).__name__}: {exc})")
         except Exception as exc:
             log(f"pass failed ({exc})")
         if args.once:

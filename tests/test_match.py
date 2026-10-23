@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import types
+import re
 import unittest
 from pathlib import Path
 
@@ -21,7 +22,8 @@ import match_core as mc  # noqa: E402
 import match_albums as ma  # noqa: E402
 
 PLUGIN_DIR = sys.argv[1] if len(sys.argv) > 1 else "~/Documents/Github/picard-discogs-enrichment"
-CFG = dict(mc.DEFAULT_CFG)
+CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])   # tie rules tested without the country preference
+CFG_PREF = dict(mc.DEFAULT_CFG)
 
 
 def album(**kw):
@@ -482,6 +484,362 @@ class OcrCodes(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class PressingFromScans(unittest.TestCase):
+    """Pressings that score the same are told apart by what the scans show."""
+    BACK = ("FIRST LIGHT  1. T0  2. T1  3. T2  (P) 2010 Nuclear Blast GmbH  "
+            "Made in Germany  NB 1234-2")
+
+    def classify(self, text, *cands):
+        return mc.classify([mc.score_candidate(album(), c, CFG, ocr_text=text) for c in cands], CFG)
+
+    def test_label_and_country_on_the_back_pick_the_pressing(self):
+        r = self.classify(self.BACK,
+                          cand(id="us", country="US", label="Century Media"),
+                          cand(id="de", country="DE", label="Nuclear Blast"))
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertEqual(r["best"]["cand"]["id"], "de")
+        note = " ".join(r["best"]["notes"])
+        self.assertIn("pressing chosen by", note)
+        self.assertIn("Nuclear Blast", note)
+        self.assertIn("made in Germany", note)
+
+    def test_catalogue_number_printed_on_the_back_picks_the_pressing(self):
+        r = self.classify(self.BACK, cand(id="a", country="DE", catnos={mc.norm_code("NB 9999-2")}),
+                          cand(id="b", country="DE", catnos={mc.norm_code("NB 1234-2")}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
+
+    def test_clues_shared_by_every_pressing_decide_nothing(self):
+        r = self.classify(self.BACK, cand(id="cd", country="DE", label="Nuclear Blast"),
+                          cand(id="lp", country="DE", label="Nuclear Blast"))
+        self.assertEqual(r["status"], "review")
+        self.assertTrue(any("runner-up" in w for w in r["why"]))
+
+    def test_front_cover_only_decides_nothing(self):
+        r = self.classify("FIRST LIGHT  ARTIST ALPHA", cand(id="us", country="US", label="Century Media"),
+                          cand(id="de", country="DE", label="Nuclear Blast"))
+        self.assertEqual(r["status"], "review")
+
+    def test_two_pressings_each_with_a_clue_stay_in_review(self):
+        r = self.classify("Century Media  Made in Germany", cand(id="us", country="US", label="Century Media"),
+                          cand(id="de", country="DE", label="Nuclear Blast"))
+        self.assertEqual(r["status"], "review")
+
+    def test_a_pressing_the_scans_contradict_is_never_picked(self):
+        r = self.classify("Nuclear Blast  Printed in Japan", cand(id="de", country="DE", label="Nuclear Blast"),
+                          cand(id="jp", country="JP", label="Avalon"))
+        self.assertEqual(r["status"], "review")
+
+    def test_countries_and_labels_are_read_carefully(self):
+        self.assertEqual(mc.countries_on_scans("Printed in Germany. Made in the EU"), {"DE", "XE"})
+        self.assertEqual(mc.countries_on_scans("MADE IN U.S.A."), {"US"})
+        self.assertEqual(mc.countries_on_scans("handmade in heaven"), set())
+        self.assertEqual(mc.country_code("Germany"), "DE")
+        self.assertEqual(mc.country_code("DE"), "DE")
+        agree, _ = mc.pressing_clues("all music by the band, recorded at studio", cand(label="Music Records"))
+        self.assertEqual(agree, {})                         # filler words are not a label
+
+
+class RemasterEditions(unittest.TestCase):
+    """[2021 RM] in a folder name: a remaster, usually a digital release, dated near that year."""
+
+    def test_media_named_in_folder(self):
+        self.assertEqual(mc.media_hint("2006 - Dante XXI [2021 RM]"), "digital")
+        self.assertEqual(mc.media_hint("2001 - Nothing [2019 RM Vinyl Rip 24bit 96khz]"), "vinyl")
+        self.assertEqual(mc.media_hint("2000 - Reinventing the Steel [3CD 2020 20th Annv Edn]"), "cd")
+        self.assertEqual(mc.media_hint("1990 - Coma Of Souls (2018 RM Noise, NOISE2CD046, Germany)"), "digital")
+        self.assertEqual(mc.media_hint("2010 - Zenith"), "")
+        self.assertEqual(mc.media_kind('12" Vinyl'), "vinyl")
+        self.assertEqual(mc.media_kind("Digital Media"), "digital")
+        self.assertEqual(mc.media_kind("File"), "digital")
+        self.assertEqual(mc.media_kind("Enhanced CD"), "cd")
+
+    def test_remaster_dated_a_year_or_two_off_is_that_edition(self):
+        a = album(pressing_year=2019)
+        r = mc.classify([mc.score_candidate(a, cand(id="rm", year=2021), CFG),
+                         mc.score_candidate(a, cand(id="orig", year=2001), CFG)], CFG)
+        self.assertEqual(r["best"]["cand"]["id"], "rm")
+        self.assertFalse(any("edition" in w for w in r["why"]), r["why"])
+        r = mc.classify([mc.score_candidate(album(pressing_year=2021), cand(id="orig", year=2006), CFG)], CFG)
+        self.assertTrue(any("2021 edition" in w for w in r["why"]))      # far off: still review
+
+    def test_exact_year_preferred_among_equals(self):
+        a = album(pressing_year=2019)
+        r = mc.classify([mc.score_candidate(a, cand(id="b", year=2021), CFG),
+                         mc.score_candidate(a, cand(id="a", year=2019), CFG)], CFG)
+        self.assertEqual(r["best"]["cand"]["id"], "a")
+
+    def test_digital_remaster_picked_over_cd_and_vinyl_of_the_same_edition(self):
+        a = album(pressing_year=2021, media_hint="digital")
+        r = mc.classify([mc.score_candidate(a, cand(id="cd", year=2021, formats={"cd"}), CFG),
+                         mc.score_candidate(a, cand(id="lp", year=2021, formats={"vinyl"}), CFG),
+                         mc.score_candidate(a, cand(id="web", year=2021, formats={"digital"}), CFG)], CFG)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "web"), r["why"])
+        self.assertIn("digital release (folder name)", " ".join(r["best"]["notes"]))
+
+    def test_two_digital_releases_still_need_a_person(self):
+        a = album(pressing_year=2021, media_hint="digital")
+        r = mc.classify([mc.score_candidate(a, cand(id="w1", year=2021, formats={"digital"}), CFG),
+                         mc.score_candidate(a, cand(id="w2", year=2021, formats={"digital"}), CFG)], CFG)
+        self.assertEqual(r["status"], "review")
+
+
+class PressingEvidence(unittest.TestCase):
+    """Tied pressings told apart by the files, the folder and the audio; albums proven
+    by a disc ID or catalogue number keep the database's title and artist."""
+
+    def pick(self, a, *cands):
+        return mc.classify([mc.score_candidate(a, c, CFG) for c in cands], CFG)
+
+    def test_disc_id_picks_the_pressing(self):
+        r = self.pick(album(toc_releases={"b"}), cand(id="a", country="US"), cand(id="b", country="DE"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
+        self.assertIn("disc ID", " ".join(r["best"]["notes"]))
+
+    def test_label_and_country_in_the_folder_name(self):
+        a = album(folder="2007 - Fiction [Century Media, 9976158, Germany]")
+        r = self.pick(a, cand(id="us", country="US", label="Century Media Records"),
+                      cand(id="de", country="DE", label="Century Media"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "de"), r["why"])
+
+    def test_folder_country_rules_out_a_pressing(self):
+        a = album(folder="2005 - Character [Toys Factory, Japan]")
+        r = self.pick(a, cand(id="de", country="DE", label="Century Media"),
+                      cand(id="jp", country="JP", label="Toy's Factory"))
+        self.assertEqual(r["best"]["cand"]["id"], "jp")
+
+    def test_tags_name_the_pressing(self):
+        a = album(tag_label="Nuclear Blast", tag_country="DE")
+        r = self.pick(a, cand(id="us", country="US", label="Nuclear Blast America"),
+                      cand(id="de", country="DE", label="Nuclear Blast"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "de"), r["why"])
+
+    def test_hi_res_audio_is_not_from_a_cd(self):
+        a = album(audio={"hires": True, "cd_frames": False})
+        r = self.pick(a, cand(id="cd", formats={"cd"}), cand(id="web", formats={"digital"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "web"), r["why"])
+        self.assertIn("no CD carries", " ".join(r["best"]["notes"]))
+
+    def test_cd_rip_prefers_the_cd(self):
+        a = album(audio={"hires": False, "cd_frames": True})
+        r = self.pick(a, cand(id="web", formats={"digital"}), cand(id="cd", formats={"cd"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cd"), r["why"])
+
+    def test_vinyl_rip_never_takes_the_cd(self):
+        a = album(folder="2001 - Nothing [2019 RM Vinyl Rip 24bit 96khz]", media_hint="vinyl",
+                  audio={"hires": True, "cd_frames": False})
+        r = self.pick(a, cand(id="cd", formats={"cd"}), cand(id="lp", formats={"vinyl"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "lp"), r["why"])
+
+    def test_clearly_closest_track_lengths(self):
+        r = self.pick(album(), cand(id="far", tracks=[{"disc": 1, "title": f"T{i}", "secs": s}
+                                                       for i, s in enumerate((203, 308, 413))]),
+                      cand(id="near"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "near"), r["why"])
+
+    def test_a_catalogue_number_on_no_pressing_blocks_weak_picks(self):
+        """Mental Vortex [Death Cult Switzerland, DCS-004, Germany]: the copy is a pressing
+        none of the candidates is, so 'Germany' must not pick the 1991 Noise CD."""
+        a = album(folder="2013 - Mental Vortex [Death Cult Switzerland, DCS-004, Germany]",
+                  catnos={mc.norm_code("DCS-004")}, catnos_from_folder={mc.norm_code("DCS-004")})
+        r = self.pick(a, cand(id="noise", country="DE", label="Noise Records", catnos={"n0177"}),
+                      cand(id="us", country="US", label="Noise International", catnos={"n01772"}))
+        self.assertEqual(r["status"], "review")
+        self.assertTrue(any("DCS4" in w for w in r["why"]), r["why"])
+        r = self.pick(dict(a, toc_releases={"re"}), cand(id="noise", country="DE", catnos={"n0177"}),
+                      cand(id="re", country="DE", catnos={"n01772"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "re"))   # a disc ID still decides
+
+    def test_year_label_and_number_in_brackets(self):
+        f = "1989 - Practice What You Preach (2013, Warner, 8122796510-3)"
+        self.assertEqual(mc.catno_hints(f), ["8122796510-3"])
+        self.assertEqual(mc.pressing_year(f), 2013)
+        self.assertIsNone(mc.pressing_year("2010 - Zenith (2010)"))
+
+    def test_download_is_not_a_cd(self):
+        a = album(audio={"hires": False, "cd_frames": False, "not_cd": True})
+        r = self.pick(a, cand(id="cd", formats={"cd"}), cand(id="web", formats={"digital"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "web"), r["why"])
+        infos = [{"lossless": True, "rate": 44100, "bits": 16, "samples": 588 * n + 5} for n in (1000, 2000)]
+        self.assertTrue(ma.audio_evidence(infos)["not_cd"])
+
+    def test_one_pressing_listed_twice(self):
+        r = self.pick(album(), cand(id="a", date="2006", catnos={"vr297"}, barcodes={"746105029729"}),
+                      cand(id="b", date="2006-06-13", catnos={"vr297"}, barcodes={"746105029729"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
+        r = self.pick(album(), cand(id="a", catnos={"cm77412"}, barcodes=set()),
+                      cand(id="b", date="1992-06-01", catnos={"cm77412"}, barcodes={"727701774121"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])   # one lacks a barcode
+        r = self.pick(album(), cand(id="a", catnos={"nb4664"}, barcodes={"727361466411"}, formats={"vinyl"}),
+                      cand(id="b", catnos={"nb4664"}, barcodes={"727361466428"}, formats={"vinyl"}))
+        self.assertEqual(r["status"], "review")              # two vinyl colours: different barcodes
+        r = self.pick(album(), cand(id="a", catnos={"cm775422"}, country="DE"),
+                      cand(id="b", catnos={"cmr82422"}, country="US"))
+        self.assertEqual(r["status"], "review")
+
+    def test_lengths_excused_when_a_code_or_vinyl_points_to_the_release(self):
+        odd = [{"disc": 1, "title": f"T{i}", "secs": s} for i, s in enumerate((230, 340, 380))]
+        r = self.pick(album(), cand(tracks=odd))
+        self.assertEqual(r["status"], "review")
+        r = self.pick(album(catnos={"nb12342"}), cand(tracks=odd, catnos={"nb12342"}))
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("track lengths not compared", " ".join(r["best"]["notes"]))
+        a = album(media_hint="vinyl", folder="2008 - X [Vinyl Rip 24bit 96khz]")
+        r = self.pick(a, cand(tracks=odd, formats={"vinyl"}))
+        self.assertEqual(r["status"], "auto", r["why"])
+        r = self.pick(album(catnos={"nb12342"}), cand(tracks=odd[:2], catnos={"nb12342"}))
+        self.assertEqual(r["status"], "review")                    # track count differs: left as is
+
+    def test_rip_log_gives_the_disc_toc(self):
+        import tempfile
+        d = Path(tempfile.mkdtemp())
+        log = ("Exact Audio Copy V1.0 beta 6\r\n\r\nTOC of the extracted CD\r\n\r\n"
+               "     Track |   Start  |  Length  | Start sector | End sector \r\n"
+               "    ---------------------------------------------------------\r\n"
+               "        1  |  0:00.00 |  1:45.61 |         0    |     7935   \r\n"
+               "        2  |  1:45.61 |  5:21.11 |      7936    |    32021   \r\n"
+               "\r\nRange status and errors\r\n        1  |  0:00.00 |  1:45.61 |         0    |     7935   \r\n")
+        (d / "rip.log").write_bytes(b"\xff\xfe" + log.encode("utf-16-le"))
+        self.assertEqual(ma.log_tocs(d), {1: "1 2 32172 150 8086"})
+
+    def test_catalogue_number_with_format_after_it(self):
+        self.assertIn("FO532CD", mc.codes_from_ocr_text("CRYPTOPSY  FO532CD")["catnos"])
+
+    def test_spine_misreads_and_licensors(self):
+        """Whisper Supremacy: the spine's FO501CD is read 'FOSO1 cp'; 'licensed from
+        Century Media' names the licensor, not the FONO pressing's label."""
+        self.assertIn("FO501CD", mc.codes_from_ocr_text("CRYPTOPSY  FOSO1 cp")["catnos"])
+        self.assertEqual(mc.codes_from_ocr_text("FO532CD")["catnos"], ["FO532CD"])
+        text = "All recordings are licensed from Century Media Records. FONO Ltd  FOSO1 cp"
+        r = self.pick(album(), cand(id="cm", label="Century Media", country="DE"),
+                      cand(id="fono", label="Fono", country="RU", catnos={"fo501cd"}))
+        scored = [mc.score_candidate(album(), c, CFG, ocr_text=text)
+                  for c in (cand(id="cm", label="Century Media", country="DE"),
+                            cand(id="fono", label="Fono", country="RU", catnos={"fo501cd"}))]
+        r = mc.classify(scored, CFG)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "fono"), r["why"])
+        self.assertNotIn("label", scored[0]["clues"])
+
+    def test_catalogue_number_ending_in_cd_is_not_a_media_note(self):
+        f = "2001 - 20 Years Ago - A Night Of Rehearsal (ФОНО, FO40CD, Russia)"
+        self.assertEqual(mc.catno_hints(f), ["FO40CD"])
+        self.assertEqual(mc.media_hint(f), "")
+        self.assertEqual(mc.media_hint("2000 - X [2CD]"), "cd")
+        self.assertEqual(mc.media_hint("2014 - Y [SPV 260222 CD]"), "cd")
+
+    def test_country_preference_is_the_last_resort(self):
+        cs = [cand(id="de", country="DE"), cand(id="us", country="US"), cand(id="jp", country="JP")]
+        r = mc.classify([mc.score_candidate(album(), c, CFG_PREF) for c in cs], CFG_PREF)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
+        self.assertIn("preferred country order", " ".join(r["best"]["notes"]))
+        # two US pressings: still undecided
+        cs = [cand(id="us1", country="US", catnos={"a1"}), cand(id="us2", country="US", catnos={"a2"})]
+        r = mc.classify([mc.score_candidate(album(), c, CFG_PREF) for c in cs], CFG_PREF)
+        self.assertEqual(r["status"], "review")
+        # evidence beats preference: the folder says Germany
+        a = album(folder="2009 - X [Nuclear Blast, Germany]")
+        cs = [cand(id="de", country="DE"), cand(id="us", country="US")]
+        r = mc.classify([mc.score_candidate(a, c, CFG_PREF) for c in cs], CFG_PREF)
+        self.assertEqual(r["best"]["cand"]["id"], "de")
+
+    def test_scans_mean_a_physical_copy(self):
+        a = album(scans={"physical": True, "why": "a scan named back.jpg"})
+        r = self.pick(a, cand(id="web", country="XW", formats={"digital"}), cand(id="cd", country="AU", formats={"cd"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cd"), r["why"])
+        # but not when the audio says download
+        a = dict(a, audio={"hires": True})
+        r = self.pick(a, cand(id="web", formats={"digital"}), cand(id="cd", formats={"cd"}))
+        self.assertEqual(r["best"]["cand"]["id"], "web")
+
+    def test_scan_evidence_from_names_and_tray_shape(self):
+        import tempfile
+        from PIL import Image
+        d = Path(tempfile.mkdtemp())
+        Image.new("RGB", (600, 600)).save(d / "cover.jpg")
+        (d / "tech.info").mkdir()
+        Image.new("RGB", (1300, 1000)).save(d / "tech.info" / "Au.jpg")
+        self.assertFalse(ma.scan_evidence(d)["physical"])
+        Image.new("RGB", (1500, 1180)).save(d / "07.jpg")
+        self.assertTrue(ma.scan_evidence(d)["physical"])
+        (d / "07.jpg").unlink()
+        Image.new("RGB", (800, 800)).save(d / "Back.jpg")
+        self.assertIn("Back.jpg", ma.scan_evidence(d)["why"])
+
+    def test_latin_script_listing_preferred(self):
+        r = self.pick(album(), cand(id="jp", script="Jpan"), cand(id="lat", script="Latn"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "lat"), r["why"])
+        self.assertEqual(mc.fold("Фоно"), "fono")
+        self.assertEqual(mc.fold("Κατά τον Δαίμονα Εαυτού"), "kata ton daimona eaytoy")
+
+    def test_disc_ids_and_ctdb_toc(self):
+        self.assertEqual(ma.mb_discid("1 12 267257 150 22767 41887 58317 72102 91375 104652 115380 "
+                                      "132165 143932 159870 174597"), "I5l9cCSFccLKFEKS.7wqSZAorPU-")
+        self.assertEqual(ma.ctdb_toc("1 2 32172 150 8086"), "0:7936:32022")
+
+    def test_cue_sheet_toc(self):
+        import tempfile
+        d = Path(tempfile.mkdtemp())
+        (d / "album.cue").write_text('FILE "album.flac" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n'
+                                    '  TRACK 02 AUDIO\n    INDEX 01 01:45:61\n')
+        infos = [(d / "album.flac", {"secs": 427.0})]
+        self.assertEqual(ma.cue_tocs(d, infos), {1: "1 2 32175 150 8086"})
+
+    def test_fingerprints_find_the_releases_common_to_all_tracks(self):
+        class H:
+            def get_json(self, url, host):
+                fp = re.search(r"fingerprint=(\w+)", url).group(1)
+                rels = {"fa": ["r1", "r2"], "fb": ["r2", "r3"], "fc": ["r2"]}[fp]
+                return {"results": [{"score": 0.95, "recordings": [{"releases": [{"id": r} for r in rels]}]}]}
+        tracks = [{"path": f"/m/{i}.flac", "secs": 100} for i in range(5)]
+        orig = (ma.fingerprint, ma.acoustid_key, ma.shutil.which)
+        fps = {"/m/0.flac": "fa", "/m/2.flac": "fb", "/m/4.flac": "fc"}
+        ma.fingerprint = lambda p, db=None: {"duration": 100, "fingerprint": fps[p]}
+        ma.acoustid_key = lambda: "k"
+        ma.shutil.which = lambda name: "/usr/bin/fpcalc"
+        try:
+            self.assertEqual(ma.acoustid_releases(H(), {"tracks": tracks}), {"r2"})
+        finally:
+            ma.fingerprint, ma.acoustid_key, ma.shutil.which = orig
+        a = album(title="Far Beyond Live", fp_releases={"x1"})
+        r = self.pick(a, cand(title="Nosatsu Live"))
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("audio fingerprint", " ".join(r["best"]["notes"]))
+
+    def test_nothing_telling_stays_in_review(self):
+        r = self.pick(album(audio={"hires": False, "cd_frames": True}),
+                      cand(id="a", formats={"cd"}), cand(id="b", formats={"cd"}))
+        self.assertEqual(r["status"], "review")
+
+    def test_cd_frames_and_disc_toc(self):
+        infos = [{"lossless": True, "rate": 44100, "bits": 16, "samples": 588 * n} for n in (1000, 2000)]
+        self.assertTrue(ma.audio_evidence(infos)["cd_frames"])
+        self.assertFalse(ma.audio_evidence(infos + [{"lossless": True, "rate": 44100, "bits": 16,
+                                                      "samples": 588 * 5 + 7}])["cd_frames"])
+        self.assertTrue(ma.audio_evidence([{"lossless": True, "rate": 96000, "bits": 24, "samples": 1}])["hires"])
+        tocs = ma.disc_tocs([(None, dict(i, disc_eff=1)) for i in infos])
+        self.assertEqual(tocs, {1: "1 2 3150 150 1150"})
+
+    def test_proven_album_keeps_database_title_and_artist(self):
+        a = album(artist="Death", title="The Fragile Art Of Existence", catnos={mc.norm_code("RR7119")},
+                  catnos_from_folder={mc.norm_code("RR7119")})
+        r = self.pick(a, cand(artist="Control Denied", title="The Fragile Art of Existence",
+                              catnos={mc.norm_code("RR 7119")}))
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("credited as the database does", " ".join(r["best"]["notes"]))
+        a = album(title="The Mediator", toc_releases={"x1"})
+        r = self.pick(a, cand(title="The Mediator Between Head and Hands Must Be the Heart"))
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("database title is used", " ".join(r["best"]["notes"]))
+
+    def test_unproven_different_title_still_needs_a_person(self):
+        r = self.pick(album(title="The Mediator"), cand(title="The Mediator Between Head and Hands Must Be the Heart"))
+        self.assertEqual(r["status"], "review")
+
+    def test_proof_never_drops_a_collaborator(self):
+        a = album(artist="Steve Brown; Blaine Reininger", toc_releases={"x1"})
+        r = self.pick(a, cand(artist="Blaine Reininger"))
+        self.assertEqual(r["status"], "review")
+
+
 class Pipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -840,10 +1198,13 @@ class RealWorldCases(unittest.TestCase):
         a2 = album(tracks=a["tracks"])
         c2 = cand(tracks=c["tracks"])
         self.assertEqual(mc.classify([mc.score_candidate(a2, c2, CFG)], CFG)["status"], "review")
-        # ...and a code cannot rescue lengths that mostly disagree
+        # ...and (John's rule) when the catalogue number points to the release, even lengths
+        # that mostly disagree do not block it: it is that release, ripped differently
         bad = [lens[0]] + [s + 90 for s in lens[1:]]
         c3 = cand(catnos={"abc123"}, tracks=[{"disc": 1, "title": "t", "secs": float(s)} for s in bad])
-        self.assertNotEqual(mc.classify([mc.score_candidate(a, c3, CFG)], CFG)["status"], "auto")
+        r = mc.classify([mc.score_candidate(a, c3, CFG)], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("track lengths not compared", " ".join(r["best"]["notes"]))
 
     def test_artist_credited_in_another_script_matches_by_sort_name(self):
         """Live case: MusicBrainz credits Kitaro as 喜多郎; its sort name is Latin."""

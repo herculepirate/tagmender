@@ -355,6 +355,52 @@ class Runs(Base):
         ini.write_text(f"[setting]\nmove_files=false\nmove_files_to={self.root}\n")
         self.assertIsNone(ta.outside_move_target([{"path": str(extreme)}], ini))
 
+    def test_no_vox_editions_are_left_alone(self):
+        novox = self.root / "Band" / "2015 - Coma Ecliptic [No Vox]"
+        audio(novox / "01.flac", 8, title="One")
+        self.add_result(novox)
+        tagged_novox = self.root / "Band2" / "2001 - Plain Folder"
+        audio(tagged_novox / "01.flac", 9, title="One", album="Colors [no vox]")
+        self.add_result(tagged_novox, mbid=OTHER)
+        albums, skipped = ta.select_albums(self.db)
+        self.assertEqual(albums, [])
+        self.assertEqual(len(skipped), 2)
+        self.assertTrue(all("[no vox]" in why for _p, why in skipped))
+        self.assertTrue(ta.is_no_vox("/m/Meshuggah/noVox/2025 - Immutable"))
+        self.assertFalse(ta.is_no_vox("/m/Band/2001 - Novocaine"))
+
+    def test_tagged_albums_are_marked_resolved(self):
+        self.make_album()
+        rc, out = self.run_tool("--apply")
+        new = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        for p in ta.audio_files(new):
+            self.assertEqual(ta.read_tagmender(p), ("Resolved", ""), p)
+
+    def test_review_albums_marked_unresolved_with_reason_and_undo(self):
+        self.make_album()
+        self.add_result(self.album, status="review")
+        self.dbc.execute("UPDATE results SET result=json_set(result,'$.why',json('[\"track count differs\"]'))")
+        self.dbc.commit()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--mark-unresolved")                      # dry run
+        self.assertIn("1 album(s) to mark", out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+        rc, out = self.run_tool("--mark-unresolved", "--apply")
+        self.assertEqual(rc, 0, out)
+        for p in ta.audio_files(self.album):
+            self.assertEqual(ta.read_tagmender(p), ("Unresolved", "review: track count differs"), p)
+        rc, out = self.run_tool("--mark-unresolved", "--apply")             # already marked
+        self.assertIn("0 album(s) to mark", out)
+        rc, out = self.run_tool("--undo", sorted(p.name for p in self.out.glob("run-*"))[0][4:])
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_picard_must_preserve_the_tag(self):
+        ini = self.tmp / "Picard.ini"
+        ini.write_text("[setting]\nclear_existing_tags=true\npreserved_tags=comment, totaltracks\n")
+        self.assertFalse(ta.picard_preserves_tagmender(ini))
+        ini.write_text("[setting]\nclear_existing_tags=true\npreserved_tags=comment, tagmender, tagmender_reason\n")
+        self.assertTrue(ta.picard_preserves_tagmender(ini))
+
     def test_picard_commands_load_settle_save_quit(self):
         cmds = ta.picard_commands(["/m/A B/1999 - X"], 10)
         self.assertEqual(cmds[:3], ["-e", "LOAD", "/m/A B/1999 - X"])

@@ -42,6 +42,44 @@ only folder names, some with scans of the sleeve and nothing else.
   credits, disc counts and multi-artist handling are exactly what Picard
   would write.
 
+## How an album is identified
+
+Everything the folder holds is used as evidence, strongest first:
+
+- **Disc ID**: the CD's table of contents, rebuilt from exact track lengths
+  (CD rips), from the rip log (EAC, XLD) or from a cue sheet, looked up on
+  MusicBrainz and in the CUETools database (which also links Discogs releases).
+- **Barcode and catalogue number**: from the tags, the folder name
+  (`[Century Media, 9976158, Germany]`), and the scans: barcodes decoded,
+  text read by OCR, including the sideways text on tray-card spines, with the
+  usual misreadings (`FOSO1` for `FO501`) allowed for.
+- **Audio fingerprints** (AcoustID, as Picard's "Scan") for albums whose
+  title or tags say little.
+- **What the copy is**: scans of a back cover, tray card or disc mean a
+  physical copy; hi-res audio or lossless tracks that are not whole CD
+  sectors mean a download; `Vinyl Rip` means vinyl.
+- **Label, country and date** from tags, folder name and scans ("Made in
+  Germany", "licensed from ..." is ignored), and the track lengths and titles
+  closest to one pressing.
+- **Every version of the album** (MusicBrainz release group, Discogs master)
+  is searched when no hit has your track count or catalogue number.
+- Last, your **preferred countries** (Picard's list when set, else
+  CA, US, worldwide, Europe, GB, DE).
+
+Cyrillic, Greek and (with `pykakasi`) Japanese are compared in Latin letters.
+Discs MusicBrainz has no disc ID for are listed in
+`discid_submissions.csv` with a link to attach each one yourself.
+
+## Ripping and naming habits that make every album match
+
+- Keep the rip log (`.log`) and cue sheet with the music, also after converting
+  to Opus or MP3: they identify the exact disc.
+- Name folders `Year - Album [Label, Catalogue number, Country, Format]`,
+  e.g. `2005 - Once Was Not [FONO, FO532CD, Russia, CD]`.
+- Scan the back/tray card (both spines in view) and the disc; name them
+  `back.jpg`, `tray.jpg`, `disc.jpg`.
+- Keep the source's tags (label, catalogue number, barcode) when converting.
+
 ## Requirements
 
 - Python 3.10+, and `pip install mutagen Pillow fonttools`
@@ -51,7 +89,12 @@ only folder names, some with scans of the sleeve and nothing else.
   (default location `~/Documents/Github/picard-discogs-enrichment`, or pass `--plugin-dir`)
 - For artwork: a clone of [picard-coverup](https://github.com/herculepirate/picard-coverup)
   (`--coverup-dir`); your CoverUp settings are read from Picard's `Picard.ini`
-- Optional, for OCR of scans: `tesseract-ocr` and `libzbar0` (+ `pip install pyzbar`)
+- Optional, for OCR of scans: `tesseract-ocr` and `libzbar0` (+ `pip install pyzbar`);
+  `tesseract-ocr-rus tesseract-ocr-jpn` to read Russian and Japanese sleeves
+- Optional, for audio fingerprints: `libchromaprint-tools` (fpcalc) and a free
+  AcoustID application key (acoustid.org/new-application) in
+  `~/.config/tagmender/acoustid_key`
+- Optional, to compare Japanese titles: `pip install pykakasi`
 - Optional, for generated covers: a Stable Diffusion server with an
   Automatic1111-compatible API (e.g. Forge), set in CoverUp's options
 
@@ -92,7 +135,25 @@ python3 tag_albums.py --undo <run-id>          # put a run back exactly as it wa
 ```
 
 Each run reports, per album: *tagged*, *tagged, no Discogs data*, *partly
-saved* or *not saved*, and where Picard moved it. Picard picks the cover from
+saved* or *not saved*, and where Picard moved it. Tagged albums get
+`TAGMENDER=Resolved`; albums left for a person can be marked
+`TAGMENDER=Unresolved` with the reason in `TAGMENDER_REASON`:
+
+```bash
+python3 tag_albums.py --mark-unresolved            # dry run
+python3 tag_albums.py --mark-unresolved --apply    # undo with --undo <run-id>
+```
+
+Add `tagmender, tagmender_reason` to Picard's Options → Tags → *Preserve
+these tags*, or Picard removes them the next time it saves those files.
+
+- Picard moves files to its own *Move files to* folder: point it at the
+  library being tagged. `tag_albums` refuses albums Picard would move into
+  another library.
+- `[no vox]` (instrumental) editions are never retagged, and their front
+  cover is never replaced.
+- Use `--matches-db` to tag a library matched into its own folder, e.g.
+  `--matches-db ~/Downloads/matching_extreme/match_state.db`. Picard picks the cover from
 its own cover-art sources in their configured order: put **Local Files**
 first (Options → Cover Art) to keep the `cover.jpg`/`folder.jpg` already in
 an album folder.

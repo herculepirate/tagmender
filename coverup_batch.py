@@ -243,7 +243,12 @@ def album_info(album_dir, ma, mc, match_db=None):
         "front_embedded_data": front_embedded_data, "embedded_generated": embedded_generated,
         "collab": is_collaboration(ids.get("artist_mbid", ""), Path(album_dir).parent.name, mc),
         "artist_image": biggest_image(Path(album_dir).parent),
+        "no_vox": bool(NO_VOX.search(str(album_dir)) or NO_VOX.search(title or "")),
     }
+
+
+# Instrumental "[no vox]" editions keep their own front cover (often made for the edition).
+NO_VOX = re.compile(r"no[\s._-]?vox", re.I)
 
 
 def is_collaboration(artist_mbids, folder_name, mc):
@@ -806,8 +811,13 @@ def process_album(album_dir, ctx, args):
         pipe.select(res)
         res._had_generated = True
     actions, notes = decide(pipe, res, info, s, args, log)
+    if info.get("no_vox"):
+        if any(a["type"] == "front" for a in actions):
+            notes.append("[no vox] edition: front cover left as it is")
+        actions = [a for a in actions if a["type"] != "front"]
     gen_note = ""
-    if getattr(args, "generate", False) and not any(a["type"] == "front" for a in actions):
+    if (getattr(args, "generate", False) and not info.get("no_vox")
+            and not any(a["type"] == "front" for a in actions)):
         g = generation_plan(res, info, args, int(s["hamming_threshold"]))
         if g is not None:
             if args.apply:

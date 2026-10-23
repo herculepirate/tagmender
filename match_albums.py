@@ -26,6 +26,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sqlite3
 import sys
 import time
@@ -114,6 +115,8 @@ def _int(v):
 
 
 _ID_KEYS = ("musicbrainzalbumid", "discogsreleaseid")
+_LOSSLESS_EXT = {".flac", ".wav", ".aiff", ".aif", ".wv", ".ape", ".alac"}
+CD_FRAME = 588          # a CD sector holds 588 stereo samples at 44.1 kHz
 # catalogue number tag names used by Picard, JRiver (LABELNO), foobar2000, Mp3tag and others
 _CATNO_KEYS = ("catalognumber", "labelno", "catalogno", "catalog", "catno", "catalog#",
                "cataloguenumber", "catalogue", "catalogueno")
@@ -122,6 +125,8 @@ _CATNO_KEYS = ("catalognumber", "labelno", "catalogno", "catalog", "catno", "cat
 def read_file(path):
     t = {"title": "", "num": 0, "disc": 0, "album": "", "artist": "", "year": 0,
          "barcode": "", "catno": "", "secs": 0.0,
+         "label": "", "country": "", "media": "", "date": "",   # pressing details in the tags
+         "rate": 0, "bits": 0, "samples": 0, "lossless": False,  # the audio itself
          "has_ids": False,      # already carries a MusicBrainz or Discogs release ID
          "audio_md5": 0}        # FLAC's checksum of the decoded audio (0 = unknown)
     try:
@@ -147,6 +152,12 @@ def read_file(path):
             return t
         t["secs"] = getattr(f.info, "length", 0.0) or 0.0
         t["audio_md5"] = getattr(f.info, "md5_signature", 0) or 0
+        t["rate"] = getattr(f.info, "sample_rate", 0) or 0
+        t["bits"] = getattr(f.info, "bits_per_sample", 0) or 0
+        t["samples"] = getattr(f.info, "total_samples", 0) or 0
+        t["lossless"] = path.suffix.lower() in _LOSSLESS_EXT
+        if t["lossless"] and not t["samples"] and t["rate"]:
+            t["samples"] = round(t["secs"] * t["rate"])        # WAV/AIFF/WavPack: from the length
         tags = f.tags
         if tags is None:
             return t
@@ -158,10 +169,12 @@ def read_file(path):
                 x = tags.getall(fid)
                 return _names([str(s) for s in x[0].text]) if x else ""
             t.update(title=fr("TIT2"), album=fr("TALB"), artist=names("TPE2") or names("TPE1"),
-                     year=_int(fr("TDRC")), num=_int(fr("TRCK")), disc=_int(fr("TPOS")))
+                     year=_int(fr("TDRC")), num=_int(fr("TRCK")), disc=_int(fr("TPOS")),
+                     label=fr("TPUB"), media=fr("TMED"), date=fr("TDRL") or fr("TDRC"))
             for frame in tags.getall("TXXX"):
                 nk = re.sub(r"[\s_\-]", "", frame.desc.lower())
                 if nk == "barcode": t["barcode"] = _txt(frame.text)
+                elif nk in ("musicbrainzalbumreleasecountry", "releasecountry"): t["country"] = _txt(frame.text)
                 elif nk in _CATNO_KEYS and not t["catno"]: t["catno"] = _txt(frame.text)
                 elif nk in _ID_KEYS: t["has_ids"] = True
             return t
@@ -174,7 +187,9 @@ def read_file(path):
         t.update(title=g("title"), album=g("album"), artist=n("albumartist") or n("artist"),
                  year=_int(g("date") or g("year")), num=_int(g("tracknumber")),
                  disc=_int(g("discnumber")), barcode=g("barcode"),
-                 catno=next((g(k) for k in _CATNO_KEYS if g(k)), ""))
+                 catno=next((g(k) for k in _CATNO_KEYS if g(k)), ""),
+                 label=g("label") or g("organization") or g("publisher"),
+                 country=g("releasecountry"), media=g("media"), date=g("date"))
     except Exception as exc:
         t["_error"] = str(exc)
     return t
@@ -338,7 +353,7 @@ def read_album(album_dir, artist_folder, album_folder):
         "year": year or None, "discs": n_discs,
         "dropped_formats": dropped_formats, "dropped_tracks": dropped_tracks,
         "tracks": [{"disc": i["disc_eff"], "num": i["num"], "title": i["title"],
-                    "secs": i["secs"]} for _p, i in infos],
+                    "secs": i["secs"], "path": str(_p)} for _p, i in infos],
         "barcodes": {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]},
         # catalogue numbers from the tags, plus any written in the folder name
         # or album title ("[20bit RM DOMO 71063-2]")
@@ -347,7 +362,271 @@ def read_album(album_dir, artist_folder, album_folder):
         "catnos_from_folder": {mc.norm_code(h) for h in folder_match},
         "catno_search": sorted({c for _p, i in infos for c in mc.split_codes(i["catno"])} | set(folder_hints)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title),
+        "media_hint": mc.media_hint(album_folder),
+        "folder": album_folder,
+        "tag_label": top("label"), "tag_country": top("country"),
+        "tag_media": mc.media_kind(top("media")), "tag_date": top("date"),
+        "audio": audio_evidence([i for _p, i in infos]),
+        "tocs": disc_tocs(infos) or log_tocs(album_dir) or cue_tocs(album_dir, infos),
+        "scans": scan_evidence(album_dir),
     }
+
+
+def audio_evidence(infos):
+    """What the audio itself says about its source.
+
+    hires: more than 16 bits or 48 kHz, so not from a CD (a vinyl rip or a download).
+    cd_frames: every lossless track at 44.1 kHz is a whole number of CD sectors
+    (588 samples), which a CD rip is and a download almost never is."""
+    lossless = [i for i in infos if i.get("lossless") and i.get("rate")]
+    hires = bool(infos) and any(i.get("bits", 0) > 16 or i.get("rate", 0) > 48000 for i in infos)
+    cd_frames = (len(lossless) >= 2 and len(lossless) == len(infos)
+                 and all(i["rate"] == 44100 and i.get("bits", 16) <= 16 and i["samples"]
+                         and i["samples"] % CD_FRAME == 0 for i in lossless))
+    # lossless CD-quality tracks that are NOT whole sectors: not a CD rip, so a download
+    not_cd = (len(lossless) >= 2 and len(lossless) == len(infos) and not hires
+              and all(i["rate"] == 44100 and i["samples"] for i in lossless)
+              and sum(1 for i in lossless if i["samples"] % CD_FRAME == 0) == 0)
+    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd}
+
+
+def disc_tocs(infos):
+    """The table of contents of each disc, rebuilt from the tracks' exact
+    lengths (as freeDB/MusicBrainz disc IDs are), for CD rips only:
+    {disc: "1 N leadout offset1 ... offsetN"} in MusicBrainz's toc form."""
+    out = {}
+    discs = {}
+    for _p, i in infos:
+        discs.setdefault(i.get("disc_eff", 1), []).append(i)
+    for d, tracks in discs.items():
+        if not tracks or len(tracks) > 99:
+            continue
+        if not all(i.get("lossless") and i.get("rate") == 44100 and i.get("samples")
+                   and i["samples"] % CD_FRAME == 0 for i in tracks):
+            continue
+        offsets, pos = [], 150
+        for i in tracks:
+            offsets.append(pos)
+            pos += i["samples"] // CD_FRAME
+        out[d] = " ".join(str(x) for x in [1, len(tracks), pos] + offsets)
+    return out
+
+
+_LOG_TOC_ROW = re.compile(r"^\s*(\d{1,2})\s*\|\s*[\d:.]+\s*\|\s*[\d:.]+\s*\|\s*(\d+)\s*\|\s*(\d+)\s*$", re.M)
+
+
+def _read_log(path):
+    raw = Path(path).read_bytes()[:400000]
+    for enc in ("utf-16",) if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else ("utf-8", "cp1252"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", "ignore")
+
+
+def log_tocs(album_dir):
+    """Tables of contents from the rip logs next to the music (EAC, XLD): the
+    exact disc that was ripped, whatever the files were converted to since."""
+    out = []
+    for p in sorted(Path(album_dir).rglob("*.log"), key=lambda p: _natural_key(str(p))):
+        try:
+            text = _read_log(p)
+        except OSError:
+            continue
+        if "TOC" not in text and "toc" not in text:
+            continue
+        rows = [(int(n), int(s), int(e)) for n, s, e in _LOG_TOC_ROW.findall(text)]
+        seen, tracks = set(), []
+        for n, s, e in rows:                       # the TOC table only (first occurrence of each track)
+            if n in seen:
+                break
+            seen.add(n)
+            tracks.append((s, e))
+        if 1 <= len(tracks) <= 99:
+            offsets = [s + 150 for s, _e in tracks]
+            toc = " ".join(str(x) for x in [1, len(tracks), tracks[-1][1] + 1 + 150] + offsets)
+            if toc not in out:
+                out.append(toc)
+    return {i + 1: toc for i, toc in enumerate(out)}
+
+
+# --------------------------------------------------------------------------
+# AcoustID fingerprints (Picard's "Scan"): identify the recordings from the audio
+# --------------------------------------------------------------------------
+def picard_preferred_countries(ini="~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"):
+    """Picard's Options > Metadata > Preferred Releases > countries, when set."""
+    import configparser
+    cp = configparser.RawConfigParser(strict=False, interpolation=None)
+    try:
+        cp.read(Path(ini).expanduser(), encoding="utf-8")
+        raw = cp.get("setting", "preferred_release_countries", fallback="")
+    except Exception:
+        return []
+    if not raw or raw.startswith("@"):
+        return []
+    return [c.strip().upper() for c in raw.split(",") if re.fullmatch(r"\s*[A-Za-z]{2}\s*", c)]
+
+
+def acoustid_key():
+    key = os.environ.get("TAGMENDER_ACOUSTID_KEY", "").strip()
+    if not key:
+        f = Path("~/.config/tagmender/acoustid_key").expanduser()
+        if f.is_file():
+            key = f.read_text().strip()
+    return key
+
+
+def fingerprint_ready():
+    return bool(shutil.which("fpcalc") and acoustid_key())
+
+
+def fingerprint(path, db=None):
+    """Chromaprint fingerprint of a file (fpcalc), cached by file size and time."""
+    import subprocess
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return None
+    key = f"{path}|{st.st_size}|{int(st.st_mtime)}"
+
+    def compute():
+        try:
+            r = subprocess.run(["fpcalc", "-json", "-length", "120", str(path)],
+                               capture_output=True, text=True, timeout=120)
+            d = json.loads(r.stdout)
+            return {"duration": round(d["duration"]), "fingerprint": d["fingerprint"]}
+        except Exception:
+            return None
+    return _cached(db, "fp", key, compute)
+
+
+def acoustid_releases(http, album, db=None, n=3):
+    """MusicBrainz releases that hold the recordings AcoustID finds for several
+    tracks of the album (first, middle and last): the releases common to all of
+    them. Empty when fingerprinting is not set up or nothing is found."""
+    key = acoustid_key()
+    tracks = [t for t in album["tracks"] if t.get("path")]
+    if not key or not tracks or not shutil.which("fpcalc"):
+        return set()
+    picks = [tracks[0], tracks[len(tracks) // 2], tracks[-1]][:n] if len(tracks) >= 3 else tracks
+    common = None
+    for t in picks:
+        fp = fingerprint(t["path"], db)
+        if not fp:
+            continue
+        data = http.get_json(f"https://api.acoustid.org/v2/lookup?client={q(key)}&format=json"
+                             f"&meta=recordings+releaseids&duration={fp['duration']}"
+                             f"&fingerprint={q(fp['fingerprint'])}", "acoustid")
+        rels = {rel["id"] for res in (data or {}).get("results", []) if res.get("score", 0) >= 0.8
+                for rec in res.get("recordings") or [] for rel in rec.get("releases") or [] if rel.get("id")}
+        if not rels:
+            continue
+        common = rels if common is None else common & rels
+    return common or set()
+
+
+def mb_discid(toc):
+    """The MusicBrainz disc ID of a table of contents ("1 N leadout off1 ... offN")."""
+    import base64
+    import hashlib
+    nums = [int(x) for x in toc.split()]
+    first, last, leadout, offsets = nums[0], nums[1], nums[2], nums[3:]
+    text = f"{first:02X}{last:02X}{leadout:08X}" + "".join(
+        f"{(offsets[i] if i < len(offsets) else 0):08X}" for i in range(99))
+    digest = hashlib.sha1(text.encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii").replace("+", ".").replace("/", "_").replace("=", "-")
+
+
+def ctdb_toc(toc):
+    """The same table of contents in CUETools DB form (sectors from 0, colon separated)."""
+    nums = [int(x) for x in toc.split()]
+    return ":".join(str(x - 150) for x in nums[3:] + [nums[2]])
+
+
+def toc_releases(http, album):
+    """Releases whose disc matches a disc of these files, from the tables of
+    contents (audio, rip log or cue sheet):
+
+    - MusicBrainz by disc ID: exact when that disc ID is attached to a release,
+      else fuzzy, as Picard's CD lookup does;
+    - the CUETools database (CTDB), which links rips to MusicBrainz AND Discogs
+      releases, including pressings MusicBrainz has no disc ID for.
+
+    Sets album["toc_discogs"] (Discogs ids from CTDB) and album["discids"]
+    ([(disc ID, toc, attached in MusicBrainz?)]); returns MusicBrainz ids."""
+    found, discogs, discids = set(), set(), []
+    for toc in (album.get("tocs") or {}).values():
+        did = mb_discid(toc)
+        data = http.get_json(f"https://musicbrainz.org/ws/2/discid/{did}?toc={toc.replace(' ', '+')}"
+                             f"&cdstubs=no&fmt=json", "mb")
+        exact = bool(data and data.get("id") == did)
+        discids.append((did, toc, exact))
+        for r in (data or {}).get("releases", []):
+            if r.get("id"):
+                found.add(r["id"])
+        get_text = getattr(http, "get_text", None)
+        if get_text:
+            try:
+                xml = get_text(f"http://db.cuetools.net/lookup2.php?version=3&ctdb=1&metadata=extensive"
+                               f"&fuzzy=1&toc={ctdb_toc(toc)}", "ctdb") or ""
+            except Exception:
+                xml = ""
+            for tag in re.findall(r"<metadata\b[^>]*>", xml):
+                attrs = dict(re.findall(r'(\w+)="([^"]*)"', tag))
+                if attrs.get("source") == "musicbrainz" and re.fullmatch(r"[0-9a-f-]{36}", attrs.get("id", "")):
+                    found.add(attrs["id"])
+                elif attrs.get("source") == "discogs" and attrs.get("id", "").isdigit():
+                    discogs.add(attrs["id"])
+    album["toc_discogs"] = discogs
+    album["discids"] = discids
+    return found
+
+
+def cue_tocs(album_dir, infos):
+    """Tables of contents from cue sheets: track starts from INDEX 01, the end
+    from the length of the audio (per-track files are added up in order)."""
+    out = []
+    secs_by_name = {Path(p).name.casefold(): i["secs"] for p, i in infos if p is not None}
+    track_secs = [i["secs"] for _p, i in infos]
+    for cue in sorted(Path(album_dir).rglob("*.cue"), key=lambda p: _natural_key(str(p))):
+        try:
+            text = _read_log(cue)
+        except OSError:
+            continue
+        files, current, starts = [], None, []
+        for line in text.splitlines():
+            m = re.match(r'\s*FILE\s+"?(.+?)"?\s+(WAVE|FLAC|MP3|AIFF|BINARY)?\s*$', line, re.I)
+            if m:
+                current = {"name": m.group(1), "tracks": []}
+                files.append(current)
+                continue
+            m = re.match(r"\s*INDEX\s+01\s+(\d+):(\d+):(\d+)", line)
+            if m and current is not None:
+                current["tracks"].append(int(m.group(1)) * 4500 + int(m.group(2)) * 75 + int(m.group(3)))
+        n = sum(len(f["tracks"]) for f in files)
+        if not n or n > 99:
+            continue
+        pos, offsets = 0, []
+        ok = True
+        for k, f in enumerate(files):
+            length = secs_by_name.get(Path(f["name"]).name.casefold())
+            if length is None:
+                # converted since (names changed): one file per track, in order
+                length = track_secs[k] if len(files) == len(track_secs) else None
+            if length is None and k < len(files) - 1:
+                ok = False
+                break
+            offsets += [pos + s for s in f["tracks"]]
+            if length is None:                         # single-file cue whose file is gone
+                ok = False
+                break
+            pos += round(length * 75)
+        if ok and offsets:
+            toc = " ".join(str(x) for x in [1, len(offsets), pos + 150] + [o + 150 for o in offsets])
+            if toc not in out:
+                out.append(toc)
+    return {i + 1: toc for i, toc in enumerate(out)}
 
 
 # --------------------------------------------------------------------------
@@ -385,9 +664,13 @@ class Http:
         db.execute("CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, body TEXT)")
 
     def get_json(self, url, host):
+        body = self.get_text(url, host)
+        return json.loads(body) if body is not None else None
+
+    def get_text(self, url, host):
         row = self.db.execute("SELECT body FROM http_cache WHERE url=?", (url,)).fetchone()
         if row:
-            return json.loads(row[0])
+            return row[0]
         delay = self.cfg["discogs_delay"] if host == "discogs" else self.cfg["mb_delay"]
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         if host == "discogs":
@@ -403,7 +686,7 @@ class Http:
                     body = r.read().decode("utf-8")
                 self.db.execute("INSERT OR REPLACE INTO http_cache VALUES (?,?)", (url, body))
                 self.db.commit()
-                return json.loads(body)
+                return body
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     return None
@@ -489,13 +772,34 @@ def mb_candidate(rel):
         "artist_sort": mb_sort_names(rel),
         "title": rel.get("title", ""),
         "year": int(rel["date"][:4]) if str(rel.get("date") or "")[:4].isdigit() else None,
+        "date": str(rel.get("date") or ""),
+        "script": (rel.get("text-representation") or {}).get("script") or "",
         "country": rel.get("country", ""),
         "label": "; ".join(sorted({i["label"]["name"] for i in infos if i.get("label")})),
         "catnos": {mc.norm_code(i.get("catalog-number")) for i in infos if i.get("catalog-number")},
         "barcodes": {mc.norm_code(rel["barcode"])} if rel.get("barcode") else set(),
         "disc_count": len([m for m in audio_media if m.get("tracks")]) or len(audio_media) or 1,
         "tracks": tracks,
+        "formats": {k for k in (mc.media_kind(m.get("format")) for m in audio_media) if k},
     }
+
+
+def _mb_track_total(rel):
+    return sum(int(m.get("track-count") or 0) for m in rel.get("media") or []
+               if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS)
+
+
+def version_priority(album, catnos=(), country="", formats=()):
+    """Which versions of an album to fetch first (lower is sooner): your
+    catalogue number, then the country and format your folder names."""
+    mine = {mc.norm_code(c) for c in album.get("catnos") or ()}
+    theirs = {mc.norm_code(c) for c in catnos if c}
+    folder = mc.fold(album.get("folder") or "")
+    cc = mc.country_code(country)
+    named = {c for n, c in mc._COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in f" {folder} "}
+    kinds = {mc.media_kind(f) for f in formats if f}
+    hint = album.get("media_hint") or ("cd" if (album.get("scans") or {}).get("physical") else "")
+    return (0 if mine & theirs else 1, 0 if cc and cc in named else 1, 0 if hint and hint in kinds else 1)
 
 
 def mb_search(http, album, cfg):
@@ -534,6 +838,24 @@ def mb_search(http, album, cfg):
             break
     same = [r for r in hits if r.get("track-count") == n_files]
     chosen = (same or hits)[:cfg["mb_detail_fetch"] if same else 2]
+    # Releases whose disc ID matches the files are fetched whatever their title
+    # (a freeDB-style lookup finds an album the folder names differently).
+    have = {r["id"] for r in chosen}
+    chosen += [{"id": rid} for rid in sorted(album.get("toc_releases") or ()) if rid not in have][:6]
+    # Every version of the album (its release group): the edition with your track
+    # count (bonus tracks, deluxe 2CD) or your pressing may not be among the hits.
+    have = {r["id"] for r in chosen}
+    rg = next(((r.get("release-group") or {}).get("id") for r in (same or hits)
+               if (r.get("release-group") or {}).get("id")), None)
+    if rg:
+        data = http.get_json(f"https://musicbrainz.org/ws/2/release?release-group={rg}"
+                             f"&inc=media+labels&limit=100&fmt=json", "mb")
+        versions = [v for v in (data or {}).get("releases", []) if v.get("id") not in have]
+        exact = [v for v in versions if _mb_track_total(v) == n_files]
+        exact.sort(key=lambda v: version_priority(album, catnos=[i.get("catalog-number") for i in v.get("label-info") or []],
+                                                  country=v.get("country"),
+                                                  formats=[m.get("format") for m in v.get("media") or []]))
+        chosen += [{"id": v["id"]} for v in exact[:4 if same else 8]]
     out = []
     for r in chosen:
         det = http.get_json(f"https://musicbrainz.org/ws/2/release/{r['id']}"
@@ -609,11 +931,13 @@ def discogs_candidate(rel, dm):
         "url": rel.get("uri") or f"https://www.discogs.com/release/{rel['id']}",
         "artist": artists or canonical, "artist_alt": canonical,
         "title": rel.get("title", ""), "year": year or None,
+        "date": str(rel.get("released") or ""),
         "country": rel.get("country", ""),
         "label": "; ".join(sorted({dm.clean_artist_name(l.get("name")) for l in labels})),
         "catnos": {mc.norm_code(l["catno"]) for l in labels
                    if l.get("catno") and str(l["catno"]).casefold() != "none"},
         "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks,
+        "formats": {k for k in (mc.media_kind(f.get("name")) for f in rel.get("formats") or []) if k},
     }
 
 
@@ -663,6 +987,32 @@ def discogs_search(http, album, cfg, dm):
         det = http.get_json(f"https://api.discogs.com/releases/{r['id']}", "discogs")
         if det:
             out.append(discogs_candidate(det, dm))
+    # Discogs releases the CUETools database links to your disc
+    have = {str(c["id"]) for c in out}
+    for rid in sorted(album.get("toc_discogs") or ())[:4]:
+        if rid not in have:
+            det = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+            if det:
+                out.append(discogs_candidate(det, dm))
+    # Every version of the album (its Discogs master) when none of these has your
+    # track count or your catalogue number.
+    n_files = len(album["tracks"])
+    mine = {mc.norm_code(c) for c in album.get("catnos") or ()}
+    found_count = any(len(c["tracks"]) == n_files for c in out)
+    found_catno = not mine or any(mine & set(c["catnos"]) for c in out)
+    master = next((r.get("master_id") for r in results if r.get("master_id") and pre(r) >= 0.7), None)
+    if master and not (found_count and found_catno):
+        data = http.get_json(f"https://api.discogs.com/masters/{master}/versions?per_page=100", "discogs")
+        have = {str(c["id"]) for c in out}
+        versions = [v for v in (data or {}).get("versions", []) if str(v.get("id")) not in have]
+        versions.sort(key=lambda v: version_priority(album, catnos=[v.get("catno") or ""], country=v.get("country"),
+                                                     formats=str(v.get("format") or "").split(",")))
+        for v in versions[:6]:
+            det = http.get_json(f"https://api.discogs.com/releases/{v['id']}", "discogs")
+            if det:
+                cand = discogs_candidate(det, dm)
+                if len(cand["tracks"]) == n_files or (mine & set(cand["catnos"])):
+                    out.append(cand)
     return out
 
 
@@ -674,6 +1024,42 @@ _HINT = re.compile(r"back|rear|tray|inlay|disc|cd\d?|label|barcode|booklet|inser
 
 
 OCR_VERSION = "ocr-2"   # bump when the OCR code changes, so cached OCR is redone
+
+
+# Images that are not scans of the release: covers saved from the web, rip
+# screenshots and spectrum/analysis pictures ("tech.info/Au.jpg", "ksnip_...").
+_NOT_A_SCAN = re.compile(r"^(cover|folder|front|albumart\w*|thumb\w*|ksnip\S*|screenshot\S*|spectr\S*|au\d*|"
+                         r"expose\d*|mv|dr|dynamic\S*|\d{2,4}x\d{2,4}\S*)$", re.I)
+_NOT_A_SCAN_DIR = re.compile(r"^(tech[ ._-]?info|info|spectr\S*|analysis|screens?(hots)?)$", re.I)
+_PHYSICAL_NAME = re.compile(r"back|rear|tray|inlay|disc|disk|(?<![a-z])cd\d*(?![a-z])|obi|matrix|spine|booklet|"
+                            r"inside|insert|(?<![a-z])label|sticker|case", re.I)
+
+
+def scan_evidence(album_dir):
+    """Does the folder hold scans of a physical copy (a back cover, tray card,
+    booklet, disc or obi)? A download comes with a cover image at most, so such
+    scans mean the disc was owned. Returns {"physical": bool, "why": str}."""
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    for dirpath, dirs, names in os.walk(album_dir):
+        dirs[:] = [d for d in dirs if not _NOT_A_SCAN_DIR.match(d)]
+        for n in sorted(names):
+            p = Path(dirpath) / n
+            if p.suffix.lower() not in IMAGE_EXT or p.suffix.lower() == ".gif" or _NOT_A_SCAN.match(p.stem):
+                continue
+            if _PHYSICAL_NAME.search(p.stem):
+                return {"physical": True, "why": f"a scan named {p.name}"}
+            if Image is not None:
+                try:
+                    with Image.open(p) as im:
+                        w, h = im.size
+                except Exception:
+                    continue
+                if w >= 1000 and 1.15 <= w / max(h, 1) <= 1.5:
+                    return {"physical": True, "why": f"a tray-card scan ({p.name})"}
+    return {"physical": False, "why": ""}
 
 
 def list_images(base, max_n):
@@ -807,6 +1193,61 @@ def ocr_barcodes(paths, per_image_s=8.0, total_s=40.0):
     return set()
 
 
+_LANGS = None
+
+
+def ocr_langs():
+    """English, plus Russian and Japanese when their tesseract packs are installed
+    (tesseract-ocr-rus, tesseract-ocr-jpn): FONO sleeves, Japanese obi strips."""
+    global _LANGS
+    if _LANGS is None:
+        import subprocess
+        try:
+            have = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True,
+                                  timeout=30).stdout.split()
+        except Exception:
+            have = []
+        _LANGS = "+".join(x for x in ("eng", "rus", "jpn") if x in have) or "eng"
+    return _LANGS
+
+
+def ocr_spines(paths):
+    """Text printed along the spines of a CD tray card (catalogue numbers often
+    appear only there), which page OCR misses: it runs sideways. Each side strip
+    of a landscape scan is cut off, turned upright, enlarged and read."""
+    import subprocess
+    import tempfile
+    try:
+        from PIL import Image
+    except ImportError:
+        return ""
+    chunks = []
+    for p in paths:
+        try:
+            im = Image.open(p).convert("L")
+        except Exception:
+            continue
+        w, h = im.size
+        if not (1.15 <= w / max(h, 1) <= 1.6) or w < 600:
+            continue                                   # tray cards are about 151 x 118 mm
+        strip_w = max(int(w * 0.07), 30)
+        for box in ((0, 0, strip_w, h), (w - strip_w, 0, w, h)):
+            strip = im.crop(box)
+            scale = max(1.0, min(3.0, 3000 / h))
+            if scale > 1.0:
+                strip = strip.resize((int(strip.size[0] * scale), int(strip.size[1] * scale)))
+            for angle in (90, 270):
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+                        strip.rotate(angle, expand=True).save(tmp.name)
+                        r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                                           capture_output=True, text=True, timeout=60)
+                    chunks.append(r.stdout)
+                except Exception:
+                    continue
+    return "\n".join(chunks)
+
+
 def ocr_text(paths):
     """OCR via the tesseract program itself (no pytesseract needed)."""
     import subprocess
@@ -822,7 +1263,7 @@ def ocr_text(paths):
             im.thumbnail((2400, 2400))
             with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                 im.save(tmp.name)
-                r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11"],
+                r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
                                    capture_output=True, text=True, timeout=120)
             chunks.append(r.stdout)
         except Exception:
@@ -887,6 +1328,13 @@ def process(row, http, cfg, dm, args):
                 album["barcodes"] = found
                 out["barcodes_from_ocr"] = ";".join(sorted(found))
 
+    if album.get("tocs"):
+        try:
+            album["toc_releases"] = toc_releases(http, album)
+        except Exception:
+            album["toc_releases"] = set()
+        if album["toc_releases"]:
+            out["toc_releases"] = len(album["toc_releases"])
     mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
     dg_res = None
     source_notes = []
@@ -900,8 +1348,15 @@ def process(row, http, cfg, dm, args):
                                 "result is MusicBrainz-only")
     final = mc.combine(mb_res, dg_res)
 
+    ocr_txt = ""
     if args.ocr and images and final["status"] != "auto":
-        text = _cached(db, "text", img_key, lambda: ocr_text(images))
+        # cached per language set: installing a language pack reads the scans again
+        kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
+        text = _cached(db, kind, img_key, lambda: ocr_text(images))
+        spines = _cached(db, "spines" if ocr_langs() == "eng" else f"spines-{ocr_langs()}", img_key,
+                         lambda: ocr_spines(images))
+        if spines.strip():
+            text = text + "\n" + spines
         if text.strip():
             # Barcodes and catalogue numbers printed on the scans are SEARCHED, not only
             # compared: the release they identify may not be among what the title found.
@@ -937,6 +1392,33 @@ def process(row, http, cfg, dm, args):
                 return new
             mb_res, dg_res = rescore(mb_res, "mb"), rescore(dg_res, "discogs")
             final = mc.combine(mb_res, dg_res)
+            ocr_txt = text
+
+    # Still unsure: fingerprint a few tracks (AcoustID) and add the releases that
+    # hold those recordings; they also prove the album when its title differs.
+    if final["status"] != "auto" and fingerprint_ready():
+        try:
+            rels = acoustid_releases(http, album, db)
+        except Exception as exc:
+            rels = set()
+            source_notes.append(f"fingerprint lookup failed ({exc})")
+        if rels:
+            album["fp_releases"] = rels
+            out["fingerprint_releases"] = len(rels)
+            have = {s["cand"]["id"] for s in (mb_res or {}).get("scored", [])}
+            new = []
+            for rid in sorted(rels - have)[:6]:
+                det = http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                    f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+                if det:
+                    new.append(mb_candidate(det))
+            cands = [s["cand"] for s in (mb_res or {}).get("scored", [])] + new
+            if cands:
+                scored = [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands]
+                mb_res = dict(mc.classify(scored, cfg), scored=scored, source="mb")
+                final = mc.combine(mb_res, dg_res)
+    if album.get("discids"):
+        out["discids"] = album["discids"]
 
     status = final["status"]
     why = list(final["why"]) + source_notes
@@ -993,6 +1475,24 @@ def export(db, out_dir):
         o = json.loads(blob)
         if o["status"] in rows:
             rows[o["status"]].append(to_row(o))
+    # Discs MusicBrainz has no disc ID for: one link each to attach it (you check
+    # the release on the MusicBrainz page and confirm; nothing is sent from here).
+    subs = []
+    for (blob,) in db.execute("SELECT result FROM results ORDER BY path"):
+        o = json.loads(blob)
+        b = o.get("best") or {}
+        for did, toc, exact in o.get("discids") or []:
+            if exact:
+                continue
+            n = toc.split()[1]
+            subs.append({"Album": o["path"], "DiscID": did, "Tracks": n,
+                         "MatchedRelease": b.get("url", "") if o["status"] == "auto" and b.get("source") == "mb" else "",
+                         "AttachLink": f"https://musicbrainz.org/cdtoc/attach?id={did}&tracks={n}"
+                                       f"&toc={toc.replace(' ', '+')}"})
+    with open(out_dir / "discid_submissions.csv", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["Album", "DiscID", "Tracks", "MatchedRelease", "AttachLink"])
+        w.writeheader()
+        w.writerows(subs)
     for status, items in rows.items():
         key = (lambda r: -float(r["Confidence"] or 0))
         with open(out_dir / f"matches_{status}.csv", "w", newline="", encoding="utf-8") as fh:
@@ -1070,8 +1570,14 @@ def main():
     if args.ocr:
         check_ocr_ready()
     cfg = dict(mc.DEFAULT_CFG)
+    picard_countries = picard_preferred_countries()
+    if picard_countries:
+        cfg["preferred_countries"] = picard_countries
     if args.config:
         cfg.update(json.load(open(Path(args.config).expanduser())))
+    if not fingerprint_ready():
+        print("Note: fingerprints (AcoustID) are off: install fpcalc (libchromaprint-tools) and put an "
+              "AcoustID application key in ~/.config/tagmender/acoustid_key", file=sys.stderr)
     token = os.environ.get("DISCOGS_TOKEN", "")
     if not token:
         sys.exit("Set DISCOGS_TOKEN (discogs.com/settings/developers -> Generate token)")

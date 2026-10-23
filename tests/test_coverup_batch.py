@@ -178,6 +178,19 @@ class LocalFirst(Base):
         front = [r for r in o["rows"] if r["type"] == "front"][0]
         self.assertEqual(front["source"], "local")
 
+    def test_no_vox_edition_keeps_its_front_cover(self):
+        novox = self.album.parent / (self.album.name + " [No Vox]")
+        self.album.rename(novox) if self.album.exists() else novox.mkdir(parents=True)
+        self.album = novox
+        audio(self.album / "01.flac", title="One", track=1)
+        art(1, 600).save(self.album / "folder.jpg", quality=92)
+        FakeOnline.ONLINE = [(ArtType.FRONT, art(1, 1800))]               # bigger vocal-edition cover
+        o = self.run_album(apply=True)
+        self.assertEqual([r for r in o["rows"] if r["type"] == "front"], [])
+        self.assertIn("[no vox]", o["note"])
+        self.assertEqual(Image.open(self.album / "folder.jpg").size, (600, 600))
+        self.assertEqual(cb.read_ids_and_art(self.album / "01.flac")[1], [])
+
     def test_small_local_front_loses_to_online(self):
         audio(self.album / "01.flac", title="One", track=1)
         art(1, 600).save(self.album / "folder.jpg", quality=92)

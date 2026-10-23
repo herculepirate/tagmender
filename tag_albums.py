@@ -31,6 +31,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -103,6 +104,14 @@ def read_ids(path):
     return out
 
 
+def read_album_title(path):
+    try:
+        f = mutagen.File(path, easy=True)
+        return _first((f.tags or {}).get("album", "")) if f is not None else ""
+    except Exception:
+        return ""
+
+
 def write_albumid(path, mbid):
     """Write only the MusicBrainz release ID, the way Picard stores it for each format."""
     f = mutagen.File(path)
@@ -122,6 +131,76 @@ def write_albumid(path, mbid):
             f.add_tags()
         f.tags["MUSICBRAINZ_ALBUMID"] = [mbid]
     f.save()
+
+
+TAGMENDER_TAG = "TAGMENDER"                  # Resolved / Unresolved
+TAGMENDER_REASON = "TAGMENDER_REASON"       # why an album is unresolved
+
+
+def write_tagmender(path, status, reason=""):
+    """TAGMENDER=Resolved|Unresolved (and the reason when unresolved), in the form
+    each format stores a custom tag. Nothing else in the file changes."""
+    path = Path(path)
+    f = mutagen.File(path)
+    if f is None:
+        raise ValueError("not an audio file mutagen can write")
+    reason = reason if status == "Unresolved" else ""
+    if isinstance(f, MP4):
+        if f.tags is None:
+            f.add_tags()
+        f.tags[f"----:com.apple.iTunes:{TAGMENDER_TAG}"] = [MP4FreeForm(status.encode())]
+        key = f"----:com.apple.iTunes:{TAGMENDER_REASON}"
+        if reason:
+            f.tags[key] = [MP4FreeForm(reason.encode())]
+        elif key in f.tags:
+            del f.tags[key]
+    elif (f.tags is not None and isinstance(f.tags, ID3)) or path.suffix.lower() == ".mp3":
+        if f.tags is None:
+            f.add_tags()
+        f.tags.delall(f"TXXX:{TAGMENDER_TAG}")
+        f.tags.delall(f"TXXX:{TAGMENDER_REASON}")
+        f.tags.add(TXXX(encoding=3, desc=TAGMENDER_TAG, text=[status]))
+        if reason:
+            f.tags.add(TXXX(encoding=3, desc=TAGMENDER_REASON, text=[reason]))
+    else:
+        if f.tags is None:
+            f.add_tags()
+        f.tags[TAGMENDER_TAG] = [status]
+        if reason:
+            f.tags[TAGMENDER_REASON] = [reason]
+        elif TAGMENDER_REASON in f.tags:
+            del f.tags[TAGMENDER_REASON]
+    f.save()
+
+
+def read_tagmender(path):
+    try:
+        f = mutagen.File(path)
+    except Exception:
+        return "", ""
+    tags = getattr(f, "tags", None) or {}
+    if isinstance(tags, ID3):
+        s, r = tags.getall(f"TXXX:{TAGMENDER_TAG}"), tags.getall(f"TXXX:{TAGMENDER_REASON}")
+        return (str(s[0].text[0]) if s else ""), (str(r[0].text[0]) if r else "")
+    if isinstance(f, MP4):
+        g = lambda k: _first(tags.get(f"----:com.apple.iTunes:{k}", ""))  # noqa: E731
+        return g(TAGMENDER_TAG), g(TAGMENDER_REASON)
+    low = {str(k).upper(): v for k, v in tags.items()}
+    return _first(low.get(TAGMENDER_TAG, "")), _first(low.get(TAGMENDER_REASON, ""))
+
+
+def picard_preserves_tagmender(ini):
+    """Picard clears tags it does not write when 'clear existing tags' is on,
+    unless they are listed under Options > Tags > 'Preserve these tags'."""
+    import configparser
+    cp = configparser.RawConfigParser(strict=False, interpolation=None)
+    try:
+        cp.read(Path(ini).expanduser(), encoding="utf-8")
+        clear = cp.get("setting", "clear_existing_tags", fallback="false").strip().lower() == "true"
+        kept = {x.strip().lower() for x in cp.get("setting", "preserved_tags", fallback="").split(",")}
+    except Exception:
+        return True
+    return not clear or TAGMENDER_TAG.lower() in kept
 
 
 def audio_key(path):
@@ -236,6 +315,15 @@ def restore_tags(path, rec, blob_dir):
 # --------------------------------------------------------------------------
 # Which albums
 # --------------------------------------------------------------------------
+# Instrumental "[no vox]" editions keep their own album title and front cover: Picard would
+# retitle them to the vocal release (and file them into the vocal album's folder).
+NO_VOX = re.compile(r"no[\s._-]?vox", re.I)
+
+
+def is_no_vox(path, titles=()):
+    return bool(NO_VOX.search(str(path)) or any(NO_VOX.search(t or "") for t in titles))
+
+
 def select_albums(matches_db, limit=None, only=None):
     """Confident MusicBrainz matches whose folder still exists and that Picard has not
     tagged since (no file carries a different release ID, none is saved by Picard)."""
@@ -255,6 +343,9 @@ def select_albums(matches_db, limit=None, only=None):
         files = audio_files(folder)
         if not files:
             skipped.append((path, "no audio files"))
+            continue
+        if is_no_vox(path, [read_album_title(p) for p in files[:1]]):
+            skipped.append((path, "[no vox] edition: its album title and front cover are left as they are"))
             continue
         ids = [read_ids(p) for p in files]
         other = {i["albumid"] for i in ids if i["albumid"] and i["albumid"] != b["id"]}
@@ -492,6 +583,9 @@ def main():
     ap.add_argument("--picard-ini", default="~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini")
     ap.add_argument("--picard", default=DEFAULT_PICARD, help=f"command that starts Picard (default: {DEFAULT_PICARD})")
     ap.add_argument("--apply", action="store_true", help="tag (default: dry run)")
+    ap.add_argument("--mark-unresolved", action="store_true",
+                    help=f"write {TAGMENDER_TAG}=Unresolved and the reason into albums left for review "
+                         "or with no match (with --apply; undoable)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only", help="only folders whose path contains this text")
     ap.add_argument("--batch", type=int, default=10, help="albums per Picard run (default 10)")
@@ -506,6 +600,11 @@ def main():
 
     if args.undo:
         return undo(out_dir, args.undo)
+    if not picard_preserves_tagmender(args.picard_ini):
+        print(f"Note: add '{TAGMENDER_TAG.lower()}, {TAGMENDER_REASON.lower()}' to Picard's Options > Tags > "
+              "'Preserve these tags', or Picard removes them whenever it saves these files again.")
+    if args.mark_unresolved:
+        return mark_unresolved(args, out_dir)
     if args.tidy:
         return tidy_run(out_dir, args.tidy, args.library_root or picard_move_target(args.picard_ini))
 
@@ -606,6 +705,15 @@ def main():
                       + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
                 for rec in a["records"]:
                     rec["new_path"] = v["new_paths"].get(rec["path"], "")
+                if v["saved"]:                                # 4b: TAGMENDER=Resolved / Unresolved
+                    status = "Resolved" if state.startswith("tagged") else "Unresolved"
+                    reason = "" if status == "Resolved" else f"Picard saved {v['saved']} of {n} files"
+                    for rec in a["records"]:
+                        if rec["new_path"]:
+                            try:
+                                write_tagmender(rec["new_path"], status, reason)
+                            except Exception as exc:
+                                print(f"    could not write {TAGMENDER_TAG} to {rec['new_path']}: {exc}")
                 if state.startswith("tagged") and new_dirs and not args.no_tidy:   # 5: artwork
                     album_dir = os.path.commonpath(new_dirs) if len(new_dirs) > 1 else new_dirs[0]
                     try:
@@ -636,6 +744,67 @@ def main():
         counts[r["state"]] = counts.get(r["state"], 0) + 1
     print(f"\n{counts}\nResults: {run_dir / 'results.csv'}\nUndo the whole run: "
           f"python3 tag_albums.py --undo {run_id}")
+    return 0
+
+
+def unresolved_albums(matches_db, only=None):
+    """Albums the matcher left for a person: (folder, reason)."""
+    db = sqlite3.connect(Path(matches_db).expanduser())
+    out = []
+    for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
+        o = json.loads(blob)
+        if o.get("status") not in ("review", "nomatch"):
+            continue
+        if only and only.casefold() not in path.casefold():
+            continue
+        if not Path(path).is_dir():
+            continue
+        why = "; ".join(o.get("why") or []) or o.get("status")
+        out.append((path, f"{o.get('status')}: {why}"[:250]))
+    return out
+
+
+def mark_unresolved(args, out_dir):
+    albums = unresolved_albums(args.matches_db, args.only)
+    todo = []
+    for path, reason in albums:
+        files = audio_files(Path(path))
+        if not files or all(read_ids(p)["trackid"] for p in files):
+            continue                                     # tagged by hand since
+        if all(read_tagmender(p) == ("Unresolved", reason) for p in files):
+            continue
+        todo.append((path, reason, files))
+    print(f"{len(todo)} album(s) to mark {TAGMENDER_TAG}=Unresolved")
+    if not args.apply:
+        for path, reason, _f in todo[:20]:
+            print(f"  {path}\n      {reason}")
+        print("Dry run, nothing changed. Run again with --apply.")
+        return 0
+    run_id = time.strftime("%Y%m%d-%H%M%S")
+    run_dir, n = out_dir / f"run-{run_id}", 1
+    while run_dir.exists():
+        n += 1
+        run_dir = out_dir / f"run-{run_id}-{n}"
+    run_id = run_dir.name[len("run-"):]
+    blob_dir = run_dir / "blobs"
+    blob_dir.mkdir(parents=True)
+    journal, done = [], 0
+    try:
+        for path, reason, files in todo:
+            recs = []
+            for p in files:
+                rec = {"path": str(p), "new_path": str(p), "key": "", "backup": backup_tags(p, blob_dir)}
+                recs.append(rec)
+            journal.append({"album": path, "mbid": None, "files": recs, "extras": [], "moves": []})
+            with open(run_dir / "journal.json", "w") as fh:
+                json.dump(journal, fh)
+            for p in files:
+                write_tagmender(p, "Unresolved", reason)
+            done += 1
+    finally:
+        with open(run_dir / "journal.json", "w") as fh:
+            json.dump(journal, fh)
+    print(f"Marked {done} album(s). Undo: python3 tag_albums.py --undo {run_id}")
     return 0
 
 

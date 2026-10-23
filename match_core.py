@@ -42,6 +42,12 @@ DEFAULT_CFG = {
     # so a year match cannot tell pressings apart. Set a number (e.g. 3.0) to
     # let "the only pressing with the files' year" win on a smaller margin.
     "auto_min_margin_year_decided": None,
+    # A remaster/reissue year in the folder name ("[2021 RM]") is when it was
+    # remastered; the release may be dated a little later or earlier.
+    "pressing_year_tolerance": 2,
+    # Last tie-breaker between pressings nothing else tells apart, like Picard's
+    # "preferred release countries" (Picard's own list is used when it is set).
+    "preferred_countries": ["CA", "US", "XW", "XE", "GB", "DE"],
     "auto_min_artist": 0.85,
     "auto_min_title": 0.85,
     "auto_min_duration_frac": 0.80,
@@ -78,10 +84,48 @@ _PLAIN_LETTERS = str.maketrans({"æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", 
                                 "Þ": "TH", "ł": "l", "Ł": "L", "ı": "i", "ħ": "h", "ŧ": "t"})
 
 
+# Cyrillic and Greek written in Latin letters, so "Фоно" matches "Fono" and
+# "Κατά τον δαίμονα" matches a Latin-script listing.
+_CYRILLIC = dict(zip("абвгдезийклмнопрстуфыэ", "abvgdeziyklmnoprstufye"))
+_CYRILLIC.update({"ё": "e", "ж": "zh", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "",
+                  "ь": "", "ю": "yu", "я": "ya", "і": "i", "ї": "yi", "є": "ye", "ґ": "g", "ў": "u"})
+_GREEK = dict(zip("αβγδεζηικλμνξοπρστυφωχς", "abgdeziiklmnxoprstyfoxs"))
+_GREEK.update({"θ": "th", "ψ": "ps", "χ": "ch"})
+_SCRIPTS = str.maketrans({**_CYRILLIC, **{k.upper(): v.capitalize() for k, v in _CYRILLIC.items()},
+                          **_GREEK, **{k.upper(): v.capitalize() for k, v in _GREEK.items()}})
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+
+
+def _romanize_cjk(text):
+    """Japanese/Chinese in Latin letters when pykakasi is installed (else unchanged)."""
+    try:
+        import pykakasi
+    except ImportError:
+        return text
+    global _KAKASI
+    try:
+        _KAKASI
+    except NameError:
+        _KAKASI = pykakasi.kakasi()
+    return " ".join(part["hepburn"] for part in _KAKASI.convert(text))
+
+
+def to_latin(text):
+    """Text in Latin letters: Cyrillic and Greek transliterated, Japanese/Chinese
+    romanised when pykakasi is available."""
+    t = str(text or "")
+    if _CJK.search(t):
+        t = _romanize_cjk(t)
+    return t.translate(_SCRIPTS)
+
+
 def fold(text):
-    """Case, accent, punctuation and spacing insensitive form."""
-    t = unicodedata.normalize("NFKD", str(text or ""))
-    t = "".join(c for c in t if not unicodedata.combining(c)).translate(_PLAIN_LETTERS)
+    """Case, accent, punctuation, spacing and script insensitive form."""
+    t = str(text or "")
+    if _CJK.search(t):
+        t = _romanize_cjk(t)
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(c for c in t if not unicodedata.combining(c)).translate(_SCRIPTS).translate(_PLAIN_LETTERS)
     t = t.casefold().replace("&", " and ")
     t = re.sub(r"[^\w\s]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
@@ -153,7 +197,8 @@ _NUMBER_WORDS = {"vol", "volume", "part", "pt", "no", "nr", "op", "opus", "chapt
                  "sessions", "episode", "act", "january", "february", "march", "april", "may",
                  "june", "july", "august", "september", "october", "november", "december",
                  "summer", "winter", "spring", "autumn", "fall", "festival", "the", "of"}
-_CATNO_ONE_TOKEN = re.compile(r"^[A-Za-z]{1,10}-?\d{2,7}(?:[-/]\d{1,3})?$")      # Warpcd92, BRC-67, DiN34
+_CATNO_ONE_TOKEN = re.compile(r"^[A-Za-z]{1,10}-?\d{2,7}(?:[-/]\d{1,3})?(?:CD|LP|DG|DVD|SACD)?$",
+                              re.I)                                         # Warpcd92, BRC-67, DiN34, FO40CD
 _CATNO_NUMBER = re.compile(r"^\d{2,7}(?:[-/]\d{1,3})?$")                         # 71063-2, 058, 2357
 _YEAR = re.compile(r"^(19|20)\d\d$")
 
@@ -181,6 +226,8 @@ def catno_hints(text, variants=False):
                         and not _YEAR.match(w) and len(w + nxt) >= 6:
                     found.append(f"{w} {nxt}")
                     skip.add(i + 1)
+                elif re.fullmatch(r"\d{7,13}(?:-\d{1,2})?", w) and not _YEAR.match(w):
+                    found.append(w)                    # "8122796510-3": a number-only catalogue number
                 elif _CATNO_ONE_TOKEN.match(w) and re.search(r"[A-Za-z]", w):
                     found.append(w)
                     if re.fullmatch(r"[A-Za-z]{2,12}", prev) and prev.casefold() not in _NUMBER_WORDS:
@@ -210,6 +257,10 @@ def pressing_year(text):
         m = _PRESSING_YEAR_RE.search(content)
         if m:
             return int(m.group(1) or m.group(2))
+        # "(2013, Warner, 8122796510-3)": a year listed with a label and catalogue number
+        first = content.split(",")[0].strip()
+        if _YEAR.fullmatch(first) and "," in content and catno_hints(f"({content})"):
+            return int(first)
     return None
 
 
@@ -335,7 +386,8 @@ _OCR_NOT_CATNO = {"lc", "cd", "lp", "disc", "disk", "side", "track", "tracks", "
 _US_STATES = set("al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv "
                  "nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc".split())
 _OCR_CATNO_RE = re.compile(
-    r"(?<![A-Za-z0-9])([A-Z][A-Za-z]{1,9}(?:[ -]?(?:CD|LP|DVD|SACD|MC|CDR|DA))?[ -]?\d{2,7}(?:[-/]\d{1,3})?)"
+    r"(?<![A-Za-z0-9])([A-Z][A-Za-z]{1,9}(?:[ -]?(?:CD|LP|DVD|SACD|MC|CDR|DA))?[ -]?\d{2,7}(?:[-/]\d{1,3})?"
+    r"(?:CD|LP|DVD|SACD|MC|CDR|DG)?)"                  # "FO532CD": the format after the number
     r"(?![A-Za-z0-9])")
 _OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ ]?\d){10,12})(?!\d)")
 
@@ -356,7 +408,7 @@ def codes_from_ocr_text(text, limit=5):
     for m in _OCR_CATNO_RE.finditer(text):
         cand = m.group(1).strip()
         word = re.match(r"[A-Za-z]+", cand).group(0)
-        number = re.search(r"\d[\d/-]*$", cand).group(0)
+        number = re.findall(r"\d[\d/-]*", cand)[-1]
         if word.casefold() in _OCR_NOT_CATNO:
             continue
         if not (word.isupper() or re.search(r"[A-Za-z]\d", cand)):
@@ -373,6 +425,11 @@ def codes_from_ocr_text(text, limit=5):
         if key not in seen:
             seen.add(key)
             out["catnos"].append(cand)
+    for v in _misread_variants(text):
+        key = norm_code(v)
+        if key not in seen:
+            seen.add(key)
+            out["catnos"].append(v)
     out["barcodes"] = out["barcodes"][:limit]
     out["catnos"] = out["catnos"][:limit]
     return out
@@ -420,6 +477,341 @@ def align_durations(file_secs, cand_secs, cfg):
             else:
                 table[i][j] = max(table[i - 1][j], table[i][j - 1])
     return table[n][m]
+
+
+# "Made in Germany" / "Printed in the EU" on a sleeve or disc, as release countries.
+# MusicBrainz gives ISO codes ("DE", "XE" for Europe), Discogs gives names ("Germany").
+_COUNTRY_NAMES = {
+    "us": "US", "usa": "US", "u s a": "US", "united states": "US", "america": "US",
+    "uk": "GB", "u k": "GB", "england": "GB", "united kingdom": "GB", "great britain": "GB", "gb": "GB",
+    "eu": "XE", "e u": "XE", "europe": "XE", "european union": "XE",
+    "germany": "DE", "west germany": "DE", "japan": "JP", "canada": "CA", "france": "FR",
+    "holland": "NL", "netherlands": "NL", "the netherlands": "NL", "sweden": "SE", "finland": "FI",
+    "norway": "NO", "denmark": "DK", "italy": "IT", "spain": "ES", "portugal": "PT", "poland": "PL",
+    "russia": "RU", "ukraine": "UA", "austria": "AT", "switzerland": "CH", "belgium": "BE",
+    "greece": "GR", "czech republic": "CZ", "czechia": "CZ", "hungary": "HU", "australia": "AU",
+    "brazil": "BR", "mexico": "MX", "argentina": "AR", "korea": "KR", "south korea": "KR",
+    "taiwan": "TW", "china": "CN", "hong kong": "HK", "israel": "IL", "turkey": "TR",
+    "worldwide": "XW",
+}
+_MADE_IN = re.compile(r"\b(?:made|printed|manufactured|pressed|produced)\s+in\s+(?:the\s+)?"
+                      r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()]|\.(?:\s|$)|\s{2}|and\b|\bby\b|\d))", re.I)
+_LABEL_FILLER = {"records", "recordings", "record", "music", "entertainment", "productions", "production",
+                 "inc", "ltd", "llc", "gmbh", "co", "company", "label", "group", "the", "and", "media",
+                 "distribution", "sound", "sounds", "audio", "international", "a", "of"}
+
+
+def country_code(name):
+    """ISO-like code for a release country given either way ("DE" or "Germany")."""
+    raw = str(name or "").strip()
+    if re.fullmatch(r"[A-Z]{2}", raw):
+        return raw
+    return _COUNTRY_NAMES.get(re.sub(r"[^a-z ]", " ", raw.casefold()).strip().replace("  ", " "), "")
+
+
+def countries_on_scans(ocr_text):
+    """Release countries printed on the scans ("Made in Germany" -> {"DE"})."""
+    out = set()
+    for m in _MADE_IN.finditer(str(ocr_text or "")):
+        words = re.sub(r"[^a-z ]", " ", m.group(1).casefold()).split()
+        for n in range(min(3, len(words)), 0, -1):       # longest known name first
+            code = _COUNTRY_NAMES.get(" ".join(words[:n]))
+            if code:
+                out.add(code)
+                break
+    return out
+
+
+_LICENSOR = re.compile(r"(?:licen[cs]ed|licen[cs]e)\s+(?:from|by|of)\s+(?:[A-Za-z0-9&'.-]+\s*){1,4}", re.I)
+_CONFUSABLE = str.maketrans({"o": "0", "s": "5", "i": "1", "l": "1", "b": "8", "z": "2"})
+
+
+def ocr_confusable(code):
+    """A code with the letters OCR mistakes for digits made digits, so "FOSO1"
+    and "FO501" compare equal (both become "f0501")."""
+    return str(code or "").casefold().translate(_CONFUSABLE)
+
+
+def _misread_variants(text):
+    """Catalogue numbers OCR read with letters in the number ("FOSO1 cp" for
+    FO501CD): the readings with those letters taken as digits, to search for."""
+    out = []
+    digitish = str.maketrans({"O": "0", "S": "5", "I": "1", "l": "1", "B": "8", "Z": "2"})
+    for m in re.finditer(r"(?<![A-Za-z0-9])([A-Z][A-Z0-9]{3,8}?)(?:\s?([cC]{1,2}[dDpPoO0]))?(?![A-Za-z0-9])", text):
+        tok, fmt = m.group(1), m.group(2)
+        if not re.search(r"\d", tok) or not re.search(r"[OSIBZ]", tok[1:]):
+            continue
+        if any(tok[:k].isalpha() and tok[k:].isdigit() and len(tok) - k >= 3 for k in range(1, len(tok))):
+            continue                                   # already read cleanly ("FO532")
+        for k in (2, 1, 3):
+            head, tail = tok[:k], tok[k:]
+            if not head.isalpha():
+                continue
+            digits = tail.translate(digitish)
+            if digits.isdigit() and len(digits) >= 3 and digits != tail:
+                out.append(head + digits + ("CD" if fmt else ""))
+                break
+    return out
+
+
+def pressing_clues(ocr_text, cand):
+    """What the scans say about this particular pressing.
+
+    Returns (agree, disagree): agree names the clues printed on the scans that
+    this pressing carries (its catalogue number, barcode, label, country);
+    disagree names a clue it contradicts (the sleeve says "Made in Japan" and
+    this is the German pressing)."""
+    agree, disagree = {}, []
+    if not ocr_text:
+        return agree, disagree
+    hay = norm_code(ocr_text)
+    hay_c = ocr_confusable(hay)
+    for c in sorted(cand.get("catnos") or ()):
+        digits = re.sub(r"\D", "", c)
+        distinctive = (len(c) >= 4 and re.search(r"[a-z]", c) and digits) or len(digits) >= 6
+        core = re.sub(r"(cd|lp|dvd|sacd|mc|cdr|dg)$", "", c)        # "fo501cd" read as "FOSO1 cp"
+        core_ok = len(core) >= 5 and re.search(r"[a-z]", core) and len(re.sub(r"\D", "", core)) >= 3
+        if distinctive and (c in hay or ocr_confusable(c) in hay_c
+                            or (core_ok and ocr_confusable(core) in hay_c)):
+            agree["catalogue number"] = f"catalogue number {c.upper()} on the scans"
+            break
+    digits_hay = re.sub(r"\D", "", ocr_text)
+    for b in sorted(cand.get("barcodes") or ()):
+        key = barcode_key(b)
+        if len(key) >= 11 and key in digits_hay:
+            agree["barcode"] = f"barcode {b} on the scans"
+            break
+    # "licensed from Century Media": the licensor, not this pressing's label
+    text_words = " " + fold(_LICENSOR.sub(" ", str(ocr_text))) + " "
+    for label in str(cand.get("label") or "").split(";"):
+        words = [w for w in fold(label).split() if w not in _LABEL_FILLER]
+        phrase = " ".join(words)
+        if len(phrase) >= 4 and f" {phrase} " in text_words:
+            agree["label"] = f"label {label.strip()} on the scans"
+            break
+    printed = countries_on_scans(ocr_text)
+    mine = country_code(cand.get("country"))
+    if printed and mine and mine != "XW":
+        if mine in printed:
+            name = cand.get("country") or ""
+            if len(name) == 2:
+                name = next((n for n, c in _COUNTRY_NAMES.items() if c == name and len(n) > 3), name)
+                name = name.upper() if name in ("us", "uk", "eu") else name.title()
+            agree["country"] = f"made in {name} on the scans"
+        else:
+            disagree.append(f"scans say made in {'/'.join(sorted(printed))}, "
+                            f"this pressing is from {cand.get('country')}")
+    return agree, disagree
+
+
+_VINYL_HINT = re.compile(r"vinyl|(?<![A-Za-z0-9])\d*\s*LPs?\b", re.I)
+_CD_HINT = re.compile(r"(?<![A-Za-z0-9])\d*\s*CDs?\b|\bSACD\b|\bHDCD\b", re.I)    # not "FO40CD"
+_DIGITAL_HINT = re.compile(r"\b(?:RM|RMX|remaster(?:ed)?|web|hi-?res)\b|\d+\s*-?\s*bit|k\s*hz", re.I)
+
+
+def media_hint(folder):
+    """What the folder name says the copy was made from: "vinyl", "cd", or
+    "digital" (a remaster or hi-res download with no CD or vinyl named)."""
+    text = str(folder or "")
+    if _VINYL_HINT.search(text):
+        return "vinyl"
+    if _CD_HINT.search(text):
+        return "cd"
+    if _DIGITAL_HINT.search(text):
+        return "digital"
+    return ""
+
+
+def media_kind(fmt):
+    """A database format name as "cd", "vinyl", "digital" or "cassette"."""
+    f = str(fmt or "").casefold()
+    if "vinyl" in f or re.search(r'\b(?:7|10|12)"', f) or f in ("lp", "flexi-disc"):
+        return "vinyl"
+    if "digital" in f or f in ("file", "download"):
+        return "digital"
+    if "cd" in f:
+        return "cd"
+    if "cassette" in f:
+        return "cassette"
+    return ""
+
+
+CLUE_WEIGHTS = {"disc TOC": 3, "barcode": 3, "catalogue number": 3, "fingerprint": 2, "date": 2, "label": 1,
+                "country": 1, "format": 1, "physical": 1, "track lengths": 1, "track titles": 1, "script": 1}
+
+
+def _readable_country(code_or_name):
+    name = str(code_or_name or "")
+    if len(name) == 2:
+        name = next((n for n, c in _COUNTRY_NAMES.items() if c == name and len(n) > 3), name)
+        name = name.upper() if name in ("us", "uk", "eu") else name.title()
+    return name
+
+
+def _bracket_text(folder):
+    return " ".join(re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(folder or "")))
+
+
+def file_clues(album, cand, clues, against):
+    """Clues to the pressing from the files and their folder (the scans are
+    read by pressing_clues): the disc ID, the tags, the folder name, the audio."""
+    formats = set(cand.get("formats") or ())
+    if ((cand.get("source") == "mb" and cand.get("id") in (album.get("toc_releases") or ()))
+            or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("toc_discogs") or ()))):
+        clues["disc TOC"] = "disc ID (track positions of the CD) matches"
+    if cand.get("source") == "mb" and cand.get("id") in (album.get("fp_releases") or ()):
+        clues["fingerprint"] = "audio fingerprints (AcoustID) are on this release"
+    # tags written by whoever ripped or bought it
+    label = album.get("tag_label")
+    if label:
+        mine = [w for w in fold(label).split() if w not in _LABEL_FILLER]
+        theirs = [" ".join(w for w in fold(x).split() if w not in _LABEL_FILLER)
+                  for x in str(cand.get("label") or "").split(";")]
+        if mine and any(" ".join(mine) == x or (x and (" ".join(mine) in x or x in " ".join(mine)))
+                        for x in theirs):
+            clues.setdefault("label", f"label {label} in the tags")
+    tc = country_code(album.get("tag_country"))
+    cc = country_code(cand.get("country"))
+    if tc and cc:
+        if tc == cc:
+            clues.setdefault("country", f"release country {_readable_country(tc)} in the tags")
+        elif "XW" not in (tc, cc):
+            against.append(f"tags say {tc}, this pressing is from {cand.get('country')}")
+    tm = album.get("tag_media")
+    if tm and formats:
+        if tm in formats:
+            clues.setdefault("format", f"{tm} in the tags")
+        else:
+            against.append(f"tags say {tm}, this pressing is {'/'.join(sorted(formats))}")
+    if cand.get("script") == "Latn" and not re.search(r"[^\x00-\u024f\s\W\d]", str(album.get("title") or "")):
+        clues.setdefault("script", "listed in Latin script, like your tags")
+    td, cd = str(album.get("tag_date") or ""), str(cand.get("date") or "")
+    if len(td) >= 7 and len(cd) >= 7 and td[:len(cd)] == cd[:len(td)]:
+        clues.setdefault("date", f"release date {cd} in the tags")
+    # folder name: "[Century Media, 9976158, Germany]"
+    folder = _bracket_text(album.get("folder"))
+    if folder:
+        fw = " " + fold(folder) + " "
+        for x in str(cand.get("label") or "").split(";"):
+            phrase = " ".join(w for w in fold(x).split() if w not in _LABEL_FILLER)
+            if len(phrase) >= 4 and f" {phrase} " in fw:
+                clues.setdefault("label", f"label {x.strip()} in the folder name")
+                break
+        named = {c for n, c in _COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in fw}
+        named |= {c for n, c in (("usa", "US"), ("uk", "GB"), ("eu", "XE")) if f" {n} " in fw}
+        if named and cc and cc != "XW":
+            if cc in named:
+                clues.setdefault("country", f"{_readable_country(cc)} in the folder name")
+            else:
+                against.append(f"folder name says {'/'.join(sorted(named))}, "
+                               f"this pressing is from {cand.get('country')}")
+    # what it was made from: folder name, then the audio itself
+    hint = album.get("media_hint") or ""
+    audio = album.get("audio") or {}
+    if formats:
+        if hint and hint in formats:
+            clues.setdefault("format", f"{hint} release (folder name)")
+        elif hint in ("vinyl", "cd") and hint not in formats:
+            against.append(f"folder name says {hint}, this pressing is {'/'.join(sorted(formats))}")
+        if audio.get("hires") and hint != "vinyl":
+            if "digital" in formats:
+                clues.setdefault("format", "digital release (hi-res audio, which no CD carries)")
+            elif formats == {"cd"}:
+                against.append("hi-res audio cannot come from this CD")
+        elif audio.get("cd_frames") and not hint and "cd" in formats:
+            clues.setdefault("format", "CD (tracks are whole CD sectors, as ripped from a disc)")
+        elif audio.get("not_cd") and not hint and "digital" in formats:
+            clues.setdefault("format", "digital release (lossless tracks are not whole CD sectors, so not ripped from a CD)")
+        # scans of a back cover, tray card, booklet or disc: the copy is physical
+        scans = album.get("scans") or {}
+        digital_audio = (audio.get("hires") and hint != "vinyl") or audio.get("not_cd") or hint == "digital"
+        if scans.get("physical") and not digital_audio:
+            if formats & {"cd", "vinyl", "cassette"}:
+                clues.setdefault("physical", f"physical release (your folder has {scans.get('why')})")
+            elif formats == {"digital"}:
+                against.append(f"your folder has {scans.get('why')}, so not this digital release")
+
+
+def _relative_clues(tied):
+    """Clues that only make sense against the other pressings: whose track
+    lengths are clearly closest, whose track titles agree with more tracks."""
+    extra = {id(s): {} for s in tied}
+    errs = sorted((s.get("len_err"), id(s)) for s in tied if s.get("len_err") is not None)
+    if len(errs) == len(tied) and len(errs) >= 2 and errs[0][0] <= 1.0 and errs[1][0] >= errs[0][0] + 1.5:
+        extra[errs[0][1]]["track lengths"] = (f"track lengths closest (off by {errs[0][0]:.1f}s on average, "
+                                              f"others {errs[1][0]:.1f}s+)")
+    titles = sorted(((s.get("titles_agree") or 0), id(s)) for s in tied)
+    if len(titles) >= 2 and titles[-1][0] >= titles[-2][0] + 2:      # one title may just be spelt differently
+        extra[titles[-1][1]]["track titles"] = f"{titles[-1][0]} track titles agree (others {titles[-2][0]})"
+    return extra
+
+
+def prefer_country(tied, order):
+    """Last resort, as Picard's 'preferred release countries': among pressings
+    nothing else tells apart, the one from the first country in `order`."""
+    if not order:
+        return None
+    pool = [s for s in tied if not s.get("clues_against")]
+    for code in order:
+        hits = [s for s in pool if country_code(s["cand"].get("country")) == code]
+        if len(hits) == 1:
+            return hits[0], {"country preference": f"your preferred country order ({', '.join(order)}) "
+                                                   f"puts {_readable_country(code)} first"}
+        if len(hits) > 1:
+            return None                                # several from that country: still undecided
+    return None
+
+
+def choose_pressing(tied, preferred_countries=None):
+    """Among pressings that score the same, the one the evidence points to, or None.
+
+    Only clues that tell the tied pressings apart count (a label shared by all
+    of them says nothing). Clues are weighed (a disc ID, barcode or catalogue
+    number counts most); the pick must outweigh every other pressing and must
+    not contradict anything the files, folder or scans say."""
+    if len(tied) < 2:
+        return None
+    rel = _relative_clues(tied)
+    allc = {id(s): dict(s.get("clues") or {}, **rel[id(s)]) for s in tied}
+    scored = []
+    for s in tied:
+        mine = allc[id(s)]
+        telling = {k: v for k, v in mine.items()
+                   if not all(allc[id(o)].get(k) == v for o in tied)}
+        weight = sum(CLUE_WEIGHTS.get(k, 1) for k in telling)
+        scored.append((weight, telling, s))
+    scored.sort(key=lambda x: -x[0])
+    weight, telling, pick = scored[0]
+    if weight == 0 or scored[1][0] == weight or pick.get("clues_against"):
+        if any(s.get("own_catno_absent") for s in tied) and all(s.get("own_catno_absent") for s in tied):
+            return None                                # your pressing is not among them
+        return same_pressing_listed_twice(tied) or prefer_country(tied, preferred_countries)
+    if all(s.get("own_catno_absent") for s in tied) and weight < CLUE_WEIGHTS["disc TOC"]:
+        return None              # your copy's catalogue number is on none of them: only hard proof decides
+    return pick, telling
+
+
+def same_pressing_listed_twice(tied):
+    """Two database entries for ONE pressing (same label, catalogue number,
+    barcode, country and format; often one entered with only a year): either is
+    right, so take the one with the fuller data."""
+    def key(s):
+        c = s["cand"]
+        return (tuple(sorted(c.get("catnos") or ())), country_code(c.get("country")),
+                tuple(sorted(c.get("formats") or ())), fold(c.get("label") or ""))
+    keys = {key(s) for s in tied}
+    k = next(iter(keys))
+    # barcodes must agree where both entries have one (an entry often lacks it)
+    codes = {tuple(sorted(barcode_key(b) for b in s["cand"].get("barcodes") or ())) for s in tied} - {()}
+    if len(keys) != 1 or not k[0] or len(codes) > 1 or any(s.get("clues_against") for s in tied):
+        return None
+    pick = max(tied, key=lambda s: (len(str(s["cand"].get("date") or "")), len(s["cand"].get("tracks") or ()),
+                                    -tied.index(s)))
+    return pick, {"duplicate": "the same pressing listed twice (same label, catalogue number and barcode); "
+                               "the fuller entry is used"}
+
+
+choose_pressing_from_scans = choose_pressing      # earlier name
 
 
 def score_candidate(album, cand, cfg, ocr_text=""):
@@ -541,13 +933,18 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     # year (reissues are common, so a mismatch only withholds points)
     year_ok = False
     want_year = album.get("pressing_year") or album["year"]
+    year_off = None
     if want_year and cand["year"]:
         avail += cfg["w_year"]
-        if want_year == cand["year"]:
+        year_off = abs(want_year - cand["year"])
+        tol = cfg.get("pressing_year_tolerance", 0) if album.get("pressing_year") else 0
+        if year_off <= tol:
             pts += cfg["w_year"]
             year_ok = True
             if album.get("pressing_year"):
-                notes.append(f"year {want_year} agrees with the edition named in the folder")
+                notes.append(f"year {cand['year']} agrees with the {want_year} edition named in the folder"
+                             if year_off else
+                             f"year {want_year} agrees with the edition named in the folder")
         else:
             notes.append(f"year {want_year} vs {cand['year']}")
 
@@ -564,12 +961,31 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             avail += cfg["w_ocr"]
             notes.append(f"OCR text found {share:.0%} of artist/title words")
 
+    clues, clues_against = pressing_clues(ocr_text, cand)
+    file_clues(album, cand, clues, clues_against)
+    # A catalogue number the folder or tags name that this pressing does not carry:
+    # if NO pressing carries it, the copy is probably one the databases do not list.
+    own = sorted(c for c in (album.get("catnos") or ())
+                 if (re.search(r"[a-z]", c) and re.search(r"\d", c) and len(c) >= 4)
+                 or len(re.sub(r"\D", "", c)) >= 6)
+    own_absent = bool(own) and not (set(own) & set(cand.get("catnos") or ()))
+    len_err = titles_agree = None
+    if tracks_ok:
+        diffs = [abs(t["secs"] - c["secs"]) for t, c in zip(album["tracks"], cand["tracks"]) if c["secs"] > 0]
+        len_err = round(sum(diffs) / len(diffs), 2) if diffs else None
+        if any(t.get("title") for t in album["tracks"]):
+            titles_agree = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
+                               if t.get("title") and _ratio(fold(strip_edition(t["title"])),
+                                                            fold(strip_edition(c.get("title") or ""))) >= 0.9)
     conf = round(100.0 * pts / avail, 1) if avail else 0.0
     return {
         "confidence": conf, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
         "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
         "pressing_year": album.get("pressing_year"),
+        "clues": clues, "clues_against": clues_against, "year_off": year_off,
+        "len_err": len_err, "titles_agree": titles_agree,
+        "own_catnos": own, "own_catno_absent": own_absent,
     }
 
 
@@ -591,19 +1007,50 @@ def classify(scored, cfg):
         return barcode_agrees(s) or s["code"] in ("catalogue number", "catalogue number (folder name)")
     # Ties go to the candidate whose barcode agrees, then to the one whose year does.
     ranked = sorted(scored, key=lambda s: (-s["confidence"], not barcode_agrees(s),
-                                           not number_agrees(s), not s["year_ok"]))
+                                           not number_agrees(s), not s["year_ok"],
+                                           s.get("year_off") if s.get("year_off") is not None else 99))
     best = ranked[0]
+    # Pressings that score the same: what the scans show can tell them apart
+    # (a label, "Made in Germany", a catalogue number printed on the back).
+    tied = [s for s in ranked if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+    scan_pick = None
+    if not number_agrees(best):
+        scan_pick = choose_pressing(tied, cfg.get("preferred_countries"))
+        if scan_pick:
+            pick = scan_pick[0]
+            ranked = [pick] + [s for s in ranked if s is not pick]
+            best = pick
     runner = ranked[1] if len(ranked) > 1 else None
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
 
     why = []
+    # The album is PROVEN when its disc ID, barcode, or a catalogue number from
+    # its tags or folder name agrees and every track length agrees too. A title
+    # or artist that differs from the folder's is then the database's own
+    # (freeDB-style): "The Mediator" is "The Mediator Between Head and Hands
+    # Must Be the Heart"; an album filed under Death is credited to Control Denied.
+    proof = ("disc ID" if (best.get("clues") or {}).get("disc TOC") else
+             "audio fingerprint" if (best.get("clues") or {}).get("fingerprint") else
+             "barcode" if best["code"] == "barcode" else
+             "catalogue number" if best["code"] in ("catalogue number", "catalogue number (folder name)")
+             else "")
+    proven = bool(proof and best["tracks_ok"] and best["dur_frac"] is not None
+                  and best["dur_frac"] >= cfg["auto_min_duration_frac"] and not best.get("conflict"))
+    split_credit = bool(best.get("lacks"))     # a collaborator would be dropped: never
     if not best["tracks_ok"]:
         why.append("track count differs")
-    if best["artist_sim"] < cfg["auto_min_artist"]:
+    if proven and best["artist_sim"] < cfg["auto_min_artist"] and not split_credit:
+        best["notes"] = best["notes"] + [f"artist differs from the folder's; {proof} proves the album, "
+                                         f"so it is credited as the database does "
+                                         f"({best['cand'].get('artist')})"]
+    elif best["artist_sim"] < cfg["auto_min_artist"]:
         why.append(f"artist similarity {best['artist_sim']:.2f} < {cfg['auto_min_artist']}"
                    + (f" (credit lacks {', '.join(best['lacks'])}; tagging from it would drop them)"
                       if best.get("lacks") else ""))
-    if best["title_sim"] < cfg["auto_min_title"]:
+    if proven and best["title_sim"] < cfg["auto_min_title"]:
+        best["notes"] = best["notes"] + [f"title differs from the folder's; {proof} proves the album, "
+                                         f"so the database title is used ({best['cand'].get('title')})"]
+    elif best["title_sim"] < cfg["auto_min_title"]:
         why.append(f"title similarity {best['title_sim']:.2f} < {cfg['auto_min_title']}")
     barcode_decides = best["code"].startswith("barcode")
     # A catalogue number that agrees is strong, pressing-specific evidence, so
@@ -611,17 +1058,35 @@ def classify(scored, cfg):
     min_dur = cfg["auto_min_duration_frac_with_code"] if best["code"] else cfg["auto_min_duration_frac"]
     if not best["code"] and best["title_sim"] < cfg["exact_title_sim"]:
         min_dur = max(min_dur, cfg["auto_min_duration_frac_partial_title"])
+    # Track lengths may differ when something else points to this very release:
+    # a barcode, catalogue number or disc ID (tags, folder name or scans), or a
+    # vinyl rip matched to a vinyl release (a manual rip is never cut like the
+    # database's lengths). The track count must still agree.
+    vinyl = str((best.get("clues") or {}).get("format", "")).startswith("vinyl")
+    excuse = ("" if not (best["tracks_ok"] and best["artist_sim"] >= cfg["auto_min_artist"]
+                         and best["title_sim"] >= cfg["auto_min_title"] and not best.get("conflict"))
+              else f"{best['code']} points to this release" if best["code"]
+              else "disc ID points to this release" if (best.get("clues") or {}).get("disc TOC")
+              else "vinyl rip of a vinyl release (a manual rip's lengths differ)" if vinyl else "")
+    lengths_excused = False
     if not barcode_decides:
-        if best["dur_frac"] is None:
-            why.append("durations unavailable")
-        elif best["dur_frac"] < min_dur:
-            why.append(f"only {best['dur_frac']:.0%} of durations agree")
-    if best["confidence"] < cfg["auto_min_confidence"]:
+        if best["dur_frac"] is None or best["dur_frac"] < min_dur:
+            if excuse:
+                lengths_excused = True
+                best["notes"] = best["notes"] + [f"track lengths not compared: {excuse}"]
+            elif best["dur_frac"] is None:
+                why.append("durations unavailable")
+            else:
+                why.append(f"only {best['dur_frac']:.0%} of durations agree")
+    if best["confidence"] < cfg["auto_min_confidence"] and not lengths_excused and not (
+            proven and (best["artist_sim"] < cfg["auto_min_artist"] or best["title_sim"] < cfg["auto_min_title"])
+            and not split_credit):
         why.append(f"confidence {best['confidence']} < {cfg['auto_min_confidence']}")
     if best.get("conflict"):
         why.append("barcode differs from the candidate's")
     py = best.get("pressing_year")
-    if py and best["cand"].get("year") and best["cand"]["year"] != py and not best["code"]:
+    if (py and best["cand"].get("year") and not best["code"]
+            and abs(best["cand"]["year"] - py) > cfg.get("pressing_year_tolerance", 0)):
         why.append(f"folder name says this is the {py} edition; matched release is from "
                    f"{best['cand']['year']}")
     # A barcode identifies one product: if only the best candidate's barcode
@@ -633,7 +1098,12 @@ def classify(scored, cfg):
                        and not best.get("conflict"))
     catno_decided = (runner is not None and not barcode_decided and number_agrees(best)
                      and not number_agrees(runner) and not best.get("conflict"))
-    if margin < cfg["auto_min_margin"] and (barcode_decided or catno_decided):
+    if scan_pick and abs(margin) < cfg["auto_min_margin"] and not (barcode_decided or catno_decided):
+        others = [s["cand"]["id"] for s in tied if s is not best]
+        said = "; ".join(scan_pick[1].values())
+        best["notes"] = best["notes"] + [f"pressing chosen by {said} "
+                                         f"(not on {', '.join(others[:3])})"]
+    elif margin < cfg["auto_min_margin"] and (barcode_decided or catno_decided):
         what = "barcode" if barcode_decided else "catalogue number"
         best["notes"] = best["notes"] + [f"pressing chosen by {what} (runner-up "
                                          f"{runner['cand']['id']} does not share it)"]
@@ -649,6 +1119,10 @@ def classify(scored, cfg):
         else:
             why.append(f"runner-up {runner['cand']['id']} within {margin:.1f} points "
                        f"(likely another pressing)")
+            if all(s.get("own_catno_absent") for s in tied) and best.get("own_catnos"):
+                why.append(f"catalogue number {', '.join(c.upper() for c in best['own_catnos'][:2])} "
+                           "from your folder/tags is on none of these pressings (probably one the "
+                           "databases do not list)")
 
     if not why:
         status = "auto"

@@ -122,14 +122,165 @@ _CATNO_KEYS = ("catalognumber", "labelno", "catalogno", "catalog", "catno", "cat
                "cataloguenumber", "catalogue", "catalogueno")
 
 
+_ISRC = re.compile(r"\b([A-Z]{2}[A-Z0-9]{3}\d{7})\b")
+
+
+def _source_clues(path, t):
+    """ISRC and every comment, URL and store ID in the tags, as one text, for
+    source_links() to read (Bandcamp/iTunes/Qobuz/Deezer/Spotify/Beatport pages,
+    MusicBrainz and Discogs release links)."""
+    try:
+        f = mutagen.File(path)
+    except Exception:
+        return
+    tags = getattr(f, "tags", None)
+    if not tags:
+        return
+    parts, isrc = [], ""
+    for k, v in tags.items():
+        key = str(k).lower()
+        vals = v if isinstance(v, list) else [v]
+        text = " ".join(str(getattr(x, "text", x) if not isinstance(x, bytes) else x.decode("utf-8", "ignore"))
+                        for x in vals)
+        if "isrc" in key or key.startswith("tsrc"):
+            isrc = isrc or text.strip().upper().replace("-", "")
+        elif key in ("plid", "cnid"):                               # iTunes album / track IDs
+            parts.append(f"itunes:{key}:{text.strip()}")
+        elif any(w in key for w in ("comm", "comment", "description", "url", "wxxx", "woaf", "woas", "wors",
+                                    "purl", "website", "source", "qobuz", "deezer", "spotify", "beatport",
+                                    "bandcamp", "itunes", "encoded", "ripp", "\xa9cmt")):
+            parts.append(text)
+    t["isrc"] = isrc if _ISRC.fullmatch(isrc or "") else ""
+    t["clue_text"] = " ".join(parts)[:4000]
+
+
+_LINK_PATTERNS = (
+    ("musicbrainz", re.compile(r"musicbrainz\.org/release/([0-9a-f-]{36})")),
+    ("discogs", re.compile(r"discogs\.com/(?:[\w-]+/)?release/(\d+)")),
+    ("url", re.compile(r"(https?://[\w-]+\.bandcamp\.com/album/[\w-]+)")),
+    ("url", re.compile(r"(https?://(?:www\.)?deezer\.com/(?:\w{2}/)?album/\d+)")),
+    ("url", re.compile(r"(https?://open\.spotify\.com/album/\w+)")),
+    ("url", re.compile(r"(https?://(?:music|itunes)\.apple\.com/[\w/.%-]*?album/[\w/.%-]*?\d+)")),
+    ("url", re.compile(r"(https?://(?:www\.)?qobuz\.com/[\w/-]*album/[\w/-]+)")),
+    ("url", re.compile(r"(https?://(?:www\.)?beatport\.com/release/[\w-]+/\d+)")),
+)
+
+
+def source_links(infos):
+    """Release links found in the files' own tags: (MusicBrainz ids, Discogs ids, other URLs)."""
+    text = " ".join(i.get("clue_text", "") for i in infos)
+    mb, dg, urls = set(), set(), []
+    for kind, rx in _LINK_PATTERNS:
+        for m in rx.findall(text):
+            if kind == "musicbrainz":
+                mb.add(m)
+            elif kind == "discogs":
+                dg.add(m)
+            elif m not in urls:
+                urls.append(m)
+    m = re.search(r"itunes:plid:(\d+)", text)
+    if m:
+        urls.append(f"https://music.apple.com/album/{m.group(1)}")
+    return mb, dg, urls
+
+
+def deezer_isrc_releases(http, album):
+    """Releases MusicBrainz holds for the ISRCs of this album on Deezer (Deezer
+    lists every track's ISRC): finds a MusicBrainz release that a title search
+    misses, e.g. one listed under another title or script."""
+    artist = mc.artist_parts(album["artist"])[0]
+    title = mc.search_title(album["title"])
+    query = 'artist:"%s" album:"%s"' % (artist, title)
+    data = http.get_json(f"https://api.deezer.com/search/album?q={q(query)}&limit=5", "deezer") or {}
+    n = len(album["tracks"])
+    for hit in (data.get("data") or [])[:3]:
+        if int(hit.get("nb_tracks") or 0) != n:
+            continue
+        tracks = (http.get_json(f"https://api.deezer.com/album/{hit['id']}/tracks?limit=300", "deezer") or {}).get("data") or []
+        if len(tracks) != n or not all(abs((t.get("duration") or 0) - a["secs"]) <= 3
+                                       for t, a in zip(tracks, album["tracks"])):
+            continue                                   # not this album
+        common = None
+        for t in [tracks[0], tracks[-1]]:
+            isrc = t.get("isrc") or (http.get_json(f"https://api.deezer.com/track/{t['id']}", "deezer") or {}).get("isrc")
+            if not isrc:
+                continue
+            d = http.get_json(f"https://musicbrainz.org/ws/2/isrc/{isrc}?inc=releases&fmt=json", "mb") or {}
+            rels = {r["id"] for rec in d.get("recordings") or [] for r in rec.get("releases") or [] if r.get("id")}
+            common = rels if common is None else common & rels
+        if common:
+            return common
+    return set()
+
+
+def link_releases(http, album):
+    """MusicBrainz releases the files' own tags point to: direct release links,
+    shop pages MusicBrainz links to a release (Bandcamp, Deezer, Spotify,
+    Apple, Qobuz, Beatport), and the releases holding the files' ISRCs."""
+    found = set(album.get("tag_mb_links") or ())
+    for url in (album.get("tag_urls") or [])[:4]:
+        data = http.get_json("https://musicbrainz.org/ws/2/url?resource=" + q(url) + "&inc=release-rels&fmt=json",
+                             "mb") or {}
+        for r in data.get("relations") or []:
+            rid = (r.get("release") or {}).get("id")
+            if rid:
+                found.add(rid)
+    isrc_rels = None
+    for code in [c for c in album.get("isrcs") or [] if c][:3]:
+        data = http.get_json(f"https://musicbrainz.org/ws/2/isrc/{code}?inc=releases&fmt=json", "mb") or {}
+        rels = {rel["id"] for rec in data.get("recordings") or [] for rel in rec.get("releases") or [] if rel.get("id")}
+        if rels:
+            isrc_rels = rels if isrc_rels is None else (isrc_rels & rels)
+    album["link_releases"] = found
+    album["isrc_releases"] = isrc_rels or set()
+    return found | (isrc_rels or set())
+
+
+# "01 - Title", "1-03 Title", "A2. Title", "03. Artist - Title": tracks named by file only
+_NAME_NUM = re.compile(r"^(?:(\d)\s*[-.]\s*)?(\d{1,3})\s*(?:[-._)]\s*|\s+)(.+)$")
+_NAME_SIDE = re.compile(r"^([A-Ha-h])(\d{1,2})\s*[-._)]?\s+(.+)$")
+
+
+def names_from_files(infos):
+    """Fill track number, disc and title from the file names where the tags have none."""
+    parsed = []
+    for p, i in infos:
+        stem = Path(p).stem
+        m, side = _NAME_NUM.match(stem), _NAME_SIDE.match(stem)
+        if m:
+            parsed.append((p, i, int(m.group(1) or 0), int(m.group(2)), m.group(3).strip()))
+        elif side:
+            parsed.append((p, i, 0, (ord(side.group(1).upper()) - 64) * 100 + int(side.group(2)), side.group(3).strip()))
+        else:
+            parsed.append((p, i, 0, 0, stem))
+    rests = [r for *_x, r in parsed]
+    heads = {r.split(" - ", 1)[0] for r in rests if " - " in r}
+    common = next(iter(heads)) if len(heads) == 1 and all(" - " in r for r in rests) and len(rests) > 1 else None
+    sides = sorted({n for _p, _i, _d, n, _r in parsed if n >= 100})
+    for p, i, disc, num, rest in parsed:
+        title = rest.split(" - ", 1)[1] if common else rest
+        if re.fullmatch(r"[A-Z0-9-]{1,14}", title) and len(rests) > 1:
+            title = ""                                     # "001.ITKWEDTSIM": initials, not a title
+        if num >= 100 and sides:
+            num = sides.index(num) + 1                     # vinyl sides A1, A2, B1 ... in order
+        if not i.get("num") and num:
+            i["num"] = num
+        if not i.get("disc") and disc:
+            i["disc"] = disc
+        if not i.get("title") and title:
+            i["title"] = title.replace("_", " ").strip()
+
+
 def read_file(path):
     t = {"title": "", "num": 0, "disc": 0, "album": "", "artist": "", "year": 0,
          "barcode": "", "catno": "", "secs": 0.0,
          "label": "", "country": "", "media": "", "date": "",   # pressing details in the tags
          "rate": 0, "bits": 0, "samples": 0, "lossless": False,  # the audio itself
          "has_ids": False,      # already carries a MusicBrainz or Discogs release ID
-         "audio_md5": 0}        # FLAC's checksum of the decoded audio (0 = unknown)
+         "audio_md5": 0,        # FLAC's checksum of the decoded audio (0 = unknown)
+         "isrc": "", "clue_text": ""}   # ISRC, and comments/URLs/store IDs left by shops and rippers
     try:
+        _source_clues(path, t)
         if path.suffix.lower() in (".m4a", ".mp4"):
             f = MP4(path)
             t["secs"] = f.info.length
@@ -321,6 +472,7 @@ def read_album(album_dir, artist_folder, album_folder):
             if p.suffix.lower() in AUDIO_EXT:
                 files.append(p)
     info = {p: read_file(p) for p in files}
+    names_from_files([(p, info[p]) for p in files])
     files, dropped_formats = _drop_duplicate_copies(files, info, album_dir)
     files, dropped_tracks = _drop_duplicate_tracks(files, info)
     infos = [(p, info[p]) for p in files]
@@ -363,12 +515,14 @@ def read_album(album_dir, artist_folder, album_folder):
         "catno_search": sorted({c for _p, i in infos for c in mc.split_codes(i["catno"])} | set(folder_hints)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title),
         "media_hint": mc.media_hint(album_folder),
-        "folder": album_folder,
+        "folder": album_folder, "artist_folder": artist_folder,
         "tag_label": top("label"), "tag_country": top("country"),
         "tag_media": mc.media_kind(top("media")), "tag_date": top("date"),
         "audio": audio_evidence([i for _p, i in infos]),
         "tocs": disc_tocs(infos) or log_tocs(album_dir) or cue_tocs(album_dir, infos),
         "scans": scan_evidence(album_dir),
+        "isrcs": [i.get("isrc") for _p, i in infos if i.get("isrc")],
+        **dict(zip(("tag_mb_links", "tag_discogs_links", "tag_urls"), source_links([i for _p, i in infos]))),
     }
 
 
@@ -662,14 +816,19 @@ class Http:
         self.db, self.cfg, self.token = db, cfg, discogs_token
         self.last = {}
         db.execute("CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, body TEXT)")
+        cols = [r[1] for r in db.execute("PRAGMA table_info(http_cache)")]
+        if "ts" not in cols:                              # when each answer was fetched
+            db.execute("ALTER TABLE http_cache ADD COLUMN ts REAL DEFAULT 0")
+            db.commit()
+        self.max_age = None
 
     def get_json(self, url, host):
         body = self.get_text(url, host)
         return json.loads(body) if body is not None else None
 
     def get_text(self, url, host):
-        row = self.db.execute("SELECT body FROM http_cache WHERE url=?", (url,)).fetchone()
-        if row:
+        row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (url,)).fetchone()
+        if row and not (self.max_age and time.time() - float(row[1] or 0) > self.max_age):
             return row[0]
         delay = self.cfg["discogs_delay"] if host == "discogs" else self.cfg["mb_delay"]
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -684,7 +843,8 @@ class Http:
                 with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
                                             timeout=60) as r:
                     body = r.read().decode("utf-8")
-                self.db.execute("INSERT OR REPLACE INTO http_cache VALUES (?,?)", (url, body))
+                self.db.execute("INSERT OR REPLACE INTO http_cache (url, body, ts) VALUES (?,?,?)",
+                                (url, body, time.time()))
                 self.db.commit()
                 return body
             except urllib.error.HTTPError as e:
@@ -842,6 +1002,9 @@ def mb_search(http, album, cfg):
     # (a freeDB-style lookup finds an album the folder names differently).
     have = {r["id"] for r in chosen}
     chosen += [{"id": rid} for rid in sorted(album.get("toc_releases") or ()) if rid not in have][:6]
+    have = {r["id"] for r in chosen}
+    chosen += [{"id": rid} for rid in sorted((album.get("link_releases") or set()) |
+                                             (album.get("isrc_releases") or set())) if rid not in have][:6]
     # Every version of the album (its release group): the edition with your track
     # count (bonus tracks, deluxe 2CD) or your pressing may not be among the hits.
     have = {r["id"] for r in chosen}
@@ -987,9 +1150,9 @@ def discogs_search(http, album, cfg, dm):
         det = http.get_json(f"https://api.discogs.com/releases/{r['id']}", "discogs")
         if det:
             out.append(discogs_candidate(det, dm))
-    # Discogs releases the CUETools database links to your disc
+    # Discogs releases the CUETools database links to your disc, or your tags link to
     have = {str(c["id"]) for c in out}
-    for rid in sorted(album.get("toc_discogs") or ())[:4]:
+    for rid in sorted(set(album.get("toc_discogs") or ()) | set(album.get("tag_discogs_links") or ()))[:4]:
         if rid not in have:
             det = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
             if det:
@@ -1296,6 +1459,17 @@ def run_source(name, finder, album, cfg, ocr_txt=""):
 
 
 def process(row, http, cfg, dm, args):
+    """Decide one album. Every kind of evidence is tried first with the country
+    preference switched off: it is the LAST resort, and a tie it settled early
+    would skip the steps that can really tell the pressings apart (the scans,
+    fingerprints, ISRCs)."""
+    full_cfg = cfg
+    cfg = dict(cfg, preferred_countries=[])
+    out = _process(row, http, cfg, dm, args, full_cfg)
+    return out
+
+
+def _process(row, http, cfg, dm, args, full_cfg):
     base = Path(row["FullPath"])
     if not base.is_dir():
         # Moved or renamed since the audit (Picard moves a folder when it tags the album).
@@ -1335,6 +1509,11 @@ def process(row, http, cfg, dm, args):
             album["toc_releases"] = set()
         if album["toc_releases"]:
             out["toc_releases"] = len(album["toc_releases"])
+    if album.get("tag_mb_links") or album.get("tag_urls") or album.get("isrcs"):
+        try:
+            link_releases(http, album)
+        except Exception:
+            album["link_releases"], album["isrc_releases"] = set(), set()
     mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
     dg_res = None
     source_notes = []
@@ -1417,8 +1596,39 @@ def process(row, http, cfg, dm, args):
                 scored = [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands]
                 mb_res = dict(mc.classify(scored, cfg), scored=scored, source="mb")
                 final = mc.combine(mb_res, dg_res)
+    # Still unsure: the album on Deezer, through its ISRCs, to the MusicBrainz release
+    if final["status"] != "auto" and not album.get("isrcs"):
+        try:
+            rels = deezer_isrc_releases(http, album)
+        except Exception:
+            rels = set()
+        if rels:
+            album["isrc_releases"] = rels
+            out["isrc_releases"] = len(rels)
+            have = {s["cand"]["id"] for s in (mb_res or {}).get("scored", [])}
+            new = []
+            for rid in sorted(rels - have)[:6]:
+                det = http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                    f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+                if det:
+                    new.append(mb_candidate(det))
+            cands = [s["cand"] for s in (mb_res or {}).get("scored", [])] + new
+            if cands:
+                scored = [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands]
+                mb_res = dict(mc.classify(scored, cfg), scored=scored, source="mb")
+                final = mc.combine(mb_res, dg_res)
     if album.get("discids"):
         out["discids"] = album["discids"]
+
+    # Last resort: the country preference, between pressings nothing else told apart
+    if final["status"] != "auto" and full_cfg.get("preferred_countries"):
+        again = []
+        for res in (mb_res, dg_res):
+            if res and res.get("scored"):
+                res = dict(mc.classify(res["scored"], full_cfg), scored=res["scored"], source=res.get("source"))
+            again.append(res)
+        mb_res, dg_res = again
+        final = mc.combine(mb_res, dg_res)
 
     status = final["status"]
     why = list(final["why"]) + source_notes
@@ -1434,7 +1644,7 @@ def process(row, http, cfg, dm, args):
                 c = s["cand"]
                 alts.append(f"{c['source']}:{c['id']} {s['confidence']} {c['artist']} - {c['title']} ({c['year']})")
     out.update(status=status, why=why, best=summarize(final), alts=alts,
-               margin=final.get("margin"), version=result_version())
+               margin=final.get("margin"), version=result_version(), checked=round(time.time()))
     return out
 
 
@@ -1559,6 +1769,9 @@ def main():
     ap.add_argument("--retry-review", action="store_true",
                     help="re-evaluate albums previously filed as review (cheap: lookups "
                          "come from the cache)")
+    ap.add_argument("--recheck-days", type=float,
+                    help="look up again, with fresh data, the review/nomatch albums last checked more than "
+                         "this many days ago (MusicBrainz and Discogs grow daily); e.g. 30")
     ap.add_argument("--retry-nomatch", action="store_true",
                     help="look up again the albums previously filed as nomatch "
                          "(use after a script fix); matched/review results are kept")
@@ -1573,6 +1786,11 @@ def main():
     picard_countries = picard_preferred_countries()
     if picard_countries:
         cfg["preferred_countries"] = picard_countries
+    try:                                           # rules learned from your library (learn_rules.py)
+        cfg["artist_aliases"] = json.loads(Path("~/.config/tagmender/rules.json").expanduser()
+                                           .read_text()).get("artist_aliases") or {}
+    except (OSError, ValueError):
+        pass
     if args.config:
         cfg.update(json.load(open(Path(args.config).expanduser())))
     if not fingerprint_ready():
@@ -1630,12 +1848,17 @@ def main():
             redo[p] = o["status"]
         elif o["status"] in retry:
             redo[p] = o["status"]
+        elif (args.recheck_days and o["status"] in ("review", "nomatch")
+              and time.time() - float(o.get("checked") or 0) > args.recheck_days * 86400):
+            redo[p] = o["status"]
         elif o["status"] == "moved" and Path(p).is_dir():
             redo[p] = o["status"]                    # the folder is back: match it
     if redo:
         print(f"Re-evaluating {len(redo)} albums ("
               + ", ".join(f"{n} {s}" for s, n in sorted(Counter(redo.values()).items())) + ")")
     http = Http(db, cfg, token)
+    if args.recheck_days:
+        http.max_age = args.recheck_days * 86400        # older lookups are fetched again
 
     wanted = {"untagged"} | ({"partial"} if args.include_partial else set())
     rows = [r for r in csv.DictReader(open(Path(args.audit_csv).expanduser(), encoding="utf-8"))

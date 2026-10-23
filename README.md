@@ -21,6 +21,12 @@ only folder names, some with scans of the sleeve and nothing else.
 | `match_loop.sh` | Keeps `match_albums.py` running over a whole library, and restarts it automatically when the matcher is updated, so a fix reaches every album already decided. | No |
 | `tag_albums.py` | Tags the confidently matched albums **with Picard itself**: writes the matched release ID into the files, runs Picard in batches (load, wait until every lookup is done, save, quit), then checks every file. Tags, file names, folders and images are exactly what Picard writes with your settings, naming script and plugins. Scans Picard leaves behind or drops next to the music are moved into `covers/`. | Yes, through Picard, only with `--apply`; `--undo <run>` restores tags, covers, names, folders and scans |
 | `web_tag.py` | The last resort for albums MusicBrainz and Discogs do not have: searches Deezer, Apple iTunes, Bandcamp (DuckDuckGo finds pages Bandcamp's own search misses) and Wikipedia; accepts a result only on the same proof as the matcher (artist, title, track count, track lengths; a different credited artist also needs the scans to name it, or a code, disc ID or fingerprint to agree), writes album, artists and contributing artists, titles, numbers, date, label, barcode and genre, with artist IDs from MusicBrainz (same-name artists told apart by their releases), Wikidata or Discogs, and files the album as your Picard naming script would. `TAGMENDER=Resolved` with the source, or `Unresolved` with the reason when nothing was found. | Writes tags and moves the album folder (and `cover.jpg` only into folders with no image), only with `--apply`; `--undo` restores; `--keep-folders` tags in place |
+| `inbox.py` | Watches an inbox folder: each album that arrives (loose tracks are grouped first) is identified, tagged by Picard or from Discogs/the web, filed into the library, or set aside in `_unresolved/`. A systemd user service is in `contrib/`. | Yes: tags and files what arrives |
+| `enrich.py` | ReplayGain (EBU R128), genres mapped to your own list, lyrics from LRCLIB (with `.lrc` files), detection of transcoded "lossless" and upsampled "hi-res" files, Navidrome rescan. | Writes tags, only with `--apply`; `--undo` restores |
+| `learn_rules.py` | Learns how you file music from your tagged albums (Control Denied under Death) and writes `~/.config/tagmender/rules.json`, which the matcher uses. | No |
+| `mb_seed.py` | One page with a pre-filled MusicBrainz "Add release" form for every album tagged from Discogs or the web. | No |
+| `dupes_fp.py` | The same recording in different albums or libraries (MusicBrainz recording IDs, AcoustID with `--fingerprint`), with the copy to keep. | No — writes a CSV |
+| `health_report.py` | One HTML page per run: % tagged, matcher decisions, why albums wait, tagging runs. | No |
 | `coverup_batch.py` | Cover art in batch with CoverUp's own pipeline and your CoverUp settings: front, back and artist images, local hi-res scans first (an unfolded sleeve is cut to its front panel), online sources next, small images enlarged, and an AI-generated cover as a last resort for albums with no cover at all. | Writes image files and embeds the front, only with `--apply`; `--undo` restores |
 
 ## Matching rules worth knowing
@@ -62,6 +68,12 @@ Everything the folder holds is used as evidence, strongest first:
 - **Label, country and date** from tags, folder name and scans ("Made in
   Germany", "licensed from ..." is ignored), and the track lengths and titles
   closest to one pressing.
+- **Links and codes left in the tags**: Bandcamp, Apple/iTunes, Deezer,
+  Spotify, Qobuz and Beatport pages and IDs, MusicBrainz and Discogs links, and
+  ISRCs (also fetched from Deezer for the album), looked up on MusicBrainz.
+- **File names** fill in track numbers and titles when the tags have none
+  (`01 - Artist - Title`, vinyl `A1 Title`).
+- **Rules learned from your library** (`learn_rules.py`).
 - **Every version of the album** (MusicBrainz release group, Discogs master)
   is searched when no hit has your track count or catalogue number.
 - Last, your **preferred countries** (Picard's list when set, else
@@ -95,7 +107,8 @@ Discs MusicBrainz has no disc ID for are listed in
 - Optional, for audio fingerprints: `libchromaprint-tools` (fpcalc) and a free
   AcoustID application key (acoustid.org/new-application) in
   `~/.config/tagmender/acoustid_key`
-- Optional, to compare Japanese titles: `pip install pykakasi`
+- Optional, to compare Japanese titles: `pip install --user --break-system-packages pykakasi`
+- Optional, to find transcoded files: `numpy` (`sudo apt install python3-numpy`)
 - Optional, for generated covers: a Stable Diffusion server with an
   Automatic1111-compatible API (e.g. Forge), set in CoverUp's options
 
@@ -159,6 +172,33 @@ its own cover-art sources in their configured order: put **Local Files**
 first (Options → Cover Art) to keep the `cover.jpg`/`folder.jpg` already in
 an album folder.
 
+## Hands-off
+
+```bash
+# keep unresolved albums looked at again, once a day, when last checked 30+ days ago
+AUDIT=~/Downloads/audit_extreme_music.csv OUT=~/Downloads/matching_extreme RECHECK_DAYS=30 \
+  nohup ./match_loop.sh > /dev/null 2>&1 & disown
+
+# an inbox that tags and files whatever you drop into it
+python3 inbox.py --inbox ~/Music/Inbox --library /media/unraidmedia2/music/extreme_music
+
+# finishing touches, monthly re-learned rules, missing releases, duplicates, health
+python3 enrich.py /media/unraidmedia2/music/extreme_music --replaygain --genres --lyrics --quality --apply --navidrome
+python3 learn_rules.py ~/Downloads/audit_*_music.csv
+python3 mb_seed.py /media/unraidmedia2/music/extreme_music
+python3 dupes_fp.py /media/unraidmedia2/music/ambient_music /media/unraidmedia2/music/extreme_music
+python3 health_report.py --library extreme ~/Downloads/audit_extreme_music.csv ~/Downloads/matching_extreme
+```
+
+Classical music: in Picard, tick Options → Metadata → *Use track relationships*
+and *Use release relationships* (composer, work, conductor, performers), and
+consider the *Classical Extras* plugin for work and movement tags.
+
+Genres: `~/.config/tagmender/genres.json` maps what MusicBrainz and Discogs say
+to your own list, e.g. `{"map": {"funeral doom metal": "Doom Metal"}, "allowed":
+["Doom Metal", "Black Metal", "Ambient"], "max": 3}`. Navidrome:
+`~/.config/tagmender/navidrome.json` with `url`, `user`, `password`.
+
 ## Albums no database has
 
 ```bash
@@ -184,6 +224,9 @@ python3 tests/test_dedupe.py
 python3 tests/test_tag_albums.py
 python3 tests/test_coverup_batch.py ~/Documents/Github/picard-coverup
 python3 tests/test_web_tag.py
+python3 tests/test_enrich.py
+python3 tests/test_inbox.py
+python3 tests/test_tools.py
 ```
 
 ## Licence

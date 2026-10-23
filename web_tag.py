@@ -429,13 +429,55 @@ def cached_ocr(db, base, max_images=15):
     return "\n".join(json.loads(v) for k, v in rows if k.startswith(("text", "spines")) and v)
 
 
-def find(http, album, cfg, ocr=""):
+_DM = None
+
+
+def _plugin():
+    """The Discogs Enrichment plugin's mapping code (credits, discs) when available."""
+    global _DM
+    if _DM is None:
+        try:
+            d = Path(ma.DEFAULT_PLUGIN_DIR).expanduser()
+            sys.path.insert(0, str(d))
+            import discogs_mapping
+            _DM = discogs_mapping
+        except Exception:
+            _DM = False
+    return _DM or None
+
+
+def discogs_matched(http, release_id):
+    """The Discogs release the matcher already proved, as a source to tag from
+    (MusicBrainz has no release for it, so Picard cannot tag it)."""
+    dm = _plugin()
+    det = http.get_json(f"https://api.discogs.com/releases/{release_id}", "discogs")
+    if not det or dm is None:
+        return []
+    c = ma.discogs_candidate(det, dm)
+    c.update(url=det.get("uri") or f"https://www.discogs.com/release/{release_id}",
+             date=str(det.get("released") or det.get("year") or ""),
+             genre="; ".join((det.get("styles") or []) + (det.get("genres") or [])),
+             cover=((det.get("images") or [{}])[0] or {}).get("uri", ""), discogs_release=str(release_id))
+    for i, tr in enumerate(c["tracks"]):
+        tr.setdefault("num", i + 1)
+    return [c]
+
+
+def find(http, album, cfg, ocr="", matched=None):
     """(source name, scored best) of the first source whose album passes the
     matcher's proof, else (None, best near miss or None)."""
     artist = mc.artist_parts(album["artist"])[0]
     title = mc.search_title(album["title"])
     near = None
-    for name, fetch in SOURCES:
+    linked = [u for u in album.get("tag_urls") or [] if ".bandcamp.com/album/" in u]
+    sources = list(SOURCES)
+    best = (matched or {}).get("best") or {}
+    if (matched or {}).get("status") == "auto" and best.get("source") == "discogs":
+        sources.insert(0, ("Discogs", lambda http, a, t: discogs_matched(http, best["id"])))
+    if linked:                                    # the files' own tags name their Bandcamp page
+        sources.insert(0, ("Bandcamp (linked in the tags)",
+                           lambda http, a, t: [c for c in (bandcamp_album(http, u) for u in linked[:2]) if c]))
+    for name, fetch in sources:
         try:
             cands = fetch(http, artist, title)
         except Exception as exc:                               # one source down: try the next
@@ -468,7 +510,9 @@ def tags_for(album, cand, http, artist_cache, source_name, token=""):
         "musicbrainz_albumartistid": [i for i in alb_ids if i],
         "discogs_albumartist_id": [d for _m, d in alb if d],
         "tagmender": "Resolved",
-        "tagmender_reason": f"not on MusicBrainz or Discogs; tags from {source_name}",
+        "tagmender_reason": (f"not on MusicBrainz; tags from the Discogs release" if source_name == "Discogs"
+                             else f"not on MusicBrainz or Discogs; tags from {source_name}"),
+        "discogs_release_id": cand.get("discogs_release", ""),
         "tagmender_source": cand["url"],
     }
     out = []
@@ -489,12 +533,14 @@ _ID3 = {"album": "TALB", "albumartist": "TPE2", "artist": "TPE1", "title": "TIT2
         "label": "TPUB", "genre": "TCON", "media": "TMED"}
 _ID3_TXXX = {"barcode": "BARCODE", "artists": "ARTISTS", "musicbrainz_artistid": "MusicBrainz Artist Id",
              "discogs_artist_id": "DISCOGS_ARTIST_ID", "discogs_albumartist_id": "DISCOGS_ALBUMARTIST_ID",
+             "discogs_release_id": "DISCOGS_RELEASE_ID",
              "musicbrainz_albumartistid": "MusicBrainz Album Artist Id", "tagmender": "TAGMENDER",
              "tagmender_reason": "TAGMENDER_REASON", "tagmender_source": "TAGMENDER_SOURCE"}
 _MP4 = {"album": "\xa9alb", "albumartist": "aART", "artist": "\xa9ART", "title": "\xa9nam", "date": "\xa9day",
         "genre": "\xa9gen"}
 _MP4_FREE = {"label": "LABEL", "barcode": "BARCODE", "media": "MEDIA", "artists": "ARTISTS",
              "discogs_artist_id": "DISCOGS_ARTIST_ID", "discogs_albumartist_id": "DISCOGS_ALBUMARTIST_ID",
+             "discogs_release_id": "DISCOGS_RELEASE_ID",
              "musicbrainz_artistid": "MusicBrainz Artist Id",
              "musicbrainz_albumartistid": "MusicBrainz Album Artist Id", "tagmender": "TAGMENDER",
              "tagmender_reason": "TAGMENDER_REASON", "tagmender_source": "TAGMENDER_SOURCE"}
@@ -559,10 +605,10 @@ def _five_words(title):
     return re.sub(r"^((?:\S+\s+){4}\S+)\s.*$", r"\1", str(title or "").strip())
 
 
-def target_folder(base, cand):
+def target_folder(base, cand, library=None):
     """Where Picard's naming script would file the album: <library>/<album
     artists A to Z, joined by &>/<year> - <album, at most 5 words>."""
-    library = Path(base).parent.parent
+    library = Path(library) if library else Path(base).parent.parent
     artists = sorted({a.strip() for a in re.split(r"\s*(?:,|&| and )\s*", cand["artist"]) if a.strip()},
                      key=str.casefold) or [cand["artist"]]
     year = str(cand.get("date") or cand.get("year") or "")[:4]
@@ -610,13 +656,18 @@ def undo(out_dir, run_id):
     return ta.undo(out_dir, run_id)
 
 
-def unresolved(matches_db, only=None, include_review=False):
+def unresolved(matches_db, only=None, include_review=False, include_discogs=True):
+    """Albums Picard cannot tag: no match, review (if asked), and confident
+    matches found on Discogs only (MusicBrainz has no release for Picard to use)."""
     db = sqlite3.connect(Path(matches_db).expanduser())
     out = []
     wanted = {"nomatch"} | ({"review"} if include_review else set())
     for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
         o = json.loads(blob)
-        if o.get("status") in wanted and Path(path).is_dir() and (not only or only.casefold() in path.casefold()):
+        discogs_only = (include_discogs and o.get("status") == "auto"
+                        and (o.get("best") or {}).get("source") == "discogs")
+        if ((o.get("status") in wanted or discogs_only) and Path(path).is_dir()
+                and (not only or only.casefold() in path.casefold())):
             out.append(o)
     return out
 
@@ -631,6 +682,9 @@ def main(argv=None):
     ap.add_argument("--apply", action="store_true", help="write the tags (default: dry run)")
     ap.add_argument("--undo", help="restore a run")
     ap.add_argument("--no-cover", action="store_true", help="do not save cover.jpg into folders without images")
+    ap.add_argument("--library", help="library folder to file albums into (default: the one they are in)")
+    ap.add_argument("--no-discogs", action="store_true",
+                    help="skip albums matched on Discogs only (by default they are tagged from that release)")
     ap.add_argument("--keep-folders", action="store_true",
                     help="tag in place; do not file albums under their artist like Picard does")
     args = ap.parse_args(argv)
@@ -644,7 +698,7 @@ def main(argv=None):
     db = sqlite3.connect(Path(args.matches_db).expanduser(), timeout=60)
     http = ma.Http(db, cfg, "")
     ma.USER_AGENT = USER_AGENT
-    albums = unresolved(args.matches_db, args.only, args.include_review)
+    albums = unresolved(args.matches_db, args.only, args.include_review, not args.no_discogs)
     print(f"{len(albums)} album(s) without a MusicBrainz/Discogs match")
     run_dir = blob_dir = None
     journal, report, cache = [], [], {}
@@ -661,7 +715,7 @@ def main(argv=None):
         album = ma.read_album(base, o.get("artist_folder") or base.parent.name, o.get("album_folder") or base.name)
         if not album["tracks"]:
             continue
-        source, best, why = find(http, album, cfg, cached_ocr(db, base))
+        source, best, why = find(http, album, cfg, cached_ocr(db, base), o)
         row = {"album": o["path"], "source": source or "", "page": (best or {}).get("cand", {}).get("url", ""),
                "matched": f"{best['cand']['artist']} - {best['cand']['title']} ({best['cand']['year']})" if best else "",
                "confidence": best["confidence"] if best else "", "result": ""}
@@ -683,7 +737,7 @@ def main(argv=None):
             report.append(row)
             continue
         tags = tags_for(album, best["cand"], http, cache, source, token)
-        dest = target_folder(base, best["cand"]) if not args.keep_folders else base
+        dest = target_folder(base, best["cand"], args.library) if not args.keep_folders else base
         row["result"] = "would tag" if not args.apply else "tagged"
         if dest != base:
             row["result"] += f", move to {dest}"
@@ -731,6 +785,8 @@ def main(argv=None):
     print(f"\n{found} of {len(report)} found on the web. Report: {path}")
     if args.apply:
         print(f"Undo: python3 web_tag.py --undo {run_dir.name[len('run-'):]}")
+        if found:
+            ta._navidrome()
     else:
         print("Dry run, nothing changed. Run again with --apply.")
     return 0

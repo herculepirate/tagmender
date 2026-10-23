@@ -219,6 +219,53 @@ class WebTag(Base):
         self.assertEqual(wt.artist_ids(W(), "Rapture", {}, "Paroxysm Of Hatred", "", 2018), ("gr", ""))
         self.assertEqual(wt.artist_ids(W(), "Rapture", {}, "Paroxysm Of Hatred", "", None), ("", ""))
 
+    def test_musicbrainz_seed_page_for_web_tagged_albums(self):
+        import mb_seed
+        self.run_main(FakeWeb(), "--apply")
+        found = list(mb_seed.candidates(self.tmp / "extreme_music"))
+        self.assertEqual(len(found), 1)
+        fields = dict(mb_seed.seed_fields(found[0][1]))
+        self.assertEqual(fields["name"], "The Exuviae of Gods, Pt. 2")
+        self.assertEqual(fields["artist_credit.names.0.name"], "Mournful Congregation")
+        self.assertEqual(fields["artist_credit.names.0.mbid"], "mc-id")
+        self.assertEqual(fields["labels.0.name"], "20 Buck Spin")
+        self.assertEqual(fields["mediums.0.track.1.name"], "Part 2")
+        self.assertAlmostEqual(int(fields["mediums.0.track.2.length"]) / 1000, LENS[2], delta=1)
+        self.assertEqual(fields["urls.0.url"], "https://www.deezer.com/album/77")
+        html_page = mb_seed.page([(found[0][0], list(fields.items()))])
+        self.assertIn('action="https://musicbrainz.org/release/add"', html_page)
+
+    def test_discogs_only_match_is_tagged_from_its_release(self):
+        sys.path.insert(0, str(HERE / "herculepirate" / "picard-discogs-enrichment"))
+        try:
+            import discogs_mapping
+        except ImportError:
+            self.skipTest("plugin not available")
+        wt._DM = discogs_mapping
+        rel = {"id": 555, "title": "The Exuviae of Gods, Pt. 2", "uri": "https://www.discogs.com/release/555",
+               "released": "2023-10-20", "styles": ["Funeral Doom Metal"], "genres": ["Rock"],
+               "artists": [{"name": "Mournful Congregation", "id": 1}], "labels": [{"name": "20 Buck Spin",
+                                                                                     "catno": "SPIN200"}],
+               "formats": [{"name": "File", "qty": "1"}], "identifiers": [],
+               "tracklist": [{"position": str(i + 1), "type_": "track", "title": f"Track {i + 1}",
+                              "duration": f"{s // 60}:{s % 60:02d}"} for i, s in enumerate(LENS)]}
+
+        class D(FakeWeb):
+            def get_json(self, url, host):
+                if url.endswith("/releases/555"):
+                    return rel
+                return super().get_json(url, host)
+        db = sqlite3.connect(self.db)
+        db.execute("UPDATE results SET result=?", (json.dumps({
+            "path": str(self.album), "status": "auto", "artist_folder": "Mournful Congregation",
+            "album_folder": self.album.name, "best": {"source": "discogs", "id": "555"}}),))
+        db.commit()
+        self.run_main(D(deezer=False, bandcamp=False), "--apply", "--keep-folders")
+        f = mutagen.File(self.album / "01.flac")
+        self.assertEqual(f["DISCOGS_RELEASE_ID"], ["555"])
+        self.assertIn("Discogs release", f["TAGMENDER_REASON"][0])
+        self.assertEqual(f["TITLE"], ["Track 1"])
+
     def test_bandcamp_page_and_durations(self):
         c = wt.bandcamp_album(FakeWeb(), "https://x.bandcamp.com/album/y")
         self.assertEqual([round(t["secs"]) for t in c["tracks"]], list(LENS))

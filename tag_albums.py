@@ -588,6 +588,8 @@ def main():
                          "or with no match (with --apply; undoable)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only", help="only folders whose path contains this text")
+    ap.add_argument("--into", help="albums come from outside the library (an inbox) and Picard files them "
+                                   "into this library folder, which must be Picard's 'Move files to' folder")
     ap.add_argument("--batch", type=int, default=10, help="albums per Picard run (default 10)")
     ap.add_argument("--settle", type=int, default=10, help="seconds Picard is left idle before saving")
     ap.add_argument("--undo", help="restore a run: its files' tags, names and folders")
@@ -612,6 +614,8 @@ def main():
     albums, skipped = select_albums(args.matches_db, args.limit, args.only)
     print(f"{len(albums)} album(s) to tag; {len(skipped)} skipped")
     outside = outside_move_target(albums, args.picard_ini)
+    if outside and args.into and Path(args.into).expanduser().resolve() == Path(outside[0]).resolve():
+        outside = None                                # an inbox: Picard files them into this library
     if outside:
         target, paths = outside
         msg = (f"Picard moves tagged files to {target}, but {len(paths)} of these album(s) are in another "
@@ -744,6 +748,8 @@ def main():
         counts[r["state"]] = counts.get(r["state"], 0) + 1
     print(f"\n{counts}\nResults: {run_dir / 'results.csv'}\nUndo the whole run: "
           f"python3 tag_albums.py --undo {run_id}")
+    if counts:
+        _navidrome()
     return 0
 
 
@@ -808,6 +814,16 @@ def mark_unresolved(args, out_dir):
             json.dump(journal, fh)
     print(f"Marked {done} album(s). Undo: python3 tag_albums.py --undo {run_id}")
     return 0
+
+
+def _navidrome():
+    """Ask Navidrome to rescan when ~/.config/tagmender/navidrome.json is set up."""
+    try:
+        import enrich
+        if enrich.navidrome_rescan():
+            print("Navidrome rescan requested")
+    except Exception:
+        pass
 
 
 def extra_files(folder):

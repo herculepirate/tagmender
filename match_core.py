@@ -636,7 +636,8 @@ def media_kind(fmt):
     return ""
 
 
-CLUE_WEIGHTS = {"disc TOC": 3, "barcode": 3, "catalogue number": 3, "fingerprint": 2, "date": 2, "label": 1,
+CLUE_WEIGHTS = {"disc TOC": 3, "barcode": 3, "catalogue number": 3, "source link": 3, "isrc": 2,
+                "fingerprint": 2, "date": 2, "label": 1,
                 "country": 1, "format": 1, "physical": 1, "track lengths": 1, "track titles": 1, "script": 1}
 
 
@@ -659,6 +660,11 @@ def file_clues(album, cand, clues, against):
     if ((cand.get("source") == "mb" and cand.get("id") in (album.get("toc_releases") or ()))
             or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("toc_discogs") or ()))):
         clues["disc TOC"] = "disc ID (track positions of the CD) matches"
+    if ((cand.get("source") == "mb" and cand.get("id") in (album.get("link_releases") or ()))
+            or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("tag_discogs_links") or ()))):
+        clues["source link"] = "the files' own tags link to this release"
+    if cand.get("source") == "mb" and cand.get("id") in (album.get("isrc_releases") or ()):
+        clues["isrc"] = "the files' ISRC codes are on this release"
     if cand.get("source") == "mb" and cand.get("id") in (album.get("fp_releases") or ()):
         clues["fingerprint"] = "audio fingerprints (AcoustID) are on this release"
     # tags written by whoever ripped or bought it
@@ -823,6 +829,14 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     a_sim = max(artist_sim(album["artist"], cand["artist"]),
                 artist_sim(album["artist"], cand.get("artist_alt") or ""),
                 artist_sim(album["artist"], cand.get("artist_sort") or ""))
+    # learned from your library: albums by this artist are filed under that folder
+    aliases = cfg.get("artist_aliases") or {}
+    learned = [a for key in (album["artist"], album.get("artist_folder") or "")
+               for k, lst in aliases.items() if fold(k) == fold(key) for a in lst]
+    if a_sim < 0.85 and any(artist_sim(x, cand["artist"]) >= 0.85 or artist_sim(x, cand.get("artist_alt") or "") >= 0.85
+                            for x in learned):
+        a_sim = 1.0
+        notes.append(f"you file {cand['artist']} under {album.get('artist_folder') or album['artist']}")
     t_sim = title_sim(album["title"], cand["title"])
     pts += cfg["w_artist"] * a_sim
     avail += cfg["w_artist"]
@@ -1034,6 +1048,8 @@ def classify(scored, cfg):
     # (freeDB-style): "The Mediator" is "The Mediator Between Head and Hands
     # Must Be the Heart"; an album filed under Death is credited to Control Denied.
     proof = ("disc ID" if (best.get("clues") or {}).get("disc TOC") else
+             "the files' own link" if (best.get("clues") or {}).get("source link") else
+             "ISRC" if (best.get("clues") or {}).get("isrc") else
              "audio fingerprint" if (best.get("clues") or {}).get("fingerprint") else
              "barcode" if best["code"] == "barcode" else
              "catalogue number" if best["code"] in ("catalogue number", "catalogue number (folder name)")
@@ -1073,6 +1089,7 @@ def classify(scored, cfg):
                          and best["title_sim"] >= cfg["auto_min_title"] and not best.get("conflict"))
               else f"{best['code']} points to this release" if best["code"]
               else "disc ID points to this release" if (best.get("clues") or {}).get("disc TOC")
+              else "your files' own tags link to this release" if (best.get("clues") or {}).get("source link")
               else "vinyl rip of a vinyl release (a manual rip's lengths differ)" if vinyl else "")
     lengths_excused = False
     if not barcode_decides:

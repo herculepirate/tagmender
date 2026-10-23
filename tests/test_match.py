@@ -492,6 +492,55 @@ class PressingFromScans(unittest.TestCase):
     def classify(self, text, *cands):
         return mc.classify([mc.score_candidate(album(), c, CFG, ocr_text=text) for c in cands], CFG)
 
+    def test_country_preference_never_skips_the_scans(self):
+        """Once Was Not: a US and a German CD tie; the spine's FO532CD finds the FONO pressing.
+        The country preference must not settle the tie before the scans are read."""
+        def rel(rid, country, catno):
+            r = mb_release(rid, "Scan Artist", "Scan Album", 2005, [10000, 20000, 30000], country=country)
+            r["label-info"] = [{"catalog-number": catno, "label": {"name": "L"}}]
+            return r
+        us, de, ru = rel("us", "US", "CMR 8242-2"), rel("de", "DE", "CM 77542-2"), rel("ru", "RU", "FO532CD")
+
+        class H(FakeHttp):
+            def __init__(self):
+                super().__init__()
+                self.mb, self.dg, self.dg_search = {"us": us, "de": de, "ru": ru}, {}, {}
+
+            def get_json(self, url, host):
+                import urllib.parse as up
+                if host == "mb" and "/ws/2/release/?" in url:
+                    q = up.unquote(url.split("query=")[1].split("&")[0])
+                    if "catno" in q:
+                        return {"releases": [mb_hit(ru)] if "FO532CD" in q else []}
+                    return {"releases": [mb_hit(us), mb_hit(de)]}
+                if host == "discogs" and "database/search" in url:
+                    return {"results": []}
+                return super().get_json(url, host)
+
+        tmp = Path(tempfile.mkdtemp())
+        saved = (ma.list_images, ma.ocr_barcodes, ma.ocr_text, ma.ocr_spines)
+        try:
+            d = tmp / "Scan Artist" / "2005 - Scan Album"
+            d.mkdir(parents=True)
+            for i in range(3):
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                                f"sine=frequency={300 + 50 * i}:duration={10 * (i + 1)}", "-ar", "8000", "-ac", "1",
+                                "-metadata", f"title=T{i}", "-metadata", f"track={i + 1}",
+                                str(d / f"{i + 1:02d}.flac"), "-y"], check=True)
+            (d / "10.jpg").write_bytes(b"x")
+            ma.list_images = lambda base, n: ([d / "10.jpg"], "k-pref")
+            ma.ocr_barcodes = lambda imgs: set()
+            ma.ocr_text = lambda imgs: "Scan Artist  Scan Album"
+            ma.ocr_spines = lambda imgs: "SCAN ARTIST  FO532CD"
+            row = {"AlbumArtistFolder": "Scan Artist", "AlbumFolder": d.name, "FullPath": str(d),
+                   "Status": "untagged", "OcrCandidateImages": ""}
+            o = ma.process(row, H(), CFG_PREF, ma.load_plugin(PLUGIN_DIR),
+                           types.SimpleNamespace(ocr=True, max_images=15))
+            self.assertEqual(((o.get("best") or {}).get("id"), o["status"]), ("ru", "auto"), o.get("why"))
+        finally:
+            ma.list_images, ma.ocr_barcodes, ma.ocr_text, ma.ocr_spines = saved
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_label_and_country_on_the_back_pick_the_pressing(self):
         r = self.classify(self.BACK,
                           cand(id="us", country="US", label="Century Media"),
@@ -803,6 +852,59 @@ class PressingEvidence(unittest.TestCase):
         r = self.pick(a, cand(title="Nosatsu Live"))
         self.assertEqual(r["status"], "auto", r["why"])
         self.assertIn("audio fingerprint", " ".join(r["best"]["notes"]))
+
+    def test_links_and_isrcs_left_in_the_tags(self):
+        infos = [{"clue_text": "Visit https://mournfulcongregation.bandcamp.com/album/the-book-of-kings for more"},
+                 {"clue_text": "itunes:plid:1680497923 https://www.discogs.com/release/1441661-Cryptopsy"},
+                 {"clue_text": "https://musicbrainz.org/release/6118a8cb-da37-4f82-bd1e-6087e0ac7d3b"}]
+        mb, dg, urls = ma.source_links(infos)
+        self.assertEqual(mb, {"6118a8cb-da37-4f82-bd1e-6087e0ac7d3b"})
+        self.assertEqual(dg, {"1441661"})
+        self.assertIn("https://mournfulcongregation.bandcamp.com/album/the-book-of-kings", urls)
+        self.assertIn("https://music.apple.com/album/1680497923", urls)
+
+        class H:
+            def get_json(self, url, host):
+                if "/ws/2/url" in url:
+                    return {"relations": [{"release": {"id": "bc-rel"}}]}
+                if "/ws/2/isrc/" in url:
+                    return {"recordings": [{"releases": [{"id": "x1"}, {"id": "x2"}]}]}
+                return {}
+        a = {"tag_urls": urls[:1], "isrcs": ["USRC17607839"]}
+        self.assertEqual(ma.link_releases(H(), a), {"bc-rel", "x1", "x2"})
+        r = self.pick(album(link_releases={"b"}), cand(id="a"), cand(id="b"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
+
+    def test_track_numbers_and_titles_from_file_names(self):
+        infos = [(Path("/m/01 - Cryptopsy - Luminum.flac"), {}), (Path("/m/02 - Cryptopsy - Carrionshine.flac"), {})]
+        ma.names_from_files(infos)
+        self.assertEqual([(i["num"], i["title"]) for _p, i in infos], [(1, "Luminum"), (2, "Carrionshine")])
+        vinyl = [(Path("/m/A1 Intro.flac"), {}), (Path("/m/A2 Second.flac"), {}), (Path("/m/B1 Third.flac"), {})]
+        ma.names_from_files(vinyl)
+        self.assertEqual([i["num"] for _p, i in vinyl], [1, 2, 3])
+        own = [(Path("/m/001.L.opus"), {"title": "Luminum", "num": 1}), (Path("/m/002.ITKWEDTSIM.opus"), {})]
+        ma.names_from_files(own)
+        self.assertEqual(own[0][1]["title"], "Luminum")             # tags win
+        self.assertEqual((own[1][1]["num"], own[1][1].get("title", "")), (2, ""))   # initials are not a title
+
+    def test_rules_learned_from_how_you_file(self):
+        import learn_rules
+        rows = [{"Status": "musicbrainz_only", "AlbumArtistFolder": "Death", "TagAlbumArtist": "Control Denied"},
+                {"Status": "musicbrainz_only", "AlbumArtistFolder": "Meshuggah",
+                 "TagAlbumArtist": "Fredrik Thordendal’s Special Defects"},
+                {"Status": "tagged_both", "AlbumArtistFolder": "Sunn O)))", "TagAlbumArtist": "Sunn O))) & Boris"},
+                {"Status": "untagged", "AlbumArtistFolder": "X", "TagAlbumArtist": "Y"}]
+        rules = learn_rules.learn(rows, {"artist_aliases": {"Slayer": ["Various Artists"]}})
+        self.assertEqual(rules["artist_aliases"]["Death"], ["Control Denied"])
+        self.assertIn("Meshuggah", rules["artist_aliases"])
+        self.assertNotIn("Sunn O)))", rules["artist_aliases"])          # a collaboration, not another artist
+        self.assertEqual(rules["artist_aliases"]["Slayer"], ["Various Artists"])   # your own entries stay
+        cfg = dict(CFG, artist_aliases=rules["artist_aliases"])
+        a = album(artist="Death", artist_folder="Death", title="The Fragile Art of Existence")
+        r = mc.classify([mc.score_candidate(a, cand(artist="Control Denied", title="The Fragile Art of Existence"),
+                                           cfg)], cfg)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("you file Control Denied under Death", " ".join(r["best"]["notes"]))
 
     def test_nothing_telling_stays_in_review(self):
         r = self.pick(album(audio={"hires": False, "cd_frames": True}),

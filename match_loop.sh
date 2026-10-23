@@ -10,13 +10,19 @@
 #   tail -f ~/Downloads/matching/run.log
 #   touch ~/Downloads/matching/STOP     ask it to stop after the current round
 #
-# Settings (environment): AUDIT, OUT, POLL (seconds between change checks), EXTRA (extra args)
+#   RECHECK_DAYS=30 ...                 also look again, once a day, at review/nomatch
+#                                       albums last checked more than 30 days ago
+#
+# Settings (environment): AUDIT, OUT, POLL (seconds between change checks), EXTRA (extra args),
+# RECHECK_DAYS (re-check unresolved albums older than this many days, once a day)
 set -u
 cd "$(dirname "$0")" || exit 1
 AUDIT="${AUDIT:-}"
 OUT="${OUT:-$HOME/Downloads/matching}"
 POLL="${POLL:-30}"
 EXTRA="${EXTRA:-}"
+RECHECK_DAYS="${RECHECK_DAYS:-}"
+last_round=0
 mkdir -p "$OUT"
 # One runner at a time: two would share one database and double the API rate.
 exec 9>"$OUT/runner.lock"
@@ -45,7 +51,9 @@ while [ ! -e "$STOP" ]; do
   # shellcheck disable=SC2086
   # No --retry-* here: when the scripts change, every album decided by the old
   # version is re-evaluated automatically (and its old result kept until then).
-  python3 -u match_albums.py "$AUDIT" --out-dir "$OUT" --ocr $EXTRA >> "$LOG" 2>&1 &
+  RECHECK=""
+  [ -n "$RECHECK_DAYS" ] && RECHECK="--recheck-days $RECHECK_DAYS"
+  python3 -u match_albums.py "$AUDIT" --out-dir "$OUT" --ocr $RECHECK $EXTRA >> "$LOG" 2>&1 &
   pid=$!
   # A full round can take many hours. If a fix is installed (scripts change)
   # or STOP appears, end this round now; finished albums are already saved.
@@ -62,8 +70,13 @@ while [ ! -e "$STOP" ]; do
   rc=$?
   echo "=== round $round finished $(date -Is) exit=$rc" >> "$LOG"
   write_status waiting "$round" "$rc" "$h"
-  # Idle until the scripts change (a fix was installed) or STOP appears.
+  last_round=$(date +%s)
+  # Idle until the scripts change (a fix was installed), STOP appears, or (with
+  # RECHECK_DAYS) a day has passed and unresolved albums are due for a fresh look.
   while [ ! -e "$STOP" ] && [ "$(scripts_hash)" = "$h" ]; do
+    if [ -n "$RECHECK_DAYS" ] && [ $(( $(date +%s) - last_round )) -ge 86400 ]; then
+      break
+    fi
     sleep "$POLL"
   done
 done

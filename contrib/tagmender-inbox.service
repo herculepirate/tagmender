@@ -1,0 +1,22 @@
+# systemd user service: TagMender watches an inbox folder and tags/files what arrives.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp contrib/tagmender-inbox.service ~/.config/systemd/user/
+#   # put your Discogs token in ~/.config/tagmender/env (chmod 600):  DISCOGS_TOKEN=...
+#   # edit the paths below, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now tagmender-inbox
+#   journalctl --user -u tagmender-inbox -f
+[Unit]
+Description=TagMender inbox (identify, tag and file new music)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/tagmender/env
+WorkingDirectory=%h/Documents/Github/tagmender
+ExecStart=/usr/bin/python3 -u inbox.py --inbox %h/Music/Inbox --library /media/unraidmedia2/music/extreme_music
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

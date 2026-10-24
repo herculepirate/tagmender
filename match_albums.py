@@ -279,7 +279,8 @@ def read_file(path):
          "rate": 0, "bits": 0, "samples": 0, "lossless": False,  # the audio itself
          "has_ids": False,      # already carries a MusicBrainz or Discogs release ID
          "audio_md5": 0,        # FLAC's checksum of the decoded audio (0 = unknown)
-         "isrc": "", "clue_text": ""}   # ISRC, and comments/URLs/store IDs left by shops and rippers
+         "isrc": "", "clue_text": "",   # ISRC, and comments/URLs/store IDs left by shops and rippers
+         "credit": ""}                  # who the files say performed/wrote it: track artist, copyright, composer
     try:
         _source_clues(path, t)
         if path.suffix.lower() in (".m4a", ".mp4"):
@@ -298,6 +299,7 @@ def read_file(path):
                 elif nk == "barcode": t["barcode"] = _txt(v)
                 elif nk in _CATNO_KEYS and not t["catno"]: t["catno"] = _txt(v)
                 elif nk in _ID_KEYS: t["has_ids"] = True
+                if k in ("\xa9ART", "cprt", "\xa9wrt"): t["credit"] += " " + _txt(v)
             return t
         f = mutagen.File(path)
         if f is None:
@@ -322,7 +324,8 @@ def read_file(path):
                 return _names([str(s) for s in x[0].text]) if x else ""
             t.update(title=fr("TIT2"), album=fr("TALB"), artist=names("TPE2") or names("TPE1"),
                      year=_int(fr("TDRC")), num=_int(fr("TRCK")), disc=_int(fr("TPOS")),
-                     label=fr("TPUB"), media=fr("TMED"), date=fr("TDRL") or fr("TDRC"))
+                     label=fr("TPUB"), media=fr("TMED"), date=fr("TDRL") or fr("TDRC"),
+                     credit=" ".join(fr(x) for x in ("TPE1", "TCOP", "TCOM", "TPE3")))
             for frame in tags.getall("TXXX"):
                 nk = re.sub(r"[\s_\-]", "", frame.desc.lower())
                 if nk == "barcode": t["barcode"] = _txt(frame.text)
@@ -341,7 +344,8 @@ def read_file(path):
                  disc=_int(g("discnumber")), barcode=g("barcode"),
                  catno=next((g(k) for k in _CATNO_KEYS if g(k)), ""),
                  label=g("label") or g("organization") or g("publisher"),
-                 country=g("releasecountry"), media=g("media"), date=g("date"))
+                 country=g("releasecountry"), media=g("media"), date=g("date"),
+                 credit=" ".join(g(k) for k in ("artist", "copyright", "composer", "performer", "conductor")))
     except Exception as exc:
         t["_error"] = str(exc)
     return t
@@ -465,7 +469,27 @@ def _drop_duplicate_tracks(files, info):
     return [p for p in files if p not in gone_set], sorted(p.name for p in gone_set)
 
 
-def read_album(album_dir, artist_folder, album_folder, exclude=()):
+BLIND_KEYS = ("barcode", "catno", "label", "country", "media", "date", "isrc", "clue_text", "credit")
+
+
+def notes_text(album_dir, limit=20000):
+    """Text the ripper or shop left next to the music (.info, .txt, .nfo): it often
+    names the performer and label ("Label: Dobles Music / Tidal")."""
+    out = []
+    for p in sorted(Path(album_dir).glob("*")):
+        if p.suffix.lower() in (".info", ".txt", ".nfo", ".md") and p.is_file() and p.stat().st_size < limit:
+            try:
+                out.append(p.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                pass
+    return " ".join(out)[:limit]
+
+
+def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
+    """blind=True (validate.py): the files were tagged already, so their release IDs,
+    ISRCs, label, catalogue number, barcode, country, date and year came FROM a release
+    and would only confirm it. They are ignored; what is left is what an untagged copy
+    has: names, track lengths, the audio, the disc TOC, the scans and the folder name."""
     files = []
     exclude = {str(x) for x in exclude}
     for dirpath, _d, names in os.walk(album_dir):
@@ -475,6 +499,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=()):
                 files.append(p)
     info = {p: read_file(p) for p in files}
     names_from_files([(p, info[p]) for p in files])
+    if blind:
+        for i in info.values():
+            for k in BLIND_KEYS:
+                i[k] = ""
+            i["year"] = 0                                  # the folder's year is used instead
     files, dropped_formats = _drop_duplicate_copies(files, info, album_dir)
     files, dropped_tracks = _drop_duplicate_tracks(files, info)
     infos = [(p, info[p]) for p in files]
@@ -524,6 +553,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=()):
         "tocs": disc_tocs(infos) or log_tocs(album_dir) or cue_tocs(album_dir, infos),
         "scans": scan_evidence(album_dir),
         "isrcs": [i.get("isrc") for _p, i in infos if i.get("isrc")],
+        "credit_text": " ".join(sorted({i.get("credit") or "" for _p, i in infos})) + " " + notes_text(album_dir),
         **dict(zip(("tag_mb_links", "tag_discogs_links", "tag_urls"), source_links([i for _p, i in infos]))),
     }
 
@@ -1531,7 +1561,8 @@ def _process(row, http, cfg, dm, args, full_cfg):
                 "tracks": len(dec.excluded), "status": "ignored" if whole.action == "ignore" else "skipped",
                 "best": None, "alts": [], "why": [whole.reason()], "excluded_by": whole.rule.id,
                 "rules_hash": exclusions.rules_hash(rules), "version": result_version(), "checked": round(time.time())}
-    album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"], exclude=dec.excluded)
+    album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"], exclude=dec.excluded,
+                       blind=getattr(args, "blind", False))
     out = {"path": row["FullPath"], "artist_folder": row["AlbumArtistFolder"],
            "album_folder": row["AlbumFolder"], "tag_artist": album["artist"],
            "tag_title": album["title"], "tag_year": album["year"],
@@ -1585,7 +1616,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
     final = mc.combine(mb_res, dg_res)
 
     ocr_txt = ""
-    if args.ocr and images and final["status"] != "auto":
+    # The scans are read for EVERY album that has them, also when a database is already
+    # sure: the back and credits (a catalogue number, "Made in", the label's address)
+    # tell which pressing your copy is, which a title match cannot.
+    if args.ocr and images:
         # cached per language set: installing a language pack reads the scans again
         kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
         text = _cached(db, kind, img_key, lambda: ocr_text(images))
@@ -1686,6 +1720,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
             again.append(res)
         mb_res, dg_res = again
         final = mc.combine(mb_res, dg_res)
+    # Both databases sure of different pressings, and nothing about your copy tells them
+    # apart: your country order decides between them as it does within one database.
+    if full_cfg.get("preferred_countries"):
+        final = mc.combine(mb_res, dg_res, full_cfg.get("preferred_countries"))
 
     # The rules again, with what identification found (a release titled "[no vox]")
     if final.get("best") and not anyway:

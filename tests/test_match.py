@@ -174,6 +174,54 @@ class Core(unittest.TestCase):
         unsure = dict(dgood, status="review")
         self.assertEqual(mc.combine(good, unsure)["best"]["cand"]["source"], "mb")
 
+    def test_discogs_without_evidence_does_not_override_musicbrainz(self):
+        """Candlemass (2005): Discogs's only confident pick is Nuclear Blast, Germany;
+        MusicBrainz is sure of Metal Mind, Poland. Nothing about the copy tells them
+        apart, so the country order decides; with evidence, the evidence does."""
+        mbr = mc.classify([mc.score_candidate(album(), cand(id="pl", country="PL", label="Metal Mind"), CFG)], CFG)
+        mbr["scored"] = [mbr["best"]]
+        dgr = mc.classify([mc.score_candidate(album(), cand(id="9", source="discogs", country="Germany",
+                                                            label="Nuclear Blast"), CFG)], CFG)
+        self.assertEqual(mc.combine(mbr, dgr, ["PL", "DE"])["best"]["cand"]["id"], "pl")
+        self.assertEqual(mc.combine(mbr, dgr, ["DE", "PL"])["best"]["cand"]["id"], "9")
+        self.assertEqual(mc.combine(mbr, dgr)["best"]["cand"]["id"], "9")              # no order: Discogs first
+        a = album(folder="2005 - First Light [Nuclear Blast, Germany]")
+        dge = mc.classify([mc.score_candidate(a, cand(id="9", source="discogs", country="Germany",
+                                                      label="Nuclear Blast"), CFG)], CFG)
+        self.assertEqual(mc.combine(mbr, dge, ["PL", "DE"])["best"]["cand"]["id"], "9")  # evidence wins
+
+    def test_same_label_country_year_and_tracks_is_one_release(self):
+        mbc = cand(id="m", label="Death Cult Switzerland", country="CH", catnos=set())
+        dgc = cand(id="d", source="discogs", label="Death Cult Switzerland", country="Switzerland",
+                   catnos={"dcs3"})
+        self.assertTrue(mc.same_pressing(mbc, dgc))
+        self.assertFalse(mc.same_pressing(mbc, dict(dgc, country="Germany")))
+        self.assertFalse(mc.same_pressing(dict(mbc, catnos={"dcs9"}), dgc))      # both numbered: they must agree
+
+    def test_evidence_both_picks_share_decides_nothing(self):
+        """Death - Leprosy [2014 RM 3CD]: 'a CD (folder name)' is true of the US and the
+        Japanese Relapse CD alike, so it does not let Discogs's Japanese pick win."""
+        a = album(folder="1988 - First Light [2014 RM 3CD]", media_hint="cd")
+        mbr = mc.classify([mc.score_candidate(a, cand(id="us", country="US", label="Relapse", formats={"cd"}),
+                                              CFG)], CFG)
+        mbr["scored"] = [mbr["best"]]
+        dgr = mc.classify([mc.score_candidate(a, cand(id="7", source="discogs", country="Japan", label="Relapse",
+                                                      formats={"cd"}), CFG)], CFG)
+        self.assertEqual(mc.combine(mbr, dgr, ["CA", "US"])["best"]["cand"]["id"], "us")
+
+    def test_another_version_of_the_album_is_not_auto(self):
+        """Cynic - Traced In Air (2008): 'Traced in Air Remixed' (2019) fits every length
+        but is another recording; only a folder saying Remixed takes it."""
+        c = cand(title="First Light Remixed")
+        r = mc.classify([mc.score_candidate(album(folder="2008 - First Light"), c, CFG)], CFG)
+        self.assertNotEqual(r["status"], "auto")
+        self.assertTrue(any("Remixed version" in w or "remixed version" in w for w in r["why"]), r["why"])
+        r = mc.classify([mc.score_candidate(album(folder="2019 - First Light [Remixed 24bit]"), c, CFG)], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        r = mc.classify([mc.score_candidate(album(title="Alive", folder="2001 - Alive"), cand(title="Alive"), CFG)],
+                        CFG)
+        self.assertEqual(r["status"], "auto")
+
     def test_ocr_text_can_confirm_catalogue_number(self):
         c = cand(catnos={"abc123"})
         s = mc.score_candidate(album(), c, CFG, ocr_text="Cat. No. ABC-123 Made in Canada")
@@ -709,6 +757,41 @@ class BothDatabases(unittest.TestCase):
         self.assertEqual(mc.combine(mb, dg)["best"]["cand"]["id"], "7")
 
 
+class FilesNameTheArtist(unittest.TestCase):
+    """Aghora - Entheogenic Frequencies Orchestral Representations: filed under Aghora,
+    but the files' own ARTIST and COPYRIGHT tags and the ripper's .info name Gustavo
+    Dobles, and the title and every track length agree: it is his, without asking."""
+
+    def test_track_artist_and_copyright_tags_prove_the_credit(self):
+        a = album(artist="Aghora", title="Entheogenic Frequencies Orchestral Representations",
+                  credit_text="Gustavo Dobles 2020 Gustavo Dobles Label: Dobles Music / Tidal")
+        c = cand(artist="Gustavo Dobles", title="Entheogenic Frequencies Orchestral Representations")
+        r = mc.classify([mc.score_candidate(a, c, CFG)], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("naming this artist", " ".join(r["best"]["notes"]))
+        r = mc.classify([mc.score_candidate(dict(a, credit_text="Aghora"), c, CFG)], CFG)
+        self.assertNotEqual(r["status"], "auto")                         # nothing names him: still asks
+        far = [{"disc": 1, "title": f"T{i}", "secs": x} for i, x in enumerate((260, 305, 410))]
+        r = mc.classify([mc.score_candidate(a, dict(c, tracks=far), CFG)], CFG)
+        self.assertNotEqual(r["status"], "auto")                         # lengths must all agree too
+
+    def test_credit_text_is_read_from_tags_and_notes(self):
+        import tempfile, shutil
+        d = Path(tempfile.mkdtemp())
+        try:
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1",
+                            "-metadata", "artist=Gustavo Dobles", "-metadata", "album_artist=Aghora",
+                            "-metadata", "copyright=2020 Gustavo Dobles", str(d / "01.flac"), "-y"], check=True)
+            (d / "notes.info").write_text("Label: Dobles Music / Tidal")
+            al = ma.read_album(d, "Aghora", "2020 - Representations")
+            self.assertIn("Gustavo Dobles", al["credit_text"])
+            self.assertIn("Dobles Music", al["credit_text"])
+            self.assertEqual(al["artist"], "Aghora")
+            self.assertNotIn("Gustavo", ma.read_album(d, "Aghora", "x", blind=True)["credit_text"].split("Label")[0])
+        finally:
+            shutil.rmtree(d)
+
+
 class RemasterEditions(unittest.TestCase):
     """[2021 RM] in a folder name: a remaster, usually a digital release, dated near that year."""
 
@@ -845,6 +928,70 @@ class PressingEvidence(unittest.TestCase):
         r = self.pick(album(folder="2010 - First Light [Century Media, Germany]"),
                       cand(id="eu", country="XE", label="Century Media"))
         self.assertEqual(r["status"], "auto", r["why"])                # Germany is in Europe
+
+    def test_same_pressing_listed_twice_takes_the_entry_with_your_edition_year(self):
+        """Sleep - Sleep's Holy Mountain [2015 ReIssue]: two entries share label, catalogue
+        number and barcode, one dated 2015 and one 1992. The 2015 one is your copy."""
+        a = album(folder="1992 - First Light [2015 ReIssue]", pressing_year=2015, barcodes={"5018615107927"})
+        kw = dict(label="Earache", catnos={"mosh1"}, barcodes={"5018615107927"}, country="GB")
+        r = self.pick(a, cand(id="old", year=1992, date="1992-10-01", **kw),
+                      cand(id="re", year=2015, date="2015", **kw))
+        self.assertEqual(r["best"]["cand"]["id"], "re", r["why"])
+
+    def test_a_live_venue_is_not_the_pressing_country(self):
+        a = album(folder="2013 - First Light (Live at Roadburn 2011 - Holland)")
+        r = self.pick(a, cand(id="se", country="SE", label="Svart"))
+        self.assertEqual(r["status"], "auto", r["why"])
+
+    def test_a_disc_id_linked_to_one_discogs_pressing_does_not_pick_it(self):
+        """Alcest - Les Chants de l'aurore: MusicBrainz's Brazilian release carries the disc
+        ID and links to its Discogs entry; Nuclear Blast's own CDs on Discogs have no such
+        link. That is no evidence the copy is Brazilian."""
+        a = album(toc_discogs={"br"})
+        r = mc.classify([mc.score_candidate(a, cand(id="br", source="discogs", country="Brazil",
+                                                    label="Shinigami"), CFG_PREF),
+                         mc.score_candidate(a, cand(id="eu", source="discogs", country="Europe",
+                                                    label="Nuclear Blast"), CFG_PREF)], CFG_PREF)
+        self.assertNotEqual(r["best"]["cand"]["id"], "br", r["why"])
+        # a MusicBrainz disc ID still decides between MusicBrainz releases
+        r = self.pick(album(toc_releases={"b"}), cand(id="a", country="US"), cand(id="b", country="DE"))
+        self.assertEqual(r["best"]["cand"]["id"], "b")
+
+    def test_self_released_album_is_one_release_on_both_databases(self):
+        mbc = cand(id="m", label="[no label]", country="XW", formats={"digital"})
+        dgc = cand(id="d", source="discogs", label="Not On Label (Band Self-released)", country="Australia",
+                   formats={"digital"})
+        self.assertTrue(mc.same_pressing(mbc, dgc))
+        self.assertFalse(mc.same_pressing(mbc, dict(dgc, year=2014)))
+        self.assertFalse(mc.same_pressing(mbc, dict(dgc, label="Napalm")))
+
+    def test_the_labels_address_on_the_back_tells_the_pressing(self):
+        """Nothing else tells two pressings apart, but the back prints the label's office:
+        'Prophecy Productions, D-54550 Daun' -> the German CD, not the European one."""
+        self.assertEqual(mc.countries_on_scans("Prophecy Productions, Kirchstr. 21, D-54550 Daun"), {"DE"})
+        self.assertEqual(mc.countries_on_scans("Nuclear Blast GmbH, Hauptstrasse 109, 73072 Donzdorf"), {"DE"})
+        self.assertEqual(mc.countries_on_scans("Napalm Records, Hauptplatz 20, 8790 Eisenerz"), {"AT"})
+        self.assertEqual(mc.countries_on_scans("Century Media Inc., Hawthorne, CA 90250"), {"US"})
+        self.assertEqual(mc.countries_on_scans("PO Box 144, Nottingham NG3 4GE, England"), {"GB"})
+        self.assertEqual(mc.countries_on_scans("Shinigami Records CEP 03163-030 Sao Paulo"), {"BR"})
+        self.assertEqual(mc.countries_on_scans("Recorded in Montreal, June 1998. AB1 2CD"), set())
+        text = "PROPHECY PRODUCTIONS  D-54550 Daun  www.prophecy.de"
+        r = mc.classify([mc.score_candidate(album(), c, CFG, ocr_text=text)
+                         for c in (cand(id="eu", country="XE", label="Prophecy Productions"),
+                                   cand(id="de", country="DE", label="Prophecy Productions"))], CFG)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "de"), r["why"])
+
+    def test_a_japanese_title_in_the_folder_names_the_japanese_edition(self):
+        """Meshuggah - Koloss = 伏魔殿: the disc ID is also on the Russian CD, but the folder's
+        Japanese title says the copy is the Japanese edition."""
+        a = album(folder="2012 - Koloss = 伏魔殿", toc_releases={"ru"})
+        r = self.pick(a, cand(id="ru", country="RU", label="Nuclear Blast"),
+                      cand(id="jp", country="JP", label="Avalon"))
+        self.assertEqual(r["best"]["cand"]["id"], "jp", r["why"])
+        r = self.pick(album(folder="2008 - obZen = オブゼン"), cand(id="us", country="US"), cand(id="jp", country="JP"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "jp"), r["why"])
+        r = self.pick(album(folder="2008 - First Light"), cand(id="us", country="US"))     # no title: no rule
+        self.assertEqual(r["status"], "auto")
 
     def test_catalogue_numbers_written_differently(self):
         same = mc.catno_same

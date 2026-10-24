@@ -378,7 +378,8 @@ def recheck(matches_db, album, allow_old=False):
     return stale_reason(o, allow_old)
 
 
-def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow_old=False, releases=None):
+def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow_old=False, releases=None,
+                  retag=False):
     """Confident MusicBrainz matches whose folder still exists and that Picard has not
     tagged since (no file carries a different release ID, none is saved by Picard),
     and that no Ignore/Skip rule excludes, checked again here before anything is written.
@@ -427,11 +428,15 @@ def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow
             continue
         ids = [read_ids(p) for p in files]
         other = {i["albumid"] for i in ids if i["albumid"] and i["albumid"] != b["id"]}
-        if other:
+        # retag (fixes found by validate.py): the files carry the WRONG release on purpose
+        if other and not retag:
             skipped.append((path, f"files already carry another release ID {sorted(other)[0]}"))
             continue
-        if all(i["trackid"] for i in ids):
+        if all(i["trackid"] for i in ids) and not retag:
             skipped.append((path, "already tagged by Picard"))
+            continue
+        if retag and not other and all(i["trackid"] for i in ids):
+            skipped.append((path, "already tagged with this release"))
             continue
         out.append({"path": path, "mbid": b["id"], "artist": b.get("artist", ""), "title": b.get("title", ""),
                     "confidence": b.get("confidence"), "files": [str(p) for p in files]})
@@ -670,6 +675,8 @@ def main():
                     help="tag albums even when an Ignore/Skip rule excludes them (this run only)")
     ap.add_argument("--into", help="albums come from outside the library (an inbox) and Picard files them "
                                    "into this library folder, which must be Picard's 'Move files to' folder")
+    ap.add_argument("--retag", action="store_true",
+                    help="re-tag albums that carry another release (with validate.py's fixes.db)")
     ap.add_argument("--allow-old-matches", action="store_true",
                     help="also tag matches made by an older version of the matcher")
     ap.add_argument("--batch", type=int, default=10, help="albums per Picard run (default 10)")
@@ -699,7 +706,7 @@ def main():
     except ImportError:
         releases = None
     albums, skipped = select_albums(args.matches_db, args.limit, args.only, args.process_anyway,
-                                    args.allow_old_matches, releases)
+                                    args.allow_old_matches, releases, retag=args.retag)
     print(f"{len(albums)} album(s) to tag; {len(skipped)} skipped")
     outside = outside_move_target(albums, args.picard_ini)
     if outside and args.into and Path(args.into).expanduser().resolve() == Path(outside[0]).resolve():

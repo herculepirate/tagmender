@@ -547,9 +547,52 @@ def country_code(name):
     return _COUNTRY_NAMES.get(re.sub(r"[^a-z ]", " ", raw.casefold()).strip().replace("  ", " "), "")
 
 
+# A label's or manufacturer's postal address on the back or in the credits says where the
+# pressing comes from: "Prophecy Productions, D-54550 Daun", "Century Media Inc., 2323 W.
+# El Segundo Blvd, Hawthorne, CA 90250", "Earache, PO Box 144, Nottingham NG3 4GE, UK".
+# Only postal forms count (not a city named in the thanks or "Recorded in Montréal").
+_EU_POSTAL = {"D": "DE", "A": "AT", "CH": "CH", "F": "FR", "NL": "NL", "B": "BE", "I": "IT", "S": "SE",
+              "DK": "DK", "N": "NO", "FIN": "FI", "SF": "FI", "PL": "PL", "E": "ES", "P": "PT", "GR": "GR",
+              "CZ": "CZ", "H": "HU", "L": "LU"}
+_EU_POSTAL_RE = re.compile(r"(?<![A-Za-z0-9])(D|A|CH|F|NL|B|I|S|DK|N|FIN|SF|PL|E|P|GR|CZ|H|L)\s?-\s?(\d{4,5})"
+                           r"\s+[A-ZÄÖÜÉÈ][A-Za-zäöüßéèàç-]{2,}")
+_STREET_RE = re.compile(r"(?:stra(?:ss|ß)e|str\.|weg|gasse|platz|allee)\s*\d+[a-z]?,?\s+(\d{4,5})\s+[A-ZÄÖÜ][a-zäöüß]{2,}",
+                        re.I)
+_US_STATE_CODES = ("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ "
+              "NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC").split()
+_US_ZIP_RE = re.compile(r"\b[A-Z][a-zA-Z .]{2,20},?\s+(" + "|".join(_US_STATE_CODES) + r")\.?\s+\d{5}(?:-\d{4})?\b")
+_UK_POST_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}\b")
+_UK_NEAR = re.compile(r"\b(?:england|london|u\.?k\.?|united kingdom|scotland|wales)\b", re.I)
+_CA_POST_RE = re.compile(r"\b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b")
+_CA_NEAR = re.compile(r"\b(?:canada|qu[eé]bec|qc|ontario|on|b\.?c\.?|alberta|ab)\b", re.I)
+_JP_POST_RE = re.compile(r"〒\s?\d{3}-\d{4}|\b\d{3}-\d{4}\b[^\n]{0,60}\b(?:tokyo|osaka|japan)\b", re.I)
+_BR_POST_RE = re.compile(r"\bCEP:?\s?\d{5}-?\d{3}\b")
+
+
+def countries_from_addresses(ocr_text):
+    """Countries whose postal address is printed on the scans."""
+    text = str(ocr_text or "")
+    out = {_EU_POSTAL[m.group(1)] for m in _EU_POSTAL_RE.finditer(text)}
+    # "Hauptstrasse 109, 73072 Donzdorf": a German street address (5 digits; Austria has 4)
+    for m in _STREET_RE.finditer(text):
+        out.add("DE" if len(m.group(1)) == 5 else "AT")
+    if _US_ZIP_RE.search(text):
+        out.add("US")
+    for rx, near, code in ((_UK_POST_RE, _UK_NEAR, "GB"), (_CA_POST_RE, _CA_NEAR, "CA")):
+        for m in rx.finditer(text):
+            if near.search(text[max(0, m.start() - 60):m.end() + 60]):
+                out.add(code)
+    if _JP_POST_RE.search(text):
+        out.add("JP")
+    if _BR_POST_RE.search(text):
+        out.add("BR")
+    return out
+
+
 def countries_on_scans(ocr_text):
-    """Release countries printed on the scans ("Made in Germany" -> {"DE"})."""
-    out = set()
+    """Release countries printed on the scans ("Made in Germany" -> {"DE"}), and the
+    countries of the postal addresses printed there (the label's own office)."""
+    out = countries_from_addresses(ocr_text)
     for m in _MADE_IN.finditer(str(ocr_text or "")):
         words = re.sub(r"[^a-z ]", " ", m.group(1).casefold()).split()
         for n in range(min(3, len(words)), 0, -1):       # longest known name first
@@ -687,8 +730,12 @@ def _readable_country(code_or_name):
     return name
 
 
-def _bracket_text(folder):
-    return " ".join(re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(folder or "")))
+def _bracket_text(folder, pressing_only=False):
+    parts = re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(folder or ""))
+    if pressing_only:
+        # "(Live at Roadburn 2011 - Holland)" says where it was played, not where it was pressed
+        parts = [p for p in parts if not re.search(r"\blive\b|\brecorded\b|\b(?:at|in)\s+[A-Z]", p, re.I)]
+    return " ".join(parts)
 
 
 def file_clues(album, cand, clues, against):
@@ -727,13 +774,28 @@ def file_clues(album, cand, clues, against):
             clues.setdefault("format", f"{tm} in the tags")
         else:
             against.append(f"tags say {tm}, this pressing is {'/'.join(sorted(formats))}")
+    # A Japanese (or Chinese) title in your folder name or tags names the edition:
+    # "Koloss = 伏魔殿", "obZen = オブゼン" are the Japanese CDs, not the Russian or US ones.
+    named_in = " ".join(str(album.get(k) or "") for k in ("folder", "title"))
+    if cc:
+        if re.search(r"[\u3040-\u30ff]", named_in):               # kana: Japanese only
+            asian = {"JP"}
+        elif re.search(r"[\u4e00-\u9fff]", named_in):             # kanji/hanzi alone
+            asian = {"JP", "CN", "TW", "HK"}
+        else:
+            asian = set()
+        if asian and cc in asian:
+            clues.setdefault("country", "the Japanese/Chinese title in your folder name")
+        elif asian and cc != "XW":
+            against.append(f"folder name says JP (its title is in Japanese/Chinese), this pressing is from "
+                           f"{cand.get('country')}")
     if cand.get("script") == "Latn" and not re.search(r"[^\x00-\u024f\s\W\d]", str(album.get("title") or "")):
         clues.setdefault("script", "listed in Latin script, like your tags")
     td, cd = str(album.get("tag_date") or ""), str(cand.get("date") or "")
     if len(td) >= 7 and len(cd) >= 7 and td[:len(cd)] == cd[:len(td)]:
         clues.setdefault("date", f"release date {cd} in the tags")
     # folder name: "[Century Media, 9976158, Germany]"
-    folder = _bracket_text(album.get("folder"))
+    folder = _bracket_text(album.get("folder"), pressing_only=True)
     if folder:
         fw = " " + fold(folder) + " "
         for x in str(cand.get("label") or "").split(";"):
@@ -818,6 +880,13 @@ def choose_pressing(tied, preferred_countries=None):
         return None
     rel = _relative_clues(tied)
     allc = {id(s): dict(s.get("clues") or {}, **rel[id(s)]) for s in tied}
+    # A Discogs pressing "matches the disc ID" only because a MusicBrainz release with
+    # that disc ID links to it; the other Discogs pressings of the same master simply
+    # lack such a link (Alcest - Les Chants de l'aurore: the Brazilian licence was picked
+    # over Nuclear Blast's own CD). So among Discogs pressings it tells nothing apart.
+    for s in tied:
+        if s["cand"].get("source") == "discogs":
+            allc[id(s)].pop("disc TOC", None)
     scored = []
     for s in tied:
         mine = allc[id(s)]
@@ -850,13 +919,33 @@ def same_pressing_listed_twice(tied):
     codes = {tuple(sorted(barcode_key(b) for b in s["cand"].get("barcodes") or ())) for s in tied} - {()}
     if len(keys) != 1 or not k[0] or len(codes) > 1 or any(s.get("clues_against") for s in tied):
         return None
-    pick = max(tied, key=lambda s: (len(str(s["cand"].get("date") or "")), len(s["cand"].get("tracks") or ()),
+    # the better-scoring entry first (Sleep's Holy Mountain [2015 ReIssue]: the entry
+    # dated 2015 over one dated 1992 with the same barcode), then the fuller one
+    pick = max(tied, key=lambda s: (s["confidence"], not s.get("year_off"),
+                                    len(str(s["cand"].get("date") or "")), len(s["cand"].get("tracks") or ()),
                                     -tied.index(s)))
     return pick, {"duplicate": "the same pressing listed twice (same label, catalogue number and barcode); "
                                "the fuller entry is used"}
 
 
 choose_pressing_from_scans = choose_pressing      # earlier name
+
+
+_VERSION_WORDS = re.compile(r"\b(remix(?:ed|es)?|re-?recorded|re-?recording|instrumentals?|acoustic|unplugged|"
+                            r"orchestral|demos?|karaoke|live)\b", re.I)
+
+
+def other_version(album, cand):
+    """A word naming another version of the album in the release title ("Traced in Air
+    Remixed", "... (Instrumental)", "... Live") that neither your folder name nor your
+    tags carry: a different recording, however well the lengths fit. Returns the word."""
+    mine = fold(" ".join(str(album.get(k) or "") for k in ("title", "folder")))
+    for m in _VERSION_WORDS.finditer(fold(cand.get("title") or "")):
+        w = m.group(1)
+        stem = re.sub(r"(?:ed|es|s)$", "", w.replace("-", ""))
+        if stem not in mine.replace("-", ""):
+            return w
+    return ""
 
 
 def score_candidate(album, cand, cfg, ocr_text=""):
@@ -1018,6 +1107,10 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     credit_words = [w for w in fold(cand.get("artist") or "").split() if len(w) > 2]
     scans_name_artist = bool(ocr_text and credit_words and len(credit_words) >= 2 and
                              f" {' '.join(credit_words)} " in f" {fold(ocr_text)} ")
+    # ... or the files do: their track-artist, copyright or composer tags, or the
+    # .info/.txt the ripper left ("ARTIST=Gustavo Dobles", "COPYRIGHT=2020 Gustavo Dobles")
+    files_name_artist = bool(credit_words and len(credit_words) >= 2 and album.get("credit_text") and
+                             f" {' '.join(credit_words)} " in f" {fold(album['credit_text'])} ")
     clues, clues_against = pressing_clues(ocr_text, cand)
     file_clues(album, cand, clues, clues_against)
     # A catalogue number the folder or tags name that this pressing does not carry:
@@ -1043,6 +1136,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "len_err": len_err, "titles_agree": titles_agree,
         "own_catnos": own, "own_catno_absent": own_absent, "scans_name_artist": scans_name_artist,
+        "files_name_artist": files_name_artist,
+        "other_version": other_version(album, cand),
         "has_folder_catno": bool(album.get("catnos_from_folder")),
         "folder_catno_agrees": catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
         "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos")
@@ -1101,7 +1196,7 @@ def classify(scored, cfg):
                                                  "none of these pressings") for s in scored]
         else:
             best0 = max(scored, key=lambda s: s["confidence"])
-            media_why = (f"{'; '.join(folder_says(best0))}; no release of this album found that fits "
+            media_why = (f"{'; '.join(folder_says(best0) or said)}; no release of this album found that fits "
                          "what the folder name says")
             scored = [dict(s, media_why=media_why) for s in scored]
 
@@ -1146,6 +1241,8 @@ def classify(scored, cfg):
              else "")
     if not proof and best.get("scans_name_artist") and best["title_sim"] >= cfg["exact_title_sim"]:
         proof = "the scans naming this artist"           # only for the artist credit, below
+    if not proof and best.get("files_name_artist") and best["title_sim"] >= cfg["exact_title_sim"]:
+        proof = "your files' own tags and notes naming this artist"   # likewise
     proven = bool(proof and best["tracks_ok"] and best["dur_frac"] is not None
                   and best["dur_frac"] >= cfg["auto_min_duration_frac"] and not best.get("conflict"))
     split_credit = bool(best.get("lacks"))     # a collaborator would be dropped: never
@@ -1195,6 +1292,8 @@ def classify(scored, cfg):
             proven and (best["artist_sim"] < cfg["auto_min_artist"] or best["title_sim"] < cfg["auto_min_title"])
             and not split_credit):
         why.append(f"confidence {best['confidence']} < {cfg['auto_min_confidence']}")
+    if best.get("other_version"):
+        why.append(f"the release is the {best['other_version']} version, which your folder and tags do not say")
     if best.get("conflict"):
         why.append("barcode differs from the candidate's")
     py = best.get("pressing_year")
@@ -1261,6 +1360,10 @@ def classify(scored, cfg):
             "margin": round(margin, 1), "why": why}
 
 
+def _label_key(labels):
+    return {" ".join(w for w in fold(x).split() if w not in _LABEL_FILLER) for x in str(labels).split(";")} - {""}
+
+
 def same_pressing(a, b):
     """A MusicBrainz and a Discogs candidate for the same pressing: MusicBrainz links
     to that Discogs release, or the barcode, or the catalogue number and country agree."""
@@ -1268,11 +1371,56 @@ def same_pressing(a, b):
         return True
     if ({barcode_key(x) for x in a.get("barcodes") or ()} & {barcode_key(x) for x in b.get("barcodes") or ()}) - {""}:
         return True
-    return bool(catnos_agree(a.get("catnos"), b.get("catnos"))
-                and country_code(a.get("country")) == country_code(b.get("country")))
+    if (catnos_agree(a.get("catnos"), b.get("catnos"))
+            and country_code(a.get("country")) == country_code(b.get("country"))):
+        return True
+    # one entry without a catalogue number (or written so differently it cannot be
+    # compared): same label, country, year and track count is the same release
+    # (Coroner - No More Color: Death Cult Switzerland, CH, 1989 on both)
+    if (not (a.get("catnos") and b.get("catnos")) and a.get("label") and b.get("label")
+            and _label_key(a.get("label")) & _label_key(b.get("label"))
+            and country_code(a.get("country")) and country_code(a.get("country")) == country_code(b.get("country"))
+            and a.get("year") and a.get("year") == b.get("year")
+            and len(a.get("tracks") or ()) == len(b.get("tracks") or ())):
+        return True
+    # A self-released album with no catalogue number anywhere (Aeon of Horus - Exile:
+    # MusicBrainz "[no label]", Worldwide; Discogs "Not On Label (... Self-released)",
+    # Australia): one release if the year, format and track count agree.
+    def unlabelled(c):
+        lab = fold(c.get("label") or "")
+        return not lab or bool(re.search(r"no label|not on label|self released|self-released", lab))
+    return bool(not a.get("catnos") and not b.get("catnos") and unlabelled(a) and unlabelled(b)
+                and a.get("year") and a.get("year") == b.get("year")
+                and set(a.get("formats") or ()) & set(b.get("formats") or ())
+                and len(a.get("tracks") or ()) == len(b.get("tracks") or ()))
 
 
-def combine(mb_result, dg_result):
+EVIDENCE_CLUES = ("disc TOC", "source link", "isrc", "fingerprint", "catalogue number", "barcode",
+                  "label", "country", "format", "physical")
+
+
+def _evidence(best):
+    if not best:
+        return {}
+    clues = {k: v for k, v in (best.get("clues") or {}).items() if k in EVIDENCE_CLUES}
+    if best["cand"].get("source") == "discogs":
+        clues.pop("disc TOC", None)            # linked from MusicBrainz, not your copy's evidence
+    if best.get("code"):
+        clues["code"] = best["code"]
+    if best.get("folder_catno_agrees"):
+        clues["folder catalogue number"] = True
+    return clues
+
+
+def has_evidence(best, other=None):
+    """The pick rests on something about YOUR copy (its numbers, scans, folder name, audio,
+    disc ID) that the OTHER pick does not also have: "a CD (folder name)" says nothing
+    between two CDs (Death - Leprosy [2014 RM 3CD]: Relapse US vs Relapse Japan)."""
+    mine, theirs = _evidence(best), _evidence(other)
+    return any(k not in theirs for k in mine)
+
+
+def combine(mb_result, dg_result, countries=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
     MusicBrainz release of that SAME pressing, when there is one, comes along
@@ -1286,6 +1434,24 @@ def combine(mb_result, dg_result):
                  if same_pressing(s["cand"], dg_result["best"]["cand"])]
         if twins:
             out["mb_twin"] = max(twins, key=lambda s: s["confidence"])["cand"]["id"]
+        elif (mb_result and mb_result["status"] == "auto" and mb_best
+              and not has_evidence(dg_result["best"], mb_best) and (has_evidence(mb_best, dg_result["best"])
+                                                                         or countries)):
+            # Discogs picked a pressing with nothing about your copy behind it, and
+            # MusicBrainz is sure of another (Candlemass: Metal Mind, Poland vs Nuclear
+            # Blast, Germany). Evidence decides; without any, your country order does.
+            if has_evidence(mb_best, dg_result["best"]):
+                mb_best["notes"] = mb_best["notes"] + [
+                    "MusicBrainz chosen: only its pressing has evidence about your copy behind it"]
+                return mb_result
+            rank = {c: i for i, c in enumerate(countries or ())}
+            mb_r = rank.get(country_code(mb_best["cand"].get("country")), 99)
+            dg_r = rank.get(country_code(dg_result["best"]["cand"].get("country")), 99)
+            if mb_r < dg_r:
+                mb_best["notes"] = mb_best["notes"] + [
+                    "MusicBrainz chosen over Discogs's other pressing by your country order"]
+                return mb_result
+            return out
         elif mb_result and mb_result["status"] == "auto" and mb_best:
             dg_result["best"]["notes"] = dg_result["best"]["notes"] + [
                 f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; Discogs decides"]

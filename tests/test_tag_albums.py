@@ -214,6 +214,19 @@ class DiscogsFirst(Base):
         self.assertEqual(ta.select_albums(self.db)[0], [])
 
 
+class Retag(Base):
+    def test_retag_replaces_a_wrong_release_only_when_asked(self):
+        self.make_album()
+        for p in ta.audio_files(self.album):
+            ta.write_albumid(p, OTHER)
+        self.assertEqual(ta.select_albums(self.db)[0], [])                        # never by default
+        albums, _ = ta.select_albums(self.db, retag=True)
+        self.assertEqual([a["mbid"] for a in albums], [MBID])
+        for p in ta.audio_files(self.album):
+            ta.write_albumid(p, MBID)                                             # already right
+        self.assertEqual(len(ta.select_albums(self.db, retag=True)[0]), 1)       # no track IDs yet: tag it
+
+
 class Artwork(Base):
     """Zoviet France - Norsch / Eostre: scans in subfolders were left in the old folder, and
     loose scans were dropped next to the music."""

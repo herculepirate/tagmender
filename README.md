@@ -208,6 +208,39 @@ python3 web_tag.py --matches-db ~/Downloads/matching_extreme/match_state.db --in
 python3 web_tag.py --undo web-<run-id>
 ```
 
+### Is it right? Validate against albums you already tagged
+
+```bash
+python3 validate.py /media/unraidmedia2/music/ambient_music     # resumable; changes nothing
+```
+
+Every tagged album is identified again BLIND: the release IDs, ISRCs, label, catalogue
+number, barcode, country and date in its tags are ignored (they came from the release).
+Only names, track lengths, the audio, disc TOC, scans and the ORIGINAL folder name
+(from the tagging journals) count. The pick is compared with the release in the tags:
+agree / differs / unsure / no match. `~/Downloads/validate_ambient_music/validation.csv`
+lists each album, with "differs" first.
+
+To keep it checking while the matcher improves (albums that did not agree are checked
+again whenever the matcher changes):
+
+```bash
+LIB=/media/unraidmedia2/music/extreme_music nohup ./validate_loop.sh > /dev/null 2>&1 & disown
+touch ~/Downloads/validate_extreme_music/STOP      # to stop it
+```
+
+When the evidence about your copy (scans, folder name, audio, disc ID; never only the
+country order) says an album is tagged as the wrong release, it can be re-tagged:
+
+```bash
+python3 validate.py /media/unraidmedia2/music/extreme_music --export-fixes   # writes fixes.db, lists them
+python3 tag_albums.py --matches-db ~/Downloads/validate_extreme_music/fixes.db --retag          # preview
+python3 tag_albums.py --matches-db ~/Downloads/validate_extreme_music/fixes.db --retag --apply  # undo: --undo RUN
+```
+
+The scans are read for every album that has them: a catalogue number, "Made in ...", or
+the label's postal address on the back (D-54550 Daun, CA 90250, NG3 4GE) names the pressing.
+
 ### Discogs first
 
 Both databases are searched for every album. Discogs decides the pressing: it lists far
@@ -292,6 +325,7 @@ python3 tests/test_inbox.py
 python3 tests/test_tools.py
 python3 tests/test_exclusions.py
 python3 tests/test_cli.py
+python3 tests/test_validate.py
 ```
 
 ## Licence

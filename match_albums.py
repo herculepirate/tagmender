@@ -1708,6 +1708,124 @@ def ocr_disc_rings(paths, max_images=8):
     return "\n".join(chunks)
 
 
+_CODE_LIKE = re.compile(r"(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9-]{5,}|\d[\d ]{9,}\d")
+
+
+def _tess(img, psm, langs=None, tsv=False):
+    import subprocess
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        img.save(tmp.name)
+        cmd = ["tesseract", tmp.name, "stdout", "--psm", str(psm)] + (["-l", langs] if langs else [])
+        r = subprocess.run(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=180)
+    return r.stdout
+
+
+def ocr_located_codes(im):
+    """Codes re-read where they are: tesseract finds the lines on a reduced copy (in
+    every orientation), and each line holding something code-like is cut from the
+    FULL-resolution scan and read alone. Small print that page OCR mangles reads
+    cleanly this way (Exhorder's barcode and spine): locating the text helps, not
+    enlarging it."""
+    chunks = []
+    g = im.convert("L")
+    for angle in (0, 90, 270, 180):
+        full = g if angle == 0 else g.rotate(angle, expand=True)
+        small = full.copy()
+        small.thumbnail((2400, 2400))
+        sc = full.width / max(small.width, 1)
+        try:
+            rows = _tess(small, 11, tsv=True).splitlines()[1:]
+        except Exception:
+            continue
+        lines = {}
+        for row in rows:
+            f = row.split("\t")
+            if len(f) < 12 or not f[11].strip():
+                continue
+            key = (f[2], f[3], f[4])
+            x, y, w, h = (int(v) for v in f[6:10])
+            box = lines.setdefault(key, [x, y, x + w, y + h, ""])
+            box[:4] = [min(box[0], x), min(box[1], y), max(box[2], x + w), max(box[3], y + h)]
+            box[4] += " " + f[11]
+        for x0, y0, x1, y1, text in lines.values():
+            if not _CODE_LIKE.search(text):
+                continue
+            hgt = (y1 - y0) * sc
+            box = (int(max(0, x0 * sc - hgt)), int(max(0, y0 * sc - hgt * 0.5)),
+                   int(min(full.width, x1 * sc + hgt)), int(min(full.height, y1 * sc + hgt * 0.5)))
+            try:
+                chunks.append(_tess(full.crop(box), 7))
+            except Exception:
+                continue
+    return "\n".join(chunks)
+
+
+def ocr_deep(paths, max_images=80, budget_s=900):
+    """Investigation: every scan, every zone. Each image at its full resolution in
+    overlapping tiles (page OCR reads a reduced copy), the code-like lines re-read
+    where they are, in every orientation, plus the barcode bands and disc rings."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return ""
+    started, chunks = time.time(), []
+    for p in list(paths)[:max_images]:
+        if time.time() - started > budget_s:
+            chunks.append("(investigation stopped: time budget used)")
+            break
+        try:
+            im = Image.open(p)
+            im.load()
+            g = im.convert("L")
+        except Exception:
+            continue
+        tile = 1800
+        nx, ny = max(1, -(-g.width // tile)), max(1, -(-g.height // tile))
+        if nx * ny > 1:
+            tw, th = -(-g.width // nx), -(-g.height // ny)
+            for i in range(nx):
+                for j in range(ny):
+                    box = (max(0, i * tw - tw // 8), max(0, j * th - th // 8),
+                           min(g.width, (i + 1) * tw + tw // 8), min(g.height, (j + 1) * th + th // 8))
+                    try:
+                        chunks.append(_tess(g.crop(box), 11, ocr_langs()))
+                    except Exception:
+                        continue
+        try:
+            chunks.append(ocr_located_codes(g))
+        except Exception:
+            pass
+    chunks.append(ocr_barcode_digits(paths, max_images=max_images))
+    chunks.append(ocr_disc_rings(paths, max_images=max_images))
+    return "\n".join(c for c in chunks if c)
+
+
+_WEB_DISCOGS = re.compile(r"discogs\.com/(?:[a-z]{2}/)?(?:[^/\s\"'<>]+/)?release/(\d+)")
+_WEB_MB = re.compile(r"musicbrainz\.org/release/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+
+
+def web_release_links(http, codes, artist, limit=6):
+    """Releases the web ties to codes read from the scans: a search for each code
+    (with and without the artist) and the Discogs and MusicBrainz release pages among
+    the results. For a pressing the databases' own search does not turn up."""
+    dg, mb = [], []
+    for code in list(codes)[:limit]:
+        for query in (f'"{code}" {artist}', f'"{code}" discogs'):
+            try:
+                html = http.get_text("https://html.duckduckgo.com/html/?q=" + q(query), "duckduckgo") or ""
+            except Exception:
+                continue
+            html = urllib.parse.unquote(html)
+            for rid in _WEB_DISCOGS.findall(html):
+                if rid not in dg:
+                    dg.append(rid)
+            for rid in _WEB_MB.findall(html):
+                if rid not in mb:
+                    mb.append(rid)
+    return dg[:8], mb[:8]
+
+
 def ocr_text(paths):
     """OCR via the tesseract program itself (no pytesseract needed)."""
     import subprocess
@@ -1754,6 +1872,81 @@ def run_source(name, finder, album, cfg, ocr_txt=""):
     res["scored"] = scored
     res["source"] = name
     return res
+
+
+def _needs_investigation(final, album, ocr_txt, base):
+    if not any(Path(d).suffix.lower() in IMAGE_EXT for _r, _d, fs in os.walk(base) for d in fs):
+        return False
+    if final.get("status") != "auto":
+        return True
+    best = final.get("best") or {}
+    cand = best.get("cand") or {}
+    have = {mc.barcode_key(b) for b in cand.get("barcodes") or ()}
+    read = {mc.barcode_key(b) for b in mc.codes_from_ocr_text(ocr_txt)["barcodes"]}
+    return bool(read) and not (read & have)        # the scans name another pressing
+
+
+def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, notes, use_mb, use_discogs, db):
+    """Read everything again, harder, and search every code found everywhere."""
+    images, key = list_images(base, 80)
+    deep = _cached(db, "deep", key, lambda: ocr_deep(images))
+    text = (ocr_txt + "\n" + deep).strip()
+    codes = mc.codes_from_ocr_text(text, limit=10)
+    tried = {mc.barcode_key(b) for b in album["barcodes"]} | {mc.norm_code(c) for c in album.get("catno_search", [])}
+    new_b = [b for b in codes["barcodes"] if mc.barcode_key(b) not in tried]
+    new_c = [c for c in codes["catnos"] if mc.norm_code(c) not in tried]
+    found = {"mb": [], "discogs": []}
+    probe = dict(album, barcodes=set(new_b), catno_search=new_c)
+    if new_b or new_c:
+        if use_mb:
+            found["mb"] = mb_search(http, probe, cfg)
+        if use_discogs:
+            try:
+                found["discogs"] = discogs_search(http, probe, cfg, dm)
+            except AuthError:
+                raise
+            except Exception as exc:
+                notes.append(f"Discogs search of codes from the investigation failed ({exc})")
+    # the web: pages naming the codes, linking to the release on Discogs or MusicBrainz
+    web_codes = codes["barcodes"] + codes["catnos"]
+    dg_ids, mb_ids = web_release_links(http, web_codes, mc.artist_parts(album["artist"])[0]) if web_codes else ([], [])
+    have = {str(c["id"]) for c in found["discogs"]} | {str(s["cand"]["id"]) for s in (dg_res or {}).get("scored", [])}
+    for rid in dg_ids:
+        if use_discogs and rid not in have:
+            det = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+            if det:
+                found["discogs"].append(discogs_candidate(det, dm))
+    have = {c["id"] for c in found["mb"]} | {s["cand"]["id"] for s in (mb_res or {}).get("scored", [])}
+    for rid in mb_ids:
+        if use_mb and rid not in have:
+            det = http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+            if det:
+                found["mb"].append(mb_candidate(det))
+    if new_b and not album["barcodes"]:
+        album["barcodes"] = set(new_b)
+
+    def rescore(res, name):
+        cands = [s["cand"] for s in (res or {}).get("scored", [])]
+        ids = {str(c["id"]) for c in cands}
+        cands += [c for c in found[name] if str(c["id"]) not in ids]
+        if not cands:
+            return res
+        scored = [mc.score_candidate(album, c, cfg, text) for c in cands]
+        return dict(mc.classify(scored, cfg), scored=scored, source=name)
+    mb_res, dg_res = rescore(mb_res, "mb"), rescore(dg_res, "discogs")
+    new_final = mc.combine(mb_res, dg_res) or final
+    out["investigated"] = {"codes": web_codes, "web_discogs": dg_ids, "web_mb": mb_ids,
+                           "found": len(found["mb"]) + len(found["discogs"])}
+    if new_final.get("best"):
+        new_final["best"]["notes"] = new_final["best"]["notes"] + [
+            "investigated: every scan read again in full; codes "
+            + (", ".join(web_codes[:6]) or "none") + " searched on MusicBrainz, Discogs and the web"]
+    if new_final.get("status") != "auto":
+        new_final["why"] = list(new_final.get("why") or []) + [
+            "investigated: " + (f"codes {', '.join(web_codes[:6])} searched on MusicBrainz, Discogs and the web"
+                                if web_codes else "no catalogue number or barcode readable on any scan")]
+    return mb_res, dg_res, new_final, text
 
 
 def process(row, http, cfg, dm, args):
@@ -1967,6 +2160,20 @@ def _process(row, http, cfg, dm, args, full_cfg):
     if album.get("discids"):
         out["discids"] = album["discids"]
 
+    # Still unsure, or the scans show a barcode the pick does not carry: investigate.
+    # Every scan (not only the first few), every zone at full resolution and every
+    # orientation; every code found is searched on MusicBrainz, Discogs and the web.
+    # An album with scans goes to a person only after all of that has failed.
+    if args.ocr and getattr(args, "investigate", True) and _needs_investigation(final, album, ocr_txt, base):
+        try:
+            mb_res, dg_res, final, ocr_txt = investigate(
+                http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, source_notes,
+                use_mb, use_discogs, db)
+        except AuthError:
+            raise
+        except Exception as exc:
+            source_notes.append(f"investigation of the scans failed ({type(exc).__name__}: {exc})")
+
     # Last resort: the country preference, between pressings nothing else told apart
     if final["status"] != "auto" and full_cfg.get("preferred_countries"):
         again = []
@@ -2135,6 +2342,9 @@ def main():
     ap.add_argument("--max-images", type=int, default=15,
                     help="most images to OCR per album, back/disc-named first "
                          "(default 15; 0 = no limit)")
+    ap.add_argument("--no-investigate", dest="investigate", action="store_false",
+                    help="do not re-read every scan in full and search the codes found on the web "
+                         "when an album is still unsure (on by default)")
     ap.add_argument("--redo", action="store_true", help="ignore saved results")
     ap.add_argument("--retry-review", action="store_true",
                     help="re-evaluate albums previously filed as review (cheap: lookups "

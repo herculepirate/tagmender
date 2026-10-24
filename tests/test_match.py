@@ -857,6 +857,68 @@ class BothDatabases(unittest.TestCase):
         self.assertEqual(mc.combine(mb, dg)["best"]["cand"]["id"], "7")
 
 
+
+class Investigation(unittest.TestCase):
+    """Exhorder - Slaughter In The Vatican / The Law: the scans carried the catalogue
+    number and barcode, yet the album went to a person (or the wrong pressing was
+    taken). An album with scans is investigated before it is given up: every scan read
+    again in full, every code searched on MusicBrainz, Discogs and the web."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        from PIL import Image
+        Image.new("L", (50, 50), 255).save(self.tmp / "Digi.jpg")
+        self.saved = (ma.ocr_deep, ma.mb_search, ma.discogs_search, ma.discogs_candidate)
+
+    def tearDown(self):
+        ma.ocr_deep, ma.mb_search, ma.discogs_search, ma.discogs_candidate = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_a_code_found_only_on_the_web_identifies_the_pressing(self):
+        a = album(title="Slaughter In The Vatican / The Law", artist="Exhorder")
+        rr = cand(id="rr", title="Slaughter In The Vatican / The Law", artist="Exhorder", country="US",
+                  label="Roadrunner", catnos={"rr1"})
+        rr2 = dict(rr, id="rr2", country="NL", catnos={"rr2"})
+        dis = dict(rr, id="22314946", source="discogs", country="UK", label="Dissonance Productions",
+                   catnos={mc.norm_code("QDISS0201CDD")}, barcodes={"5013929020160"})
+        scored = [mc.score_candidate(a, c, CFG) for c in (rr, rr2)]
+        mb = dict(mc.classify(scored, CFG), scored=scored, source="mb")
+        self.assertNotEqual(mb["status"], "auto")
+        ma.ocr_deep = lambda paths: "MADE IN EU / MCPS. QDISSO201CDD\nQDISS0201CDD-1 15 A00"
+        ma.mb_search = lambda http, album, cfg: []             # the databases' own search finds nothing
+        ma.discogs_search = lambda http, album, cfg, dm: []
+        ma.discogs_candidate = lambda det, dm: dis
+        asked = []
+
+        class H:
+            db = None
+
+            def get_text(self, url, host):
+                asked.append(url)
+                return ('<a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.discogs.com%2Frelease%2F'
+                        '22314946-Exhorder-Slaughter-In-The-Vatican-The-Law">x</a>')
+
+            def get_json(self, url, host):
+                return {"id": 22314946} if "api.discogs.com/releases/22314946" in url else None
+        out, notes = {}, []
+        mb_res, dg_res, final, text = ma.investigate(H(), self.tmp, a, CFG, object(), mb, None, mb, "", out,
+                                                     notes, True, True, None)
+        self.assertTrue(any("QDISS0201CDD" in u for u in asked), asked)
+        self.assertEqual((final["status"], final["best"]["cand"]["id"]), ("auto", "22314946"), final.get("why"))
+        self.assertIn("investigated", " ".join(final["best"]["notes"]))
+        self.assertEqual(out["investigated"]["web_discogs"], ["22314946"])
+
+    def test_a_sure_pick_without_the_barcode_on_the_scans_is_investigated(self):
+        best = {"cand": cand(barcodes={"0016861841127"})}
+        final = {"status": "auto", "best": best}
+        self.assertTrue(ma._needs_investigation(final, album(), "5 013929 020160 5013929020160", self.tmp))
+        self.assertFalse(ma._needs_investigation(final, album(), "0016861841127", self.tmp))
+        empty = Path(tempfile.mkdtemp())
+        try:
+            self.assertFalse(ma._needs_investigation({"status": "review"}, album(), "", empty))  # no scans
+        finally:
+            shutil.rmtree(empty)
+
 class FilesNameTheArtist(unittest.TestCase):
     """Aghora - Entheogenic Frequencies Orchestral Representations: filed under Aghora,
     but the files' own ARTIST and COPYRIGHT tags and the ripper's .info name Gustavo

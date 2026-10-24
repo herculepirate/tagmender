@@ -96,6 +96,7 @@ class Engine:
             db = sqlite3.connect(cache or (ex.STATE_DIR / "cache.sqlite"), timeout=60)
             http = ma.Http(db, cfg, token)
         self.http = http
+        self._art = None
 
     # ---- what is in a path ------------------------------------------------
     def albums_in(self, path) -> list[Group]:
@@ -303,6 +304,32 @@ class Engine:
                                 why=why, evidence=list(best.get("notes") or []),
                                 release=self._release(best) if best else {})
 
+    # ---- artwork -------------------------------------------------------------
+    def add_artwork(self, prop: planmod.Proposal):
+        """Fetch the front cover into staging (the executor writes it). Never raises."""
+        if not self.profile["artwork"]["enabled"] or prop.status != "identified" or not prop.targets:
+            return
+        t = prop.targets[0]
+        ids = {"release_mbid": (t.get("musicbrainz_albumid") or [""])[0],
+               "rg_mbid": (t.get("musicbrainz_releasegroupid") or [""])[0],
+               "artist_mbid": "; ".join(t.get("musicbrainz_albumartistid") or []),
+               "discogs_release_id": (t.get("discogs_release_id") or [""])[0]}
+        if not any(ids.values()):
+            return
+        try:
+            import artwork
+            if self._art is None:
+                self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
+                                          self.token, self.log)
+            got = artwork.find_front(self._art, prop.source_dir, ids, (t.get("albumartist") or [""])[0],
+                                     (t.get("album") or [""])[0], self.log)
+        except Exception as exc:
+            got = {"note": f"artwork: {exc}"}
+        if got and got.get("front"):
+            prop.artwork = got
+        elif got and got.get("note"):
+            prop.why = list(prop.why) + [f"no cover: {got['note']}"]
+
     # ---- everything ---------------------------------------------------------
     def proposals(self, path, progress=None, cancel=None):
         groups = self.albums_in(path)
@@ -313,7 +340,9 @@ class Engine:
             if progress:
                 progress(i, len(groups), str(g.folder))
             try:
-                out.append(self.identify(g))
+                prop = self.identify(g)
+                self.add_artwork(prop)
+                out.append(prop)
             except Exception as exc:                          # one bad album never stops the run
                 self.log.exception("identifying %s failed", g.folder)
                 out.append(planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],

@@ -131,7 +131,7 @@ class Base(unittest.TestCase):
         return d
 
     def engine(self, http, **prof):
-        d = {"name": "default", "providers": {"web": {"enabled": False}}}
+        d = {"name": "default", "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False}}
         d.update(prof)
         return engine.Engine(pf.from_dict(d), http=http)
 
@@ -300,6 +300,49 @@ class EndToEnd(Base):
         before = (d / "01.flac").read_bytes()
         executor.Executor(p).run()
         self.assertEqual((d / "01.flac").read_bytes(), before)
+
+
+class Artwork(Base):
+    """CoverUp's real pipeline, offline: only its local-files source is switched on."""
+    def setUp(self):
+        super().setUp()
+        coverup = Path(_os.environ.get("TAGMENDER_COVERUP_DIR", "~/Documents/Github/picard-coverup")).expanduser()
+        if not (coverup / "pipeline.py").exists():
+            self.skipTest("CoverUp not found (set TAGMENDER_COVERUP_DIR)")
+
+    def _engine(self, http, d):
+        import artwork
+        eng = self.engine(http, artwork={"enabled": True, "provider": "coverup"})
+        cu = artwork.CoverUp(self.tmp / "staging")
+        cu.s = cu.s.with_(providers_enabled=["local"])
+        eng._art = [cu]
+        return eng
+
+    def test_local_scan_is_embedded_into_files_without_art_and_no_file_is_added(self):
+        from PIL import Image
+        d = self.album("Band K", "Album K")
+        Image.new("RGB", (1200, 1200), (200, 30, 30)).save(d / "folder.jpg", quality=90)
+        eng = self._engine(te_http := FakeHttp(dg=[dg_release(910, "Band K", "Album K")]), d)
+        p = eng.plan(d)
+        art = p["albums"][0]["artwork"]
+        self.assertIsNotNone(art, pl.preview(p))
+        self.assertEqual(art["source"], "coverup:local")
+        self.assertEqual(len(art["embed_into"]), 3)
+        self.assertIsNone(art["file"])                       # the folder already has its image
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1})
+        self.assertEqual(tagio.read(d / "02.flac")["~pictures"], ["1"])
+        del te_http
+
+    def test_no_cover_anywhere_does_not_block_tagging(self):
+        d = self.album("Band L", "Album L")
+        eng = self._engine(FakeHttp(dg=[dg_release(911, "Band L", "Album L")]), d)
+        p = eng.plan(d)
+        a = p["albums"][0]
+        self.assertIsNone(a["artwork"])
+        self.assertTrue(any(w.startswith("no cover") for w in a["identification"]["why"]))
+        executor.Executor(p).run()
+        self.assertEqual(tagio.read(d / "01.flac")["discogs_release_id"], ["911"])
 
 
 if __name__ == "__main__":

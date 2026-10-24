@@ -47,7 +47,7 @@ class Work(te.Base):
         p.start()
         self.addCleanup(p.stop)
         pf.save(pf.from_dict({"name": "T", "sources": [{"path": str(self.lib)}],
-                              "providers": {"web": {"enabled": False}}}))
+                              "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False}}))
 
     def test_scan_is_offline_and_lists_albums(self):
         code, out, _ = run("scan", str(self.lib), "--json")
@@ -125,6 +125,7 @@ class Watch(te.Base):
             os.utime(f, (old, old))
         self.prof = pf.from_dict({"name": "W", "sources": [{"path": str(self.inbox), "watch": True}],
                                   "unattended": True, "providers": {"web": {"enabled": False}},
+                                  "artwork": {"enabled": False},
                                   "watch": {"settle_minutes": 1}})
         pf.save(self.prof)
 

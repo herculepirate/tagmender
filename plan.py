@@ -301,7 +301,10 @@ class Planner:
         if art and art.get("front") and Path(art["front"]).exists():
             embed = [fe["dst"] for fe in entry["files"]
                      if p["artwork"]["embed_front"] and not tagio.read(fe["src"]).get("~pictures")]
-            folder = Path(entry["files"][0]["dst"]).parent if entry["files"] else Path(prop.source_dir)
+            # the album's own folder: for a disc set in "Disc 01", "Disc 02" ... that is the folder
+            # holding the disc folders, not the first disc's
+            folder = (Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
+                      if entry["files"] else Path(prop.source_dir))
             has_image = folder.exists() and any(x.suffix.lower() in (".jpg", ".jpeg", ".png") for x in folder.iterdir())
             has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
                                          (".jpg", ".jpeg", ".png") for c in entry["companions"])
@@ -338,7 +341,8 @@ class Planner:
             counts[a["status"]] = counts.get(a["status"], 0) + 1
         return {"version": PLAN_VERSION, "job": self.job, "created": time.time(), "profile": self.profile.name,
                 "profile_data": self.profile.to_dict(), "operation": self.profile["operation"],
-                "roots": self.roots(), "albums": albums, "summary": counts}
+                "roots": self.roots(), "albums": albums, "summary": counts,
+                "discogs_settings": _enrichment_summary(self.profile)}
 
     def roots(self):
         p = self.profile
@@ -368,11 +372,27 @@ def load(path) -> dict:
     return plan
 
 
+def _enrichment_summary(profile) -> str:
+    """One line saying how Discogs data is applied, and where that came from."""
+    try:
+        import picard_config
+        s = profile.enrichment()
+        src = (picard_config.source() if profile.get("follow_picard", True)
+               else "the plugin's defaults (follow_picard is off)")
+        return (f"Discogs Enrichment: merge {s['merge_mode']}, styles {s['style_mode']}, "
+                f"marketplace {'on' if s['marketplace'] else 'off'}, "
+                f"original date in Date {'on' if s['prefer_original_date'] else 'off'}  (from {src})")
+    except Exception:
+        return ""
+
+
 # --------------------------------------------------------------------------
 # preview text (the CLI and GUI show the same thing)
 # --------------------------------------------------------------------------
 def preview(plan: dict, verbose=False) -> str:
     out = [f"Plan {plan['job']}  profile {plan['profile']}  ({plan['operation']})"]
+    if plan.get("discogs_settings"):
+        out.append(plan["discogs_settings"])
     for a in plan["albums"]:
         ident = a["identification"]
         head = f"\n[{a['status'].upper()}] {a['source_dir']}"

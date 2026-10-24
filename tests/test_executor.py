@@ -154,6 +154,21 @@ class InPlace(Base):
         self.assertNotIn("tagmender_reason", tagio.read(self.f1))
 
 
+    def test_disc_set_cover_goes_in_the_album_folder_not_disc_01(self):
+        from PIL import Image
+        box = self.lib / "Band" / "2005 - Box"
+        f1 = audio(box / "Disc 01" / "101.flac", 500)
+        f2 = audio(box / "Disc 02" / "201.flac", 600)
+        front = self.tmp / "front.jpg"
+        Image.new("RGB", (600, 600), (10, 20, 30)).save(front)
+        prop = self.proposal(source_dir=str(box), files=[str(f1), str(f2)],
+                             targets=[target(1, "A", discnumber=["1"], totaldiscs=["2"]),
+                                      target(1, "B", discnumber=["2"], totaldiscs=["2"])],
+                             artwork={"front": str(front), "source": "test"})
+        entry = pl.build([prop], self.profile())["albums"][0]
+        self.assertEqual(entry["artwork"]["file"], str(box / "cover.jpg"))
+
+
 class Rules(Base):
     def add_rule(self, value="[no vox]", field="album", action="ignore", target="album"):
         ex.save_rule(ex.Rule.from_dict({"id": "r", "name": "No vox", "action": action, "target": target,

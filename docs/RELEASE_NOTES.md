@@ -1,5 +1,26 @@
 # Release notes
 
+## Unreleased
+
+**Fixed (from the first live plan, Exhorder)**
+- Discogs data is now applied the way your Picard's Discogs Enrichment plugin applies it, with
+  its settings read from Picard.ini: merge mode (yours: override), style mode, marketplace
+  numbers off unless switched on, performers / companies / identifiers, protected tags, notes,
+  original date in Date, track tags, collaboration splitting. Before, Discogs only filled gaps,
+  the profile forced Discogs' genre, and marketplace numbers were written regardless.
+- Tags Picard is told to preserve (Options > Tags) are kept as they are on the file - e.g.
+  `totaltracks` "08" is no longer rewritten to "8".
+- A disc set's `cover.jpg` goes in the album folder, not in "Disc 01".
+- Plans and `doctor` say which Discogs Enrichment settings were used and where they came from.
+
+**Known differences from Picard**
+- Genres from MusicBrainz itself (Picard's Options > Genres) are not fetched; with merge mode
+  override, Discogs' genre replaces them in Picard too.
+- Tags not written by either source are left on the file (Picard's "Clear existing tags"
+  removes them).
+- Track numbers on disc sets are counted within each disc; the plugin's automatic path counts
+  through the whole release.
+
 ## 0.2.0 (2026-10-24)
 
 One engine behind a command line, a background watcher and a desktop app.

@@ -125,6 +125,18 @@ def checks() -> list[Check]:
                          "tagmender recover" if pending else ""))
     except Exception as exc:                                   # executor missing or broken: say so
         out.append(Check("interrupted jobs", "warn", f"could not check: {exc}"))
+    try:
+        import picard_config
+        s = picard_config.enrichment()
+        src = picard_config.source()
+        out.append(Check("Discogs Enrichment settings", "ok" if picard_config.from_ini() else "warn",
+                         f"merge {s['merge_mode']}, styles {s['style_mode']}, marketplace "
+                         f"{'on' if s['marketplace'] else 'off'} (from {src})",
+                         "" if picard_config.from_ini() else
+                         "open Picard > Options > Plugins > Discogs Enrichment once and press OK, "
+                         "or set TAGMENDER_PICARD_INI"))
+    except Exception as exc:
+        out.append(Check("Discogs Enrichment settings", "warn", f"could not read: {exc}"))
     ini = Path(PICARD_INI).expanduser()
     if ini.exists():
         import tag_albums

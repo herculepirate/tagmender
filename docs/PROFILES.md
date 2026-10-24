@@ -21,7 +21,9 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `formats` | every format | e.g. `["mp3","opus","m4a"]`; others are Skipped, never converted |
 | `providers` | MB, Discogs, web on; AcoustID off | `{"discogs": {"enabled": true, "identify": true}}` |
 | `primary` | `discogs` | which provider's tags form the base when MusicBrainz and Discogs hold the *same* pressing (`discogs`, `musicbrainz`, `both`). Which pressing it is, is the matcher's call: evidence about your copy first (folder catalogue number, barcode, scans, disc ID), Discogs ahead of MusicBrainz, then your preferred-country order |
-| `field_sources` | genre, label, catalogue number: Discogs first | per field, providers in order |
+| `follow_picard` | `true` | apply Discogs data exactly as your Picard's Discogs Enrichment plugin does, with its settings read from Picard.ini (merge mode, style mode, marketplace numbers, performers, companies, identifiers, protected tags, notes, original date in Date, track tags, split collaborations), and keep the tags Picard's Options > Tags > "Preserve these tags" keeps (written only where the file has none). `false`: the plugin's defaults |
+| `discogs_enrichment` | `{}` | overrides single plugin settings for this profile, e.g. `{"merge_mode": "fill_gaps", "style_mode": "genre"}` |
+| `field_sources` | `{}` | per field, providers in order; overrides the merge for that field |
 | `thresholds` | identify 90 (margin 8), replace 90, organise 95 | matcher scores 0-100 (heuristic, not probability) |
 | `field_policy` | replace | `{"default": "replace", "fields": {"album": "lock", "comment": "remove"}}` |
 | `artwork` | CoverUp, embed front, cover.jpg only into folders without an image | |

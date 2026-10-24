@@ -58,11 +58,13 @@ DEFAULTS = {
         "web": {"enabled": True},
     },
     "primary": "discogs",                 # who decides the pressing when both have it
-    "field_sources": {                    # per field, the provider asked first
-        "genre": ["discogs", "musicbrainz"],
-        "label": ["discogs", "musicbrainz"],
-        "catalognumber": ["discogs", "musicbrainz"],
-    },
+    # How Discogs data joins MusicBrainz's: exactly as your Picard's Discogs Enrichment plugin
+    # does it, with its settings read from Picard.ini (merge mode, styles, marketplace numbers,
+    # performers, protected tags, ...) and Picard's "Preserve these tags". Entries here
+    # override single plugin settings for this profile, e.g. {"merge_mode": "fill_gaps"}.
+    "follow_picard": True,
+    "discogs_enrichment": {},
+    "field_sources": {},                  # per field, providers in order; overrides the merge
     "thresholds": {
         "auto_min_confidence": 90.0,      # identify (match_core's own setting)
         "auto_min_margin": 8.0,
@@ -203,6 +205,11 @@ def validate(data: dict) -> list[str]:
             p.append(f"sources[{i}] needs a path")
         elif not os.path.isabs(os.path.expanduser(s["path"])):
             p.append(f"sources[{i}].path must be absolute")
+    if not isinstance(d["discogs_enrichment"], dict):
+        p.append("discogs_enrichment must be an object of Discogs Enrichment settings")
+    else:
+        import picard_config
+        p += picard_config.validate(d["discogs_enrichment"])
     for r in d["exclusions"]:
         try:
             ex.Rule.from_dict(r, d["name"] or "profile")
@@ -236,8 +243,33 @@ class Profile:
         return any(fnmatch.fnmatchcase(s, g) for g in self.data["exclude_paths"])
 
     def policy(self, fld: str) -> str:
+        """The profile's own policy for the field; else, for a tag Picard is set to preserve
+        (Options > Tags > "Preserve these tags"), fill_missing - kept as it is on the file,
+        written only where the file has none, as Picard does; else the default."""
         pol = self.data["field_policy"]
-        return (pol.get("fields") or {}).get(fld.lower(), pol.get("default", "replace"))
+        fields = pol.get("fields") or {}
+        low = fld.lower()
+        if low in fields:
+            return fields[low]
+        if low in self.picard_preserved():
+            return "fill_missing"
+        return pol.get("default", "replace")
+
+    def picard_preserved(self) -> set:
+        """Picard's preserved tags, less TagMender's own markers (Picard keeps those so that
+        it does not wipe them; TagMender writes them)."""
+        if not self.data.get("follow_picard", True):
+            return set()
+        import picard_config
+        return {t for t in picard_config.preserved_tags() if not t.startswith("tagmender")}
+
+    def enrichment(self) -> dict:
+        """Discogs Enrichment settings for this profile (see picard_config)."""
+        import picard_config
+        over = self.data.get("discogs_enrichment") or {}
+        if not self.data.get("follow_picard", True):
+            return picard_config.enrichment(over, path=Path("/nonexistent/Picard.ini"))
+        return picard_config.enrichment(over)
 
     def matcher_cfg(self, base: dict) -> dict:
         """match_core's settings with this profile's identification thresholds."""

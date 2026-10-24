@@ -108,13 +108,25 @@ class Base(unittest.TestCase):
         ex._write(ex.rules_file(), {"rules": []})
         _os.environ["DISCOGS_TOKEN"] = "test-token"
         _os.environ.pop("TAGMENDER_PROFILE", None)
+        _os.environ["TAGMENDER_PICARD_INI"] = str(self.tmp / "no-Picard.ini")   # never this machine's
         logsetup.reset()
         self.lib = self.tmp / "lib"
+
+    def picard_ini(self, preserved="comment, tagmender, tagmender_reason", **plugin):
+        """A Picard.ini with these Discogs Enrichment settings, as Picard writes them."""
+        ini = self.tmp / "Picard.ini"
+        lines = ["[plugin.dd789f69-332f-498a-af94-d8e3273cc435]", "token=never-read"]
+        lines += [f"{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in plugin.items()]
+        lines += ["", "[setting]", "clear_existing_tags=true", f"preserved_tags={preserved}", ""]
+        ini.write_text("\n".join(lines))
+        _os.environ["TAGMENDER_PICARD_INI"] = str(ini)
+        return ini
 
     def tearDown(self):
         logsetup.reset()
         _os.environ.pop("DISCOGS_TOKEN", None)
         _os.environ.pop("TAGMENDER_PROFILE", None)
+        _os.environ.pop("TAGMENDER_PICARD_INI", None)
         ex.CONFIG_DIR, ex.STATE_DIR = self.saved
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -176,7 +188,8 @@ class Identify(Base):
         self.assertEqual(t["genre"], ["Electronic"])
         self.assertFalse([k for k in t if k.startswith("musicbrainz_")])
 
-    def test_same_pressing_on_both_mb_base_and_discogs_fills(self):
+    def test_same_pressing_on_both_mb_base_and_discogs_applied_as_the_plugin_does(self):
+        # no Picard.ini: the plugin's defaults (combine, styles kept separate)
         d = self.album("Band C", "Album C")
         eng = self.engine(FakeHttp(mb=[mb_release("mb-c", "Band C", "Album C", discogs=902)],
                                    dg=[dg_release(902, "Band C", "Album C")]))
@@ -185,9 +198,10 @@ class Identify(Base):
         self.assertEqual(p.provider, "musicbrainz+discogs")
         self.assertEqual(t["musicbrainz_albumid"], ["mb-c"])
         self.assertEqual(t["discogs_release_id"], ["902"])
-        self.assertEqual(t["genre"], ["Electronic"])                  # field_sources: genre from Discogs
-        self.assertEqual(t["label"], ["Label DG"])                    # label: Discogs first
-        self.assertEqual(p.provenance["genre"], "discogs")
+        self.assertEqual(t["genre"], ["Electronic"])                  # MusicBrainz had none
+        self.assertEqual(t["label"], ["Label DG", "Label MB"])        # combine: Discogs first, both kept
+        self.assertEqual(t["discogs_style"], ["Ambient"])
+        self.assertEqual(p.provenance["discogs_release_id"], "discogs")
         self.assertEqual(p.provenance["musicbrainz_recordingid"], "musicbrainz")
 
     def test_providers_disagree_folder_catalogue_number_decides_nothing_is_mixed(self):
@@ -333,6 +347,111 @@ class Identify(Base):
         self.assertEqual(p.targets[0]["musicbrainz_recordingid"], ["rec-9"])
         self.assertNotIn("album", p.targets[0])
         self.assertIn("album edition is not established", p.why[0])
+
+
+def exhorder_like(rid=950):
+    """A Discogs release as the Exhorder run met it: Title Case titles, a coarse genre with the
+    useful detail in styles, marketplace numbers, credits, a master with the original year."""
+    r = dg_release(rid, "Band E", "Album In The Vatican")
+    r["tracklist"] = [{"type_": "track", "position": str(i + 1), "title": f"Death In Vain {i}", "duration": d}
+                      for i, d in enumerate(("0:10", "0:20", "0:30"))]
+    r["genres"], r["styles"] = ["Rock"], ["Thrash"]
+    r["released"], r["master_id"] = "2008-05-19", 77
+    r["community"] = {"have": 297, "want": 189, "rating": {"average": 4.52, "count": 27}}
+    r["num_for_sale"], r["lowest_price"], r["estimated_weight"], r["data_quality"] = 11, 51.75, 85, "Needs Vote"
+    r["extraartists"] = [{"name": "Duane Simoneaux", "role": "Producer"}, {"name": "Vinnie LaBella", "role": "Producer"}]
+    return r
+
+
+class ExhorderHttp(FakeHttp):
+    def get_json(self, url, host):
+        if host == "discogs" and "/masters/" in url:
+            return {"id": 77, "year": 1990, "title": "Album In The Vatican"}
+        return super().get_json(url, host)
+
+
+class PicardFidelity(Base):
+    """TagMender writes what Picard + Discogs Enrichment would, with the user's settings."""
+
+    def identify(self, **prof):
+        d = self.album("Band E", "Album In The Vatican")
+        mb = mb_release("mb-e", "Band E", "Album In The Vatican", discogs=950)
+        for i, t in enumerate(mb["media"][0]["tracks"]):
+            t["title"] = t["recording"]["title"] = f"Death in Vain {i}"
+        eng = self.engine(ExhorderHttp(mb=[mb], dg=[exhorder_like()]), **prof)
+        return eng.identify(eng.albums_in(d)[0])
+
+    def test_users_settings_override_separate_styles_no_marketplace(self):
+        self.picard_ini(merge_mode="override", style_mode="separate", marketplace=False,
+                        import_notes=True, prefer_original_date=False)
+        t = self.identify().targets[0]
+        self.assertEqual(t["genre"], ["Rock"])                     # override: Discogs' genre, as Picard writes
+        self.assertEqual(t["discogs_style"], ["Thrash"])           # styles stay in discogs_style
+        self.assertEqual(t["title"], ["Death In Vain 0"])          # track tags go through override too
+        self.assertEqual(t["date"], ["2008-05-19"])                # the pressing's date ...
+        self.assertEqual(t["originalyear"][0][:4], "1990")         # ... the work's year from the master
+        self.assertEqual(t["producer"], ["Duane Simoneaux", "Vinnie LaBella"])
+        self.assertFalse([k for k in t if k.startswith("discogs_community") or k in (
+            "discogs_num_for_sale", "discogs_lowest_price", "discogs_estimated_weight", "discogs_data_quality")])
+
+    def test_marketplace_numbers_only_when_switched_on(self):
+        self.picard_ini(merge_mode="override", marketplace=True)
+        t = self.identify().targets[0]
+        self.assertEqual(t["discogs_community_have"], ["297"])
+
+    def test_style_mode_genre_and_prefer_original_date(self):
+        self.picard_ini(merge_mode="override", style_mode="genre", prefer_original_date=True)
+        t = self.identify().targets[0]
+        self.assertEqual(t["genre"], ["Thrash"])
+        self.assertNotIn("discogs_style", t)
+        self.assertEqual(t["date"][0][:4], "1990")
+
+    def test_fill_gaps_keeps_musicbrainz_values(self):
+        self.picard_ini(merge_mode="fill_gaps")
+        t = self.identify().targets[0]
+        self.assertEqual(t["title"], ["Death in Vain 0"])
+        self.assertEqual(t["label"], ["Label MB"])
+        self.assertEqual(t["discogs_release_id"], ["950"])         # supplementary fields always added
+
+    def test_protected_tags_and_profile_override(self):
+        self.picard_ini(merge_mode="override", protected_tags="producer, Genre")
+        t = self.identify().targets[0]
+        self.assertNotIn("producer", t)
+        self.assertNotIn("genre", t)
+        p = self.identify(discogs_enrichment={"merge_mode": "mb_only"})
+        self.assertEqual(p.provider, "musicbrainz")
+        self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])
+
+    def test_picard_preserved_tags_are_kept_on_the_file(self):
+        self.picard_ini(preserved="comment, tagmender, tagmender_reason, totaltracks", merge_mode="override")
+        prof = pf.from_dict({"name": "default"})
+        self.assertEqual(prof.policy("totaltracks"), "fill_missing")
+        self.assertEqual(prof.policy("TOTALTRACKS"), "fill_missing")
+        self.assertEqual(prof.policy("tagmender"), "replace")      # TagMender still writes its marker
+        self.assertEqual(pf.from_dict({"name": "x", "field_policy": {"fields": {"totaltracks": "replace"}}})
+                         .policy("totaltracks"), "replace")         # the profile's own word wins
+        self.assertEqual(pf.from_dict({"name": "y", "follow_picard": False}).policy("totaltracks"), "replace")
+        d = self.album("Band E", "Album In The Vatican", TRACKTOTAL="08")
+        mb = mb_release("mb-e", "Band E", "Album In The Vatican", discogs=950)
+        eng = self.engine(ExhorderHttp(mb=[mb], dg=[exhorder_like()]))
+        plan = eng.plan(d)
+        text = pl.preview(plan)
+        self.assertNotIn("totaltracks: 08", text)
+
+    def test_bad_enrichment_setting_is_a_profile_problem(self):
+        self.assertTrue(pf.validate({"name": "x", "discogs_enrichment": {"merge_mode": "sometimes"}}))
+        self.assertTrue(pf.validate({"name": "x", "discogs_enrichment": {"tokn": "x"}}))
+        self.assertEqual(pf.validate({"name": "x", "discogs_enrichment": {"merge_mode": "fill_gaps"}}), [])
+
+    def test_settings_come_from_picard_ini_and_never_the_token(self):
+        import picard_config
+        ini = self.picard_ini(merge_mode="override", marketplace=False)
+        s = picard_config.enrichment()
+        self.assertEqual((s["merge_mode"], s["marketplace"]), ("override", False))
+        self.assertNotIn("token", s)
+        self.assertEqual(picard_config.source(), str(ini))
+        _os.environ["TAGMENDER_PICARD_INI"] = str(self.tmp / "missing.ini")
+        self.assertEqual(picard_config.enrichment()["merge_mode"], "combine")   # the plugin's default
 
 
 class EndToEnd(Base):

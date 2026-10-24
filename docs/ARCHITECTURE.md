@@ -8,7 +8,7 @@
 | Providers | `match_albums` (MusicBrainz, Discogs, CTDB, AcoustID, ISRC, links), `web_tag` (web), `mb_tags` (MB release → tags), Discogs Enrichment's `discogs_mapping` (Discogs release → tags) |
 | Fingerprints | `match_albums.fingerprint` (fpcalc, read-only) |
 | Candidates and scoring | `match_core.score_candidate`, `classify`, `combine` |
-| Reconciliation | `engine.Engine._identified` (same pressing only; base + fill; `field_sources`) |
+| Reconciliation | `engine.Engine._identified` + `engine.enrich` (same pressing only; MusicBrainz base, Discogs applied as the Discogs Enrichment plugin applies it, settings from `picard_config`) |
 | Profiles | `profiles` (schema version, defaults, validation, migration) |
 | Rules | `exclusions` |
 | Naming | `naming` (template language), `filenames` (safety, limits, shortening) |

@@ -15,9 +15,12 @@ Identification never depends on Picard. Tags come from the release itself:
     Discogs-only album is tagged exactly as the plugin would tag it, with no MusicBrainz
     ID required or invented;
   - both, when they hold the same pressing (linked, or the matcher's "twin"): the
-    profile's primary provider gives the base and field_sources decide named fields;
-    other fields are only filled where the base has none. Releases that are not the same
-    pressing are never mixed.
+    MusicBrainz tags are the base and the Discogs release is applied to them the way the
+    plugin applies it inside Picard (enrich(): its merge mode, style mode, field filters,
+    protected tags, original date, track tags and artist-credit settling), with your
+    plugin settings read from Picard.ini (picard_config). A profile's field_sources, if
+    set, have the last word on named fields. Releases that are not the same pressing are
+    never mixed.
 
 Missing credentials, an outage or throttling at one provider is recorded on the album
 (provider_errors) and does not make it unresolved when the other provider identified it.
@@ -206,33 +209,43 @@ class Engine:
             rel = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}?inc={mb_tags.INC}&fmt=json", "mb")
             if rel:
                 tags_mb = mb_tags.release_tags(rel)
+        es = self.profile.enrichment()
+        dparts = None
         if dgid and self.dm is not None and (self.use_discogs or self.token):
             det = self.http.get_json(f"https://api.discogs.com/releases/{dgid}", "discogs")
             if det:
-                tags_dg = discogs_tags(det, self.dm, self.http)
+                dparts = discogs_parts(det, self.dm, self.http, es)
         n = len(files)
         tags_mb = tags_mb if tags_mb and len(tags_mb) == n else None
-        tags_dg = tags_dg if tags_dg and len(tags_dg) == n else None
+        if dparts and (dparts[1] is None or len(dparts[1]) != n):
+            dparts = None if not tags_mb else (dparts[0], None, dparts[2])
+        if tags_mb and dparts and es["merge_mode"] == "mb_only":
+            dparts = None
+        if not tags_mb and dparts and dparts[1] is not None:
+            tags_dg = discogs_only_tags(*dparts[:2])
         if not tags_mb and not tags_dg:
             raise RuntimeError("the matched release's tracks could not be read")
-        primary = self.profile["primary"]
-        order = (["discogs", "musicbrainz"] if primary == "discogs" else ["musicbrainz", "discogs"])
-        if primary == "both" or (primary == "discogs" and tags_mb):
-            order = ["musicbrainz", "discogs"]                  # Picard + Discogs Enrichment: MB base, Discogs fills
-        src = {"musicbrainz": tags_mb, "discogs": tags_dg}
-        order = [o for o in order if src[o]]
+        order = ["musicbrainz"] + (["discogs"] if dparts else []) if tags_mb else ["discogs"]
         targets, prov = [], {}
         for i in range(n):
-            merged, where = {}, {}
-            for name in order:                                  # base first, others fill gaps only
-                for k, v in src[name][i].items():
-                    if k.startswith("~") or not v:
-                        continue
-                    if k not in merged:
-                        merged[k], where[k] = v, name
-            for fld, prefs in self.profile["field_sources"].items():   # named fields: the profile decides
+            dg_i = None
+            if tags_mb:
+                merged = {k: v for k, v in tags_mb[i].items() if not k.startswith("~") and v}
+                where = dict.fromkeys(merged, "musicbrainz")
+                if dparts:
+                    album_f, tracks_f, dcount = dparts
+                    track_i = tracks_f[i] if tracks_f else None
+                    dg_i = _as_tags({**album_f, **(track_i or {})})
+                    merged = enrich(merged, album_f, track_i, es, dcount, self.dm)
+                    where = {k: ("discogs" if dg_i.get(k) == v else "musicbrainz") for k, v in merged.items()}
+            else:
+                dg_i = tags_dg[i]
+                merged = {k: v for k, v in dg_i.items() if not k.startswith("~") and v}
+                where = dict.fromkeys(merged, "discogs")
+            src = {"musicbrainz": tags_mb[i] if tags_mb else {}, "discogs": dg_i or {}}
+            for fld, prefs in self.profile["field_sources"].items():   # a profile's explicit choice
                 for name in prefs:
-                    v = (src.get(name) or [{}] * n)[i].get(fld) if src.get(name) else None
+                    v = src.get(name, {}).get(fld)
                     if v:
                         merged[fld], where[fld] = v, name
                         break
@@ -402,10 +415,53 @@ def _flatten_raw(tracklist, parent_position=None):
     return out
 
 
-def discogs_tags(det, dm, http=None) -> list[dict]:
-    """Per audio track, in the matcher's order: album fields from extract_discogs_fields,
-    the master's original year, disc and track fields - as the plugin writes them."""
-    album = dict(dm.extract_discogs_fields(det))
+class Meta:
+    """The little of Picard's Metadata the plugin's merge code uses, over a tag dict."""
+
+    def __init__(self, tags: dict):
+        self.d = {k: [str(x) for x in (v if isinstance(v, list) else [v])] for k, v in tags.items()}
+
+    def getall(self, k):
+        return list(self.d.get(k, []))
+
+    def get(self, k, default=""):
+        v = self.d.get(k)
+        return v[0] if v else default
+
+    def __setitem__(self, k, v):
+        self.d[k] = [str(x) for x in v] if isinstance(v, (list, tuple)) else [str(v)]
+
+    def __contains__(self, k):
+        return k in self.d
+
+    def delete(self, k):
+        self.d.pop(k, None)
+
+    def keys(self):
+        return list(self.d)
+
+
+def shape_fields(fields: dict, s: dict, dm) -> dict:
+    """The plugin's _shape_fields: style routing, then the field groups switched off and the
+    protected tags dropped; notes only when imported."""
+    fields = dm.apply_style_mode(dict(fields), s["style_mode"] or "separate")
+    fields = dm.filter_fields(fields, marketplace=bool(s["marketplace"]), performers=bool(s["performers"]),
+                              companies=bool(s["companies"]), identifiers=bool(s["identifiers"]),
+                              protected=dm.parse_protected_tags(s["protected_tags"]))
+    if not s["import_notes"]:
+        fields.pop("discogs_notes", None)
+    return fields
+
+
+def discogs_parts(det, dm, http=None, s=None):
+    """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
+    builds them: extract_discogs_fields shaped by the settings, then the master's original
+    year (and date = original date when prefer_original_date is on). Per-track fields are in
+    the matcher's track order, each with its disc fields; None when the tracklist does not
+    line up with the matcher's."""
+    import picard_config
+    s = s or picard_config.enrichment()
+    album = shape_fields(dm.extract_discogs_fields(det), s, dm)
     if det.get("master_id") and http is not None:
         try:
             master = http.get_json(f"https://api.discogs.com/masters/{det['master_id']}", "discogs")
@@ -413,23 +469,102 @@ def discogs_tags(det, dm, http=None) -> list[dict]:
                 album.update(dm.extract_original_year(master))
         except Exception:
             pass
+    if s["prefer_original_date"]:
+        original = album.get("originaldate") or album.get("originalyear")
+        if original:
+            album["date"] = original
     raw = ma.drop_video_tracks(_flatten_raw(det.get("tracklist")), det)
     cand = ma.discogs_candidate(det, dm)
     discs = [t["disc"] for t in cand["tracks"]]
-    if len(discs) != len(raw):
-        return []
     total_discs = dm.release_disc_count(det) or max(discs or [1])
+    if len(discs) != len(raw):
+        return album, None, total_discs
     per_disc = {}
     for d in discs:
         per_disc[d] = per_disc.get(d, 0) + 1
-    seen, out = {}, []
+    seen, tracks = {}, []
     for entry, disc in zip(raw, discs):
         seen[disc] = seen.get(disc, 0) + 1
-        t = dict(album)
-        t.update(dm.extract_disc_fields({"number": disc}, total_discs))
+        t = dict(dm.extract_disc_fields({"number": disc}, total_discs))
+        # numbered within each disc: the plugin's automatic path numbers through the whole
+        # release, which would give disc 2's first track number 11
         t.update(dm.extract_track_fields(entry, seen[disc], per_disc[disc]))
-        t.setdefault("artist", album.get("albumartist", ""))
         t["discnumber"], t["totaldiscs"] = str(disc), str(total_discs)
-        out.append({k: (v if isinstance(v, list) else [str(v)]) for k, v in t.items()
-                    if not str(k).startswith("~") and v not in ("", None, [])})
+        tracks.append(t)
+    return album, tracks, total_discs
+
+
+def _as_tags(d: dict) -> dict:
+    return {k: (v if isinstance(v, list) else [str(v)]) for k, v in d.items()
+            if not str(k).startswith("~") and v not in ("", None, [])}
+
+
+def discogs_tags(det, dm, http=None, s=None) -> list[dict]:
+    """A release tagged from Discogs alone (no MusicBrainz release): every field from Discogs,
+    shaped by the plugin's settings."""
+    album, tracks, _ = discogs_parts(det, dm, http, s)
+    return discogs_only_tags(album, tracks)
+
+
+def discogs_only_tags(album: dict, tracks) -> list[dict]:
+    if tracks is None:
+        return []
+    out = []
+    for t in tracks:
+        merged = dict(album)
+        merged.update(t)
+        merged.setdefault("artist", album.get("albumartist", ""))
+        out.append(_as_tags(merged))
     return out
+
+
+TRACK_ONLY = ("discnumber", "totaldiscs", "disctotal", "discsubtitle")
+
+
+def enrich(mb: dict, album: dict, track: dict | None, s: dict, disc_count: int, dm) -> dict:
+    """One file's MusicBrainz tags with the Discogs release applied, as the plugin applies
+    it in Picard (_apply_discogs_fields, then the per-track fields through the merge mode,
+    "Discogs only" clearing, then artist credits settled)."""
+    meta = Meta(mb)
+    mode = s["merge_mode"] or "combine"
+    if s["split_collaborations"]:                      # done by the plugin on MusicBrainz's data
+        try:
+            dm.settle_artist_credits(meta, dm.snapshot_artist_credits(meta), (), True, None)
+        except Exception:
+            pass
+    if mode == "mb_only":
+        return meta.d
+    names_before = dm.snapshot_artist_credits(meta)
+    boxset = dm.is_probable_boxset(meta.getall("album"), album.get("album"), disc_count)
+    for f, v in album.items():
+        if dm.is_supplementary_field(f):
+            meta[f] = v
+            continue
+        if f == "album":
+            for tf, tv in dm.resolve_album_and_subtitle(meta.getall("album"), v,
+                                                        meta.getall("discsubtitle"), mode).items():
+                meta[tf] = tv
+            continue
+        eff = "fill_gaps" if (boxset and f in dm.PROTECTED_IN_BOXSET) else mode
+        r = dm.resolve_field_value(meta.getall(f), v, eff, field=f)
+        if r is not None:
+            meta[f] = r
+    per = {}
+    if s["track_tags"] and track:
+        # the automatic path writes track identity only; disc numbers come from MusicBrainz
+        per = {k: v for k, v in track.items() if k not in TRACK_ONLY}
+        for f, v in per.items():
+            if f.startswith("~"):
+                continue
+            r = dm.resolve_field_value(meta.getall(f), v, mode, field=f)
+            if r is not None:
+                meta[f] = r
+    supplied = set(album) | set(per)
+    if mode == "discogs_only":
+        for name in dm.tags_to_clear(meta.keys(), supplied, dm.parse_protected_tags(s["protected_tags"])):
+            meta.delete(name)
+    try:
+        dm.settle_artist_credits(meta, names_before, supplied, mode != "discogs_only", None)
+    except Exception:
+        pass
+    return meta.d

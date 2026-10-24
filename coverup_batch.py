@@ -49,10 +49,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import companions  # noqa: E402
 import coverup_loader  # noqa: E402
 import coverup_pil_render as R  # noqa: E402
 
-DEFAULT_COVERUP = "~/Documents/Github/picard-coverup"
+DEFAULT_COVERUP = str(companions.coverup_dir())      # env, ~/Documents/Github clone, or bundled
 DEFAULT_INI = "~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"
 COVERUP_UUID = "be95dccc-b521-488a-843f-4af29033de41"
 LIST_KEYS = {"apply_types", "embed_types", "providers_enabled", "provider_order", "artist_types",
@@ -92,10 +93,29 @@ def picard_values(ini_path):
     return {k: v for k, v in plugin.items() if v is not None}, picard
 
 
+def with_tagmender_keys(plugin):
+    """CoverUp's API keys from TagMender's credential store (`tagmender setup`) where
+    Picard.ini has none, so CoverUp works on a machine without Picard. Keys set in
+    CoverUp's own options always win."""
+    import credentials
+    out = dict(plugin)
+    for name, key in credentials.COVERUP_KEYS.items():
+        if out.get(key):
+            continue
+        try:
+            v = credentials.get(name)
+        except credentials.CredentialError:
+            v = ""
+        if v:
+            out[key] = v
+    return out
+
+
 def batch_settings(ini_path, pass_name):
     """Your CoverUp settings, with the choices made for this batch applied on top."""
     from coverup.settings import Settings
     plugin, picard = picard_values(ini_path)
+    plugin = with_tagmender_keys(plugin)
     s = Settings.from_mapping(plugin)
     overrides = {
         "embed_types": ["front"],          # what Picard does today ("embed only a single front image")

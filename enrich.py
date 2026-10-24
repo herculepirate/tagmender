@@ -450,7 +450,7 @@ def main(argv=None):
         return 0
 
     db = sqlite3.connect(Path(args.cache_db).expanduser(), timeout=60)
-    http = ma.Http(db, dict(mc.DEFAULT_CFG), os.environ.get("DISCOGS_TOKEN", ""))
+    http = ma.Http(db, dict(mc.DEFAULT_CFG), ma._discogs_token())
     run_dir = blob_dir = None
     if args.apply:
         run_dir = out_dir / f"run-enrich-{time.strftime('%Y%m%d-%H%M%S')}"

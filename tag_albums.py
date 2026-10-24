@@ -41,6 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import exclusions  # noqa: E402
+import reasons  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv", ".ape", ".mpc", ".dsf", ".wma"}
@@ -147,7 +148,7 @@ def write_tagmender(path, status, reason=""):
     f = mutagen.File(path)
     if f is None:
         raise ValueError("not an audio file mutagen can write")
-    reason = reason if status == "Unresolved" else ""
+    reason = reasons.encode(reason) if status == "Unresolved" else ""
     if isinstance(f, MP4):
         if f.tags is None:
             f.add_tags()
@@ -882,7 +883,7 @@ def mark_unresolved(args, out_dir):
         files = audio_files(Path(path))
         if not files or all(read_ids(p)["trackid"] for p in files):
             continue                                     # tagged by hand since
-        if all(read_tagmender(p) == ("Unresolved", reason) for p in files):
+        if all(read_tagmender(p) == ("Unresolved", reasons.encode(reason)) for p in files):
             continue
         if any(read_tagmender(p)[0] == "Resolved" for p in files):
             continue                                     # tagged from the web since

@@ -495,7 +495,7 @@ class Runs(Base):
         rc, out = self.run_tool("--mark-unresolved", "--apply")
         self.assertEqual(rc, 0, out)
         for p in ta.audio_files(self.album):
-            self.assertEqual(ta.read_tagmender(p), ("Unresolved", "review: track count differs"), p)
+            self.assertEqual(ta.read_tagmender(p), ("Unresolved", "incomplete_album: review: track count differs"), p)
         rc, out = self.run_tool("--mark-unresolved", "--apply")             # already marked
         self.assertIn("0 album(s) to mark", out)
         rc, out = self.run_tool("--undo", sorted(p.name for p in self.out.glob("run-*"))[0][4:])

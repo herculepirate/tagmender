@@ -151,9 +151,9 @@ def main(argv=None):
     out_dir = Path(args.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     args.db = out_dir / "match_state.db"
-    token = os.environ.get("DISCOGS_TOKEN", "")
+    token = ma._discogs_token()
     if not token:
-        sys.exit("Set DISCOGS_TOKEN first")
+        sys.exit("No Discogs token: run `tagmender setup`, or set DISCOGS_TOKEN")
     cfg = dict(mc.DEFAULT_CFG)
     countries = ma.picard_preferred_countries(args.picard_ini)
     if countries:

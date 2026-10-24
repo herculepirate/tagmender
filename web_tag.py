@@ -512,7 +512,7 @@ def tags_for(album, cand, http, artist_cache, source_name, token=""):
         "discogs_albumartist_id": [d for _m, d in alb if d],
         "tagmender": "Resolved",
         "tagmender_reason": (f"not on MusicBrainz; tags from the Discogs release" if source_name == "Discogs"
-                             else f"not on MusicBrainz or Discogs; tags from {source_name}"),
+                             else f"web_fallback_only: not on MusicBrainz or Discogs; tags from {source_name}"),
         "discogs_release_id": cand.get("discogs_release", ""),
         "tagmender_source": cand["url"],
     }
@@ -698,7 +698,7 @@ def main(argv=None):
         return undo(out_dir, args.undo)
 
     cfg = dict(mc.DEFAULT_CFG)
-    token = os.environ.get("DISCOGS_TOKEN", "")
+    token = ma._discogs_token()
     db = sqlite3.connect(Path(args.matches_db).expanduser(), timeout=60)
     http = ma.Http(db, cfg, "")
     ma.USER_AGENT = USER_AGENT

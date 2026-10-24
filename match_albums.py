@@ -40,6 +40,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
 import exclusions  # noqa: E402
+import companions  # noqa: E402
 
 try:
     import mutagen
@@ -80,7 +81,7 @@ def result_version():
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv",
              ".ape", ".wav", ".aif", ".aiff", ".dsf", ".dff", ".wma", ".mpc"}
 USER_AGENT = "AlbumMatcher/0.1 +https://github.com/herculepirate/picard-discogs-enrichment"
-DEFAULT_PLUGIN_DIR = "~/Documents/Github/picard-discogs-enrichment"
+DEFAULT_PLUGIN_DIR = str(companions.discogs_dir())   # env, ~/Documents/Github clone, or bundled
 
 
 # --------------------------------------------------------------------------
@@ -652,6 +653,15 @@ def picard_preferred_countries(ini="~/.var/app/org.musicbrainz.Picard/config/Mus
     if not raw or raw.startswith("@"):
         return []
     return [c.strip().upper() for c in raw.split(",") if re.fullmatch(r"\s*[A-Za-z]{2}\s*", c)]
+
+
+def _discogs_token():
+    """DISCOGS_TOKEN from the environment, else ~/.config/tagmender/discogs_token (mode 600)."""
+    import credentials
+    try:
+        return credentials.get("discogs")
+    except credentials.CredentialError as exc:
+        sys.exit(str(exc))
 
 
 def acoustid_key():
@@ -1912,9 +1922,9 @@ def main():
     if not fingerprint_ready():
         print("Note: fingerprints (AcoustID) are off: install fpcalc (libchromaprint-tools) and put an "
               "AcoustID application key in ~/.config/tagmender/acoustid_key", file=sys.stderr)
-    token = os.environ.get("DISCOGS_TOKEN", "")
+    token = _discogs_token()
     if not token:
-        sys.exit("Set DISCOGS_TOKEN (discogs.com/settings/developers -> Generate token)")
+        sys.exit("No Discogs token: run `tagmender setup`, or set DISCOGS_TOKEN (discogs.com/settings/developers -> Generate token)")
 
     dm = load_plugin(args.plugin_dir)
     global _PLUGIN_STAMP

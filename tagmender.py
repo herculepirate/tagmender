@@ -329,6 +329,70 @@ def profiles_parser(sub):
     a.add_argument("--overwrite", action="store_true")
 
 
+# --------------------------------------------------------------------------
+# doctor, setup
+# --------------------------------------------------------------------------
+def cmd_doctor(args):
+    import doctor
+    if args.export:
+        path = doctor.export(args.export, anonymize_paths=args.anonymize)
+        print(f"Diagnostics written to {path} (no tokens or keys"
+              + (", names anonymized" if args.anonymize else "") + ")", file=sys.stderr)
+    found = doctor.checks()
+    if args.json:
+        from dataclasses import asdict
+        print(json.dumps([asdict(c) for c in found], indent=2, ensure_ascii=False))
+    else:
+        mark = {"ok": "ok  ", "warn": "WARN", "fail": "FAIL"}
+        for c in found:
+            print(f"{mark[c.status]}  {c.name:<34} {c.detail}")
+            if c.fix:
+                print(f"{'':<6}{'':<34} fix: {c.fix}")
+    return 1 if any(c.status == "fail" for c in found) else 0
+
+
+def cmd_setup(args):
+    """Interactive unless --stdin NAME is given (then one value is read from standard input,
+    for scripts). Secrets are typed without echo, stored mode 0600, never shown again."""
+    import getpass
+    import credentials as cr
+    if args.stdin:
+        value = sys.stdin.readline().strip()
+        if not value:
+            print("Nothing read from standard input", file=sys.stderr)
+            return 2
+        print(f"Saved {args.stdin} to {cr.store(args.stdin, value)}")
+        return 0
+    if not sys.stdin.isatty():
+        print("setup is interactive; for scripts use: echo TOKEN | tagmender setup --stdin discogs", file=sys.stderr)
+        return 2
+    print("TagMender setup. Press Enter to keep what is there.\n")
+    for name in ("discogs", "acoustid", "fanart", "audiodb", "lastfm"):
+        have = cr.source(name)
+        prompt = f"{cr.LABELS[name]}" + (f" [set, from {have}]" if have else " [not set]") + ": "
+        value = getpass.getpass(prompt)
+        if value.strip():
+            cr.store(name, value)
+            print("  saved")
+    done = pf.install_examples()
+    if done:
+        print(f"\nExample profile(s) installed: {', '.join(done)}  (tagmender profiles show Lossy)")
+    print("\nCoverUp: its other settings (sources, sizes, file names) are read from Picard's "
+          "Options > Plugins > CoverUp when Picard is installed; the keys above are used where "
+          "Picard has none.\n")
+    return cmd_doctor(argparse.Namespace(json=False, export=None, anonymize=False))
+
+
+def doctor_parser(sub):
+    a = sub.add_parser("doctor", help="check what TagMender needs; --export makes a diagnostics zip")
+    a.add_argument("--json", action="store_true")
+    a.add_argument("--export", metavar="PATH", help="write a diagnostics .zip (file or folder)")
+    a.add_argument("--anonymize", action="store_true", help="replace folder and file names with hashes")
+    a = sub.add_parser("setup", help="enter provider keys (typed without echo; stored mode 0600)")
+    a.add_argument("--stdin", metavar="NAME", choices=("discogs", "acoustid", "fanart", "audiodb", "lastfm"),
+                   help="read this one secret from standard input instead of asking")
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = None
@@ -348,8 +412,13 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     rules_parser(sub)
     profiles_parser(sub)
+    doctor_parser(sub)
     args = ap.parse_args(argv)
     args.profile = profile
+    if args.cmd == "doctor":
+        return cmd_doctor(args)
+    if args.cmd == "setup":
+        return cmd_setup(args)
     if args.cmd == "profiles":
         try:
             return cmd_profiles(args)

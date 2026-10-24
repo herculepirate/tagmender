@@ -780,6 +780,47 @@ class ScanReading(unittest.TestCase):
         text = ma.ocr_disc_rings([self.tmp / "matrix.png"])
         self.assertIn("QDISS0201CDD", mc.codes_from_ocr_text(text)["catnos"], text)
 
+    def test_a_barcode_on_a_late_scan_is_found_within_the_time_budget(self):
+        """Enslaved - Axioma Ethica Odini: nine huge scans, the barcode on the 8th; the
+        whole-page passes spent the budget first. Bar patches are now decoded first."""
+        try:
+            import numpy  # noqa: F401
+            import pyzbar  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy or pyzbar not installed")
+        from PIL import Image, ImageDraw
+        L = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011",
+             "0110111", "0001011"]
+        G = ["0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001",
+             "0001001", "0010111"]
+        R = ["1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100",
+             "1001000", "1110100"]
+        PARITY = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL",
+                  "LGGLGL"]
+        code = "7090014385050"
+        d = [int(c) for c in code]
+        bits = "101" + "".join((L if p == "L" else G)[x] for p, x in zip(PARITY[d[0]], d[1:7])) + "01010" + \
+            "".join(R[x] for x in d[7:]) + "101"
+        paths = []
+        for n in range(4):
+            im = Image.new("L", (4000, 3000), 235)
+            ImageDraw.Draw(im).text((200, 200), f"page {n}", fill=0)
+            if n == 3:
+                x = 3000
+                for b in bits:
+                    if b == "1":
+                        ImageDraw.Draw(im).rectangle((x, 2500, x + 3, 2700), fill=0)
+                    x += 4
+            p = self.tmp / f"img10{n}.png"
+            im.save(p)
+            paths.append(p)
+        self.assertEqual(ma.ocr_barcodes(paths, per_image_s=0.01, total_s=0.01), {code})
+
+    def test_a_completed_barcode_does_not_stand_for_the_copy(self):
+        """A misread completed by the check digit always passes the check."""
+        text = mc.COMPLETED + "9000044388080\n5 013929 020160\n" + mc.COMPLETED + "5013929020160"
+        self.assertEqual(mc.barcodes_read_whole(text, ["9000044388080", "5013929020160"]), ["5013929020160"])
+
     def test_the_barcodes_first_digit_is_completed_by_the_check_digit(self):
         """Exhorder: the band under the bars read "BS 013929)020160)"; the 5 stands apart."""
         self.assertEqual(mc.complete_ean("013929020160"), "5013929020160")

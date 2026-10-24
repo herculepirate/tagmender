@@ -649,6 +649,23 @@ def _o_for_zero(text):
     return out
 
 
+COMPLETED = "check-digit completed: "
+
+
+def barcodes_read_whole(text, codes):
+    """The barcodes read in full somewhere in the text, not only completed from twelve
+    digits by the check digit: a completion always passes the check, so a misread
+    ("000044 388080" for Enslaved's 7090014385050) becomes a valid-looking wrong
+    barcode. Completed ones are searched; only whole readings stand for the copy."""
+    text = str(text or "")
+    out = []
+    for c in codes:
+        total = len(re.findall(r"(?<!\d)" + re.escape(c) + r"(?!\d)", re.sub(r"(?<=\d)[ °'’·.](?=\d)", "", text)))
+        if total > text.count(COMPLETED + c):
+            out.append(c)
+    return out
+
+
 def complete_ean(digits12):
     """The EAN-13 whose last twelve digits OCR read: the first digit sits apart, left
     of the bars, and is the one most often lost ("5 013929 020160" read as

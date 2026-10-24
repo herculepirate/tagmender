@@ -1542,6 +1542,41 @@ def ocr_barcodes(paths, per_image_s=8.0, total_s=40.0):
     except ImportError:
         return set()
     symbols = [ZBarSymbol.EAN13, ZBarSymbol.EAN8, ZBarSymbol.UPCA, ZBarSymbol.UPCE]
+
+    def codes_in(img):
+        found = set()
+        for rotation in (0, 90, 180, 270):
+            v = img if rotation == 0 else img.rotate(rotation, expand=True)
+            try:
+                for d in decode(v, symbols=symbols):
+                    code = re.sub(r"\D", "", d.data.decode("ascii", "ignore"))
+                    if _valid_barcode(code):
+                        found.add(code)
+            except Exception:
+                continue
+            if found:
+                break
+        return found
+
+    # First where barcodes ARE: the bar patches of every scan, found cheaply and decoded
+    # on their own (Enslaved - Axioma Ethica Odini: nine 7019x5100 scans; the whole-page
+    # passes used the time budget up before the 8th, the back of the digipak).
+    for p in paths:
+        try:
+            im = Image.open(p)
+            im.load()
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+        except Exception:
+            continue
+        for x0, y0, x1, y1 in barcode_regions(im):
+            bw, bh = x1 - x0, y1 - y0
+            crop = im.crop((int(max(0, x0 - bw * 0.3)), int(max(0, y0 - bh * 0.5)),
+                            int(min(im.width, x1 + bw * 0.3)), int(min(im.height, y1 + bh * 0.8))))
+            for variant in list(_barcode_variants(crop))[:4]:
+                hit = codes_in(variant)
+                if hit:
+                    return hit
     started = time.time()
     for p in paths:
         if time.time() - started > total_s:
@@ -1746,7 +1781,7 @@ def ocr_barcode_digits(paths, max_images=15):
     for m in re.finditer(r"(?<!\d)(\d{6})\D{0,3}(\d{6})(?!\d)", text):
         code = mc.complete_ean(m.group(1) + m.group(2))
         if code:
-            chunks.append(code)
+            chunks.append(mc.COMPLETED + code)
     return "\n".join(chunks)
 
 
@@ -2076,8 +2111,9 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
                                 f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
             if det:
                 found["mb"].append(mb_candidate(det))
-    if new_b and not album["barcodes"]:
-        album["barcodes"] = set(new_b)
+    sure = mc.barcodes_read_whole(text, new_b)
+    if sure and not album["barcodes"]:
+        album["barcodes"] = set(sure)
 
     def rescore(res, name):
         cands = [s["cand"] for s in (res or {}).get("scored", [])]
@@ -2158,7 +2194,7 @@ def _process(row, http, cfg, dm, args, full_cfg):
     if args.ocr:
         images, img_key = list_images(base, args.max_images)
         if images:
-            found = set(_cached(db, "barcodes", img_key, lambda: sorted(ocr_barcodes(images))))
+            found = set(_cached(db, "barcodes2", img_key, lambda: sorted(ocr_barcodes(images))))
             if found and not album["barcodes"]:
                 album["barcodes"] = found
                 out["barcodes_from_ocr"] = ";".join(sorted(found))
@@ -2254,8 +2290,9 @@ def _process(row, http, cfg, dm, args, full_cfg):
                     raise
                 except Exception as exc:
                     source_notes.append(f"Discogs lookup of codes read from scans failed ({exc})")
-                if not album["barcodes"] and new_b:
-                    album["barcodes"] = set(new_b)       # as for barcodes decoded from the scans
+                sure = mc.barcodes_read_whole(text, new_b)
+                if not album["barcodes"] and sure:
+                    album["barcodes"] = set(sure)        # as for barcodes decoded from the scans
 
             def rescore(res, name):
                 cands = [s["cand"] for s in (res or {}).get("scored", [])]

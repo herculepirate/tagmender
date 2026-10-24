@@ -155,6 +155,13 @@ def _source_clues(path, t):
             parts.append(text)
     t["isrc"] = isrc if _ISRC.fullmatch(isrc or "") else ""
     t["clue_text"] = " ".join(parts)[:4000]
+    # A shop's own track ID, as its downloaders write it (SOURCE=Deezer, SOURCEID=1203751422):
+    # the shop's album page, which MusicBrainz links to the digital release, follows from it.
+    low = {str(k).lower(): v for k, v in tags.items()}
+    src = " ".join(str(x) for x in (low.get("source") or [])) if isinstance(low.get("source"), list) else ""
+    sid = " ".join(str(x) for x in (low.get("sourceid") or [])) if isinstance(low.get("sourceid"), list) else ""
+    if src.strip().lower() == "deezer" and sid.strip().isdigit():
+        t["store_track"] = f"deezer:{sid.strip()}"
 
 
 _LINK_PATTERNS = (
@@ -221,6 +228,17 @@ def link_releases(http, album):
     shop pages MusicBrainz links to a release (Bandcamp, Deezer, Spotify,
     Apple, Qobuz, Beatport), and the releases holding the files' ISRCs."""
     found = set(album.get("tag_mb_links") or ())
+    for ref in sorted(album.get("store_tracks") or ())[:2]:
+        shop, tid = ref.split(":", 1)
+        if shop == "deezer":
+            try:
+                track = http.get_json(f"https://api.deezer.com/track/{tid}", "deezer") or {}
+            except Exception:
+                track = {}
+            aid = (track.get("album") or {}).get("id")
+            url = f"https://www.deezer.com/album/{aid}" if aid else ""
+            if url and url not in (album.get("tag_urls") or []):
+                album["tag_urls"] = [url] + list(album.get("tag_urls") or [])
     for url in (album.get("tag_urls") or [])[:4]:
         data = http.get_json("https://musicbrainz.org/ws/2/url?resource=" + q(url) + "&inc=release-rels&fmt=json",
                              "mb") or {}
@@ -679,6 +697,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tocs": disc_tocs(infos) or log_tocs(album_dir) or cue_tocs(album_dir, infos),
         "scans": scan_evidence(album_dir),
         "isrcs": [i.get("isrc") for _p, i in infos if i.get("isrc")],
+        "store_tracks": sorted({i["store_track"] for _p, i in infos if i.get("store_track")}),
         "credit_text": " ".join(sorted({i.get("credit") or "" for _p, i in infos})) + " " + notes_text(album_dir),
         **dict(zip(("tag_mb_links", "tag_discogs_links", "tag_urls"), source_links([i for _p, i in infos]))),
     }
@@ -2206,7 +2225,7 @@ def _process(row, http, cfg, dm, args, full_cfg):
             album["toc_releases"] = set()
         if album["toc_releases"]:
             out["toc_releases"] = len(album["toc_releases"])
-    if album.get("tag_mb_links") or album.get("tag_urls") or album.get("isrcs"):
+    if album.get("tag_mb_links") or album.get("tag_urls") or album.get("isrcs") or album.get("store_tracks"):
         try:
             link_releases(http, album)
         except Exception:

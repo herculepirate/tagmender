@@ -1007,6 +1007,34 @@ class EveryDocument(unittest.TestCase):
         page.save(self.d / "booklet.pdf", resolution=200)
         self.assertIn("NB 1234-2", self.codes()["catnos"])
 
+
+class ShopTrackIds(unittest.TestCase):
+    """Lamb of God - Lamb Of God (2021 deluxe, 2 discs): a Deezer download, its files
+    carrying SOURCE=Deezer and SOURCEID=<Deezer track ID>. The Deezer album page, which
+    MusicBrainz links to the digital release, follows from the track."""
+
+    def test_a_deezer_track_id_in_the_tags_leads_to_the_release(self):
+        d = Path(tempfile.mkdtemp())
+        try:
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1",
+                            "-metadata", "source=Deezer", "-metadata", "sourceid=1203751422",
+                            str(d / "111.GSP.flac"), "-y"], check=True)
+            a = ma.read_album(d, "Lamb of God", "2020 - Lamb Of God", blind=True)
+            self.assertEqual(a["store_tracks"], ["deezer:1203751422"])     # a fresh download has it too
+            asked = []
+
+            class H:
+                def get_json(self, url, host):
+                    asked.append(url)
+                    if url == "https://api.deezer.com/track/1203751422":
+                        return {"id": 1203751422, "album": {"id": 220000000}}
+                    if "/ws/2/url?resource=" in url and "deezer.com/album/220000000" in url:
+                        return {"relations": [{"release": {"id": "ab57f8fa-2e7f-488c-aceb-7d99654f1f22"}}]}
+                    return {}
+            self.assertIn("ab57f8fa-2e7f-488c-aceb-7d99654f1f22", ma.link_releases(H(), a))
+        finally:
+            shutil.rmtree(d)
+
 class FilesNameTheArtist(unittest.TestCase):
     """Aghora - Entheogenic Frequencies Orchestral Representations: filed under Aghora,
     but the files' own ARTIST and COPYRIGHT tags and the ripper's .info name Gustavo

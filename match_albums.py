@@ -1597,13 +1597,112 @@ def ocr_barcode_digits(paths, max_images=15):
             box = (int(max(0, x0 - bw * 0.15)), int(max(0, y0 - bh * 0.4)),
                    int(min(im.width, x1 + bw * 0.15)), int(min(im.height, y1 + bh * 0.6)))
             crop = im.crop(box).convert("L")
-            crop = crop.resize((crop.width * 2, crop.height * 2))
+            crops = [(crop.resize((crop.width * 2, crop.height * 2)), "6")]
+            # the digits alone: a tight band at the foot of the bars, at the scan's own
+            # resolution (Exhorder's Dissonance digipak: enlarged, or with the bars in
+            # view, tesseract reads noise; the band alone reads "5 013929 020160")
+            g = im.convert("L")
+            for f0, f1 in ((-0.1, 0.3), (-0.05, 0.35), (0.0, 0.3)):
+                band = (int(max(0, x0 - bw * 0.15)), int(max(0, y1 + bh * f0)),
+                        int(min(im.width, x1 + bw * 0.1)), int(min(im.height, y1 + bh * f1)))
+                if band[3] - band[1] > 8:
+                    crops.append((g.crop(band), "7"))
+            for c, psm in crops:
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+                        c.save(tmp.name)
+                        r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", psm],
+                                           capture_output=True, text=True, timeout=60)
+                    chunks.append(r.stdout)
+                except Exception:
+                    continue
+    # the first digit sits apart and is often misread: complete 6+6 digit groups by
+    # the check digit
+    text = "\n".join(chunks)
+    for m in re.finditer(r"(?<!\d)(\d{6})\D{0,3}(\d{6})(?!\d)", text):
+        code = mc.complete_ean(m.group(1) + m.group(2))
+        if code:
+            chunks.append(code)
+    return "\n".join(chunks)
+
+
+def find_disc(g):
+    """A disc on a scan as (centre x, centre y, radius) in the image's own pixels, from
+    the extent of everything darker than the scanner's lid; None when the scan is not
+    a disc (too little of it, or not round)."""
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    s = 800 / max(g.size)
+    small = np.asarray(g.resize((max(1, int(g.width * s)), max(1, int(g.height * s)))), dtype=np.float32)
+    ys, xs = np.nonzero(small < 235)
+    if len(xs) < 1000:
+        return None
+    x0, x1 = np.percentile(xs, [0.5, 99.5])
+    y0, y1 = np.percentile(ys, [0.5, 99.5])
+    w, h = x1 - x0, y1 - y0
+    if min(w, h) < 0.5 * min(small.shape) or not 0.85 <= w / max(h, 1) <= 1.15:
+        return None
+    return (x0 + x1) / 2 / s, (y0 + y1) / 2 / s, min(w, h) / 2 / s
+
+
+def unwrap_ring(g, cx, cy, r0, r1):
+    """The ring between radii r0 and r1 laid out flat, outer edge up, so text printed
+    round the hub reads left to right; the start is repeated at the end, so a line
+    crossing the cut is read whole."""
+    import numpy as np
+    a = np.asarray(g, dtype=np.uint8)
+    n, rows = int(2 * np.pi * r1), int(r1 - r0)
+    if n < 50 or rows < 8:
+        return None
+    th = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    th = np.concatenate([th, th[: n // 4]])
+    T, R = np.meshgrid(th, np.linspace(r1, r0, rows))
+    X = np.clip(cx + R * np.cos(T), 0, a.shape[1] - 1).astype(int)
+    Y = np.clip(cy + R * np.sin(T), 0, a.shape[0] - 1).astype(int)
+    return Image_from(a[Y, X])
+
+
+def ocr_disc_rings(paths, max_images=8):
+    """The matrix / runout codes etched or printed round a disc's hub (Exhorder's
+    Dissonance CD: "QDISS0201CDD-1 15 A00"), which page OCR cannot read because the
+    text runs in a circle: the ring is unwrapped from the disc's centre and read flat."""
+    import subprocess
+    import tempfile
+    try:
+        from PIL import Image
+        import numpy  # noqa: F401
+    except ImportError:
+        return ""
+    chunks = []
+    for p in list(paths)[:40]:
+        if len(chunks) >= max_images * 3:
+            break
+        try:
+            g = Image.open(p).convert("L")
+        except Exception:
+            continue
+        if not 0.8 <= g.width / max(g.height, 1) <= 1.25 or min(g.size) < 800:
+            continue
+        found = find_disc(g)
+        if not found:
+            continue
+        cx, cy, r = found
+        for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True)):
+            if flip:                                   # text running the other way round
+                strip = unwrap_ring(g.transpose(Image.FLIP_LEFT_RIGHT), g.width - cx, cy, r * f0, r * f1)
+                strip = strip.rotate(180) if strip is not None else None
+            else:
+                strip = unwrap_ring(g, cx, cy, r * f0, r * f1)
+            if strip is None:
+                continue
             try:
                 with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
-                    crop.save(tmp.name)
-                    r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "6"],
-                                       capture_output=True, text=True, timeout=60)
-                chunks.append(r.stdout)
+                    strip.save(tmp.name)
+                    out = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11"],
+                                         capture_output=True, text=True, timeout=120)
+                chunks.append(out.stdout)
             except Exception:
                 continue
     return "\n".join(chunks)
@@ -1777,9 +1876,13 @@ def _process(row, http, cfg, dm, args, full_cfg):
         if spines.strip():
             text = text + "\n" + spines
         if not album["barcodes"]:
-            digits = _cached(db, "barcode-digits", img_key, lambda: ocr_barcode_digits(images))
+            # "barcode-digits2": the digit band read alone, the first digit completed
+            digits = _cached(db, "barcode-digits2", img_key, lambda: ocr_barcode_digits(images))
             if digits.strip():
                 text = text + "\n" + digits
+        rings = _cached(db, "disc-rings", img_key, lambda: ocr_disc_rings(images))
+        if rings.strip():
+            text = text + "\n" + rings
         if text.strip():
             # Barcodes and catalogue numbers printed on the scans are SEARCHED, not only
             # compared: the release they identify may not be among what the title found.

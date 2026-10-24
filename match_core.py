@@ -387,7 +387,7 @@ _US_STATES = set("al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma
                  "nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc".split())
 _OCR_CATNO_RE = re.compile(
     r"(?<![A-Za-z0-9])([A-Z][A-Za-z]{1,9}(?:[ -]?(?:CD|LP|DVD|SACD|MC|CDR|DA))?[ -]?\d{2,7}(?:[-/]\d{1,3})?"
-    r"(?:CD|LP|DVD|SACD|MC|CDR|DG)?)"                  # "FO532CD": the format after the number
+    r"(?:(?:CD|LP|DVD|SACD|MC|CDR|DG)[A-Z]{0,2})?)"    # "FO532CD", "QDISS0201CDD": the format after the number
     r"(?![A-Za-z0-9])")
 _OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ °'’·.]?\d){10,12})(?!\d)")
 
@@ -421,11 +421,12 @@ def codes_from_ocr_text(text, limit=5):
         if (spaced and len(word) >= 5 and len(re.sub(r"\D", "", number)) <= 3
                 and not re.search(r"cd|lp", word, re.I)):
             continue                                   # a word and a small number: "RETURNING 43"
+        cand = (_o_for_zero(cand) or [cand])[0]
         key = norm_code(cand)
         if key not in seen:
             seen.add(key)
             out["catnos"].append(cand)
-    for v in _misread_variants(text):
+    for v in _misread_variants(text) + _o_for_zero(text):
         key = norm_code(v)
         if key not in seen:
             seen.add(key)
@@ -615,10 +616,49 @@ _LICENSOR = re.compile(r"(?:licen[cs]ed|licen[cs]e)\s+(?:from|by|of)\s+(?:[A-Za-
 _CONFUSABLE = str.maketrans({"o": "0", "s": "5", "i": "1", "l": "1", "b": "8", "z": "2"})
 
 
+def _zeroless(code):
+    """A code with its zeros dropped, after OCR look-alikes are folded to digits:
+    norm_code drops leading zeros only ("QDISS0201CDD" -> "qdiss201cdd") while a zero
+    OCR read as O stays ("QDISSO201CDD" -> "qd1550201cdd"); without zeros both agree."""
+    return ocr_confusable(code).replace("0", "")
+
+
 def ocr_confusable(code):
     """A code with the letters OCR mistakes for digits made digits, so "FOSO1"
     and "FO501" compare equal (both become "f0501")."""
     return str(code or "").casefold().translate(_CONFUSABLE)
+
+
+def _o_for_zero(text):
+    """Catalogue numbers with a zero printed in a font OCR reads as the letter O
+    ("QDISSO201CDD" for Dissonance's QDISS0201CDD): an O touching a digit is a 0."""
+    out = []
+    for m in re.finditer(r"(?<![A-Za-z0-9])([A-Z][A-Z0-9]{4,15})(?![A-Za-z0-9])", text):
+        tok = m.group(1)
+        if "O" not in tok or not re.search(r"\d", tok):
+            continue
+        fixed = tok
+        while True:
+            nxt = re.sub(r"O(?=\d)|(?<=\d)O", "0", fixed)
+            if nxt == fixed:
+                break
+            fixed = nxt
+        if fixed != tok and _OCR_CATNO_RE.fullmatch(fixed):
+            out.append(fixed)
+    return out
+
+
+def complete_ean(digits12):
+    """The EAN-13 whose last twelve digits OCR read: the first digit sits apart, left
+    of the bars, and is the one most often lost ("5 013929 020160" read as
+    "BS 013929 020160)"). The check digit fixes it: exactly one leading digit fits."""
+    d = str(digits12 or "")
+    if not (d.isdigit() and len(d) == 12):
+        return ""
+    for first in "0123456789":
+        if valid_barcode(first + d):
+            return first + d
+    return ""
 
 
 def _misread_variants(text):
@@ -655,13 +695,15 @@ def pressing_clues(ocr_text, cand):
         return agree, disagree
     hay = norm_code(ocr_text)
     hay_c = ocr_confusable(hay)
+    hay_z = _zeroless(hay)
     for c in sorted(cand.get("catnos") or ()):
         digits = re.sub(r"\D", "", c)
         distinctive = (len(c) >= 4 and re.search(r"[a-z]", c) and digits) or len(digits) >= 6
         core = re.sub(r"(cd|lp|dvd|sacd|mc|cdr|dg)$", "", c)        # "fo501cd" read as "FOSO1 cp"
         core_ok = len(core) >= 5 and re.search(r"[a-z]", core) and len(re.sub(r"\D", "", core)) >= 3
         if distinctive and (c in hay or ocr_confusable(c) in hay_c
-                            or (core_ok and ocr_confusable(core) in hay_c)):
+                            or (core_ok and ocr_confusable(core) in hay_c)
+                            or (len(c) >= 7 and _zeroless(c) in hay_z)):
             agree["catalogue number"] = f"catalogue number {c.upper()} on the scans"
             break
     digits_hay = re.sub(r"\D", "", ocr_text)

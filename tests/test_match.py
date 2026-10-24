@@ -753,6 +753,53 @@ class ScanReading(unittest.TestCase):
         text = ma.ocr_barcode_digits([self.tmp / "back.png"])
         self.assertEqual(mc.codes_from_ocr_text(text)["barcodes"], ["8715392182327"])
 
+    def test_the_matrix_code_round_a_disc_hub_is_read(self):
+        """Exhorder's Dissonance CD: "QDISS0201CDD-1 15 A00" runs round the hub."""
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy not installed")
+        import numpy as np
+        from PIL import Image, ImageDraw
+        # the code set on a flat band, then bent round the hub (outer edge = top of the text)
+        r0, r1 = 900 * 0.30, 900 * 0.38
+        band = Image.new("L", (int(2 * np.pi * r1), int(r1 - r0)), 200)
+        ImageDraw.Draw(band).text((300, 14), "QDISS0201CDD-1 15 A00", font=self.font(40), fill=0)
+        b = np.asarray(band)
+        yy, xx = np.mgrid[0:2000, 0:2000]
+        rad = np.hypot(xx - 1000, yy - 1000)
+        ang = np.mod(np.arctan2(yy - 1000, xx - 1000), 2 * np.pi)
+        disc = np.where(rad <= 900, 200, 255).astype(np.uint8)
+        ring = (rad >= r0) & (rad < r1)
+        col = (ang[ring] / (2 * np.pi) * b.shape[1]).astype(int) % b.shape[1]
+        row = np.clip(((r1 - rad[ring]) / (r1 - r0) * b.shape[0]).astype(int), 0, b.shape[0] - 1)
+        disc[ring] = b[row, col]
+        disc[rad < 160] = 255                                   # the hole
+        im = Image.fromarray(disc)
+        im.save(self.tmp / "matrix.png")
+        text = ma.ocr_disc_rings([self.tmp / "matrix.png"])
+        self.assertIn("QDISS0201CDD", mc.codes_from_ocr_text(text)["catnos"], text)
+
+    def test_the_barcodes_first_digit_is_completed_by_the_check_digit(self):
+        """Exhorder: the band under the bars read "BS 013929)020160)"; the 5 stands apart."""
+        self.assertEqual(mc.complete_ean("013929020160"), "5013929020160")
+        self.assertEqual(mc.complete_ean("01392902016"), "")
+
+
+class ZeroReadAsO(unittest.TestCase):
+    """Dissonance's QDISS0201CDD, printed in a font whose 0 OCR reads as O."""
+
+    def test_the_catalogue_number_is_searched_with_a_zero(self):
+        codes = mc.codes_from_ocr_text("ROAD, LONDON W4 5PY. UK. MADE IN EU / MCPS. QDISSO201CDD")
+        self.assertIn("QDISS0201CDD", codes["catnos"])
+        self.assertNotIn("QDISSO201CDD", codes["catnos"])
+
+    def test_the_pressing_carrying_it_agrees(self):
+        agree, _ = mc.pressing_clues("spine: QDISSO201CDD", cand(catnos={mc.norm_code("QDISS0201CDD")}))
+        self.assertIn("catalogue number", agree)
+        agree, _ = mc.pressing_clues("spine: QDISSO202CDD", cand(catnos={mc.norm_code("QDISS0201CDD")}))
+        self.assertNotIn("catalogue number", agree)
+
 
 class BothDatabases(unittest.TestCase):
     """Kreator - Endorama (2003 Art Music, AMG 099, Russia): the Russian CD has 15 tracks

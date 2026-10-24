@@ -208,6 +208,15 @@ python3 web_tag.py --matches-db ~/Downloads/matching_extreme/match_state.db --in
 python3 web_tag.py --undo web-<run-id>
 ```
 
+### Discogs first
+
+Both databases are searched for every album. Discogs decides the pressing: it lists far
+more catalogue numbers and licensed editions. When MusicBrainz has the same pressing
+(linked to that Discogs release, or the same barcode, or the same catalogue number and
+country), `tag_albums.py` tags from it through Picard and Discogs Enrichment fills in.
+A Discogs pressing MusicBrainz lacks is tagged by `web_tag.py`. MusicBrainz decides only
+when Discogs is unsure. An enhanced CD's video and data entries never count as tracks.
+
 ### What the folder name says is a rule
 
 A format (`[Vinyl Rip 24bit 192khz]`, `[2CD]`), country (`Germany`) or catalogue

@@ -666,7 +666,8 @@ def unresolved(matches_db, only=None, include_review=False, include_discogs=True
     for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
         o = json.loads(blob)
         discogs_only = (include_discogs and o.get("status") == "auto"
-                        and (o.get("best") or {}).get("source") == "discogs")
+                        and (o.get("best") or {}).get("source") == "discogs"
+                        and not (o.get("best") or {}).get("mb_id"))   # else Picard tags its MB twin
         if ((o.get("status") in wanted or discogs_only) and Path(path).is_dir()
                 and (not only or only.casefold() in path.casefold())):
             out.append(o)

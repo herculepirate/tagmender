@@ -373,7 +373,7 @@ def recheck(matches_db, album, allow_old=False):
     b = o.get("best") or {}
     if o.get("status") != "auto":
         return f"the matcher now says {o.get('status')}: " + "; ".join((o.get("why") or [])[:2])
-    if b.get("id") != album["mbid"]:
+    if (b.get("mb_id") or (b.get("id") if b.get("source") == "mb" else "")) != album["mbid"]:
         return f"the matcher now picks another release ({b.get('id')})"
     return stale_reason(o, allow_old)
 
@@ -390,10 +390,14 @@ def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow
     for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
         o = json.loads(blob)
         b = o.get("best") or {}
-        if o.get("status") != "auto" or b.get("source") != "mb":
+        # Discogs decides the pressing; Picard tags from the MusicBrainz release of that
+        # same pressing ("mb_id"). A Discogs pick with no such release is web_tag.py's.
+        mbid = b.get("mb_id") or (b.get("id") if b.get("source") == "mb" else "")
+        if o.get("status") != "auto" or not mbid:
             continue
         if only and only.casefold() not in path.casefold():
             continue
+        b = dict(b, id=mbid)
         stale = stale_reason(o, allow_old)
         if stale:
             skipped.append((path, stale))

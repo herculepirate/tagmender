@@ -447,20 +447,30 @@ _EUROPE = {"DE", "GB", "FR", "NL", "BE", "AT", "CH", "IT", "ES", "PT", "SE", "NO
 
 
 def catno_same(a, b):
-    """Two normalised catalogue numbers for one product: equal, or one with a format
-    word added ("SPV 260222" / "SPV 260222 CD", "CG-0004" / "DIGICD CG-0004"), or a
-    long number with and without its check digit ("99833708" / "9983370")."""
+    """Two catalogue numbers for one product, however written: equal; with a format
+    word added or inside ("SPV 91978" / "SPV 91978 Box", "MASS 1389" / "MASS CD 1389 DG",
+    "CG-0004" / "DIGICD CG-0004"); with the label's letters in front ("CD0540" /
+    "MAS CD0540", "079" / "GUN 079"); with a trailing disc digit ("RR 9117" / "RR 9117 2");
+    or a long number with and without its check digit ("99833708" / "9983370")."""
     a, b = norm_code(a), norm_code(b)
     if not a or not b:
         return False
     if a == b:
         return True
+    fmt = r"(?:digicd|digi|dcd|\dcd|cd|lp|dg|box|dvd|mc|ltd|jewel)"
+    sa, sb = re.sub(fmt, "", a), re.sub(fmt, "", b)
+    if sa and sa == sb and len(re.sub(r"\D", "", sa)) >= 3:
+        return True
     short, long_ = sorted((a, b), key=len)
-    if (len(short) >= 3 and re.search(r"[a-z]", short) and re.search(r"\d", short)
-            and (long_.startswith(short) or long_.endswith(short))):
-        extra = long_[len(short):] if long_.startswith(short) else long_[:-len(short)]
-        if re.fullmatch(r"(cd|lp|dcd|\dcd|digicd|digi|mc|dvd|ltd|jewel)", extra):
-            return True
+    digits = len(re.sub(r"\D", "", short))
+    if digits >= 2 and long_.endswith(short) and re.fullmatch(r"[a-z]{1,5}" + fmt + "?", long_[:-len(short)]):
+        return True                                  # the label's letters in front
+    if (len(short) >= 3 and re.search(r"[a-z]", short) and digits
+            and long_.startswith(short) and re.fullmatch(fmt + r"|[1-9]", long_[len(short):])):
+        return True                                  # a format word or disc digit after
+    if long_.endswith(short) and len(short) >= 3 and re.search(r"[a-z]", short) and digits \
+            and re.fullmatch(fmt, long_[:-len(short)]):
+        return True
     if a.isdigit() and b.isdigit() and len(short) >= 7 and long_[:-1] == short:
         return True
     return False
@@ -1251,12 +1261,37 @@ def classify(scored, cfg):
             "margin": round(margin, 1), "why": why}
 
 
+def same_pressing(a, b):
+    """A MusicBrainz and a Discogs candidate for the same pressing: MusicBrainz links
+    to that Discogs release, or the barcode, or the catalogue number and country agree."""
+    if str(a.get("discogs_id") or "") and str(a.get("discogs_id")) == str(b.get("id")):
+        return True
+    if ({barcode_key(x) for x in a.get("barcodes") or ()} & {barcode_key(x) for x in b.get("barcodes") or ()}) - {""}:
+        return True
+    return bool(catnos_agree(a.get("catnos"), b.get("catnos"))
+                and country_code(a.get("country")) == country_code(b.get("country")))
+
+
 def combine(mb_result, dg_result):
-    """MusicBrainz wins when it is auto; else Discogs when auto; else the
-    better of the two for the review list."""
-    for res in (mb_result, dg_result):
-        if res and res["status"] == "auto":
-            return res
+    """Discogs first: it lists far more pressings (catalogue numbers, licensed
+    editions) than MusicBrainz. A confident Discogs match decides the pressing; the
+    MusicBrainz release of that SAME pressing, when there is one, comes along
+    ("mb_twin") so Picard can tag from MusicBrainz with Discogs filling in. When
+    Discogs is not sure, a confident MusicBrainz match is used; else the better of
+    the two goes to the review list."""
+    if dg_result and dg_result["status"] == "auto":
+        out = dict(dg_result)
+        mb_best = (mb_result or {}).get("best")
+        twins = [s for s in (mb_result or {}).get("scored") or []
+                 if same_pressing(s["cand"], dg_result["best"]["cand"])]
+        if twins:
+            out["mb_twin"] = max(twins, key=lambda s: s["confidence"])["cand"]["id"]
+        elif mb_result and mb_result["status"] == "auto" and mb_best:
+            dg_result["best"]["notes"] = dg_result["best"]["notes"] + [
+                f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; Discogs decides"]
+        return out
+    if mb_result and mb_result["status"] == "auto":
+        return mb_result
     order = {"review": 0, "nomatch": 1}
     options = [r for r in (mb_result, dg_result) if r and r["best"]]
     if not options:

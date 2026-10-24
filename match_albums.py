@@ -924,6 +924,8 @@ def mb_candidate(rel):
                    if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
     for mi, media in enumerate(audio_media, 1):
         for t in media.get("tracks", []):
+            if (t.get("recording") or {}).get("video"):
+                continue                               # an enhanced CD's video, never an audio file
             tracks.append({"disc": mi, "title": t.get("title", ""),
                            "secs": (t.get("length") or 0) / 1000.0})
     infos = rel.get("label-info") or []
@@ -999,7 +1001,18 @@ def mb_search(http, album, cfg):
         if len(hits) >= 5 and any(r.get("track-count") == n_files for r in hits):
             break
     same = [r for r in hits if r.get("track-count") == n_files]
+
+    def prio(r):
+        return version_priority(album, catnos=[i.get("catalog-number") for i in r.get("label-info") or []],
+                                country=r.get("country"), formats=[m.get("format") for m in r.get("media") or []])
+    same.sort(key=prio)                                    # stable: search rank among equals
     chosen = (same or hits)[:cfg["mb_detail_fetch"] if same else 2]
+    # The pressing your folder names (its catalogue number or country) is fetched
+    # whatever its track count: Kreator Endorama (2003 Art Music, AMG 099, Russia) is
+    # a 15-track enhanced CD, and must not lose to the 13-track Japanese one unseen.
+    have = {r["id"] for r in chosen}
+    named = [r for r in hits if r["id"] not in have and prio(r)[:2] != (1, 1)]
+    chosen += sorted(named, key=prio)[:4]
     # Releases whose disc ID matches the files are fetched whatever their title
     # (a freeDB-style lookup finds an album the folder names differently).
     have = {r["id"] for r in chosen}
@@ -1017,10 +1030,11 @@ def mb_search(http, album, cfg):
                              f"&inc=media+labels&limit=100&fmt=json", "mb")
         versions = [v for v in (data or {}).get("releases", []) if v.get("id") not in have]
         exact = [v for v in versions if _mb_track_total(v) == n_files]
-        exact.sort(key=lambda v: version_priority(album, catnos=[i.get("catalog-number") for i in v.get("label-info") or []],
-                                                  country=v.get("country"),
-                                                  formats=[m.get("format") for m in v.get("media") or []]))
+        exact.sort(key=prio)
         chosen += [{"id": v["id"]} for v in exact[:4 if same else 8]]
+        have = {r["id"] for r in chosen}
+        chosen += [{"id": v["id"]} for v in sorted((v for v in versions if v["id"] not in have
+                                                     and prio(v)[:2] != (1, 1)), key=prio)[:4]]
     out = []
     for r in chosen:
         det = http.get_json(f"https://musicbrainz.org/ws/2/release/{r['id']}"
@@ -1063,6 +1077,29 @@ def flatten_tracklist(tracklist, dm, parent_position=None):
     return out
 
 
+_VIDEO_POS = re.compile(r"^\s*(?:video|vid|v\d|dvd|cd-?rom|data|enh(?:anced)?|multimedia|mm)\b", re.I)
+_VIDEO_TITLE = re.compile(r"\((?:video|videoclip|video clip|music video|live video|multimedia)[^)]*\)\s*$|"
+                          r"^\s*(?:video|videoclip|multimedia|cd-?rom)(?:\s+(?:track|part|section|clip))?\s*[:\-]|"
+                          r"\b(?:screensaver|wallpapers?|bonus multimedia|enhanced (?:part|section))\b", re.I)
+
+
+def drop_video_tracks(tracks, rel):
+    """An enhanced CD's videos and data are listed as tracks on Discogs (Kreator -
+    Endorama, Art Music AMG 099: 13 songs + 2 videos), but are never audio files. Only
+    entries marked as such are dropped: a position like "Video" or "CD-ROM", or a title
+    ending "(Video)", and only at the end of a release whose format says Enhanced or
+    lists a DVD/CD-ROM part, so a song called "Video Killed the Radio Star" stays."""
+    desc = " ".join(" ".join([f.get("name") or ""] + list(f.get("descriptions") or []))
+                    for f in rel.get("formats") or []).casefold()
+    if not re.search(r"enhanced|dvd|cd-?rom|multimedia|video", desc):
+        return tracks
+    out = list(tracks)
+    while out and (_VIDEO_POS.match(str(out[-1].get("position") or "")) or _VIDEO_TITLE.search(out[-1]["title"])):
+        out.pop()
+    # videos marked anywhere by their position ("Video 1") are never audio
+    return [t for t in out if not _VIDEO_POS.match(str(t.get("position") or ""))]
+
+
 def discogs_candidate(rel, dm):
     # The credit exactly as the plugin writes it (format_artist_credit honours
     # Discogs' "credited as" names and join words), plus the canonical names,
@@ -1070,7 +1107,7 @@ def discogs_candidate(rel, dm):
     artists = dm.format_artist_credit(rel.get("artists"))
     canonical = " & ".join(dm.clean_artist_name(a.get("name")) for a in rel.get("artists", [])
                            if isinstance(a, dict))
-    flat = flatten_tracklist(rel.get("tracklist"), dm)
+    flat = drop_video_tracks(flatten_tracklist(rel.get("tracklist"), dm), rel)
     discs = dm.parse_discs(rel)
     disc_count = dm.release_disc_count(rel)     # same rule as the plugin
     tracks = []
@@ -1448,7 +1485,8 @@ def summarize(res):
             "artist": c["artist"], "title": c["title"], "year": c["year"],
             "country": c["country"], "label": c["label"],
             "tracks": len(c["tracks"]), "confidence": b["confidence"],
-            "notes": b["notes"], "discogs_id": c.get("discogs_id", "")}
+            "notes": b["notes"], "discogs_id": c.get("discogs_id", ""),
+            "mb_id": res.get("mb_twin") or (c["id"] if c["source"] == "mb" else "")}
 
 
 def run_source(name, finder, album, cfg, ocr_txt=""):
@@ -1533,7 +1571,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
     mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
     dg_res = None
     source_notes = []
-    if mb_res["status"] != "auto":
+    # Discogs is asked too, also when MusicBrainz is sure: your pressing may be listed
+    # only there (Kreator Endorama, Art Music AMG 099), and its catalogue number then
+    # outranks a MusicBrainz release that contradicts the folder name.
+    if True:
         try:
             dg_res = run_source("discogs", lambda: discogs_search(http, album, cfg, dm), album, cfg)
         except AuthError:
@@ -1730,7 +1771,8 @@ def export(db, out_dir):
                 continue
             n = toc.split()[1]
             subs.append({"Album": o["path"], "DiscID": did, "Tracks": n,
-                         "MatchedRelease": b.get("url", "") if o["status"] == "auto" and b.get("source") == "mb" else "",
+                         "MatchedRelease": (f"https://musicbrainz.org/release/{b['mb_id']}" if o["status"] == "auto"
+                                            and b.get("mb_id") else ""),
                          "AttachLink": f"https://musicbrainz.org/cdtoc/attach?id={did}&tracks={n}"
                                        f"&toc={toc.replace(' ', '+')}"})
     with open(out_dir / "discid_submissions.csv", "w", newline="", encoding="utf-8") as fh:

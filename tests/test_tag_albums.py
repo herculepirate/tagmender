@@ -197,6 +197,23 @@ class Safeguards(Base):
         self.assertIn("now says review", ta.recheck(self.db, a))
 
 
+class DiscogsFirst(Base):
+    def test_discogs_pick_is_tagged_through_its_musicbrainz_twin(self):
+        self.make_album()
+        o = {"path": str(self.album), "status": "auto", "version": ta.matcher_version(),
+             "best": {"source": "discogs", "id": "123", "mb_id": MBID, "artist": "A", "title": "T",
+                      "confidence": 100.0}}
+        self.dbc.execute("INSERT OR REPLACE INTO results VALUES (?,?)", (str(self.album), json.dumps(o)))
+        self.dbc.commit()
+        albums, _ = ta.select_albums(self.db)
+        self.assertEqual([a["mbid"] for a in albums], [MBID])
+        self.assertEqual(ta.recheck(self.db, albums[0]), "")
+        o["best"]["mb_id"] = ""                                          # Discogs only: web_tag.py's
+        self.dbc.execute("INSERT OR REPLACE INTO results VALUES (?,?)", (str(self.album), json.dumps(o)))
+        self.dbc.commit()
+        self.assertEqual(ta.select_albums(self.db)[0], [])
+
+
 class Artwork(Base):
     """Zoviet France - Norsch / Eostre: scans in subfolders were left in the old folder, and
     loose scans were dropped next to the music."""

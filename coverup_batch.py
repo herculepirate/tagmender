@@ -230,6 +230,8 @@ def album_info(album_dir, ma, mc, match_db=None):
                         ids["discogs_release_id"] = b["discogs_id"]
                 elif b.get("source") == "discogs":
                     ids["discogs_release_id"] = b["id"]
+                    if b.get("mb_id"):
+                        ids["release_mbid"] = b["mb_id"]
     images = [p for p in Path(album_dir).rglob("*")
               if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".gif", ".bmp")
               and ".coverup-backup" not in p.parts]

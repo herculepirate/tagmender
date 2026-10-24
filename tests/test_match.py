@@ -158,12 +158,21 @@ class Core(unittest.TestCase):
     def test_nothing_found(self):
         self.assertEqual(mc.classify([], CFG)["status"], "nomatch")
 
-    def test_combine_prefers_mb_auto_then_discogs_auto(self):
-        good = mc.classify([mc.score_candidate(album(), cand(), CFG)], CFG)
-        dgood = mc.classify([mc.score_candidate(album(), cand(source="discogs", id="d"), CFG)], CFG)
+    def test_combine_puts_discogs_first(self):
+        """Discogs is primary (it lists more pressings); the MusicBrainz release of the
+        same pressing comes along so Picard can still tag from it."""
+        good = mc.classify([mc.score_candidate(album(), cand(catnos={"abc1"}), CFG)], CFG)
+        good["scored"] = [good["best"]]
+        dgood = mc.classify([mc.score_candidate(album(), cand(source="discogs", id="d", catnos={"abc1"}), CFG)], CFG)
         weak = mc.classify([mc.score_candidate(album(), cand(artist="Nope", title="Nope"), CFG)], CFG)
-        self.assertEqual(mc.combine(good, dgood)["best"]["cand"]["source"], "mb")
+        both = mc.combine(good, dgood)
+        self.assertEqual((both["best"]["cand"]["source"], both["mb_twin"]), ("discogs", "x1"))
         self.assertEqual(mc.combine(weak, dgood)["best"]["cand"]["source"], "discogs")
+        other = mc.classify([mc.score_candidate(album(), cand(source="discogs", id="d", catnos={"zzz9"},
+                                                              country="RU"), CFG)], CFG)
+        self.assertNotIn("mb_twin", mc.combine(good, other))            # another pressing: no twin
+        unsure = dict(dgood, status="review")
+        self.assertEqual(mc.combine(good, unsure)["best"]["cand"]["source"], "mb")
 
     def test_ocr_text_can_confirm_catalogue_number(self):
         c = cand(catnos={"abc123"})
@@ -644,6 +653,62 @@ class PressingFromScans(unittest.TestCase):
         self.assertEqual(agree, {})                         # filler words are not a label
 
 
+class BothDatabases(unittest.TestCase):
+    """Kreator - Endorama (2003 Art Music, AMG 099, Russia): the Russian CD has 15 tracks
+    (2 extra), so a track-count filter skipped it; and Discogs was not asked because
+    MusicBrainz was sure of the Japanese CD."""
+
+    def test_the_named_pressing_is_fetched_whatever_its_track_count(self):
+        def rel(rid, country, catno, n):
+            return {"id": rid, "title": "Endorama", "country": country, "track-count": n,
+                    "label-info": [{"catalog-number": catno, "label": {"name": "L"}}],
+                    "media": [{"format": "CD", "track-count": n}],
+                    "release-group": {"id": "rg"}}
+        hits = [rel("jp", "JP", "VICP-60704", 3), rel("de", "DE", "X", 3), rel("us", "US", "Y", 3),
+                rel("de2", "DE", "Z", 3), rel("xw", "XW", "W", 3), rel("ru", "RU", "AMG 099", 5)]
+        fetched = []
+
+        class H:
+            def get_json(self, url, host):
+                if "/release/?query=" in url:
+                    return {"releases": hits}
+                if "release-group=" in url:
+                    return {"releases": []}
+                rid = url.split("/release/")[1].split("?")[0]
+                fetched.append(rid)
+                r = next(h for h in hits if h["id"] == rid)
+                return dict(r, media=[{"format": "CD", "tracks": [{"title": f"T{i}", "length": 200000}
+                                                                  for i in range(r["track-count"])]}])
+        a = album(title="Endorama", artist="Kreator", folder="1999 - Endorama (2003 Art Music, AMG 099, Russia)",
+                  catnos={mc.norm_code("AMG 099")}, catno_search=[])
+        ma.mb_search(H(), a, dict(mc.DEFAULT_CFG, mb_detail_fetch=2))
+        self.assertIn("ru", fetched)
+
+    def test_enhanced_cd_videos_are_not_tracks(self):
+        songs = [{"position": str(i), "title": f"Song {i}", "secs": 200} for i in range(1, 14)]
+        rel = {"formats": [{"name": "CD", "descriptions": ["Album", "Enhanced", "Reissue"]}]}
+        videos = [{"position": "14", "title": "Chosen Few (Video)", "secs": 0},
+                  {"position": "Video", "title": "Golden Age", "secs": 0}]
+        self.assertEqual(len(ma.drop_video_tracks(songs + videos, rel)), 13)
+        plain = {"formats": [{"name": "CD", "descriptions": ["Album"]}]}
+        kept = songs + [{"position": "14", "title": "Video Killed the Radio Star", "secs": 200}]
+        self.assertEqual(len(ma.drop_video_tracks(kept, plain)), 14)
+        self.assertEqual(len(ma.drop_video_tracks(kept, rel)), 14)        # a song, even on an enhanced CD
+        mbrel = {"id": "r", "media": [{"format": "Enhanced CD", "tracks": [
+            {"title": "a", "length": 1000}, {"title": "v", "length": 1000, "recording": {"video": True}}]}]}
+        self.assertEqual(len(ma.mb_candidate(mbrel)["tracks"]), 1)
+
+    def test_only_discogs_carrying_the_folder_number_wins_over_a_sure_musicbrainz(self):
+        nb = mc.norm_code("AMG 099")
+        a = album(folder="1999 - First Light (2003 Art Music, AMG 099, Russia)", catnos={nb},
+                  catnos_from_folder={nb})
+        mb = mc.classify([mc.score_candidate(a, cand(id="jp", country="JP", catnos={"vicp60704"}), CFG)], CFG)
+        dg = mc.classify([mc.score_candidate(a, cand(id="7", source="discogs", country="Russia",
+                                                     catnos={nb}), CFG)], CFG)
+        self.assertEqual(dg["status"], "auto", dg["why"])
+        self.assertEqual(mc.combine(mb, dg)["best"]["cand"]["id"], "7")
+
+
 class RemasterEditions(unittest.TestCase):
     """[2021 RM] in a folder name: a remaster, usually a digital release, dated near that year."""
 
@@ -788,7 +853,11 @@ class PressingEvidence(unittest.TestCase):
         self.assertTrue(same("99833708", "9983370"))
         self.assertTrue(same("FO40CD", "FO 40 CD"))
         self.assertFalse(same("NB 1234-2", "NB 1234-3"))
-        self.assertFalse(same("SOM299", "SOM2990"))
+        self.assertFalse(same("SOM299", "SOM399"))
+        for x, y in (("RR 9117", "RR 9117 2"), ("CD0540", "MAS CD0540"), ("GUN 079", "079"),
+                     ("SPV 91978", "SPV 91978 Box"), ("MASS 1389", "MASS CD 1389 DG")):
+            self.assertTrue(same(x, y), (x, y))
+        self.assertFalse(same("SPV 99807", "SPV 98807 DVD+CD"))           # a different number
 
     def test_clearly_closest_track_lengths(self):
         r = self.pick(album(), cand(id="far", tracks=[{"disc": 1, "title": f"T{i}", "secs": s}
@@ -1100,9 +1169,11 @@ class Pipeline(unittest.TestCase):
         o = self.out["2010 - First Light"]
         self.assertEqual((o["status"], o["best"]["source"], o["best"]["id"]), ("auto", "mb", "mb-alpha"), o["why"])
 
-    def test_auto_mb_skips_discogs_lookup(self):
+    def test_discogs_is_asked_even_when_musicbrainz_is_sure(self):
+        """Your pressing may be listed only on Discogs (Kreator Endorama, AMG 099)."""
         calls = [u for h, u in self.http.calls if h == "discogs" and "First" in u]
-        self.assertEqual(calls, [])
+        self.assertTrue(calls)
+        self.assertEqual(self.out["2010 - First Light"]["best"]["source"], "mb")
 
     def test_identical_pressings_need_review(self):
         o = self.out["2005 - Twin Pressing"]
@@ -1872,8 +1943,11 @@ class FailureHandling(unittest.TestCase):
             self.run_row("2012 - Slow Drift", ma.AuthError("401"))
 
     def test_mb_auto_unaffected_by_discogs_outage(self):
-        o = self.run_row("2010 - First Light", ma.AuthError("401"))   # never reaches Discogs
+        o = self.run_row("2010 - First Light", RuntimeError("timeout"))
         self.assertEqual(o["status"], "auto")
+        self.assertTrue(any("Discogs lookup failed" in w for w in o["why"]))
+        with self.assertRaises(ma.AuthError):                          # a bad token stops the run
+            self.run_row("2010 - First Light", ma.AuthError("401"))
 
     def test_transient_discogs_failure_keeps_musicbrainz_review(self):
         o = self.run_row("2005 - Twin Pressing", RuntimeError("timeout"))

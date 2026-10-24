@@ -107,7 +107,7 @@ def handle(folder, args, http, cfg, dm, db, log):
         return out["status"]
     log(f"{folder.name}: {out['status']} {best.get('source', '')} {best.get('artist', '')} - {best.get('title', '')}")
     py = sys.executable
-    if out["status"] == "auto" and best.get("source") == "mb":
+    if out["status"] == "auto" and best.get("mb_id"):         # Picard tags the MusicBrainz twin
         if ta.picard_running():
             log("  Picard is open: will tag on a later pass")
             return "waiting"

@@ -153,22 +153,36 @@ def short(rel):
                        "/".join(m.get("format") or "" for m in rel.get("media") or [])])
 
 
-def other_album(http, mb_id, b, cache):
+def _discogs(http, rid, cache):
+    if not rid or not cache.get("dm"):
+        return None
+    d = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+    return ma.discogs_candidate(d, cache["dm"]) if d else None
+
+
+def tagged_release(http, mb_id, dg_id, cache):
+    """The release in the tags as a candidate: the MusicBrainz release, else the Discogs
+    one (albums tagged from Discogs alone carry only DISCOGS_RELEASE_ID)."""
+    if mb_id:
+        d = describe_mb(http, mb_id)
+        if d:
+            return ma.mb_candidate(d)
+    return _discogs(http, dg_id, cache)
+
+
+def picked_release(http, b, cache):
+    if b.get("source") == "discogs":
+        return _discogs(http, b.get("id"), cache)
+    d = describe_mb(http, b.get("mb_id") or b.get("id"))
+    return ma.mb_candidate(d) if d else None
+
+
+def other_album(mine, other):
     """False when the release in the tags and the pick are the same album (same title
     and track count), True when they are not, None when unknown."""
-    mine = describe_mb(http, mb_id)
-    if not mine:
+    if not mine or not other:
         return None
-    a = ma.mb_candidate(mine)
-    if b.get("source") == "discogs":
-        d = http.get_json(f"https://api.discogs.com/releases/{b['id']}", "discogs")
-        o = ma.discogs_candidate(d, cache["dm"]) if d and cache.get("dm") else None
-    else:
-        d = describe_mb(http, b.get("id"))
-        o = ma.mb_candidate(d) if d else None
-    if not o:
-        return None
-    return not (mc.title_sim(a["title"], o["title"]) >= 0.85 and len(a["tracks"]) == len(o["tracks"]))
+    return not (mc.title_sim(mine["title"], other["title"]) >= 0.85 and len(mine["tracks"]) == len(other["tracks"]))
 
 
 def verdict(out, mb_id, dg_id, http, cache):
@@ -181,22 +195,14 @@ def verdict(out, mb_id, dg_id, http, cache):
         return "no match", "; ".join(out.get("why") or [])
     picked_mb = b.get("mb_id") or (b.get("id") if b.get("source") == "mb" else "")
     picked_dg = b.get("id") if b.get("source") == "discogs" else (b.get("discogs_id") or "")
-    same = ((mb_id and picked_mb == mb_id) or (dg_id and str(picked_dg) == str(dg_id)))
-    if not same and mb_id:
+    same = bool((mb_id and picked_mb == mb_id) or (dg_id and str(picked_dg) == str(dg_id)))
+    mine = other = None
+    if not same and (mb_id or dg_id):
         # the same pressing listed twice, or MusicBrainz and Discogs entries of one pressing
-        mine = describe_mb(http, mb_id)
-        if mine:
-            cand_mine = ma.mb_candidate(mine)
-            other = None
-            if picked_mb:
-                d = describe_mb(http, picked_mb)
-                other = ma.mb_candidate(d) if d else None
-            elif b.get("source") == "discogs":
-                d = http.get_json(f"https://api.discogs.com/releases/{b['id']}", "discogs")
-                other = ma.discogs_candidate(d, cache["dm"]) if d else None
-            if other and (mc.same_pressing(cand_mine, other) or mc.same_pressing(other, cand_mine)):
-                same = True
-    if not same and mb_id and other_album(http, mb_id, b, cache) is False:
+        mine, other = tagged_release(http, mb_id, dg_id, cache), picked_release(http, b, cache)
+        if mine and other and (mc.same_pressing(mine, other) or mc.same_pressing(other, mine)):
+            same = True
+    if not same and other_album(mine, other) is False:
         # the same album, another pressing of it: nothing in the files or folder name tells
         # the pressings apart, or the matcher read it differently
         return ("other pressing" if st == "auto" else "unsure"), "; ".join(out.get("why") or [])
@@ -205,7 +211,7 @@ def verdict(out, mb_id, dg_id, http, cache):
     return ("unsure (would pick yours)" if same else "unsure"), "; ".join(out.get("why") or [])
 
 
-FALLBACKS = ("preferred country order", "same pressing listed twice")
+FALLBACKS = ("preferred country order", "same pressing listed twice", "label's original pressing")
 
 
 def evidence_decided(rec):

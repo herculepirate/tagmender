@@ -887,6 +887,54 @@ def prefer_country(tied, order):
     return None
 
 
+def _date_key(cand):
+    """A release date as a sortable (year, month, day); missing parts sort last
+    within their year, so '2003' never beats '2003-07-07' by being shorter."""
+    parts = [int(x) for x in re.findall(r"\d+", str(cand.get("date") or ""))[:3]]
+    if not parts and cand.get("year"):
+        parts = [int(cand["year"])]
+    if not parts or not 1900 <= parts[0] <= 2100:
+        return None
+    return tuple(parts + [99] * (3 - len(parts)))
+
+
+def prefer_original(tied):
+    """Between pressings nothing about your copy tells apart, the label's original:
+    the first pressing released. Only a pressing strictly earlier than every other
+    one counts; two first released on the same day (or in the same year with no
+    day given) stay undecided, and your country order decides between them."""
+    if any(s.get("pressing_year") for s in tied):
+        return None                       # the folder names an edition year: not the original
+    pool = [s for s in tied if not s.get("clues_against")]
+    if len(pool) < 2:
+        return None
+    on_year = [s for s in pool if not s.get("year_off")]
+    if on_year and len(on_year) < len(pool):
+        pool = on_year                    # the folder's year rules out the others
+        if len(pool) == 1:
+            return None                   # already told apart by the year; not this rule's call
+    dated = [(_date_key(s["cand"]), s) for s in pool]
+    if any(k is None for k, _s in dated):
+        return None                       # an undated pressing could be the original
+    dated.sort(key=lambda x: x[0])
+    (first, pick) = dated[0]
+
+    def surely_before(a, b):                 # 99 = not given: unknown, not late
+        for x, y in zip(a, b):
+            if x == 99 or y == 99:
+                return False
+            if x != y:
+                return x < y
+        return False
+    if not all(surely_before(first, k) for k, _s in dated[1:]):
+        return None
+    c = pick["cand"]
+    what = ", ".join(x for x in (c.get("label") or "", _readable_country(c.get("country")) if c.get("country")
+                                 else "", str(c.get("date") or c.get("year") or "")) if x)
+    return pick, {"original pressing": f"the label's original pressing, released first ({what}); "
+                                       f"nothing about your copy tells the pressings apart"}
+
+
 def choose_pressing(tied, preferred_countries=None):
     """Among pressings that score the same, the one the evidence points to, or None.
 
@@ -917,7 +965,8 @@ def choose_pressing(tied, preferred_countries=None):
     if weight == 0 or scored[1][0] == weight or pick.get("clues_against"):
         if any(s.get("own_catno_absent") for s in tied) and all(s.get("own_catno_absent") for s in tied):
             return None                                # your pressing is not among them
-        return same_pressing_listed_twice(tied) or prefer_country(tied, preferred_countries)
+        return (same_pressing_listed_twice(tied) or prefer_original(tied)
+                or prefer_country(tied, preferred_countries))
     if all(s.get("own_catno_absent") for s in tied) and weight < CLUE_WEIGHTS["disc TOC"]:
         return None              # your copy's catalogue number is on none of them: only hard proof decides
     return pick, telling
@@ -1462,6 +1511,14 @@ def combine(mb_result, dg_result, countries=None):
                 mb_best["notes"] = mb_best["notes"] + [
                     "MusicBrainz chosen: only its pressing has evidence about your copy behind it"]
                 return mb_result
+            first = prefer_original([mb_best, dg_result["best"]])
+            if first and first[0] is mb_best:
+                mb_best["notes"] = mb_best["notes"] + [
+                    "MusicBrainz chosen over Discogs's other pressing: " + first[1]["original pressing"]]
+                return mb_result
+            if first:
+                out["best"] = dict(out["best"], notes=out["best"]["notes"] + [first[1]["original pressing"]])
+                return out
             rank = {c: i for i, c in enumerate(countries or ())}
             mb_r = rank.get(country_code(mb_best["cand"].get("country")), 99)
             dg_r = rank.get(country_code(dg_result["best"]["cand"].get("country")), 99)

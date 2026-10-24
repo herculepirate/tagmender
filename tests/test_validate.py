@@ -118,6 +118,36 @@ class Validate(unittest.TestCase):
                                     MBID, "", http, dm)[0], "no match")
 
 
+    def test_tags_holding_only_a_discogs_id_are_compared_through_discogs(self):
+        # Albums tagged from Discogs alone carry DISCOGS_RELEASE_ID and no MusicBrainz ID; a pick
+        # of another pressing of the same album was reported as "differs"
+        dm = plugin_dm()
+        if not dm:
+            self.skipTest("Discogs Enrichment plugin not available")
+
+        def dg(rid, country, catno, title="Endorama", n=1):
+            return {"id": rid, "title": title, "country": country, "year": 2003, "released": "2003",
+                    "artists": [{"name": "Kreator", "id": 1}],
+                    "labels": [{"name": "Art Music", "catno": catno}], "formats": [{"name": "CD", "qty": "1"}],
+                    "tracklist": [{"position": str(i + 1), "title": f"T{i}", "duration": "3:00", "type_": "track"}
+                                  for i in range(n)]}
+        http = FakeHttp({"555": dg(555, "Russia", "AMG 099"), "jp": dict(rel("jp", "JP", "VICP-60704")),
+                         "666": dg(666, "Germany", "DRAKKAR 1", title="Violent Revolution", n=5)})
+        http.releases["jp"]["media"][0]["tracks"] = [{"title": "T0", "length": 180000}]
+        http.releases["ru"] = dict(rel("ru", "RU", "AMG 099"))
+        http.releases["ru"]["media"][0]["tracks"] = [{"title": "T0", "length": 180000}]
+        auto = lambda b: {"status": "auto", "best": b, "why": []}   # noqa: E731
+        cache = {"dm": dm}
+        # the same pressing on MusicBrainz
+        self.assertEqual(va.verdict(auto({"source": "mb", "id": "ru", "mb_id": "ru"}), "", "555", http, cache)[0],
+                         "agree")
+        # the same album, another pressing
+        self.assertEqual(va.verdict(auto({"source": "mb", "id": "jp", "mb_id": "jp"}), "", "555", http, cache)[0],
+                         "other pressing")
+        # another album
+        self.assertEqual(va.verdict(auto({"source": "discogs", "id": "666"}), "", "555", http, cache)[0], "differs")
+
+
 class Rechecks(unittest.TestCase):
     def test_disagreements_are_checked_again_after_a_fix(self):
         st = sqlite3.connect(":memory:")
@@ -139,6 +169,8 @@ class Fixes(unittest.TestCase):
                                   notes="pressing chosen by made in Germany on the scans (not on eu)"),
             "/l/A/by-country": dict(verdict="other pressing", status="auto", picked="mb:us", picked_mb_twin="us",
                                     notes="pressing chosen by your preferred country order (CA, US) puts USA first"),
+            "/l/A/by-original": dict(verdict="other pressing", status="auto", picked="mb:o", picked_mb_twin="o",
+                                     notes="pressing chosen by the label's original pressing, released first (L)"),
             "/l/A/agrees": dict(verdict="agree", status="auto", picked="mb:x", notes="pressing chosen by disc ID"),
             "/l/A/unsure": dict(verdict="unsure", status="review", picked="mb:y", notes="pressing chosen by disc ID"),
             "/l/A/old": dict(verdict="differs", status="auto", picked="mb:z", notes="catalogue number agrees",
@@ -160,6 +192,15 @@ class Fixes(unittest.TestCase):
 
 def types_dm():
     return {"dm": None}
+
+
+def plugin_dm():
+    d = _os.environ.get("TAGMENDER_DISCOGS_PLUGIN") or str(HERE.parent / "herculepirate" / "picard-discogs-enrichment")
+    if not (Path(d) / "discogs_mapping.py").exists():
+        return None
+    sys.path.insert(0, d)
+    import discogs_mapping
+    return discogs_mapping
 
 
 if __name__ == "__main__":

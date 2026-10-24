@@ -889,6 +889,45 @@ class RemasterEditions(unittest.TestCase):
         self.assertEqual(r["status"], "review")
 
 
+
+class OriginalPressing(unittest.TestCase):
+    """John's rule for pressings nothing about the copy tells apart: a new album gets the
+    label's original pressing (the first released); only pressings released together fall
+    back to the country order. Albums already tagged keep their tag (validate.py does not
+    export such picks as fixes)."""
+
+    def test_the_first_pressing_released_is_picked(self):
+        a = album()
+        r = mc.classify([mc.score_candidate(a, cand(id="lic", country="BR", date="2010-11-02"), CFG_PREF),
+                         mc.score_candidate(a, cand(id="orig", country="DE", date="2010-03-15"), CFG_PREF),
+                         mc.score_candidate(a, cand(id="us", country="US", date="2010-04-20"), CFG_PREF)], CFG_PREF)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "orig"), r["why"])
+        self.assertIn("label's original pressing", " ".join(r["best"]["notes"]))
+
+    def test_pressings_released_together_fall_back_to_the_country_order(self):
+        a = album()
+        r = mc.classify([mc.score_candidate(a, cand(id="de", country="DE", date="2010-03-15"), CFG_PREF),
+                         mc.score_candidate(a, cand(id="us", country="US", date="2010-03-15"), CFG_PREF)], CFG_PREF)
+        self.assertEqual(r["best"]["cand"]["id"], "us")
+        self.assertIn("preferred country order", " ".join(r["best"]["notes"]))
+        # a year alone cannot say which came first within it
+        self.assertIsNone(mc.prefer_original([mc.score_candidate(a, cand(id="p", date="2010"), CFG),
+                                              mc.score_candidate(a, cand(id="q", date="2010-06-01"), CFG)]))
+
+    def test_an_edition_year_in_the_folder_is_not_overruled(self):
+        a = album(pressing_year=2019)
+        self.assertIsNone(mc.prefer_original([mc.score_candidate(a, cand(id="rm", year=2019), CFG),
+                                              mc.score_candidate(a, cand(id="o", year=2001), CFG)]))
+
+    def test_between_the_databases_the_original_wins_too(self):
+        a = album()
+        mb = mc.classify([mc.score_candidate(a, cand(id="mbus", country="US", date="2012-05-01"), CFG)], CFG)
+        dg = mc.classify([mc.score_candidate(a, cand(id="dgde", source="discogs", country="DE",
+                                                         date="2010-03-15"), CFG)], CFG)
+        out = mc.combine(dict(mb, scored=[]), dict(dg, scored=[]), ["CA", "US", "DE"])
+        self.assertEqual(out["best"]["cand"]["id"], "dgde")
+        self.assertIn("label's original pressing", " ".join(out["best"]["notes"]))
+
 class PressingEvidence(unittest.TestCase):
     """Tied pressings told apart by the files, the folder and the audio; albums proven
     by a disc ID or catalogue number keep the database's title and artist."""

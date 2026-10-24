@@ -224,6 +224,21 @@ class Organise(Base):
                                         source_dir=str(self.lib / "Real Artist" / "2001 - Real Album"))], prof)
         self.assertEqual(again["albums"][0]["status"], "unchanged")              # already in place: nothing to do
 
+    def test_file_already_at_its_destination_is_tagged_not_moved(self):
+        final = self.lib / "Real Artist" / "2001 - Real Album"
+        final.mkdir(parents=True)
+        f1 = final / "01.F.flac"
+        shutil.move(str(self.f1), f1)                                  # already named as the template says
+        prof = self.profile(operation="move", destination=str(self.lib))
+        prop = self.proposal(files=[str(f1), str(self.f2)], source_dir=str(final))
+        p = pl.build([prop], prof)
+        ops = {Path(fe["src"]).name: fe["op"] for fe in p["albums"][0]["files"]}
+        self.assertEqual(ops["01.F.flac"], "tag")
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertEqual(tagio.read(f1)["album"], ["Real Album"])
+        self.assertTrue((final / "02.S.flac").exists())
+
     def test_low_confidence_move_tags_in_place_and_says_why(self):
         prof = self.profile(operation="move", destination=str(self.dest))
         p, _ = self.run_plan(prof, self.proposal(conf=91))

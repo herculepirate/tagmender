@@ -236,6 +236,49 @@ class Identify(Base):
         self.assertEqual(p.reason_codes, ["missing_credentials"])
         self.assertIn("no provider could be asked", p.reason)
 
+    def test_profile_rules_do_not_leak_into_a_later_default_run(self):
+        pf.save(pf.from_dict({"name": "Strict", "exclusions": [
+            {"id": "all", "name": "all", "action": "skip", "target": "album",
+             "when": {"all": [{"field": "album", "op": "contains", "value": "Album"}]}}]}))
+        engine.Engine(pf.load("Strict"), http=FakeHttp())
+        self.engine(FakeHttp())                                        # the default profile afterwards
+        self.assertNotEqual(_os.environ.get("TAGMENDER_PROFILE"), "Strict")
+
+    def test_excluded_album_makes_no_web_or_fingerprint_lookups(self):
+        ex._write(ex.rules_file(), {"rules": [{"id": "nv", "name": "nv", "action": "ignore", "target": "album",
+                                               "when": {"all": [{"field": "album", "op": "contains",
+                                                                 "value": "[no vox]"}]}}]})
+        d = self.album("Band NV", "Album [no vox]")
+        http = FakeHttp()
+        eng = self.engine(http, providers={"web": {"enabled": True}})
+        looked = []
+        with mock.patch("web_tag.find", side_effect=lambda *a, **k: looked.append("web") or (None, None, [])), \
+                mock.patch.object(ma, "fingerprint_ready", return_value=True), \
+                mock.patch.object(engine.Engine, "_single", side_effect=lambda *a: looked.append("fp")):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((http.calls, looked), ([], []))
+        self.assertEqual(p.status, "unresolved")
+        a = pl.build([p], eng.profile)["albums"][0]
+        self.assertEqual((a["status"], a["label"]), ("excluded", "Ignored"))
+
+    def test_track_mismatch_after_a_match_is_not_a_provider_outage(self):
+        d = self.album("Band T", "Album T")
+        rel = mb_release("mb-t", "Band T", "Album T")
+        eng = self.engine(FakeHttp(mb=[rel]))
+        with mock.patch.object(mb_tags, "release_tags", return_value=[{"title": ["x"]}]):   # 1 track, 3 files
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "unresolved")
+        self.assertEqual(p.provider_errors, {})
+        self.assertNotIn("musicbrainz_unavailable", p.reason_codes)
+
+    def test_rejected_discogs_token_still_identifies_from_musicbrainz(self):
+        d = self.album("Band R", "Album R")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-r", "Band R", "Album R")]))
+        with mock.patch.object(ma, "discogs_search", side_effect=ma.AuthError("401")):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"))
+        self.assertEqual(p.provider_errors.get("discogs"), "missing_credentials")
+
     def test_mixed_folder_is_split_by_album(self):
         d = self.album("Mixed", "Album M1", folder="downloads")
         for i in range(2):

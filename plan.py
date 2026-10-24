@@ -269,7 +269,10 @@ class Planner:
                 if dst is None:
                     continue
                 fe["dst"] = str(dst)
-                fe["op"] = op if (changes or Path(dst) != f) else "none"
+                if Path(dst) == f:                       # already where the template puts it
+                    fe["op"] = "tag" if changes else "none"
+                else:
+                    fe["op"] = op
                 if Path(dst).name != f.name:
                     renames[f.name] = Path(dst).name
             entry["files"].append(fe)

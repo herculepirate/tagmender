@@ -55,8 +55,13 @@ class Group:
 class Engine:
     def __init__(self, profile, *, http=None, dm=None, ocr=False, log=None, job=None, cache=None):
         self.profile = profile
+        # the matcher reads the profile's rules from here; the default profile has none of its own,
+        # so a name left by an earlier engine (the GUI runs several) must not linger
         if profile.name != "default":
-            os.environ["TAGMENDER_PROFILE"] = profile.name     # the matcher reads the profile's rules too
+            os.environ["TAGMENDER_PROFILE"] = profile.name
+        else:
+            os.environ.pop("TAGMENDER_PROFILE", None)
+        self.rules = ex.load_rules(profile.name if profile.name != "default" else None)
         self.job = job or logsetup.new_job_id()
         self.log = log or logsetup.setup("engine", job=self.job)
         self.ocr = ocr
@@ -135,6 +140,11 @@ class Engine:
     # ---- identification ------------------------------------------------------
     def identify(self, g: Group) -> planmod.Proposal:
         errors = {k: v.split(":")[0] for k, v in self.notes.items()}
+        # the rules first, on what the files themselves say: an excluded album gets no lookup,
+        # fingerprint or web search at all (the planner labels it Ignored/Skipped)
+        if ex.evaluate(g.files, self.rules, overrides=ex.State().overrides()).all_excluded:
+            return planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
+                                    status="unresolved", reason="excluded by a rule", reason_codes=["other"])
         row = {"FullPath": str(g.folder), "AlbumArtistFolder": g.folder.parent.name, "AlbumFolder": g.folder.name,
                "Status": "untagged"}
         args = argparse.Namespace(ocr=self.ocr, max_images=15, process_anyway=False, use_mb=self.use_mb,
@@ -142,10 +152,14 @@ class Engine:
         out = None
         if self.use_mb or self.use_discogs:
             try:
-                out = ma.process(row, self.http, self.cfg, self.dm, args)
-            except ma.AuthError as exc:
-                errors["discogs"] = "missing_credentials"
-                self.log.error("Discogs rejected the token: %s", exc, extra={"provider": "discogs"})
+                try:
+                    out = ma.process(row, self.http, self.cfg, self.dm, args)
+                except ma.AuthError as exc:                  # token rejected: carry on without Discogs
+                    errors["discogs"] = "missing_credentials"
+                    self.notes["discogs"] = f"missing_credentials: Discogs rejected the token ({exc})"
+                    self.log.error("Discogs rejected the token: %s", exc, extra={"provider": "discogs"})
+                    self.use_discogs = args.use_discogs = False
+                    out = ma.process(row, self.http, self.cfg, self.dm, args) if self.use_mb else None
             except ma.ProviderUnavailable as exc:
                 errors[{"mb": "musicbrainz"}.get(exc.host, exc.host)] = exc.kind
                 self.log.warning("%s", exc, extra={"provider": exc.host})
@@ -153,17 +167,22 @@ class Engine:
                               exclude={str(x) for x in g.others})
         files = [t["path"] for t in album["tracks"] if t.get("path")] or [str(f) for f in g.files]
         base = dict(source_dir=str(g.folder), files=files, provider_errors=errors)
+        if out and out.get("status") in ("ignored", "skipped"):   # a rule matched the identified release
+            return self._unresolved(out, files, base, errors)
         if out and out.get("status") == "auto" and out.get("best"):
+            prov = {"mb": "musicbrainz"}.get(out["best"]["source"], out["best"]["source"])
             try:
                 return self._identified(out, album, files, base)
-            except Exception as exc:                          # a lookup for the tags failed: retry later
+            except ma.ProviderUnavailable as exc:             # fetching the release failed: retry later
                 self.log.warning("tags for %s: %s", g.folder, exc)
-                errors[out["best"]["source"].replace("mb", "musicbrainz")] = getattr(exc, "kind", "outage")
-                return planmod.Proposal(**base, status="unresolved",
-                                        reason=f"identified, but the release could not be fetched: {exc}",
-                                        reason_codes=[errors[out["best"]["source"].replace("mb", "musicbrainz")]
-                                                      if errors.get("musicbrainz") or errors.get("discogs")
-                                                      else "other"])
+                errors[prov] = exc.kind
+                code = exc.kind if exc.kind == "rate_limited" else f"{prov}_unavailable"
+                return planmod.Proposal(**base, status="unresolved", reason_codes=[code],
+                                        reason=f"identified, but the release could not be fetched: {exc}")
+            except Exception as exc:                          # the release does not fit the files after all
+                self.log.warning("tags for %s: %s", g.folder, exc)
+                return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
+                                        reason=f"matched, but the release's tracks do not line up with the files: {exc}")
         if g.single and len(files) == 1 and ma.fingerprint_ready():
             p = self._single(Path(files[0]), base)
             if p:

@@ -196,6 +196,14 @@ class Doctor(Base):
         self.assertEqual(found["discogs key"].status, "ok")
         self.assertNotIn("SECRET-TOKEN", json.dumps([c.__dict__ for c in found.values()]))
 
+    def test_optional_modules_warn_and_say_how_to_install_on_debian(self):
+        from unittest import mock
+        real = doctor._module
+        with mock.patch.object(doctor, "_module", lambda m: None if m == "fontTools" else real(m)):
+            found = {c.name: c for c in doctor.checks()}
+        self.assertEqual(found["fontTools"].status, "warn")          # covers still work without it
+        self.assertTrue(found["fontTools"].fix.startswith("sudo apt install python3-fonttools"))
+
     def test_unmounted_destination_is_flagged(self):
         import profiles as pf
         pf.save(pf.from_dict({"name": "L", "operation": "copy", "destination": str(self.tmp / "nowhere")}))

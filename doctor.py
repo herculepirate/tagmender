@@ -52,9 +52,10 @@ def checks() -> list[Check]:
     v = sys.version_info
     out.append(Check("python", "ok" if v >= (3, 10) else "fail", platform.python_version(),
                      "" if v >= (3, 10) else "TagMender needs Python 3.10 or newer"))
-    for mod, need, fix in (("mutagen", True, "pip install mutagen  (or: sudo apt install python3-mutagen)"),
-                           ("PIL", True, "pip install Pillow  (or: sudo apt install python3-pil)"),
-                           ("fontTools", True, "pip install fonttools"),
+    for mod, need, fix in (("mutagen", True, "sudo apt install python3-mutagen  (or: pip install mutagen)"),
+                           ("PIL", True, "sudo apt install python3-pil  (or: pip install Pillow)"),
+                           ("fontTools", False, "sudo apt install python3-fonttools  (or: pip install fonttools)  "
+                                                "- generated covers check their fonts have every letter of a title"),
                            ("PySide6", False, "pip install PySide6  (only for `tagmender gui`)"),
                            ("numpy", False, "sudo apt install python3-numpy  (transcode detection)"),
                            ("pyzbar", False, "pip install pyzbar + libzbar0  (barcodes on scans)"),

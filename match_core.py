@@ -742,8 +742,12 @@ def file_clues(album, cand, clues, against):
     """Clues to the pressing from the files and their folder (the scans are
     read by pressing_clues): the disc ID, the tags, the folder name, the audio."""
     formats = set(cand.get("formats") or ())
-    if ((cand.get("source") == "mb" and cand.get("id") in (album.get("toc_releases") or ()))
-            or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("toc_discogs") or ()))):
+    # A disc ID identifies a CD only when it has a few tracks: a one- or two-track TOC is
+    # just "a CD this long", which unrelated CDs share (The Ocean - The Grand Inquisitor IV,
+    # a one-track single, "matched" Michael Mauldin's The Last Musician of Ur).
+    if (len(album.get("tracks") or ()) >= 3 and
+            ((cand.get("source") == "mb" and cand.get("id") in (album.get("toc_releases") or ()))
+             or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("toc_discogs") or ())))):
         clues["disc TOC"] = "disc ID (track positions of the CD) matches"
     if ((cand.get("source") == "mb" and cand.get("id") in (album.get("link_releases") or ()))
             or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("tag_discogs_links") or ()))):
@@ -932,7 +936,7 @@ choose_pressing_from_scans = choose_pressing      # earlier name
 
 
 _VERSION_WORDS = re.compile(r"\b(remix(?:ed|es)?|re-?recorded|re-?recording|instrumentals?|acoustic|unplugged|"
-                            r"orchestral|demos?|karaoke|live)\b", re.I)
+                            r"orchestral|demos?|karaoke|live|ambient|dub)\b", re.I)
 
 
 def other_version(album, cand):

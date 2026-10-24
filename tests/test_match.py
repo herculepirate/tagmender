@@ -993,6 +993,26 @@ class PressingEvidence(unittest.TestCase):
         r = self.pick(album(folder="2008 - First Light"), cand(id="us", country="US"))     # no title: no rule
         self.assertEqual(r["status"], "auto")
 
+    def test_a_one_track_disc_id_proves_nothing(self):
+        """The Ocean - The Grand Inquisitor IV (a one-track single): its TOC also fits an
+        unrelated one-track CD, which must not be taken with its own title and artist."""
+        one = [{"disc": 1, "num": 1, "title": "T0", "secs": 600.0}]
+        a = album(title="The Grand Inquisitor IV", artist="The Ocean", tracks=one, toc_releases={"x"})
+        c = cand(id="x", title="The Last Musician of Ur", artist="Michael Mauldin",
+                 tracks=[{"disc": 1, "title": "Ur", "secs": 600}])
+        r = mc.classify([mc.score_candidate(a, c, CFG)], CFG)
+        self.assertNotEqual(r["status"], "auto")
+        # with 3+ tracks the disc ID still proves the album (freeDB-style)
+        a3 = album(title="Wrong Title", toc_releases={"y"})
+        r = mc.classify([mc.score_candidate(a3, cand(id="y", title="Real Title"), CFG)], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+
+    def test_an_ambient_version_is_another_version(self):
+        """Slow - IV - Mythologiæ: the release titled '(Ambient)' is a different recording."""
+        r = mc.classify([mc.score_candidate(album(folder="2015 - First Light"), cand(title="First Light (Ambient)"),
+                                            CFG)], CFG)
+        self.assertNotEqual(r["status"], "auto")
+
     def test_catalogue_numbers_written_differently(self):
         same = mc.catno_same
         self.assertTrue(same("SPV 260222", "SPV 260222 CD"))

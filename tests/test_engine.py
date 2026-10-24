@@ -190,13 +190,24 @@ class Identify(Base):
         self.assertEqual(p.provenance["genre"], "discogs")
         self.assertEqual(p.provenance["musicbrainz_recordingid"], "musicbrainz")
 
-    def test_providers_disagree_on_the_pressing_nothing_is_mixed(self):
-        d = self.album("Band D", "Album D", folder="2005 - Album D [CAT-9]")
-        eng = self.engine(FakeHttp(mb=[mb_release("mb-d", "Band D", "Album D", catno="OTHER-1", country="US")],
-                                   dg=[dg_release(903, "Band D", "Album D", catno="CAT-9")]))
+    def test_providers_disagree_folder_catalogue_number_decides_nothing_is_mixed(self):
+        d = self.album("Band D", "Album D", folder="2005 - Album D [CAT-901]")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-d", "Band D", "Album D", catno="OTHER-100", country="US")],
+                                   dg=[dg_release(903, "Band D", "Album D", catno="CAT-901")]))
         p = eng.identify(eng.albums_in(d)[0])
         self.assertEqual((p.status, p.provider), ("identified", "discogs"))
         self.assertFalse([k for k in p.targets[0] if k.startswith("musicbrainz_")])
+        self.assertEqual(p.targets[0]["catalognumber"], ["CAT-901"])
+
+    def test_providers_disagree_without_evidence_country_order_decides_nothing_is_mixed(self):
+        d = self.album("Band D2", "Album D2")                         # the folder says nothing about the copy
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
+                                   dg=[dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
+        eng.cfg["preferred_countries"] = ["US"]
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"))
+        self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])   # the other pressing stays out
+        self.assertEqual(p.targets[0]["catalognumber"], ["OTHER-100"])
 
     def test_missing_discogs_token_still_identifies_from_musicbrainz(self):
         _os.environ.pop("DISCOGS_TOKEN")

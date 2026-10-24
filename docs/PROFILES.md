@@ -20,7 +20,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `exclude_paths` | 2delete, _unresolved, .Trash | globs on the full path, never processed |
 | `formats` | every format | e.g. `["mp3","opus","m4a"]`; others are Skipped, never converted |
 | `providers` | MB, Discogs, web on; AcoustID off | `{"discogs": {"enabled": true, "identify": true}}` |
-| `primary` | `discogs` | who decides the pressing when both list it (`discogs`, `musicbrainz`, `both`) |
+| `primary` | `discogs` | which provider's tags form the base when MusicBrainz and Discogs hold the *same* pressing (`discogs`, `musicbrainz`, `both`). Which pressing it is, is the matcher's call: evidence about your copy first (folder catalogue number, barcode, scans, disc ID), Discogs ahead of MusicBrainz, then your preferred-country order |
 | `field_sources` | genre, label, catalogue number: Discogs first | per field, providers in order |
 | `thresholds` | identify 90 (margin 8), replace 90, organise 95 | matcher scores 0-100 (heuristic, not probability) |
 | `field_policy` | replace | `{"default": "replace", "fields": {"album": "lock", "comment": "remove"}}` |

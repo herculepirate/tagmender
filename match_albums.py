@@ -832,6 +832,15 @@ class AuthError(RuntimeError):
     """Discogs rejected the token. Fatal: retrying cannot help."""
 
 
+class ProviderUnavailable(RuntimeError):
+    """A provider could not answer: kind is "rate_limited", "outage" or "invalid_response".
+    Recorded per album; another provider may still identify it."""
+
+    def __init__(self, host, kind, detail=""):
+        super().__init__(f"{host} {kind.replace('_', ' ')}: {detail}")
+        self.host, self.kind = host, kind
+
+
 def check_discogs_token(token):
     """One uncached call so a bad token stops the run before any work is done."""
     req = urllib.request.Request(
@@ -866,7 +875,14 @@ class Http:
 
     def get_json(self, url, host):
         body = self.get_text(url, host)
-        return json.loads(body) if body is not None else None
+        if body is None:
+            return None
+        try:
+            return json.loads(body)
+        except ValueError:
+            self.db.execute("DELETE FROM http_cache WHERE url=?", (url,))
+            self.db.commit()
+            raise ProviderUnavailable(host, "invalid_response", f"not JSON from {url.split('?')[0]}") from None
 
     def get_text(self, url, host):
         row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (url,)).fetchone()
@@ -876,6 +892,7 @@ class Http:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         if host == "discogs":
             headers["Authorization"] = f"Discogs token={self.token}"
+        last_kind = "outage"
         for attempt in range(6):
             wait = delay - (time.time() - self.last.get(host, 0))
             if wait > 0:
@@ -895,6 +912,7 @@ class Http:
                 if e.code in (401, 403) and host == "discogs":
                     raise AuthError("Discogs rejected the token (HTTP %d)" % e.code)
                 if e.code in (429, 500, 502, 503, 504):
+                    last_kind = "rate_limited" if e.code == 429 or (host == "mb" and e.code == 503) else "outage"
                     if host == "mb" and e.code == 503:
                         # MusicBrainz answers 503 when requests come too fast:
                         # slow down for the rest of the run, and retry soon.
@@ -903,14 +921,15 @@ class Http:
                         pause = int(e.headers.get("Retry-After") or 0) or 3 * (attempt + 1)
                     else:
                         pause = int(e.headers.get("Retry-After") or 0) or 15 * (attempt + 1)
-                    print(f"    {host} HTTP {e.code}, waiting {pause}s", file=sys.stderr)
+                    pause += random.uniform(0, 1)                   # jitter: parallel runs do not retry in step
+                    print(f"    {host} HTTP {e.code}, waiting {pause:.0f}s", file=sys.stderr)
                     time.sleep(pause)
                     continue
                 raise
             except (urllib.error.URLError, TimeoutError) as e:
                 print(f"    {host} network error {e}, retrying", file=sys.stderr)
-                time.sleep(10 * (attempt + 1))
-        raise RuntimeError(f"giving up on {url}")
+                time.sleep(10 * (attempt + 1) + random.uniform(0, 1))
+        raise ProviderUnavailable(host, last_kind, f"giving up on {url.split('?')[0]}")
 
 
 def q(s):
@@ -1571,8 +1590,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
                 "tracks": len(dec.excluded), "status": "ignored" if whole.action == "ignore" else "skipped",
                 "best": None, "alts": [], "why": [whole.reason()], "excluded_by": whole.rule.id,
                 "rules_hash": exclusions.rules_hash(rules), "version": result_version(), "checked": round(time.time())}
-    album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"], exclude=dec.excluded,
-                       blind=getattr(args, "blind", False))
+    # a mixed folder is matched one album at a time: the engine names the other files
+    others = {str(x) for x in getattr(args, "exclude_files", ()) or ()}
+    album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"],
+                       exclude={str(x) for x in dec.excluded} | others, blind=getattr(args, "blind", False))
     out = {"path": row["FullPath"], "artist_folder": row["AlbumArtistFolder"],
            "album_folder": row["AlbumFolder"], "tag_artist": album["artist"],
            "tag_title": album["title"], "tag_year": album["year"],
@@ -1609,13 +1630,27 @@ def _process(row, http, cfg, dm, args, full_cfg):
             link_releases(http, album)
         except Exception:
             album["link_releases"], album["isrc_releases"] = set(), set()
-    mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
-    dg_res = None
     source_notes = []
+    use_mb = getattr(args, "use_mb", True)
+    use_discogs = getattr(args, "use_discogs", True) and dm is not None
+    provider_errors = getattr(args, "provider_errors", None)
+    if use_mb:
+        try:
+            mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
+        except ProviderUnavailable as exc:             # Discogs may still identify the album
+            if not use_discogs:
+                raise
+            mb_res = None
+            source_notes.append(f"MusicBrainz lookup failed ({exc}); result is Discogs-only")
+            if provider_errors is not None:
+                provider_errors["musicbrainz"] = exc.kind
+    else:
+        mb_res = None
+    dg_res = None
     # Discogs is asked too, also when MusicBrainz is sure: your pressing may be listed
     # only there (Kreator Endorama, Art Music AMG 099), and its catalogue number then
     # outranks a MusicBrainz release that contradicts the folder name.
-    if True:
+    if use_discogs:
         try:
             dg_res = run_source("discogs", lambda: discogs_search(http, album, cfg, dm), album, cfg)
         except AuthError:
@@ -1623,7 +1658,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
         except Exception as exc:     # keep what MusicBrainz found
             source_notes.append(f"Discogs lookup failed ({type(exc).__name__}: {exc}); "
                                 "result is MusicBrainz-only")
-    final = mc.combine(mb_res, dg_res)
+            if provider_errors is not None:
+                provider_errors["discogs"] = getattr(exc, "kind", "outage")
+    final = mc.combine(mb_res, dg_res) or {"status": "nomatch", "best": None, "runner_up": None, "margin": None,
+                                           "why": ["no provider could be asked"]}
 
     ocr_txt = ""
     # The scans are read for EVERY album that has them, also when a database is already
@@ -1649,9 +1687,9 @@ def _process(row, http, cfg, dm, args, full_cfg):
             if new_b or new_c:
                 out["codes_from_ocr"] = ";".join(new_b + new_c)
                 probe = dict(album, barcodes=set(new_b), catno_search=new_c)
-                extra["mb"] = mb_search(http, probe, cfg)
+                extra["mb"] = mb_search(http, probe, cfg) if use_mb else []
                 try:
-                    extra["discogs"] = discogs_search(http, probe, cfg, dm)
+                    extra["discogs"] = discogs_search(http, probe, cfg, dm) if use_discogs else []
                 except AuthError:
                     raise
                 except Exception as exc:
@@ -1676,7 +1714,7 @@ def _process(row, http, cfg, dm, args, full_cfg):
 
     # Still unsure: fingerprint a few tracks (AcoustID) and add the releases that
     # hold those recordings; they also prove the album when its title differs.
-    if final["status"] != "auto" and fingerprint_ready():
+    if final["status"] != "auto" and use_mb and fingerprint_ready():
         try:
             rels = acoustid_releases(http, album, db)
         except Exception as exc:
@@ -1698,7 +1736,7 @@ def _process(row, http, cfg, dm, args, full_cfg):
                 mb_res = dict(mc.classify(scored, cfg), scored=scored, source="mb")
                 final = mc.combine(mb_res, dg_res)
     # Still unsure: the album on Deezer, through its ISRCs, to the MusicBrainz release
-    if final["status"] != "auto" and not album.get("isrcs"):
+    if final["status"] != "auto" and use_mb and not album.get("isrcs"):
         try:
             rels = deezer_isrc_releases(http, album)
         except Exception:

@@ -1,0 +1,153 @@
+"""filenames.py - safe, length-limited file and folder names.
+
+make_path(dest_root, components, extension, limits) -> (Path, notes)
+
+1. Each component is made safe for the chosen compatibility:
+   linux    only "/" and NUL are replaced;
+   windows  also \\ : * ? " < > | and control characters; trailing dots and spaces are
+            removed; reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9, with any
+            extension) get a trailing underscore.
+   Text is put in Unicode NFC form.
+2. Limits: every folder name and the file name (with its extension) must fit
+   max_dir_bytes / max_name_bytes in UTF-8 bytes (Linux filesystems count bytes; 255 is
+   the common limit) and, with windows compatibility, also 255 UTF-16 code units (what
+   NTFS counts). The whole path must fit max_path_chars characters. There is no
+   universal 260-character Windows limit: it applies to some Windows programs only, so
+   it is a setting (max_path_chars), not an assumption.
+3. Too long? Shortened deterministically, in this order, until everything fits:
+   a. abbreviations from the profile ("Volume" -> "Vol."), whole words only;
+   b. word-aware truncation, least important component first (the file name's title
+      part, then the album folder, then the artist folder), never below 8 characters;
+      the extension and room for a collision suffix are reserved first.
+4. Still too long: notes say so and the path is None (the plan reports it as a
+   conflict; nothing is guessed).
+
+collision_suffix(key) is stable: the same file always gets the same " ~1a2b" suffix,
+whichever order files are planned in.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+import unicodedata
+from pathlib import Path
+
+_WIN_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+_LINUX_BAD = re.compile(r"[/\x00]")
+_RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(\..*)?$", re.I)
+MIN_KEEP = 8
+SUFFIX_LEN = 6                       # " ~1a2b"
+
+
+def safe_component(text: str, compat="windows") -> str:
+    s = unicodedata.normalize("NFC", str(text))
+    if compat == "windows":
+        s = _WIN_BAD.sub("_", s).rstrip(". ")
+        if _RESERVED.match(s):
+            s += "_"
+    else:
+        s = _LINUX_BAD.sub("_", s)
+    s = s.strip()
+    if s in ("", ".", ".."):
+        s = "_"
+    return s
+
+
+def _units(s: str, compat: str) -> int:
+    """The larger of UTF-8 bytes and (with windows compatibility) UTF-16 code units."""
+    b = len(s.encode("utf-8"))
+    return max(b, len(s.encode("utf-16-le")) // 2) if compat == "windows" else b
+
+
+def _fits(s, limit, compat):
+    return _units(s, compat) <= limit
+
+
+def abbreviate(text: str, abbreviations: dict) -> str:
+    for long, short in sorted((abbreviations or {}).items(), key=lambda kv: -len(kv[0])):
+        text = re.sub(rf"(?<!\w){re.escape(long)}(?!\w)", short, text, flags=re.I)
+    return text
+
+
+def truncate_words(text: str, limit: int, compat: str) -> str:
+    """The longest whole-word prefix that fits (a cut inside a word only when the first
+    word alone is too long)."""
+    if _fits(text, limit, compat):
+        return text
+    words = text.split(" ")
+    out = ""
+    for w in words:
+        cand = (out + " " + w) if out else w
+        if not _fits(cand, limit, compat):
+            break
+        out = cand
+    if not out:
+        out = text
+        while out and not _fits(out, limit, compat):
+            out = out[:-1]
+    return out.rstrip(" .,-–—_")
+
+
+def collision_suffix(key: str) -> str:
+    return " ~" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:4]
+
+
+def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
+    """(path or None, notes). components: [folders..., file stem]."""
+    compat = limits.get("compat", "windows")
+    max_name = int(limits.get("max_name_bytes", 255))
+    max_dir = int(limits.get("max_dir_bytes", 255))
+    max_path = int(limits.get("max_path_chars", 4096))
+    abbr = limits.get("abbreviations") or {}
+    notes = []
+    ext = extension if extension.startswith(".") or not extension else "." + extension
+    parts = [safe_component(c, compat) for c in components]
+    if not parts:
+        return None, ["the naming template gave an empty path"]
+    reserve = len(ext) + SUFFIX_LEN       # always leave room for a collision suffix
+
+    def limit_of(i):
+        return (max_name - reserve) if i == len(parts) - 1 else max_dir
+
+    # a. abbreviations where a component is too long
+    for i, p in enumerate(parts):
+        if not _fits(p, limit_of(i), compat) and abbr:
+            q = safe_component(abbreviate(p, abbr), compat)
+            if q != p:
+                notes.append(f"abbreviated {p!r} -> {q!r}")
+                parts[i] = q
+    # b. each component within its own limit
+    for i, p in enumerate(parts):
+        if not _fits(p, limit_of(i), compat):
+            q = truncate_words(p, limit_of(i), compat)
+            notes.append(f"shortened {p!r} -> {q!r}")
+            parts[i] = q
+
+    def total():
+        return len(str(Path(dest_root).joinpath(*parts))) + reserve
+
+    # c. the whole path, least important first: file name, album folder, artist folder...
+    order = list(range(len(parts) - 1, -1, -1))
+    for i in order:
+        if total() <= max_path:
+            break
+        over = total() - max_path
+        p = parts[i]
+        target = max(MIN_KEEP, len(p) - over)
+        if target < len(p):
+            q = truncate_words(p, target, "linux")      # characters here, not bytes
+            q = q if len(q) >= MIN_KEEP or len(p) <= MIN_KEEP else p[:MIN_KEEP]
+            if q != p:
+                notes.append(f"shortened {p!r} -> {q!r} for the path length limit")
+                parts[i] = q
+    if total() > max_path:
+        notes.append(f"cannot fit the path in {max_path} characters even after shortening "
+                     f"(destination folder alone is {len(str(dest_root))})")
+        return None, notes
+    parts[-1] = parts[-1] + suffix + ext
+    return Path(dest_root).joinpath(*parts), notes
+
+
+def fold(path) -> str:
+    """The form two paths collide in on a case-insensitive filesystem."""
+    return unicodedata.normalize("NFC", str(path)).casefold()

@@ -463,6 +463,11 @@ class State:
                          detail or exclusion.where))
         self.db.commit()
 
+    def log_raw(self, job, item, label, rule_id, rule_name, detail=""):
+        self.db.execute("INSERT INTO history VALUES (?,?,?,?,?,?,?)",
+                        (time.time(), job, str(item), label, rule_id, rule_name, detail))
+        self.db.commit()
+
     def history(self, limit=200):
         return self.db.execute("SELECT ts, job, item, label, rule_name, detail FROM history ORDER BY ts DESC LIMIT ?",
                                (limit,)).fetchall()

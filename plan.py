@@ -1,0 +1,423 @@
+"""plan.py - what TagMender is about to do, decided before anything is touched.
+
+build(proposals, profile) turns identified (or unresolved) albums into a Plan: for every
+file the tags before and after (added / changed / kept / removed / locked), the source
+and destination path, the companion files that go along, artwork, the evidence and
+confidence behind it, conflicts, and the albums the rules exclude (labelled Ignored or
+Skipped, never Unresolved). The same Plan is shown by `tagmender plan`, the GUI, and
+written as JSON with --output; `tagmender apply PLAN` executes exactly that plan.
+
+Planning reads files and providers but never changes the music.
+
+What decides what:
+  - the profile's rules (exclusions) first, and again with the identified release;
+  - field policy per field: preserve | fill_missing | replace | remove | lock;
+    an existing value is only replaced at >= thresholds.replace_min_confidence;
+  - files are renamed, copied or moved only at >= thresholds.organize_min_confidence;
+    below it a move/copy profile tags in place (move) or does nothing (copy), and says so;
+  - unresolved albums: unresolved.action = leave | mark (TAGMENDER=Unresolved and the
+    reason codes) | move (to unresolved.move_to);
+  - a value equal to what the file has is not written again (repeat runs rewrite nothing).
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+import exclusions as ex
+import filenames as fnm
+import naming
+import reasons
+import tagio
+
+PLAN_VERSION = 1
+AUDIO_EXT = ex.AUDIO_EXT
+CUE_LIKE = {".cue", ".m3u", ".m3u8"}
+
+
+@dataclass
+class Proposal:
+    """One album (or single file) as identification left it."""
+    source_dir: str
+    files: list                         # paths, in track order
+    targets: list = field(default_factory=list)   # per file: {field: [values]} (empty when unresolved)
+    status: str = "identified"          # identified | unresolved
+    provider: str = ""                  # musicbrainz | discogs | web | ...
+    release_id: str = ""
+    url: str = ""
+    confidence: float = 0.0             # the matcher's score (0-100); a heuristic, not a probability
+    margin: float | None = None
+    why: list = field(default_factory=list)          # reasons it is not more certain
+    evidence: list = field(default_factory=list)     # what agreed
+    reason: str = ""                    # unresolved: in words
+    reason_codes: list = field(default_factory=list)
+    provenance: dict = field(default_factory=dict)   # field -> provider
+    provider_errors: dict = field(default_factory=dict)   # provider -> error (recorded, not fatal)
+    release: dict = field(default_factory=dict)      # identified album/albumartist/genre, for rules
+    artwork: dict | None = None         # {"front": staged file, "source": ..., "width": .., "height": ..}
+
+
+def _fp(path):
+    st = os.stat(path)
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "ino": st.st_ino}
+
+
+def _vals(v):
+    if v is None:
+        return []
+    return [str(x) for x in (v if isinstance(v, list) else [v]) if str(x) != ""]
+
+
+def diff_tags(before: dict, target: dict, profile, confidence: float, extra_removals=()):
+    """(changes {field: [..] | None}, rows [{field, before, after, action}])."""
+    changes, rows = {}, []
+    replace_ok = confidence >= float(profile["thresholds"]["replace_min_confidence"])
+    fields = list(dict.fromkeys(list(target) + list(extra_removals)))
+    for f in fields:
+        if f.startswith("~"):
+            continue
+        b, a = _vals(before.get(f)), _vals(target.get(f))
+        pol = profile.policy(f)
+        if f in extra_removals and f not in target:
+            pol = "remove"
+        if pol == "lock":
+            if a != b:
+                rows.append({"field": f, "before": b, "after": b, "action": "locked"})
+            continue
+        if pol == "remove":
+            if b:
+                changes[f] = None
+                rows.append({"field": f, "before": b, "after": [], "action": "removed"})
+            continue
+        if pol == "preserve":
+            if a != b and b:
+                rows.append({"field": f, "before": b, "after": b, "action": "preserved"})
+            continue
+        if not a or a == b:
+            continue
+        if not b:
+            changes[f] = a
+            rows.append({"field": f, "before": b, "after": a, "action": "added"})
+        elif pol == "fill_missing":
+            rows.append({"field": f, "before": b, "after": b, "action": "preserved"})
+        elif replace_ok or f.startswith("tagmender"):
+            changes[f] = a
+            rows.append({"field": f, "before": b, "after": a, "action": "changed"})
+        else:
+            rows.append({"field": f, "before": b, "after": b, "action": "kept (confidence below replace threshold)"})
+    # policy "remove" for fields the target does not mention
+    for f, pol in (profile["field_policy"].get("fields") or {}).items():
+        if pol == "remove" and f not in fields and _vals(before.get(f)):
+            changes[f] = None
+            rows.append({"field": f, "before": _vals(before.get(f)), "after": [], "action": "removed"})
+    return changes, rows
+
+
+def _companions(src_dir: Path, album_files: list, profile):
+    """Non-audio companion files of this album: only when every audio file in the folder
+    belongs to it (a mixed folder's cue sheet or scans are not this album's alone)."""
+    exts = {e.lower() for e in profile["companions"]}
+    in_folder = {p for p in src_dir.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXT}
+    if not in_folder <= {Path(f) for f in album_files}:
+        return [], "folder holds other music too; companion files stay where they are"
+    out = []
+    for p in sorted(src_dir.iterdir()):
+        if p.is_file() and p.suffix.lower() in exts and not p.name.startswith("."):
+            out.append(p)
+    return out, ""
+
+
+def _cue_rewrites(path: Path, renames: dict):
+    """New text of a cue sheet / playlist whose FILE lines name files being renamed, or None."""
+    try:
+        raw = path.read_bytes()
+        text = raw.decode("utf-8")
+        enc = "utf-8"
+    except UnicodeDecodeError:
+        text, enc = raw.decode("latin-1"), "latin-1"
+    except OSError:
+        return None
+    new = text
+    for old, newname in renames.items():
+        if old != newname and old in new:
+            new = new.replace(f'"{old}"', f'"{newname}"')
+            new = "\n".join(newname if ln.strip() == old else ln for ln in new.split("\n"))
+    return (new, enc) if new != text else None
+
+
+class Planner:
+    def __init__(self, profile, job_id=None, rules=None, overrides=None, extra_roots=()):
+        self.profile = profile
+        self.extra_roots = [os.path.realpath(os.path.expanduser(str(r))) for r in extra_roots]
+        self.job = job_id or time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
+        self.rules = ex.load_rules(profile.name if profile.name != "default" else None) if rules is None else rules
+        self.overrides = ex.State().overrides() if overrides is None else overrides
+        self.claimed = {}          # folded destination path -> source (collisions inside the plan)
+        self.created_dirs = set()
+
+    # ---- the plan for one album -------------------------------------------
+    def album(self, prop: Proposal) -> dict:
+        p = self.profile
+        files = [Path(f) for f in prop.files]
+        entry = {"source_dir": str(prop.source_dir), "status": "ready", "label": "", "rule": None,
+                 "identification": {k: getattr(prop, k) for k in
+                                    ("status", "provider", "release_id", "url", "confidence", "margin", "why",
+                                     "evidence", "reason_codes", "provenance", "provider_errors")},
+                 "release": prop.release, "files": [], "companions": [], "artwork": None,
+                 "conflicts": [], "skipped": [], "notes": []}
+        if prop.status == "unresolved":
+            entry["identification"]["reason"] = reasons.encode(prop.reason, prop.reason_codes or None)
+        # 1. rules, with what the files say and what identification found
+        dec = ex.evaluate(files, self.rules, release=prop.release or None, overrides=self.overrides)
+        if dec.excluded:
+            whole = dec.summary()
+            if whole is not None:
+                entry.update(status="excluded", label=whole.label,
+                             rule={"id": whole.rule.id, "name": whole.rule.name, "action": whole.action,
+                                   "matched": whole.where})
+                return entry
+            for f, e in dec.excluded.items():
+                entry["skipped"].append({"file": str(f), "label": e.label, "rule": e.rule.id, "matched": e.where})
+        kept = [f for f in files if f not in dec.excluded]
+        # 2. profile filters
+        for f in list(kept):
+            if not p.wants_format(f):
+                entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "profile formats",
+                                         "matched": f.suffix.lower()})
+                kept.remove(f)
+            elif p.excluded_path(f):
+                entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "profile exclude_paths",
+                                         "matched": str(f)})
+                kept.remove(f)
+        if not kept:
+            entry["status"] = "skipped"
+            entry["label"] = "Skipped"
+            return entry
+        targets = {Path(f): t for f, t in zip(files, prop.targets or [{}] * len(files))}
+        identified = prop.status == "identified"
+        conf = float(prop.confidence or 0)
+        organize_ok = identified and conf >= float(p["thresholds"]["organize_min_confidence"])
+        op = p["operation"]
+        if not identified:
+            ua = p["unresolved"]["action"]
+            entry["status"] = "unresolved"
+            entry["label"] = "Unresolved"
+            if ua == "leave" or op == "copy":
+                for f in kept:
+                    entry["files"].append({"src": str(f), "dst": str(f), "op": "none", "changes": {}, "diff": [],
+                                           "fingerprint": _fp(f)})
+                return entry
+            op = "move" if ua == "move" else "in_place"
+        elif op in ("copy", "move") and not organize_ok:
+            entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
+                                  f"{p['thresholds']['organize_min_confidence']}: "
+                                  + ("not copied" if op == "copy" else "tagged in place, not moved"))
+            if op == "copy":
+                entry["status"] = "skipped"
+                entry["label"] = "Skipped"
+                return entry
+            op = "in_place"
+        # 3. destination root (never created: an unmounted share must not fill the local disk)
+        dest_root = None
+        if op in ("copy", "move"):
+            dest_root = Path(p["unresolved"]["move_to"] if not identified else p["destination"]).expanduser()
+            if not dest_root.is_dir():
+                entry["status"] = "blocked"
+                entry["conflicts"].append(f"destination {dest_root} is not available (unmounted?); "
+                                          "TagMender never creates it")
+                return entry
+        template = naming.template_for(p["naming"])
+        renames = {}
+        for f in kept:
+            try:
+                before = tagio.read(f)
+            except tagio.Unsupported as exc:
+                entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "unsupported_format",
+                                         "matched": str(exc)})
+                continue
+            target = dict(targets.get(f) or {})
+            if identified and p["mark_resolved"]:
+                target.setdefault("tagmender", ["Resolved"])
+                if not before.get("tagmender_reason"):
+                    target.setdefault("tagmender_reason", [])
+            if not identified and p["unresolved"]["action"] in ("mark", "move"):
+                target = {"tagmender": ["Unresolved"], "tagmender_reason": [entry["identification"]["reason"]]}
+            removals = ["tagmender_reason"] if identified and before.get("tagmender_reason") and \
+                str((before.get("tagmender") or [""])[0]).lower() == "unresolved" else []
+            changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
+            fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
+                  "diff": rows, "fingerprint": _fp(f)}
+            if op in ("copy", "move"):
+                merged = {**{k: v for k, v in before.items()}, **{k: v for k, v in changes.items() if v is not None}}
+                for k, v in changes.items():
+                    if v is None:
+                        merged.pop(k, None)
+                if not identified:
+                    dst = dest_root / f.parent.name / f.name
+                    notes = []
+                else:
+                    comps = naming.render(template, merged)
+                    dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
+                entry["notes"] += notes
+                if dst is None:
+                    entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
+                    continue
+                dst = self._unique(dst, f, entry)
+                if dst is None:
+                    continue
+                fe["dst"] = str(dst)
+                fe["op"] = op if (changes or Path(dst) != f) else "none"
+                if Path(dst).name != f.name:
+                    renames[f.name] = Path(dst).name
+            entry["files"].append(fe)
+        if entry["conflicts"]:
+            entry["status"] = "blocked"
+            return entry
+        # 4. companion files go with an album that moves or is copied
+        moved = [fe for fe in entry["files"] if fe["op"] in ("copy", "move")]
+        if moved and len(moved) == len(entry["files"]):
+            album_dst = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in moved]))
+            comps, why_not = _companions(Path(prop.source_dir), [fe["src"] for fe in moved], p)
+            if why_not:
+                entry["notes"].append(why_not)
+            for c in comps:
+                dst = self._unique(album_dst / c.name, c, entry)
+                if dst is None:
+                    continue
+                ce = {"src": str(c), "dst": str(dst), "op": moved[0]["op"], "fingerprint": _fp(c)}
+                if c.suffix.lower() in CUE_LIKE and renames:
+                    rw = _cue_rewrites(c, renames)
+                    if rw:
+                        ce["rewrite"] = {"text": rw[0], "encoding": rw[1]}
+                entry["companions"].append(ce)
+        # 5. artwork (staged by the artwork provider; never replaces a picture already embedded)
+        art = prop.artwork if p["artwork"]["enabled"] else None
+        if art and art.get("front") and Path(art["front"]).exists():
+            embed = [fe["dst"] for fe in entry["files"]
+                     if p["artwork"]["embed_front"] and not tagio.read(fe["src"]).get("~pictures")]
+            folder = Path(entry["files"][0]["dst"]).parent if entry["files"] else Path(prop.source_dir)
+            has_image = folder.exists() and any(x.suffix.lower() in (".jpg", ".jpeg", ".png") for x in folder.iterdir())
+            has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
+                                         (".jpg", ".jpeg", ".png") for c in entry["companions"])
+            entry["artwork"] = {"front": art["front"], "source": art.get("source", ""),
+                                "embed_into": embed, "file": None if (has_image or not p["artwork"]["files"])
+                                else str(folder / "cover.jpg"),
+                                "width": art.get("width"), "height": art.get("height")}
+        if all(fe["op"] == "none" for fe in entry["files"]) and not entry["companions"] and \
+                not (entry["artwork"] and (entry["artwork"]["embed_into"] or entry["artwork"]["file"])):
+            entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
+        return entry
+
+    def _unique(self, dst: Path, src: Path, entry):
+        """dst, or dst with a stable suffix when another file has (or will have) that name;
+        None (with a conflict noted) when even that is taken."""
+        for attempt in range(2):
+            cand = dst if attempt == 0 else dst.with_name(
+                dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)
+            key = fnm.fold(cand)
+            other = self.claimed.get(key)
+            taken_on_disk = cand.exists() and not (src.exists() and os.path.samefile(cand, src))
+            if other in (None, str(src)) and not taken_on_disk:
+                self.claimed[key] = str(src)
+                if attempt:
+                    entry["notes"].append(f"{dst.name} is taken; using {cand.name}")
+                return cand
+        entry["conflicts"].append(f"{dst} already exists (a different file) and so does the suffixed name")
+        return None
+
+    def build(self, proposals) -> dict:
+        albums = [self.album(pr) for pr in proposals]
+        counts = {}
+        for a in albums:
+            counts[a["status"]] = counts.get(a["status"], 0) + 1
+        return {"version": PLAN_VERSION, "job": self.job, "created": time.time(), "profile": self.profile.name,
+                "profile_data": self.profile.to_dict(), "operation": self.profile["operation"],
+                "roots": self.roots(), "albums": albums, "summary": counts}
+
+    def roots(self):
+        p = self.profile
+        r = [os.path.realpath(os.path.expanduser(s["path"])) for s in p["sources"]]
+        for d in (p["destination"], p["unresolved"].get("move_to")):
+            if d:
+                r.append(os.path.realpath(os.path.expanduser(d)))
+        return list(dict.fromkeys(r + self.extra_roots))
+
+
+def build(proposals, profile, job_id=None, **kw) -> dict:
+    return Planner(profile, job_id, **kw).build(proposals)
+
+
+def save(plan: dict, path) -> Path:
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(plan, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def load(path) -> dict:
+    plan = json.loads(Path(path).read_text(encoding="utf-8"))
+    if plan.get("version") != PLAN_VERSION:
+        raise ValueError(f"plan version {plan.get('version')} is not {PLAN_VERSION}")
+    return plan
+
+
+# --------------------------------------------------------------------------
+# preview text (the CLI and GUI show the same thing)
+# --------------------------------------------------------------------------
+def preview(plan: dict, verbose=False) -> str:
+    out = [f"Plan {plan['job']}  profile {plan['profile']}  ({plan['operation']})"]
+    for a in plan["albums"]:
+        ident = a["identification"]
+        head = f"\n[{a['status'].upper()}] {a['source_dir']}"
+        if a["status"] == "excluded":
+            head += f"\n    {a['label']} by rule '{a['rule']['name']}' (matched {a['rule']['matched']})"
+        elif ident.get("status") == "identified":
+            head += (f"\n    {ident['provider']} {ident['release_id']}  score {ident['confidence']:.1f}"
+                     + (f"  margin {ident['margin']:.1f}" if ident.get("margin") is not None else ""))
+            if ident.get("evidence"):
+                head += "\n    agreed: " + "; ".join(ident["evidence"][:6])
+            if ident.get("why"):
+                head += "\n    doubts: " + "; ".join(ident["why"][:4])
+        else:
+            codes, words = reasons.parse(ident.get("reason", ""))
+            head += f"\n    Unresolved: {', '.join(codes)} — {words}"
+        if ident.get("provider_errors"):
+            head += "\n    provider problems (recorded): " + "; ".join(f"{k}: {v}" for k, v in
+                                                                      ident["provider_errors"].items())
+        out.append(head)
+        for c in a["conflicts"]:
+            out.append(f"    CONFLICT: {c}")
+        for n in a["notes"]:
+            out.append(f"    note: {n}")
+        for s in a["skipped"]:
+            out.append(f"    {s['label']}: {Path(s['file']).name} ({s['rule']}: {s['matched']})")
+        for fe in a["files"]:
+            if fe["op"] == "none" and not verbose:
+                continue
+            move = f"  ->  {fe['dst']}" if fe["dst"] != fe["src"] else ""
+            out.append(f"    {fe['op']:<5} {Path(fe['src']).name}{move}")
+            for r in fe["diff"]:
+                if r["action"] in ("added", "changed", "removed") or verbose:
+                    b = "; ".join(r["before"]) or "—"
+                    af = "; ".join(r["after"]) or "—"
+                    out.append(f"           {r['action']:<9} {r['field']}: {b[:50]} => {af[:50]}")
+        for c in a["companions"]:
+            out.append(f"    {c['op']:<5} {Path(c['src']).name}  ->  {c['dst']}"
+                       + ("  (file references updated)" if c.get("rewrite") else ""))
+        if a.get("artwork"):
+            art = a["artwork"]
+            if art["embed_into"]:
+                out.append(f"    art   front cover embedded into {len(art['embed_into'])} file(s) from {art['source']}")
+            if art["file"]:
+                out.append(f"    art   {art['file']}")
+    s = plan["summary"]
+    out.append("\n" + ", ".join(f"{v} {k}" for k, v in sorted(s.items())))
+    return "\n".join(out)
+
+
+def as_dict(p: Proposal) -> dict:
+    return asdict(p)

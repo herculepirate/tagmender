@@ -84,6 +84,7 @@ DEFAULTS = {
     "filenames": {"compat": "windows", "max_name_bytes": 255, "max_dir_bytes": 255, "max_path_chars": 4096,
                   "max_album_words": 5, "abbreviations": {}},
     "backup_retention_days": 30,
+    "allow_unverified_writes": False,     # write tags to formats whose audio data cannot be checked
     # albums nothing could identify
     "unresolved": {"action": "mark", "move_to": "", "allow_partial": False},
     "retry": {"after_days": 30, "max_attempts": 6},

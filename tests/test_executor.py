@@ -212,6 +212,18 @@ class Organise(Base):
         self.assertFalse(self.album.exists())                      # emptied folders removed
         self.assertTrue(self.lib.exists())                         # never a profile root
 
+    def test_reorganising_a_library_within_itself(self):
+        prof = self.profile(operation="move", destination=str(self.lib))       # destination = the source root
+        p, res = self.run_plan(prof, self.proposal())
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertTrue((self.lib / "Real Artist" / "2001 - Real Album" / "01.F.flac").exists())
+        self.assertFalse(self.album.exists())
+        self.assertTrue(self.lib.exists())
+        again = pl.build([self.proposal(files=[str(self.lib / "Real Artist" / "2001 - Real Album" / n)
+                                               for n in ("01.F.flac", "02.S.flac")],
+                                        source_dir=str(self.lib / "Real Artist" / "2001 - Real Album"))], prof)
+        self.assertEqual(again["albums"][0]["status"], "unchanged")              # already in place: nothing to do
+
     def test_low_confidence_move_tags_in_place_and_says_why(self):
         prof = self.profile(operation="move", destination=str(self.dest))
         p, _ = self.run_plan(prof, self.proposal(conf=91))

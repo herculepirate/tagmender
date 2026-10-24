@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "Lossy",
+  "description": "Copies identified lossy files (MP3, Opus, Ogg, AAC/M4A) into the lossy library. Lossless files are left out, never transcoded; the originals stay where they are.",
+  "formats": ["mp3", "opus", "ogg", "oga", "m4a", "aac", "wma", "mpc"],
+  "operation": "copy",
+  "destination": "/media/media1/music/lossy"
+}

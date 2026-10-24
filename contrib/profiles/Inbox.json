@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "Inbox",
+  "description": "Watches the inbox; identified albums move into the library, the rest are marked and set aside.",
+  "sources": [{"path": "/home/hp/Music/Inbox", "recursive": true, "watch": true}],
+  "operation": "move",
+  "destination": "/media/unraidmedia2/music/extreme_music",
+  "unresolved": {"action": "move", "move_to": "/home/hp/Music/Inbox/_unresolved"},
+  "unattended": true,
+  "watch": {"settle_minutes": 15}
+}

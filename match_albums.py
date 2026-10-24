@@ -80,7 +80,8 @@ def result_version():
 
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv",
              ".ape", ".wav", ".aif", ".aiff", ".dsf", ".dff", ".wma", ".mpc"}
-USER_AGENT = "AlbumMatcher/0.1 +https://github.com/herculepirate/picard-discogs-enrichment"
+from version import VERSION as _VERSION  # noqa: E402
+USER_AGENT = f"TagMender/{_VERSION} ( https://github.com/herculepirate/tagmender )"   # MusicBrainz asks for app/version ( contact )
 DEFAULT_PLUGIN_DIR = str(companions.discogs_dir())   # env, ~/Documents/Github clone, or bundled
 
 

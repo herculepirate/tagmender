@@ -25,7 +25,8 @@ from pathlib import Path
 import companions
 import exclusions as ex
 
-USER_AGENT = "TagMender/0.2 +https://github.com/herculepirate/tagmender"
+from version import VERSION as _VERSION  # noqa: E402
+USER_AGENT = f"TagMender/{_VERSION} ( https://github.com/herculepirate/tagmender )"   # MusicBrainz asks for app/version ( contact )
 MAX_BYTES = 20_000_000
 
 

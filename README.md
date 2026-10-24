@@ -1,15 +1,45 @@
 # TagMender
 
-Finds the albums in a large music library that were never tagged properly,
-identifies each one on MusicBrainz and Discogs, cleans up duplicate copies,
-and fills in cover art — in batch, unattended, and in step with how
-[MusicBrainz Picard](https://picard.musicbrainz.org/) tags with the
-[Discogs Enrichment](https://github.com/herculepirate/picard-discogs-enrichment)
-and [CoverUp](https://github.com/herculepirate/picard-coverup) plugins.
+Identifies the music in a large library with **MusicBrainz and Discogs as equal sources**,
+shows exactly what it would change, then tags and organises it — unattended, undoable, and
+without needing MusicBrainz Picard. Built for libraries laid out as
+`<Album Artist>/<Year - Album>/`, with thousands of albums ripped or collected over years.
 
-It is built for libraries laid out as `<Album Artist>/<Year - Album>/`, with
-thousands of albums ripped or collected over years: some tagged, some with
-only folder names, some with scans of the sleeve and nothing else.
+**Choose music → pick a profile → preview → apply → review what needs attention.**
+
+```bash
+tagmender setup                                   # Discogs token, AcoustID key (stored mode 600)
+tagmender plan ~/Music/Inbox --profile Lossy      # identify and preview; changes nothing
+tagmender run ~/Music/Inbox --profile Lossy       # preview, confirm, apply
+tagmender undo 20261024-091200-ab12               # put a job back
+tagmender gui                                     # the desktop app
+tagmender watch                                   # keep watched folders processed
+```
+
+What it guarantees:
+
+- **Nothing changes without a preview** (`plan`), and nothing is applied without `--yes`, a
+  confirmation, or a profile you marked unattended.
+- **Audio is never touched**: every write goes to a staged copy whose audio data is checked
+  against the original before it replaces anything; an existing file is never overwritten.
+- **Every job can be undone**, and an interrupted one is recovered (`tagmender recover`).
+- **MusicBrainz or Discogs alone is enough**: a Discogs-only pressing is tagged as the Discogs
+  Enrichment plugin would tag it, with no invented MusicBrainz IDs; the two are merged only
+  when they describe the same pressing.
+- **Rules are literal**: `[no vox]` means those characters; excluded albums are labelled
+  Ignored or Skipped, never Unresolved.
+
+Install: `sudo apt install ./tagmender_0.2.0_all.deb`, or run `TagMender-0.2.0-x86_64.AppImage`
+(no installation; includes the desktop app). From a clone: `python3 tagmender.py ...`.
+
+Documentation: [profiles and naming](docs/PROFILES.md) · [providers and keys](docs/PROVIDERS.md) ·
+[formats](docs/FORMATS.md) · [architecture](docs/ARCHITECTURE.md) ·
+[Picard coverage](docs/PICARD_COVERAGE.md) · [upgrading from 0.1](docs/MIGRATION.md) ·
+[requirements checklist](docs/ASSESSMENT.md) · [release notes](docs/RELEASE_NOTES.md).
+
+## The batch tools (0.1)
+
+They still work exactly as before, and `tagmender <tool>` runs them.
 
 ## What it does
 
@@ -315,21 +345,19 @@ key `exclusions`); remembered ignores and history in `~/.local/state/tagmender/s
 ## Tests
 
 ```bash
-python3 tests/test_match.py ~/Documents/Github/picard-discogs-enrichment
-python3 tests/test_dedupe.py
-python3 tests/test_tag_albums.py
-python3 tests/test_coverup_batch.py ~/Documents/Github/picard-coverup
-python3 tests/test_web_tag.py
-python3 tests/test_enrich.py
-python3 tests/test_inbox.py
-python3 tests/test_tools.py
-python3 tests/test_exclusions.py
-python3 tests/test_cli.py
-python3 tests/test_validate.py
+./run_tests.sh                     # every suite; needs ffmpeg and the two plugin clones
+PYTHON=/path/to/python3 ./run_tests.sh
+```
+
+## Building the packages
+
+```bash
+packaging/build_deb.sh             # dist/tagmender_<version>_all.deb (+ .sha256)
+packaging/build_appimage.sh        # dist/TagMender-<version>-x86_64.AppImage (needs uv)
 ```
 
 ## Licence
 
-GPL-2.0-or-later, the same as the Picard plugins whose code it uses.
+GPL-2.0-or-later, the same as the Picard plugins whose code it uses. See THIRD_PARTY_NOTICES.md.
 The fonts in `coverup_fonts/` are under the SIL Open Font License; see
 `coverup_fonts/licenses/`.

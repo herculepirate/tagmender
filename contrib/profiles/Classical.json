@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "Classical",
+  "description": "Western classical: composer folders, MusicBrainz decides the release.",
+  "sources": [{"path": "/media/unraidmedia2/music/classical"}],
+  "tradition": "western_classical",
+  "primary": "musicbrainz",
+  "naming": {"preset": "classical"},
+  "operation": "move",
+  "destination": "/media/unraidmedia2/music/classical"
+}

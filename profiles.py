@@ -203,12 +203,6 @@ def validate(data: dict) -> list[str]:
             p.append(f"sources[{i}] needs a path")
         elif not os.path.isabs(os.path.expanduser(s["path"])):
             p.append(f"sources[{i}].path must be absolute")
-    dest = os.path.realpath(os.path.expanduser(d["destination"])) if d["destination"] else ""
-    for s in d["sources"]:
-        if dest and isinstance(s, dict) and s.get("path") and d["operation"] == "move":
-            src = os.path.realpath(os.path.expanduser(s["path"]))
-            if dest == src:
-                p.append("move destination is the same folder as a source; use in_place instead")
     for r in d["exclusions"]:
         try:
             ex.Rule.from_dict(r, d["name"] or "profile")

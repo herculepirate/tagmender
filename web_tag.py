@@ -41,7 +41,8 @@ import match_albums as ma  # noqa: E402
 import tag_albums as ta  # noqa: E402
 import exclusions  # noqa: E402
 
-USER_AGENT = "TagMender/0.1 +https://github.com/herculepirate/tagmender"
+from version import VERSION as _VERSION  # noqa: E402
+USER_AGENT = f"TagMender/{_VERSION} ( https://github.com/herculepirate/tagmender )"   # MusicBrainz asks for app/version ( contact )
 q = urllib.parse.quote
 
 

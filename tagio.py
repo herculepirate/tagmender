@@ -463,7 +463,8 @@ def _set_asf(f, tags, k, vals):
 # capabilities (verified by tests/test_tagio.py for every format listed as tested)
 # --------------------------------------------------------------------------
 CAPABILITIES = {
-    # format: (family, tested here, custom fields, multiple values, embedded art, synced lyrics)
+    # format: (family, tested here, custom fields, multiple values, front cover embedded by TagMender,
+    #          synced lyrics embedded)
     "MP3": ("id3", True, True, True, True, False),
     "FLAC": ("vorbis", True, True, True, True, False),
     "M4A (AAC)": ("mp4", True, True, True, True, False),
@@ -472,12 +473,12 @@ CAPABILITIES = {
     "Opus": ("vorbis", True, True, True, True, False),
     "WAV": ("id3", True, True, True, True, False),
     "AIFF": ("id3", True, True, True, True, False),
-    "WavPack": ("apev2", True, True, True, True, False),
-    "WMA": ("asf", True, False, True, True, False),          # also: no total-tracks field
-    "Monkey's Audio (APE)": ("apev2", False, True, True, True, False),
-    "Musepack": ("apev2", False, True, True, True, False),
-    "DSF": ("id3", False, True, True, True, False),
-    "DFF": ("id3", False, True, True, True, False),
-    "TrueAudio": ("id3", False, True, True, True, False),
+    "WavPack": ("apev2", True, True, True, False, False),
+    "WMA": ("asf", True, False, True, False, False),          # also: no total-tracks field
+    "Monkey's Audio (APE)": ("apev2", False, True, True, False, False),
+    "Musepack": ("apev2", False, True, True, False, False),
+    "DSF": ("id3", False, True, True, False, False),
+    "DFF": ("id3", False, True, True, False, False),
+    "TrueAudio": ("id3", False, True, True, False, False),
     "raw AAC (ADTS)": (None, False, False, False, False, False),
 }

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "Library-in-place",
+  "description": "Tags the library where it is: fills what is missing, replaces only with strong evidence, never renames.",
+  "sources": [{"path": "/media/unraidmedia2/music"}],
+  "thresholds": {"replace_min_confidence": 95},
+  "field_policy": {"default": "replace", "fields": {"album": "fill_missing", "comment": "preserve"}}
+}

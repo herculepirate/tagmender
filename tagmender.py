@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
-"""tagmender - one command for every TagMender tool.
+"""tagmender - identify, tag and organise music; one engine for the CLI, watcher and GUI.
 
-  tagmender rules list                      the Ignore/Skip rules (global and --profile)
-  tagmender rules add ...                   add a rule (see: tagmender rules add -h)
-  tagmender rules enable|disable ID         switch a rule on or off
-  tagmender rules remove ID
-  tagmender rules test PATH [--rule ID]     preview which files and albums the rules exclude
-  tagmender rules allow PATH                "process anyway": rules never exclude PATH
-  tagmender rules disallow PATH             undo that
-  tagmender rules ignored                   what is remembered as ignored
-  tagmender rules history                   recent Ignored/Skipped decisions
+  tagmender setup                           enter provider keys; install the example profiles
+  tagmender doctor [--export PATH]          what is installed and set up; diagnostics zip
+  tagmender gui                             the desktop app
+
+  tagmender scan PATH                       what is in PATH (albums, singles, mixed folders); offline
+  tagmender plan PATH [-o PLAN]             identify and preview every change; changes nothing
+  tagmender apply PLAN [--yes]              carry out a saved plan
+  tagmender run PATH [--yes]                plan and apply in one go
+  tagmender watch [--once]                  keep the profiles' watched folders processed
+  tagmender jobs [JOB] | jobs prune         history; delete old backups
+  tagmender undo JOB                        put back everything a job changed
+  tagmender recover [JOB]                   tidy up after an interrupted job
+  tagmender unresolved [PATH]               albums marked TAGMENDER=Unresolved, by reason code
+  tagmender retry PATH                      plan the unresolved albums under PATH again
+  tagmender formats                         what each audio format supports
+
+  tagmender profiles list|show|check|new|set|migrate|examples
+  tagmender rules list|add|enable|disable|remove|test|allow|disallow|ignored|history
 
   tagmender audit|match|tag|web|enrich|inbox|coverup|dedupe|dupes|seed|learn|health ...
-                                            the tools, with their own options (-h)
+                                            the batch tools, with their own options (-h)
 
-  --profile NAME (before the command) applies that profile's rules as well.
-Exit codes: 0 ok, 1 error, 2 bad usage.
+  --profile NAME (before the command, or as an option) picks the profile.
+  --json on reading commands prints JSON on standard output; messages go to standard error.
+Exit codes: 0 ok; 1 error; 2 bad usage; 3 not applied (needs --yes or confirmation);
+4 done, but some albums failed or were in conflict.
 """
 from __future__ import annotations
 
@@ -393,6 +404,356 @@ def doctor_parser(sub):
                    help="read this one secret from standard input instead of asking")
 
 
+# --------------------------------------------------------------------------
+# scan, plan, apply, run, jobs, undo, recover, unresolved, retry, watch, formats
+# --------------------------------------------------------------------------
+EXIT_OK, EXIT_ERR, EXIT_USAGE, EXIT_NOT_APPLIED, EXIT_PARTIAL = 0, 1, 2, 3, 4
+
+
+def _profile(args):
+    name = getattr(args, "profile_opt", None) or args.profile
+    if not name:
+        return pf.default()
+    return pf.load(name)
+
+
+def _err(*a):
+    print(*a, file=sys.stderr)
+
+
+def cmd_scan(args):
+    import engine
+    import tagio
+    prof = _profile(args)
+    e = engine.Engine.__new__(engine.Engine)          # offline: grouping only, no providers
+    e.profile = prof
+    rows = []
+    for g in e.albums_in(args.path):
+        tags = {}
+        try:
+            tags = tagio.read(g.files[0])
+        except Exception:
+            pass
+        ids = [k for k in ("musicbrainz_albumid", "discogs_release_id") if tags.get(k)]
+        rows.append({"folder": str(g.folder), "files": len(g.files), "single": g.single, "mixed": bool(g.others),
+                     "album": (tags.get("album") or [""])[0], "albumartist": (tags.get("albumartist") or
+                                                                          tags.get("artist") or [""])[0],
+                     "ids": ids, "tagmender": (tags.get("tagmender") or [""])[0]})
+    if args.json:
+        print(json.dumps(rows, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    for r in rows:
+        kind = "single" if r["single"] else ("mixed folder" if r["mixed"] else f"{r['files']} files")
+        print(f"{r['tagmender'] or '-':<11} {kind:<13} {', '.join(r['ids']) or 'no IDs':<36} {r['folder']}")
+    print(f"{len(rows)} album(s) or single(s)", file=sys.stderr)
+    return EXIT_OK
+
+
+def _progress(i, n, what):
+    if sys.stderr.isatty():
+        print(f"\r[{i + 1}/{n}] {Path(what).name[:60]:<60}", end="", file=sys.stderr, flush=True)
+
+
+def _make_plan(args):
+    import engine
+    prof = _profile(args)
+    e = engine.Engine(prof, ocr=getattr(args, "ocr", False))
+    for prov, note in e.notes.items():
+        _err(f"note: {prov}: {note}")
+    p = e.plan(args.path, progress=_progress)
+    if sys.stderr.isatty():
+        print(file=sys.stderr)
+    return prof, p
+
+
+def cmd_plan(args):
+    import plan as planmod
+    _prof, p = _make_plan(args)
+    if args.output:
+        planmod.save(p, args.output)
+        _err(f"Plan saved to {args.output}  (apply with: tagmender apply {args.output})")
+    if args.json:
+        print(json.dumps(p, indent=1, ensure_ascii=False, default=str))
+    else:
+        print(planmod.preview(p, verbose=args.verbose))
+        _err("Nothing was changed.")
+    return EXIT_OK
+
+
+def _confirm(prompt):
+    if not sys.stdin.isatty():
+        return False
+    return input(prompt).strip().lower() in ("y", "yes")
+
+
+def _execute(p, args):
+    import executor
+    import plan as planmod
+    actionable = [a for a in p["albums"] if a["status"] in ("ready", "unresolved")
+                  and any(fe["op"] != "none" for fe in a["files"])]
+    if not actionable:
+        print("Nothing to change.")
+        return EXIT_OK
+    unattended = (p.get("profile_data") or {}).get("unattended")
+    if not (args.yes or unattended):
+        if not args.json:
+            print(planmod.preview(p))
+        if not _confirm(f"\nApply these changes to {len(actionable)} album(s)? [y/N] "):
+            _err("Not applied. Use --yes, or set the profile to unattended.")
+            return EXIT_NOT_APPLIED
+    res = executor.Executor(p, progress=_progress).run()
+    if sys.stderr.isatty():
+        print(file=sys.stderr)
+    if args.json:
+        print(json.dumps(res, indent=1, ensure_ascii=False))
+    else:
+        for a in res["albums"]:
+            if a["status"] not in ("done", "unchanged"):
+                print(f"{a['label'] or a['status']:<10} {a['album']}" + (f"  ({a['detail']})" if a["detail"] else ""))
+        print(f"Job {res['job']}: " + ", ".join(f"{v} {k}" for k, v in sorted(res["counts"].items()))
+              + f"\nUndo with: tagmender undo {res['job']}")
+    return EXIT_PARTIAL if res["status"] != "done" or any(a["status"] in ("failed", "conflict")
+                                                         for a in res["albums"]) else EXIT_OK
+
+
+def cmd_apply(args):
+    import plan as planmod
+    try:
+        p = planmod.load(args.plan)
+    except (OSError, ValueError) as exc:
+        _err(f"Cannot read plan: {exc}")
+        return EXIT_ERR
+    return _execute(p, args)
+
+
+def cmd_run(args):
+    _prof, p = _make_plan(args)
+    return _execute(p, args)
+
+
+def cmd_jobs(args):
+    import executor
+    if args.job == "prune":
+        days = args.days if args.days is not None else _profile(args)["backup_retention_days"]
+        done = executor.prune(days)
+        print(f"Backups deleted for {len(done)} job(s) older than {days} days (they can no longer be undone).")
+        return EXIT_OK
+    if args.job:
+        rows = executor.job_albums(args.job)
+        if args.json:
+            print(json.dumps([dict(zip(("album", "status", "label", "detail", "ts"), r)) for r in rows], indent=1))
+            return EXIT_OK
+        for album, status, label, detail, _ts in rows:
+            print(f"{status:<10} {label:<10} {album}" + (f"  ({detail})" if detail else ""))
+        return EXIT_OK
+    rows = executor.jobs(args.limit)
+    if args.json:
+        print(json.dumps([dict(zip(("job", "profile", "started", "ended", "status", "summary"), r)) for r in rows],
+                         indent=1))
+        return EXIT_OK
+    for job, prof, started, _ended, status, summary in rows:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(started)) if started else "?"
+        print(f"{when}  {job:<26} {status or '?':<10} {prof or '':<12} {summary or ''}")
+    pending = executor.pending_jobs()
+    if pending:
+        _err(f"Interrupted: {', '.join(pending)}  (tagmender recover)")
+    return EXIT_OK
+
+
+def cmd_undo(args):
+    import executor
+    try:
+        out = executor.undo(args.job)
+    except executor.StepError as exc:
+        _err(str(exc))
+        return EXIT_ERR
+    for line in out:
+        print(line)
+    return EXIT_PARTIAL if any(x.startswith("PROBLEM") for x in out) else EXIT_OK
+
+
+def cmd_recover(args):
+    import executor
+    jobs = [args.job] if args.job else executor.pending_jobs()
+    if not jobs:
+        print("No interrupted jobs.")
+    for j in jobs:
+        print(f"{j}:")
+        for line in executor.recover(j):
+            print(f"  {line}")
+    return EXIT_OK
+
+
+def _unresolved_albums(path):
+    import engine
+    import reasons
+    import tagio
+    e = engine.Engine.__new__(engine.Engine)
+    e.profile = pf.default()
+    out = []
+    for g in e.albums_in(path):
+        try:
+            t = tagio.read(g.files[0])
+        except Exception:
+            continue
+        if str((t.get("tagmender") or [""])[0]).lower() == "unresolved":
+            codes, words = reasons.parse((t.get("tagmender_reason") or [""])[0])
+            out.append({"folder": str(g.folder), "codes": codes, "reason": words, "files": len(g.files)})
+    return out
+
+
+def cmd_unresolved(args):
+    import reasons
+    rows = _unresolved_albums(args.path)
+    if args.code:
+        rows = [r for r in rows if args.code in r["codes"]]
+    if args.json:
+        print(json.dumps(rows, indent=1, ensure_ascii=False))
+        return EXIT_OK
+    by = {}
+    for r in rows:
+        for c in r["codes"] or ["other"]:
+            by.setdefault(c, []).append(r)
+    for code in sorted(by, key=lambda c: -len(by[c])):
+        print(f"\n{code} ({len(by[code])}): {reasons.describe(code)}")
+        for r in by[code][:args.limit]:
+            print(f"    {r['folder']}" + (f"  - {r['reason'][:90]}" if r["reason"] else ""))
+    print(f"\n{len(rows)} unresolved album(s)", file=sys.stderr)
+    return EXIT_OK
+
+
+def cmd_retry(args):
+    import engine
+    import plan as planmod
+    prof = _profile(args)
+    folders = [Path(r["folder"]) for r in _unresolved_albums(args.path)
+               if not args.code or args.code in r["codes"]]
+    if not folders:
+        print("No unresolved albums there.")
+        return EXIT_OK
+    e = engine.Engine(prof)
+    props = []
+    for i, f in enumerate(folders):
+        _progress(i, len(folders), str(f))
+        props += [e.identify(g) for g in e.albums_in(f)]
+    p = planmod.build(props, prof, e.job, extra_roots=[Path(args.path).expanduser()])
+    if args.output:
+        planmod.save(p, args.output)
+        _err(f"Plan saved to {args.output}")
+    if args.apply:
+        return _execute(p, args)
+    print(planmod.preview(p))
+    return EXIT_OK
+
+
+def cmd_watch(args):
+    import watcher
+    if args.nice:
+        watcher.lower_priority()
+    profs = [pf.load(args.profile_opt or args.profile)] if (args.profile_opt or args.profile) else None
+    w = watcher.Watcher(profs, once=args.once)
+    if not w.profiles:
+        _err('No profile watches a folder. Add one: tagmender profiles set NAME \'sources=[{"path": "/music/inbox", '
+             '"watch": true}]\'')
+        return EXIT_USAGE
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: setattr(w, "stop", True))
+    try:
+        if args.once:
+            for folder, status in w.tick().items():
+                print(f"{status:<14} {folder}")
+        else:
+            _err(f"Watching {len(w.roots())} folder(s); Ctrl+C or SIGTERM stops.")
+            w.run()
+    except KeyboardInterrupt:
+        pass
+    return EXIT_OK
+
+
+def cmd_formats(args):
+    import tagio
+    cols = ("tag family", "tested here", "custom fields", "multiple values", "embedded art", "synced lyrics")
+    if args.json:
+        print(json.dumps({k: dict(zip(cols, v)) for k, v in tagio.CAPABILITIES.items()}, indent=1))
+        return EXIT_OK
+    yn = lambda v: "yes" if v is True else ("no" if v is False else (v or "-"))  # noqa: E731
+    print(f"{'format':<22}" + "".join(f"{c:<16}" for c in cols))
+    for k, v in tagio.CAPABILITIES.items():
+        print(f"{k:<22}" + "".join(f"{yn(x):<16}" for x in v))
+    print("\nTags are only written where the audio data can be verified unchanged afterwards (see docs/FORMATS.md).",
+          file=sys.stderr)
+    return EXIT_OK
+
+
+def cmd_gui(args):
+    try:
+        import gui
+    except ImportError as exc:
+        _err(f"The desktop app needs PySide6 ({exc}). Install it: pip install PySide6")
+        return EXIT_ERR
+    return gui.main()
+
+
+def work_parsers(sub):
+    def prof(a):
+        a.add_argument("--profile", dest="profile_opt", metavar="NAME")
+
+    a = sub.add_parser("scan", help="what is in PATH (offline)")
+    a.add_argument("path")
+    a.add_argument("--json", action="store_true")
+    prof(a)
+    for name in ("plan", "run"):
+        a = sub.add_parser(name, help="identify and preview" if name == "plan" else "plan, then apply")
+        a.add_argument("path")
+        a.add_argument("--ocr", action="store_true", help="read barcodes and catalogue numbers from scans")
+        a.add_argument("--json", action="store_true")
+        prof(a)
+        if name == "plan":
+            a.add_argument("-o", "--output", metavar="PLAN")
+            a.add_argument("-v", "--verbose", action="store_true")
+        else:
+            a.add_argument("--yes", "-y", action="store_true", help="apply without asking")
+    a = sub.add_parser("apply", help="carry out a saved plan")
+    a.add_argument("plan")
+    a.add_argument("--yes", "-y", action="store_true")
+    a.add_argument("--json", action="store_true")
+    a = sub.add_parser("jobs", help="job history; `jobs JOB` for one; `jobs prune` deletes old backups")
+    a.add_argument("job", nargs="?")
+    a.add_argument("--days", type=int)
+    a.add_argument("--limit", type=int, default=30)
+    a.add_argument("--json", action="store_true")
+    prof(a)
+    a = sub.add_parser("undo", help="put back what a job changed")
+    a.add_argument("job")
+    a = sub.add_parser("recover", help="tidy up after an interrupted job")
+    a.add_argument("job", nargs="?")
+    for name in ("unresolved", "retry"):
+        a = sub.add_parser(name)
+        a.add_argument("path")
+        a.add_argument("--code", help="only albums with this reason code")
+        prof(a)
+        if name == "unresolved":
+            a.add_argument("--limit", type=int, default=20, help="albums listed per code")
+            a.add_argument("--json", action="store_true")
+        else:
+            a.add_argument("--apply", action="store_true")
+            a.add_argument("--yes", "-y", action="store_true")
+            a.add_argument("--json", action="store_true")
+            a.add_argument("-o", "--output", metavar="PLAN")
+    a = sub.add_parser("watch", help="keep watched folders processed (foreground; see contrib/ for a service)")
+    a.add_argument("--once", action="store_true", help="one pass, then exit")
+    a.add_argument("--nice", action="store_true", help="lowest CPU and I/O priority")
+    prof(a)
+    a = sub.add_parser("formats", help="what each audio format supports")
+    a.add_argument("--json", action="store_true")
+    sub.add_parser("gui", help="the desktop app")
+
+
+WORK = {"scan": cmd_scan, "plan": cmd_plan, "apply": cmd_apply, "run": cmd_run, "jobs": cmd_jobs, "undo": cmd_undo,
+        "recover": cmd_recover, "unresolved": cmd_unresolved, "retry": cmd_retry, "watch": cmd_watch,
+        "formats": cmd_formats, "gui": cmd_gui}
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = None
@@ -413,8 +774,21 @@ def main(argv=None):
     rules_parser(sub)
     profiles_parser(sub)
     doctor_parser(sub)
+    work_parsers(sub)
+    if not argv:
+        ap.print_help()
+        return EXIT_USAGE
     args = ap.parse_args(argv)
     args.profile = profile
+    if args.cmd in WORK:
+        try:
+            return WORK[args.cmd](args)
+        except pf.ProfileError as exc:
+            _err(f"Profile error: {exc}")
+            return EXIT_ERR
+        except KeyboardInterrupt:
+            _err("\nStopped. Anything half-done is in the journal: tagmender recover")
+            return EXIT_ERR
     if args.cmd == "doctor":
         return cmd_doctor(args)
     if args.cmd == "setup":

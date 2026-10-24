@@ -148,6 +148,20 @@ class Validate(unittest.TestCase):
         self.assertEqual(va.verdict(auto({"source": "discogs", "id": "666"}), "", "555", http, cache)[0], "differs")
 
 
+    def test_the_same_album_under_another_title_or_with_a_bonus_disc_is_another_pressing(self):
+        def r(title, secs):
+            return {"title": title, "tracks": [{"secs": x} for x in secs]}
+        cd = [300, 250, 410, 380, 290, 330, 400, 270, 600]
+        # Enslaved - Axioma Ethica Odini: the CD + 7" edition in the tags, the CD picked
+        self.assertIs(va.other_album(r("Axioma Ethica Odini", cd + [200, 210]), r("Axioma Ethica Odini", cd)), False)
+        # Candlemass: every length agrees, the database titles it differently
+        two = cd + [x + 17 for x in cd]
+        self.assertIs(va.other_album(r("Dactylis Glomerate & Abstrakt Algebra II", two),
+                                     r("Dactylis Glomerata", [x + 1 for x in two])), False)
+        # another album entirely
+        self.assertIs(va.other_album(r("Axioma Ethica Odini", cd), r("Vertebrae", [x + 40 for x in cd])), True)
+        self.assertIs(va.other_album(r("Axioma Ethica Odini", cd), r("Axioma Ethica Odini", cd[:4] + [999])), True)
+
 class Rechecks(unittest.TestCase):
     def test_disagreements_are_checked_again_after_a_fix(self):
         st = sqlite3.connect(":memory:")

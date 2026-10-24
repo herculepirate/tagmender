@@ -177,12 +177,42 @@ def picked_release(http, b, cache):
     return ma.mb_candidate(d) if d else None
 
 
+def _secs(release):
+    return [float(t.get("secs") or 0) for t in release.get("tracks") or []]
+
+
+def _contained(short, long, tol=3.0):
+    """Every track length of `short` found in `long`, in order (the CD inside a CD +
+    7" edition, a release without its bonus tracks)."""
+    if not short or any(x <= 0 for x in short):
+        return False
+    i = 0
+    for x in long:
+        if i < len(short) and abs(x - short[i]) <= tol:
+            i += 1
+    return i == len(short)
+
+
 def other_album(mine, other):
-    """False when the release in the tags and the pick are the same album (same title
-    and track count), True when they are not, None when unknown."""
+    """False when the release in the tags and the pick are the same album, True when
+    they are not, None when unknown. The same album: the same title and tracks, or one
+    tracklist inside the other (Enslaved - Axioma Ethica Odini: the CD + 7" edition in
+    the tags, the CD picked), or every track length agreeing under another title
+    (Candlemass: "Dactylis Glomerata" with Abstrakt Algebra II as its second disc)."""
     if not mine or not other:
         return None
-    return not (mc.title_sim(mine["title"], other["title"]) >= 0.85 and len(mine["tracks"]) == len(other["tracks"]))
+    a, b = _secs(mine), _secs(other)
+    same_title = mc.title_sim(mine["title"], other["title"]) >= 0.85
+    if same_title and len(a) == len(b):
+        return False
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    if same_title and _contained(short, long):
+        return False
+    if len(a) == len(b) and len(a) >= 3 and all(x > 0 for x in a + b):
+        agree = sum(abs(x - y) <= 3 for x, y in zip(a, b))
+        if agree >= 0.9 * len(a):
+            return False
+    return True
 
 
 def verdict(out, mb_id, dg_id, http, cache):

@@ -389,7 +389,7 @@ _OCR_CATNO_RE = re.compile(
     r"(?<![A-Za-z0-9])([A-Z][A-Za-z]{1,9}(?:[ -]?(?:CD|LP|DVD|SACD|MC|CDR|DA))?[ -]?\d{2,7}(?:[-/]\d{1,3})?"
     r"(?:CD|LP|DVD|SACD|MC|CDR|DG)?)"                  # "FO532CD": the format after the number
     r"(?![A-Za-z0-9])")
-_OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ ]?\d){10,12})(?!\d)")
+_OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ °'’·.]?\d){10,12})(?!\d)")
 
 
 def codes_from_ocr_text(text, limit=5):
@@ -401,7 +401,7 @@ def codes_from_ocr_text(text, limit=5):
     out = {"barcodes": [], "catnos": []}
     text = str(text or "")
     for m in _OCR_BARCODE_RE.finditer(text):
-        code = m.group(1).replace(" ", "")
+        code = re.sub(r"\D", "", m.group(1))      # "8°715392°18 2327" as OCR reads a barcode's digits
         if valid_barcode(code) and code not in out["barcodes"]:
             out["barcodes"].append(code)
     seen = set()
@@ -565,6 +565,8 @@ _UK_POST_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}\b")
 _UK_NEAR = re.compile(r"\b(?:england|london|u\.?k\.?|united kingdom|scotland|wales)\b", re.I)
 _CA_POST_RE = re.compile(r"\b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b")
 _CA_NEAR = re.compile(r"\b(?:canada|qu[eé]bec|qc|ontario|on|b\.?c\.?|alberta|ab)\b", re.I)
+_NL_POST_RE = re.compile(r"\b\d{4}\s?[A-Z]{2}\b")
+_NL_NEAR = re.compile(r"\b(?:the\s+)?netherlands\b|\bholland\b|\bnederland\b", re.I)
 _JP_POST_RE = re.compile(r"〒\s?\d{3}-\d{4}|\b\d{3}-\d{4}\b[^\n]{0,60}\b(?:tokyo|osaka|japan)\b", re.I)
 _BR_POST_RE = re.compile(r"\bCEP:?\s?\d{5}-?\d{3}\b")
 
@@ -578,7 +580,8 @@ def countries_from_addresses(ocr_text):
         out.add("DE" if len(m.group(1)) == 5 else "AT")
     if _US_ZIP_RE.search(text):
         out.add("US")
-    for rx, near, code in ((_UK_POST_RE, _UK_NEAR, "GB"), (_CA_POST_RE, _CA_NEAR, "CA")):
+    for rx, near, code in ((_UK_POST_RE, _UK_NEAR, "GB"), (_CA_POST_RE, _CA_NEAR, "CA"),
+                           (_NL_POST_RE, _NL_NEAR, "NL")):
         for m in rx.finditer(text):
             if near.search(text[max(0, m.start() - 60):m.end() + 60]):
                 out.add(code)
@@ -603,6 +606,11 @@ def countries_on_scans(ocr_text):
     return out
 
 
+# A line saying whose rights these are ("... all rights reserved", "copyright ...").
+# Not the bare ℗/© marks: a label's own "(P) 2010 Nuclear Blast GmbH" names the label,
+# and OCR also reads the "•" between address parts as "©".
+_RIGHTS_LINE = re.compile(r"copyright|rights\s+reserved|all\s+rights|\breserved\b|"
+                          r"under\s+(?:exclusive\s+)?licen[cs]e", re.I)
 _LICENSOR = re.compile(r"(?:licen[cs]ed|licen[cs]e)\s+(?:from|by|of)\s+(?:[A-Za-z0-9&'.-]+\s*){1,4}", re.I)
 _CONFUSABLE = str.maketrans({"o": "0", "s": "5", "i": "1", "l": "1", "b": "8", "z": "2"})
 
@@ -663,7 +671,11 @@ def pressing_clues(ocr_text, cand):
             agree["barcode"] = f"barcode {b} on the scans"
             break
     # "licensed from Century Media": the licensor, not this pressing's label
-    text_words = " " + fold(_LICENSOR.sub(" ", str(ocr_text))) + " "
+    # ... and not the rights holder named in the copyright line ("℗ 2018 Defen Society 3000,
+    # Cryptopsy, all rights reserved" on Hammerheart's CD): the label that issued the
+    # pressing is the one in the logo, the address and the catalogue number.
+    no_rights = "\n".join(l for l in str(ocr_text).splitlines() if not _RIGHTS_LINE.search(l))
+    text_words = " " + fold(_LICENSOR.sub(" ", no_rights)) + " "
     for label in str(cand.get("label") or "").split(";"):
         words = [w for w in fold(label).split() if w not in _LABEL_FILLER]
         phrase = " ".join(words)
@@ -673,7 +685,9 @@ def pressing_clues(ocr_text, cand):
     printed = countries_on_scans(ocr_text)
     mine = country_code(cand.get("country"))
     if printed and mine and mine != "XW":
-        if mine in printed:
+        if mine == "XE" and printed & _EUROPE and mine not in printed:
+            pass        # a European pressing with a German or Dutch address: consistent, but no clue
+        elif mine in printed:
             name = cand.get("country") or ""
             if len(name) == 2:
                 name = next((n for n, c in _COUNTRY_NAMES.items() if c == name and len(n) > 3), name)

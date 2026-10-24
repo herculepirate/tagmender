@@ -701,6 +701,59 @@ class PressingFromScans(unittest.TestCase):
         self.assertEqual(agree, {})                         # filler words are not a label
 
 
+class ScanReading(unittest.TestCase):
+    """The scans as TagMender reads them (needs tesseract; numpy for the barcode patch)."""
+
+    def setUp(self):
+        if not shutil.which("tesseract"):
+            self.skipTest("tesseract not installed")
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def font(self, size):
+        from PIL import ImageFont
+        for f in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+            if Path(f).exists():
+                return ImageFont.truetype(f, size)
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            self.skipTest("no scalable font")
+
+    def test_the_spine_of_an_open_digipak_spread_is_read(self):
+        """Tome II's digipak was scanned open: the spine with HHR 2018-23 runs down the middle."""
+        from PIL import Image, ImageDraw
+        spine = Image.new("L", (1400, 120), 255)
+        ImageDraw.Draw(spine).text((20, 20), "CRYPTOPSY HHR 2018-23", font=self.font(70), fill=0)
+        spread = Image.new("L", (3200, 1400), 200)
+        spread.paste(spine.rotate(90, expand=True), (1540, 0))
+        spread.save(self.tmp / "spread.png")
+        text = ma.ocr_spines([self.tmp / "spread.png"])
+        self.assertIn("HHR 2018-23", mc.codes_from_ocr_text(text)["catnos"])
+
+    def test_barcode_digits_are_read_from_the_barcode_patch(self):
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy not installed")
+        from PIL import Image, ImageDraw
+        im = Image.new("L", (4000, 2400), 230)
+        d = ImageDraw.Draw(im)
+        x = 3000
+        for i, wbar in enumerate([4, 2, 6, 2, 4, 8, 2, 4, 2, 6, 4, 2, 8, 2, 4, 6, 2, 4] * 3):
+            if i % 2 == 0:
+                d.rectangle((x, 100, x + wbar, 260), fill=0)
+            x += wbar + 3
+        d.text((3000, 270), "8 715392 182327", font=self.font(34), fill=0)
+        im.save(self.tmp / "back.png")
+        self.assertTrue(ma.barcode_regions(Image.open(self.tmp / "back.png")))
+        text = ma.ocr_barcode_digits([self.tmp / "back.png"])
+        self.assertEqual(mc.codes_from_ocr_text(text)["barcodes"], ["8715392182327"])
+
+
 class BothDatabases(unittest.TestCase):
     """Kreator - Endorama (2003 Art Music, AMG 099, Russia): the Russian CD has 15 tracks
     (2 extra), so a track-count filter skipped it; and Discogs was not asked because
@@ -964,6 +1017,26 @@ class PressingEvidence(unittest.TestCase):
         self.assertTrue(mc.same_pressing(mbc, dgc))
         self.assertFalse(mc.same_pressing(mbc, dict(dgc, year=2014)))
         self.assertFalse(mc.same_pressing(mbc, dict(dgc, label="Napalm")))
+
+    def test_hammerheart_back_cover_beats_the_rights_holders_name(self):
+        """Cryptopsy - The Book of Suffering, Tome II: the back reads 'P.O. Box 277, 6300 AG
+        Valkenburg, The Netherlands', 'HHR 2018-23' on the spine, barcode 8715392182327,
+        and the copyright line '2018 Defen Society 3000, Cryptopsy, all rights reserved'.
+        The rights holder's name must not pick the Canadian Defen Society release."""
+        back = ("P.O. Box 277 \u2022 6300 AG Valkenburg \u2022 The Netherlands \u2022 www.hammerheart.com\n"
+                "\u2117 2018 Defen Society 3000 \u2022 Cryptopsy all rights reserved Socan\n"
+                "CRYPTOPSY - THE BOOK OF SUFFERING TOME II - HHR 2018-23\n8\u00b0715392\u00b018 2327")
+        self.assertEqual(mc.codes_from_ocr_text(back)["barcodes"], ["8715392182327"])
+        self.assertIn("NL", mc.countries_on_scans(back))
+        hh = cand(id="hh", country="XE", label="Hammerheart Records", catnos={mc.norm_code("HHR 2018-23")},
+                  barcodes={"8715392182327"})
+        ds = cand(id="ds", country="CA", label="Defen Society")
+        r = mc.classify([mc.score_candidate(album(), c, CFG, ocr_text=back) for c in (ds, hh)], CFG)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "hh"), r["why"])
+        agree, _ = mc.pressing_clues(back, ds)
+        self.assertNotIn("label", agree)                                  # only in the copyright line
+        agree, against = mc.pressing_clues(back, hh)
+        self.assertEqual(against, [])                                     # NL address fits a European pressing
 
     def test_the_labels_address_on_the_back_tells_the_pressing(self):
         """Nothing else tells two pressings apart, but the back prints the label's office:

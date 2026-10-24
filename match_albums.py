@@ -1490,6 +1490,21 @@ def ocr_spines(paths):
         except Exception:
             continue
         w, h = im.size
+        if w / max(h, 1) >= 1.8 and w >= 1200:
+            # a digipak or booklet spread scanned open: its spine runs down the middle
+            # (Cryptopsy - Tome II: "HHR 2018-23" only there). Read the whole spread sideways.
+            whole = im.copy()
+            whole.thumbnail((3600, 3600))
+            for angle in (90, 270):
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+                        whole.rotate(angle, expand=True).save(tmp.name)
+                        r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                                           capture_output=True, text=True, timeout=120)
+                    chunks.append(r.stdout)
+                except Exception:
+                    continue
+            continue
         if not (1.15 <= w / max(h, 1) <= 1.6) or w < 600:
             continue                                   # tray cards are about 151 x 118 mm
         strip_w = max(int(w * 0.07), 30)
@@ -1507,6 +1522,90 @@ def ocr_spines(paths):
                     chunks.append(r.stdout)
                 except Exception:
                     continue
+    return "\n".join(chunks)
+
+
+def barcode_regions(im, max_regions=3):
+    """Where barcodes are on a scan: patches of dense vertical bars (strong horizontal
+    contrast, weak vertical contrast), found on a small copy. Returns boxes in the
+    image's own pixels, largest first. Needs numpy; without it, none."""
+    try:
+        import numpy as np
+        from PIL import ImageFilter
+    except ImportError:
+        return []
+    from collections import deque
+    g = im.convert("L")
+    W, H = g.size
+    s = 1200 / max(W, H, 1)
+    a = np.asarray(g.resize((max(1, int(W * s)), max(1, int(H * s)))), dtype=np.float32)
+    if a.shape[0] < 3 or a.shape[1] < 3:
+        return []
+    gx = np.abs(np.diff(a, axis=1))[:-1, :]
+    gy = np.abs(np.diff(a, axis=0))[:, :-1]
+    energy = Image_from(np.uint8(np.clip(np.clip(gx - gy, 0, None) * 2, 0, 255))).filter(ImageFilter.BoxBlur(6))
+    m = np.asarray(energy) > 60
+    h, w = m.shape
+    seen = np.zeros_like(m, bool)
+    found = []
+    for y in range(0, h, 2):
+        for x in range(0, w, 2):
+            if not m[y, x] or seen[y, x]:
+                continue
+            q, ys, xs = deque([(y, x)]), [], []
+            seen[y, x] = True
+            while q:
+                cy, cx = q.popleft()
+                ys.append(cy)
+                xs.append(cx)
+                for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
+                    if 0 <= ny < h and 0 <= nx < w and m[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        q.append((ny, nx))
+            x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+            bw, bh = x1 - x0, y1 - y0
+            if len(ys) > 150 and bw > 20 and bh > 8 and len(ys) > 0.5 * bw * bh:
+                found.append((len(ys), (x0 / s, y0 / s, x1 / s, y1 / s)))
+    found.sort(reverse=True)
+    return [b for _n, b in found[:max_regions]]
+
+
+def Image_from(arr):
+    from PIL import Image
+    return Image.fromarray(arr)
+
+
+def ocr_barcode_digits(paths, max_images=15):
+    """The digits printed under a barcode, read from the barcode's own patch at full
+    resolution (page OCR on a reduced scan misses them: Cryptopsy - Tome II's
+    8715392182327). For when no barcode decoder (pyzbar) is installed."""
+    import subprocess
+    import tempfile
+    try:
+        from PIL import Image
+    except ImportError:
+        return ""
+    chunks = []
+    for p in list(paths)[:max_images]:
+        try:
+            im = Image.open(p)
+            im.load()
+        except Exception:
+            continue
+        for x0, y0, x1, y1 in barcode_regions(im):
+            bw, bh = x1 - x0, y1 - y0
+            box = (int(max(0, x0 - bw * 0.15)), int(max(0, y0 - bh * 0.4)),
+                   int(min(im.width, x1 + bw * 0.15)), int(min(im.height, y1 + bh * 0.6)))
+            crop = im.crop(box).convert("L")
+            crop = crop.resize((crop.width * 2, crop.height * 2))
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+                    crop.save(tmp.name)
+                    r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "6"],
+                                       capture_output=True, text=True, timeout=60)
+                chunks.append(r.stdout)
+            except Exception:
+                continue
     return "\n".join(chunks)
 
 
@@ -1672,10 +1771,15 @@ def _process(row, http, cfg, dm, args, full_cfg):
         # cached per language set: installing a language pack reads the scans again
         kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
         text = _cached(db, kind, img_key, lambda: ocr_text(images))
-        spines = _cached(db, "spines" if ocr_langs() == "eng" else f"spines-{ocr_langs()}", img_key,
+        # "spines2": spreads are read sideways too (older cached readings did not)
+        spines = _cached(db, "spines2" if ocr_langs() == "eng" else f"spines2-{ocr_langs()}", img_key,
                          lambda: ocr_spines(images))
         if spines.strip():
             text = text + "\n" + spines
+        if not album["barcodes"]:
+            digits = _cached(db, "barcode-digits", img_key, lambda: ocr_barcode_digits(images))
+            if digits.strip():
+                text = text + "\n" + digits
         if text.strip():
             # Barcodes and catalogue numbers printed on the scans are SEARCHED, not only
             # compared: the release they identify may not be among what the title found.

@@ -381,7 +381,8 @@ _OCR_NOT_CATNO = {"lc", "cd", "lp", "disc", "disk", "side", "track", "tracks", "
                   "uk", "usa", "us", "eu", "made", "in", "p", "c", "the", "and", "of", "at", "by",
                   "page", "pages", "issue", "edition", "remaster", "remastered", "recorded", "year",
                   "dvd", "bonus", "mix", "version", "take", "bar", "bars", "min", "mins", "sec",
-                  "copy", "time", "for", "suite", "route", "room", "postfach", "postbus", "cedex", "pmb", "box"}
+                  "copy", "time", "for", "suite", "route", "room", "postfach", "postbus", "cedex", "pmb", "box",
+                  "dr", "rms", "khz", "bit", "hz", "db"}             # dynamic-range reports in rip notes
 # US state + ZIP code ("CA 90064", "NY 11576") on label addresses
 _US_STATES = set("al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv "
                  "nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc".split())

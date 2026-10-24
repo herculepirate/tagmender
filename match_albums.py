@@ -487,6 +487,130 @@ def notes_text(album_dir, limit=20000):
     return " ".join(out)[:limit]
 
 
+# Every document in an album folder may name the release: the ripper's notes and logs,
+# the shop's or label's PDF booklet, a Word or HTML page saved with the download.
+TEXT_DOC_EXT = {".txt", ".nfo", ".info", ".md", ".log", ".cue", ".m3u", ".m3u8", ".csv", ".json", ".xml",
+                ".accurip", ".sfv", ".ffp", ".rtf", ".htm", ".html"}
+OFFICE_DOC_EXT = {".docx", ".odt", ".doc", ".pdf"}
+DOC_EXT = TEXT_DOC_EXT | OFFICE_DOC_EXT
+
+
+def album_documents(album_dir, max_bytes=60_000_000):
+    """The documents under the album folder (subfolders too), small ones first."""
+    found = []
+    for dirpath, _d, names in os.walk(album_dir):
+        for n in sorted(names):
+            p = Path(dirpath) / n
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if p.suffix.lower() in DOC_EXT and 0 < size <= max_bytes:
+                found.append((size, str(p).lower(), p))
+    return [p for _s, _n, p in sorted(found)]
+
+
+def _decode(raw):
+    """Text in whatever encoding the ripper wrote (EAC logs are UTF-16)."""
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    if raw.count(b"\x00") > len(raw) // 4:
+        return raw.decode("utf-16-le", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
+def _xml_text(xml):
+    xml = re.sub(r"<(?:w:p|text:p|w:br|text:line-break|w:tab|text:tab)\b[^>]*>", "\n", xml)
+    import html as _html
+    return _html.unescape(re.sub(r"<[^>]+>", " ", xml))
+
+
+def pdf_text(path, ocr=True, max_pages=40):
+    """A PDF's text; pages that are only pictures (a scanned booklet) are rendered and
+    read like any other scan, barcode digits and spines included."""
+    import subprocess
+    import tempfile
+    text = ""
+    if shutil.which("pdftotext"):
+        try:
+            text = subprocess.run(["pdftotext", "-layout", "-l", str(max_pages), str(path), "-"],
+                                  capture_output=True, text=True, timeout=120).stdout
+        except Exception:
+            text = ""
+    else:
+        try:
+            import pypdf
+            text = "\n".join((pg.extract_text() or "") for pg in pypdf.PdfReader(str(path)).pages[:max_pages])
+        except Exception:
+            text = ""
+    pages = text.count("\f") + 1
+    if not ocr or len(re.sub(r"\s", "", text)) >= 80 * pages or not shutil.which("pdftoppm"):
+        return text
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            subprocess.run(["pdftoppm", "-r", "300", "-gray", "-png", "-l", str(max_pages), str(path),
+                            str(Path(tmp) / "page")], capture_output=True, timeout=600)
+        except Exception:
+            return text
+        imgs = sorted(str(x) for x in Path(tmp).glob("page*.png"))
+        if imgs:
+            text += "\n" + ocr_text(imgs) + "\n" + ocr_spines(imgs) + "\n" + ocr_barcode_digits(imgs, 40)
+    return text
+
+
+def document_text(path, ocr=True):
+    """The text of one document, whatever its kind."""
+    import zipfile
+    ext = Path(path).suffix.lower()
+    try:
+        if ext == ".pdf":
+            return pdf_text(path, ocr=ocr)
+        if ext in (".docx", ".odt"):
+            with zipfile.ZipFile(path) as z:
+                part = "word/document.xml" if ext == ".docx" else "content.xml"
+                return _xml_text(z.read(part).decode("utf-8", errors="replace"))
+        raw = Path(path).read_bytes()[:2_000_000]
+        if ext == ".doc":
+            import subprocess
+            for tool in ("antiword", "catdoc"):
+                if shutil.which(tool):
+                    return subprocess.run([tool, str(path)], capture_output=True, text=True, timeout=60).stdout
+            return " ".join(re.findall(r"[\x20-\x7e]{4,}", raw.decode("latin-1")))
+        text = _decode(raw)
+        if ext in (".log", ".cue", ".accurip", ".sfv", ".ffp", ".m3u", ".m3u8"):
+            # rip logs and cue sheets: only the lines naming the release (a cue's CATALOG
+            # is the barcode); drive models and checksums would be searched as codes
+            return "\n".join(l for l in text.splitlines()
+                              if re.search(r"catalog|barcode|upc|ean|label|^\s*(?:REM\s+)?(?:PERFORMER|TITLE)\b",
+                                           l, re.I) and not re.search(r"\.(?:wav|flac|ape|mp3)\b", l, re.I))
+        if ext in (".htm", ".html", ".xml"):
+            text = _xml_text(re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", text))
+        elif ext == ".rtf":
+            text = re.sub(r"\\'[0-9a-f]{2}|\\[a-z]+-?\d* ?|[{}]", " ", text)
+        return text
+    except Exception:
+        return ""
+
+
+_URL = re.compile(r"(?:https?://|www\.)\S+|\[/?(?:img|url|hide|spoiler|code|b|i|br|hr)[^\]]*\]", re.I)
+
+
+def documents_text(album_dir, ocr=True, db=None):
+    """Every document in the folder as one text (cached while the files are unchanged)."""
+    import hashlib
+    docs = album_documents(album_dir)
+    if not docs:
+        return ""
+    key = hashlib.md5(("docs-2|" + "|".join(f"{p}:{p.stat().st_size}:{int(p.stat().st_mtime)}"
+                                            for p in docs) + f"|{ocr}").encode()).hexdigest()
+    # links and forum markup out: an image host's hash would be read as a barcode
+    return _cached(db, "docs", key, lambda: "\n".join(
+        f"({p.name})\n{_URL.sub(' ', document_text(p, ocr=ocr))}" for p in docs))
+
+
 def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     """blind=True (validate.py): the files were tagged already, so their release IDs,
     ISRCs, label, catalogue number, barcode, country, date and year came FROM a release
@@ -1801,6 +1925,30 @@ def ocr_deep(paths, max_images=80, budget_s=900):
     return "\n".join(c for c in chunks if c)
 
 
+def pdf_deep(base, db=None):
+    """Investigation of PDF booklets: their pages rendered and read like scans, in full."""
+    import hashlib
+    import subprocess
+    import tempfile
+    pdfs = [p for p in album_documents(base) if p.suffix.lower() == ".pdf"]
+    if not pdfs or not shutil.which("pdftoppm"):
+        return ""
+    key = hashlib.md5("|".join(f"{p}:{p.stat().st_size}" for p in pdfs).encode()).hexdigest()
+
+    def read():
+        chunks = []
+        for p in pdfs:
+            with tempfile.TemporaryDirectory() as tmp:
+                try:
+                    subprocess.run(["pdftoppm", "-r", "300", "-gray", "-png", "-l", "40", str(p),
+                                    str(Path(tmp) / "page")], capture_output=True, timeout=600)
+                except Exception:
+                    continue
+                chunks.append(ocr_deep(sorted(str(x) for x in Path(tmp).glob("page*.png"))))
+        return "\n".join(chunks)
+    return _cached(db, "pdf-deep", key, read)
+
+
 _WEB_DISCOGS = re.compile(r"discogs\.com/(?:[a-z]{2}/)?(?:[^/\s\"'<>]+/)?release/(\d+)")
 _WEB_MB = re.compile(r"musicbrainz\.org/release/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
@@ -1875,7 +2023,7 @@ def run_source(name, finder, album, cfg, ocr_txt=""):
 
 
 def _needs_investigation(final, album, ocr_txt, base):
-    if not any(Path(d).suffix.lower() in IMAGE_EXT for _r, _d, fs in os.walk(base) for d in fs):
+    if not any(Path(d).suffix.lower() in IMAGE_EXT | DOC_EXT for _r, _d, fs in os.walk(base) for d in fs):
         return False
     if final.get("status") != "auto":
         return True
@@ -1889,8 +2037,8 @@ def _needs_investigation(final, album, ocr_txt, base):
 def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, notes, use_mb, use_discogs, db):
     """Read everything again, harder, and search every code found everywhere."""
     images, key = list_images(base, 80)
-    deep = _cached(db, "deep", key, lambda: ocr_deep(images))
-    text = (ocr_txt + "\n" + deep).strip()
+    deep = _cached(db, "deep", key, lambda: ocr_deep(images)) if images else ""
+    text = (ocr_txt + "\n" + deep + "\n" + pdf_deep(base, db)).strip()
     codes = mc.codes_from_ocr_text(text, limit=10)
     tried = {mc.barcode_key(b) for b in album["barcodes"]} | {mc.norm_code(c) for c in album.get("catno_search", [])}
     new_b = [b for b in codes["barcodes"] if mc.barcode_key(b) not in tried]
@@ -1909,7 +2057,12 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
                 notes.append(f"Discogs search of codes from the investigation failed ({exc})")
     # the web: pages naming the codes, linking to the release on Discogs or MusicBrainz
     web_codes = codes["barcodes"] + codes["catnos"]
-    dg_ids, mb_ids = web_release_links(http, web_codes, mc.artist_parts(album["artist"])[0]) if web_codes else ([], [])
+    first = mc.artist_parts(album["artist"])[0]
+    dg_ids, mb_ids = web_release_links(http, web_codes, first) if web_codes else ([], [])
+    if not dg_ids and not mb_ids:
+        # nothing tied to a code: the album's own name on the web
+        title = mc.search_title(album["title"])
+        dg_ids, mb_ids = web_release_links(http, [f"{title}\" \"{first}"], "", limit=1)
     have = {str(c["id"]) for c in found["discogs"]} | {str(s["cand"]["id"]) for s in (dg_res or {}).get("scored", [])}
     for rid in dg_ids:
         if use_discogs and rid not in have:
@@ -2056,24 +2209,30 @@ def _process(row, http, cfg, dm, args, full_cfg):
                                            "why": ["no provider could be asked"]}
 
     ocr_txt = ""
+    # Every document in the folder (notes, logs, PDF booklets, Word/HTML pages) is read
+    # with the scans: the codes in it are searched and compared like printed ones.
+    docs_txt = documents_text(base, ocr=bool(args.ocr), db=db)
+    if docs_txt.strip():
+        out["documents_read"] = len(album_documents(base))
     # The scans are read for EVERY album that has them, also when a database is already
     # sure: the back and credits (a catalogue number, "Made in", the label's address)
     # tell which pressing your copy is, which a title match cannot.
-    if args.ocr and images:
+    if (args.ocr and images) or docs_txt.strip():
         # cached per language set: installing a language pack reads the scans again
         kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
-        text = _cached(db, kind, img_key, lambda: ocr_text(images))
+        text = _cached(db, kind, img_key, lambda: ocr_text(images)) if (args.ocr and images) else ""
+        text = (docs_txt + "\n" + text).strip()
         # "spines2": spreads are read sideways too (older cached readings did not)
         spines = _cached(db, "spines2" if ocr_langs() == "eng" else f"spines2-{ocr_langs()}", img_key,
-                         lambda: ocr_spines(images))
+                         lambda: ocr_spines(images)) if (args.ocr and images) else ""
         if spines.strip():
             text = text + "\n" + spines
-        if not album["barcodes"]:
+        if not album["barcodes"] and args.ocr and images:
             # "barcode-digits2": the digit band read alone, the first digit completed
             digits = _cached(db, "barcode-digits2", img_key, lambda: ocr_barcode_digits(images))
             if digits.strip():
                 text = text + "\n" + digits
-        rings = _cached(db, "disc-rings", img_key, lambda: ocr_disc_rings(images))
+        rings = _cached(db, "disc-rings", img_key, lambda: ocr_disc_rings(images)) if (args.ocr and images) else ""
         if rings.strip():
             text = text + "\n" + rings
         if text.strip():

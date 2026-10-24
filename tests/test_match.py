@@ -919,6 +919,53 @@ class Investigation(unittest.TestCase):
         finally:
             shutil.rmtree(empty)
 
+
+class EveryDocument(unittest.TestCase):
+    """Every document in the folder may name the release: notes in subfolders, the
+    label's PDF booklet (often only pictures), a Word or HTML page, the cue sheet."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def codes(self):
+        return mc.codes_from_ocr_text(ma.documents_text(self.d), limit=10)
+
+    def test_notes_word_html_and_cue_sheets_are_read(self):
+        import zipfile
+        (self.d / "tech.info").mkdir()
+        (self.d / "tech.info" / "tXt.txt").write_text("Label: Dissonance Productions\nCat#: QDISS0201CDD\n")
+        with zipfile.ZipFile(self.d / "notes.docx", "w") as z:
+            z.writestr("word/document.xml", '<w:document><w:p><w:r><w:t>Catalogue HHR 2018-23</w:t></w:r></w:p>'
+                                            '</w:document>')
+        (self.d / "shop.html").write_text("<html><script>var x='ZZZ 999';</script><p>Cat. no. AMG 099</p></html>")
+        (self.d / "disc.cue").write_bytes('CATALOG 5013929020160\nFILE "01 ABC 123.flac" WAVE\n'.encode("utf-16"))
+        (self.d / "rip.log").write_text("Used drive  : PLEXTOR PX-716A\nRead offset correction : 30\n")
+        # a tracker's notes (Exhorder - The Law): the source pressing, an image host's links, a DR report
+        (self.d / "tech.info" / "release.txt").write_text(
+            "[b]Source:[/b] Metal Mind Productions - MASS CD 1176 DG\n"
+            "[img]https://i123.fastpic.org/big/2024/0522/91/88ea2eed2bb5df9f710cd0f0c6155444515556.png[/img]\n"
+            "DR10  -0.20 dB  -12.50 dB  4:50 01-Soul Search Me\n")
+        c = self.codes()
+        self.assertIn("5013929020160", c["barcodes"])
+        for code in ("QDISS0201CDD", "HHR 2018-23", "AMG 099", "MASS CD 1176"):
+            self.assertIn(code, c["catnos"])
+        self.assertFalse({"PX-716", "ZZZ 999", "ABC 123", "DR10"} & set(c["catnos"]), c)   # drive, script, file, DR
+        self.assertEqual(c["barcodes"], ["5013929020160"])                                 # not the link's digits
+
+    def test_a_pdf_booklet_of_pictures_is_read_like_a_scan(self):
+        if not (shutil.which("tesseract") and shutil.which("pdftoppm")):
+            self.skipTest("tesseract or poppler not installed")
+        from PIL import Image, ImageDraw, ImageFont
+        page = Image.new("RGB", (1700, 2200), "white")
+        f = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        font = ImageFont.truetype(f, 48) if Path(f).exists() else None
+        ImageDraw.Draw(page).text((150, 1900), "Made in EU  NB 1234-2", font=font, fill="black")
+        page.save(self.d / "booklet.pdf", resolution=200)
+        self.assertIn("NB 1234-2", self.codes()["catnos"])
+
 class FilesNameTheArtist(unittest.TestCase):
     """Aghora - Entheogenic Frequencies Orchestral Representations: filed under Aghora,
     but the files' own ARTIST and COPYRIGHT tags and the ripper's .info name Gustavo

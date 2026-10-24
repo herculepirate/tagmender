@@ -177,6 +177,54 @@ class Watch(te.Base):
         self.assertEqual(watcher.Watcher([prof], once=True).tick(), {})
         self.assertFalse((self.tmp / "gone").exists())
 
+    def _settled(self):
+        for f in self.d.rglob("*"):
+            os.utime(f, (time.time() - 3600, time.time() - 3600))
+
+    def test_ignored_album_is_not_requeued_until_rules_or_override_change(self):
+        ex._write(ex.rules_file(), {"rules": [{"id": "nv", "name": "no vox", "action": "ignore", "target": "album",
+                                               "when": {"all": [{"field": "album", "op": "contains",
+                                                                 "value": "[NO VOX]"}]}}]})
+        self.http.dg[908]["title"] = "Album X [no vox]"                 # only the release says so
+        before = (self.d / "01.flac").read_bytes()
+        w = watcher.Watcher([self.prof], once=True)
+        with mock.patch.object(ma, "discogs_search",
+                               lambda http, album, cfg, dm: [ma.discogs_candidate(http.dg[908], dm)]):
+            self.assertEqual(list(w.tick().values()), ["excluded"])
+            calls = len(self.http.calls)
+            self.assertEqual(w.tick(), {})                               # unchanged: not queued, not looked up
+            self.assertEqual(len(self.http.calls), calls)
+            self.assertEqual((self.d / "01.flac").read_bytes(), before)
+            ex.State().allow(self.d)                                     # Process anyway
+            self.assertEqual(list(w.tick().values()), ["done"])
+        self.assertEqual(tagio.read(self.d / "01.flac")["discogs_release_id"], ["908"])
+
+    def test_a_rule_change_brings_an_excluded_album_back(self):
+        ex._write(ex.rules_file(), {"rules": [{"id": "x", "name": "x", "action": "ignore", "target": "album",
+                                               "when": {"all": [{"field": "album", "op": "contains",
+                                                                 "value": "Album X"}]}}]})
+        w = watcher.Watcher([self.prof], once=True)
+        self.assertEqual(list(w.tick().values()), ["excluded"])
+        self.assertEqual(w.tick(), {})
+        ex.set_enabled("x", False)
+        self.assertEqual(list(w.tick().values()), ["done"])
+
+    def test_skip_rule_in_a_mixed_watched_folder_spares_the_other_album(self):
+        import subprocess
+        for i in range(2):
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency={800 + i}:duration=3",
+                            "-ar", "8000", "-ac", "1", "-metadata", "album=Live Thing (Live)", "-metadata",
+                            "albumartist=Band X", "-metadata", f"title=L{i}", str(self.d / f"l{i}.flac"), "-y"],
+                           check=True)
+        self._settled()
+        ex._write(ex.rules_file(), {"rules": [{"id": "live", "name": "live", "action": "skip", "target": "album",
+                                               "when": {"all": [{"field": "album", "op": "contains",
+                                                                 "value": "(live)"}]}}]})
+        w = watcher.Watcher([self.prof], once=True)
+        w.tick()
+        self.assertEqual(tagio.read(self.d / "01.flac")["discogs_release_id"], ["908"])
+        self.assertNotIn("discogs_release_id", tagio.read(self.d / "l0.flac"))
+
     def test_watch_command_once(self):
         code, out, _ = run("watch", "--once", "--profile", "W")
         self.assertEqual(code, 0)

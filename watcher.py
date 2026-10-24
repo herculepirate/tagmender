@@ -104,6 +104,13 @@ class Watcher:
         signature, status, attempts, next_try = row
         if signature != sig:
             return True, "changed"
+        if status == "excluded":                     # looked at again when the rules or an override change
+            detail = db.execute("SELECT detail FROM processed WHERE folder=?", (str(folder),)).fetchone()[0]
+            if detail != ex.rules_hash(rules):
+                return True, "rules changed"
+            if ex._overridden(folder, ex.State().overrides()):
+                return True, "process anyway"
+            return False, "excluded (unchanged)"
         if status in ("unresolved", "provider_error") and (attempts or 0) < prof["retry"]["max_attempts"] \
                 and time.time() >= (next_try or 0):
             return True, "retry"
@@ -161,10 +168,11 @@ class Watcher:
                     errs = prop.provider_errors or {}
                     retryable = prop.status == "unresolved" and any(
                         v in ("outage", "rate_limited", "invalid_response") for v in errs.values())
-                    status = ("provider_error" if retryable else
-                              "unresolved" if prop.status == "unresolved" else
-                              "excluded" if a["status"] == "excluded" else outcome)
-                    self.record(db, g.folder, prof, status, attempts, a.get("label", ""))
+                    status = ("excluded" if a["status"] == "excluded" or outcome == "excluded" else
+                              "provider_error" if retryable else
+                              "unresolved" if prop.status == "unresolved" else outcome)
+                    self.record(db, g.folder, prof, status, attempts,
+                                ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""))
                     done[str(g.folder)] = status
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher

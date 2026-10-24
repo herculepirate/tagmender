@@ -31,4 +31,32 @@ def load_coverup(repo: str | Path):
     sys.modules["coverup.imaging"] = mod
     spec.loader.exec_module(mod)
     pkg.imaging = mod
+    _stand_in_for_qt_render()
     return pkg
+
+
+def _qt_available():
+    try:
+        import PyQt6.QtGui  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _stand_in_for_qt_render():
+    """CoverUp's creative/render.py draws with Qt (PyQt6), which only Picard brings along.
+    TagMender composes generated covers with Pillow (coverup_pil_render), and needs from
+    CoverUp's creative/generate.py only its helpers, which import render at module level.
+    Without PyQt6, register a stand-in so those imports work; its drawing functions say
+    plainly that the Pillow port is to be used instead."""
+    if _qt_available() or "coverup.creative.render" in sys.modules:
+        return
+    mod = types.ModuleType("coverup.creative.render")
+    mod.__doc__ = "Stand-in for CoverUp's Qt compositor (PyQt6 not installed); TagMender uses coverup_pil_render."
+
+    def _unavailable(*_a, **_k):
+        raise RuntimeError("CoverUp's Qt compositor needs PyQt6; TagMender composes covers with "
+                           "coverup_pil_render instead")
+
+    mod.compose = mod.disc_mask = mod.procedural = _unavailable
+    sys.modules["coverup.creative.render"] = mod

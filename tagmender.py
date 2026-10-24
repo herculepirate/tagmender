@@ -30,6 +30,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import exclusions as ex  # noqa: E402
+import profiles as pf  # noqa: E402
 
 TOOLS = {"audit": "audit_untagged.py", "match": "match_albums.py", "tag": "tag_albums.py", "web": "web_tag.py",
          "enrich": "enrich.py", "inbox": "inbox.py", "coverup": "coverup_batch.py", "dedupe": "dedupe_twins.py",
@@ -212,6 +213,122 @@ def rules_parser(sub):
     a.add_argument("--limit", type=int, default=50)
 
 
+# --------------------------------------------------------------------------
+# profiles
+# --------------------------------------------------------------------------
+def _parse_value(text):
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
+def _set_path(d, dotted, value):
+    keys = dotted.split(".")
+    for k in keys[:-1]:
+        d = d.setdefault(k, {})
+        if not isinstance(d, dict):
+            raise pf.ProfileError(f"{dotted}: {k} is not a group of settings")
+    d[keys[-1]] = value
+
+
+def cmd_profiles(args):
+    if args.pcmd == "list":
+        rows = []
+        for n in pf.names():
+            try:
+                p = pf.load(n)
+                rows.append({"name": n, "ok": True, "operation": p["operation"], "destination": p["destination"],
+                             "description": p["description"], "rules": len(p["exclusions"])})
+            except pf.ProfileError as exc:
+                rows.append({"name": n, "ok": False, "problem": str(exc)})
+        if args.json:
+            print(json.dumps(rows, indent=2, ensure_ascii=False))
+            return 0
+        if not rows:
+            print("No profiles. `tagmender profiles examples` installs the Lossy example.")
+        for r in rows:
+            if r["ok"]:
+                dest = f" -> {r['destination']}" if r["destination"] else ""
+                print(f"{r['name']:<20} {r['operation']:<8}{dest}  ({r['rules']} rule(s))")
+                if r["description"]:
+                    print(f"{'':<20} {r['description']}")
+            else:
+                print(f"{r['name']:<20} PROBLEM: {r['problem']}")
+        return 0
+    if args.pcmd == "show":
+        p = pf.load(args.name)
+        print(json.dumps(p.to_dict() if args.full else pf.minimal(p), indent=2, ensure_ascii=False))
+        return 0
+    if args.pcmd == "check":
+        bad = 0
+        for n in ([args.name] if args.name else pf.names()):
+            try:
+                problems = pf.validate(pf.upgrade(pf.raw(n)))
+            except pf.ProfileError as exc:
+                problems = [str(exc)]
+            bad += bool(problems)
+            print(f"{n}: " + ("ok" if not problems else "; ".join(problems)))
+        return 1 if bad else 0
+    if args.pcmd == "new":
+        if pf.path_of(args.name).exists():
+            print(f"Profile {args.name} already exists", file=sys.stderr)
+            return 1
+        base = pf.raw(args.base) if args.base else {}
+        base = dict(base, name=args.name)
+        for item in args.set or []:
+            k, _, v = item.partition("=")
+            _set_path(base, k, _parse_value(v))
+        path = pf.save(pf.from_dict(base))
+        print(f"Created {path}")
+        return 0
+    if args.pcmd == "set":
+        data = pf.raw(args.name)
+        for item in args.pairs:
+            k, sep, v = item.partition("=")
+            if not sep:
+                print(f"Use KEY=VALUE, not {item!r}", file=sys.stderr)
+                return 2
+            _set_path(data, k, _parse_value(v))
+        pf.save(pf.from_dict(data))
+        print(f"Updated {args.name}")
+        return 0
+    if args.pcmd == "migrate":
+        for n in ([args.name] if args.name else pf.names()):
+            changed, backup = pf.migrate(n)
+            print(f"{n}: " + (f"upgraded (old file kept as {backup.name})" if changed else "already current"))
+        return 0
+    if args.pcmd == "examples":
+        done = pf.install_examples(overwrite=args.overwrite)
+        print("Installed: " + (", ".join(done) if done else "nothing (already there; --overwrite replaces)"))
+        return 0
+    return 2
+
+
+def profiles_parser(sub):
+    p = sub.add_parser("profiles", help="processing profiles")
+    ps = p.add_subparsers(dest="pcmd", required=True)
+    a = ps.add_parser("list")
+    a.add_argument("--json", action="store_true")
+    a = ps.add_parser("show")
+    a.add_argument("name")
+    a.add_argument("--full", action="store_true", help="every setting, defaults included")
+    a = ps.add_parser("check", help="validate one profile, or all")
+    a.add_argument("name", nargs="?")
+    a = ps.add_parser("new")
+    a.add_argument("name")
+    a.add_argument("--from", dest="base", help="copy the settings of this profile")
+    a.add_argument("--set", action="append", metavar="KEY=VALUE",
+                   help="e.g. operation=copy destination=/media/x thresholds.organize_min_confidence=97")
+    a = ps.add_parser("set", help="change settings: KEY=VALUE ... (JSON values allowed)")
+    a.add_argument("name")
+    a.add_argument("pairs", nargs="+")
+    a = ps.add_parser("migrate", help="rewrite older profile files in today's form (keeps a backup)")
+    a.add_argument("name", nargs="?")
+    a = ps.add_parser("examples", help="install the example profiles (Lossy)")
+    a.add_argument("--overwrite", action="store_true")
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = None
@@ -230,8 +347,15 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     rules_parser(sub)
+    profiles_parser(sub)
     args = ap.parse_args(argv)
     args.profile = profile
+    if args.cmd == "profiles":
+        try:
+            return cmd_profiles(args)
+        except pf.ProfileError as exc:
+            print(f"Profile error: {exc}", file=sys.stderr)
+            return 1
     try:
         if args.rcmd == "list":
             return cmd_list(args)

@@ -291,10 +291,14 @@ class Engine:
                 codes.append(kind)
             elif kind in ("outage", "invalid_response"):
                 codes.append(f"{prov}_unavailable")
-        words = "; ".join(why) or ("no candidates found" if status == "nomatch" else status)
-        if status == "review":
-            words = "review: " + words
-        codes += [c for c in reasons.classify(words) if c != "other" or not codes]
+        if out is None:                                      # nobody was asked: not a "no match"
+            words = "no provider could be asked (" + ", ".join(f"{k}: {v}" for k, v in errors.items()) + ")"
+            codes = codes or ["other"]
+        else:
+            words = "; ".join(why) or ("no candidates found" if status == "nomatch" else status)
+            if status == "review":
+                words = "review: " + words
+            codes += [c for c in reasons.classify(words) if c != "other" or not codes]
         best = (out or {}).get("best") or {}
         if status in ("ignored", "skipped"):                   # the rules: the planner labels it
             codes = ["other"]

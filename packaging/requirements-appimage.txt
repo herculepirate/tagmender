@@ -1,0 +1,7 @@
+# Bundled in the AppImage. Pinned to the versions the test suite passed with (2026-10-24);
+# packaging/requirements-appimage.lock records the full resolved set with hashes.
+mutagen==1.48.1
+Pillow==12.3.0
+fonttools==4.66.1
+numpy==2.5.3
+PySide6-Essentials==6.12.0

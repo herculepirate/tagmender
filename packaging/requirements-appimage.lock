@@ -1,0 +1,7 @@
+# Full set bundled in TagMender-0.2.0-x86_64.AppImage (python-build-standalone CPython 3.12.13), from pip freeze
+fonttools==4.66.1
+mutagen==1.48.1
+numpy==2.5.3
+pillow==12.3.0
+PySide6_Essentials==6.12.0
+shiboken6==6.12.0

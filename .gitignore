@@ -8,3 +8,5 @@ matching/
 covers/
 test_before/
 test_after/
+dist/
+.cache/

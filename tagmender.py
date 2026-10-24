@@ -757,6 +757,10 @@ WORK = {"scan": cmd_scan, "plan": cmd_plan, "apply": cmd_apply, "run": cmd_run, 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = None
+    if argv[:1] in (["--version"], ["-V"]):
+        import version
+        print(f"tagmender {version.VERSION}")
+        return 0
     if argv[:1] == ["--profile"] and len(argv) > 1:
         profile, argv = argv[1], argv[2:]
         os.environ["TAGMENDER_PROFILE"] = profile

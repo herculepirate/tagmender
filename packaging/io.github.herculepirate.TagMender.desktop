@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=TagMender
+GenericName=Music Tagger
+Comment=Identify, tag and organise music with MusicBrainz and Discogs
+Exec=tagmender gui
+Icon=io.github.herculepirate.TagMender
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=tags;metadata;musicbrainz;discogs;picard;library;
+StartupWMClass=TagMender

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.herculepirate.TagMender</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <name>TagMender</name>
+  <summary>Identify, tag and organise music with MusicBrainz and Discogs</summary>
+  <description>
+    <p>TagMender identifies albums and single tracks with MusicBrainz and Discogs as equal sources,
+    previews every change, writes tags the way MusicBrainz Picard does without needing Picard, and
+    organises files with journaled operations that can be undone.</p>
+  </description>
+  <launchable type="desktop-id">io.github.herculepirate.TagMender.desktop</launchable>
+  <url type="homepage">https://github.com/herculepirate/tagmender</url>
+  <developer id="io.github.herculepirate"><name>herculepirate</name></developer>
+  <releases><release version="0.2.0" date="2026-10-24"/></releases>
+  <content_rating type="oars-1.1"/>
+</component>

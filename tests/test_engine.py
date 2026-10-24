@@ -228,6 +228,14 @@ class Identify(Base):
         self.assertEqual(p.status, "unresolved")
         self.assertIn("musicbrainz_unavailable", p.reason_codes)
 
+    def test_no_provider_asked_is_not_called_no_candidate(self):
+        _os.environ.pop("DISCOGS_TOKEN")
+        d = self.album("Band Q", "Album Q")
+        eng = self.engine(FakeHttp(), providers={"musicbrainz": {"enabled": False}, "web": {"enabled": False}})
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.reason_codes, ["missing_credentials"])
+        self.assertIn("no provider could be asked", p.reason)
+
     def test_mixed_folder_is_split_by_album(self):
         d = self.album("Mixed", "Album M1", folder="downloads")
         for i in range(2):

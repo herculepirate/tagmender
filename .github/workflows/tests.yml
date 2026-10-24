@@ -1,0 +1,29 @@
+# Every push and pull request runs the whole test suite, so a change from any session or machine
+# that breaks something is caught before it reaches the library.
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: herculepirate/picard-discogs-enrichment, path: plugins/picard-discogs-enrichment}
+      - uses: actions/checkout@v4
+        with: {repository: herculepirate/picard-coverup, path: plugins/picard-coverup}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - name: Python packages
+        run: pip install -r packaging/requirements-appimage.txt
+      - name: Run every suite
+        env:
+          TAGMENDER_DISCOGS_PLUGIN: ${{ github.workspace }}/plugins/picard-discogs-enrichment
+          TAGMENDER_COVERUP_DIR: ${{ github.workspace }}/plugins/picard-coverup
+          QT_QPA_PLATFORM: offscreen
+        run: ./run_tests.sh

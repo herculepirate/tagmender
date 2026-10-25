@@ -363,6 +363,39 @@ def exhorder_like(rid=950):
     return r
 
 
+
+class AlbumOnly(Base):
+    """John (2026-10-25): when nothing tells the pressings apart, the album is still
+    tagged with everything every pressing shares - musicians, genres, the album's IDs -
+    and nothing that names one pressing (release IDs, catalogue number, barcode)."""
+
+    def test_an_album_whose_pressing_is_unknown_gets_album_tags_only(self):
+        d = self.album("Ihsahn", "Amr", folder="2018 - Amr")
+        eng = self.engine(FakeHttp())
+        tied = [{"source": "mb", "id": "a", "label": "Candlelight", "country": "XE", "formats": ["cd"], "year": 2018},
+                {"source": "mb", "id": "b", "label": "Candlelight", "country": "US", "formats": ["cd"], "year": 2018}]
+        out = {"status": "review", "why": ["runner-up b within 0.0 points (likely another pressing)"],
+               "best": {"source": "mb", "id": "a", "mb_id": "a", "url": "u", "confidence": 100.0, "notes": []},
+               "album_only": {"tied": tied}}
+        full = {"album": ["Amr"], "albumartist": ["Ihsahn"], "musicbrainz_albumid": ["a"], "catalognumber": ["X 1"],
+                "barcode": ["123"], "label": ["Candlelight"], "releasecountry": ["XE"], "media": ["CD"],
+                "date": ["2018-05-04"], "originaldate": ["2018-05-04"], "musicbrainz_releasegroupid": ["rg"],
+                "performer:keyboards": ["Ihsahn"], "discogs_company_manufactured_by": ["Optimal"]}
+        with mock.patch.object(ma, "process", return_value=out), \
+                mock.patch.object(engine.Engine, "_identified",
+                                  lambda self, o, al, files, base: pl.Proposal(**base, targets=[dict(full) for _ in files],
+                                                                               release_id="a", url="u",
+                                                                               provenance=dict.fromkeys(full, "musicbrainz"))):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "identified")
+        t = p.targets[0]
+        for gone in ("musicbrainz_albumid", "catalognumber", "barcode", "releasecountry", "discogs_company_manufactured_by"):
+            self.assertNotIn(gone, t)                        # names one pressing, or the pressings disagree
+        for kept in ("album", "albumartist", "label", "media", "date", "musicbrainz_releasegroupid", "performer:keyboards"):
+            self.assertIn(kept, t)                           # true of every pressing
+        self.assertEqual((p.release_id, p.url), ("", ""))
+        self.assertIn("pressing unknown", " ".join(p.why))
+
 class ExhorderHttp(FakeHttp):
     def get_json(self, url, host):
         if host == "discogs" and "/masters/" in url:

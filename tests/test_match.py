@@ -1192,6 +1192,47 @@ class OriginalPressing(unittest.TestCase):
         self.assertEqual(out["best"]["cand"]["id"], "dgde")
         self.assertIn("label's original pressing", " ".join(out["best"]["notes"]))
 
+
+class AlbumKnownPressingNot(unittest.TestCase):
+    def test_a_tie_between_pressings_of_a_certain_album_is_album_only(self):
+        a = album()
+        tied = [mc.score_candidate(a, cand(id="p1", country="US", date="2018"), CFG),
+                mc.score_candidate(a, cand(id="p2", country="DE", date="2018"), CFG)]
+        r = dict(mc.classify(tied, CFG), scored=tied)
+        self.assertEqual(r["status"], "review")
+        ao = mc.album_only(r, CFG)
+        self.assertEqual(sorted(t["id"] for t in ao["tied"]), ["p1", "p2"])
+        # not when the doubt is about the album itself
+        far = [mc.score_candidate(a, cand(id="x", tracks=[{"disc": 1, "title": "T0", "secs": 260}] * 3), CFG)]
+        self.assertIsNone(mc.album_only(dict(mc.classify(far, CFG), scored=far), CFG))
+
+    def test_what_every_pressing_shares_is_kept(self):
+        tags = {"album": ["A"], "label": ["L"], "releasecountry": ["US"], "date": ["2018-06-01"],
+                "originaldate": ["2017-01-01"], "barcode": ["1"], "catalognumber": ["C"], "media": ["CD"],
+                "musicbrainz_albumid": ["m"], "discogs_release_id": ["9"], "genre": ["Metal"]}
+        tied = [{"label": "L", "country": "US", "formats": ["cd"], "year": 2018},
+                {"label": "L", "country": "DE", "formats": ["cd"], "year": 2017}]
+        t = mc.album_only_tags(tags, tied)
+        self.assertEqual(sorted(t), ["album", "date", "genre", "label", "media", "originaldate"])
+        self.assertEqual(t["date"], ["2017-01-01"])           # pressings from different years: the original
+
+    def test_a_cd_rip_is_tagged_from_the_cds_only(self):
+        """John: a log or cue sheet (a CD rip) or a download decides which kind of release
+        the album tags come from; a CD rip's media is then CD."""
+        a = album()
+        tied = [mc.score_candidate(a, cand(id="cd1", country="US", formats={"cd"}), CFG),
+                mc.score_candidate(a, cand(id="cd2", country="DE", formats={"cd"}), CFG),
+                mc.score_candidate(a, cand(id="web", country="XW", formats={"digital"}), CFG)]
+        r = dict(mc.classify(tied, CFG), scored=tied)
+        ao = mc.album_only(r, CFG, "cd")
+        self.assertEqual(sorted(t["id"] for t in ao["tied"]), ["cd1", "cd2"])
+        t = mc.album_only_tags({"media": ["CD"], "album": ["A"]}, ao["tied"])
+        self.assertEqual(t["media"], ["CD"])
+        self.assertEqual(ma.copy_source({"tocs": {1: "x"}, "audio": {}}), "cd")
+        self.assertEqual(ma.copy_source({"store_tracks": ["deezer:1"], "audio": {}}), "digital")
+        self.assertEqual(ma.copy_source({"media_hint": "vinyl", "tocs": {1: "x"}}), "vinyl")
+        self.assertEqual(ma.copy_source({"audio": {"hires": True}}), "")
+
 class PressingEvidence(unittest.TestCase):
     """Tied pressings told apart by the files, the folder and the audio; albums proven
     by a disc ID or catalogue number keep the database's title and artist."""

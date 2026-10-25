@@ -724,6 +724,22 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     }
 
 
+def copy_source(album):
+    """What the files were made from, as far as they tell: "vinyl", "cd" or "digital"
+    (the folder name first, then a rip log / cue sheet / disc TOC or whole CD sectors for a
+    CD, a shop's track ID or CD-quality tracks that are not CD sectors for a download);
+    "" when they do not say (hi-res audio alone may be a vinyl rip or a download)."""
+    hint = album.get("media_hint") or ""
+    if hint:
+        return hint
+    audio = album.get("audio") or {}
+    if album.get("tocs") or audio.get("cd_frames"):
+        return "cd"
+    if album.get("store_tracks") or audio.get("not_cd"):
+        return "digital"
+    return ""
+
+
 def audio_evidence(infos):
     """What the audio itself says about its source.
 
@@ -2551,6 +2567,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
                 alts.append(f"{c['source']}:{c['id']} {s['confidence']} {c['artist']} - {c['title']} ({c['year']})")
     out.update(status=status, why=why, best=summarize(final), alts=alts,
                margin=final.get("margin"), version=result_version(), checked=round(time.time()))
+    if status != "auto":
+        ao = mc.album_only(final, cfg, copy_source(album))
+        if ao:
+            out["album_only"] = ao              # the album is certain, its pressing is not
     return out
 
 

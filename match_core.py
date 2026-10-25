@@ -1599,3 +1599,68 @@ def combine(mb_result, dg_result, countries=None):
         return mb_result or dg_result
     options.sort(key=lambda r: (order[r["status"]], -r["best"]["confidence"]))
     return options[0]
+
+
+# ---------------------------------------------------------------------------
+# Album known, pressing not (John, 2026-10-25): when every check and the whole
+# investigation leave pressings of ONE album tied, the album is still tagged, with
+# what is true of all of them, and nothing that would name one pressing.
+# ---------------------------------------------------------------------------
+_TIE_WHY = re.compile(r"^runner-up \S+ within [\d.]+ points \(likely another pressing\)$")
+
+# Fields that name one pressing: never written for an album whose pressing is unknown.
+PRESSING_FIELDS = {"musicbrainz_albumid", "musicbrainz_trackid", "musicbrainz_discid", "discogs_release_id",
+                   "discogs_uri", "discogs_released", "discogs_year", "discogs_notes", "discogs_catalognumber",
+                   "catalognumber", "barcode", "asin"}
+
+
+def album_only(final, cfg, source=""):
+    """The tied pressings when the ALBUM is certain and only its pressing is not: the pick
+    is as sure as an automatic one (score, title, artist, every track length), and the only
+    doubt is a runner-up of the same album. None otherwise."""
+    best = (final or {}).get("best")
+    if not best or final.get("status") == "auto":
+        return None
+    why = [w for w in final.get("why") or [] if not w.startswith("investigated")]
+    if not why or not all(_TIE_WHY.match(w) for w in why):
+        return None
+    if best["confidence"] < cfg["auto_min_confidence"] or not best.get("tracks_ok") \
+            or (best.get("dur_frac") or 0) < 1.0 or best.get("conflict"):
+        return None
+    n = len(best["cand"]["tracks"])
+    tied = [s for s in final.get("scored") or [best]
+            if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
+            and title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n]
+    if len(tied) < 2:
+        return None
+    # what the files are (a CD rip, a download, a vinyl rip) narrows the pressings whose
+    # shared fields are written: a CD rip is tagged from the CDs only, so its media is "CD"
+    if source:
+        same_kind = [s for s in tied if source in (s["cand"].get("formats") or ())]
+        if same_kind:
+            tied = same_kind
+    return {"source": source, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+                      "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
+                      "year": s["cand"].get("year")} for s in tied]}
+
+
+def album_only_tags(tags, tied):
+    """One file's tags, kept to what every tied pressing shares: release IDs, catalogue
+    numbers, barcode, ASIN and a pressing's own notes and companies are dropped; label,
+    release country, media and release date stay only when all the pressings agree on them
+    (else the date becomes the album's original date)."""
+    out = {k: v for k, v in tags.items() if k not in PRESSING_FIELDS and not k.startswith("discogs_company_")}
+    same = lambda vals: len(vals) == 1 and "" not in vals and None not in vals   # noqa: E731
+    if not same({fold(t.get("label") or "") for t in tied}):
+        out.pop("label", None)
+    if not same({country_code(t.get("country")) or "" for t in tied}):
+        out.pop("releasecountry", None)
+    if not same({",".join(t.get("formats") or ()) for t in tied}):
+        out.pop("media", None)
+    if not same({t.get("year") for t in tied}):
+        original = out.get("originaldate") or out.get("originalyear")
+        if original:
+            out["date"] = original
+        else:
+            out.pop("date", None)
+    return out

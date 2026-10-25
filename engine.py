@@ -186,6 +186,12 @@ class Engine:
                 self.log.warning("tags for %s: %s", g.folder, exc)
                 return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
                                         reason=f"matched, but the release's tracks do not line up with the files: {exc}")
+        if out and out.get("album_only") and out.get("best"):
+            # the album is certain, only its pressing is not: tag what every pressing shares
+            try:
+                return self._album_only(self._identified(out, album, files, base), out["album_only"])
+            except Exception as exc:
+                self.log.warning("album-only tags for %s: %s", g.folder, exc)
         if g.single and len(files) == 1 and ma.fingerprint_ready():
             p = self._single(Path(files[0]), base)
             if p:
@@ -262,6 +268,17 @@ class Engine:
             confidence=float(best.get("confidence") or 0), margin=out.get("margin"),
             why=list(out.get("why") or []), evidence=list(best.get("notes") or []),
             provenance=prov, release=self._release(best))
+
+    def _album_only(self, p, info):
+        """An identified album whose pressing is unknown: no release IDs, catalogue number or
+        barcode; label, country, media and date only when every tied pressing agrees."""
+        tied = info.get("tied") or []
+        p.targets = [mc.album_only_tags(t, tied) for t in p.targets]
+        p.release_id, p.url = "", ""
+        p.provenance = {k: v for k, v in p.provenance.items() if k not in mc.PRESSING_FIELDS}
+        p.why = list(p.why) + [f"pressing unknown ({len(tied)} pressings fit equally): album tags only; "
+                               "release IDs, catalogue number and barcode left empty"]
+        return p
 
     def _single(self, path, base):
         """A standalone track: its recording, from the fingerprint. This proves the recording,

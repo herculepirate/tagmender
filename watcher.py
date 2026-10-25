@@ -365,10 +365,10 @@ class Watcher:
                     else:
                         plan["watch"] = {"key": k, "folder": planmod.db_text(g.folder),
                                          "files": [planmod.db_text(f) for f in scope], "deep": deep}
-                        superseded = _supersede(k)          # one plan per album waits, the newest
                         pdir = plans_dir()
                         pdir.mkdir(parents=True, exist_ok=True)
                         planmod.save(plan, pdir / f"{plan['job']}.json")
+                        superseded = _supersede(k, but=plan["job"])   # one plan per album waits: this one
                         outcome = "planned"
                         if superseded:
                             self.log.info("%s: plan %s replaces %s", g.folder, plan["job"], ", ".join(superseded))
@@ -572,10 +572,12 @@ class pass_lock:
         return False
 
 
-def _supersede(key) -> list:
+def _supersede(key, but=None) -> list:
     """Set aside the waiting plans made earlier for the album known by key."""
     out = []
     for x in pending_plans():
+        if x["job"] == but:
+            continue
         try:
             w = planmod.load(x["path"]).get("watch") or {}
         except Exception:
@@ -805,6 +807,10 @@ def install_service(run=None, portal=None, spawn=None, **kw) -> str:
         err = _portal_background(True, portal)
         if err:
             return f"The Background portal refused: {err}"
+        try:                                   # a Stop asked for just before: no longer wanted
+            _stop_file().unlink()
+        except OSError:
+            pass
         if not watching_pid():
             (spawn or _start_detached)()
         return "running"

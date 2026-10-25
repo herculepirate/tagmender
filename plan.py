@@ -826,10 +826,13 @@ class Planner:
                     rw = {"from": str(new), "sha256": hashlib.sha256(new.read_bytes()).hexdigest(),
                           "cover": True}
                     ce = next((c for c in entry["companions"] if c["src"] == rf), None)
-                    if ce is None:
+                    stays = all(fe["dst"] == fe["src"] for fe in entry["files"])
+                    if ce is None and stays:              # tagged where it is: the cover beside it
                         ce = {"src": rf, "dst": rf, "op": "rewrite", "fingerprint": _fp(Path(rf))}
                         entry["companions"].append(ce)
-                    if not ce.get("rewrite"):
+                    if ce is None:                        # (copied or moved without it: the source's is not touched)
+                        entry["notes"].append(f"{Path(rf).name} stays as it is: it does not go with the album")
+                    elif not ce.get("rewrite"):
                         ce["rewrite"] = rw
                         replaced = ce["dst"]
                 except Exception as exc:

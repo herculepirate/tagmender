@@ -108,7 +108,7 @@ def busy_jobs(but=None) -> list[str]:
         if j == but:
             continue
         try:
-            with job_lock(j):
+            with job_lock(j, active=False):
                 pass
         except StepError:
             out.append(j)
@@ -221,9 +221,10 @@ def file_lock(path):
 
 
 @contextmanager
-def job_lock(job):
+def job_lock(job, active=True):
     """One process at a time per job: applying, recovering or undoing it. While held, a shared
-    lock on STATE_DIR/jobs.active says "a job is changing files" (job_running)."""
+    lock on STATE_DIR/jobs.active says "a job is changing files" (job_running); active=False
+    for a look that changes nothing (busy_jobs, prune)."""
     jd = job_dir(job)
     jd.mkdir(parents=True, exist_ok=True)
     with open(jd / ".lock", "w") as fh:
@@ -232,12 +233,15 @@ def job_lock(job):
         except BlockingIOError:
             raise StepError(f"job {job} is being run by another TagMender process") from None
         try:
-            with open(ex.STATE_DIR / "jobs.active", "a") as active:
-                fcntl.flock(active, fcntl.LOCK_SH)
+            if not active:
+                yield
+                return
+            with open(ex.STATE_DIR / "jobs.active", "a") as act:
+                fcntl.flock(act, fcntl.LOCK_SH)
                 try:
                     yield
                 finally:
-                    fcntl.flock(active, fcntl.LOCK_UN)
+                    fcntl.flock(act, fcntl.LOCK_UN)
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
 
@@ -512,12 +516,14 @@ def _embed_image(art: dict):
 
 
 def _front_index(types) -> int | None:
-    """Which picture is the front cover: the one typed so, else the first (a rip that left the
-    type as "other") - the one TagMender measured (artwork.embedded_front)."""
+    """Which picture is the front cover: the one typed so, else one typed "other" (a rip that
+    left the type so) - the one TagMender measured (artwork.embedded_front). None: there is
+    no front (a back cover or booklet alone stays, the new front is added beside it)."""
     types = list(types)
-    if 3 in types:
-        return types.index(3)
-    return 0 if types else None
+    for want in (3, 0):
+        if want in types:
+            return types.index(want)
+    return None
 
 
 def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
@@ -550,12 +556,17 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
     elif isinstance(getattr(f, "tags", None), ID3) or type(f).__name__ in ("MP3", "AIFF", "WAVE"):
         if f.tags is None:
             f.add_tags()
+        desc = ""
         if replace:
             apics = f.tags.getall("APIC")
             k = _front_index(a.type for a in apics)
             if k is not None:
+                desc = apics[k].desc                     # its place: never another picture's
                 del f.tags[apics[k].HashKey]
-        f.tags.add(APIC(encoding=3, mime=mime, type=3, desc="", data=data))
+        taken = {a.desc for a in f.tags.getall("APIC")}
+        while desc in taken:                              # (APIC frames are told apart by description)
+            desc = (desc or "Front") + " "
+        f.tags.add(APIC(encoding=3, mime=mime, type=3, desc=desc, data=data))
     elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
@@ -2060,7 +2071,7 @@ def prune(days: int) -> list[str]:
     cutoff = time.time() - days * 86400
     for d in (jobs_dir().iterdir() if jobs_dir().is_dir() else []):
         try:
-            with job_lock(d.name):
+            with job_lock(d.name, active=False):   # (backups only: no music changes)
                 ev = Journal(d).read()
                 if not ev or not any(e.get("ev") in ("end", "recovered", "undone") for e in ev):
                     continue

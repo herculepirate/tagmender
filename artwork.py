@@ -276,7 +276,7 @@ def _size_of(data: bytes):
 
 def embedded_front(path):
     """The track's front cover as embedded (bytes), or None: the picture typed "front cover",
-    else the first one (many rippers leave the type as "other")."""
+    else one typed "other" (many rippers leave the type so); never a back cover or booklet."""
     import base64
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import ID3
@@ -303,10 +303,11 @@ def embedded_front(path):
                     continue
     except Exception:
         return None
-    for t, d in pics:
-        if t == 3:
-            return d
-    return pics[0][1] if pics else None
+    for want in (3, 0):                  # the front cover, else an untyped ("other") picture
+        for t, d in pics:
+            if t == want:
+                return d
+    return None                          # (a back cover or booklet page is never "the front")
 
 
 def folder_cover(folder) -> Path | None:
@@ -335,7 +336,9 @@ def small_covers(folder, files, profile) -> dict:
         return {}
     out = {"file": None, "embedded": {}, "own": None}
     best = None
-    if art.get("files", True):
+    cap = embed_cap()
+    # a folder holding other music too: its cover file is no one album's (never replaced, never "own")
+    if art.get("files", True) and not _other_music(Path(folder), files):
         c = folder_cover(folder)
         if c is not None:
             sz = _size_of(c.read_bytes())
@@ -347,7 +350,9 @@ def small_covers(folder, files, profile) -> dict:
         for f in files:
             data = embedded_front(f)
             sz = _size_of(data) if data else None
-            if sz and min(sz) < low:
+            # small, unless it is as large as TagMender embeds (embed_max_side caps the long side:
+            # with min_px above that, or a wide cover, it would be replaced again on every run)
+            if sz and min(sz) < low and max(sz) < cap - 2:
                 out["embedded"][str(f)] = sz
             if sz and (best is None or min(sz) > min(best[1:])):
                 best = (data, *sz)
@@ -355,6 +360,28 @@ def small_covers(folder, files, profile) -> dict:
         return {}
     out["own"] = best
     return out
+
+
+_CAP = []
+
+
+def embed_cap() -> int:
+    """The smallest long side TagMender embeds covers at: EMBED_MAX_SIDE, or CoverUp's
+    embed_max_side when that is smaller (0 there: no cap of its own)."""
+    if not _CAP:
+        cap = EMBED_MAX_SIDE
+        try:
+            import coverup_batch as cb
+            import picard_config
+            found = picard_config.ini_path()
+            st = cb.batch_settings(str(found) if found else cb.DEFAULT_INI, "full")[0]
+            v = int(st["embed_max_side"] or 0)
+            if v > 0:
+                cap = min(cap, v)
+        except BaseException:                 # CoverUp not there: TagMender's own size
+            pass
+        _CAP.append(cap)
+    return _CAP[0]
 
 
 def own_cover(small: dict, staging: Path) -> dict | None:
@@ -599,8 +626,13 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
         p, got = small
         if own and got is not own and min(own["width"], own["height"]) >= min(got["width"], got["height"]):
             got = own                                # (what was found is no larger than the album's own)
-        big = _enlarged(got, int(getattr(p, "min_px", 0) or 0),
-                        p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY)
+        want = int(getattr(p, "min_px", 0) or 0)
+        if min(got["width"], got["height"]) >= want:  # the album's own, already large enough (an
+            try:                                      # embedded front for a small cover.jpg): as it is
+                return _finish(p, got, notes)
+            except Exception as exc:
+                notes.append(f"{p.name}: {exc}")
+        big = _enlarged(got, want, p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY)
         if big is not None:
             try:
                 return _finish(p, big, notes)

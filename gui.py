@@ -786,9 +786,12 @@ class WatchDialog(QDialog):
                          "To file them into your library, choose a profile that moves or copies.")
         dest = Path(os.path.abspath(os.path.expanduser(p["destination"]))) if p["destination"] else None
         if folder is not None and dest is not None and p["operation"] != "in_place":
-            if dest == folder or folder in dest.parents:
-                notes.append("The library is inside this folder: what TagMender files there is remembered, "
-                             "not taken for a new drop.")
+            if dest == folder:
+                notes.append("This folder IS the profile's library: every album already in it will be "
+                             "checked and filed again by this profile.")
+            elif folder in dest.parents:
+                notes.append("The library is inside this folder: what is in it is left alone, only new "
+                             "drops are filed.")
             elif dest in folder.parents:
                 notes.append("This folder is inside the profile's library.")
         if folder is not None:
@@ -1874,9 +1877,16 @@ class Main(QMainWindow):
         if not running:
             event.accept()
             return
+        if getattr(self, "_closing", False) and time.time() - self._closing_since > 10:
+            if QMessageBox.question(self, APP, "TagMender is still finishing an album (or waiting for the "
+                                    "background watcher's pass). Close anyway? An interrupted job is put "
+                                    "back as it was the next time TagMender starts.") == QMessageBox.Yes:
+                event.accept()
+                os._exit(0)
         event.ignore()
         self.statusBar().showMessage("Finishing the work in progress before closing…")
         if not getattr(self, "_closing", False):
+            self._closing_since = time.time()
             self._closing = True
             from PySide6.QtCore import QTimer
             t = QTimer(self)

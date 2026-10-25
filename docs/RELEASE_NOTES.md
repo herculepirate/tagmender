@@ -8,7 +8,12 @@ artwork.min_px (500 px) - embedded in a track, or the folder's cover/folder/fron
 replaced by a larger one found; when nothing larger is found anywhere, by the album's own cover
 enlarged (artwork.enlarge, not under 250 px). Only the front cover is replaced: other pictures
 (back, booklet) stay, a cover.png stays a PNG, nothing is generated over an album's own cover.
-The old pictures and the old file are kept by the job; undo puts them back.
+The old pictures and the old file are kept by the job; undo puts them back. Reviewed
+(tests/test_review2_cover_watch.py): a back cover or booklet page is never taken for the front
+(nor overwritten: MP3 picture descriptions stay apart); a folder shared with other music lends
+no album its cover; a cover embedded as large as TagMender embeds is not replaced again on the
+next run; a copy or move never rewrites the source's cover file; a small cover.jpg beside a
+large embedded front gets that front as it is.
 
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)

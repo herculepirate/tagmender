@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
+- Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.
+- Enthusiast (default): everything MusicBrainz and Discogs supply, as Picard writes it.
+- Audiophile: also ReplayGain 2.0 (R128 for Opus), lyrics from LRCLIB (`.lrc` files, plain
+  lyrics embedded), AcoustID IDs, the disc ID and verdict from the rip log, dynamic range, and
+  a warning for lossless files made from lossy ones. Measurements are cached and never
+  replace a value the file already has; new `.lrc` files are undone with the job.
+- A lower level never removes tags; `level_fields` adds or drops single fields.
+
 **Fixed (from the first live plan, Exhorder)**
 - Discogs data is now applied the way your Picard's Discogs Enrichment plugin applies it, with
   its settings read from Picard.ini: merge mode (yours: override), style mode, marketplace

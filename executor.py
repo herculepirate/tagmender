@@ -395,6 +395,9 @@ class Executor:
                 self.companion_step(i, j, ce, done_steps)
             if a.get("artwork") and a["artwork"].get("file"):
                 self.cover_file(i, a, done_steps)
+            for sc in a.get("sidecars") or []:
+                if Path(sc["src"]) not in dec.excluded:
+                    self.new_file(i, sc, done_steps)
             if self.plan["operation"] == "move" or any(fe["op"] == "move" for fe in a["files"]):
                 self.cleanup_dirs(i, a)
         except Exception as exc:                                  # roll the album back, then carry on
@@ -516,6 +519,22 @@ class Executor:
         _place(stage, dst)
         st = os.stat(dst)
         self.journal.write(ev="cover_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns)
+        done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
+
+    def new_file(self, i, sc, done_steps):
+        """A new text file next to the music (time-synced lyrics); never over an existing one."""
+        dst = Path(sc["dst"])
+        _check_target(dst, self.roots)
+        if dst.exists():
+            return
+        stage = _stage_name(dst, self.job)
+        with open(stage, "w", encoding="utf-8") as fh:
+            fh.write(sc["text"])
+            fh.flush()
+            os.fsync(fh.fileno())
+        _place(stage, dst)
+        st = os.stat(dst)
+        self.journal.write(ev="new_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns)
         done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
 
     def cleanup_dirs(self, i, a):
@@ -672,7 +691,7 @@ def undo(job) -> list[str]:
     rolled = {e["album"] for e in events if e.get("ev") == "album_rolled_back"}
     files, comps = _replay(events)
     out, problems = [], []
-    covers = [e for e in events if e.get("ev") == "cover_file" and e["album"] not in rolled]
+    covers = [e for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled]
     for e in reversed(covers):
         p = Path(e["path"])
         if p.exists() and (os.stat(p).st_size, os.stat(p).st_mtime_ns) == (e["size"], e["mtime_ns"]):

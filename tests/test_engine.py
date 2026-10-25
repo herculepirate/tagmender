@@ -454,6 +454,167 @@ class PicardFidelity(Base):
         self.assertEqual(picard_config.enrichment()["merge_mode"], "combine")   # the plugin's default
 
 
+EAC_LOG = """Exact Audio Copy V1.6 from 23. October 2020
+
+TOC of the extracted CD
+
+     Track |   Start  |  Length  | Start sector | End sector
+    ---------------------------------------------------------
+        1  |  0:00.00 |  0:10.00 |         0    |       749
+        2  |  0:10.00 |  0:20.00 |       750    |      2249
+        3  |  0:30.00 |  0:30.00 |      2250    |      4499
+
+Track  1
+
+     Accurately ripped (confidence 5)  [ABCD1234]  (AR v2)
+
+Track  2
+
+     Accurately ripped (confidence 5)  [ABCD1235]  (AR v2)
+
+Track  3
+
+     Accurately ripped (confidence 5)  [ABCD1236]  (AR v2)
+
+All tracks accurately ripped
+
+No errors occurred
+"""
+
+
+class LevelHttp(FakeHttp):
+    """FakeHttp with LRCLIB and AcoustID answers."""
+    def __init__(self, *a, lyrics=None, acoustid=None, **k):
+        super().__init__(*a, **k)
+        self.lyrics = lyrics or {}
+        self.acoustid = acoustid
+
+    def get_json(self, url, host):
+        if host == "lrclib":
+            self.calls.append((host, url))
+            title = up.unquote(url.split("track_name=")[1].split("&")[0])
+            return self.lyrics.get(title)
+        if host == "acoustid":
+            self.calls.append((host, url))
+            return self.acoustid
+        return super().get_json(url, host)
+
+
+class Levels(Base):
+    """Basic, Enthusiast and Audiophile: how much is written."""
+
+    def identify(self, http, d, **prof):
+        eng = self.engine(http, **prof)
+        return eng, eng.plan(d)
+
+    def test_basic_writes_only_the_basic_fields_and_never_a_comment(self):
+        d = self.album("Band L", "Album L", label="Old Label", comment="my note")
+        http = FakeHttp(mb=[mb_release("mb-l", "Band L", "Album L", discogs=930)], dg=[dg_release(930, "Band L", "Album L")])
+        _eng, p = self.identify(http, d, tag_level="basic")
+        f = p["albums"][0]["files"][0]
+        written = set(f["changes"])
+        self.assertTrue(written <= set(__import__("levels").BASIC_FIELDS) | {"tagmender", "tagmender_reason"},
+                        written)
+        self.assertIn("date", written)
+        executor.Executor(p).run()
+        t = tagio.read(d / "01.flac")
+        self.assertEqual(t["label"], ["Old Label"])                 # a lower level never removes anything
+        self.assertEqual(t["description"], ["my note"])            # (ffmpeg writes a comment as DESCRIPTION)
+        self.assertNotIn("musicbrainz_albumid", t)
+        self.assertEqual(__import__("levels").restrict({"comment": ["x"], "title": ["y"]}, pf.from_dict(
+            {"name": "b", "tag_level": "basic", "level_fields": {"add": ["comment"]}})), {"title": ["y"]})
+
+    def test_level_fields_add_and_drop(self):
+        d = self.album("Band M", "Album M")
+        http = FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")])
+        _eng, p = self.identify(http, d, tag_level="basic", level_fields={"add": ["label"], "drop": ["genre"]})
+        self.assertIn("label", p["albums"][0]["files"][0]["changes"])
+        _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")]), d,
+                                level_fields={"drop": ["isrc", "tagmender"]})
+        ch = p["albums"][0]["files"][0]["changes"]
+        self.assertNotIn("isrc", ch)
+        self.assertIn("tagmender", ch)                              # TagMender's own marker always
+        self.assertIn("musicbrainz_albumid", ch)
+
+    def test_enthusiast_is_the_default_and_measures_nothing(self):
+        d = self.album("Band N", "Album N")
+        with mock.patch("levels.loudness") as loud:
+            _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-n", "Band N", "Album N")]), d)
+        loud.assert_not_called()
+        self.assertNotIn("replaygain_track_gain", p["albums"][0]["files"][0]["changes"])
+
+    def test_audiophile_replaygain_dynamic_range_rip_info_lyrics(self):
+        d = self.album("Band O", "Album O")
+        (d / "rip.log").write_text(EAC_LOG, encoding="utf-8")
+        http = LevelHttp(mb=[mb_release("mb-o", "Band O", "Album O")],
+                         lyrics={"T0": {"syncedLyrics": "[00:01.00] la la"}, "T1": {"plainLyrics": "words"}})
+        _eng, p = self.identify(http, d, tag_level="audiophile", audiophile={"acoustid": False})
+        a = p["albums"][0]
+        f0, f1 = a["files"][0]["changes"], a["files"][1]["changes"]
+        for f in (f0, f1):
+            self.assertRegex(f["replaygain_track_gain"][0], r"^-?\d+\.\d\d dB$")
+            self.assertTrue(f["dynamic_range"][0].isdigit())
+        self.assertEqual(f0["replaygain_album_gain"], f1["replaygain_album_gain"])
+        self.assertEqual(f0["album_dynamic_range"], f1["album_dynamic_range"])
+        import match_albums
+        toc = match_albums.log_tocs(d)[1]
+        self.assertEqual(f0["musicbrainz_discid"], [match_albums.mb_discid(toc)])
+        self.assertEqual(f0["tagmender_rip"], ["EAC V1.6; AccurateRip: all tracks accurate; no errors"])
+        self.assertNotIn("lyrics", f0)                               # synced: a .lrc file, not embedded
+        self.assertEqual(f1["lyrics"], ["words"])                    # plain lyrics have no file of their own
+        self.assertEqual([Path(s["dst"]).name for s in a["sidecars"]], ["01.lrc"])
+        self.assertIn("lyric 01.lrc", pl.preview(p))
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1})
+        self.assertEqual((d / "01.lrc").read_text(), "[00:01.00] la la")
+        self.assertTrue(tagio.read(d / "02.flac")["replaygain_album_gain"])
+        executor.undo(p["job"])
+        self.assertFalse((d / "01.lrc").exists())
+        self.assertNotIn("replaygain_album_gain", tagio.read(d / "02.flac"))
+
+    def test_measurements_are_cached_and_never_replace_existing_values(self):
+        d = self.album("Band P", "Album P", REPLAYGAIN_TRACK_GAIN="-3.00 dB")
+        prof = dict(tag_level="audiophile", audiophile={"acoustid": False, "lyrics": False, "rip_info": False})
+        import levels
+        real = levels.loudness
+        with mock.patch("levels.loudness", side_effect=real) as loud:
+            _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-p", "Band P", "Album P")]), d, **prof)
+            self.assertEqual(loud.call_count, 3)
+            self.identify(FakeHttp(mb=[mb_release("mb-p", "Band P", "Album P")]), d, **prof)
+            self.assertEqual(loud.call_count, 3)                     # the second plan used the cache
+        ch = p["albums"][0]["files"][0]["changes"]
+        self.assertNotIn("replaygain_track_gain", ch)                # the file's own value stays
+        self.assertIn("replaygain_album_gain", ch)
+
+    def test_acoustid_only_when_it_confirms_the_recording(self):
+        d = self.album("Band Q", "Album Q")
+        good = {"results": [{"id": "aid-1", "score": 0.95, "recordings": [{"id": "mb-q-r0"}]}]}
+        prof = dict(tag_level="audiophile", audiophile={"lyrics": False, "quality": False, "replaygain": False})
+        with mock.patch.object(ma, "fingerprint_ready", return_value=True), \
+                mock.patch.object(ma, "fingerprint", return_value={"duration": 10, "fingerprint": "AQAA"}), \
+                mock.patch.object(ma, "acoustid_key", return_value="k"):
+            _eng, p = self.identify(LevelHttp(mb=[mb_release("mb-q", "Band Q", "Album Q")], acoustid=good), d, **prof)
+        files = p["albums"][0]["files"]
+        self.assertEqual(files[0]["changes"]["acoustid_id"], ["aid-1"])
+        self.assertNotIn("acoustid_id", files[1]["changes"])         # its recording is not in that result
+        with mock.patch.object(ma, "fingerprint_ready", return_value=False):
+            _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-q", "Band Q", "Album Q")]), d, **prof)
+        self.assertTrue(any("AcoustID" in w for w in p["albums"][0]["identification"]["why"]))
+
+    def test_instrumental_albums_are_not_looked_up_for_lyrics(self):
+        d = self.album("Band R", "Album R", folder="2005 - Album R [no vox]")
+        http = LevelHttp(mb=[mb_release("mb-r", "Band R", "Album R")])
+        self.identify(http, d, tag_level="audiophile",
+                      audiophile={"acoustid": False, "replaygain": False, "quality": False})
+        self.assertFalse([c for c in http.calls if c[0] == "lrclib"])
+
+    def test_profile_checks(self):
+        self.assertTrue(pf.validate({"name": "x", "tag_level": "expert"}))
+        self.assertTrue(pf.validate({"name": "x", "audiophile": {"bpm": True}}))
+        self.assertTrue(pf.validate({"name": "x", "level_fields": {"add": "label"}}))
+        self.assertEqual(pf.validate({"name": "x", "tag_level": "audiophile", "audiophile": {"lyrics": False}}), [])
+
+
 class EndToEnd(Base):
     def test_identify_plan_apply_and_repeat(self):
         d = self.album("Band Z", "Album Z")

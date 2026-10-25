@@ -136,6 +136,25 @@ class Gui(te.Base):
         self.assertEqual(r.when["any"][0], {"field": "album", "op": "contains", "value": "[live]"})
         self.assertTrue(ex.matches(r.when, {"album": ["Show [LIVE] 1999"]}))
 
+    def test_profile_tagging_level_is_saved(self):
+        import profiles as pf
+        pf.save(pf.from_dict({"name": "Lvl"}))
+        pr = self.win.pages["Profiles"]
+        pr.reload()
+        self.app.processEvents()
+        row = [pr.list.item(i).text() for i in range(pr.list.count())].index("Lvl")
+        pr.list.setCurrentRow(row)
+        self.app.processEvents()
+        self.assertEqual(pr.level.currentText(), "enthusiast")
+        self.assertFalse(pr.aud["lyrics"].isEnabled())
+        pr.level.setCurrentText("audiophile")
+        self.assertTrue(pr.aud["lyrics"].isEnabled())
+        pr.aud["acoustid"].setChecked(False)
+        pr.save()
+        p = pf.load("Lvl")
+        self.assertEqual((p["tag_level"], p["audiophile"]["acoustid"], p["audiophile"]["lyrics"]),
+                         ("audiophile", False, True))
+
     def test_settings_never_show_a_saved_key(self):
         st = self.win.pages["Settings"]
         st.fields["fanart"].setText("SECRET-FANART")

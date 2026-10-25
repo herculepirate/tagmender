@@ -870,6 +870,18 @@ class Profiles(QWidget):
         self.unres = QComboBox()
         self.unres.addItems(list(pf.UNRESOLVED_ACTIONS))
         self.art = QCheckBox("Find front covers (CoverUp first)")
+        self.level = QComboBox()
+        self.level.addItems(["basic", "enthusiast", "audiophile"])
+        self.level.setToolTip("basic: artist, album, title, numbers, date, genre\n"
+                              "enthusiast: everything MusicBrainz and Discogs supply, as Picard writes it\n"
+                              "audiophile: also ReplayGain, lyrics, AcoustID, rip log, dynamic range")
+        self.aud = {}
+        arow = QHBoxLayout()
+        for key, label in (("replaygain", "ReplayGain"), ("lyrics", "Lyrics"), ("acoustid", "AcoustID"),
+                           ("rip_info", "Rip log"), ("quality", "Dynamic range / quality")):
+            self.aud[key] = QCheckBox(label)
+            arow.addWidget(self.aud[key])
+        self.level.currentTextChanged.connect(lambda t: [c.setEnabled(t == "audiophile") for c in self.aud.values()])
         self.unattended = QCheckBox("Apply without asking (watched folders)")
         form.addRow("Description", self.desc)
         form.addRow("Files", self.op)
@@ -882,6 +894,8 @@ class Profiles(QWidget):
         form.addRow("Naming", self.naming)
         form.addRow("Only formats", self.formats)
         form.addRow("Unresolved albums", self.unres)
+        form.addRow("Tagging level", self.level)
+        form.addRow("Audiophile", arow)
         form.addRow("", self.art)
         form.addRow("", self.unattended)
         save = QPushButton("Save profile")
@@ -964,6 +978,10 @@ class Profiles(QWidget):
             self.formats.setText(" ".join(p["formats"]))
             self.unres.setCurrentText(p["unresolved"]["action"])
             self.art.setChecked(p["artwork"]["enabled"])
+            self.level.setCurrentText(p["tag_level"])
+            for k, c in self.aud.items():
+                c.setChecked(bool(p["audiophile"].get(k, True)))
+                c.setEnabled(p["tag_level"] == "audiophile")
             self.unattended.setChecked(p["unattended"])
         else:
             self.tabs.setCurrentIndex(1)
@@ -1079,6 +1097,8 @@ class Profiles(QWidget):
         data.setdefault("naming", {})["preset"] = self.naming.currentText()
         data.setdefault("unresolved", {})["action"] = self.unres.currentText()
         data.setdefault("artwork", {})["enabled"] = self.art.isChecked()
+        data["tag_level"] = self.level.currentText()
+        data.setdefault("audiophile", {}).update({k: c.isChecked() for k, c in self.aud.items()})
         try:
             pf.save(pf.from_dict(data))
             self.win.statusBar().showMessage(f"Saved profile {name}", 4000)

@@ -25,6 +25,10 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `discogs_enrichment` | `{}` | overrides single plugin settings for this profile, e.g. `{"merge_mode": "fill_gaps", "style_mode": "genre"}` |
 | `field_sources` | `{}` | per field, providers in order; overrides the merge for that field |
 | `thresholds` | identify 90 (margin 8), replace 90, organise 95 | matcher scores 0-100 (heuristic, not probability) |
+| `tag_level` | `enthusiast` | `basic`: album artist, artist, album, title, track/disc numbers and totals, date, genre (never a comment). `enthusiast`: everything MusicBrainz and Discogs supply, as Picard + Discogs Enrichment write it. `audiophile`: enthusiast plus measurements (below). A lower level never removes tags a higher one wrote |
+| `level_fields` | `{"add": [], "drop": []}` | `add`: more fields at Basic, e.g. `["label"]`; `drop`: never write these, at any level |
+| `audiophile` | all on | `replaygain` (ReplayGain 2.0 + true peak, R128 for Opus), `lyrics` (LRCLIB; synced as `.lrc` next to the track, plain lyrics embedded; see `lyrics`), `acoustid` (AcoustID ID confirmed against the MusicBrainz recording; needs fpcalc and a key), `rip_info` (MusicBrainz disc ID from the rip log's TOC, and the log's verdict in `tagmender_rip`), `quality` (`dynamic_range`, `album_dynamic_range`, and `tagmender_quality` when a lossless file was made from a lossy one). Measurements never replace a value the file has, and are cached |
+| `lyrics` | sidecar on, embed off | `sidecar`: time-synced lyrics as `.lrc` next to the track; `embed`: also in the file's lyrics tag (plain lyrics are always embedded, they have no file of their own); `enabled`: lyrics below Audiophile too |
 | `field_policy` | replace | `{"default": "replace", "fields": {"album": "lock", "comment": "remove"}}` |
 | `artwork` | CoverUp, embed front, cover.jpg only into folders without an image | |
 | `operation` | `in_place` | `in_place`, `copy`, `move` |

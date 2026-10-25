@@ -71,7 +71,10 @@ DEFAULTS = {
         "replace_min_confidence": 90.0,   # replace a tag that already has a value
         "organize_min_confidence": 95.0,  # rename, copy or move files
     },
-    # what is written
+    # what is written: basic | enthusiast | audiophile (see levels.py)
+    "tag_level": "enthusiast",
+    "level_fields": {"add": [], "drop": []},
+    "audiophile": {"replaygain": True, "lyrics": True, "acoustid": True, "rip_info": True, "quality": True},
     "field_policy": {"default": "replace", "fields": {}},   # field -> preserve|fill_missing|replace|remove|lock
     "artwork": {"enabled": True, "provider": "coverup", "embed_front": True, "files": True,
                 "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000},
@@ -205,6 +208,18 @@ def validate(data: dict) -> list[str]:
             p.append(f"sources[{i}] needs a path")
         elif not os.path.isabs(os.path.expanduser(s["path"])):
             p.append(f"sources[{i}].path must be absolute")
+    import levels
+    if d["tag_level"] not in levels.LEVELS:
+        p.append(f"tag_level must be one of {', '.join(levels.LEVELS)}")
+    for k in ("add", "drop"):
+        v = (d["level_fields"] or {}).get(k, [])
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            p.append(f"level_fields.{k} must be a list of tag names")
+    for k, v in (d["audiophile"] or {}).items():
+        if k not in levels.AUDIOPHILE_ITEMS:
+            p.append(f"audiophile.{k} is not a measurement (use {', '.join(levels.AUDIOPHILE_ITEMS)})")
+        elif not isinstance(v, bool):
+            p.append(f"audiophile.{k} must be true or false")
     if not isinstance(d["discogs_enrichment"], dict):
         p.append("discogs_enrichment must be an object of Discogs Enrichment settings")
     else:

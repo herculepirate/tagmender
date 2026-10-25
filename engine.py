@@ -367,6 +367,21 @@ class Engine:
             prop.why = list(prop.why) + [f"no cover: {got['note']}"]
 
     # ---- everything ---------------------------------------------------------
+    def apply_level(self, prop: planmod.Proposal):
+        """Basic, Enthusiast or Audiophile (levels.py): the Audiophile measurements are added,
+        then each file's tags are cut to what the profile's level writes."""
+        import levels
+        if levels.items(self.profile) and prop.status == "identified":
+            if getattr(self, "_analysis", None) is None:
+                self._analysis = levels.Cache(ex.STATE_DIR / "analysis.db")
+            try:
+                prop.why = list(prop.why or []) + levels.audiophile(prop, self.profile, self.http,
+                                                                     self._analysis, self.log)
+            except Exception as exc:                          # measurements never block tagging
+                self.log.warning("audiophile measurements for %s failed: %s", prop.source_dir, exc)
+                prop.why = list(prop.why or []) + [f"audiophile measurements failed: {exc}"]
+        prop.targets = [levels.restrict(t, self.profile) for t in prop.targets or []]
+
     def proposals(self, path, progress=None, cancel=None):
         groups = self.albums_in(path)
         out = []
@@ -378,6 +393,7 @@ class Engine:
             try:
                 prop = self.identify(g)
                 self.add_artwork(prop)
+                self.apply_level(prop)
                 out.append(prop)
             except Exception as exc:                          # one bad album never stops the run
                 self.log.exception("identifying %s failed", g.folder)

@@ -58,6 +58,7 @@ class Proposal:
     provider_errors: dict = field(default_factory=dict)   # provider -> error (recorded, not fatal)
     release: dict = field(default_factory=dict)      # identified album/albumartist/genre, for rules
     artwork: dict | None = None         # {"front": staged file, "source": ..., "width": .., "height": ..}
+    sidecars: dict = field(default_factory=dict)     # audio file -> text of a new .lrc next to it
 
 
 def _fp(path):
@@ -312,7 +313,17 @@ class Planner:
                                 "embed_into": embed, "file": None if (has_image or not p["artwork"]["files"])
                                 else str(folder / "cover.jpg"),
                                 "width": art.get("width"), "height": art.get("height")}
+        # 6. lyrics files (.lrc) next to the tracks; never over a file that is already there
+        entry["sidecars"] = []
+        if identified:
+            for fe in entry["files"]:
+                text = (prop.sidecars or {}).get(fe["src"])
+                dst = Path(fe["dst"]).with_suffix(".lrc")
+                if not text or dst.exists() or any(c["dst"] == str(dst) for c in entry["companions"]):
+                    continue
+                entry["sidecars"].append({"src": fe["src"], "dst": str(dst), "text": text})
         if all(fe["op"] == "none" for fe in entry["files"]) and not entry["companions"] and \
+                not entry["sidecars"] and \
                 not (entry["artwork"] and (entry["artwork"]["embed_into"] or entry["artwork"]["file"])):
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
@@ -437,6 +448,8 @@ def preview(plan: dict, verbose=False) -> str:
                 out.append(f"    art   front cover embedded into {len(art['embed_into'])} file(s) from {art['source']}")
             if art["file"]:
                 out.append(f"    art   {art['file']}")
+        for sc in a.get("sidecars") or []:
+            out.append(f"    lyric {Path(sc['dst']).name}  (time-synced lyrics, new file)")
     s = plan["summary"]
     out.append("\n" + ", ".join(f"{v} {k}" for k, v in sorted(s.items())))
     return "\n".join(out)

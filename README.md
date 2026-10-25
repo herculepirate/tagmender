@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icon/tagmender-icon-animated.svg" width="160" height="160" alt="TagMender icon"></p>
+<p align="center"><img src="assets/icon/tagmender-animated.svg" width="160" height="160" alt="TagMender icon"></p>
 
 # TagMender
 

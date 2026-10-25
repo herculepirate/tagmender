@@ -234,6 +234,15 @@ class Fixes(unittest.TestCase):
                              ("discogs", "22314946"))
             self.assertEqual(got["/l/Bell Witch/2015 - Demo 2011"]["mb_id"], "d6f7")
             self.assertEqual(got["/l/Candlemass/2008 - D"]["mb_id"], "e9bd")      # the pick named: twin kept
+            # only the approved ones: an evidence-decided row stays out
+            st.execute("INSERT INTO validation VALUES (?,?)", ("/l/A/by-scans", json.dumps(dict(
+                folder="/l/A/by-scans", version="v", status="auto", tags_mb="t", verdict="other pressing",
+                picked="mb:de", notes="pressing chosen by made in Germany on the scans"))))
+            _p, every = va.export_fixes(st, tmp, "v", approved)
+            _p, only = va.export_fixes(st, tmp, "v", approved, only_approved=True)
+            self.assertIn("/l/A/by-scans", [f["folder"] for f in every])
+            self.assertNotIn("/l/A/by-scans", [f["folder"] for f in only])
+            self.assertEqual(len(only), 3)
             (tmp / "bad.tsv").write_text("/l/x\tsomething\n")
             with self.assertRaises(ValueError):
                 va.read_approved(tmp / "bad.tsv")

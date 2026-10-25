@@ -275,7 +275,7 @@ def read_approved(path):
     return out
 
 
-def export_fixes(state, out_dir, current, approved=None):
+def export_fixes(state, out_dir, current, approved=None, only_approved=False):
     """fixes.db for tag_albums.py --retag (and web_tag.py): the albums whose tags hold
     another release than the one the evidence points to, and the albums you approved
     (a pick nothing about the copy decides, or another release you named)."""
@@ -291,7 +291,7 @@ def export_fixes(state, out_dir, current, approved=None):
             elif not r.get("picked"):
                 continue                               # nothing picked and nothing named
             fixes.append(r)
-        elif (r.get("verdict") in ("differs", "other pressing") and evidence_decided(r)
+        elif (not only_approved and r.get("verdict") in ("differs", "other pressing") and evidence_decided(r)
               and r.get("version") == current):
             fixes.append(r)
     path = out_dir / "fixes.db"
@@ -345,6 +345,8 @@ def main():
     ap.add_argument("--approved", default=None,
                     help="albums you approved for a retag (folder[TAB]mb:<MBID>|discogs:<id> per line); "
                          "default: approved.tsv in the output folder, when it exists")
+    ap.add_argument("--only-approved", action="store_true",
+                    help="with --export-fixes: only the albums in the approved list")
     ap.add_argument("--export-fixes", action="store_true",
                     help="only write fixes.db (albums the evidence says are tagged as the wrong release) and stop")
     args = ap.parse_args()
@@ -375,7 +377,7 @@ def main():
         ma.check_ocr_ready()
     if args.export_fixes:
         approved = read_approved(args.approved or out_dir / "approved.tsv")
-        path, fixes = export_fixes(state, out_dir, ma.result_version(), approved)
+        path, fixes = export_fixes(state, out_dir, ma.result_version(), approved, args.only_approved)
         for r in fixes:
             print(f"  {r['folder']}\n      tags {r.get('tags_release') or r.get('tags_mb')}\n      ->   {r.get('picked_release')}"
                   f"  ({r.get('picked')})")

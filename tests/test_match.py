@@ -2454,6 +2454,31 @@ class Reevaluation(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class UnreachableWebSearch(unittest.TestCase):
+    """Pass 4 of validate: DuckDuckGo timed out, and each query was retried six times with
+    a 60 s timeout, holding every investigated album up for many minutes. The web search
+    only adds evidence: asked once, briefly, and left alone for a while after failing."""
+
+    def test_the_web_search_fails_fast_and_is_then_left_alone(self):
+        import urllib.error
+        calls = []
+
+        def boom(req, timeout=None):
+            calls.append(timeout)
+            raise urllib.error.URLError("timed out")
+        saved = ma.urllib.request.urlopen
+        ma.urllib.request.urlopen = boom
+        try:
+            h = ma.Http(sqlite3.connect(":memory:"), {"mb_delay": 0, "discogs_delay": 0}, "")
+            for _ in range(4):
+                with self.assertRaises(ma.ProviderUnavailable):
+                    h.get_text("https://html.duckduckgo.com/html/?q=x", "duckduckgo")
+            self.assertEqual(calls, [15, 15, 15])          # once each, short; the 4th is not even asked
+            self.assertEqual(ma.web_release_links(h, ["QDISS0201CDD"], "Exhorder"), ([], []))
+            self.assertEqual(len(calls), 3)
+        finally:
+            ma.urllib.request.urlopen = saved
+
 class DiscogsDown(FakeHttp):
     """Discogs raises `exc`; MusicBrainz works normally."""
     def __init__(self, exc):

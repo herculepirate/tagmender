@@ -1028,24 +1028,36 @@ class Http:
             self.db.commit()
             raise ProviderUnavailable(host, "invalid_response", f"not JSON from {url.split('?')[0]}") from None
 
+    # Hosts that only add evidence (the web search of an investigation): asked once with a
+    # short timeout, and left alone for a while after failing, so an unreachable search
+    # engine cannot hold every album up for minutes (6 retries x 60 s per query).
+    OPTIONAL_HOSTS = {"duckduckgo": (1, 15, 3, 1800)}    # attempts, timeout s, failures, pause s
+
     def get_text(self, url, host):
         row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (url,)).fetchone()
         if row and not (self.max_age and time.time() - float(row[1] or 0) > self.max_age):
             return row[0]
+        attempts, timeout, max_fail, pause_s = self.OPTIONAL_HOSTS.get(host, (6, 60, 0, 0))
+        down = getattr(self, "down", None)
+        if down is None:
+            down = self.down = {}
+        if host in self.OPTIONAL_HOSTS and down.get(host, (0, 0))[1] > time.time():
+            raise ProviderUnavailable(host, "outage", "skipped: failed repeatedly, trying again later")
         delay = self.cfg["discogs_delay"] if host == "discogs" else self.cfg["mb_delay"]
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         if host == "discogs":
             headers["Authorization"] = f"Discogs token={self.token}"
         last_kind = "outage"
-        for attempt in range(6):
+        for attempt in range(attempts):
             wait = delay - (time.time() - self.last.get(host, 0))
             if wait > 0:
                 time.sleep(wait)
             self.last[host] = time.time()
             try:
                 with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
-                                            timeout=60) as r:
+                                            timeout=timeout) as r:
                     body = r.read().decode("utf-8")
+                down.pop(host, None)
                 self.db.execute("INSERT OR REPLACE INTO http_cache (url, body, ts) VALUES (?,?,?)",
                                 (url, body, time.time()))
                 self.db.commit()
@@ -1071,8 +1083,16 @@ class Http:
                     continue
                 raise
             except (urllib.error.URLError, TimeoutError) as e:
+                if attempts == 1:
+                    break
                 print(f"    {host} network error {e}, retrying", file=sys.stderr)
                 time.sleep(10 * (attempt + 1) + random.uniform(0, 1))
+        if host in self.OPTIONAL_HOSTS:
+            fails = down.get(host, (0, 0))[0] + 1
+            until = time.time() + pause_s if fails >= max_fail else 0
+            down[host] = (0 if until else fails, until)
+            if until:
+                print(f"    {host} unreachable, not asked again for {pause_s // 60} minutes", file=sys.stderr)
         raise ProviderUnavailable(host, last_kind, f"giving up on {url.split('?')[0]}")
 
 

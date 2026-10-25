@@ -42,7 +42,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `unresolved` | `mark` | `leave`, `mark` (TAGMENDER tags), `move` (to `move_to`) |
 | `retry` | after 30 days, 6 attempts | watched folders |
 | `unattended` | false | apply without asking (watcher) |
-| `watch` | settle 10 min, every 300 s | |
+| `watch` | settle 10 min, every 300 s | `settle_minutes` (≥ 0): an album waits until nothing in it changed this long; `interval_seconds` (≥ 1): how often watched folders are looked at. `tagmender watch --add FOLDER --profile NAME` sets a watched source |
 | `backup_retention_days` | 30 | `tagmender jobs prune` |
 | `exclusions` | `[]` | this profile's Ignore/Skip rules, added to the global ones |
 

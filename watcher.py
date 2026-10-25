@@ -137,6 +137,7 @@ def snapshot(folder: Path, files=None, deep=True):
 
 class Watcher:
     def __init__(self, profiles=None, once=False, log=None):
+        self.fixed = profiles is not None        # else the profiles are read again on every pass
         self.profiles = profiles if profiles is not None else self._watched_profiles()
         self.once = once
         self.log = log or logsetup.setup("watch")
@@ -225,8 +226,47 @@ class Watcher:
                     planmod.db_text(detail)))
         db.commit()
 
+    def filed(self, db, entry, prof, status):
+        """Remember an album where a job filed it, as TagMender left it: a library inside the
+        watched folder (or a watched library the album was moved within) does not take what
+        was just filed for a new drop and identify it again."""
+        if status not in ("done", "unchanged"):
+            return
+        dst = [Path(fe["dst"]) for fe in entry.get("files") or []
+               if Path(fe["dst"]).suffix.lower() in ex.AUDIO_EXT]
+        if not dst or {str(p) for p in dst} == {fe["src"] for fe in entry["files"]}:
+            return                                     # tagged where it was: its own record covers it
+        try:
+            folder = Path(os.path.commonpath([str(p.parent) for p in dst]))
+        except ValueError:
+            return
+        from engine import is_disc_dir
+        if is_disc_dir(folder):
+            folder = folder.parent
+        if not all(p.exists() for p in dst):
+            return
+        self.record(db, folder, prof, status, 1, entry.get("label", ""), key=album_key(folder, dst), files=dst)
+
     def tick(self):
-        """One pass over every watched root. Returns {folder: what happened}."""
+        """One pass over every watched root. Returns {folder: what happened}. One pass at a
+        time across processes: the app watching while the background service runs too only
+        lets one of them look (the other's pass is skipped, not queued)."""
+        import fcntl
+        ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(ex.STATE_DIR / "watch.lock", "w") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self.skipped = "another TagMender process is checking the watched folders"
+                self.log.info("watch: %s; this pass is skipped", self.skipped)
+                return {}
+            try:
+                self.skipped = ""
+                return self._tick()
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    def _tick(self):
         done = {}
         db = _db()
         busy = executor.busy_jobs()
@@ -301,6 +341,8 @@ class Watcher:
                     self.record(db, g.folder, prof, status, attempts,
                                 ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
                                 key=k, files=scope, deep=deep)
+                    if prof["unattended"]:
+                        self.filed(db, a, prof, outcome)
                     done[str(g.folder)] = shown
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher
@@ -311,18 +353,350 @@ class Watcher:
         return done
 
     def run(self):
-        interval = min((p["watch"]["interval_seconds"] for p in self.profiles), default=300)
-        if not self.profiles:
-            self.log.warning("no profile has a watched source (sources: [{\"path\": ..., \"watch\": true}])")
-            return
-        while not self.stop:
-            self.tick()
-            if self.once:
+        """Watch until stopped. One watching process at a time (the app's background
+        watcher, the systemd service, a `tagmender watch` in a terminal): a second one says
+        so and ends. A folder added or a profile changed is seen at the next pass."""
+        with run_lock() as held:
+            if not held:
+                self.log.warning("another TagMender is already watching (pid %s); not starting a second",
+                                 watching_pid() or "?")
+                self.already = True
                 return
-            for _ in range(int(interval)):
-                if self.stop:
+            self.already = False
+            while not self.stop:
+                if not self.fixed:
+                    try:
+                        self.profiles = self._watched_profiles()
+                    except Exception:                       # a profile being saved: the last set
+                        self.log.exception("watch: profiles could not be read; using the last ones")
+                if self.profiles:
+                    self.tick()
+                else:
+                    self.log.info("no profile watches a folder; waiting")
+                if self.once:
                     return
-                time.sleep(1)
+                interval = min((p["watch"]["interval_seconds"] for p in self.profiles), default=300)
+                end = time.time() + max(1, interval)
+                while not self.stop and time.time() < end:
+                    time.sleep(min(1, max(0, end - time.time())))
+
+
+def _run_lock_file() -> Path:
+    return ex.STATE_DIR / "watching.pid"
+
+
+class run_lock:
+    """Held while a process watches; the file names its pid (for Stop)."""
+
+    def __enter__(self):
+        import fcntl
+        ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
+        self.fh = open(_run_lock_file(), "a+")
+        try:
+            fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.fh.close()
+            self.fh = None
+            return False
+        self.fh.seek(0)
+        self.fh.truncate()
+        self.fh.write(str(os.getpid()))
+        self.fh.flush()
+        return True
+
+    def __exit__(self, *exc):
+        if self.fh is not None:
+            import fcntl
+            try:
+                self.fh.seek(0)
+                self.fh.truncate()
+                fcntl.flock(self.fh, fcntl.LOCK_UN)
+            finally:
+                self.fh.close()
+        return False
+
+
+def watching_pid():
+    """The pid of the process watching now, or None."""
+    import fcntl
+    try:
+        with open(_run_lock_file(), "a+") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                fh.seek(0)
+                txt = fh.read().strip()
+                return int(txt) if txt.isdigit() else -1
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            return None
+    except OSError:
+        return None
+
+
+def plans_dir() -> Path:
+    return ex.STATE_DIR / "plans"
+
+
+def pending_plans() -> list[dict]:
+    """Plans a watched folder made for a profile that asks first, not yet applied or
+    dismissed, oldest first: {"path", "job", "profile", "albums": [(source, label, to)]}."""
+    out = []
+    try:
+        paths = sorted(plans_dir().glob("*.json"), key=lambda x: x.stat().st_mtime)
+    except OSError:
+        return out
+    for x in paths:
+        if (executor.jobs_dir() / x.stem / "journal.jsonl").exists():     # applied
+            continue
+        try:
+            p = planmod.load(x)
+        except Exception:                                # unreadable: shown, so it can be dismissed
+            out.append({"path": x, "job": x.stem, "profile": "?", "albums": [], "error": True})
+            continue
+        albums = []
+        for a in p.get("albums") or []:
+            dst = sorted({str(Path(fe["dst"]).parent) for fe in a.get("files") or []})
+            albums.append((a.get("source_dir", ""), a.get("label") or a.get("status", ""),
+                           dst[0] if len(dst) == 1 else os.path.commonpath(dst) if dst else ""))
+        out.append({"path": x, "job": p.get("job", x.stem), "profile": p.get("profile", ""), "albums": albums})
+    return out
+
+
+def apply_pending(path, log=None) -> dict:
+    """Carry out a plan waiting for approval, and remember where it filed each album."""
+    path = Path(path)
+    p = planmod.load(path)
+    res = executor.Executor(p, log=log or logsetup.setup("watch")).run()
+    try:
+        prof = pf.load(p.get("profile") or "default")
+    except pf.ProfileError:
+        prof = None
+    if prof is not None:
+        db = _db()
+        try:
+            w = Watcher([prof], once=True, log=log)
+            for r in res.get("albums") or []:
+                w.filed(db, p["albums"][r["index"]], prof, r["status"])
+        finally:
+            db.close()
+    return res
+
+
+def dismiss_pending(path) -> Path:
+    """Set a waiting plan aside (kept in plans/dismissed/, never deleted); the album stays
+    as it is and is not planned again until its files change."""
+    path = Path(path)
+    to = plans_dir() / "dismissed"
+    to.mkdir(parents=True, exist_ok=True)
+    dest = to / path.name
+    n = 1
+    while dest.exists():
+        dest = to / f"{path.stem}.{n}{path.suffix}"
+        n += 1
+    os.replace(path, dest)
+    return dest
+
+
+def recent(limit=50) -> list[tuple]:
+    """What the watcher did last: (folder, profile, status, when, label), newest first."""
+    try:
+        db = _db()
+        rows = db.execute("SELECT folder, profile, status, ts, detail FROM processed ORDER BY ts DESC LIMIT ?",
+                          (limit,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    out = []
+    for key, prof, status, ts, detail in rows:
+        folder = str(planmod.db_path(key))
+        if "#" in folder and len(folder.rsplit("#", 1)[1]) == 12:     # one album of a mixed folder
+            folder = folder.rsplit("#", 1)[0]
+        label = "" if status == "excluded" else (detail or "")         # (an excluded row holds a rules hash)
+        out.append((folder, prof, status, ts, label))
+    return out
+
+
+# ---- the background service (Linux: a systemd user service) -------------------
+SERVICE = "tagmender-watch.service"
+
+
+def service_file() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user" / SERVICE
+
+
+def service_text(python=None, script=None) -> str:
+    """The unit for `tagmender watch --nice`. It is not sandboxed: it reads and writes every
+    folder you can (home, /media, /mnt, /run/media, /srv, shares), as the app does - a
+    ProtectSystem sandbox made any other library read-only and, where unprivileged user
+    namespaces are off (Ubuntu 24.04), kept the service from starting. Which folders it
+    watches comes from the profiles, read again on every pass."""
+    import sys
+    here = Path(__file__).resolve().parent
+    if python is None and script is None and os.environ.get("APPIMAGE"):
+        start = _unit_quote(os.environ["APPIMAGE"])      # the AppImage itself: its mount path changes each run
+    elif python is None and script is None and here == Path("/usr/lib/tagmender") \
+            and os.access("/usr/bin/tagmender", os.X_OK):
+        start = "/usr/bin/tagmender"                     # the .deb
+    else:
+        start = f"{_unit_quote(python or sys.executable)} -u {_unit_quote(script or str(here / 'tagmender.py'))}"
+    return "\n".join([
+        "# Written by TagMender (Watched folders > Run in the background); written again when you press",
+        "# it. The watched folders and what is done with them are the profiles' settings, not this file's.",
+        "[Unit]",
+        "Description=TagMender watched folders (identify, tag and file new music)",
+        "After=network-online.target",
+        "Wants=network-online.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"ExecStart={start} watch --nice",
+        "Restart=on-failure",
+        "RestartSec=60",
+        "Nice=10",
+        "IOSchedulingClass=idle",
+        "NoNewPrivileges=true",
+        "",
+        "[Install]",
+        "WantedBy=default.target",
+        ""])
+
+
+def _unit_quote(s: str) -> str:
+    s = str(s).replace("%", "%%")
+    if any(c in s for c in " \t\"'\\"):
+        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return s
+
+
+def _systemctl(*args, run=None):
+    import subprocess
+    run = run or subprocess.run
+    try:
+        r = run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 127, str(exc)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+FLATPAK_ID = "io.github.herculepirate.TagMender"
+
+
+def in_flatpak() -> bool:
+    return Path("/.flatpak-info").exists()
+
+
+def service_supported() -> bool:
+    """Watching after the app closes: a systemd user service, or in the Flatpak the
+    Background portal (a Flatpak cannot install a systemd service)."""
+    import shutil
+    import sys
+    if not sys.platform.startswith("linux"):
+        return False
+    return in_flatpak() or shutil.which("systemctl") is not None
+
+
+def _autostart_file() -> Path:
+    # where the Background portal puts it: the host's ~/.config/autostart (the Flatpak has
+    # --filesystem=host, so the real home is visible; XDG_CONFIG_HOME is the sandbox's own)
+    return Path.home() / ".config" / "autostart" / f"{FLATPAK_ID}.desktop"
+
+
+def _gvariant(v) -> str:
+    """Python value as GVariant text (gdbus call's argument format)."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, str):
+        return "'" + v.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    if isinstance(v, list):
+        return "[" + ", ".join(_gvariant(x) for x in v) + "]" if v else "@as []"
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{_gvariant(k)}: <{_gvariant(x)}>" for k, x in v.items()) + "}" if v \
+            else "@a{sv} {}"
+    raise TypeError(type(v))
+
+
+def _portal_background(autostart: bool, call=None) -> str:
+    """Ask the Background portal to start `tagmender watch --nice` at login (or not), with
+    gdbus (in every Flatpak runtime). Returns "" or what went wrong."""
+    opts = {"reason": "Keep the watched folders processed when TagMender is closed",
+            "autostart": autostart, "commandline": ["tagmender", "watch", "--nice"], "dbus-activatable": False}
+    if call is not None:
+        return call(opts)
+    import shutil
+    import subprocess
+    if not shutil.which("gdbus"):
+        return "gdbus is not available"
+    try:
+        r = subprocess.run(["gdbus", "call", "--session", "--dest", "org.freedesktop.portal.Desktop",
+                            "--object-path", "/org/freedesktop/portal/desktop", "--method",
+                            "org.freedesktop.portal.Background.RequestBackground", "", _gvariant(opts)],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc)
+    return "" if r.returncode == 0 else (r.stderr or r.stdout).strip()[:300]
+
+
+def _start_detached():
+    import subprocess
+    import sys
+    script = Path(__file__).resolve().parent / "tagmender.py"
+    subprocess.Popen([sys.executable, "-u", str(script), "watch", "--nice"], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def service_status(run=None) -> str:
+    """"running", "stopped", "failed" or "not installed"."""
+    if in_flatpak():
+        if watching_pid():
+            return "running"
+        return "stopped" if _autostart_file().exists() else "not installed"
+    if not service_file().exists():
+        return "not installed"
+    code, out = _systemctl("is-active", SERVICE, run=run)
+    out = out.strip().splitlines()[-1] if out.strip() else ""
+    return "running" if out == "active" else "failed" if out == "failed" else "stopped"
+
+
+def install_service(run=None, portal=None, spawn=None, **kw) -> str:
+    """Start watching now and at every login, when TagMender is closed too. Returns
+    "running" or what went wrong, for the user."""
+    if in_flatpak():
+        err = _portal_background(True, portal)
+        if err:
+            return f"The Background portal refused: {err}"
+        if not watching_pid():
+            (spawn or _start_detached)()
+        return "running"
+    f = service_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    text = service_text(**kw)
+    if f.exists() and f.read_text(errors="replace") != text:
+        os.replace(f, f.with_name(f.name + ".old"))
+    tmp = f.with_name(f".{f.name}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, f)
+    for args in (("daemon-reload",), ("enable", "--now", SERVICE), ("restart", SERVICE)):
+        code, out = _systemctl(*args, run=run)
+        if code != 0:
+            return f"systemctl --user {' '.join(args)} failed: {out.strip()[:300]}"
+    return "running"
+
+
+def stop_service(run=None, portal=None) -> str:
+    """Stop watching in the background and stop it starting at login; the unit file stays
+    (Run in the background starts it again)."""
+    if in_flatpak():
+        err = _portal_background(False, portal)
+        pid = watching_pid()
+        if pid and pid > 0 and pid != os.getpid():
+            import signal
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        return f"The Background portal refused: {err}" if err else "stopped"
+    code, out = _systemctl("disable", "--now", SERVICE, run=run)
+    return "stopped" if code == 0 else f"systemctl --user disable failed: {out.strip()[:300]}"
 
 
 def lower_priority():

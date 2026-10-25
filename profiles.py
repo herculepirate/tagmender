@@ -222,6 +222,15 @@ def validate(data: dict) -> list[str]:
             p.append(f"sources[{i}] needs a path")
         elif not os.path.isabs(os.path.expanduser(s["path"])):
             p.append(f"sources[{i}].path must be absolute")
+        elif s.get("watch") and os.path.dirname(os.path.abspath(os.path.expanduser(s["path"]))) == \
+                os.path.abspath(os.path.expanduser(s["path"])):
+            p.append(f"sources[{i}]: a whole drive ({s['path']}) cannot be watched; watch a folder on it")
+    w = d.get("watch") or {}
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731
+    if not num(w.get("settle_minutes")) or w["settle_minutes"] < 0:
+        p.append("watch.settle_minutes must be a number of minutes, 0 or more")
+    if not num(w.get("interval_seconds")) or w["interval_seconds"] < 1:
+        p.append("watch.interval_seconds must be a number of seconds, at least 1")
     if d["preserve_timestamps"] not in (None, True, False):
         p.append("preserve_timestamps must be true, false or null (as Picard is set)")
     import levels

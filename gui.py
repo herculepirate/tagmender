@@ -658,95 +658,470 @@ class Jobs(QWidget):
                                             for a, s, lb, d, _t in rows) or "No albums recorded.")
 
 
+def watch_does(p) -> str:
+    """What a profile does with an album dropped into one of its watched folders."""
+    dest = p["destination"] or "?"
+    return {"move": f"Moved into {dest}", "copy": f"Copied into {dest} (the drop stays)"}.get(
+        p["operation"], "Tagged and renamed where it is (not moved)")
+
+
+def _gui_prefs() -> dict:
+    try:
+        return json.loads((ex.CONFIG_DIR / "gui.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _set_gui_pref(key, value):
+    d = _gui_prefs()
+    d[key] = value
+    try:
+        ex.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = ex.CONFIG_DIR / ".gui.json.tmp"
+        tmp.write_text(json.dumps(d, indent=1))
+        os.replace(tmp, ex.CONFIG_DIR / "gui.json")
+    except OSError:
+        pass
+
+
+class WatchDialog(QDialog):
+    """Add a watched folder, or change which profile one belongs to and how it is handled."""
+
+    def __init__(self, parent, path="", profile=""):
+        super().__init__(parent)
+        self.setWindowTitle("Watched folder")
+        self.resize(640, 0)
+        self.old_path = path
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        row = QHBoxLayout()
+        self.path = QLineEdit(path)
+        self.path.setPlaceholderText("Folder music is dropped into, e.g. ~/Music/Inbox")
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self.browse)
+        row.addWidget(self.path, 1)
+        row.addWidget(browse)
+        self.prof = QComboBox()
+        self.prof.addItems(pf.names())
+        if profile:
+            self.prof.setCurrentText(profile)
+        self.does = QLabel("")
+        self.does.setWordWrap(True)
+        self.auto = QCheckBox("File albums without asking")
+        self.auto.setToolTip("Off: each album is planned and waits under \"Waiting for your approval\".\n"
+                             "This is a profile setting: it applies to every folder the profile watches.")
+        self.settle = QDoubleSpinBox()
+        self.settle.setRange(0.5, 1440)
+        self.settle.setDecimals(1)
+        self.settle.setSuffix(" min")
+        self.settle.setToolTip("An album is left alone until nothing in it changed for this long\n"
+                               "(a copy or download still running)")
+        self.every = QDoubleSpinBox()
+        self.every.setRange(0.5, 1440)
+        self.every.setDecimals(1)
+        self.every.setSuffix(" min")
+        self.warn = QLabel("")
+        self.warn.setWordWrap(True)
+        self.warn.setProperty("role", "hint")
+        form.addRow("Folder", row)
+        form.addRow("Profile", self.prof)
+        form.addRow("What happens", self.does)
+        form.addRow("", self.auto)
+        form.addRow("Wait until unchanged for", self.settle)
+        form.addRow("Look every", self.every)
+        lay.addLayout(form)
+        lay.addWidget(self.warn)
+        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.save)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self.prof.currentTextChanged.connect(self.show_profile)
+        self.path.textChanged.connect(lambda _t: self.show_warnings())
+        self.show_profile(self.prof.currentText())
+
+    def browse(self):
+        d = QFileDialog.getExistingDirectory(self, "Folder to watch", self.path.text() or str(Path.home()))
+        if d:
+            self.path.setText(d)
+
+    def profile(self):
+        try:
+            return pf.load(self.prof.currentText())
+        except pf.ProfileError:
+            return None
+
+    def show_profile(self, _name):
+        p = self.profile()
+        if p is None:
+            self.does.setText("")
+            return
+        self.does.setText(watch_does(p))
+        self.auto.setChecked(bool(p["unattended"]))
+        self.settle.setValue(p["watch"]["settle_minutes"])
+        self.every.setValue(p["watch"]["interval_seconds"] / 60)
+        self.show_warnings()
+
+    def problems(self):
+        """(errors that stop saving, notes)"""
+        p = self.profile()
+        text = self.path.text().strip()
+        errs, notes = [], []
+        if not text:
+            errs.append("Choose the folder to watch.")
+        if p is None:
+            errs.append("Create a profile first (Profiles).")
+            return errs, notes
+        folder = Path(os.path.abspath(os.path.expanduser(text))) if text else None
+        if folder is not None and not folder.is_dir():
+            notes.append("This folder is not there now (not mounted?). It is watched once it is.")
+        if p["operation"] == "in_place":
+            notes.append("This profile fixes albums where they are, so dropped albums stay in this folder. "
+                         "To file them into your library, choose a profile that moves or copies.")
+        dest = Path(os.path.abspath(os.path.expanduser(p["destination"]))) if p["destination"] else None
+        if folder is not None and dest is not None and p["operation"] != "in_place":
+            if dest == folder or folder in dest.parents:
+                notes.append("The library is inside this folder: what TagMender files there is remembered, "
+                             "not taken for a new drop.")
+            elif dest in folder.parents:
+                notes.append("This folder is inside the profile's library.")
+        if folder is not None:
+            for n in pf.names():
+                if n == p.name:
+                    continue
+                try:
+                    q = pf.load(n)
+                except pf.ProfileError:
+                    continue
+                for s in q["sources"]:
+                    if s.get("watch") and os.path.abspath(os.path.expanduser(s["path"])) == str(folder) \
+                            and str(folder) != os.path.abspath(os.path.expanduser(self.old_path or "-")):
+                        notes.append(f"Profile \"{n}\" watches this folder now; saving moves it to "
+                                     f"\"{p.name}\".")
+        if not self.auto.isChecked():
+            notes.append("Albums are planned and wait for your approval on this page.")
+        return errs, notes
+
+    def show_warnings(self):
+        errs, notes = self.problems()
+        self.warn.setText("\n".join(errs + notes))
+
+    def save(self):
+        errs, _notes = self.problems()
+        if errs:
+            QMessageBox.information(self, APP, "\n".join(errs))
+            return
+        folder = os.path.abspath(os.path.expanduser(self.path.text().strip()))
+        old = os.path.abspath(os.path.expanduser(self.old_path)) if self.old_path else None
+        same = lambda s: os.path.abspath(os.path.expanduser(s.get("path", ""))) in {folder, old}  # noqa: E731
+        try:
+            for n in pf.names():                     # a folder belongs to one profile
+                if n == self.prof.currentText():
+                    continue
+                try:
+                    q = pf.load(n)
+                except pf.ProfileError:
+                    continue
+                if any(s.get("watch") and same(s) for s in q["sources"]):
+                    data = q.to_dict()
+                    data["sources"] = [s for s in data["sources"] if not (s.get("watch") and same(s))]
+                    pf.save(pf.from_dict(data))
+            data = self.profile().to_dict()
+            data["sources"] = [s for s in data["sources"] if not same(s)] + [
+                {"path": folder, "watch": True, "recursive": True}]
+            data["unattended"] = self.auto.isChecked()
+            data["watch"] = dict(data.get("watch") or {}, settle_minutes=self.settle.value(),
+                                 interval_seconds=int(round(self.every.value() * 60)))
+            pf.save(pf.from_dict(data))
+        except pf.ProfileError as exc:
+            QMessageBox.warning(self, APP, str(exc))
+            return
+        self.accept()
+
+
+def _table(cols, stretch=0, fit=()):
+    t = QTableWidget(0, len(cols))
+    t.setHorizontalHeaderLabels(cols)
+    t.horizontalHeader().setSectionResizeMode(stretch, QHeaderView.Stretch)
+    for c in fit:
+        t.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
+    t.setSelectionBehavior(QAbstractItemView.SelectRows)
+    t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    t.verticalHeader().hide()
+    return t
+
+
+def _fill(table, rows):
+    table.setRowCount(len(rows))
+    for i, r in enumerate(rows):
+        for j, v in enumerate(r):
+            table.setItem(i, j, QTableWidgetItem(str(v)))
+
+
 class Watched(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
+        self.busy = False
+        self.watcher = None
         lay = QVBoxLayout(self)
-        lay.addLayout(heading("Watched folders", "Folders kept processed in the background "
-                                                 "(tagmender watch, or the user service in contrib/). "
-                                                 "Each belongs to a profile."))
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Folder", "Profile", "Available"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().hide()
+        lay.addLayout(heading("Watched folders", "Music dropped into these folders - an album folder or loose "
+                                                 "tracks - is identified, tagged and filed by the folder's "
+                                                 "profile, once nothing in it has changed for a while."))
+        self.table = _table(["Folder", "Profile", "What happens", "Applies", "Available"], stretch=2,
+                            fit=(0, 1, 3, 4))
+        self.table.doubleClicked.connect(lambda *_: self.change())
         lay.addWidget(self.table, 1)
         row = QHBoxLayout()
-        self.prof = QComboBox()
         add = QPushButton("Watch a folder…")
+        add.setProperty("role", "primary")
         add.clicked.connect(self.add)
+        ch = QPushButton("Change…")
+        ch.clicked.connect(self.change)
         rm = QPushButton("Stop watching")
         rm.clicked.connect(self.remove)
         self.check = QPushButton("Check now")
         self.check.clicked.connect(self.check_now)
-        row.addWidget(QLabel("For profile:"))
-        row.addWidget(self.prof)
-        for b in (add, rm, self.check):
+        for b in (add, ch, rm, self.check):
             row.addWidget(b)
         row.addStretch(1)
         lay.addLayout(row)
+        row = QHBoxLayout()
+        self.live = QCheckBox("Keep watching while TagMender is open")
+        self.live.setChecked(bool(_gui_prefs().get("watch_in_app")))
+        self.live.toggled.connect(self.set_live)
+        row.addWidget(self.live)
+        row.addStretch(1)
+        self.svc_label = QLabel("")
+        self.svc_btn = QPushButton("")
+        self.svc_btn.clicked.connect(self.toggle_service)
+        row.addWidget(self.svc_label)
+        row.addWidget(self.svc_btn)
+        lay.addLayout(row)
+        box = QGroupBox("Waiting for your approval")
+        bl = QVBoxLayout(box)
+        self.pending = _table(["Album", "Filed into", "Profile"], stretch=1, fit=(0, 2))
+        self.pending.doubleClicked.connect(lambda *_: self.show_plan())
+        bl.addWidget(self.pending)
+        prow = QHBoxLayout()
+        for text, fn in (("Show plan", self.show_plan), ("Apply", self.apply_one), ("Apply all", self.apply_all),
+                         ("Dismiss", self.dismiss)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            prow.addWidget(b)
+        prow.addStretch(1)
+        bl.addLayout(prow)
+        lay.addWidget(box, 1)
+        box = QGroupBox("Recently")
+        bl = QVBoxLayout(box)
+        self.recent = _table(["When", "Folder", "Outcome", "Profile"], stretch=1)
+        bl.addWidget(self.recent)
+        lay.addWidget(box, 1)
         self.out = QLabel("")
         self.out.setWordWrap(True)
         lay.addWidget(self.out)
+        from PySide6.QtCore import QTimer
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.check_now)
         self.reload()
+        self.set_live(self.live.isChecked(), save=False)
 
-    def reload(self):
-        self.prof.clear()
-        self.prof.addItems(pf.names())
-        rows = []
+    # ---- the list ----------------------------------------------------------
+    def rows(self):
+        out = []
         for n in pf.names():
             try:
                 p = pf.load(n)
             except pf.ProfileError:
                 continue
-            rows += [(s["path"], n) for s in p["sources"] if s.get("watch")]
-        self.table.setRowCount(len(rows))
-        for i, (path, n) in enumerate(rows):
-            ok = Path(path).expanduser().is_dir()
-            for j, v in enumerate((path, n, "✓ yes" if ok else "✕ not mounted")):
-                self.table.setItem(i, j, QTableWidgetItem(v))
+            out += [(s["path"], p) for s in p["sources"] if s.get("watch")]
+        return out
+
+    def reload(self):
+        rows = self.rows()
+        _fill(self.table, [(path, p.name, watch_does(p), "Automatically" if p["unattended"] else "Asks first",
+                            "✓ yes" if Path(path).expanduser().is_dir() else "✕ not mounted")
+                           for path, p in rows])
+        self.plans = []
+        try:
+            import watcher
+            self.plans = watcher.pending_plans()
+            prows = []
+            for x in self.plans:
+                for src, _label, to in x["albums"] or [("(unreadable plan)", "", "")]:
+                    prows.append((src, to, x["profile"], x))
+            self.prow_plans = [r[3] for r in prows]
+            _fill(self.pending, [r[:3] for r in prows])
+            _fill(self.recent, [(time.strftime("%Y-%m-%d %H:%M", time.localtime(ts or 0)), f, st, pn)
+                                for f, pn, st, ts, _l in watcher.recent(40)])
+            if watcher.service_supported():
+                st = watcher.service_status()
+                self.svc_label.setText(f"Background service: {st}")
+                self.svc_btn.setText("Stop the background service" if st == "running" else "Run in the background")
+                self.svc_btn.setToolTip("A systemd user service that keeps watching when TagMender is closed")
+                self.svc_btn.show()
+            else:
+                self.svc_label.setText("")
+                self.svc_btn.hide()
+        except Exception:                                    # the page still shows the folders
+            self.prow_plans = []
+        self.win.set_badge("Watched folders", len(self.plans))
+
+    def selected(self):
+        r = self.table.currentRow()
+        if r < 0 or self.table.item(r, 0) is None:
+            return None, None
+        return self.table.item(r, 0).text(), self.table.item(r, 1).text()
 
     def add(self):
-        if not self.prof.currentText():
+        if not pf.names():
             QMessageBox.information(self, APP, "Create a profile first (Profiles).")
             return
-        d = QFileDialog.getExistingDirectory(self, "Folder to watch")
-        if not d:
+        if WatchDialog(self).exec():
+            self.reload()
+
+    def change(self):
+        path, name = self.selected()
+        if path and WatchDialog(self, path, name).exec():
+            self.reload()
+
+    def remove(self):
+        path, name = self.selected()
+        if not path:
             return
-        p = pf.load(self.prof.currentText())
-        data = p.to_dict()
-        data["sources"] = [s for s in data["sources"] if s.get("path") != d] + [{"path": d, "watch": True,
-                                                                                "recursive": True}]
         try:
+            data = pf.load(name).to_dict()
+            data["sources"] = [s for s in data["sources"] if not (s.get("watch") and s.get("path") == path)]
             pf.save(pf.from_dict(data))
         except pf.ProfileError as exc:
             QMessageBox.warning(self, APP, str(exc))
         self.reload()
 
-    def remove(self):
-        r = self.table.currentRow()
-        if r < 0:
+    # ---- watching ------------------------------------------------------------
+    def set_live(self, on, save=True):
+        if save:
+            _set_gui_pref("watch_in_app", bool(on))
+        if not on:
+            self.timer.stop()
             return
-        path, name = self.table.item(r, 0).text(), self.table.item(r, 1).text()
-        data = pf.load(name).to_dict()
-        data["sources"] = [s for s in data["sources"] if s.get("path") != path]
-        pf.save(pf.from_dict(data))
-        self.reload()
+        mins = [p["watch"]["interval_seconds"] for _path, p in self.rows()] or [300]
+        self.timer.start(max(30, int(min(mins))) * 1000)
+        self.check_now()
 
     def check_now(self):
+        if self.busy or not self.rows():
+            if not self.rows():
+                self.out.setText("No folder is watched yet: Watch a folder….")
+            return
+        self.busy = True
+
         def work(_w):
             import watcher
-            return watcher.Watcher(once=True).tick()
+            w = watcher.Watcher(once=True)
+            self.watcher = w
+            res = w.tick()
+            return res, getattr(w, "skipped", "")
         self.check.setEnabled(False)
         self.out.setText("Checking…")
 
-        def done(res):
+        def done(out):
+            res, skipped = out
+            self.busy = False
+            self.watcher = None
             self.check.setEnabled(True)
-            self.out.setText("\n".join(f"{v}: {k}" for k, v in res.items()) or "Nothing new or changed.")
+            self.out.setText(f"Skipped: {skipped}." if skipped else
+                             "\n".join(f"{v}: {k}" for k, v in res.items()) or
+                             f"Nothing new or changed ({time.strftime('%H:%M')}).")
+            self.reload()
+            if res:
+                self.win.pages["Jobs"].reload()
+
+        def failed(msg):
+            self.busy = False
+            self.watcher = None
+            self.check.setEnabled(True)
+            self.out.setText(f"The check failed: {msg}")
+        start(self, work, done, failed=failed)
+
+    def toggle_service(self):
+        import watcher
+        if watcher.service_status() == "running":
+            msg = watcher.stop_service()
+        else:
+            if not self.rows():
+                QMessageBox.information(self, APP, "Watch a folder first.")
+                return
+            msg = watcher.install_service()
+        if msg not in ("running", "stopped"):
+            QMessageBox.warning(self, APP, msg)
+        self.reload()
+
+    # ---- plans waiting for approval -----------------------------------------
+    def chosen_plan(self):
+        r = self.pending.currentRow()
+        plans = getattr(self, "prow_plans", [])
+        return plans[r] if 0 <= r < len(plans) else None
+
+    def show_plan(self):
+        x = self.chosen_plan()
+        if not x:
+            return
+        try:
+            text = planmod.preview(planmod.load(x["path"]))
+        except Exception as exc:
+            text = f"This plan cannot be read: {exc}"
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Plan {x['job']}")
+        dlg.resize(900, 560)
+        v = QVBoxLayout(dlg)
+        t = QPlainTextEdit(text)
+        t.setReadOnly(True)
+        v.addWidget(t)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        dlg.exec()
+
+    def _apply(self, plans):
+        plans = [x for x in plans if not x.get("error")]
+        if not plans:
+            return
+
+        def work(_w):
+            import watcher
+            out = []
+            for x in plans:
+                try:
+                    res = watcher.apply_pending(x["path"])
+                    out += [f"{r['status']}: {r['album']}" for r in res["albums"]]
+                except Exception as exc:
+                    out.append(f"not applied: {x['job']}: {exc}")
+            return out
+
+        def done(lines):
+            self.out.setText("\n".join(lines))
+            self.reload()
             self.win.pages["Jobs"].reload()
+        self.out.setText("Applying…")
         start(self, work, done)
+
+    def apply_one(self):
+        x = self.chosen_plan()
+        if x:
+            self._apply([x])
+
+    def apply_all(self):
+        self._apply(list(self.plans))
+
+    def dismiss(self):
+        x = self.chosen_plan()
+        if not x:
+            return
+        import watcher
+        try:
+            watcher.dismiss_pending(x["path"])
+        except OSError as exc:
+            QMessageBox.warning(self, APP, str(exc))
+        self.reload()
 
 
 class RuleDialog(QDialog):

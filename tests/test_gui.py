@@ -219,6 +219,66 @@ class Gui(te.Base):
             self.assertTrue(w.accessibleName(), w)
         self.assertEqual(ov.btn_preview.shortcut().toString(), "Ctrl+P")
 
+    def test_watch_dialog_ties_a_folder_to_a_profile_and_moves_it_between_profiles(self):
+        import profiles as pf
+        inbox, lib = self.tmp / "inbox", self.tmp / "library"
+        inbox.mkdir()
+        lib.mkdir()
+        pf.save(pf.from_dict({"name": "Mover", "operation": "move", "destination": str(lib)}))
+        wp = self.win.pages["Watched folders"]
+        dlg = self.gui.WatchDialog(wp)
+        dlg.path.setText(str(inbox))
+        dlg.prof.setCurrentText("Mover")
+        self.assertIn("Moved into", dlg.does.text())
+        dlg.auto.setChecked(True)
+        dlg.settle.setValue(2)
+        dlg.save()
+        p = pf.load("Mover")
+        self.assertTrue(p["unattended"])
+        self.assertEqual(p["watch"]["settle_minutes"], 2)
+        self.assertEqual([s["path"] for s in p["sources"] if s.get("watch")], [str(inbox)])
+        wp.reload()
+        self.assertEqual([wp.table.item(0, i).text() for i in (0, 1, 3)], [str(inbox), "Mover", "Automatically"])
+        dlg = self.gui.WatchDialog(wp, str(inbox), "Mover")       # change it to another profile
+        dlg.prof.setCurrentText("Auto")
+        self.assertIn("where it is", dlg.does.text())
+        self.assertIn("stay in this folder", dlg.warn.text())
+        dlg.save()
+        self.assertEqual([s for s in pf.load("Mover")["sources"] if s.get("watch")], [])
+        self.assertEqual([s["path"] for s in pf.load("Auto")["sources"] if s.get("watch")], [str(inbox)])
+        dlg = self.gui.WatchDialog(wp)
+        dlg.prof.setCurrentText("Mover")
+        dlg.path.setText(str(lib / "Inbox"))
+        self.assertIn("inside the profile's library", dlg.warn.text())
+        self.shot("watched-folders")
+
+    def test_watched_page_lists_and_applies_plans_waiting_for_approval(self):
+        import profiles as pf
+        import watcher
+        lib = self.tmp / "library"
+        lib.mkdir()
+        old = time.time() - 3600
+        for f in [self.d, *self.d.rglob("*")]:
+            _os.utime(f, (old, old))
+        pf.save(pf.from_dict({"name": "Ask", "operation": "move", "destination": str(lib),
+                              "sources": [{"path": str(self.d.parent), "watch": True}],
+                              "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False},
+                              "watch": {"settle_minutes": 1}}))
+        self.assertEqual(list(watcher.Watcher([pf.load("Ask")], once=True).tick().values()), ["planned"])
+        wp = self.win.pages["Watched folders"]
+        wp.reload()
+        self.assertEqual(wp.pending.rowCount(), 1)
+        self.assertEqual(wp.pending.item(0, 0).text(), str(self.d))
+        self.assertIn("(1)", self.win.nav.item(2).text())
+        wp.pending.selectRow(0)
+        wp.apply_one()
+        self.assertTrue(wait(lambda: wp.pending.rowCount() == 0 and "done" in wp.out.text(), self.app),
+                        wp.out.text())
+        self.assertFalse(self.d.exists())
+        self.assertEqual(len(list(lib.rglob("*.flac"))), 3)
+        self.assertGreater(wp.recent.rowCount(), 0)
+        self.assertNotIn("(", self.win.nav.item(2).text())
+
 
 if __name__ == "__main__":
     unittest.main()

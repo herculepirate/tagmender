@@ -2,7 +2,9 @@
 # Needs no desktop session; runs at the lowest CPU and I/O priority.
 #
 #   tagmender setup                      # keys go to ~/.config/tagmender/*, mode 600
-#   tagmender profiles set Inbox 'sources=[{"path": "/home/you/Music/Inbox", "watch": true}]' unattended=true
+#   tagmender watch --add ~/Music/Inbox --profile Inbox --auto
+#   (or in the app: Watched folders > Watch a folder…, then Run in the background - which
+#    writes and starts this service for you)
 #   mkdir -p ~/.config/systemd/user
 #   cp contrib/tagmender-watch.service ~/.config/systemd/user/
 #   # installed from a package: ExecStart=/usr/bin/tagmender watch --nice
@@ -21,10 +23,9 @@ Restart=on-failure
 RestartSec=60
 Nice=10
 IOSchedulingClass=idle
-# never let it write outside your home and media mounts by accident
-ProtectSystem=strict
-ReadWritePaths=%h /media /mnt
-PrivateTmp=true
+# Not sandboxed (no ProtectSystem/ReadWritePaths): it reads and writes every folder you can,
+# as the app does - libraries on /run/media, /srv or a share included. TagMender itself only
+# writes inside a plan's source and destination folders.
 NoNewPrivileges=true
 
 [Install]

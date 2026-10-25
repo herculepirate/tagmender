@@ -1,0 +1,61 @@
+# Flatpak of TagMender (desktop app, command line and the watched-folders watcher).
+#
+#   flatpak install flathub org.kde.Sdk//6.10 io.qt.PySide.BaseApp//6.10
+#   flatpak-builder --user --install --force-clean build-dir \
+#       packaging/flatpak/io.github.herculepirate.TagMender.yml
+#   flatpak run io.github.herculepirate.TagMender            (the app)
+#   flatpak run io.github.herculepirate.TagMender watch      (the watcher, in a terminal)
+#
+# Python wheels are pinned to the versions the test suite passed with (as the AppImage);
+# python3-deps.json was made from PyPI's own sha256 digests.
+id: io.github.herculepirate.TagMender
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+base: io.qt.PySide.BaseApp
+base-version: '6.10'
+command: tagmender
+finish-args:
+  - --share=ipc
+  - --share=network                 # MusicBrainz, Discogs, cover art, AcoustID
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Read and write every folder you can: music libraries live on other drives and shares
+  # (/media, /mnt, /run/media, /srv), files are moved between them, and Picard's own
+  # settings (~/.config/MusicBrainz or Picard's Flatpak folder) are read. "home" or
+  # "xdg-music" alone (as Picard's Flatpak has) cannot reach a library on /media.
+  - --filesystem=host
+  - --filesystem=/run/media
+  - --filesystem=xdg-run/gvfs       # shares mounted by the file manager (smb://, sftp://)
+  # Watching after the app is closed goes through the Background portal (autostart);
+  # it needs no permission here.
+modules:
+  - python3-deps.json
+  - name: tagmender
+    buildsystem: simple
+    build-commands:
+      - mkdir -p ${FLATPAK_DEST}/lib/tagmender/vendor
+      - for f in *.py; do install -Dm644 "$f" "${FLATPAK_DEST}/lib/tagmender/$f"; done
+      - cp -r coverup_fonts ${FLATPAK_DEST}/lib/tagmender/
+      - for d in picard-discogs-enrichment picard-coverup; do rm -rf "vendor/$d/tests" "vendor/$d/.git";
+        cp -r "vendor/$d" ${FLATPAK_DEST}/lib/tagmender/vendor/; done
+      - install -Dm755 packaging/flatpak/tagmender.sh ${FLATPAK_DEST}/bin/tagmender
+      - install -Dm644 packaging/io.github.herculepirate.TagMender.desktop
+        ${FLATPAK_DEST}/share/applications/io.github.herculepirate.TagMender.desktop
+      - install -Dm644 packaging/io.github.herculepirate.TagMender.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/io.github.herculepirate.TagMender.metainfo.xml
+      - install -Dm644 packaging/tagmender.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.herculepirate.TagMender.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip: [dist, tests, .git, __pycache__]
+      - type: git
+        url: https://github.com/herculepirate/picard-discogs-enrichment
+        commit: 3dc00512d1fe1d4167107da8b578268cf6d08770
+        dest: vendor/picard-discogs-enrichment
+      - type: git
+        url: https://github.com/herculepirate/picard-coverup
+        commit: d1d36d143718e76cc7fe2525e6b9e4996f6ea347
+        dest: vendor/picard-coverup

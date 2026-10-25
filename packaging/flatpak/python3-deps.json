@@ -1,0 +1,97 @@
+{
+    "name": "python3-tagmender-deps",
+    "buildsystem": "simple",
+    "build-commands": [
+        "pip3 install --verbose --exists-action=i --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} --no-build-isolation mutagen pillow fonttools numpy"
+    ],
+    "sources": [
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/47/d8/a29e4e3991765e7ce4ed1f7e4074fe1ba9da03e0048639734de60f9cadb9/mutagen-1.48.1-py3-none-any.whl",
+            "sha256": "4f077fe87d3fc7fba259aa63d8c026b18382ca6a42ef37c61e16f1b1b5b82fe7",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "mutagen",
+                "packagetype": "bdist_wheel"
+            }
+        },
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/f7/62/de5bdd77d935331f4f802edc11e4d82950f642caad6cb2f949837b8560e2/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+            "sha256": "0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "pillow",
+                "packagetype": "bdist_wheel"
+            },
+            "only-arches": [
+                "x86_64"
+            ]
+        },
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/1f/01/e18aff37cb0b4aac47ac90f016d347a49aca667ef97f190b06ac2aabc928/pillow-12.3.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+            "sha256": "f7401aebd7f581d7f83a439d87d474999317ee099218e5ad25d125290990ba65",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "pillow",
+                "packagetype": "bdist_wheel"
+            },
+            "only-arches": [
+                "aarch64"
+            ]
+        },
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/4c/1c/6ec22372362b03350fe3da7bf33491a07cc9a553a36dd2383b76ec1741eb/fonttools-4.66.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+            "sha256": "83572afe48733bad7a4a9c11721d3a726c2e976d82b063fc9bdd049d76955abd",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "fonttools",
+                "packagetype": "bdist_wheel"
+            },
+            "only-arches": [
+                "x86_64"
+            ]
+        },
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/db/e7/11e5e6beb7e336d80f0ca870ae080033a91ebfe34fd5390dbcf78f8df56f/fonttools-4.66.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+            "sha256": "1801fdad5600118327171e0e8aa79f7cc48831dd55ab36998c9de03bd5ffe6cd",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "fonttools",
+                "packagetype": "bdist_wheel"
+            },
+            "only-arches": [
+                "aarch64"
+            ]
+        },
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/3a/1b/3b16a9bc514a440a7a0883684111dcb1ef1aee960af2ca95da8fc775f124/numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+            "sha256": "a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "numpy",
+                "packagetype": "bdist_wheel"
+            },
+            "only-arches": [
+                "x86_64"
+            ]
+        },
+        {
+            "type": "file",
+            "url": "https://files.pythonhosted.org/packages/73/85/735720d04ec197c5dcfacdfc9922667c7f1f5f496a279b7ba4d7c74c4cc7/numpy-2.5.3-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+            "sha256": "c76d5dde9f445058f83d0c02af00557a4db91de9a9a57c0df87d1535001d654b",
+            "x-checker-data": {
+                "type": "pypi",
+                "name": "numpy",
+                "packagetype": "bdist_wheel"
+            },
+            "only-arches": [
+                "aarch64"
+            ]
+        }
+    ]
+}

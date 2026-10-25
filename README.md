@@ -206,6 +206,40 @@ an album folder.
 
 ## Hands-off
 
+### Watched folders
+
+Drop an album folder, or loose tracks, into a watched folder: once nothing in it has changed
+for a while (10 minutes by default; downloads in progress are waited for), the folder's
+profile identifies it, tags it and files it - moved or copied into that profile's library,
+or tagged where it is. Each watched folder belongs to one profile, so an inbox for vinyl
+rips can file into one library and a downloads folder into another.
+
+```bash
+tagmender watch --add ~/Music/Inbox --profile Lossy --auto   # file without asking
+tagmender watch --add ~/Downloads/Rips --profile Vinyl       # plans wait for approval
+tagmender watch --list
+tagmender watch --pending                                    # plans waiting for approval
+tagmender watch --approve all                                # (or a job id; --dismiss sets one aside)
+tagmender watch                                              # watch, in this terminal
+tagmender watch --service install                            # watch in the background, also at login
+```
+
+The desktop app has the same on its **Watched folders** page: the folders and what happens
+to what is dropped there, *Keep watching while TagMender is open*, *Run in the background*,
+the plans waiting for approval (Show plan / Apply / Apply all / Dismiss) and what was done
+recently. What it filed is remembered, so a library inside the watched folder is not taken
+for a new drop. An album nothing identifies stays where it was dropped (or goes to the
+profile's unresolved folder) and is looked at again after `retry.after_days`.
+
+Folder access: the .deb, the AppImage and a clone run as you, and so does the background
+service (a systemd user service, not sandboxed): they read and write every folder you can,
+libraries on `/media`, `/mnt`, `/run/media`, `/srv` or a mounted share included. The Flatpak
+asks for the same (`--filesystem=host`), keeps its settings in `~/.config/tagmender` like the
+others, and watches in the background through the desktop's Background portal (it starts at
+login; a Flatpak cannot install a systemd service).
+
+### Other unattended tools
+
 ```bash
 # keep unresolved albums looked at again, once a day, when last checked 30+ days ago
 AUDIT=~/Downloads/audit_extreme_music.csv OUT=~/Downloads/matching_extreme RECHECK_DAYS=30 \
@@ -356,6 +390,8 @@ PYTHON=/path/to/python3 ./run_tests.sh
 ```bash
 packaging/build_deb.sh             # dist/tagmender_<version>_all.deb (+ .sha256)
 packaging/build_appimage.sh        # dist/TagMender-<version>-x86_64.AppImage (needs uv)
+flatpak-builder --user --install --force-clean build-dir \
+    packaging/flatpak/io.github.herculepirate.TagMender.yml     # needs org.kde.Sdk//6.10, io.qt.PySide.BaseApp//6.10
 ```
 
 ## Licence

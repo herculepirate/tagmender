@@ -682,16 +682,98 @@ def cmd_retry(args):
     return EXIT_OK
 
 
+def _watch_manage(args):
+    """--list / --add / --remove / --pending / --approve / --dismiss / --service: the watch list
+    and the plans waiting for approval, as the app's Watched folders page has them."""
+    import watcher
+    if args.list:
+        rows = [(s["path"], n, pf.load(n)) for n in pf.names() for s in pf.load(n)["sources"] if s.get("watch")]
+        for path, n, p in rows:
+            how = {"move": f"moved into {p['destination']}", "copy": f"copied into {p['destination']}"}.get(
+                p["operation"], "tagged where it is")
+            print(f"{path}\t{n}\t{how}\t{'automatically' if p['unattended'] else 'asks first'}")
+        if not rows:
+            _err("No folder is watched. Add one: tagmender watch --add FOLDER --profile NAME")
+        return EXIT_OK
+    if args.add or args.remove:
+        folder = os.path.abspath(os.path.expanduser(args.add or args.remove))
+        same = lambda s: s.get("watch") and os.path.abspath(os.path.expanduser(s["path"])) == folder  # noqa: E731
+        name = args.profile_opt or args.profile
+        if args.add and not name:
+            _err("Which profile files what is dropped there? --profile NAME")
+            return EXIT_USAGE
+        try:
+            for n in pf.names():
+                p = pf.load(n)
+                if any(same(s) for s in p["sources"]) and (args.remove or n != name):
+                    d = p.to_dict()
+                    d["sources"] = [s for s in d["sources"] if not same(s)]
+                    pf.save(pf.from_dict(d))
+            if args.add:
+                d = pf.load(name).to_dict()
+                d["sources"] = [s for s in d["sources"] if not same(s)] + [
+                    {"path": folder, "watch": True, "recursive": True}]
+                if args.auto is not None:
+                    d["unattended"] = args.auto
+                pf.save(pf.from_dict(d))
+                p = pf.load(name)
+                _err(f"Watching {folder} for profile {name} "
+                     f"({'files albums automatically' if p['unattended'] else 'plans wait for --approve'}).")
+            else:
+                _err(f"No longer watching {folder}.")
+        except pf.ProfileError as exc:
+            _err(str(exc))
+            return EXIT_USAGE
+        return EXIT_OK
+    if args.pending:
+        for x in watcher.pending_plans():
+            for src, _label, to in x["albums"]:
+                print(f"{x['job']}\t{x['profile']}\t{src}\t-> {to}")
+        return EXIT_OK
+    if args.approve or args.dismiss:
+        want = args.approve or args.dismiss
+        plans = [x for x in watcher.pending_plans() if want in ("all", x["job"])]
+        if not plans:
+            _err(f"No plan waiting called {want} (tagmender watch --pending lists them).")
+            return EXIT_USAGE
+        for x in plans:
+            if args.dismiss:
+                watcher.dismiss_pending(x["path"])
+                print(f"dismissed\t{x['job']}")
+                continue
+            try:
+                res = watcher.apply_pending(x["path"])
+            except Exception as exc:                      # one plan never stops the others
+                _err(f"not applied: {x['job']}: {exc}")
+                continue
+            for r in res["albums"]:
+                print(f"{r['status']:<14} {r['album']}")
+        return EXIT_OK
+    if args.service:
+        if not watcher.service_supported():
+            _err("The background service needs Linux with systemd; run `tagmender watch` at login instead.")
+            return EXIT_ERR
+        msg = {"install": watcher.install_service, "stop": watcher.stop_service,
+               "status": watcher.service_status}[args.service]()
+        print(msg)
+        return EXIT_OK if msg in ("running", "stopped", "not installed") else EXIT_ERR
+    return None
+
+
 def cmd_watch(args):
     import watcher
+    done = _watch_manage(args)
+    if done is not None:
+        return done
     if args.nice:
         watcher.lower_priority()
     profs = [pf.load(args.profile_opt or args.profile)] if (args.profile_opt or args.profile) else None
     w = watcher.Watcher(profs, once=args.once)
-    if not w.profiles:
-        _err('No profile watches a folder. Add one: tagmender profiles set NAME \'sources=[{"path": "/music/inbox", '
-             '"watch": true}]\'')
+    if not w.profiles and (args.once or profs is not None):
+        _err("No profile watches a folder. Add one: tagmender watch --add FOLDER --profile NAME")
         return EXIT_USAGE
+    if not w.profiles:
+        _err("No profile watches a folder yet; waiting (tagmender watch --add FOLDER --profile NAME).")
     import signal
     signal.signal(signal.SIGTERM, lambda *_: setattr(w, "stop", True))
     try:
@@ -701,6 +783,8 @@ def cmd_watch(args):
         else:
             _err(f"Watching {len(w.roots())} folder(s); Ctrl+C or SIGTERM stops.")
             w.run()
+            if getattr(w, "already", False):
+                _err(f"Another TagMender is already watching (pid {watcher.watching_pid() or '?'}).")
     except KeyboardInterrupt:
         pass
     return EXIT_OK
@@ -781,6 +865,17 @@ def work_parsers(sub):
     a = sub.add_parser("watch", help="keep watched folders processed (foreground; see contrib/ for a service)")
     a.add_argument("--once", action="store_true", help="one pass, then exit")
     a.add_argument("--nice", action="store_true", help="lowest CPU and I/O priority")
+    g = a.add_mutually_exclusive_group()
+    g.add_argument("--list", action="store_true", help="the watched folders and their profiles")
+    g.add_argument("--add", metavar="FOLDER", help="watch FOLDER for --profile NAME")
+    g.add_argument("--remove", metavar="FOLDER", help="stop watching FOLDER")
+    g.add_argument("--pending", action="store_true", help="plans waiting for approval")
+    g.add_argument("--approve", metavar="JOB", help="apply a waiting plan (or: all)")
+    g.add_argument("--dismiss", metavar="JOB", help="set a waiting plan aside")
+    g.add_argument("--service", choices=("install", "stop", "status"),
+                   help="the systemd user service that watches while you are logged out too")
+    a.add_argument("--auto", action=argparse.BooleanOptionalAction, default=None,
+                   help="with --add: file albums without asking (a profile setting)")
     prof(a)
     a = sub.add_parser("formats", help="what each audio format supports")
     a.add_argument("--json", action="store_true")

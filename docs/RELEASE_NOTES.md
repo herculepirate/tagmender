@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+**Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
+an album folder or loose tracks dropped there are identified, tagged and moved (or copied)
+into that profile's library once nothing in them changes. The app's Watched folders page
+ties a folder to a profile (and moves it between profiles), shows what happens to what is
+dropped there, keeps watching while the app is open, installs the background service, lists
+the plans waiting for approval (Show plan / Apply / Apply all / Dismiss) and what was done
+recently; `tagmender watch --add/--remove/--list/--pending/--approve/--dismiss/--service`
+does the same from the command line. Fixed on the way: a library inside the watched folder
+had every album TagMender filed there identified again as a new drop; the background service
+only noticed a folder added in the app after a restart (profiles are now read on every pass);
+the service's systemd sandbox (ProtectSystem=strict) made every library outside home, /media
+and /mnt read-only - USB drives under /run/media, /srv - and can keep a user service from
+starting where unprivileged user namespaces are off; it is gone, the service runs as you do.
+Only one TagMender watches at a time (the app, the service and a terminal no longer race).
+`watch.settle_minutes` and `watch.interval_seconds` are checked; a whole drive cannot be
+watched. **New: a Flatpak** (packaging/flatpak/) with access to every folder, sharing
+~/.config/tagmender with the other installs; background watching through the Background portal.
+
 **Artwork / CoverUp reviewed** in three rounds (tests/test_artwork_review*.py): covers are always JPEG
 (a TIFF/WebP/PNG/CMYK scan is converted, transparency onto white), the embedded copy is
 capped at CoverUp's embed_max_side so a hi-res scan never fails an album, ID3v2.3 stays

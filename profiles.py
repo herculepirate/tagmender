@@ -83,7 +83,9 @@ DEFAULTS = {
     # where it goes
     "operation": "in_place",              # in_place | copy | move
     "destination": "",                    # library root for copy/move
-    "naming": {"preset": "tagmender", "template": ""},
+    # editions: "Separate editions in folder names": off | edition ([Vinyl], [WEB], [Tape])
+    #   | edition_year ([2019 Vinyl], [2014 CD]); album_editions: the same, added to the Album tag
+    "naming": {"preset": "tagmender", "template": "", "editions": "off", "album_editions": "off"},
     "companions": [".cue", ".log", ".lrc", ".jpg", ".jpeg", ".png", ".pdf", ".txt", ".m3u", ".m3u8"],
     "remove_empty_dirs": True,
     "filenames": {"compat": "windows", "max_name_bytes": 255, "max_dir_bytes": 255, "max_path_chars": 4096,
@@ -212,6 +214,10 @@ def validate(data: dict) -> list[str]:
     if d["preserve_timestamps"] not in (None, True, False):
         p.append("preserve_timestamps must be true, false or null (as Picard is set)")
     import levels
+    import naming as _naming
+    for k in ("editions", "album_editions"):
+        if (d["naming"] or {}).get(k, "off") not in _naming.EDITIONS:
+            p.append(f"naming.{k} must be one of {', '.join(_naming.EDITIONS)}")
     if d["tag_level"] not in levels.LEVELS:
         p.append(f"tag_level must be one of {', '.join(levels.LEVELS)}")
     for k in ("add", "drop"):

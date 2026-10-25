@@ -594,7 +594,17 @@ class Planner:
             album_dirs["prior"] = self._prior_album_dir(kept, dest_root)
         words = int(p["filenames"].get("max_album_words") or 5)
         if not (p["naming"] or {}).get("template", "").strip() and words != 5:
-            template = template.replace("$words(%album%,5)", f"$words(%album%,{words})")
+            template = template.replace("$words(%album%,5)", f"$words(%album%,{words})") \
+                .replace("$set(_maxwords,5)", f"$set(_maxwords,{words})")
+        nm = p["naming"] or {}
+        template = naming.with_editions(template, nm.get("editions", "off"))
+        # the release's first disc says which edition it is, for every file of it: a CD with a
+        # 7" bonus disc stays in one folder
+        def _disc(t):
+            n = str((t.get("discnumber") or ["1"])[0]).split("/")[0]
+            return int(n) if n.isdigit() else 1
+        with_media = [t for t in targets.values() if (t.get("media") or [""])[0]]
+        rel_media = (min(with_media, key=_disc).get("media") or [""])[0] if with_media else ""
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -614,6 +624,13 @@ class Planner:
             if ino:
                 self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
+            album_mode = nm.get("album_editions", "off")
+            if identified and album_mode != "off" and (target.get("album") or [""])[0]:
+                ed = naming.edition({**before, **target, "~edition_media": [rel_media] if rel_media else []},
+                                    album_mode)
+                album = str(target["album"][0])
+                if ed and not album.endswith(f"[{ed}]"):    # "I" -> "I [2019 Vinyl]", once
+                    target["album"] = [f"{album} [{ed}]"] + list(target["album"][1:])
             if identified and p["mark_resolved"]:
                 target.setdefault("tagmender", ["Resolved"])
                 if not before.get("tagmender_reason"):
@@ -647,7 +664,9 @@ class Planner:
                             / _fit_name(rel.name, p["filenames"])
                     notes = []
                 else:
-                    comps = naming.render(template, merged)
+                    # (for the name only, every file of the release has its first disc's media)
+                    comps = naming.render(template, {**merged, "~edition_media": [rel_media], "media": [rel_media]}
+                                          if rel_media else merged)
                     dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
                     if dst is not None:
                         dst = self._spelled(dst, dest_root)

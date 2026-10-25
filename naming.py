@@ -12,18 +12,24 @@ Supported (same meaning as in Picard unless noted):
   %_year%                    year of originaldate, else of date        (TagMender)
   %_albumartists_sorted%     the album artists (ALBUMARTISTS tag), A to Z; else the album artist as written (TagMender)
   %_multiartist%             "1" when a track artist differs from the album artist
+  %_edition%                 the edition: "<reissue year> <kind>" ("2019 Vinyl", "Vinyl", "2015 WEB",
+                             "2014 CD"); empty for an original CD and when the media is unknown (TagMender)
+  %_edition_kind%            the kind alone ("Vinyl", "WEB", "Tape"); empty for a CD (TagMender)
   $if(cond,then[,else])  $if2(a,b,...)  $not(x)  $and(a,b,...)  $or(a,b,...)
   $eq(a,b)  $ne(a,b)  $gt(a,b)  $lt(a,b)  $gte(a,b)  $lte(a,b)       (numbers compared as numbers)
   $num(n,len)  $left(t,n)  $right(t,n)  $lower(t)  $upper(t)  $title(t)  $trim(t)
   $replace(t,search,repl)  $firstalphachar(t[,other])  $truncate(t,n)  $year(date)
   $join(%name%,sep)  $getmulti(%name%,index)  $lenmulti(%name%)  $noop(...)
+  $set(name,v)  $unset(name)  $get(name)   variables for the rest of the name (never tags)
+  $rsearch(t,regex)  $sortmulti(multi)  $in(t,s)  $add(a,b)  $sub(a,b)  $mul(a,b)  $div(a,b)
   $words(t,n)    the first n words                                       (TagMender)
   $initials(t)   the first letter of each word, upper case               (TagMender)
   \\, \\$ \\% \\( \\) \\,   literal characters
 
-Not supported: $set/$unset/$copy and other functions that change tags (naming here
-never changes tags), $rsearch/$rreplace and plugin functions. An unknown function is
-an error when the template is checked, not a silent empty string.
+Not supported: $copy and other functions that change tags (naming here never changes
+tags; $set only names a variable for the rest of the name), $rreplace and plugin
+functions. An unknown function is an error when the template is checked, not a silent
+empty string.
 
 A "/" inside a tag value becomes "_" (it would otherwise create a folder), as in Picard.
 """
@@ -42,9 +48,112 @@ PRESETS = {
     "singleton": "$if2(%albumartist%,%artist%)/Singles/%artist% - %title%",
     "classical": ("$if2(%composer%,%albumartist%,%artist%)/$if(%_year%,%_year% - )%album%/"
                   "$if($gt(%totaldiscs%,1),$num(%discnumber%,1)-)$num(%tracknumber%,2) - %title%"),
+    # John's Picard file naming scripts, as Picard runs them (the edition part follows the
+    # profile's "Separate editions in folder names")
+    "all-music": '$noop( Folder artist: collaborators sorted A to Z, so "A & B" and "B & A" share one folder )\n$set(_folderartist,%albumartist%)\n$if($gt($lenmulti(%_albumartists%),1),$set(_folderartist,$join($sortmulti(%_albumartists%), & )))\n$if($gt($lenmulti(%albumartist%),1),$set(_folderartist,$join($sortmulti(%albumartist%), & )))\n$if2(%_folderartist%,%artist%)/\n$set(usedate,$if(%originaldate%,%originaldate%,%date%))\n\n$noop( Folder album name: at most this many words. Folder only, the ALBUM tag is untouched )\n$set(_maxwords,5)\n$set(_foldalbum,$if2($rsearch(%album%,^\\(\\(?:\\\\S+\\\\s+\\){0\\,$sub(%_maxwords%,1)}\\\\S+\\)),%album%))\n\n$noop( Edition: Vinyl / WEB / Tape, plus the pressing\'s own year for a reissue.\n       Original CD = no suffix; unknown media = no suffix )\n$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($in(%media%,Digital),WEB,$if($in(%media%,Cassette),Tape,$if(%media%,CD,)))))\n$set(_edyear,$if($and(%date%,$ne($left(%date%,4),$left(%usedate%,4))),$left(%date%,4),))\n$set(_edition,$if(%_edkind%,$if($or($ne(%_edkind%,CD),%_edyear%),$trim(%_edyear% %_edkind%)),))\n\n$left(%usedate%,4) - %_foldalbum%$if(%_edition%, [%_edition%])/\n$if($and(%totaldiscs%,$ne(%totaldiscs%,1)),Disc $num(%discnumber%,2)/,)\n$if($and(%totaldiscs%,$ne(%totaldiscs%,1)),\n$num($add($mul(%discnumber%,100),%tracknumber%),3),\n$num(%tracknumber%,2)\n).$initials($upper(%title%))',
+    "various-artists": "$if2(%albumartist%,$if(%compilation%,Various Artists,%artist%))/\n$set(usedate,$if($and(%originalyear%,$lt(%originalyear%,$left(%date%,4))),%originalyear%,%date%))\n\n$noop( Folder album name: at most this many words. Folder only, the ALBUM tag is untouched )\n$set(_maxwords,5)\n$set(_foldalbum,$if2($rsearch(%album%,^\\(\\(?:\\\\S+\\\\s+\\){0\\,$sub(%_maxwords%,1)}\\\\S+\\)),%album%))\n\n$noop( Edition: Vinyl / WEB / Tape, plus the pressing's own year for a reissue.\n       Original CD = no suffix; unknown media = no suffix )\n$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($in(%media%,Digital),WEB,$if($in(%media%,Cassette),Tape,$if(%media%,CD,)))))\n$set(_edyear,$if($and(%date%,$ne($left(%date%,4),$left(%usedate%,4))),$left(%date%,4),))\n$set(_edition,$if(%_edkind%,$if($or($ne(%_edkind%,CD),%_edyear%),$trim(%_edyear% %_edkind%)),))\n\n%_foldalbum% - $left(%usedate%,4)$if(%_edition%, [%_edition%])/\n$if($and(%totaldiscs%,$ne(%totaldiscs%,1)),Disc $num(%discnumber%,2)/,)\n$if($and(%totaldiscs%,$ne(%totaldiscs%,1)),\n$num($add($mul(%discnumber%,100),%tracknumber%),3),\n$num(%tracknumber%,2)\n).$initials($upper(%title%))",
+    "classical-performer": '$noop(Classical library naming — Performer/Album. Composers are browsed from the COMPOSER tags, not folders.)\n\n$noop(Folder artist: album artist only, never the per-track composer, so an album is never split across folders.\nCollaborations are sorted A to Z so "A & B" and "B & A" share one folder.)\n$set(_folderartist,%albumartist%)\n$if($gt($lenmulti(%_albumartists%),1),$set(_folderartist,$join($sortmulti(%_albumartists%), & )))\n$if($gt($lenmulti(%albumartist%),1),$set(_folderartist,$join($sortmulti(%albumartist%), & )))\n$replace($if2(%_folderartist%,%artist%),/,-)/\n\n$noop(Year prefix, preferring ORIGINALDATE over DATE)\n$set(usedate,$if2(%originaldate%,%date%))\n\n$noop( Folder album name: at most this many words, forward slashes stripped. Folder only, the ALBUM tag is untouched )\n$set(_maxwords,5)\n$set(_foldalbum,$replace($if2($rsearch(%album%,^\\(\\(?:\\\\S+\\\\s+\\){0\\,$sub(%_maxwords%,1)}\\\\S+\\)),%album%),/,-))\n\n$noop( Edition: Vinyl / WEB / Tape, plus the pressing\'s own year for a reissue.\n       Original CD = no suffix; unknown media = no suffix )\n$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($in(%media%,Digital),WEB,$if($in(%media%,Cassette),Tape,$if(%media%,CD,)))))\n$set(_edyear,$if($and(%date%,$ne($left(%date%,4),$left(%usedate%,4))),$left(%date%,4),))\n$set(_edition,$if(%_edkind%,$if($or($ne(%_edkind%,CD),%_edyear%),$trim(%_edyear% %_edkind%)),))\n\n$left(%usedate%,4) - %_foldalbum%$if(%_edition%, [%_edition%])/\n\n$noop(\nDisc subfolder unless confident this is a genuine single-disc release.\nErrs toward creating a Disc NN folder whenever there\'s any ambiguity.\n)\n$if($and($or($not(%totaldiscs%),$eq(%totaldiscs%,1)),$or($not(%discnumber%),$eq(%discnumber%,1))),,Disc $num($if2(%discnumber%,1),2)/)\n\n$noop(Track number + title, forward slashes stripped)\n$num(%tracknumber%,2) $replace(%title%,/,-)',
 }
 
 MULTI_SEP = "; "
+
+# "Separate editions in folder names" (profile naming.editions)
+EDITIONS = ("off", "edition", "edition_year")
+EDITION_VAR = {"edition": "_edition_kind", "edition_year": "_edition"}
+_VINYL = re.compile(r'vinyl|\b(?:7|10|12)\s*(?:"|\u201d|\u2033|\'\'|-?inch\b|in\b)', re.I)
+
+
+def edition_parts(tags: dict) -> tuple[str, str]:
+    """(kind, reissue year) of a release from its tags. Kind from the media tag: Vinyl
+    (vinyl, 7"/10"/12"), WEB (digital), Tape (cassette), CD for anything else, "" when
+    there is no media tag. The reissue year is the release's own date year when it is not
+    the original year. "~edition_media" (the release's first disc, set by the planner)
+    wins over the file's own media, so a set mixing media stays in one folder."""
+    def first(k):
+        v = tags.get(k)
+        v = (v if isinstance(v, list) else [v]) if v not in (None, "") else []
+        return str(v[0]).strip() if v else ""
+    media = first("~edition_media") or first("media")
+    if not media:
+        return "", ""
+    low = media.lower()
+    kind = "Vinyl" if _VINYL.search(media) else "WEB" if "digital" in low else "Tape" if "cassette" in low else "CD"
+    orig = (first("originalyear") or first("originaldate"))[:4]
+    year = first("date")[:4]
+    reissue = year if year.isdigit() and orig.isdigit() and year != orig else ""
+    return kind, reissue
+
+
+def edition(tags: dict, mode: str = "edition_year") -> str:
+    """The edition text for a folder or the album tag: "2019 Vinyl", "Vinyl", "2014 CD";
+    "" for an original CD, unknown media or mode "off"."""
+    if mode not in EDITION_VAR:
+        return ""
+    kind, reissue = edition_parts(tags)
+    if not kind:
+        return ""
+    if mode == "edition":
+        return "" if kind == "CD" else kind
+    return "" if kind == "CD" and not reissue else f"{reissue} {kind}".strip()
+
+
+_ALBUM_EXPR = re.compile(r"\$words\(%album%,\s*\d+\)|%album%", re.I)
+
+
+def with_editions(template: str, mode: str) -> str:
+    """The template with [edition] after the album in its album folder ($if(%_edition%,
+    [%_edition%])); unchanged for "off", or when the template names no %album% folder."""
+    piece = "$if(%_edition%, [%_edition%])"
+    if "$set(_edition," in template and piece in template:     # a Picard script with its own edition
+        if mode == "off":
+            return template.replace(piece, "")
+        if mode == "edition":                                  # the kind alone: [Vinyl], never [2019 Vinyl]
+            return template.replace(piece, "$set(_edition,$if($ne(%_edkind%,CD),%_edkind%))" + piece)
+        return template
+    var = EDITION_VAR.get(mode)
+    if not var:
+        return template
+    for m in _ALBUM_EXPR.finditer(template):
+        rest = template[m.end():]
+        # the album folder: an %album% followed (soon) by "/" - not the album inside a file name
+        if "/" in rest:
+            return template[:m.end()] + f"$if(%{var}%, [%{var}%])" + rest
+    return template
+
+
+_PICARD_EDITION = [
+    "$noop( Edition: Vinyl / WEB / Tape, plus the pressing's own year for a reissue.",
+    "       Original CD = no suffix; unknown media = no suffix )",
+    "$set(usedate,$if(%originaldate%,%originaldate%,%date%))",
+    "$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($in(%media%,Digital),WEB,$if($in(%media%,Cassette),Tape,"
+    "$if(%media%,CD,)))))",
+    "$set(_edyear,$if($and(%date%,$ne($left(%date%,4),$left(%usedate%,4))),$left(%date%,4),))",
+    "$set(_edition,$if(%_edkind%,$if($or($ne(%_edkind%,CD),%_edyear%),$trim(%_edyear% %_edkind%)),))",
+]
+
+
+def picard_script(mode: str, album_tag: str = "off", template: str = "") -> str:
+    """The Picard lines that do what these settings do. For a preset that is a Picard
+    script already (all-music, various-artists, classical-performer): that script, with
+    the edition as set. Otherwise the edition lines (as in those scripts) and the piece to
+    add after the album in the folder part of the naming script; and, when the Album tag
+    carries the edition too, the tagger-script line for that."""
+    out = []
+    if mode in EDITION_VAR or album_tag in EDITION_VAR:
+        if template and "$set(_edition," in template:
+            out += ["$noop( File naming script (Options > File Naming) )", with_editions(template, mode)]
+        elif mode in EDITION_VAR:
+            out += ["$noop( In the file naming script, before the folders: )", *_PICARD_EDITION]
+            if mode == "edition":
+                out.append("$set(_edition,$if($ne(%_edkind%,CD),%_edkind%))")
+            out += ["$noop( and right after the album in the folder part: )", "$if(%_edition%, [%_edition%])"]
+    if album_tag in EDITION_VAR:
+        out += ["", "$noop( Tagger script (Options > Scripting): the edition in the Album tag )",
+                *_PICARD_EDITION]
+        if album_tag == "edition":
+            out.append("$set(_edition,$if($ne(%_edkind%,CD),%_edkind%))")
+        out.append("$if(%_edition%,$set(album,%album% [%_edition%]))")
+    return "\n".join(out)
 
 
 class TemplateError(ValueError):
@@ -121,6 +230,7 @@ def compile_template(src: str):
 class Ctx:
     def __init__(self, tags: dict):
         self.tags = {k.lower(): (v if isinstance(v, list) else [v]) for k, v in tags.items() if v not in (None, "")}
+        self.local = {}                                   # $set variables (never tags)
         self._derive()
 
     def _derive(self):
@@ -135,11 +245,21 @@ class Ctx:
             names = [aa] if aa else []
         if names:
             t["_albumartists_sorted"] = sorted(dict.fromkeys(names), key=str.casefold)
+        if t.get("albumartists") and "_albumartists" not in t:     # Picard's %_albumartists%
+            t["_albumartists"] = list(t["albumartists"])
         a, aa = (t.get("artist") or [""])[0], (t.get("albumartist") or [""])[0]
         if a and aa and a != aa:
             t["_multiartist"] = ["1"]
+        album = str((t.get("album") or [""])[0])
+        for var, mode in (("_edition", "edition_year"), ("_edition_kind", "edition")):
+            ed = edition(t, mode)
+            if ed and not album.endswith(f"[{ed}]"):       # (the album tag may carry it already)
+                t[var] = [ed]
 
     def var(self, name, joined=True):
+        if name.lower() in self.local:                # set by $set in this name
+            v = self.local[name.lower()]
+            return v if joined else [x for x in v.split(MULTI_SEP) if x]
         vals = self.tags.get(name.lower())
         if not vals:
             return "" if joined else []
@@ -220,9 +340,7 @@ def _f_num(ctx, args):
 
 
 def _f_join(ctx, args):
-    name = _var_name(args[0])
-    sep = _a(ctx, args, 1)
-    return sep.join(ctx.var(name, joined=False)) if name else _a(ctx, args, 0)
+    return _a(ctx, args, 1).join(_multi(ctx, args[0]))
 
 
 def _f_getmulti(ctx, args):
@@ -234,9 +352,65 @@ def _f_getmulti(ctx, args):
         return ""
 
 
+def _multi(ctx, arg):
+    """A multi-value argument: a variable's values, or a text split at "; " (as Picard)."""
+    name = _var_name(arg)
+    if name and arg[0][0] == "var":
+        return ctx.var(name, joined=False)
+    text = _ev(arg, ctx)
+    return [x for x in text.split(MULTI_SEP) if x] if text else []
+
+
 def _f_lenmulti(ctx, args):
-    name = _var_name(args[0])
-    return str(len(ctx.var(name, joined=False))) if name else "0"
+    return str(len(_multi(ctx, args[0])))
+
+
+def _f_set(ctx, args):
+    name = _var_name(args[0]) or _ev(args[0], ctx).strip().lower()
+    value = _a(ctx, args, 1)
+    if name:
+        ctx.local[name] = value
+    return ""
+
+
+def _f_unset(ctx, args):
+    name = _var_name(args[0]) or _ev(args[0], ctx).strip().lower()
+    ctx.local[name] = ""
+    return ""
+
+
+def _f_rsearch(ctx, args):
+    try:
+        m = re.search(_a(ctx, args, 1), _a(ctx, args, 0))
+    except re.error as exc:
+        raise TemplateError(f"$rsearch: bad pattern: {exc}") from None
+    if not m:
+        return ""
+    try:
+        return m.group(1) or ""
+    except IndexError:
+        return m.group(0)
+
+
+def _int(s):
+    try:
+        return int(float(str(s).strip()))
+    except ValueError:
+        return None
+
+
+def _arith(op):
+    def f(ctx, args):
+        vals = [_int(_a(ctx, args, i)) for i in range(len(args))]
+        if not vals or any(v is None for v in vals):
+            return ""
+        out = vals[0]
+        for v in vals[1:]:
+            if op == "div" and v == 0:
+                return ""
+            out = out + v if op == "add" else out - v if op == "sub" else out * v if op == "mul" else out // v
+        return str(out)
+    return f
 
 
 def _f_firstalphachar(ctx, args):
@@ -273,6 +447,11 @@ FUNCS = {
     "trim": lambda c, a: _a(c, a, 0).strip(),
     "replace": lambda c, a: _a(c, a, 0).replace(_a(c, a, 1), _a(c, a, 2)) if _a(c, a, 1) else _a(c, a, 0),
     "noop": lambda c, a: "",
+    "set": _f_set, "unset": _f_unset, "get": lambda c, a: c.var(_var_name(a[0]) or _a(c, a, 0).strip()),
+    "rsearch": _f_rsearch,
+    "add": _arith("add"), "sub": _arith("sub"), "mul": _arith("mul"), "div": _arith("div"),
+    "in": lambda c, a: "1" if _a(c, a, 1) in _a(c, a, 0) else "",
+    "sortmulti": lambda c, a: MULTI_SEP.join(sorted(_multi(c, a[0]))),
     "words": lambda c, a: _words(_a(c, a, 0), _a(c, a, 1)),
     "initials": lambda c, a: _initials(_a(c, a, 0)),
 }

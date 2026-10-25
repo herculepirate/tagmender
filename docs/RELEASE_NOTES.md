@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**New: editions of one album in separate folders** (profile naming settings, and in the
+desktop app): "Separate editions in folder names" (Off / Edition / Edition + reissue year)
+gives `2004 - I [2019 Vinyl]`, `2004 - I [2014 CD]`, `1986 - Reign in Blood [2015 WEB]`;
+an original CD and albums without a media tag keep their folder. The edition can go into
+the Album tag too. A release mixing media (a CD with a 7" bonus disc) stays in one folder.
+The desktop app shows the matching Picard script lines. John's three Picard naming scripts
+are presets (`all-music`, `various-artists`, `classical-performer`); naming now also knows
+Picard's `$set`, `$rsearch`, `$sortmulti`, `$in`, `$add`, `$sub`, `$mul`, `$div`.
+
 **File operations reviewed** in fourteen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.

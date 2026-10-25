@@ -890,6 +890,26 @@ class Profiles(QWidget):
             arow.addWidget(self.aud[key])
         self.level.currentTextChanged.connect(lambda t: [c.setEnabled(t == "audiophile") for c in self.aud.values()])
         self.unattended = QCheckBox("Apply without asking (watched folders)")
+        edition_labels = {"off": "Off", "edition": "Edition  ([Vinyl], [WEB], [Tape])",
+                          "edition_year": "Edition + reissue year  ([2019 Vinyl], [2014 CD])"}
+        self.editions = QComboBox()
+        self.album_editions = QComboBox()
+        for box in (self.editions, self.album_editions):
+            for k in naming.EDITIONS:
+                box.addItem(edition_labels[k], k)
+        self.editions.setToolTip("Separate editions of one album in folder names: a vinyl rip, a CD and a\n"
+                                 "download each get a folder of their own. An original CD gets no suffix;\n"
+                                 "albums without a media tag keep their folder.")
+        self.album_editions.setToolTip("Add the edition to the Album tag too: \"I\" becomes \"I [2019 Vinyl]\"")
+        self.picard_btn = QPushButton("Picard script…")
+        self.picard_btn.setToolTip("The Picard naming-script and tagger-script lines that do the same")
+        self.picard_btn.clicked.connect(self.show_picard_script)
+        erow = QHBoxLayout()
+        erow.addWidget(self.editions, 1)
+        erow.addWidget(self.picard_btn)
+        for box in (self.editions, self.album_editions):
+            box.currentIndexChanged.connect(lambda _i: self.picard_btn.setEnabled(
+                self.editions.currentData() != "off" or self.album_editions.currentData() != "off"))
         form.addRow("Description", self.desc)
         form.addRow("Files", self.op)
         form.addRow("Destination", drow)
@@ -899,6 +919,8 @@ class Profiles(QWidget):
         form.addRow("Replace existing tags at ≥", self.t_rep)
         form.addRow("Rename or move at ≥", self.t_org)
         form.addRow("Naming", self.naming)
+        form.addRow("Separate editions in folder names", erow)
+        form.addRow("Edition in the Album tag", self.album_editions)
         form.addRow("Only formats", self.formats)
         form.addRow("Unresolved albums", self.unres)
         form.addRow("Tagging level", self.level)
@@ -982,6 +1004,10 @@ class Profiles(QWidget):
             self.t_rep.setValue(th["replace_min_confidence"])
             self.t_org.setValue(th["organize_min_confidence"])
             self.naming.setCurrentText(p["naming"]["preset"])
+            for box, key in ((self.editions, "editions"), (self.album_editions, "album_editions")):
+                box.setCurrentIndex(max(0, box.findData(p["naming"].get(key, "off"))))
+            self.picard_btn.setEnabled(self.editions.currentData() != "off" or
+                                       self.album_editions.currentData() != "off")
             self.formats.setText(" ".join(p["formats"]))
             self.unres.setCurrentText(p["unresolved"]["action"])
             self.art.setChecked(p["artwork"]["enabled"])
@@ -1086,6 +1112,35 @@ class Profiles(QWidget):
             self.reload()
             self.win.pages["Overview"].refresh_profiles()
 
+    def picard_script_text(self) -> str:
+        import naming
+        try:
+            tpl = naming.PRESETS.get(self.naming.currentText(), "")
+        except AttributeError:
+            tpl = ""
+        return naming.picard_script(self.editions.currentData(), self.album_editions.currentData(), tpl)
+
+    def show_picard_script(self):
+        text = self.picard_script_text()
+        if not text:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Picard script for editions")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("For Picard to name and tag as this profile does. (Picard works the edition out "
+                             "per track: a set mixing media, such as a CD with a 7\" bonus disc, gets two "
+                             "folders there; TagMender keeps it in one.)"))
+        box = QPlainTextEdit(text)
+        box.setReadOnly(True)
+        lay.addWidget(box)
+        btns = QDialogButtonBox(QDialogButtonBox.Close)
+        copy = btns.addButton("Copy", QDialogButtonBox.ActionRole)
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+        dlg.resize(760, 360)
+        dlg.exec()
+
     def save(self):
         name = self.scope()
         if name == "global":
@@ -1102,6 +1157,8 @@ class Profiles(QWidget):
                                                   "replace_min_confidence": self.t_rep.value(),
                                                   "organize_min_confidence": self.t_org.value()})
         data.setdefault("naming", {})["preset"] = self.naming.currentText()
+        data["naming"]["editions"] = self.editions.currentData()
+        data["naming"]["album_editions"] = self.album_editions.currentData()
         data.setdefault("unresolved", {})["action"] = self.unres.currentText()
         data.setdefault("artwork", {})["enabled"] = self.art.isChecked()
         data["tag_level"] = self.level.currentText()

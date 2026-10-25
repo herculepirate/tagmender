@@ -33,7 +33,9 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `artwork` | CoverUp, embed front, cover.jpg only into folders without an image | |
 | `operation` | `in_place` | `in_place`, `copy`, `move` |
 | `destination` | — | must exist (never created); required for copy/move |
-| `naming` | preset `tagmender` | or `{"template": "..."}` |
+| `naming` | preset `tagmender` | or `{"template": "..."}`; presets `all-music`, `various-artists`, `classical-performer` are John's Picard scripts |
+| `naming.editions` | `off` | "Separate editions in folder names": `edition` adds [Vinyl] / [WEB] / [Tape]; `edition_year` adds [2019 Vinyl] / [2014 CD] (an original CD, and unknown media, get nothing) |
+| `naming.album_editions` | `off` | the same values, added to the Album tag ("I" becomes "I [2019 Vinyl]"); the folder then never adds it twice |
 | `companions` | .cue .log .lrc .jpg .png .pdf .txt .m3u | go along with a moved/copied album from the folders holding its music; subfolders without music (Scans, covers) go entirely; per-track files follow their track's new name |
 | `preserve_timestamps` | `null` | keep files' modification times; `null` follows Picard's "Preserve timestamps of tagged files" |
 | `filenames` | windows-compatible, 255 bytes per name, 4096 per path, 5-word album folders | `abbreviations`: `{"Volume": "Vol."}` |

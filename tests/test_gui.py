@@ -155,6 +155,30 @@ class Gui(te.Base):
         self.assertEqual((p["tag_level"], p["audiophile"]["acoustid"], p["audiophile"]["lyrics"]),
                          ("audiophile", False, True))
 
+    def test_profile_edition_settings_are_saved_and_offer_picard_lines(self):
+        import profiles as pf
+        pf.save(pf.from_dict({"name": "Ed"}))
+        pr = self.win.pages["Profiles"]
+        pr.reload()
+        self.app.processEvents()
+        pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Ed"))
+        self.app.processEvents()
+        self.assertEqual((pr.editions.currentData(), pr.album_editions.currentData()), ("off", "off"))
+        self.assertFalse(pr.picard_btn.isEnabled())
+        pr.editions.setCurrentIndex(pr.editions.findData("edition_year"))
+        self.assertTrue(pr.picard_btn.isEnabled())
+        self.assertIn("$if(%_edition%, [%_edition%])", pr.picard_script_text())
+        pr.album_editions.setCurrentIndex(pr.album_editions.findData("edition"))
+        self.assertIn("$set(album,%album% [%_edition%])", pr.picard_script_text())
+        pr.save()
+        n = pf.load("Ed")["naming"]
+        self.assertEqual((n["editions"], n["album_editions"]), ("edition_year", "edition"))
+        pr.reload()
+        self.app.processEvents()
+        pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Ed"))
+        self.app.processEvents()
+        self.assertEqual((pr.editions.currentData(), pr.album_editions.currentData()), ("edition_year", "edition"))
+
     def test_settings_never_show_a_saved_key(self):
         st = self.win.pages["Settings"]
         st.fields["fanart"].setText("SECRET-FANART")

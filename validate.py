@@ -80,13 +80,11 @@ def file_ids(folder):
 
 
 def album_folders(library, artist=None):
-    """library/Artist/Album folders holding audio (in them or in Disc subfolders)."""
+    """The album folders of each artist folder, however deep (in them or in Disc subfolders)."""
     for a in sorted(Path(library).iterdir()):
         if not a.is_dir() or (artist and artist.casefold() not in a.name.casefold()):
             continue
-        for d in sorted(a.iterdir()):
-            if d.is_dir() and any(p.suffix.lower() in ma.AUDIO_EXT for p in d.rglob("*")):
-                yield d
+        yield from ma.album_dirs(a)            # nested folders too: Artist/Albums/<album>
 
 
 def original_names(state, journals):
@@ -403,7 +401,8 @@ def main():
             continue
         mb_id, dg_id = file_ids(d)
         original = names.get(str(d)) or str(d)
-        row = {"FullPath": str(d), "AlbumArtistFolder": d.parent.name, "AlbumFolder": Path(original).name,
+        artist_folder = Path(d).relative_to(lib).parts[0]          # also for Artist/Albums/<album>
+        row = {"FullPath": str(d), "AlbumArtistFolder": artist_folder, "AlbumFolder": Path(original).name,
                "Status": "untagged"}
         rec = {"folder": str(d), "original_folder": Path(original).name, "tags_mb": mb_id, "tags_discogs": dg_id,
                "version": current, "checked": round(time.time())}

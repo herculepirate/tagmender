@@ -141,6 +141,29 @@ def read_tags(path):
     return out, length
 
 
+_DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*\d+\b|^\d{1,2}$", re.I)
+
+
+def album_dirs(top):
+    """Album folders under an artist folder, however deep (Artist/Albums/<album>); a
+    disc folder counts as its parent's. Same rule as match_albums.album_dirs."""
+    owners = []
+    for dirpath, dirs, names in os.walk(top):
+        dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete")
+        d = Path(dirpath)
+        if d == Path(top) or not any(Path(n).suffix.lower() in AUDIO_EXT for n in names):
+            continue
+        owner = d.parent if _DISC_DIR.match(d.name) and d.parent != Path(top) else d
+        if owner not in owners:
+            owners.append(owner)
+    # every direct subfolder still gets a row (one holding only an ISO or scans, as before)
+    for c in sorted(p for p in Path(top).iterdir()
+                    if p.is_dir() and not p.name.startswith((".", "_")) and p.name != "2delete"):
+        if not any(o == c or c in o.parents for o in owners):
+            owners.append(c)
+    return sorted(owners)
+
+
 def audit_album(album_dir, log):
     audio, isos, images = [], [], []
     for dirpath, _dirs, files in os.walk(album_dir):
@@ -257,7 +280,7 @@ def main():
             if artist_dir.name.strip().lower() in skip:
                 skipped.append(artist_dir.name)
                 continue
-            for album_dir in sorted(p for p in artist_dir.iterdir() if p.is_dir()):
+            for album_dir in album_dirs(artist_dir):
                 row = audit_album(album_dir, log)
                 row.update({"AlbumArtistFolder": artist_dir.name,
                             "AlbumFolder": album_dir.name,

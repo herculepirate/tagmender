@@ -629,6 +629,27 @@ def documents_text(album_dir, ocr=True, db=None):
         f"({p.name})\n{_URL.sub(' ', document_text(p, ocr=ocr))}" for p in docs))
 
 
+DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*\d+\b|^\d{1,2}$", re.I)
+
+
+def album_dirs(top):
+    """The album folders under an artist folder, however deep (Rotting Christ/Albums/
+    1993 - Thy Mighty Contract): every folder holding audio, a disc folder ("Disc 02",
+    "CD1") counting as its parent's. Hidden, "_" and 2delete folders are skipped."""
+    owners = []
+    for dirpath, dirs, names in os.walk(top):
+        dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete")
+        d = Path(dirpath)
+        if d == Path(top):
+            continue
+        if not any(Path(n).suffix.lower() in AUDIO_EXT and not n.startswith(".") for n in names):
+            continue
+        owner = d.parent if DISC_DIR.match(d.name) and d.parent != Path(top) else d
+        if owner not in owners:
+            owners.append(owner)
+    return sorted(owners)
+
+
 def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     """blind=True (validate.py): the files were tagged already, so their release IDs,
     ISRCs, label, catalogue number, barcode, country, date and year came FROM a release

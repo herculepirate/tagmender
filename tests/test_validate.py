@@ -162,6 +162,30 @@ class Validate(unittest.TestCase):
         self.assertIs(va.other_album(r("Axioma Ethica Odini", cd), r("Vertebrae", [x + 40 for x in cd])), True)
         self.assertIs(va.other_album(r("Axioma Ethica Odini", cd), r("Axioma Ethica Odini", cd[:4] + [999])), True)
 
+    def test_albums_nested_deeper_in_the_artist_folder_are_found(self):
+        """Rotting Christ/Albums/<11 albums>: each album is found on its own; disc folders
+        still belong to their album; an artist's top-level album too."""
+        lib = self.tmp / "lib"
+        for rel in ("Rotting Christ/Albums/1993 - Thy Mighty Contract/01.flac",
+                    "Rotting Christ/Albums/1997 - A Dead Poem/Disc 01/101.flac",
+                    "Rotting Christ/Albums/1997 - A Dead Poem/Disc 02/201.flac",
+                    "Rotting Christ/2016 - Rituals/01.flac",
+                    "Rotting Christ/2delete/old/01.flac"):
+            (lib / rel).parent.mkdir(parents=True, exist_ok=True)
+            (lib / rel).write_bytes(b"")
+        got = [str(p.relative_to(lib)) for p in va.album_folders(lib)]
+        self.assertEqual(got, ["Rotting Christ/2016 - Rituals", "Rotting Christ/Albums/1993 - Thy Mighty Contract",
+                               "Rotting Christ/Albums/1997 - A Dead Poem"])
+        # the audit that lists untagged albums for match_albums finds the same ones (and still
+        # lists a folder holding only an ISO, as before)
+        import audit_untagged
+        (lib / "Rotting Christ" / "2001 - SACD" ).mkdir()
+        (lib / "Rotting Christ" / "2001 - SACD" / "x.iso").write_bytes(b"")
+        got = [str(p.relative_to(lib)) for p in audit_untagged.album_dirs(lib / "Rotting Christ")]
+        self.assertEqual(got, ["Rotting Christ/2001 - SACD", "Rotting Christ/2016 - Rituals",
+                               "Rotting Christ/Albums/1993 - Thy Mighty Contract",
+                               "Rotting Christ/Albums/1997 - A Dead Poem"])
+
 class Rechecks(unittest.TestCase):
     def test_disagreements_are_checked_again_after_a_fix(self):
         st = sqlite3.connect(":memory:")

@@ -34,6 +34,18 @@ import plan as planmod
 import profiles as pf
 
 PARTIAL = (".part", ".crdownload", ".tmp", ".!qb", ".partial", ".download", ".opdownload")
+import re as _re
+# rsync's temporary file: ".01 Track.flac.Xy12Ab" next to where 01 Track.flac will be
+_RSYNC_TMP = _re.compile(r"^\..+\.[A-Za-z0-9]{1,5}\.[A-Za-z0-9]{6}$")
+
+
+def _partial(name: str) -> bool:
+    n = name.lower()
+    return n.endswith(PARTIAL) or n.startswith(("~$", ".~lock.")) or bool(_RSYNC_TMP.match(name))
+
+
+def _changed_at(st) -> float:
+    return st.st_mtime
 PROVIDER_RETRY = [600, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600]
 # outcomes tried again later: a provider outage, an unresolved album, and an album that
 # failed or was blocked for what may be a passing reason (a share dropping, a locked file)
@@ -101,18 +113,25 @@ def snapshot(folder: Path, files=None, deep=True):
     for in the folder - below it too when deep (an album folder; not a watched root)."""
     entries, newest, partial = [], 0.0, False
     if files is not None:                # (anything new in the folder is "still changing" too)
+        if deep:                          # (an album folder; a watched root's time is everyone's)
+            try:
+                newest = os.stat(folder).st_mtime
+            except OSError:
+                pass
         try:
             around = Path(folder).rglob("*") if deep else Path(folder).iterdir()
             for p in around:
                 n = p.name.lower()
                 if executor.STAGE_TAG in n:
                     continue
-                if n.endswith(PARTIAL) or n.startswith(("~$", ".~lock.")):
+                if _partial(p.name):
                     partial = True
                     break
                 try:
-                    if deep and p.is_file():
-                        newest = max(newest, p.stat().st_mtime)
+                    # a file, or a folder: a copy that keeps the files' own times (cp -a,
+                    # rsync -a, file managers) still changes the folder's time as files arrive
+                    if deep and (p.is_file() or p.is_dir()):
+                        newest = max(newest, _changed_at(p.stat()))
                 except OSError:
                     pass
         except OSError:
@@ -123,7 +142,7 @@ def snapshot(folder: Path, files=None, deep=True):
         name = p.name.lower()
         if executor.STAGE_TAG in name:                     # TagMender's own staging files
             continue
-        if name.endswith(PARTIAL) or name.startswith(("~$", ".~lock.")):
+        if _partial(p.name):
             partial = True
             continue
         try:
@@ -131,7 +150,7 @@ def snapshot(folder: Path, files=None, deep=True):
         except FileNotFoundError:
             continue
         entries.append(p)
-        newest = max(newest, st.st_mtime)
+        newest = max(newest, _changed_at(st))
     return ex.signature(entries), newest, partial
 
 
@@ -251,20 +270,29 @@ class Watcher:
         """One pass over every watched root. Returns {folder: what happened}. One pass at a
         time across processes: the app watching while the background service runs too only
         lets one of them look (the other's pass is skipped, not queued)."""
-        import fcntl
-        ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(ex.STATE_DIR / "watch.lock", "w") as fh:
-            try:
-                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+        with pass_lock(blocking=False) as held:
+            if not held:
                 self.skipped = "another TagMender process is checking the watched folders"
                 self.log.info("watch: %s; this pass is skipped", self.skipped)
                 return {}
-            try:
-                self.skipped = ""
-                return self._tick()
-            finally:
-                fcntl.flock(fh, fcntl.LOCK_UN)
+            self.skipped = ""
+            return self._tick()
+
+    @staticmethod
+    def library_inside(root: Path, prof) -> list:
+        """The profile's library (and unresolved folder) where it lies inside the watched folder:
+        what is already there - filed by TagMender or not - is never taken for a new drop."""
+        out = []
+        for d in ([prof["destination"]] if prof["operation"] in ("copy", "move") else []) + \
+                ([prof["unresolved"].get("move_to")] if (prof.get("unresolved") or {}).get("action") == "move"
+                 else []):
+            if not d:
+                continue
+            d = Path(os.path.realpath(os.path.expanduser(d)))
+            r = Path(os.path.realpath(root))
+            if d != r and r in d.parents:
+                out.append(d)
+        return out
 
     def _tick(self):
         done = {}
@@ -283,14 +311,21 @@ class Watcher:
                 db.close()
                 return done
         seen = set()
+        self.stop_pass = False
         for root, prof in self.roots():
+            if self.stop or self.stop_pass:
+                break
             if not root.is_dir():
                 self.log.warning("watched folder %s is not available (unmounted?)", root)
                 continue
             e = eng_mod.Engine(prof, log=self.log)
+            libs = self.library_inside(root, prof)
             for g in e.albums_in(root):
                 if self.stop:
                     break
+                real = Path(os.path.realpath(g.folder))
+                if any(real == lb or lb in real.parents for lb in libs):
+                    continue                               # already in the library
                 key = (str(g.folder), tuple(sorted(map(str, g.files))))
                 if key in seen:
                     continue
@@ -305,6 +340,10 @@ class Watcher:
                     continue
                 if not go:
                     continue
+                if executor.job_running():                 # a plan being applied, an undo: it may be this album
+                    self.log.info("watch: a job is changing files; the rest of this pass waits")
+                    self.stop_pass = True
+                    break
                 prev = db.execute("SELECT attempts FROM processed WHERE folder=?", (k,)).fetchone()
                 attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
                 try:
@@ -324,10 +363,15 @@ class Watcher:
                     elif not planmod.has_work(a):                 # nothing to change: no plan to keep
                         outcome = a["status"]
                     else:
-                        pdir = ex.STATE_DIR / "plans"
+                        plan["watch"] = {"key": k, "folder": planmod.db_text(g.folder),
+                                         "files": [planmod.db_text(f) for f in scope], "deep": deep}
+                        superseded = _supersede(k)          # one plan per album waits, the newest
+                        pdir = plans_dir()
                         pdir.mkdir(parents=True, exist_ok=True)
                         planmod.save(plan, pdir / f"{plan['job']}.json")
                         outcome = "planned"
+                        if superseded:
+                            self.log.info("%s: plan %s replaces %s", g.folder, plan["job"], ", ".join(superseded))
                     errs = prop.provider_errors or {}
                     retryable = prop.status == "unresolved" and any(
                         v in ("outage", "rate_limited", "invalid_response") for v in errs.values())
@@ -363,7 +407,11 @@ class Watcher:
                 self.already = True
                 return
             self.already = False
+            started = time.time()
             while not self.stop:
+                if stop_requested(started):
+                    self.log.info("watch: asked to stop")
+                    break
                 if not self.fixed:
                     try:
                         self.profiles = self._watched_profiles()
@@ -378,7 +426,38 @@ class Watcher:
                 interval = min((p["watch"]["interval_seconds"] for p in self.profiles), default=300)
                 end = time.time() + max(1, interval)
                 while not self.stop and time.time() < end:
+                    if stop_requested(started):
+                        self.log.info("watch: asked to stop")
+                        self.stop = True
+                        break
                     time.sleep(min(1, max(0, end - time.time())))
+
+
+def _stop_file() -> Path:
+    return ex.STATE_DIR / "watch.stop"
+
+
+def request_stop():
+    """Ask the process watching now to stop (a signal cannot reach it from another Flatpak
+    instance: each has its own process numbers)."""
+    ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _stop_file().write_text(str(time.time()))
+
+
+def stop_requested(since: float) -> bool:
+    """A stop was asked for after `since` (the watcher's start); the request is used up."""
+    f = _stop_file()
+    try:
+        asked = float(f.read_text().strip() or 0)
+    except (OSError, ValueError):
+        return False
+    if asked < since:
+        return False
+    try:
+        f.unlink()
+    except OSError:
+        pass
+    return True
 
 
 def _run_lock_file() -> Path:
@@ -392,12 +471,16 @@ class run_lock:
         import fcntl
         ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
         self.fh = open(_run_lock_file(), "a+")
-        try:
-            fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            self.fh.close()
-            self.fh = None
-            return False
+        for n in range(20):                  # (watching_pid's brief look is not another watcher)
+            try:
+                fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if n == 19:
+                    self.fh.close()
+                    self.fh = None
+                    return False
+                time.sleep(0.1)
         self.fh.seek(0)
         self.fh.truncate()
         self.fh.write(str(os.getpid()))
@@ -462,31 +545,89 @@ def pending_plans() -> list[dict]:
     return out
 
 
+class pass_lock:
+    """Held while the watched folders are looked at, or a waiting plan is applied: a pass
+    never looks at an album half moved by an approval."""
+
+    def __init__(self, blocking=False):
+        self.blocking = blocking
+
+    def __enter__(self):
+        import fcntl
+        ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
+        self.fh = open(ex.STATE_DIR / "watch.lock", "w")
+        try:
+            fcntl.flock(self.fh, fcntl.LOCK_EX | (0 if self.blocking else fcntl.LOCK_NB))
+        except BlockingIOError:
+            self.fh.close()
+            self.fh = None
+            return False
+        return True
+
+    def __exit__(self, *exc):
+        if self.fh is not None:
+            import fcntl
+            fcntl.flock(self.fh, fcntl.LOCK_UN)
+            self.fh.close()
+        return False
+
+
+def _supersede(key) -> list:
+    """Set aside the waiting plans made earlier for the album known by key."""
+    out = []
+    for x in pending_plans():
+        try:
+            w = planmod.load(x["path"]).get("watch") or {}
+        except Exception:
+            continue
+        if w.get("key") == key:
+            dismiss_pending(x["path"], "superseded")
+            out.append(x["job"])
+    return out
+
+
 def apply_pending(path, log=None) -> dict:
-    """Carry out a plan waiting for approval, and remember where it filed each album."""
+    """Carry out a plan waiting for approval (after any pass looking at the watched folders
+    now), and remember the outcome: where each album was filed, and - when it could not be
+    carried out (a drive out, a file changed) - the album is planned again later."""
     path = Path(path)
-    p = planmod.load(path)
-    res = executor.Executor(p, log=log or logsetup.setup("watch")).run()
-    try:
-        prof = pf.load(p.get("profile") or "default")
-    except pf.ProfileError:
-        prof = None
-    if prof is not None:
+    log = log or logsetup.setup("watch")
+    with pass_lock(blocking=True):
+        p = planmod.load(path)
+        res = executor.Executor(p, log=log).run()
+        try:
+            prof = pf.load(p.get("profile") or "default")
+        except pf.ProfileError:
+            prof = None
+        if prof is None:
+            return res
         db = _db()
         try:
             w = Watcher([prof], once=True, log=log)
+            meta = p.get("watch") or {}
             for r in res.get("albums") or []:
-                w.filed(db, p["albums"][r["index"]], prof, r["status"])
+                a = p["albums"][r["index"]]
+                w.filed(db, a, prof, r["status"])
+                if not meta.get("key"):
+                    continue
+                folder = planmod.db_path(meta["folder"])
+                files = [planmod.db_path(f) for f in meta.get("files") or []]
+                if r["status"] in ("excluded", "skipped"):
+                    continue                              # a rule says leave it: it stays "planned"
+                status = r["status"] if r["status"] in ("done", "unchanged") else \
+                    "failed" if r["status"] == "failed" else "conflict"
+                w.record(db, folder, prof, status, 1, r.get("detail") or r.get("label", ""),
+                         key=meta["key"], files=files, deep=meta.get("deep", True))
         finally:
             db.close()
     return res
 
 
-def dismiss_pending(path) -> Path:
+def dismiss_pending(path, why="dismissed") -> Path:
     """Set a waiting plan aside (kept in plans/dismissed/, never deleted); the album stays
     as it is and is not planned again until its files change."""
     path = Path(path)
-    to = plans_dir() / "dismissed"
+    to = plans_dir() / why
     to.mkdir(parents=True, exist_ok=True)
     dest = to / path.name
     n = 1
@@ -687,13 +828,8 @@ def stop_service(run=None, portal=None) -> str:
     (Run in the background starts it again)."""
     if in_flatpak():
         err = _portal_background(False, portal)
-        pid = watching_pid()
-        if pid and pid > 0 and pid != os.getpid():
-            import signal
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
+        if watching_pid():
+            request_stop()
         return f"The Background portal refused: {err}" if err else "stopped"
     code, out = _systemctl("disable", "--now", SERVICE, run=run)
     return "stopped" if code == 0 else f"systemctl --user disable failed: {out.strip()[:300]}"

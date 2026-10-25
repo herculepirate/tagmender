@@ -3,7 +3,7 @@
 #   flatpak install flathub org.kde.Sdk//6.10 io.qt.PySide.BaseApp//6.10
 #   flatpak-builder --user --install --force-clean build-dir \
 #       packaging/flatpak/io.github.herculepirate.TagMender.yml
-#   flatpak run io.github.herculepirate.TagMender            (the app)
+#   flatpak run io.github.herculepirate.TagMender            (the app; no arguments opens it)
 #   flatpak run io.github.herculepirate.TagMender watch      (the watcher, in a terminal)
 #
 # Python wheels are pinned to the versions the test suite passed with (as the AppImage);
@@ -15,6 +15,8 @@ sdk: org.kde.Sdk
 base: io.qt.PySide.BaseApp
 base-version: '6.10'
 command: tagmender
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh          # the PySide BaseApp's build-only files
 finish-args:
   - --share=ipc
   - --share=network                 # MusicBrainz, Discogs, cover art, AcoustID
@@ -27,6 +29,8 @@ finish-args:
   # "xdg-music" alone (as Picard's Flatpak has) cannot reach a library on /media.
   - --filesystem=host
   - --filesystem=/run/media
+  # Picard's Flatpak keeps its settings under ~/.var/app, which "host" does not include
+  - --filesystem=~/.var/app/org.musicbrainz.Picard/config/MusicBrainz:ro
   - --filesystem=xdg-run/gvfs       # shares mounted by the file manager (smb://, sftp://)
   # Watching after the app is closed goes through the Background portal (autostart);
   # it needs no permission here.
@@ -38,6 +42,8 @@ modules:
       - mkdir -p ${FLATPAK_DEST}/lib/tagmender/vendor
       - for f in *.py; do install -Dm644 "$f" "${FLATPAK_DEST}/lib/tagmender/$f"; done
       - cp -r coverup_fonts ${FLATPAK_DEST}/lib/tagmender/
+      - echo 3dc00512d1fe1d4167107da8b578268cf6d08770 > vendor/picard-discogs-enrichment/VENDORED_COMMIT
+      - echo f8f4199b5471eddb934d874bcb67f342c67e6490 > vendor/picard-coverup/VENDORED_COMMIT
       - for d in picard-discogs-enrichment picard-coverup; do rm -rf "vendor/$d/tests" "vendor/$d/.git";
         cp -r "vendor/$d" ${FLATPAK_DEST}/lib/tagmender/vendor/; done
       - install -Dm755 packaging/flatpak/tagmender.sh ${FLATPAK_DEST}/bin/tagmender
@@ -57,5 +63,5 @@ modules:
         dest: vendor/picard-discogs-enrichment
       - type: git
         url: https://github.com/herculepirate/picard-coverup
-        commit: d1d36d143718e76cc7fe2525e6b9e4996f6ea347
+        commit: f8f4199b5471eddb934d874bcb67f342c67e6490
         dest: vendor/picard-coverup

@@ -146,6 +146,23 @@ class Drop(DropBase):
         self.assertEqual(w.tick(), {})
         self.assertEqual(len(watcher.pending_plans()), 1)
 
+    def test_copy_keeping_old_times_waits_until_the_folder_is_quiet(self):
+        prof = self.profile()
+        d = self.drop("Band X", "Album X")
+        now = time.time()
+        os.utime(d, (now, now))           # files arriving (cp -a keeps each file's old time)
+        self.assertEqual(watcher.Watcher([prof], once=True).tick(), {})
+        self.assertTrue(d.exists())
+
+    def test_rsync_temporary_file_is_a_download_in_progress(self):
+        prof = self.profile()
+        d = self.drop("Band X", "Album X")
+        (d / ".04 T3.flac.Ab12Cd").write_bytes(b"half")
+        settle(self.inbox)
+        self.assertEqual(watcher.Watcher([prof], once=True).tick(), {})
+        self.assertTrue(watcher._partial(".01 Song.mp3.x9Y8z7"))
+        self.assertFalse(watcher._partial(".DS_Store"))
+
     def test_destination_unmounted_waits(self):
         prof = self.profile()
         d = self.drop("Band X", "Album X")

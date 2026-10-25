@@ -687,7 +687,14 @@ def _watch_manage(args):
     and the plans waiting for approval, as the app's Watched folders page has them."""
     import watcher
     if args.list:
-        rows = [(s["path"], n, pf.load(n)) for n in pf.names() for s in pf.load(n)["sources"] if s.get("watch")]
+        rows = []
+        for n in pf.names():
+            try:
+                p = pf.load(n)
+            except pf.ProfileError as exc:
+                _err(f"profile {n} cannot be read: {exc}")
+                continue
+            rows += [(s["path"], n, p) for s in p["sources"] if s.get("watch")]
         for path, n, p in rows:
             how = {"move": f"moved into {p['destination']}", "copy": f"copied into {p['destination']}"}.get(
                 p["operation"], "tagged where it is")
@@ -697,30 +704,42 @@ def _watch_manage(args):
         return EXIT_OK
     if args.add or args.remove:
         folder = os.path.abspath(os.path.expanduser(args.add or args.remove))
-        same = lambda s: s.get("watch") and os.path.abspath(os.path.expanduser(s["path"])) == folder  # noqa: E731
+        same = lambda s: os.path.abspath(os.path.expanduser(s.get("path", ""))) == folder  # noqa: E731
         name = args.profile_opt or args.profile
         if args.add and not name:
             _err("Which profile files what is dropped there? --profile NAME")
             return EXIT_USAGE
         try:
-            for n in pf.names():
-                p = pf.load(n)
-                if any(same(s) for s in p["sources"]) and (args.remove or n != name):
-                    d = p.to_dict()
-                    d["sources"] = [s for s in d["sources"] if not same(s)]
-                    pf.save(pf.from_dict(d))
-            if args.add:
+            target = None
+            if args.add:                  # the new owner first: a typo or a bad setting changes nothing
                 d = pf.load(name).to_dict()
+                had = [s for s in d["sources"] if same(s)]
                 d["sources"] = [s for s in d["sources"] if not same(s)] + [
-                    {"path": folder, "watch": True, "recursive": True}]
+                    dict(had[0] if had else {"recursive": True}, path=folder, watch=True)]
                 if args.auto is not None:
                     d["unattended"] = args.auto
-                pf.save(pf.from_dict(d))
-                p = pf.load(name)
+                target = pf.from_dict(d)
+            others = []
+            for n in pf.names():
+                if n == name and args.add:
+                    continue
+                try:
+                    p = pf.load(n)
+                except pf.ProfileError:
+                    continue                        # (a broken profile elsewhere is not this folder's)
+                if any(same(s) and s.get("watch") for s in p["sources"]):
+                    d = p.to_dict()
+                    d["sources"] = [s for s in d["sources"] if not (same(s) and s.get("watch"))]
+                    others.append(pf.from_dict(d))
+            if target is not None:
+                pf.save(target)
+            for o in others:
+                pf.save(o)
+            if args.add:
                 _err(f"Watching {folder} for profile {name} "
-                     f"({'files albums automatically' if p['unattended'] else 'plans wait for --approve'}).")
+                     f"({'files albums automatically' if target['unattended'] else 'plans wait for --approve'}).")
             else:
-                _err(f"No longer watching {folder}.")
+                _err(f"No longer watching {folder}." if others else f"{folder} was not watched.")
         except pf.ProfileError as exc:
             _err(str(exc))
             return EXIT_USAGE
@@ -783,8 +802,9 @@ def cmd_watch(args):
         else:
             _err(f"Watching {len(w.roots())} folder(s); Ctrl+C or SIGTERM stops.")
             w.run()
-            if getattr(w, "already", False):
+            if getattr(w, "already", False):    # (non-zero: a service started meanwhile tries again)
                 _err(f"Another TagMender is already watching (pid {watcher.watching_pid() or '?'}).")
+                return EXIT_ERR
     except KeyboardInterrupt:
         pass
     return EXIT_OK
@@ -873,7 +893,8 @@ def work_parsers(sub):
     g.add_argument("--approve", metavar="JOB", help="apply a waiting plan (or: all)")
     g.add_argument("--dismiss", metavar="JOB", help="set a waiting plan aside")
     g.add_argument("--service", choices=("install", "stop", "status"),
-                   help="the systemd user service that watches while you are logged out too")
+                   help="watch in the background from login on (systemd user service; in the Flatpak, "
+                        "the Background portal); while logged out too after: loginctl enable-linger")
     a.add_argument("--auto", action=argparse.BooleanOptionalAction, default=None,
                    help="with --add: file albums without asking (a profile setting)")
     prof(a)

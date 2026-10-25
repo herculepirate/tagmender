@@ -121,7 +121,7 @@ class Watch(te.Base):
         p.start()
         self.addCleanup(p.stop)
         old = time.time() - 3600
-        for f in self.d.rglob("*"):
+        for f in [self.d, self.d.parent, *self.d.rglob("*")]:            # (folders too: their time counts)
             os.utime(f, (old, old))
         self.prof = pf.from_dict({"name": "W", "sources": [{"path": str(self.inbox), "watch": True}],
                                   "unattended": True, "providers": {"web": {"enabled": False}},
@@ -153,7 +153,7 @@ class Watch(te.Base):
         w = watcher.Watcher([self.prof], once=True)
         w.tick()
         tagio.write(self.d / "01.flac", {"comment": ["changed by hand"]})
-        for f in self.d.rglob("*"):
+        for f in [self.d, self.d.parent, *self.d.rglob("*")]:            # (folders too: their time counts)
             os.utime(f, (time.time() - 3600, time.time() - 3600))
         self.assertEqual(list(w.tick().values()), ["unchanged"])
 
@@ -178,7 +178,7 @@ class Watch(te.Base):
         self.assertFalse((self.tmp / "gone").exists())
 
     def _settled(self):
-        for f in self.d.rglob("*"):
+        for f in [self.d, self.d.parent, *self.d.rglob("*")]:            # (folders too: their time counts)
             os.utime(f, (time.time() - 3600, time.time() - 3600))
 
     def test_ignored_album_is_not_requeued_until_rules_or_override_change(self):

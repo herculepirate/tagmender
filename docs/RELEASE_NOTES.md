@@ -24,6 +24,16 @@ the service's systemd sandbox (ProtectSystem=strict) made every library outside 
 and /mnt read-only - USB drives under /run/media, /srv - and can keep a user service from
 starting where unprivileged user namespaces are off; it is gone, the service runs as you do.
 Only one TagMender watches at a time (the app, the service and a terminal no longer race).
+Reviewed independently (tests/test_watch_review1.py): a library inside the watched folder is
+never taken for new drops (what was there before watching included); an approved plan that
+could not be carried out (the drive out) is planned again; a pass never looks at an album
+while a job or an approval is moving it; closing the app during a check waits for it; one
+plan waits per album (a retry replaces it, never piles up); in place + asks first, an approved
+album is not identified again; Stop works in the Flatpak (a stop request, not a signal);
+`watch --add` with a misspelt profile changes nothing; "Look every" reaches a running app; a
+second watcher exits with an error so the service retries; a copy that keeps the files' old
+times (cp -a, rsync -a) is waited for by the folder's own time, and rsync's temporary files
+count as a download in progress.
 `watch.settle_minutes` and `watch.interval_seconds` are checked; a whole drive cannot be
 watched. **New: a Flatpak** (packaging/flatpak/) with access to every folder, sharing
 ~/.config/tagmender with the other installs; background watching through the Background portal.

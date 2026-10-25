@@ -445,7 +445,7 @@ class R11_05_InPlaceUndoWhileTheShareIsDown(Base):
 class R11_06_WatcherNeverRetriesBlockedAlbums(Lossy):
     def test_x(self):
         old = time.time() - 3600
-        for f in self.album.iterdir():
+        for f in [self.album, *self.album.iterdir()]:
             os.utime(f, (old, old))                              # settled long ago
         FakeEngine.test = self
         stick = self.tmp / "stick"

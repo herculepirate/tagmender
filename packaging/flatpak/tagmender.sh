@@ -6,4 +6,5 @@
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_STATE_HOME="$HOME/.local/state"
 export XDG_CACHE_HOME="$HOME/.cache"
+[ $# -eq 0 ] && set -- gui                     # "flatpak run ..." with nothing else: the app
 exec python3 /app/lib/tagmender/tagmender.py "$@"

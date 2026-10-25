@@ -222,7 +222,8 @@ def file_lock(path):
 
 @contextmanager
 def job_lock(job):
-    """One process at a time per job: applying, recovering or undoing it."""
+    """One process at a time per job: applying, recovering or undoing it. While held, a shared
+    lock on STATE_DIR/jobs.active says "a job is changing files" (job_running)."""
     jd = job_dir(job)
     jd.mkdir(parents=True, exist_ok=True)
     with open(jd / ".lock", "w") as fh:
@@ -231,9 +232,29 @@ def job_lock(job):
         except BlockingIOError:
             raise StepError(f"job {job} is being run by another TagMender process") from None
         try:
-            yield
+            with open(ex.STATE_DIR / "jobs.active", "a") as active:
+                fcntl.flock(active, fcntl.LOCK_SH)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(active, fcntl.LOCK_UN)
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def job_running() -> bool:
+    """A job (apply, undo, recover) is changing files now, in any TagMender process or thread."""
+    try:
+        ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(ex.STATE_DIR / "jobs.active", "a") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            return False
+    except OSError:
+        return False
 
 
 def _fsync_dir(d):

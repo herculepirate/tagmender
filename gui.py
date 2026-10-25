@@ -124,6 +124,13 @@ class Worker(QObject):
         self.finished.emit(out)
 
 
+def _alive(th) -> bool:
+    try:
+        return th.isRunning()
+    except RuntimeError:                      # (deleted once it finished)
+        return False
+
+
 def start(owner, fn, done, progress=None, failed=None):
     """Run fn(worker) on a thread; done(result) on the UI thread."""
     th = QThread(owner)
@@ -711,13 +718,13 @@ class WatchDialog(QDialog):
         self.auto.setToolTip("Off: each album is planned and waits under \"Waiting for your approval\".\n"
                              "This is a profile setting: it applies to every folder the profile watches.")
         self.settle = QDoubleSpinBox()
-        self.settle.setRange(0.5, 1440)
+        self.settle.setRange(0, 1440)
         self.settle.setDecimals(1)
         self.settle.setSuffix(" min")
         self.settle.setToolTip("An album is left alone until nothing in it changed for this long\n"
                                "(a copy or download still running)")
         self.every = QDoubleSpinBox()
-        self.every.setRange(0.5, 1440)
+        self.every.setRange(0.1, 1440)
         self.every.setDecimals(1)
         self.every.setSuffix(" min")
         self.warn = QLabel("")
@@ -814,24 +821,30 @@ class WatchDialog(QDialog):
         old = os.path.abspath(os.path.expanduser(self.old_path)) if self.old_path else None
         same = lambda s: os.path.abspath(os.path.expanduser(s.get("path", ""))) in {folder, old}  # noqa: E731
         try:
+            # the new owner first, checked: a bad setting changes no profile
+            data = self.profile().to_dict()
+            had = [s for s in data["sources"] if same(s)]
+            data["sources"] = [s for s in data["sources"] if not same(s)] + [
+                dict(had[0] if had else {"recursive": True}, path=folder, watch=True)]
+            data["unattended"] = self.auto.isChecked()
+            data["watch"] = dict(data.get("watch") or {}, settle_minutes=self.settle.value(),
+                                 interval_seconds=max(1, int(round(self.every.value() * 60))))
+            target = pf.from_dict(data)
+            others = []
             for n in pf.names():                     # a folder belongs to one profile
-                if n == self.prof.currentText():
+                if n == target.name:
                     continue
                 try:
                     q = pf.load(n)
                 except pf.ProfileError:
                     continue
                 if any(s.get("watch") and same(s) for s in q["sources"]):
-                    data = q.to_dict()
-                    data["sources"] = [s for s in data["sources"] if not (s.get("watch") and same(s))]
-                    pf.save(pf.from_dict(data))
-            data = self.profile().to_dict()
-            data["sources"] = [s for s in data["sources"] if not same(s)] + [
-                {"path": folder, "watch": True, "recursive": True}]
-            data["unattended"] = self.auto.isChecked()
-            data["watch"] = dict(data.get("watch") or {}, settle_minutes=self.settle.value(),
-                                 interval_seconds=int(round(self.every.value() * 60)))
-            pf.save(pf.from_dict(data))
+                    d = q.to_dict()
+                    d["sources"] = [s for s in d["sources"] if not (s.get("watch") and same(s))]
+                    others.append(pf.from_dict(d))
+            pf.save(target)
+            for o in others:
+                pf.save(o)
         except pf.ProfileError as exc:
             QMessageBox.warning(self, APP, str(exc))
             return
@@ -964,7 +977,12 @@ class Watched(QWidget):
                 self.svc_btn.hide()
         except Exception:                                    # the page still shows the folders
             self.prow_plans = []
+            self.pending.setRowCount(0)
         self.win.set_badge("Watched folders", len(self.plans))
+        if getattr(self, "timer", None) is not None and self.timer.isActive():
+            ms = self.interval_ms()
+            if ms != self.timer.interval():                  # "Look every" changed
+                self.timer.start(ms)
 
     def selected(self):
         r = self.table.currentRow()
@@ -1003,9 +1021,20 @@ class Watched(QWidget):
         if not on:
             self.timer.stop()
             return
-        mins = [p["watch"]["interval_seconds"] for _path, p in self.rows()] or [300]
-        self.timer.start(max(30, int(min(mins))) * 1000)
+        self.timer.start(self.interval_ms())
         self.check_now()
+
+    def interval_ms(self) -> int:
+        secs = [p["watch"]["interval_seconds"] for _path, p in self.rows()] or [300]
+        return int(max(5, min(secs)) * 1000)
+
+    def finish(self) -> bool:
+        """Before the window closes: no new pass, the running one asked to stop after the
+        album it is on. True when nothing is running any more."""
+        self.timer.stop()
+        if self.watcher is not None:
+            self.watcher.stop = True
+        return not self.busy
 
     def check_now(self):
         if self.busy or not self.rows():
@@ -1835,6 +1864,25 @@ class Main(QMainWindow):
         import executor
         if set(executor.pending_jobs()) - set(executor.busy_jobs()):
             self.statusBar().showMessage("A job was interrupted. Recover it under Jobs.")
+
+    def closeEvent(self, event):
+        """Never end the program under a running job or watcher pass (the thread would be
+        killed mid-album): ask them to stop, wait, then close."""
+        self.pages["Watched folders"].finish()
+        running = [th for page in self.pages.values() for th, _w in getattr(page, "_threads", [])
+                   if _alive(th)]
+        if not running:
+            event.accept()
+            return
+        event.ignore()
+        self.statusBar().showMessage("Finishing the work in progress before closing…")
+        if not getattr(self, "_closing", False):
+            self._closing = True
+            from PySide6.QtCore import QTimer
+            t = QTimer(self)
+            t.timeout.connect(lambda: (not any(_alive(th) for page in self.pages.values()
+                                               for th, _w in getattr(page, "_threads", []))) and self.close())
+            t.start(200)
 
     def go(self, name):
         self.nav.setCurrentRow([n for n, _ in PAGES].index(name))

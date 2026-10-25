@@ -90,7 +90,7 @@ class R12_02_NonUtf8NameStopsTheWatcher(Base):
     def test_x(self):
         latin1(self.album, b"R\xfcckseite.jpg").write_bytes(b"back")
         old = time.time() - 3600
-        for f in self.album.iterdir():
+        for f in [self.album, *self.album.iterdir()]:
             os.utime(f, (old, old))
         FakeEngine.test = self
         prof = self.profile(sources=[{"path": str(self.lib), "watch": True}], unattended=True,
@@ -202,7 +202,7 @@ class R12_04_RecoverWhileTheShareIsDown(Base):
 class R12_05_PlanOnlyWatcherNeverReplansABlockedAlbum(Lossy):
     def test_x(self):
         old = time.time() - 3600
-        for f in self.album.iterdir():
+        for f in [self.album, *self.album.iterdir()]:
             os.utime(f, (old, old))
         FakeEngine.test = self
         stick = self.tmp / "stick"

@@ -134,7 +134,7 @@ class UnresolvedEngine(FakeEngine):
 class R13_03_UnresolvedMoveWaitsDaysForItsShare(Base):
     def test_x(self):
         old = time.time() - 3600
-        for f in self.album.iterdir():
+        for f in [self.album, *self.album.iterdir()]:
             os.utime(f, (old, old))
         held = self.tmp / "nas" / "_unresolved"                # the share is not there yet
         prof = self.profile(sources=[{"path": str(self.lib), "watch": True}], unattended=True,
@@ -416,7 +416,7 @@ class R13_11_LooseTrackJudgedByTheWholeInbox(Base):
         super().setUp()
         self.single = audio(self.lib / "01 single.flac", 660, title="single", artist="Some Artist")
         old = time.time() - 3600
-        for f in [self.single, *self.album.iterdir()]:
+        for f in [self.single, self.single.parent, self.album, *self.album.iterdir()]:
             os.utime(f, (old, old))
         self.prof = self.profile(sources=[{"path": str(self.lib), "watch": True}], unattended=True,
                                  unresolved={"action": "leave"},

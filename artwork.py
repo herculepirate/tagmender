@@ -320,43 +320,61 @@ def embedded_front(path):
     return _pick_front(_pictures(path))
 
 
+def _album_dirs(folder) -> list:
+    """The album's folder and its disc folders ("Disc 01" ...): a cover in either is the album's."""
+    from engine import is_disc_dir
+    folder = Path(folder)
+    out = [folder]
+    try:
+        out += sorted(d for d in folder.iterdir() if d.is_dir() and not d.is_symlink() and is_disc_dir(d))
+    except OSError:
+        pass
+    return out
+
+
 def folder_cover(folder) -> Path | None:
     """The album folder's own cover file (cover.jpg, folder.png, Front.jpeg ...), the largest
-    if there are several; None when there is none."""
-    best = None
-    try:
-        for x in Path(folder).iterdir():
-            if x.is_file() and not x.is_symlink() and x.stem.lower() in COVER_STEMS and \
-                    x.suffix.lower() in (".jpg", ".jpeg", ".png"):      # (a link points at someone else's file)
-                sz = _size_of(x.read_bytes())
-                if sz and (best is None or min(sz) > best[1]):
-                    best = (x, min(sz))
-    except OSError:
-        return None
-    return best[0] if best else None
+    if there are several; in its disc folder when the album folder has none ("Album/Disc 01/
+    cover.jpg"); None when there is none."""
+    for d in _album_dirs(folder):
+        best = None
+        try:
+            for x in d.iterdir():
+                if x.is_file() and not x.is_symlink() and x.stem.lower() in COVER_STEMS and \
+                        x.suffix.lower() in (".jpg", ".jpeg", ".png"):      # (a link points at someone else's file)
+                    sz = _size_of(x.read_bytes())
+                    if sz and (best is None or min(sz) > best[1]):
+                        best = (x, min(sz))
+        except OSError:
+            continue
+        if best:
+            return best[0]
+    return None
 
 
 def small_covers(folder, files, profile) -> dict:
-    """The album's covers smaller than artwork.min_px on the short side, which a larger
-    cover replaces (artwork.replace "larger_only"): {"file": (path, w, h) or None,
-    "embedded": {track: (w, h)} ((0, 0): pictures, but no front among them), "owns": the
-    album's existing covers, largest first, as (path or bytes, w, h)}. Empty when replacing
-    is off or nothing is small."""
+    """The album's covers: {"owns": its existing front covers, largest first, as (path or
+    bytes, w, h) - never another album's (a shared folder's cover file is no one's); and,
+    with artwork.replace "larger_only", those smaller than artwork.min_px on the short side,
+    which a larger cover replaces: "file": (path, w, h) or None, "embedded": {track: (w, h)}
+    ((0, 0): pictures, but no front among them)}."""
     from plan import EMBEDDABLE
     art = profile["artwork"]
     low = int(art.get("min_px") or 0)
-    if art.get("replace", "larger_only") != "larger_only" or not low:
-        return {}
+    replacing = art.get("replace", "larger_only") == "larger_only" and low > 0
     out = {"file": None, "embedded": {}, "owns": []}
-    cap = embed_cap()
+    cap = embed_cap(profile)
     # a folder holding other music too: its cover file is no one album's (never replaced, never "own")
     if art.get("files", True) and not _other_music(Path(folder), files):
         c = folder_cover(folder)
         if c is not None:
-            sz = _size_of(c.read_bytes())
+            try:
+                sz = _size_of(c.read_bytes())
+            except OSError:
+                sz = None
             if sz:
                 out["owns"].append((c, *sz))
-                if min(sz) < low:
+                if replacing and min(sz) < low:
                     out["file"] = (c, *sz)
     if art.get("embed_front", True):
         for f in files:
@@ -365,28 +383,33 @@ def small_covers(folder, files, profile) -> dict:
             pics = _pictures(f)
             data = _pick_front(pics)
             if data is None:
-                if pics:
+                if pics and replacing:
                     out["embedded"][str(f)] = (0, 0)          # a back cover or booklet alone: a front is added
                 continue
             sz = _size_of(data)
             # small, unless it is as large as TagMender embeds (embed_max_side caps the long side:
             # with min_px above that, or a wide cover, it would be replaced again on every run)
-            if sz and min(sz) < low and max(sz) < cap - 2:
+            if replacing and sz and min(sz) < low and max(sz) < cap - 2:
                 out["embedded"][str(f)] = sz
             if sz:
                 out["owns"].append((data, *sz))
-    if not out["file"] and not out["embedded"]:
-        return {}
     out["owns"].sort(key=lambda o: -min(o[1:]))
     return out
+
+
+def has_small(small: dict) -> bool:
+    return bool(small and (small.get("file") or small.get("embedded")))
 
 
 _CAP = []
 
 
-def embed_cap() -> int:
-    """The smallest long side TagMender embeds covers at: EMBED_MAX_SIDE, or CoverUp's
-    embed_max_side when that is smaller (0 there: no cap of its own)."""
+def embed_cap(profile=None) -> int:
+    """The smallest long side TagMender embeds covers at for this profile: EMBED_MAX_SIDE, or
+    CoverUp's embed_max_side when CoverUp is among its sources and that is smaller."""
+    srcs = sources_of(profile["artwork"]) if profile is not None else ["coverup"]
+    if not any(x in srcs for x in ("coverup", "web", "local")):
+        return EMBED_MAX_SIDE                 # (Cover Art Archive and Discogs covers embed at TagMender's size)
     if _CAP:
         return _CAP[0]
     cap = EMBED_MAX_SIDE
@@ -464,7 +487,7 @@ def needs_art(folder, files, profile, small=None) -> str:
     if art.get("files", True):
         try:
             if not any(x.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp")
-                       for x in Path(folder).iterdir() if x.is_file()):
+                       for d in _album_dirs(folder) for x in d.iterdir() if x.is_file()):
                 return "no picture in the folder"
         except OSError:
             return ""
@@ -626,8 +649,18 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
     own (too small) cover, enlarged when nothing larger is found - never generated over."""
     notes = []
     small = None                                     # (the best too-small front, to enlarge)
-    if own and providers and getattr(providers[0], "enlarge", False) and own.get("width"):
-        small = (providers[0], own)
+    if own and providers and own.get("width"):
+        want = int(getattr(providers[0], "min_px", 0) or 0)
+        big_own = min(own["width"], own["height"]) >= want
+        # the album has a good cover: that one, with no lookup - unless CoverUp looks at the
+        # album's own scans itself (it crops and straightens them; it takes them first)
+        if big_own and not any(isinstance(p, CoverUp) and p.name in ("coverup", "local") for p in providers):
+            try:
+                return _finish(providers[0], own, notes)
+            except Exception as exc:
+                notes.append(f"the album's own cover: {exc}")
+        if big_own or getattr(providers[0], "enlarge", False):
+            small = (providers[0], own)           # (used when nothing larger is found)
     for p in providers:
         try:
             if isinstance(p, CoverUp):

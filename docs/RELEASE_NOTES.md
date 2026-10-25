@@ -22,6 +22,14 @@ of other albums in the folder make it a shared folder; an unreadable largest cov
 the next, and nothing is generated over an album that has covers; a track with only a back
 cover gets a front beside it; a watcher pass never opens the library inside the watched folder;
 in the Flatpak the background watcher runs in its own sandbox instance (it outlives the app).
+Fourth review (tests/test_review4_cover_watch.py): a partly copied album is judged at the
+copies it has; an untagged album holding a second copy of itself (FLAC and MP3) is one album;
+a lone disc folder ("Album/Disc 01") keeps its cover where the album's is looked for; an
+album with a good cover of its own never gets a generated one and needs no lookup; CoverUp's
+embed size applies only to profiles using CoverUp; an idle watcher pass never walks the
+watched folder for a loose track; undo leaves a cover the user put in after the job alone;
+the background service gets the plugin locations (never keys; those from
+~/.config/tagmender/env if present).
 
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)

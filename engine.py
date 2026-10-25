@@ -274,6 +274,13 @@ class Engine:
 
     # ---- identification ------------------------------------------------------
     def identify(self, g: Group) -> planmod.Proposal:
+        prop = self._identify(g)
+        # every audio file of the album as found (its second copies too: "01 a.flac" and
+        # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)
+        prop.group_files = [str(f) for f in g.files]
+        return prop
+
+    def _identify(self, g: Group) -> planmod.Proposal:
         errors = {k: v.split(":")[0] for k, v in self.notes.items()}
         # the rules first, on what the files themselves say: an excluded album gets no lookup,
         # fingerprint or web search at all (the planner labels it Ignored/Skipped)
@@ -512,11 +519,14 @@ class Engine:
             if self._art is None:
                 self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
                                           self.token, self.log)
-            own = artwork.own_cover(small, ex.STATE_DIR / "staging" / self.job) if small else None
+            # the album's own best cover: used as it is when large enough (no lookup), enlarged when
+            # nothing larger is found; and never a generated cover over it
+            own = artwork.own_cover(small, ex.STATE_DIR / "staging" / self.job) if small["owns"] else None
             got = artwork.find_front(self._art, prop.source_dir, ids, (t.get("albumartist") or [""])[0],
-                                     (t.get("album") or [""])[0], self.log, files=prop.files, own=own,
-                                     keep=bool(small))
-            if got and got.get("front") and small:
+                                     (t.get("album") or [""])[0], self.log,
+                                     files=getattr(prop, "group_files", None) or prop.files, own=own,
+                                     keep=bool(small["owns"]))
+            if got and got.get("front") and artwork.has_small(small):
                 # what the larger cover replaces (artwork.replace "larger_only"); backed up, undoable
                 got["replace"] = {"file": str(small["file"][0]) if small.get("file") else None,
                                   "embedded": sorted(small.get("embedded") or {})}
@@ -530,14 +540,16 @@ class Engine:
     def _art_view(self, prop):
         """Where the album's covers are judged: for a copy profile whose copies exist already,
         the copies (what the library has; the source is never changed); else the album itself."""
+        own = list(getattr(prop, "group_files", None) or prop.files)
         if self.profile["operation"] != "copy" or not self.profile["destination"]:
-            return prop.source_dir, prop.files
+            return prop.source_dir, own
         copies = []
-        for f in prop.files:
+        for f in prop.files:                  # (files never copied - another format, skipped - do not count)
             c = [x for x in planmod.copies_of(f, under=self.profile["destination"]) if Path(x).is_file()]
-            if not c:
-                return prop.source_dir, prop.files
-            copies.append(Path(c[0]))
+            if c:
+                copies.append(Path(c[0]))
+        if not copies:
+            return prop.source_dir, own
         folder = Path(os.path.commonpath([str(c.parent) for c in copies]))
         if is_disc_dir(folder):
             folder = folder.parent

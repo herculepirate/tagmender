@@ -447,6 +447,9 @@ class State:
                         (_t(item), exclusion.rule.id, exclusion.rule.name, rhash, sig, time.time()))
         self.db.commit()
 
+    def ignored_item(self, item) -> bool:
+        return self.db.execute("SELECT 1 FROM ignored WHERE item=?", (_t(item),)).fetchone() is not None
+
     def still_ignored(self, item, sig, rhash):
         """The item was ignored, and neither its files nor the rules changed since:
         no need to look at it again."""

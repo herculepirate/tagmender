@@ -385,6 +385,17 @@ def _tags_sig(path) -> str:
                         .encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _pics_sig(path) -> str:
+    """A fingerprint of a file's embedded pictures (type and content): undo leaves a cover
+    the user put in after the job alone (the tags signature only counts pictures)."""
+    try:
+        import artwork
+        pics = artwork._pictures(path)
+    except Exception:
+        return ""
+    return hashlib.sha1(json.dumps([(t, hashlib.sha1(d).hexdigest()) for t, d in pics]).encode()).hexdigest()
+
+
 def _keep_owner(path: Path, st):
     """Give a staged copy the original's owner and group where this user may (on a shared
     library, files often belong to another account); never an error."""
@@ -910,7 +921,7 @@ class Executor:
                         raise
                 else:
                     self.journal.write(ev="file", album=i, idx=j, state="committed", moved_by="rename",
-                                       tags_sig=_tags_sig(dst))
+                                       tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
                     self.journal.write(ev="file", album=i, idx=j, state="source_removed")
                     done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
                     return
@@ -965,7 +976,7 @@ class Executor:
                     raise
             st = os.stat(dst)
             self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
-                               mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst))
+                               mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
             done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
             if op == "copy":
                 _record_copy(src, dst, self.job)
@@ -1007,7 +1018,7 @@ class Executor:
             _fsync_dir(dst.parent)
         st = os.stat(dst)
         self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
-                           mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst))
+                           mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
         done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
         if op == "relink_copy":
             _record_copy(src, dst, self.job)
@@ -1925,7 +1936,8 @@ def _undo(job, jd, journal, events, force):
                 ((os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and
                  not (f.get("tags_sig") and _tags_sig(dst) == f["tags_sig"] and
                       (not f.get("digest") or payload.digest(dst) == f["digest"]))) or
-                (f.get("tags_sig") and _tags_sig(dst) != f["tags_sig"])):
+                (f.get("tags_sig") and _tags_sig(dst) != f["tags_sig"]) or
+                (f.get("pics_sig") and _pics_sig(dst) != f["pics_sig"])):
             # (a copy whose only change is its time - a later job's undo put its tags back - is
             # still the copy; one with other tags is not, even when the editor kept its time)
             why = f"{dst} was changed after the job; left in place"
@@ -1933,9 +1945,11 @@ def _undo(job, jd, journal, events, force):
             why = f"{check} holds different audio now; left alone"
         elif op in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and \
                 check == (src if op == "tag" else dst) and check.exists() and not force and \
-                _tags_sig(check) != f["tags_sig"] and not _matches_backup(check, f.get("backup")):
+                (_tags_sig(check) != f["tags_sig"] or
+                 (f.get("pics_sig") and _pics_sig(check) != f["pics_sig"])) and \
+                not _matches_backup(check, f.get("backup")):
             # (tags as the backup has them: an undo cut short had put them back already)
-            why = (f"{check}: its tags were edited after the job; left as they are "
+            why = (f"{check}: its tags or pictures were edited after the job; left as they are "
                    f"(tagmender undo --force {job} puts the old tags back anyway)")
         verdict[(a, j)] = (why, check)
     staying = {a for (a, _j), (why, _c) in verdict.items() if why and files[(a, _j)].get("op") != "tag"}

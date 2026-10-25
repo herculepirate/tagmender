@@ -593,6 +593,8 @@ class Jobs(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        for c in range(4):                                   # (a date and a job id are read whole)
+            self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.table.verticalHeader().hide()
         self.table.setAccessibleName("Jobs")
         lay.addWidget(self.table, 1)
@@ -929,7 +931,7 @@ class Watched(QWidget):
         lay.addWidget(box, 1)
         box = QGroupBox("Recently")
         bl = QVBoxLayout(box)
-        self.recent = _table(["When", "Folder", "Outcome", "Profile"], stretch=1)
+        self.recent = _table(["When", "Folder", "Outcome", "Profile"], stretch=1, fit=(0, 2, 3))
         bl.addWidget(self.recent)
         lay.addWidget(box, 1)
         self.out = QLabel("")
@@ -963,7 +965,9 @@ class Watched(QWidget):
             self.plans = watcher.pending_plans()
             prows = []
             for x in self.plans:
-                for src, _label, to in x["albums"] or [("(unreadable plan)", "", "")]:
+                for src, label, to in x["albums"] or [("(unreadable plan)", "", "")]:
+                    if to and os.path.normpath(to) == os.path.normpath(src):
+                        to = f"stays where it is ({label.lower() or 'tagged'})"
                     prows.append((src, to, x["profile"], x))
             self.prow_plans = [r[3] for r in prows]
             _fill(self.pending, [r[:3] for r in prows])

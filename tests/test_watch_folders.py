@@ -320,6 +320,14 @@ class Service(unittest.TestCase):
         self.assertNotIn("ProtectSystem=", shipped)
         self.assertNotIn("ReadWritePaths=", shipped)
 
+    def test_plugin_locations_go_along_keys_never(self):
+        with mock.patch.dict(os.environ, {"TAGMENDER_COVERUP_DIR": "/home/u/Git/picard coverup",
+                                          "DISCOGS_TOKEN": "secret-token-123"}):
+            t = watcher.service_text(python="/usr/bin/python3", script="/opt/tm.py")
+        self.assertIn('Environment="TAGMENDER_COVERUP_DIR=/home/u/Git/picard coverup"', t)
+        self.assertNotIn("secret-token-123", t)
+        self.assertIn("EnvironmentFile=-%h/.config/tagmender/env", t)
+
     def test_appimage_starts_itself(self):
         with mock.patch.dict(os.environ, {"APPIMAGE": "/home/u/Apps/TagMender.AppImage"}):
             t = watcher.service_text()

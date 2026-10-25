@@ -800,8 +800,15 @@ class Planner:
             # holding the disc folders, not the first disc's
             folder = (Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
                       if entry["files"] else (None if op == "copy" else Path(prop.source_dir)))
-            has_image = folder is None or folder.exists() and any(x.suffix.lower() in IMAGE_EXT for x in folder.iterdir())
-            has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
+            looks = [folder]
+            if folder is not None and entry["files"]:
+                from engine import is_disc_dir
+                if is_disc_dir(folder):           # one disc of a set ("Album/Disc 01"): the album's folder,
+                    looks = [folder, folder.parent]   # where the set's cover is looked for too
+                    folder = folder.parent
+            has_image = folder is None or any(d.exists() and any(x.suffix.lower() in IMAGE_EXT for x in d.iterdir())
+                                              for d in looks)
+            has_image = has_image or any(Path(c["dst"]).parent in looks and Path(c["dst"]).suffix.lower() in
                                          IMAGE_EXT for c in entry["companions"])
             for fe in entry["files"]:
                 if fe["dst"] in embed and fe["op"] == "none":   # only the cover is new

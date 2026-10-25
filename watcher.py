@@ -207,7 +207,10 @@ class Watcher:
         row = db.execute("SELECT signature, status, attempts, next_try, ts FROM processed WHERE folder=?",
                          (key,)).fetchone()
         rules = ex.load_rules(prof.name)
-        if ex.State().still_ignored(folder, ex.signature(ex.audio_files(folder)), ex.rules_hash(rules)):
+        st = ex.State()
+        # (only an ignored folder is signed: a watched root's loose track never walks the whole root)
+        if st.ignored_item(folder) and \
+                st.still_ignored(folder, ex.signature(ex.audio_files(folder)), ex.rules_hash(rules)):
             return False, "ignored (unchanged)"
         if not row:
             return True, "new"
@@ -692,6 +695,8 @@ def service_text(python=None, script=None) -> str:
         "",
         "[Service]",
         "Type=simple",
+        *[f"Environment={_unit_quote(k + '=' + os.environ[k])}" for k in _SERVICE_ENV if os.environ.get(k)],
+        "EnvironmentFile=-%h/.config/tagmender/env",       # (keys: DISCOGS_TOKEN=..., mode 600; never in this file)
         f"ExecStart={start} watch --nice",
         "Restart=on-failure",
         "RestartSec=60",
@@ -702,6 +707,11 @@ def service_text(python=None, script=None) -> str:
         "[Install]",
         "WantedBy=default.target",
         ""])
+
+
+# where the plugins and Picard's settings are, as this session knows them (a service has none of
+# the shell's environment); keys are never written here
+_SERVICE_ENV = ("TAGMENDER_COVERUP_DIR", "TAGMENDER_DISCOGS_PLUGIN", "TAGMENDER_PICARD_INI", "TAGMENDER_PROFILE")
 
 
 def _unit_quote(s: str) -> str:

@@ -203,7 +203,7 @@ def _check_target(dst: Path, roots):
         raise StepError(f"{dst} is outside the folders this profile may change")
 
 
-def _make_dirs(d: Path, roots, journal, album):
+def _make_dirs(d: Path, roots, journal, album, created=None):
     """Create d below an existing root, journalling each folder created (undo removes them)."""
     missing = []
     p = Path(d)
@@ -215,6 +215,8 @@ def _make_dirs(d: Path, roots, journal, album):
     for m in reversed(missing):
         m.mkdir()
         journal.write(ev="dir_created", album=album, path=str(m))
+        if created is not None:
+            created.append(m)
 
 
 def _space_for(folder: Path, nbytes: int):
@@ -386,6 +388,7 @@ class Executor:
         self.progress = progress or (lambda *a: None)
         self.rules = None
         self.results = []
+        self.created = []
         self.preserve_times = bool(plan.get("preserve_timestamps"))
 
     def run(self) -> dict:
@@ -442,6 +445,7 @@ class Executor:
                 return "conflict", "Changed", f"{Path(fe['src']).name} changed since the plan was made"
         self.journal.write(ev="album_begin", album=i, source=a["source_dir"])
         done_steps = []
+        self.created = []
         try:
             for j, fe in enumerate(a["files"]):
                 if fe["op"] == "none" or Path(fe["src"]) in dec.excluded:
@@ -460,6 +464,11 @@ class Executor:
             self.log.error("album %s failed: %s", a["source_dir"], exc)
             self.journal.write(ev="album_failed", album=i, error=str(exc))
             problems = self.rollback(done_steps)
+            for d in reversed(self.created):                  # folders made for this album, if empty
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
             self.journal.write(ev="album_rolled_back", album=i, problems=problems)
             return "failed", "Failed", f"{exc}" + (f"; rollback problems: {problems}" if problems else
                                                    "; album put back as it was")
@@ -484,14 +493,14 @@ class Executor:
                                digest=src_digest, backup=backup)
             if op == "move" and not changes and not embed and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
-                _make_dirs(dst.parent, self.roots, self.journal, i)
+                _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
                 _place_move(src, dst)                     # same filesystem: a rename, nothing copied
                 self.journal.write(ev="file", album=i, idx=j, state="committed", moved_by="rename")
                 self.journal.write(ev="file", album=i, idx=j, state="source_removed")
                 done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
                 return
             if op in ("copy", "move"):
-                _make_dirs(dst.parent, self.roots, self.journal, i)
+                _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
             stage = _stage_name(dst, self.job)
             _space_for(dst.parent, os.path.getsize(src))
             _copy_fsync(src, stage)
@@ -549,7 +558,25 @@ class Executor:
     def companion_step(self, i, j, ce, done_steps):
         src, dst, op = Path(ce["src"]), Path(ce["dst"]), ce["op"]
         _check_target(dst, self.roots)
-        _make_dirs(dst.parent, self.roots, self.journal, i)
+        if op == "rewrite":                       # a cue sheet that stays, naming renamed files
+            saved = self.jd / "companions" / f"{i}-{j}{src.suffix}"
+            saved.parent.mkdir(exist_ok=True)
+            _copy_fsync(src, saved)
+            stage = _stage_name(src, self.job)
+            with open(stage, "w", encoding=ce["rewrite"]["encoding"], newline="") as fh:
+                fh.write(ce["rewrite"]["text"])
+                fh.flush()
+                os.fsync(fh.fileno())
+            shutil.copystat(src, stage)
+            _keep_owner(stage, os.stat(src))
+            self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="staged",
+                               saved=str(saved))
+            os.replace(stage, src)
+            _fsync_dir(src.parent)
+            self.journal.write(ev="companion", album=i, idx=j, state="committed")
+            done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved), None))
+            return
+        _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
         stage = _stage_name(dst, self.job)
         saved = None
         if ce.get("rewrite"):
@@ -562,6 +589,7 @@ class Executor:
                 os.fsync(fh.fileno())
             shutil.copystat(src, stage)
         else:
+            _space_for(dst.parent, os.path.getsize(src))
             _copy_fsync(src, stage)
             if payload.file_sha256(stage) != payload.file_sha256(src):
                 stage.unlink(missing_ok=True)
@@ -663,6 +691,11 @@ def _undo_step(step, jd, rolling_back=False):
         dst.unlink(missing_ok=True)
         return
     if kind == "companion":
+        if op == "rewrite":
+            stage = _stage_name(src, "undo")
+            _copy_fsync(Path(extra), stage)
+            os.replace(stage, src)
+            return
         if op == "move":
             if not src.exists():
                 src.parent.mkdir(parents=True, exist_ok=True)

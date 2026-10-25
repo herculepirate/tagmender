@@ -136,10 +136,15 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
     moved = {Path(k): Path(v) for k, v in moved.items()}
     dmap = {}
     for s_, d_ in moved.items():
-        dmap.setdefault(s_.parent, []).append(d_.parent)
-    dmap = {k: Path(os.path.commonpath([str(x) for x in v])) for k, v in dmap.items()}
+        dmap.setdefault(s_.parent, set()).add(d_.parent)
+    if any(len(v) > 1 for v in dmap.values()):
+        return [], "files of one folder go to different folders; companion files stay where they are"
+    dmap = {k: next(iter(v)) for k, v in dmap.items()}
     if src_dir not in dmap:
-        dmap[src_dir] = Path(os.path.commonpath([str(d.parent) for d in moved.values()]))
+        top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
+        if any(d != top and d.parent != top for d in dmap.values()):
+            return [], "the album's folders go to different places; companion files stay where they are"
+        dmap[src_dir] = top
 
     def audio_in(d):
         try:
@@ -367,18 +372,20 @@ class Planner:
             return entry
         # 4. companion files go with an album that moves or is copied
         moved = [fe for fe in entry["files"] if fe["op"] in ("copy", "move")]
-        if moved and len(moved) == len(entry["files"]):
-            pairs = {fe["src"]: fe["dst"] for fe in moved}
+        if moved:
+            # every file of the album, those already in place too: their folder is the album's
+            pairs = {fe["src"]: fe["dst"] for fe in entry["files"]}
             src_root = Path(prop.source_dir)
             comps, why_not = _companions(src_root, pairs, p,
                                          shallow=os.path.realpath(src_root) in self.roots())
             if why_not:
                 entry["notes"].append(why_not)
             for c, want in comps:
-                dst = self._unique(want, c, entry)
+                dst = c if want == c else self._unique(want, c, entry)
                 if dst is None:
                     continue
-                ce = {"src": str(c), "dst": str(dst), "op": moved[0]["op"], "fingerprint": _fp(c)}
+                ce = {"src": str(c), "dst": str(dst), "op": moved[0]["op"] if dst != c else "rewrite",
+                      "fingerprint": _fp(c)}
                 if c.suffix.lower() in CUE_LIKE:
                     rel = {os.path.relpath(s_, c.parent): os.path.relpath(d_, dst.parent)
                            for s_, d_ in pairs.items()}
@@ -388,6 +395,8 @@ class Planner:
                                               f"{rw[1]} encoding; it keeps the old names")
                     elif rw:
                         ce["rewrite"] = {"text": rw[0], "encoding": rw[1]}
+                if ce["op"] == "rewrite" and not ce.get("rewrite"):
+                    continue                                  # stays where it is, unchanged
                 entry["companions"].append(ce)
         # 5. artwork (staged by the artwork provider; never replaces a picture already embedded)
         art = prop.artwork if p["artwork"]["enabled"] else None

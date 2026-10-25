@@ -140,7 +140,7 @@ class FailedVerification(Base):
             res = executor.Executor(p).run()
         self.assertEqual(res["counts"], {"failed": 1})
         self.assertNotIn("rollback problems", res["albums"][0]["detail"])
-        self.assertEqual([x for x in self.dest.rglob("*") if x.is_file()], [])
+        self.assertEqual(list(self.dest.rglob("*")), [])                     # no empty folders either
         self.assertTrue(self.f1.exists() and self.f2.exists())
 
 
@@ -202,6 +202,42 @@ class DiscSets(Base):
         p = pl.build([self.proposal(source_dir=str(alb), files=[str(a)], targets=[target(1, "A", album="Main")])],
                      prof)
         self.assertFalse([c for c in p["albums"][0]["companions"] if "Bonus" in c["src"]])
+
+
+class RenameInPlace(Base):
+    """Reorganising a library within itself: the album folder already has its final name,
+    only the files are renamed."""
+
+    def setUp(self):
+        super().setUp()
+        self.final = self.lib / "Real Artist" / "2001 - Real Album"
+        self.final.mkdir(parents=True)
+        self.a = audio(self.final / "01 a.flac", 500, album="Real Album")
+        self.b = audio(self.final / "02 b.flac", 600, album="Real Album")
+        (self.final / "rip.cue").write_text('FILE "01 a.flac" WAVE\nFILE "02 b.flac" WAVE\n')
+        (self.final / "rip.log").write_text("log")
+
+    def test_files_renamed_in_their_own_folder_rewrite_the_cue_there(self):
+        prof = self.profile(operation="move", destination=str(self.lib))
+        p = pl.build([self.proposal(files=[str(self.a), str(self.b)], source_dir=str(self.final))], prof)
+        self.assertEqual(p["albums"][0]["status"], "ready", pl.preview(p))
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertEqual((self.final / "rip.cue").read_text(), 'FILE "01.F.flac" WAVE\nFILE "02.S.flac" WAVE\n')
+        self.assertEqual((self.final / "rip.log").read_text(), "log")
+        executor.undo(p["job"])
+        self.assertEqual((self.final / "rip.cue").read_text(), 'FILE "01 a.flac" WAVE\nFILE "02 b.flac" WAVE\n')
+        self.assertTrue(self.a.exists() and self.b.exists())
+
+    def test_one_file_already_named_the_other_renamed(self):
+        done = self.final / "01.F.flac"
+        self.a.rename(done)
+        (self.final / "rip.cue").write_text('FILE "01.F.flac" WAVE\nFILE "02 b.flac" WAVE\n')
+        prof = self.profile(operation="move", destination=str(self.lib))
+        p = pl.build([self.proposal(files=[str(done), str(self.b)], source_dir=str(self.final))], prof)
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertEqual((self.final / "rip.cue").read_text(), 'FILE "01.F.flac" WAVE\nFILE "02.S.flac" WAVE\n')
 
 
 class CueSheets(unittest.TestCase):

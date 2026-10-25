@@ -601,13 +601,26 @@ class Planner:
                 .replace("$set(_maxwords,5)", f"$set(_maxwords,{words})")
         nm = p["naming"] or {}
         template = naming.with_editions(template, nm.get("editions", "off"))
-        # the release's first disc says which edition it is, for every file of it: a CD with a
-        # 7" bonus disc stays in one folder
-        def _disc(t):
-            n = str((t.get("discnumber") or ["1"])[0]).split("/")[0]
-            return int(n) if n.isdigit() else 1
-        with_media = [t for t in targets.values() if (t.get("media") or [""])[0]]
-        rel_media = (min(with_media, key=_disc).get("media") or [""])[0] if with_media else ""
+        # the release's first disc says which edition it is, for every file of it (its media and
+        # its date as they will be written): a CD with a 7" bonus disc, or a disc from a later
+        # repress, stays in one folder
+        folder_mode, album_mode = nm.get("editions", "off"), nm.get("album_editions", "off")
+        rel = {}
+        if identified and (folder_mode != "off" or album_mode != "off") and kept:
+            def _order(f):
+                t = targets.get(f) or {}
+                d = str((t.get("discnumber") or ["1"])[0]).split("/")[0]
+                n = str((t.get("tracknumber") or ["1"])[0]).split("/")[0]
+                return (int(d) if d.isdigit() else 1, int(n) if n.isdigit() else 1, str(f))
+            f0 = min(kept, key=_order)
+            try:
+                b0 = tagio.read(f0)
+                ch0, _r0 = diff_tags(b0, dict(targets.get(f0) or {}), p, conf, [])
+                m0 = {**b0, **{k: v for k, v in ch0.items() if v is not None}}
+                rel = {k: list(m0[k]) for k in ("media", "date", "originaldate", "originalyear") if m0.get(k)}
+            except Exception:
+                rel = {}
+        rel_tags = {f"~edition_{k}": v for k, v in rel.items()}
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -627,13 +640,11 @@ class Planner:
             if ino:
                 self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
-            album_mode = nm.get("album_editions", "off")
-            if identified and album_mode != "off" and (target.get("album") or [""])[0]:
-                ed = naming.edition({**before, **target, "~edition_media": [rel_media] if rel_media else []},
-                                    album_mode)
+            tag_ed = naming.edition({**before, **target, **rel_tags}, album_mode) if album_mode != "off" else ""
+            if identified and tag_ed and (target.get("album") or [""])[0]:
                 album = str(target["album"][0])
-                if ed and not album.endswith(f"[{ed}]"):    # "I" -> "I [2019 Vinyl]", once
-                    target["album"] = [f"{album} [{ed}]"] + list(target["album"][1:])
+                if not album.endswith(f" [{tag_ed}]"):      # "I" -> "I [2019 Vinyl]", once
+                    target["album"] = [f"{album} [{tag_ed}]"] + list(target["album"][1:])
             if identified and p["mark_resolved"]:
                 target.setdefault("tagmender", ["Resolved"])
                 if not before.get("tagmender_reason"):
@@ -667,9 +678,16 @@ class Planner:
                             / _fit_name(rel.name, p["filenames"])
                     notes = []
                 else:
-                    # (for the name only, every file of the release has its first disc's media)
-                    comps = naming.render(template, {**merged, "~edition_media": [rel_media], "media": [rel_media]}
-                                          if rel_media else merged)
+                    names = dict(merged, **rel_tags)
+                    if folder_mode != "off":
+                        # (for the name only, every file has its release's first-disc media and
+                        # date - a Picard script works the edition out from those - and the album
+                        # without the edition the Album tag carries: the folder adds its own)
+                        names.update(rel)
+                        al = str((names.get("album") or [""])[0])
+                        if tag_ed and al.endswith(f" [{tag_ed}]"):
+                            names["album"] = [al[:-len(f" [{tag_ed}]")]]
+                    comps = naming.render(template, names)
                     dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
                     if dst is not None:
                         dst = self._spelled(dst, dest_root)
@@ -994,7 +1012,7 @@ class Planner:
             counts[a["status"]] = counts.get(a["status"], 0) + 1
         return {"version": PLAN_VERSION, "job": self.job, "created": time.time(), "profile": self.profile.name,
                 "profile_data": self.profile.to_dict(), "operation": self.profile["operation"],
-                "roots": self.roots(), "albums": albums, "summary": counts,
+                "roots": self.roots(), "library_roots": self.library_roots(), "albums": albums, "summary": counts,
                 "discogs_settings": _enrichment_summary(self.profile),
                 "preserve_timestamps": self.profile.preserve_timestamps()}
 

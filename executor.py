@@ -1085,11 +1085,25 @@ class Executor:
         Picard's "delete empty directories", a folder holding only what Windows and macOS
         leave everywhere (JUNK) counts as empty; those files are kept in the job folder, so
         undo puts them back."""
-        roots = {r.rstrip(os.sep) for r in self.roots}
+        lib = self.plan.get("library_roots")
+        if lib is None:                                  # (a plan from before library_roots)
+            stops = {r.rstrip(os.sep) for r in self.roots}
+        else:
+            # the profile's own folders are never removed; a folder named on the command line
+            # (`tagmender run Inbox/Album`) is, once empty, as Picard does - and nothing above
+            # it unless it lies inside one of the profile's folders
+            lib = [r.rstrip(os.sep) for r in lib]
+            stops = set(lib)
+            for r in self.roots:
+                r = r.rstrip(os.sep)
+                if r not in stops and not any(r.startswith(x + os.sep) for x in lib):
+                    stops.add(os.path.dirname(r))
+        roots = stops
         for d in sorted({str(Path(fe["src"]).parent) for fe in a["files"] + a["companions"]},
                         key=len, reverse=True):
             p = Path(d)
-            while p.exists() and os.path.realpath(str(p)) not in roots and p != p.parent:
+            while p.exists() and os.path.realpath(str(p)) not in roots and p != p.parent and \
+                    _inside(p, self.roots):
                 try:
                     inside = list(p.iterdir())
                     if any(x.name not in JUNK or not x.is_file() or x.is_symlink() for x in inside):

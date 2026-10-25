@@ -5,7 +5,7 @@ A template gives the path of a file below the destination, without the extension
 
     $join(%_albumartists_sorted%, & )/$if(%_year%,%_year% - )$words(%album%,5)/
     $if($gt(%totaldiscs%,1),Disc $num(%discnumber%,2)/$num(%discnumber%,1)$num(%tracknumber%,2),
-    $num(%tracknumber%,2)).$initials(%title%)
+    $num(%tracknumber%,2)).$initials($upper(%title%))
 
 Supported (same meaning as in Picard unless noted):
   %name%                     the tag's value; several values are joined with "; "
@@ -23,7 +23,7 @@ Supported (same meaning as in Picard unless noted):
   $set(name,v)  $unset(name)  $get(name)   variables for the rest of the name (never tags)
   $rsearch(t,regex)  $sortmulti(multi)  $in(t,s)  $add(a,b)  $sub(a,b)  $mul(a,b)  $div(a,b)
   $words(t,n)    the first n words                                       (TagMender)
-  $initials(t)   the first letter of each word, upper case               (TagMender)
+  $initials(t)   the first letter of each word that starts with a letter (as Picard)
   \\, \\$ \\% \\( \\) \\,   literal characters
 
 Not supported: $copy and other functions that change tags (naming here never changes
@@ -40,7 +40,7 @@ import re
 PRESETS = {
     "tagmender": ("$join(%_albumartists_sorted%, & )/$if(%_year%,%_year% - )$words(%album%,5)/"
                   "$if($gt(%totaldiscs%,1),Disc $num(%discnumber%,2)/$num(%discnumber%,1)$num(%tracknumber%,2),"
-                  "$num(%tracknumber%,2)).$initials(%title%)"),
+                  "$num(%tracknumber%,2)).$initials($upper(%title%))"),
     "picard": ("$if2(%albumartist%,%artist%)/$if(%albumartist%,%album%/,)$if($gt(%totaldiscs%,1),%discnumber%-,)"
                "$if($and(%albumartist%,%tracknumber%),$num(%tracknumber%,2) ,)$if(%_multiartist%,%artist% - ,)%title%"),
     "artist-album-track": ("$if2(%albumartist%,%artist%)/$if(%_year%,%_year% - )%album%/"
@@ -78,8 +78,12 @@ def edition_parts(tags: dict) -> tuple[str, str]:
         return "", ""
     low = media.lower()
     kind = "Vinyl" if _VINYL.search(media) else "WEB" if "digital" in low else "Tape" if "cassette" in low else "CD"
-    orig = (first("originalyear") or first("originaldate"))[:4]
-    year = first("date")[:4]
+    if first("~edition_media"):          # the release's first disc decides, its dates too
+        orig = (first("~edition_originalyear") or first("~edition_originaldate"))[:4]
+        year = first("~edition_date")[:4]
+    else:
+        orig = (first("originalyear") or first("originaldate"))[:4]
+        year = first("date")[:4]
     reissue = year if year.isdigit() and orig.isdigit() and year != orig else ""
     return kind, reissue
 
@@ -300,7 +304,8 @@ def _words(t, n):
 
 
 def _initials(t):
-    return "".join(w[0] for w in str(t).split() if w[:1].isalnum()).upper()
+    """Picard's $initials: the first character of each word (split at spaces) that is a letter."""
+    return "".join(w[:1] for w in str(t).split(" ") if w[:1].isalpha())
 
 
 def _ev(nodes, ctx):
@@ -439,9 +444,10 @@ FUNCS = {
     "lt": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x < y) else "",
     "gte": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x >= y) else "",
     "lte": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x <= y) else "",
-    "left": lambda c, a: _a(c, a, 0)[:int(_a(c, a, 1) or 0)],
-    "right": lambda c, a: _a(c, a, 0)[-int(_a(c, a, 1) or 0):] if int(_a(c, a, 1) or 0) else "",
-    "truncate": lambda c, a: _a(c, a, 0)[:int(_a(c, a, 1) or 0)].rstrip(),
+    "left": lambda c, a: _a(c, a, 0)[:_int(_a(c, a, 1)) or 0] if _int(_a(c, a, 1)) is not None else "",
+    "right": lambda c, a: _a(c, a, 0)[-_int(_a(c, a, 1)):] if (_int(_a(c, a, 1)) or 0) > 0 else "",
+    "truncate": lambda c, a: (_a(c, a, 0)[:_int(_a(c, a, 1)) or 0].rstrip()
+                              if _int(_a(c, a, 1)) is not None else _a(c, a, 0)),
     "lower": lambda c, a: _a(c, a, 0).lower(),
     "upper": lambda c, a: _a(c, a, 0).upper(),
     "trim": lambda c, a: _a(c, a, 0).strip(),

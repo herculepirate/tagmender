@@ -58,26 +58,39 @@ def album_key(folder: Path, files) -> str:
     """Watcher.key for an album known by its folder and files (as undo knows it): the folder,
     or the folder and its files when the folder holds other music too."""
     mine = {str(f) for f in files}
-    try:
-        others = [p for p in Path(folder).iterdir() if p.is_file() and p.suffix.lower() in ex.AUDIO_EXT
-                  and not p.name.startswith(".") and str(p) not in mine]
+    from engine import is_disc_dir
+    others = []
+    try:                                  # (the folder's own music: in it and in its disc folders)
+        for p in Path(folder).iterdir():
+            kids = [p] if p.is_file() else ([x for x in p.rglob("*") if x.is_file()] if is_disc_dir(p) else [])
+            others += [x for x in kids if x.suffix.lower() in ex.AUDIO_EXT and not x.name.startswith(".")
+                       and str(x) not in mine]
     except OSError:
         others = []
     return _files_key(folder, files) if others else planmod.db_text(folder)
 
 
 def shape(folder: Path, files=None) -> str:
-    """Which audio files there are, and their sizes (not their times): what undo leaves is
-    compared with this - a track added, removed or retagged changes it, a touched time not."""
+    """Which audio files there are, their sizes and their tags (not their times): what undo
+    leaves is compared with this - a track added, removed or retagged changes it (tags
+    rewritten inside their padding keep the size), a touched time not."""
     import hashlib
+    import json
+    import tagio
     h = hashlib.sha1()
     paths = sorted(Path(x) for x in files) if files is not None else sorted(Path(folder).rglob("*"))
     for p in paths:
         if p.suffix.lower() in ex.AUDIO_EXT and executor.STAGE_TAG not in p.name:
             try:
-                h.update(f"{p}|{p.stat().st_size}\n".encode("utf-8", "surrogateescape"))
+                tags = tagio.read(p)
+            except Exception:
+                tags = {}
+            try:
+                h.update(f"{p}|{p.stat().st_size}|".encode("utf-8", "surrogateescape"))
             except OSError:
                 continue
+            h.update(json.dumps(sorted((k, [str(x) for x in v] if isinstance(v, list) else str(v))
+                                       for k, v in tags.items()), ensure_ascii=True).encode() + b"\n")
     return "shape:" + h.hexdigest()[:16]
 
 

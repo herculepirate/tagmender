@@ -18,8 +18,10 @@ the Album tag too. A release mixing media (a CD with a 7" bonus disc) stays in o
 The desktop app shows the matching Picard script lines. John's three Picard naming scripts
 are presets (`all-music`, `various-artists`, `classical-performer`); naming now also knows
 Picard's `$set`, `$rsearch`, `$sortmulti`, `$in`, `$add`, `$sub`, `$mul`, `$div`.
+`$initials` now works as Picard's (letters only: "99 Luftballons" gives "L"), so titles
+whose first word is a number get a new file name under the tagmender preset.
 
-**File operations reviewed** in fifteen independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in sixteen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.

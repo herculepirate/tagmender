@@ -772,6 +772,26 @@ _CD_HINT = re.compile(r"(?<![A-Za-z0-9])\d*\s*CDs?\b|\bSACD\b|\bHDCD\b", re.I)  
 _DIGITAL_HINT = re.compile(r"\b(?:RM|RMX|remaster(?:ed)?|web|hi-?res)\b|\d+\s*-?\s*bit|k\s*hz", re.I)
 
 
+_STORES = (("prostudio\\s*s?\\s*masters?", "ProStudioMasters"), ("hd\\s*tracks", "HDtracks"),
+           ("qobuz", "Qobuz"), ("bandcamp", "Bandcamp"), ("7\\s*digital", "7digital"),
+           ("itunes", "iTunes"), ("tidal", "Tidal"), ("deezer", "Deezer"),
+           ("presto\\s*music", "Presto Music"), ("e-?onkyo", "e-onkyo"),
+           ("nativedsd", "NativeDSD"), ("beatport", "Beatport"), ("web(?:-?dl)?", "a download shop"))
+_STORE_HINT = [(re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])", re.I), n) for p, n in _STORES]
+
+
+def download_store(folder):
+    """The download shop a folder name says the files came from ("[ProStudioMasters]",
+    "(Qobuz 24-96)", "[WEB]"), or "": only inside the brackets of the album folder's own
+    name, so a title ("Tidal Wave") never counts."""
+    name = str(folder or "").rstrip("/\\").replace("\\", "/").rsplit("/", 1)[-1]
+    for group in re.findall(r"[\[(]([^\])]*)[\])]", name):
+        for rx, store in _STORE_HINT:
+            if rx.search(group):
+                return store
+    return ""
+
+
 def media_hint(folder):
     """What the folder name says the copy was made from: "vinyl", "cd", or
     "digital" (a remaster or hi-res download with no CD or vinyl named)."""
@@ -915,6 +935,21 @@ def file_clues(album, cand, clues, against):
             clues.setdefault("format", "CD (tracks are whole CD sectors, as ripped from a disc)")
         elif audio.get("not_cd") and not hint and "digital" in formats:
             clues.setdefault("format", "digital release (lossless tracks are not whole CD sectors, so not ripped from a CD)")
+        elif album.get("rip_log_toc") and hint in ("", "cd"):
+            # an EAC/XLD log with the disc's table of contents: ripped from a CD,
+            # whatever the files were converted to since (Nile - Amongst the Catacombs: opus)
+            if "cd" in formats:
+                clues.setdefault("format", "CD (the folder's rip log has the disc's table of contents)")
+            elif formats == {"digital"}:
+                against.append("your folder has a CD rip log, so not this digital release")
+        store = download_store(album.get("folder"))
+        if store and hint != "vinyl":
+            # a shop named in the folder ("[ProStudioMasters]"): bought as a download
+            if "digital" in formats:
+                clues.setdefault("format", f"digital release (bought from {store}, per the folder name)")
+            else:
+                against.append(f"folder name says it was bought from {store}, "
+                               f"this pressing is {'/'.join(sorted(formats))}")
         # scans of a back cover, tray card, booklet or disc: the copy is physical
         scans = album.get("scans") or {}
         digital_audio = (audio.get("hires") and hint != "vinyl") or audio.get("not_cd") or hint == "digital"

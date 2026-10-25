@@ -297,6 +297,10 @@ class Fixes(unittest.TestCase):
         hires = "pressing chosen by digital release (hi-res audio, which no CD carries) (not on x)"
         self.assertTrue(va.evidence_decided(row(hires, "CD")))                   # AVKRVST
         self.assertFalse(va.evidence_decided(row(hires, "Digital Media")))       # Cynic - ReFocus
+        log = "pressing chosen by CD (the folder's rip log has the disc's table of contents) (not on x)"
+        self.assertTrue(va.evidence_decided(row(log, "Digital Media")))          # Nile: opus from a CD rip
+        shop = "pressing chosen by digital release (bought from ProStudioMasters, per the folder name)"
+        self.assertTrue(va.evidence_decided(row(shop, '12" Vinyl')))             # Slayer: a download tagged as the LP
 
 def types_dm():
     return {"dm": None}

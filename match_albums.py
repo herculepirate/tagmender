@@ -709,6 +709,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                                    if h not in mc.catno_hints(album_folder)]
     folder_match = set(mc.catno_hints(album_folder, variants=True)) | set(
         mc.catno_hints(title, variants=True))
+    log_toc = log_tocs(album_dir)          # an EAC/XLD log: the copy was ripped from a CD
     return {
         "artist": top("artist") or artist_folder, "title": title,
         "year": year or None, "discs": n_discs,
@@ -728,7 +729,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tag_label": top("label"), "tag_country": top("country"),
         "tag_media": mc.media_kind(top("media")), "tag_date": top("date"),
         "audio": audio_evidence([i for _p, i in infos]),
-        "tocs": disc_tocs(infos) or log_tocs(album_dir) or cue_tocs(album_dir, infos),
+        "tocs": disc_tocs(infos) or log_toc or cue_tocs(album_dir, infos),
+        "rip_log_toc": bool(log_toc),
         "scans": scan_evidence(album_dir),
         "isrcs": [i.get("isrc") for _p, i in infos if i.get("isrc")],
         "store_tracks": sorted({i["store_track"] for _p, i in infos if i.get("store_track")}),

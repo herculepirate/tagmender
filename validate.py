@@ -249,7 +249,8 @@ _STRONG = re.compile(r"barcode (?:\(OCR\) )?agrees|pressing chosen by barcode|ca
                      r"left out: folder (?:catalogue number|name says [A-Z]{2}\b)")
 # What the files are (a CD rip, a download, a vinyl rip): decides only against a tag whose
 # format contradicts it (Jesu - Terminus: a CD rip tagged as the download).
-_FORMAT = re.compile(r"pressing chosen by (?:digital release \((?:hi-res|lossless)|CD \(tracks are whole|"
+_FORMAT = re.compile(r"pressing chosen by (?:digital release \((?:hi-res|lossless|bought from)|"
+                     r"CD \((?:tracks are whole|the folder's rip log)|"
                      r"physical release)|left out: folder name says (?:cd|vinyl)")
 
 

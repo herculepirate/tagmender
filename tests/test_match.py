@@ -1505,6 +1505,30 @@ class PressingEvidence(unittest.TestCase):
         infos = [{"lossless": True, "rate": 44100, "bits": 16, "samples": 588 * n + 5} for n in (1000, 2000)]
         self.assertTrue(ma.audio_evidence(infos)["not_cd"])
 
+    def test_rip_log_makes_it_a_cd_rip(self):
+        """Nile - Amongst the Catacombs: opus files with the EAC log of the CD
+        they were ripped from; the CD, not the download."""
+        a = album(rip_log_toc=True, audio={"hires": False, "cd_frames": False, "not_cd": False})
+        r = self.pick(a, cand(id="cd", formats={"cd"}), cand(id="web", formats={"digital"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cd"), r["why"])
+        r = self.pick(album(media_hint="vinyl", rip_log_toc=True),                # the folder name rules
+                      cand(id="cd", formats={"cd"}), cand(id="lp", formats={"vinyl"}))
+        self.assertEqual(r["best"]["cand"]["id"], "lp")
+
+    def test_download_shop_in_the_folder_name(self):
+        """Slayer - Reign In Blood [ProStudiosMasters] [RM 2015]: a 24/192 download,
+        never the 1986 LP (hi-res audio alone could be a vinyl rip)."""
+        self.assertEqual(mc.download_store("1986 - Reign In Blood [ProStudiosMasters] [RM 2015]"),
+                         "ProStudioMasters")
+        self.assertEqual(mc.download_store("2010 - X (Qobuz 24-96)"), "Qobuz")
+        self.assertEqual(mc.download_store("2020 - A [WEB]"), "a download shop")
+        for f in ("2001 - Tidal Wave", "2020 - Web of Lies", "2019 - A [2019 Reissue Vinyl Rip]"):
+            self.assertEqual(mc.download_store(f), "", f)
+        a = album(folder="1986 - Reign In Blood [ProStudiosMasters] [RM 2015]", media_hint="digital",
+                  audio={"hires": True, "cd_frames": False, "not_cd": False})
+        r = self.pick(a, cand(id="lp", formats={"vinyl"}), cand(id="web", formats={"digital"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "web"), r["why"])
+
     def test_one_pressing_listed_twice(self):
         r = self.pick(album(), cand(id="a", date="2006", catnos={"vr297"}, barcodes={"746105029729"}),
                       cand(id="b", date="2006-06-13", catnos={"vr297"}, barcodes={"746105029729"}))

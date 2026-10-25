@@ -20,6 +20,12 @@ Picard must be closed, and its "Move files to" must be the library being tagged.
   python3 retag_approved.py                                   # checks only, writes nothing
   python3 retag_approved.py --apply                           # checks, then tags
   python3 retag_approved.py --library /media/unraidmedia2/music/ambient_music --apply
+  python3 retag_approved.py --new --apply       # the UNTAGGED albums the matcher is sure of
+                                                # (~/Downloads/matching_<library>/match_state.db)
+
+With --new there is no approved list: the matcher's own sure matches ("auto") of albums
+that carry no release yet are tagged, with the same checks; albums left for review are
+listed in the summary, never tagged.
 """
 from __future__ import annotations
 
@@ -65,12 +71,16 @@ class Runner:
         self.summary.append(line)
 
 
-def approved_releases(fixes_db: Path) -> dict:
-    """{folder: {"mb": MusicBrainz release or "", "discogs": Discogs release or ""}} from fixes.db."""
+def approved_releases(fixes_db: Path, sure_only=False) -> dict:
+    """{folder: {"mb": MusicBrainz release or "", "discogs": Discogs release or ""}} from fixes.db
+    (or, sure_only, the matcher's own results: only those it is sure of, status auto)."""
     db = sqlite3.connect(fixes_db)
     out = {}
     for path, blob in db.execute("SELECT path, result FROM results"):
-        b = (json.loads(blob).get("best") or {})
+        o = json.loads(blob)
+        if sure_only and o.get("status") != "auto":
+            continue
+        b = (o.get("best") or {})
         out[path] = {"mb": b.get("mb_id") or (b.get("id") if b.get("source") == "mb" else ""),
                      "discogs": b.get("id") if b.get("source") == "discogs" else ""}
     return out
@@ -126,21 +136,38 @@ def main(argv=None):
     ap.add_argument("--apply", action="store_true", help="tag once every check passed (default: checks only)")
     ap.add_argument("--batch", type=int, default=3)
     ap.add_argument("--settle", type=int, default=30)
+    ap.add_argument("--new", action="store_true",
+                    help="tag the untagged albums the matcher is sure of, not the approved retags")
     args = ap.parse_args(argv)
     lib = Path(args.library)
     vdir = Path.home() / "Downloads" / f"validate_{lib.name}"
     fixes = vdir / "fixes.db"
+    if args.new:
+        fixes = Path.home() / "Downloads" / f"matching_{lib.name.split('_')[0]}" / "match_state.db"
+        if not fixes.exists():                            # the first library's results: ~/Downloads/matching
+            fixes = Path.home() / "Downloads" / "matching" / "match_state.db"
     run_dir = Path.home() / "Downloads" / "autopilot" / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     r = Runner(run_dir)
     r.say(f"retag_approved {'(apply)' if args.apply else '(checks only)'}: {lib}")
     try:
-        out = r.run("validate.py", lib, "--export-fixes", "--only-approved")
-        m = re.search(r"(\d+) album\(s\) to re-tag", out)
-        r.say(f"1. approved list exported: {m.group(1) if m else '?'} album(s)")
-        wanted = approved_releases(fixes)
+        retag = [] if args.new else ["--retag"]
+        if args.new:
+            if not fixes.exists():
+                raise Stop(f"no matcher results at {fixes}")
+            wanted = approved_releases(fixes, sure_only=True)
+            review = [p for p, blob in sqlite3.connect(fixes).execute("SELECT path, result FROM results")
+                      if json.loads(blob).get("status") == "review" and Path(p).is_dir()]
+            r.say(f"1. matcher results: {len(wanted)} album(s) it is sure of; {len(review)} left for "
+                  f"review (not tagged; listed in log.txt)")
+            r.log.write("\nLeft for review:\n" + "\n".join(sorted(review)) + "\n")
+        else:
+            out = r.run("validate.py", lib, "--export-fixes", "--only-approved")
+            m = re.search(r"(\d+) album\(s\) to re-tag", out)
+            r.say(f"1. approved list exported: {m.group(1) if m else '?'} album(s)")
+            wanted = approved_releases(fixes)
 
-        out = r.run("tag_albums.py", "--matches-db", fixes, "--retag")
+        out = r.run("tag_albums.py", "--matches-db", fixes, *retag)
         planned, problems = check_tag_plan(Path.home() / "Downloads" / "tagging" / "tag_plan.csv", wanted)
         if problems:
             raise Stop("the Picard plan does not match the approved list:\n  " + "\n  ".join(problems))
@@ -157,14 +184,14 @@ def main(argv=None):
             r.say("Checks passed. Nothing was changed. Run again with --apply to tag.")
             return 0
         if planned:
-            out = r.run("tag_albums.py", "--matches-db", fixes, "--retag", "--apply",
+            out = r.run("tag_albums.py", "--matches-db", fixes, *retag, "--apply",
                         "--batch", args.batch, "--settle", args.settle, check=False)
             _path, states = results_of(out)
             again = [a for a, s in states.items() if not s.startswith("tagged")]
             if again:                                       # Picard busy or slow: once more
                 r.say(f"4. Picard: {len(states) - len(again)} tagged; trying {len(again)} again")
                 for a in again:
-                    out = r.run("tag_albums.py", "--matches-db", fixes, "--retag", "--apply",
+                    out = r.run("tag_albums.py", "--matches-db", fixes, *retag, "--apply",
                                 "--only", a, "--batch", 1, "--settle", args.settle * 2, check=False)
                     states.update(results_of(out)[1])
             done = [a for a, s in states.items() if s.startswith("tagged")]

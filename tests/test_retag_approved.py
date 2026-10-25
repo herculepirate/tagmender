@@ -54,6 +54,16 @@ class Checks(unittest.TestCase):
         bad = self.plan([("/l/AVKRVST/The Approbation", "56af"), ("/l/Other/Album", "aaaa")])
         self.assertEqual(len(ra.check_tag_plan(bad, self.wanted)[1]), 2)
 
+    def test_new_albums_only_the_sure_ones(self):
+        db = sqlite3.connect(self.tmp / "fixes.db")
+        db.execute("INSERT INTO results VALUES (?,?)", ("/l/Sepultura/The Mediator", json.dumps(
+            {"status": "review", "best": {"source": "mb", "id": "6a70", "mb_id": "6a70"}})))
+        db.execute("UPDATE results SET result=? WHERE path='/l/Jesu/Terminus'", (json.dumps(
+            {"status": "auto", "best": {"source": "mb", "id": "52c3"}}),))
+        db.commit()
+        sure = ra.approved_releases(self.tmp / "fixes.db", sure_only=True)
+        self.assertEqual(sorted(sure), ["/l/Jesu/Terminus"])     # the others carry no status
+
     def test_discogs_only_albums_must_come_from_discogs(self):
         """King Diamond - Deadly Lullabyes Live was about to be tagged from iTunes."""
         self.assertEqual(ra.check_web_plan(self.web([("/l/King Diamond/Deadly Lullabyes", "Discogs")]),

@@ -30,7 +30,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `audiophile` | all on | `replaygain` (ReplayGain 2.0 + true peak, R128 for Opus), `lyrics` (LRCLIB; synced as `.lrc` next to the track, plain lyrics embedded; see `lyrics`), `acoustid` (AcoustID ID confirmed against the MusicBrainz recording; needs fpcalc and a key), `rip_info` (MusicBrainz disc ID from the rip log's TOC, and the log's verdict in `tagmender_rip`), `quality` (`dynamic_range`, `album_dynamic_range`, and `tagmender_quality` when a lossless file was made from a lossy one). Measurements never replace a value the file has, and are cached |
 | `lyrics` | sidecar on, embed off | `sidecar`: time-synced lyrics as `.lrc` next to the track; `embed`: also in the file's lyrics tag (plain lyrics are always embedded, they have no file of their own); `enabled`: lyrics below Audiophile too |
 | `field_policy` | replace | `{"default": "replace", "fields": {"album": "lock", "comment": "remove"}}` |
-| `artwork` | CoverUp, embed front, cover.jpg only into folders without an image | |
+| `artwork` | CoverUp, embed front, cover.jpg only into folders without an image | `provider` (coverup, caa, discogs: tried first), `embed_front`, `files`, `min_px` (smallest short side taken), `max_bytes` (largest download). The embedded copy is at most CoverUp's `embed_max_side` (1200 px), always JPEG/PNG; cover.jpg is always a JPEG. `replace` is not used yet: TagMender never replaces artwork that is there |
 | `operation` | `in_place` | `in_place`, `copy`, `move` |
 | `destination` | — | must exist (never created); required for copy/move |
 | `naming` | preset `tagmender` | or `{"template": "..."}`; presets `all-music`, `various-artists`, `classical-performer` are John's Picard scripts |

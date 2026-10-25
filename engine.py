@@ -505,7 +505,7 @@ class Engine:
                 self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
                                           self.token, self.log)
             got = artwork.find_front(self._art, prop.source_dir, ids, (t.get("albumartist") or [""])[0],
-                                     (t.get("album") or [""])[0], self.log)
+                                     (t.get("album") or [""])[0], self.log, files=prop.files)
         except Exception as exc:
             got = {"note": f"artwork: {exc}"}
         if got and got.get("front"):

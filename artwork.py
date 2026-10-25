@@ -30,19 +30,65 @@ USER_AGENT = f"TagMender/{_VERSION} ( https://github.com/herculepirate/tagmender
 MAX_BYTES = 20_000_000
 
 
-def _stage(data: bytes, staging: Path) -> tuple[Path, int, int]:
-    """Write the image as JPEG (CMYK/PNG converted) and return (path, width, height)."""
+EMBED_MAX_SIDE = 1200          # CoverUp's embed_max_side default: what goes into each track
+JPEG_QUALITY = 95              # CoverUp's jpeg_quality default
+EMBED_LIMIT = 16_000_000       # a FLAC picture block holds less than 16 MiB
+
+
+def _rgb(im):
+    """im as RGB; transparency flattened onto white, as CoverUp does."""
+    from PIL import Image
+    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+        im = im.convert("RGBA")
+        bg = Image.new("RGB", im.size, (255, 255, 255))
+        bg.paste(im, mask=im.split()[-1])
+        return bg
+    return im.convert("RGB")
+
+
+def _stage(data: bytes, staging: Path, quality=JPEG_QUALITY) -> tuple[Path, int, int]:
+    """Write the image as JPEG (PNG, TIFF, WebP, BMP, CMYK converted) and return (path,
+    width, height)."""
     from PIL import Image
     staging.mkdir(parents=True, exist_ok=True)
     with Image.open(io.BytesIO(data)) as im:
+        im.load()                                   # (a truncated image fails here, not later)
         w, h = im.size
         if im.format != "JPEG" or im.mode not in ("RGB", "L"):
             buf = io.BytesIO()
-            im.convert("RGB").save(buf, "JPEG", quality=93)
+            _rgb(im).save(buf, "JPEG", quality=int(quality))
             data = buf.getvalue()
     path = staging / (hashlib.sha1(data).hexdigest()[:16] + ".jpg")
     path.write_bytes(data)
     return path, w, h
+
+
+def embed_copy(front: Path, staging: Path, max_side=EMBED_MAX_SIDE, quality=JPEG_QUALITY) -> Path:
+    """The front as it is embedded into each track: a JPEG at most max_side pixels on its
+    long side (CoverUp's embed_max_side) and small enough for every format's picture
+    block; front itself when it already is one."""
+    from PIL import Image
+    data = Path(front).read_bytes()
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+        side = int(max_side or 0)
+        if im.format == "JPEG" and im.mode in ("RGB", "L") and (not side or max(im.size) <= side) \
+                and len(data) < EMBED_LIMIT:
+            return Path(front)
+        out = _rgb(im)
+        if side and max(out.size) > side:
+            out.thumbnail((side, side), Image.LANCZOS)
+        q = int(quality)
+        while True:
+            buf = io.BytesIO()
+            out.save(buf, "JPEG", quality=q)
+            if len(buf.getvalue()) < EMBED_LIMIT or q <= 50:
+                break
+            q -= 10
+    staging.mkdir(parents=True, exist_ok=True)
+    path = staging / (hashlib.sha1(buf.getvalue()).hexdigest()[:16] + ".embed.jpg")
+    path.write_bytes(buf.getvalue())
+    return path
 
 
 def _get(url, headers=None, limit=MAX_BYTES) -> bytes | None:
@@ -60,16 +106,20 @@ class CoverUp:
     def __init__(self, staging: Path, ini=None, local_min=1000):
         import coverup_batch as cb
         import coverup_loader
+        import picard_config
         self.cb = cb
         self.staging = staging
         coverup_loader.load_coverup(str(companions.coverup_dir()))
         from coverup.net import HttpClient
-        self.s, self.plugin, _ = cb.batch_settings(ini or cb.DEFAULT_INI, "full")
+        if ini is None:                  # the Picard.ini TagMender reads ($TAGMENDER_PICARD_INI, Flatpak, native)
+            found = picard_config.ini_path()
+            ini = str(found) if found else cb.DEFAULT_INI
+        self.s, self.plugin, _ = cb.batch_settings(ini, "full")
         self.http = HttpClient(version="tagmender", cache_dir=ex.STATE_DIR / "coverup_cache",
                                cache_hours=float(self.s["http_cache_hours"]))
         self.args = argparse.Namespace(local_min=local_min)
 
-    def front(self, folder, ids: dict, artist="", album="") -> dict | None:
+    def front(self, folder, ids: dict, artist="", album="", files=None) -> dict | None:
         import match_albums as ma
         import match_core as mc
         from coverup import imaging
@@ -81,29 +131,70 @@ class CoverUp:
             info["artist"] = artist
         if album:
             info["album"] = mc.search_title(album)
-        pipe = Pipeline(self.s, self.http, fingerprint=imaging.fingerprint)
+        s = self.s
+        if files is None:                 # (no file list: the folder's own music and its disc folders')
+            files = _own_music(Path(folder))
+        if _other_music(Path(folder), files):
+            # a loose track beside other albums, or one album of a folder holding several: the
+            # pictures there (and below) are not this album's own - online sources only
+            s = s.with_(providers_enabled=[p for p in s["providers_enabled"] if p != "local"])
+        pipe = Pipeline(s, self.http, fingerprint=imaging.fingerprint)
         res = pipe.run(cb.make_query(info))
         res.candidates = [c for c in res.candidates if not (c.provider == "local" and cb.R.is_generated(c.data))]
 
         class _Log:
             def write(self, *_a):
                 pass
-        actions, notes = cb.decide(pipe, res, info, self.s, self.args, _Log())
+        actions, notes = cb.decide(pipe, res, info, s, self.args, _Log())
         front = next((a for a in actions if a["type"] == "front"), None)
         if front is None:
             return {"note": "; ".join(notes) or "CoverUp found no front cover"}
         c = front["cand"]
         local = c.extra.get("local_path") or c.extra.get("path")
+        q = s.get("jpeg_quality", JPEG_QUALITY) or JPEG_QUALITY
         if front["local"] and not c.extra.get("cropped") and local:
-            path = Path(local)                               # the scan in the folder is the cover
-            return {"front": str(path), "source": "coverup:local", "width": c.width, "height": c.height,
-                    "why": front["why"]}
+            # the scan in the folder is the cover: a JPEG copy of it, staged (the scan itself
+            # may be a TIFF or a CMYK JPEG, and it may move with the album before cover.jpg
+            # is made)
+            path, w, h = _stage(Path(local).read_bytes(), self.staging, q)
+            return {"front": str(path), "source": "coverup:local", "width": w, "height": h,
+                    "why": front["why"], "local": str(local)}
         if c.data is None:
             pipe.fetch_full(c)
         if c.data is None:
             return {"note": f"CoverUp chose {c.provider} but the download failed"}
-        path, w, h = _stage(c.data, self.staging)
+        path, w, h = _stage(c.data, self.staging, q)
         return {"front": str(path), "source": f"coverup:{c.provider}", "width": w, "height": h, "why": front["why"]}
+
+    def embed_max_side(self):
+        try:
+            return int(self.s["embed_max_side"] or 0)
+        except (KeyError, TypeError, ValueError):
+            return EMBED_MAX_SIDE
+
+
+def _own_music(folder: Path) -> list:
+    from engine import is_disc_dir
+    out = []
+    try:
+        for p in folder.iterdir():
+            if p.is_file() and p.suffix.lower() in ex.AUDIO_EXT:
+                out.append(p)
+            elif p.is_dir() and is_disc_dir(p):
+                out += [x for x in p.rglob("*") if x.suffix.lower() in ex.AUDIO_EXT]
+    except OSError:
+        pass
+    return out
+
+
+def _other_music(folder: Path, files) -> bool:
+    """folder (or a folder below it) holds music that is not among files."""
+    mine = {str(f) for f in files}
+    try:
+        return any(p.suffix.lower() in ex.AUDIO_EXT and str(p) not in mine and not p.name.startswith(".")
+                   for p in folder.rglob("*"))
+    except OSError:
+        return False
 
 
 class CoverArtArchive:
@@ -116,7 +207,7 @@ class CoverArtArchive:
         mbid = ids.get("release_mbid")
         if not mbid:
             return None
-        data = _get(f"https://coverartarchive.org/release/{mbid}/front-1200")
+        data = _get(f"https://coverartarchive.org/release/{mbid}/front-1200", limit=getattr(self, "limit", MAX_BYTES))
         path, w, h = _stage(data, self.staging)
         return {"front": str(path), "source": f"Cover Art Archive {mbid}", "width": w, "height": h}
 
@@ -136,16 +227,19 @@ class DiscogsImage:
         img = next((i for i in imgs if i.get("type") == "primary"), imgs[0] if imgs else None)
         if not img or not img.get("uri"):
             return None
-        data = _get(img["uri"], {"Authorization": f"Discogs token={self.token}"})
+        data = _get(img["uri"], {"Authorization": f"Discogs token={self.token}"}, limit=getattr(self, "limit", MAX_BYTES))
         path, w, h = _stage(data, self.staging)
         return {"front": str(path), "source": f"Discogs release {rid}", "width": w, "height": h}
 
 
 def chain(profile, staging: Path, http=None, token="", log=None) -> list:
     """The providers to try, the profile's choice first; one that cannot start is left out
-    (and logged), so artwork never stops the run."""
-    first = profile["artwork"].get("provider", "coverup")
+    (and logged), so artwork never stops the run. The profile's artwork.max_bytes limits
+    what is downloaded, artwork.min_px what is taken (find_front)."""
+    art = profile["artwork"]
+    first = art.get("provider", "coverup")
     order = [first] + [p for p in ("coverup", "caa", "discogs") if p != first]
+    limit = int(art.get("max_bytes") or MAX_BYTES)
     out = []
     for name in order:
         try:
@@ -155,21 +249,39 @@ def chain(profile, staging: Path, http=None, token="", log=None) -> list:
                 out.append(CoverArtArchive(staging))
             elif name == "discogs":
                 out.append(DiscogsImage(staging, http, token))
+            out[-1].limit = limit
+            out[-1].min_px = int(art.get("min_px") or 0)
         except BaseException as exc:                          # CoverUp missing: SystemExit from its loader
             if log:
                 log.warning("artwork provider %s unavailable: %s", name, exc)
     return out
 
 
-def find_front(providers, folder, ids, artist="", album="", log=None) -> dict | None:
+def find_front(providers, folder, ids, artist="", album="", log=None, files=None) -> dict | None:
+    """The first provider's front that is big enough (artwork.min_px on its short side),
+    with "embed": the copy that goes into each track (at most embed_max_side, as CoverUp)."""
     notes = []
     for p in providers:
         try:
-            got = p.front(folder, ids, artist, album)
+            if isinstance(p, CoverUp):
+                got = p.front(folder, ids, artist, album, files=files)
+            else:
+                got = p.front(folder, ids, artist, album)
         except Exception as exc:
             notes.append(f"{p.name}: {exc}")
             continue
         if got and got.get("front"):
+            low = getattr(p, "min_px", 0)
+            if low and got.get("width") and got.get("height") and min(got["width"], got["height"]) < low:
+                notes.append(f"{p.name}: {got['width']}x{got['height']} is smaller than the profile's "
+                             f"{low} px")
+                continue
+            side = p.embed_max_side() if isinstance(p, CoverUp) else EMBED_MAX_SIDE
+            try:
+                got["embed"] = str(embed_copy(Path(got["front"]), Path(got["front"]).parent, side))
+            except Exception as exc:                         # not an image after all
+                notes.append(f"{p.name}: {exc}")
+                continue
             if notes:
                 got["notes"] = notes
             return got

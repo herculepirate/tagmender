@@ -466,6 +466,30 @@ def _rename_case(src: Path, dst: Path):
 # --------------------------------------------------------------------------
 # artwork embedding (front cover)
 # --------------------------------------------------------------------------
+def _image_mime(data: bytes) -> str | None:
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    return None
+
+
+def _embed_image(art: dict):
+    """(bytes, MIME type) of the picture to embed, or None when it is gone (a staging folder
+    pruned, a scan moved since the plan) or is no JPEG/PNG: the album is tagged without it."""
+    for p in (art.get("embed"), art.get("front")):
+        if not p:
+            continue
+        try:
+            data = Path(p).read_bytes()
+        except OSError:
+            continue
+        mime = _image_mime(data)
+        if mime:
+            return data, mime
+    return None
+
+
 def embed_front(path, data: bytes, mime="image/jpeg"):
     import base64
     import mutagen
@@ -492,7 +516,10 @@ def embed_front(path, data: bytes, mime="image/jpeg"):
         f.tags["METADATA_BLOCK_PICTURE"] = [base64.b64encode(pic.write()).decode("ascii")]
     else:
         raise tagio.Unsupported(f"no front-cover embedding for {type(f).__name__}")
-    f.save()
+    if isinstance(getattr(f, "tags", None), ID3):
+        f.save(v2_version=3 if f.tags.version[1] == 3 else 4)    # an ID3v2.3 tag stays v2.3
+    else:
+        f.save()
 
 
 # --------------------------------------------------------------------------
@@ -748,7 +775,9 @@ class Executor:
         src, dst, op = Path(fe["src"]), Path(fe["dst"]), fe["op"]
         changes = fe.get("changes") or {}
         art = a.get("artwork") or {}
-        embed = bool(art.get("front")) and fe["dst"] in (art.get("embed_into") or [])
+        embed = bool(art.get("front")) and fe["dst"] in (art.get("embed_into") or []) and _embed_image(art) is not None
+        if op == "tag" and not changes and not embed:
+            return                          # only the cover was new, and it is gone: nothing to write
         _check_target(dst, self.roots)
         if op == "tag" and Path(src).is_symlink():
             raise StepError(f"refusing to write through a symbolic link: {src}")
@@ -805,8 +834,7 @@ class Executor:
                 if changes:
                     tagio.write(stage, changes)
                 if embed:
-                    embed_front(stage, Path(art["front"]).read_bytes(),
-                                "image/png" if str(art["front"]).lower().endswith(".png") else "image/jpeg")
+                    embed_front(stage, *_embed_image(art))
                 if self.preserve_times:
                     os.utime(stage, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
                 after = payload.digest(stage)
@@ -865,8 +893,7 @@ class Executor:
                 if changes:
                     tagio.write(stage, changes)
                 if embed:
-                    embed_front(stage, Path(art["front"]).read_bytes(),
-                                "image/png" if str(art["front"]).lower().endswith(".png") else "image/jpeg")
+                    embed_front(stage, *_embed_image(art))
                 if self.preserve_times:
                     st0 = os.stat(src)
                     os.utime(stage, ns=(st0.st_atime_ns, st0.st_mtime_ns))
@@ -1012,6 +1039,9 @@ class Executor:
         if not front.exists():              # a scan of the album ("Scans/Front.jpg"), moved with it just now
             front = next((Path(c["dst"]) for c in a.get("companions") or []
                           if c["src"] == str(front) and Path(c["dst"]).exists()), front)
+        if not front.exists():              # gone since the plan (staging pruned): no cover file, never a failure
+            self.journal.write(ev="note", album=i, text=f"no {dst.name}: the cover planned ({front}) is gone")
+            return
         self.journal.write(ev="create_begin", kind="cover_file", album=i, path=str(dst),
                            sha256=payload.file_sha256(front))
         stage = _stage_name(dst, self.job)

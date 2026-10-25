@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Artwork / CoverUp reviewed** (tests/test_artwork_review.py): covers are always JPEG
+(a TIFF/WebP/PNG/CMYK scan is converted, transparency onto white), the embedded copy is
+capped at CoverUp's embed_max_side so a hi-res scan never fails an album, ID3v2.3 stays
+v2.3, a cover that is gone at apply time is skipped instead of failing the album, CoverUp
+reads the same Picard.ini as the rest of TagMender, `min_px`/`max_bytes` are honoured,
+another album's pictures are never taken (loose tracks, shared folders), and cover.jpg is
+not added beside a cover.webp/gif/tif.
+
 **New: editions of one album in separate folders** (profile naming settings, and in the
 desktop app): "Separate editions in folder names" (Off / Edition / Edition + reissue year)
 gives `2004 - I [2019 Vinyl]`, `2004 - I [2014 CD]`, `1986 - Reign in Blood [2015 WEB]`;

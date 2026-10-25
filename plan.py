@@ -38,6 +38,8 @@ import tagio
 
 PLAN_VERSION = 1
 AUDIO_EXT = ex.AUDIO_EXT
+# an album folder holding any of these has its cover already (as CoverUp's writer sees it)
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp", ".jfif")
 CUE_LIKE = {".cue", ".m3u", ".m3u8"}
 EMBEDDABLE = {".flac", ".mp3", ".m4a", ".mp4", ".aiff", ".aif", ".wav", ".ogg", ".oga", ".opus"}
 
@@ -758,9 +760,9 @@ class Planner:
             # holding the disc folders, not the first disc's
             folder = (Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
                       if entry["files"] else (None if op == "copy" else Path(prop.source_dir)))
-            has_image = folder is None or folder.exists() and any(x.suffix.lower() in (".jpg", ".jpeg", ".png") for x in folder.iterdir())
+            has_image = folder is None or folder.exists() and any(x.suffix.lower() in IMAGE_EXT for x in folder.iterdir())
             has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
-                                         (".jpg", ".jpeg", ".png") for c in entry["companions"])
+                                         IMAGE_EXT for c in entry["companions"])
             for fe in entry["files"]:
                 if fe["dst"] in embed and fe["op"] == "none":   # only the cover is new
                     fe["op"] = "tag" if fe["dst"] == fe["src"] else op
@@ -771,7 +773,15 @@ class Planner:
                     cover = None                              # another album's file goes there
                 else:
                     self.claimed[key] = f"artwork:{prop.source_dir}"
-            entry["artwork"] = {"front": art["front"], "source": art.get("source", ""),
+            emb = art.get("embed")
+            if not emb and embed:                  # (a provider result without its embedding copy)
+                try:
+                    import artwork as _artwork
+                    emb = str(_artwork.embed_copy(Path(art["front"]), ex.STATE_DIR / "staging" / self.job))
+                except Exception:
+                    emb = None
+            entry["artwork"] = {"front": art["front"], "embed": emb or art["front"],
+                                "source": art.get("source", ""), "why": art.get("why", ""),
                                 "embed_into": embed, "file": str(cover) if cover else None,
                                 "width": art.get("width"), "height": art.get("height")}
         # 6. lyrics files (.lrc) next to the tracks; never over a file that is already there

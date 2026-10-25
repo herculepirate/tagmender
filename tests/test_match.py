@@ -1505,6 +1505,25 @@ class PressingEvidence(unittest.TestCase):
         infos = [{"lossless": True, "rate": 44100, "bits": 16, "samples": 588 * n + 5} for n in (1000, 2000)]
         self.assertTrue(ma.audio_evidence(infos)["not_cd"])
 
+    def test_shop_and_discogs_pictures_are_not_scans(self):
+        """Samael - Ceremony Of Opposites: an Amazon picture of the 2021 MDD reissue
+        carried its barcode into a folder ripped from the 1994 CD in 2005."""
+        import tempfile, shutil
+        from PIL import Image
+        d = Path(tempfile.mkdtemp())
+        try:
+            for n in ("71-Q6hBQwTL._UF1000,1000_QL80_.jpg", "R-4847696-1388801849-4582.jpg",
+                      "samael-ceremony_of_opposites_back.jpg"):
+                Image.new("RGB", (1200, 900), "white").save(d / n)
+            imgs, _key = ma.list_images(d, 80)
+            self.assertEqual([Path(p).name for p in imgs], ["samael-ceremony_of_opposites_back.jpg"])
+            (d / "samael-ceremony_of_opposites_back.jpg").unlink()
+            self.assertFalse(ma.scan_evidence(d)["physical"])        # web pictures prove no copy
+        finally:
+            shutil.rmtree(d)
+        for n in ("Back.jpg", "R-side.jpg", "img108.jpg", "Samael-CeremonyCD2012b.jpg"):
+            self.assertFalse(ma.web_image(n), n)
+
     def test_rip_log_makes_it_a_cd_rip(self):
         """Nile - Amongst the Catacombs: opus files with the EAC log of the CD
         they were ripped from; the CD, not the download."""

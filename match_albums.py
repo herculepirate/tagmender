@@ -1558,6 +1558,17 @@ OCR_VERSION = "ocr-2"   # bump when the OCR code changes, so cached OCR is redon
 _NOT_A_SCAN = re.compile(r"^(cover|folder|front|albumart\w*|thumb\w*|ksnip\S*|screenshot\S*|spectr\S*|au\d*|"
                          r"expose\d*|mv|dr|dynamic\S*|\d{2,4}x\d{2,4}\S*)$", re.I)
 _NOT_A_SCAN_DIR = re.compile(r"^(tech[ ._-]?info|info|spectr\S*|analysis|screens?(hots)?)$", re.I)
+# Pictures saved from shops and databases, not scanned from your copy: Amazon product
+# images ("71-Q6hBQwTL._UF1000,1000_QL80_.jpg", "._AC_SL1500_"), Discogs release images
+# ("R-4847696-1388801849-4582.jpg"). Their barcode is some other pressing's (Samael -
+# Ceremony Of Opposites: the 2021 MDD reissue's, in a folder ripped in 2005).
+_WEB_IMAGE = re.compile(r"\._(?:[A-Z]{2}\d|[A-Z]{2}_)|^R-\d{3,}-\d{9,}(?:-\d+)?$", re.I)
+
+
+def web_image(path):
+    return bool(_WEB_IMAGE.search(Path(path).stem))
+
+
 _PHYSICAL_NAME = re.compile(r"back|rear|tray|inlay|disc|disk|(?<![a-z])cd\d*(?![a-z])|obi|matrix|spine|booklet|"
                             r"inside|insert|(?<![a-z])label|sticker|case", re.I)
 
@@ -1574,7 +1585,8 @@ def scan_evidence(album_dir):
         dirs[:] = [d for d in dirs if not _NOT_A_SCAN_DIR.match(d)]
         for n in sorted(names):
             p = Path(dirpath) / n
-            if p.suffix.lower() not in IMAGE_EXT or p.suffix.lower() == ".gif" or _NOT_A_SCAN.match(p.stem):
+            if p.suffix.lower() not in IMAGE_EXT or p.suffix.lower() == ".gif" or _NOT_A_SCAN.match(p.stem) \
+                    or web_image(p):
                 continue
             if _PHYSICAL_NAME.search(p.stem):
                 return {"physical": True, "why": f"a scan named {p.name}"}
@@ -1601,7 +1613,7 @@ def list_images(base, max_n):
     for dirpath, _d, names in os.walk(base):
         for n in sorted(names):
             p = Path(dirpath) / n
-            if p.suffix.lower() in IMAGE_EXT:
+            if p.suffix.lower() in IMAGE_EXT and not web_image(p):
                 found.append(p)
     found.sort(key=lambda p: (0 if _HINT.search(p.stem) else 1, str(p).lower()))
     seen, out, digests = set(), [], []

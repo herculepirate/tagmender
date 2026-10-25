@@ -1258,6 +1258,26 @@ class PressingEvidence(unittest.TestCase):
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
         self.assertIn("disc ID", " ".join(r["best"]["notes"]))
 
+    def test_a_short_folder_title_does_not_drop_the_release_its_numbers_prove(self):
+        """Sepultura - 2013 - The Mediator [Nuclear Blast, NB 3099-0, Germany]: the European
+        digipak carries the folder's NB 3099-0 and the files' barcode, but "The Mediator" is
+        only part of its title, so every release was dropped and the album left for review."""
+        long = "The Mediator Between Head and Hands Must Be the Heart"
+        a = album(title="The Mediator", folder="2013 - The Mediator [Nuclear Blast, NB 3099-0, Germany]",
+                  catnos={mc.norm_code("NB 3099-0")}, catnos_from_folder={mc.norm_code("NB 3099-0")},
+                  barcodes={"727361309909"})
+        r = self.pick(a, cand(id="ru", country="RU", title=long, label="Nuclear Blast",
+                              catnos={mc.norm_code("NB 3099-0")}, barcodes={"727361309909"}),
+                      cand(id="eu", country="XE", title=long, label="Nuclear Blast",
+                           catnos={mc.norm_code("NB 3099-0")}, barcodes={"727361309909"}),
+                      cand(id="jewel", country="XE", title=long, label="Nuclear Blast",
+                           catnos={mc.norm_code("NB 3099-2")}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "eu"), r["why"])
+        # names that agree with nothing proving the album still leave it for a person
+        r = self.pick(album(title="The Mediator", folder="2013 - The Mediator [Germany]"),
+                      cand(id="ru", country="RU", title=long), cand(id="us", country="US", title=long))
+        self.assertNotEqual(r["status"], "auto")
+
     def test_label_and_country_in_the_folder_name(self):
         a = album(folder="2007 - Fiction [Century Media, 9976158, Germany]")
         r = self.pick(a, cand(id="us", country="US", label="Century Media Records"),

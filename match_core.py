@@ -1315,6 +1315,18 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     }
 
 
+def _numbers_prove_album(s, cfg):
+    """The candidate is this album by its own numbers, whatever the names say: a disc ID,
+    the files' link, an ISRC, a fingerprint, the barcode or a catalogue number from the
+    tags or folder name, with the track lengths agreeing (as classify proves the best)."""
+    clues = s.get("clues") or {}
+    proof = (any(k in clues for k in ("disc TOC", "source link", "isrc", "fingerprint"))
+             or s["code"] == "barcode" or s["code"].startswith("barcode")
+             or s["code"] in ("catalogue number", "catalogue number (folder name)"))
+    return bool(proof and s.get("dur_frac") is not None and s["dur_frac"] >= cfg["auto_min_duration_frac"]
+                and not s.get("conflict"))
+
+
 def classify(scored, cfg):
     """Decide auto / review / nomatch for ONE source's scored candidates.
 
@@ -1337,17 +1349,28 @@ def classify(scored, cfg):
     catno_real = any(s.get("folder_catno_absent") is False and (s["cand"].get("catnos"))
                      and s.get("has_folder_catno") for s in scored)
 
+    def _says(s):
+        return [x for x in s.get("clues_against") or () if x.startswith("folder name says")]
+    # Several releases carry the folder's own number (an unofficial Russian CD copies the
+    # European one's NB 3099-0): then the rest of the folder name decides between them.
+    numbered_fit = any(s.get("folder_catno_agrees") and not _says(s) for s in scored)
+
     def folder_says(s):
-        out = [x for x in s.get("clues_against") or () if x.startswith("folder name says")]
-        if s.get("folder_catno_agrees"):     # the folder's own number is on it: that is the pressing
+        out = _says(s)
+        if s.get("folder_catno_agrees") and not numbered_fit:
+            # the folder's own number is on it: that is the pressing
             out = [x for x in out if re.match(r"folder name says (vinyl|cd),", x)]
         if catno_real and s.get("folder_catno_absent"):
             out.append("folder catalogue number is not on it")
         return out
     if any(folder_says(s) for s in scored):
         fitting = [s for s in scored if not folder_says(s)]
-        same_album = [s for s in fitting if s["tracks_ok"] and s["artist_sim"] >= cfg["auto_min_artist"]
-                      and s["title_sim"] >= cfg["auto_min_title"]]
+        # the same album: its names agree, or its own numbers prove it ("The Mediator" in the
+        # folder is "The Mediator Between Head and Hands Must Be the Heart", barcode and the
+        # folder's NB 3099-0 on it; its short title alone dropped every release)
+        same_album = [s for s in fitting if s["tracks_ok"] and (
+            (s["artist_sim"] >= cfg["auto_min_artist"] and s["title_sim"] >= cfg["auto_min_title"])
+            or _numbers_prove_album(s, cfg))]
         said = sorted({x.split(",")[0] for s in scored for x in folder_says(s)})
         if same_album:
             dropped = len(scored) - len(fitting)

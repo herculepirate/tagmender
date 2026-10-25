@@ -172,6 +172,11 @@ def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
             except Exception:
                 continue
             if ids and not (ids & me):
+                try:
+                    if ("digest", payload.digest(p)) in ignore:
+                        continue                         # an earlier copy of this album's own audio
+                except Exception:
+                    pass
                 return True
     return False
 
@@ -402,6 +407,7 @@ class Planner:
         self._inodes = {}
         self._album_dirs = {}
         self._planned = set()
+        self._resident = []
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
@@ -546,10 +552,10 @@ class Planner:
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
                     continue
-                if op == "copy" and Path(dst).exists() and not os.path.samefile(dst, f) and \
-                        fnm.fold(dst) not in self.claimed and payload.digest(dst) == payload.digest(f) \
-                        and payload.digest(f) is not None:
+                earlier = self._earlier_copy(dst, f) if op == "copy" else None
+                if earlier is not None:
                     # copied by an earlier run: bring the copy's tags up to date, nothing else
+                    dst = earlier
                     self.claimed[fnm.fold(dst)] = str(f)
                     have = tagio.read(dst)
                     changes2, rows2 = diff_tags(have, target, p, conf if identified else 100.0, [])
@@ -651,6 +657,22 @@ class Planner:
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
 
+    def _earlier_copy(self, dst: Path, src: Path):
+        """The copy an earlier run made of src: at the template's name, or at the suffixed
+        name it was given when the plain one was taken. None when there is none."""
+        want = payload.digest(src)
+        if want is None:
+            return None
+        for cand in (dst, dst.with_name(dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)):
+            try:
+                if not cand.exists() or os.path.samefile(cand, src) or fnm.fold(cand) in self.claimed:
+                    continue
+            except OSError:
+                continue
+            if payload.digest(cand) == want:
+                return cand
+        return None
+
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release
         the same folder as a different release (in this plan, or already on disk): "Now
@@ -660,9 +682,15 @@ class Planner:
             me = _release_ids(prop)
             key = fnm.fold(album_dir)
             owner = self._album_dirs.get(key)
-            single = len(prop.files) == 1             # singles share Artist/ or Artist/Singles by design
-            clash = not single and ((owner is not None and not (owner & me)) or
-                                    (owner is None and _other_release_there(album_dir, me, self._planned)))
+            if owner is None:                          # an album already sitting there, in this plan
+                owner = next((ids for d, ids, src in self._resident if d == key and src != prop.source_dir), None)
+            # a single's folder (Artist/, Artist/Singles) is shared by design; a folder named
+            # after the release is an album folder, also for a one-track release
+            title = str(((prop.targets or [{}])[0].get("album") or [""])[0])
+            shared = len(prop.files) == 1 and not (title and fnm.fold(title)[:12] in fnm.fold(album_dir.name))
+            ignore = self._planned | self._digests_of(own_files)
+            clash = not shared and ((owner is not None and not (owner & me)) or
+                                    (owner is None and _other_release_there(album_dir, me, ignore)))
             new = album_dir
             if clash:
                 tag = fnm.collision_suffix(" ".join(sorted(me)))
@@ -672,15 +700,30 @@ class Planner:
                 if len(base.encode("utf-8")) > room:
                     base = fnm.truncate_words(base, room, limits.get("compat", "windows"))
                 new = album_dir.with_name(base + tag)
-            if not single:
+            if not shared:
                 self._album_dirs[fnm.fold(new)] = me
-            self._album_dirs[fnm.fold(new)] = me
             cache["map"] = (album_dir, new)
         old, new = cache["map"]
         try:
             return new / dst.relative_to(old)
         except ValueError:
             return dst
+
+    def _digests_of(self, files) -> set:
+        """Audio digests of these files: an earlier copy of them is not another release."""
+        out = set()
+        for f in files:
+            d = self._digest_cache.get(str(f)) if hasattr(self, "_digest_cache") else None
+            if d is None:
+                try:
+                    d = payload.digest(f)
+                except Exception:
+                    d = None
+                self._digest_cache = getattr(self, "_digest_cache", {})
+                self._digest_cache[str(f)] = d
+            if d:
+                out.add(("digest", d))
+        return out
 
     def _below_source(self, folder: Path) -> Path:
         """The album folder's path below the deepest profile source holding it
@@ -772,6 +815,9 @@ class Planner:
                     self._planned.add((st.st_dev, st.st_ino))
                 except OSError:
                     pass
+        for pr in proposals:
+            if pr.status == "identified" and len(pr.files) > 1:
+                self._resident.append((fnm.fold(pr.source_dir), _release_ids(pr), pr.source_dir))
         albums = [self.album(pr) for pr in proposals]
         counts = {}
         for a in albums:

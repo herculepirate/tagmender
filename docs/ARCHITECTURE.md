@@ -51,7 +51,23 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys), `~/.l
 8. **One preview text** (`plan.preview`) for CLI and GUI, so both say exactly the same.
 9. **Logs are not state.** Journals and history live in the state DB and job folders; the log
    rotates at 104,857,600 bytes with 3 backups and is written under an flock.
-10. **beets not used at runtime**: it would be a second library database writing the same files.
+10. **File operations follow Picard and foobar2000, with a journal they lack.**
+    - Companion files: Picard's "move additional files" (patterns and named subfolders) and
+      foobar2000's "move entire source folder content". TagMender moves the album's folder tree:
+      companion-extension files beside the music, everything in subfolders without music
+      (Scans, covers), nothing from a folder holding another album's music. Per-track files
+      (`01 a.lrc`) follow their track's new name; cue sheets and playlists are rewritten.
+    - Case-only renames on case-insensitive shares go through a temporary name (Picard's
+      `move_ensure_casing`).
+    - "Delete empty directories" (Picard) / "remove empty source folders" (foobar2000): only
+      folders the move emptied, never a profile root, recreated by undo.
+    - Never overwrite (Picard's default for additional files): a taken name gets a stable
+      ` ~1a2b` suffix; a name taken only by case or Unicode form counts as taken with
+      Windows-compatible names, and an existing folder is reused in its on-disk spelling.
+    - "Preserve timestamps" follows the user's Picard setting.
+    - Beyond both: every commit point is journalled; `recover` re-derives what a crash left
+      from the files on disk; undo is resumable and leaves files edited after the job alone.
+11. **beets not used at runtime**: it would be a second library database writing the same files.
     Its documentation informed the template and plugin-free design only.
 
 ## Research consulted (2026-10-24)
@@ -68,5 +84,8 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys), `~/.l
 | picard-coverup | d1d36d14 | artwork pipeline |
 | AppImage tooling | appimagetool (continuous), python-build-standalone CPython 3.12.13 via uv | portable build |
 
-Mp3tag, Jaikoz, Yate, Kid3, bliss, MusicBee, foobar2000, Strawberry, Clementine, Swinsian, Roon
+File operations (2026-10-25): Picard's File Naming options (picard-docs.musicbrainz.org/en/v3.0/config/options_filerenaming.html)
+and foobar2000's File Operations options (as discussed on hydrogenaudio.org).
+
+Mp3tag, Jaikoz, Yate, Kid3, bliss, MusicBee, Strawberry, Clementine, Swinsian, Roon
 and TuneUp were not re-examined in this round; only Picard and beets (open source) were read.

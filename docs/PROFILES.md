@@ -34,7 +34,8 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `operation` | `in_place` | `in_place`, `copy`, `move` |
 | `destination` | — | must exist (never created); required for copy/move |
 | `naming` | preset `tagmender` | or `{"template": "..."}` |
-| `companions` | .cue .log .lrc .jpg .png .pdf .txt .m3u | go along with a moved/copied album |
+| `companions` | .cue .log .lrc .jpg .png .pdf .txt .m3u | go along with a moved/copied album from the folders holding its music; subfolders without music (Scans, covers) go entirely; per-track files follow their track's new name |
+| `preserve_timestamps` | `null` | keep files' modification times; `null` follows Picard's "Preserve timestamps of tagged files" |
 | `filenames` | windows-compatible, 255 bytes per name, 4096 per path, 5-word album folders | `abbreviations`: `{"Volume": "Vol."}` |
 | `unresolved` | `mark` | `leave`, `mark` (TAGMENDER tags), `move` (to `move_to`) |
 | `retry` | after 30 days, 6 attempts | watched folders |

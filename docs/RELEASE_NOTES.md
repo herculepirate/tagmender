@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+**File operations reviewed** (tests/test_fileops.py; an independent review found the rest)
+- Crash-safe at every step: `recover` works out from the files what a crash left and completes
+  the journal, so undo can always put things back; undo can be re-run and leaves files whose
+  tags were edited after the job alone (`undo --force` to override).
+- Albums move with their whole folder: scans, covers, per-disc logs and cue sheets; per-track
+  lyrics files follow their track; cue sheets and playlists are rewritten per disc.
+- Long file names, case-only renames on SMB shares, unmounted shares, look-alike folders,
+  hidden ("...And Justice for All") and reserved ("AUX.") names, symlinks out of the library,
+  ownership, and timestamps (as Picard is set) are handled.
+
 **New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
 - Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.
 - Enthusiast (default): everything MusicBrainz and Discogs supply, as Picard writes it.

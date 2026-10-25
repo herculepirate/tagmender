@@ -28,7 +28,19 @@
 <stop offset=".45" stop-color="#FFFFFF" stop-opacity=".5"/>
 <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
 </radialGradient>
-<filter id="tm-soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
+<filter id="tm-soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="12"/></filter>
+<linearGradient id="tm-tfill" gradientUnits="userSpaceOnUse" x1="0" y1="360" x2="0" y2="760">
+<stop offset="0" stop-color="#FF3B30"/>
+<stop offset=".25" stop-color="#FF9F0A"/>
+<stop offset=".5" stop-color="#FFD60A"/>
+<stop offset="1" stop-color="#30D158"/>
+</linearGradient>
+<linearGradient id="tm-mfill" gradientUnits="userSpaceOnUse" x1="0" y1="360" x2="0" y2="760">
+<stop offset="0" stop-color="#30D158"/>
+<stop offset=".5" stop-color="#FFD60A"/>
+<stop offset=".75" stop-color="#FF9F0A"/>
+<stop offset="1" stop-color="#FF3B30"/>
+</linearGradient>
 </defs>
 <rect width="1024" height="1024" fill="url(#tm-bg)"/>
 <g transform="rotate(50 512 512)" opacity=".35">
@@ -45,14 +57,14 @@
 <circle cx="512" cy="512" r="202" transform="rotate(129 512 512)" fill="none" stroke="url(#tm-ring)" stroke-width="7" stroke-linecap="round" stroke-dasharray="980 290"/>
 <ellipse cx="512" cy="372" rx="150" ry="70" fill="url(#tm-gloss)" opacity=".55"/>
 <circle cx="512" cy="512" r="226" fill="none" stroke="#FFFFFF" stroke-opacity=".28" stroke-width="4"/>
-<g transform="translate(512 516) scale(0.46) translate(-512 -515)">
-<g transform="translate(0 16)" fill="#000000" opacity=".4" filter="url(#tm-soft)">
-<path d="M332 250H692V330H552V500H472V330H332Z"/>
-<path d="M332 780V540H412L512 658L612 540H692V780H612V666L536 756H488L412 666V780Z"/>
+<!-- monogram: T laid over M, flush edges, stem centred; T red to green, M green to red -->
+<g transform="translate(512 516) scale(0.57) translate(-512 -560)">
+<g transform="translate(0 18)" fill="#000000" opacity=".45" filter="url(#tm-soft)">
+<path d="M260 760V360H384L512 600L640 360H764V760H648V579L562 740H462L376 579V760Z"/>
+<path d="M260 360H764V476H570V760H454V476H260Z"/>
 </g>
-<g fill="#FFFFFF">
-<path d="M332 250H692V330H552V500H472V330H332Z"/>
-<path d="M332 780V540H412L512 658L612 540H692V780H612V666L536 756H488L412 666V780Z"/>
-</g>
+<path d="M260 760V360H384L512 600L640 360H764V760H648V579L562 740H462L376 579V760Z" fill="url(#tm-mfill)"/>
+<path d="M260 360H764V476H570V760H454V476H260Z" fill="none" stroke="#111924" stroke-width="40" stroke-linejoin="miter"/>
+<path d="M260 360H764V476H570V760H454V476H260Z" fill="url(#tm-tfill)"/>
 </g>
 </svg>

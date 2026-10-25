@@ -1664,6 +1664,7 @@ def _undo(job, jd, journal, events, force):
     # all, with its cover, scans, log and cue. Two kinds of reason: a change made since the
     # job (--force overrides it) and a state undo cannot put right (never overridden)
     touched_by_undo = {tuple(e["key"]) for e in events if e.get("ev") == "undo_file_begin"}
+    rolling = {e["album"] for e in events if e.get("ev") in ("album_failed", "album_rolled_back")}
     journal.write(ev="undo_begin")
     verdict, hard, gone = {}, set(), set()
     for (a, j), f in sorted(files.items(), reverse=True):
@@ -1686,8 +1687,9 @@ def _undo(job, jd, journal, events, force):
                 why = (f"{dst} is gone (deleted after the job?); the rest of its album stays "
                        f"(tagmender undo --force {job} puts the rest back)")
         elif op in ("move", "relink_move") and src.exists() and dst.exists() and not _same_file(src, dst) and \
-                (a, j) not in touched_by_undo:
-            # (an earlier undo that was cut short while putting this very file back made it)
+                (a, j) not in touched_by_undo and a not in rolling:
+            # (an earlier undo or the album's rollback, cut short while putting this very file
+            # back, made it)
             why = f"{src} holds a file again (downloaded again?); the album stays where the job put it"
             hard.add(a)
         elif op == "copy" and dst.exists() and f.get("size") is not None and not force and (

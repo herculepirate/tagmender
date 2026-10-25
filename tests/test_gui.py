@@ -179,6 +179,25 @@ class Gui(te.Base):
         self.app.processEvents()
         self.assertEqual((pr.editions.currentData(), pr.album_editions.currentData()), ("edition_year", "edition"))
 
+    def test_profile_artwork_settings_are_saved(self):
+        import profiles as pf
+        pf.save(pf.from_dict({"name": "Art"}))
+        pr = self.win.pages["Profiles"]
+        pr.reload()
+        self.app.processEvents()
+        pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Art"))
+        self.app.processEvents()
+        self.assertEqual((pr.art_src.currentData(), pr.art_when.currentData(), pr.art_enlarge.isChecked(),
+                          pr.art_gen.currentData()), (["coverup", "caa", "discogs"], "needed", True, "off"))
+        pr.art_src.setCurrentIndex(pr.art_src.findData(["caa", "discogs"]))
+        pr.art_when.setCurrentIndex(pr.art_when.findData("always"))
+        pr.art_enlarge.setChecked(False)
+        pr.art_gen.setCurrentIndex(pr.art_gen.findData("template"))
+        pr.save()
+        a = pf.load("Art")["artwork"]
+        self.assertEqual((a["sources"], a["when"], a["enlarge"], a["generate"]),
+                         (["caa", "discogs"], "always", False, "template"))
+
     def test_settings_never_show_a_saved_key(self):
         st = self.win.pages["Settings"]
         st.fields["fanart"].setText("SECRET-FANART")

@@ -76,7 +76,14 @@ DEFAULTS = {
     "level_fields": {"add": [], "drop": []},
     "audiophile": {"replaygain": True, "lyrics": True, "acoustid": True, "rip_info": True, "quality": True},
     "field_policy": {"default": "replace", "fields": {}},   # field -> preserve|fill_missing|replace|remove|lock
-    "artwork": {"enabled": True, "provider": "coverup", "embed_front": True, "files": True,
+    # artwork: sources - where covers come from, in order (coverup: CoverUp with all its sources;
+    #   caa: MusicBrainz's Cover Art Archive; discogs; web: shops and web image search via
+    #   CoverUp; local: the album's own scans); when - "needed" (only for albums missing a cover
+    #   in a track or the folder) or "always"; enlarge - a cover smaller than min_px (but at
+    #   least 250 px) is enlarged to min_px; generate - when nothing is found: off | template
+    #   (CoverUp's offline renderer) | ai (the AI service set in CoverUp) | auto (CoverUp's order)
+    "artwork": {"enabled": True, "provider": "coverup", "sources": ["coverup", "caa", "discogs"],
+                "when": "needed", "enlarge": True, "generate": "off", "embed_front": True, "files": True,
                 "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000},
     "lyrics": {"enabled": False, "synced": True, "embed": False, "sidecar": True},
     "mark_resolved": True,                # TAGMENDER=Resolved on what was identified
@@ -112,6 +119,10 @@ EXAMPLES = {
         "unresolved": {"action": "mark", "move_to": "", "allow_partial": False},
     },
 }
+
+
+ARTWORK_SOURCES = ("coverup", "caa", "discogs", "web", "local")
+ARTWORK_GENERATE = ("off", "template", "ai", "auto")
 
 
 class ProfileError(ValueError):
@@ -214,6 +225,14 @@ def validate(data: dict) -> list[str]:
     if d["preserve_timestamps"] not in (None, True, False):
         p.append("preserve_timestamps must be true, false or null (as Picard is set)")
     import levels
+    art = d["artwork"] or {}
+    bad = [x for x in (art.get("sources") or []) if x not in ARTWORK_SOURCES]
+    if bad or not art.get("sources"):
+        p.append(f"artwork.sources must be a list of {', '.join(ARTWORK_SOURCES)}")
+    if art.get("when", "needed") not in ("needed", "always"):
+        p.append("artwork.when must be needed or always")
+    if art.get("generate", "off") not in ARTWORK_GENERATE:
+        p.append(f"artwork.generate must be one of {', '.join(ARTWORK_GENERATE)}")
     import naming as _naming
     for k in ("editions", "album_editions"):
         if (d["naming"] or {}).get(k, "off") not in _naming.EDITIONS:

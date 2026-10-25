@@ -372,8 +372,15 @@ class A16_07_ProfileMinPxAndMaxBytesIgnored(ArtBase):
         return prop
 
     def test_min_px(self):
-        prop = self._add_artwork(jpeg(300, 300), min_px=1000)
+        prop = self._add_artwork(jpeg(300, 300), min_px=1000, enlarge=False)
         self.assertIsNone(prop.artwork, f"a 300 px cover taken by a profile with min_px 1000: {prop.artwork}")
+
+    def test_min_px_with_enlarging(self):                 # (artwork.enlarge, on by default)
+        prop = self._add_artwork(jpeg(300, 300), min_px=1000)
+        self.assertEqual((prop.artwork["width"], prop.artwork["height"]), (1000, 1000), prop.artwork)
+        self.assertIn("enlarged", prop.artwork["source"])
+        prop = self._add_artwork(jpeg(200, 200), min_px=1000)
+        self.assertIsNone(prop.artwork, "a 200 px cover (under the 250 px floor) enlarged")
 
     def test_max_bytes(self):
         big = io.BytesIO()

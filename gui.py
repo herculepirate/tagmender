@@ -841,6 +841,17 @@ class RuleDialog(QDialog):
                                   "when": {("any" if self.match.currentIndex() else "all"): conds}})
 
 
+ART_SOURCE_CHOICES = (
+    ("CoverUp, then Cover Art Archive, then Discogs", ["coverup", "caa", "discogs"]),
+    ("CoverUp only (all its sources)", ["coverup"]),
+    ("MusicBrainz: Cover Art Archive", ["caa"]),
+    ("Discogs", ["discogs"]),
+    ("MusicBrainz, then Discogs", ["caa", "discogs"]),
+    ("Web: shops and web image search", ["web"]),
+    ("The album's own scans only", ["local"]),
+)
+
+
 class Profiles(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -892,7 +903,23 @@ class Profiles(QWidget):
         self.formats.setPlaceholderText("every format (or e.g. mp3 opus m4a)")
         self.unres = QComboBox()
         self.unres.addItems(list(pf.UNRESOLVED_ACTIONS))
-        self.art = QCheckBox("Find front covers (CoverUp first)")
+        self.art = QCheckBox("Find front covers")
+        self.art_src = QComboBox()
+        for label, srcs in ART_SOURCE_CHOICES:
+            self.art_src.addItem(label, srcs)
+        self.art_src.setToolTip("Where covers come from. CoverUp uses all the sources set in its options "
+                                "(Picard > Options > Plugins > CoverUp); the others ask one place only.")
+        self.art_when = QComboBox()
+        self.art_when.addItem("Only for albums missing a cover", "needed")
+        self.art_when.addItem("For every album", "always")
+        self.art_enlarge = QCheckBox("Enlarge a small cover (down to 250 px) to the minimum size")
+        self.art_gen = QComboBox()
+        for label, mode in (("Never", "off"), ("CoverUp's template (offline, free)", "template"),
+                            ("CoverUp's AI service", "ai"), ("CoverUp's order: fan art, AI, template", "auto")):
+            self.art_gen.addItem(label, mode)
+        self.art_gen.setToolTip("When nothing is found. The AI service (local Stable Diffusion, Cloudflare, AI "
+                                "Horde, ...) is chosen in CoverUp's options; a generated cover is marked as such "
+                                "and replaced as soon as a real one is found.")
         self.level = QComboBox()
         self.level.addItems(["basic", "enthusiast", "audiophile"])
         self.level.setToolTip("basic: artist, album, title, numbers, date, genre\n"
@@ -942,6 +969,10 @@ class Profiles(QWidget):
         form.addRow("Tagging level", self.level)
         form.addRow("Audiophile", arow)
         form.addRow("", self.art)
+        form.addRow("Cover source", self.art_src)
+        form.addRow("Look for covers", self.art_when)
+        form.addRow("", self.art_enlarge)
+        form.addRow("Create a cover when none is found", self.art_gen)
         form.addRow("", self.unattended)
         save = QPushButton("Save profile")
         save.setProperty("role", "primary")
@@ -1027,6 +1058,16 @@ class Profiles(QWidget):
             self.formats.setText(" ".join(p["formats"]))
             self.unres.setCurrentText(p["unresolved"]["action"])
             self.art.setChecked(p["artwork"]["enabled"])
+            import artwork as _artwork
+            srcs = _artwork.sources_of(p["artwork"])
+            idx = self.art_src.findData(srcs)
+            if idx < 0:                                 # an order set in the profile file: shown as it is
+                self.art_src.addItem(" > ".join(srcs), srcs)
+                idx = self.art_src.count() - 1
+            self.art_src.setCurrentIndex(idx)
+            self.art_when.setCurrentIndex(max(0, self.art_when.findData(p["artwork"].get("when", "needed"))))
+            self.art_enlarge.setChecked(bool(p["artwork"].get("enlarge", True)))
+            self.art_gen.setCurrentIndex(max(0, self.art_gen.findData(p["artwork"].get("generate", "off"))))
             self.level.setCurrentText(p["tag_level"])
             for k, c in self.aud.items():
                 c.setChecked(bool(p["audiophile"].get(k, True)))
@@ -1177,6 +1218,9 @@ class Profiles(QWidget):
         data["naming"]["album_editions"] = self.album_editions.currentData()
         data.setdefault("unresolved", {})["action"] = self.unres.currentText()
         data.setdefault("artwork", {})["enabled"] = self.art.isChecked()
+        data["artwork"].update({"sources": list(self.art_src.currentData()), "when": self.art_when.currentData(),
+                                "enlarge": self.art_enlarge.isChecked(), "generate": self.art_gen.currentData()})
+        data["artwork"].pop("provider", None)           # (sources says it now)
         data["tag_level"] = self.level.currentText()
         data.setdefault("audiophile", {}).update({k: c.isChecked() for k, c in self.aud.items()})
         try:

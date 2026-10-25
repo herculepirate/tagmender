@@ -501,6 +501,8 @@ class Engine:
             return
         try:
             import artwork
+            if not artwork.needs_art(prop.source_dir, prop.files, self.profile):
+                return                        # every track and the folder have a cover: nothing to look for
             if self._art is None:
                 self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
                                           self.token, self.log)

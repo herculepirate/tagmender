@@ -105,10 +105,16 @@ def _get(url, headers=None, limit=MAX_BYTES) -> bytes | None:
     return data
 
 
+WEB_SOURCES = ("itunes", "deezer", "lastfm", "websearch", "fanart", "audiodb")
+LOW_RES_FLOOR = 250            # never a cover smaller than this, enlarged or not (coverup_batch)
+
+
 class CoverUp:
+    """CoverUp's pipeline. only: CoverUp's sources to use ("web": shops and web search,
+    "local": the album's own scans; None: all of yours)."""
     name = "coverup"
 
-    def __init__(self, staging: Path, ini=None, local_min=1000):
+    def __init__(self, staging: Path, ini=None, local_min=1000, only=None):
         import coverup_batch as cb
         import coverup_loader
         import picard_config
@@ -122,7 +128,18 @@ class CoverUp:
         self.s, self.plugin, _ = cb.batch_settings(ini, "full")
         self.http = HttpClient(version="tagmender", cache_dir=ex.STATE_DIR / "coverup_cache",
                                cache_hours=float(self.s["http_cache_hours"]))
-        self.args = argparse.Namespace(local_min=local_min)
+        if only == "web":
+            self.name = "web"
+            self.s = self.s.with_(providers_enabled=[p for p in WEB_SOURCES])
+        elif only == "local":
+            self.name = "local"
+            self.s = self.s.with_(providers_enabled=["local"])
+        import coverup_batch
+        self.args = argparse.Namespace(local_min=local_min, low_res_floor=LOW_RES_FLOOR, allow_template=False,
+                                       title_font=None, fonts_dir=str(Path(coverup_batch.__file__).parent /
+                                                                      "coverup_fonts"),
+                                       gen_ref_strength=0.4, gen_style_strength=0.7, generate=False)
+        self._last = None
 
     def front(self, folder, ids: dict, artist="", album="", files=None) -> dict | None:
         import match_albums as ma
@@ -149,8 +166,12 @@ class CoverUp:
             # pictures there (and below) are not this album's own - online sources only
             s = s.with_(providers_enabled=[p for p in s["providers_enabled"] if p != "local"])
             info["images"] = []
+        if getattr(self, "enlarge", False) and getattr(self, "min_px", 0):
+            s = cb.upscale_settings(s, int(self.min_px), LOW_RES_FLOOR)[0]   # (small ones count: enlarged later)
         pipe = Pipeline(s, self.http, fingerprint=imaging.fingerprint)
-        res = pipe.run(cb.make_query(info))
+        query = cb.make_query(info)
+        res = pipe.run(query)
+        self._last = (str(folder), pipe, res, query, info, s)
         gen_local = [c for c in res.candidates if c.provider == "local" and cb.R.is_generated(c.data)]
         if gen_local:                     # a cover CoverUp generated earlier never blocks a real one
             res.candidates = [c for c in res.candidates if c not in gen_local]
@@ -195,6 +216,31 @@ class CoverUp:
         path, w, h = self._file_size(path, w, h, q)
         return {"front": str(path), "source": f"coverup:{c.provider}", "width": w, "height": h, "why": front["why"]}
 
+    def generate(self, folder, mode: str) -> dict | None:
+        """A generated cover for the album front() just looked at (nothing usable found):
+        CoverUp's creative methods - mode "template" (the offline renderer), "ai" (the AI
+        service set in CoverUp's options, with its consent), "auto" (CoverUp's own order:
+        fan art, AI, template). Marked as generated, so a real cover replaces it later."""
+        if mode not in ("template", "ai", "auto") or not self._last or self._last[0] != str(folder):
+            return None
+        _f, pipe, res, query, info, s = self._last
+        cb = self.cb
+        order = {"template": ["template"], "ai": ["ai"]}.get(mode) or list(s["creative_method_order"] or [])
+        s = s.with_(creative_method_order=order)
+        args = argparse.Namespace(**vars(self.args))
+        args.allow_template = mode in ("template", "auto")
+        g = cb.generation_plan(res, info, args, int(s["hamming_threshold"]))
+        if g is None:
+            return {"note": "a usable cover exists; nothing generated"}
+        cand, why = cb.make_generated(pipe, res, query, info, s, args, g)
+        if cand is None or not cand.data:
+            return {"note": why}
+        path = self.staging / (hashlib.sha1(cand.data).hexdigest()[:16] + ".jpg")
+        self.staging.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(cand.data)                 # (kept as made: it carries CoverUp's "generated" mark)
+        return {"front": str(path), "source": "coverup:generated", "width": cand.width, "height": cand.height,
+                "why": why, "generated": True}
+
     def _file_size(self, path, w, h, q):
         """The cover file at most CoverUp's file_max_side (0: as it is)."""
         side = int(self.s.get("file_max_side", 0) or 0)
@@ -213,6 +259,30 @@ class CoverUp:
             return int(self.s["embed_max_side"] or 0)
         except (KeyError, TypeError, ValueError):
             return EMBED_MAX_SIDE
+
+
+def needs_art(folder, files, profile) -> str:
+    """Why the album needs a cover ("" when it does not): a track without an embedded front
+    (when covers are embedded), or no picture in its folder (when cover files are written)."""
+    import tagio
+    art = profile["artwork"]
+    if art.get("when", "needed") == "always":
+        return "always looked for"
+    if art.get("embed_front", True):
+        for f in files:
+            try:
+                if not tagio.read(f).get("~pictures"):
+                    return f"{Path(f).name} has no cover"
+            except Exception:
+                return f"{Path(f).name} could not be read"
+    if art.get("files", True):
+        try:
+            if not any(x.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp")
+                       for x in Path(folder).iterdir() if x.is_file()):
+                return "no picture in the folder"
+        except OSError:
+            return ""
+    return ""
 
 
 def _own_music(folder: Path) -> list:
@@ -295,35 +365,69 @@ class DiscogsImage:
         return {"front": str(path), "source": f"Discogs release {rid}", "width": w, "height": h}
 
 
+def sources_of(art: dict) -> list:
+    """The profile's cover sources, in order (an older profile's "provider" goes first)."""
+    srcs = list(art.get("sources") or ["coverup", "caa", "discogs"])
+    first = art.get("provider")
+    if first and first in srcs and srcs == ["coverup", "caa", "discogs"] and first != "coverup":
+        srcs = [first] + [x for x in srcs if x != first]
+    return srcs
+
+
 def chain(profile, staging: Path, http=None, token="", log=None) -> list:
-    """The providers to try, the profile's choice first; one that cannot start is left out
-    (and logged), so artwork never stops the run. The profile's artwork.max_bytes limits
-    what is downloaded, artwork.min_px what is taken (find_front)."""
+    """The providers to try, in the profile's order (artwork.sources); one that cannot start
+    is left out (and logged), so artwork never stops the run. The profile's artwork.max_bytes
+    limits what is downloaded, artwork.min_px what is taken (find_front)."""
     art = profile["artwork"]
-    first = art.get("provider", "coverup")
-    order = [first] + [p for p in ("coverup", "caa", "discogs") if p != first]
     limit = int(art.get("max_bytes") or MAX_BYTES)
     out = []
-    for name in order:
+    for name in sources_of(art):
         try:
-            if name == "coverup":
-                out.append(CoverUp(staging))
+            if name in ("coverup", "web", "local"):
+                out.append(CoverUp(staging, only=None if name == "coverup" else name))
             elif name == "caa":
                 out.append(CoverArtArchive(staging))
             elif name == "discogs":
                 out.append(DiscogsImage(staging, http, token))
+            else:
+                continue
             out[-1].limit = limit
             out[-1].min_px = int(art.get("min_px") or 0)
+            out[-1].enlarge = bool(art.get("enlarge", True))
+            out[-1].generate_mode = art.get("generate", "off")
         except BaseException as exc:                          # CoverUp missing: SystemExit from its loader
             if log:
                 log.warning("artwork provider %s unavailable: %s", name, exc)
     return out
 
 
+def _enlarged(got: dict, min_px: int, quality=JPEG_QUALITY) -> dict | None:
+    """got's front enlarged to min_px on its short side (CoverUp's "enlarge to minimum"),
+    when it is at least LOW_RES_FLOOR; None when it is smaller than that."""
+    from PIL import Image
+    w, h = int(got.get("width") or 0), int(got.get("height") or 0)
+    if min(w, h) < LOW_RES_FLOOR:
+        return None
+    with Image.open(got["front"]) as im:
+        icc = im.info.get("icc_profile")
+        im = _rgb(im)
+        k = min_px / float(min(im.size))
+        im = im.resize((round(im.width * k), round(im.height * k)), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=int(quality), **({"icc_profile": icc} if icc else {}))
+    path = Path(got["front"]).parent / (hashlib.sha1(buf.getvalue()).hexdigest()[:16] + ".jpg")
+    path.write_bytes(buf.getvalue())
+    return dict(got, front=str(path), width=im.width, height=im.height, enlarged_from=f"{w}x{h}",
+                source=got.get("source", "") + " (enlarged)")
+
+
 def find_front(providers, folder, ids, artist="", album="", log=None, files=None) -> dict | None:
-    """The first provider's front that is big enough (artwork.min_px on its short side),
-    with "embed": the copy that goes into each track (at most embed_max_side, as CoverUp)."""
+    """The first provider's front that is big enough (artwork.min_px on its short side; a
+    smaller one of at least LOW_RES_FLOOR is enlarged when artwork.enlarge is on), with
+    "embed": the copy that goes into each track (at most embed_max_side, as CoverUp). When
+    no provider has one, a cover is generated if artwork.generate says so."""
     notes = []
+    small = None                                     # (the best too-small front, to enlarge)
     for p in providers:
         try:
             if isinstance(p, CoverUp):
@@ -338,19 +442,55 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
             if low and got.get("width") and got.get("height") and min(got["width"], got["height"]) < low:
                 notes.append(f"{p.name}: {got['width']}x{got['height']} is smaller than the profile's "
                              f"{low} px")
+                if getattr(p, "enlarge", False) and (small is None or
+                                                     min(got["width"], got["height"]) > min(small[1]["width"],
+                                                                                            small[1]["height"])):
+                    small = (p, got)
                 continue
-            side = p.embed_max_side() if isinstance(p, CoverUp) else EMBED_MAX_SIDE
-            q = p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY
             try:
-                got["embed"] = str(embed_copy(Path(got["front"]), Path(got["front"]).parent, side, q))
-            except Exception as exc:                         # not an image after all
+                return _finish(p, got, notes)
+            except Exception as exc:                     # not an image after all
                 notes.append(f"{p.name}: {exc}")
                 continue
-            if notes:
-                got["notes"] = notes
-            return got
         if got and got.get("note"):
             notes.append(f"{p.name}: {got['note']}")
+    if small is not None:                            # nothing big enough: the best small one, enlarged
+        p, got = small
+        big = _enlarged(got, int(getattr(p, "min_px", 0) or 0),
+                        p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY)
+        if big is not None:
+            try:
+                return _finish(p, big, notes)
+            except Exception as exc:
+                notes.append(f"{p.name}: {exc}")
+    for p in providers:                              # nothing at all: made, if the profile says so
+        mode = getattr(p, "generate_mode", "off")
+        if isinstance(p, CoverUp) and mode != "off":
+            try:
+                got = p.generate(folder, mode)
+            except Exception as exc:
+                notes.append(f"generating: {exc}")
+                break
+            if got and got.get("front"):
+                try:
+                    return _finish(p, got, notes)
+                except Exception as exc:
+                    notes.append(f"generating: {exc}")
+            if got and got.get("note"):
+                notes.append(f"generating: {got['note']}")
+            break
     if log and notes:
         log.info("no cover for %s: %s", folder, "; ".join(notes))
     return {"note": "; ".join(notes)} if notes else None
+
+
+def _finish(p, got, notes):
+    side = p.embed_max_side() if isinstance(p, CoverUp) else EMBED_MAX_SIDE
+    q = p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY
+    if got.get("generated"):
+        got["embed"] = got["front"]                   # (as made: small enough, and keeps its mark)
+    else:
+        got["embed"] = str(embed_copy(Path(got["front"]), Path(got["front"]).parent, side, q))
+    if notes:
+        got["notes"] = notes
+    return got

@@ -131,6 +131,7 @@ def _db():
                " status TEXT, summary TEXT)")
     db.execute("CREATE TABLE IF NOT EXISTS job_albums (job TEXT, album TEXT, status TEXT, label TEXT,"
                " detail TEXT, ts REAL)")
+    db.execute("CREATE TABLE IF NOT EXISTS copies (src TEXT, dst TEXT, job TEXT, ts REAL, PRIMARY KEY (src, dst))")
     return db
 
 
@@ -153,6 +154,20 @@ def _record_album(job, album, status, label="", detail=""):
     db.execute("INSERT INTO job_albums VALUES (?,?,?,?,?,?)", (job, album, status, label, detail, time.time()))
     db.commit()
     db.close()
+
+
+def _record_copy(src, dst, job, remove=False):
+    """Remember where a copy profile put each file (planning finds earlier copies by it)."""
+    try:
+        db = _db()
+        if remove:
+            db.execute("DELETE FROM copies WHERE src=? AND dst=?", (str(src), str(dst)))
+        else:
+            db.execute("INSERT OR REPLACE INTO copies VALUES (?,?,?,?)", (str(src), str(dst), job, time.time()))
+        db.commit()
+        db.close()
+    except sqlite3.Error:
+        pass
 
 
 def jobs(limit=50):
@@ -339,12 +354,15 @@ def _stage_name(dst: Path, job) -> Path:
     """A hidden staging file next to dst. Short whatever dst's name is: a name near the
     filesystem's 255-byte limit would not fit with a prefix and suffix added."""
     h = hashlib.sha1(Path(dst).name.encode("utf-8", "surrogateescape")).hexdigest()[:12]
-    return Path(dst).parent / f"{STAGE_TAG}{job}-{h}.part"
+    ext = Path(dst).suffix if len(Path(dst).suffix) <= 8 else ""
+    return Path(dst).parent / f"{STAGE_TAG}{job}-{h}.part{ext}"   # the extension: how mutagen tells formats
 
 
 def _old_stage_names(dst: Path, job):
     """Staging files named the way earlier versions named them (recover still finds them)."""
-    return list(Path(dst).parent.glob(f".{Path(dst).name}{STAGE_TAG}{job}.part"))
+    h = hashlib.sha1(Path(dst).name.encode("utf-8", "surrogateescape")).hexdigest()[:12]
+    return list(Path(dst).parent.glob(f".{Path(dst).name}{STAGE_TAG}{job}.part")) + \
+        [p for p in [Path(dst).parent / f"{STAGE_TAG}{job}-{h}.part"] if os.path.lexists(p)]
 
 
 def _same_file(a, b) -> bool:
@@ -429,7 +447,7 @@ def _backup(src: Path, jd: Path, n: int) -> dict:
         fam = tagio.family(tagio.open_file(src))
     except tagio.Unsupported:
         fam = None
-    if fam in ("id3", "mp4", "vorbis") and src.suffix.lower() not in (".wav", ".aif", ".aiff"):
+    if fam in ("id3", "mp4", "vorbis") and src.suffix.lower() not in (".wav", ".aif", ".aiff", ".dsf", ".dff"):
         return {"kind": "tags", "rec": ta.backup_tags(src, blobs)}
     files = jd / "files"
     files.mkdir(exist_ok=True)
@@ -442,6 +460,8 @@ def _restore(path: Path, backup: dict, jd: Path):
     """The file's tags (or the whole file) as backed up, through a staging copy that keeps
     the file's owner: a crash never leaves a half-written file."""
     import tag_albums as ta
+    if backup.get("kind") == "tags" and _tags_sig_backup_free(path, backup):
+        return                                    # the tags are as backed up: nothing to write
     stage = _stage_name(path, "undo-tags")
     st = os.stat(path)
     try:
@@ -533,7 +553,11 @@ class Executor:
                 counts["cancelled"] = counts.get("cancelled", 0) + len(albums) - i
                 break
             self.progress(i, len(albums), a["source_dir"])
-            status, label, detail = self.album(i, a)
+            try:
+                status, label, detail = self.album(i, a)
+            except Exception as exc:                  # never one album's surprise ends the job
+                self.log.exception("album %s could not be started", a.get("source_dir"))
+                status, label, detail = "conflict", "Unavailable", f"could not be started: {exc}"
             counts[status] = counts.get(status, 0) + 1
             self.results.append({"album": a["source_dir"], "status": status, "label": label, "detail": detail})
             _record_album(self.job, a["source_dir"], status, label, detail)
@@ -576,6 +600,8 @@ class Executor:
                 st = os.stat(fe["src"])
             except FileNotFoundError:
                 return "conflict", "Changed", f"{fe['src']} is gone since the plan was made"
+            except OSError as exc:                       # a stale share handle, permissions, I/O
+                return "conflict", "Unavailable", f"{fe['src']} cannot be read now ({exc.strerror})"
             # an edit that kept size and time still changes the change time (audio files only:
             # a companion hard-linked elsewhere changes it when another album moves; inode
             # numbers are left out, some shares do not keep them)
@@ -706,6 +732,8 @@ class Executor:
             self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
                                mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst))
             done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
+            if op == "copy":
+                _record_copy(src, dst, self.job)
             if op == "move" and not case_only:
                 if src_digest is not None and payload.digest(dst) != src_digest:
                     raise StepError(f"{dst.name}: new file did not verify; source kept")
@@ -747,6 +775,8 @@ class Executor:
         self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
                            mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst))
         done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
+        if op == "relink_copy":
+            _record_copy(src, dst, self.job)
         if op == "relink_move":
             os.unlink(src)
             _fsync_dir(src.parent)
@@ -1022,6 +1052,7 @@ def _undo_step(step, jd, rolling_back=False):
         _restore(src, backup, jd)
     elif op == "copy":
         dst.unlink(missing_ok=True)
+        _record_copy(src, dst, None, remove=True)
     elif op == "move":
         if src.exists() and dst.exists() and _same_file(src, dst) and not _case_only(src, dst):
             dst.unlink()                                 # linked back, not yet unlinked: finish

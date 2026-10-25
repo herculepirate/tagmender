@@ -53,7 +53,7 @@ class Crashes(Base):
     """A crash between two steps of a commit must leave something recover/undo can finish."""
 
     def leftovers(self):
-        return [p for p in self.tmp.rglob("*.part")]
+        return [p for p in self.tmp.rglob("*.part*")]
 
     def test_crash_after_in_place_commit_before_journal_then_recover_and_undo(self):
         prof = self.profile()
@@ -78,7 +78,7 @@ class Crashes(Base):
         real = os.unlink
 
         def unlink(path, *a, **k):
-            if str(path).endswith(".part"):
+            if ".part" in Path(path).name:
                 raise Crash()
             return real(path, *a, **k)
         with mock.patch.object(executor.os, "unlink", unlink), self.assertRaises(Crash):
@@ -334,7 +334,7 @@ class Timestamps(Base):
 
 
 def stray(*folders):
-    return [str(p) for f in folders for p in Path(f).rglob(".*.part")]
+    return [str(p) for f in folders for p in Path(f).rglob(".*.part*")]
 
 
 class Review(Base):

@@ -181,6 +181,20 @@ def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
     return False
 
 
+def copies_of(src) -> list:
+    """Where earlier jobs copied this file (newest first), from the state database."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(ex.STATE_DIR / "state.db", timeout=30)
+        try:
+            rows = db.execute("SELECT dst FROM copies WHERE src=? ORDER BY ts DESC", (str(src),)).fetchall()
+        finally:
+            db.close()
+        return [r[0] for r in rows]
+    except sqlite3.Error:
+        return []
+
+
 def _same_bytes(there: Path, c: Path, pairs: dict, profile) -> bool:
     """there already holds what c would become at that place (itself, or its rewrite)."""
     try:
@@ -318,6 +332,19 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                     break
                 q = q.parent
     by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
+    ours = {s_.parent for s_ in moved}
+
+    def shared_ok(d):
+        """With another album's music in the tree (disc 2 tagged as another title, a bonus
+        album), only the folders holding this album's own music, and what is inside them,
+        are this album's; the shared folder's own files (cover, Scans) stay."""
+        q = d
+        while True:
+            if q in ours and q != src_dir:
+                return True
+            if q == src_dir:
+                return src_dir in ours
+            q = q.parent
     out = []
     for d, here in tree:
         anchor = d
@@ -332,6 +359,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             track = by_stem.get((d, p.stem))                # "01 a.lrc" goes with "01 a.flac"
             if tracks_only and not track:
                 continue                                    # a library root's own files stay
+            if foreign and not track and not shared_ok(d):
+                continue                                    # the album folder is shared with another album
             out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
     return out, ""
 
@@ -487,10 +516,12 @@ class Planner:
                 return entry
             entry["dest_root"] = {"path": str(dest_root), "dev": os.stat(dest_root).st_dev}
         template = naming.template_for(p["naming"])
+        album_dirs = {}
+        if op == "copy" and identified:
+            album_dirs["prior"] = self._prior_album_dir(kept)
         words = int(p["filenames"].get("max_album_words") or 5)
         if not (p["naming"] or {}).get("template", "").strip() and words != 5:
             template = template.replace("$words(%album%,5)", f"$words(%album%,{words})")
-        album_dirs = {}
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -658,12 +689,15 @@ class Planner:
         return entry
 
     def _earlier_copy(self, dst: Path, src: Path):
-        """The copy an earlier run made of src: at the template's name, or at the suffixed
-        name it was given when the plain one was taken. None when there is none."""
+        """The copy an earlier run made of src: where TagMender recorded it, or at the
+        template's name, or at the suffixed name it was given when the plain one was taken.
+        None when there is none."""
         want = payload.digest(src)
         if want is None:
             return None
-        for cand in (dst, dst.with_name(dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)):
+        cands = [Path(p) for p in copies_of(src)]
+        cands += [dst, dst.with_name(dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)]
+        for cand in cands:
             try:
                 if not cand.exists() or os.path.samefile(cand, src) or fnm.fold(cand) in self.claimed:
                     continue
@@ -673,11 +707,31 @@ class Planner:
                 return cand
         return None
 
+    def _prior_album_dir(self, files) -> Path | None:
+        """The album folder an earlier run of a copy profile put this album's copies in (as
+        recorded), when they are still there: the album stays there - no second copy when a
+        folder clash went away or the template now gives another path."""
+        found = {}
+        for f in files:
+            want = None
+            for p in copies_of(f):
+                p = Path(p)
+                if not p.exists():
+                    continue
+                want = want or payload.digest(f)
+                if want is not None and payload.digest(p) == want:
+                    d = p.parent.parent if _DISC_NAME.match(p.parent.name) else p.parent
+                    found[d] = found.get(d, 0) + 1
+                    break
+        return max(found, key=found.get) if found else None
+
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release
         the same folder as a different release (in this plan, or already on disk): "Now
         That's What I Call Music! 47" and "... 48" shortened to five words would share one."""
         album_dir = dst.parent.parent if _DISC_NAME.match(dst.parent.name) else dst.parent
+        if "map" not in cache and cache.get("prior") is not None:
+            cache["map"] = (album_dir, cache["prior"])
         if "map" not in cache:
             me = _release_ids(prop)
             key = fnm.fold(album_dir)
@@ -687,7 +741,8 @@ class Planner:
             # a single's folder (Artist/, Artist/Singles) is shared by design; a folder named
             # after the release is an album folder, also for a one-track release
             title = str(((prop.targets or [{}])[0].get("album") or [""])[0])
-            shared = len(prop.files) == 1 and not (title and fnm.fold(title)[:12] in fnm.fold(album_dir.name))
+            as_named = fnm.safe_component(title, self.profile["filenames"].get("compat", "windows")) if title else ""
+            shared = len(prop.files) == 1 and not (as_named and fnm.fold(as_named)[:12] in fnm.fold(album_dir.name))
             ignore = self._planned | self._digests_of(own_files)
             clash = not shared and ((owner is not None and not (owner & me)) or
                                     (owner is None and _other_release_there(album_dir, me, ignore)))

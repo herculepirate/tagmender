@@ -102,7 +102,7 @@ class InPlace(Base):
         t = tagio.read(self.f1)
         self.assertEqual((t["album"], t["title"], t["tagmender"]), (["Real Album"], ["First"], ["Resolved"]))
         self.assertEqual(payload.digest(self.f1), d1)
-        self.assertFalse(list(self.album.glob(".*.part")))
+        self.assertFalse(list(self.album.glob(".*.part*")))
         again = pl.build([self.proposal()], prof)
         self.assertEqual(again["albums"][0]["status"], "unchanged")              # no rewrites on a repeat run
 
@@ -373,7 +373,7 @@ class Safety(Base):
         self.assertIn("put back", res["albums"][0]["detail"])
         for f in (self.f1, self.f2):
             self.assertEqual(tagio.read(f), before[f])
-        self.assertFalse(list(self.album.glob(".*.part")))
+        self.assertFalse(list(self.album.glob(".*.part*")))
 
     def test_insufficient_space(self):
         p = pl.build([self.proposal()], self.profile())
@@ -419,11 +419,11 @@ class Interrupted(Base):
             with self.assertRaises(KeyboardInterrupt):
                 executor.Executor(p).run()
         self.assertEqual(executor.pending_jobs(), [p["job"]])
-        self.assertFalse(list(self.album.glob(".*.part")))          # Ctrl-C: the staging copy is removed
+        self.assertFalse(list(self.album.glob(".*.part*")))          # Ctrl-C: the staging copy is removed
         self.assertEqual(self.f1.read_bytes(), before)
         done = executor.recover(p["job"])
         self.assertTrue(any("put back as it was" in d for d in done), done)
-        self.assertFalse(list(self.album.glob(".*.part")))
+        self.assertFalse(list(self.album.glob(".*.part*")))
         self.assertEqual(executor.pending_jobs(), [])
 
     def test_crash_between_commit_and_source_removal_puts_the_album_back(self):

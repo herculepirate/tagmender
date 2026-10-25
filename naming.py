@@ -10,7 +10,7 @@ A template gives the path of a file below the destination, without the extension
 Supported (same meaning as in Picard unless noted):
   %name%                     the tag's value; several values are joined with "; "
   %_year%                    year of originaldate, else of date        (TagMender)
-  %_albumartists_sorted%     the album artists, A to Z (multi-valued)    (TagMender)
+  %_albumartists_sorted%     the album artists (ALBUMARTISTS tag), A to Z; else the album artist as written (TagMender)
   %_multiartist%             "1" when a track artist differs from the album artist
   $if(cond,then[,else])  $if2(a,b,...)  $not(x)  $and(a,b,...)  $or(a,b,...)
   $eq(a,b)  $ne(a,b)  $gt(a,b)  $lt(a,b)  $gte(a,b)  $lte(a,b)       (numbers compared as numbers)
@@ -130,9 +130,9 @@ class Ctx:
         if y.isdigit():
             t["_year"] = [y]
         names = t.get("albumartists") or []
-        if not names:
+        if not names:          # one credit: "Earth, Wind & Fire" is one band, never split
             aa = (t.get("albumartist") or t.get("artist") or [""])[0]
-            names = [a.strip() for a in re.split(r"\s*(?:,|&| and )\s*", aa) if a.strip()] or ([aa] if aa else [])
+            names = [aa] if aa else []
         if names:
             t["_albumartists_sorted"] = sorted(dict.fromkeys(names), key=str.casefold)
         a, aa = (t.get("artist") or [""])[0], (t.get("albumartist") or [""])[0]

@@ -49,6 +49,23 @@ DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|one|two|thr
 _NUMBER_ONLY = re.compile(r"^\d{1,2}$")
 
 
+_DISC_SUFFIX = re.compile(r"\s*(?:[-:,]\s*)?[\(\[\{]?\s*(?:disc|disk|cd|dvd)\s*\d+(?:\s*(?:of|/)\s*\d+)?"
+                          r"\s*[\)\]\}]?\s*$", re.I)
+
+
+def _group_key(meta: dict):
+    """Which album a file belongs to, for grouping: exclusions.album_key, with the disc
+    left out of the title ("Album (Disc 1)" and "Album (Disc 2)" are one album) and, when
+    no album artist is tagged, the title alone (a compilation's tracks have their own
+    artists)."""
+    key = ex.album_key(meta)
+    if key[0] != "tags":
+        return key
+    album = _DISC_SUFFIX.sub("", key[2]) or key[2]
+    has_aa = bool((meta.get("albumartist") or [""])[0].strip())
+    return ("tags", key[1] if has_aa else "", album)
+
+
 def is_disc_dir(d: Path) -> bool:
     """A disc folder ("CD1", "Disc 2", "Disc One", "Side A"). A folder named only by a
     number counts when its siblings are numbered 1, 2, ... too: "Adele/19" and "Adele/21"
@@ -143,7 +160,7 @@ class Engine:
         owner_of = {d: (d.parent if disc[d] else d) for d in found}
         own_key = {}
         for d in found:
-            own_key.setdefault(owner_of[d], set()).update(ex.album_key(ex.read_meta(f)) for f in found[d])
+            own_key.setdefault(owner_of[d], set()).update(_group_key(ex.read_meta(f)) for f in found[d])
         folders = {}
         for d in sorted(found):
             owner = owner_of[d]
@@ -161,7 +178,7 @@ class Engine:
                 continue
             by_album = {}
             for f in files:
-                by_album.setdefault(ex.album_key(ex.read_meta(f)), []).append(f)
+                by_album.setdefault(_group_key(ex.read_meta(f)), []).append(f)
             tagged = [k for k in by_album if k[0] == "tags"]
             spans_discs = len({f.parent for f in files}) > 1
             if len(by_album) > 1 and spans_discs and len(tagged) <= 1:

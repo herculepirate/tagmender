@@ -31,8 +31,23 @@ What it guarantees:
 - **Rules are literal**: `[no vox]` means those characters; excluded albums are labelled
   Ignored or Skipped, never Unresolved.
 
-Install: `sudo apt install ./tagmender_0.2.0_all.deb`, or run `TagMender-0.2.0-x86_64.AppImage`
-(no installation; includes the desktop app). From a clone: `python3 tagmender.py ...`.
+## Install
+
+Linux, x86_64. Download from [Releases](https://github.com/herculepirate/tagmender/releases):
+
+| | How | Notes |
+|---|---|---|
+| **AppImage** (any distro) | `chmod +x TagMender-*-x86_64.AppImage` then run it | Nothing to install; includes Python and the desktop app. Run with no arguments for the app, or with a command (`./TagMender-*.AppImage plan ~/Music/Inbox`). Ubuntu/Mint 22+ need `sudo apt install libfuse2t64` |
+| **.deb** (Debian 12+, Ubuntu 24.04+, Mint 22+) | `sudo apt install ./tagmender_*_all.deb` | Uses the system Python; `tagmender` on the path, a menu entry, the background service. The desktop app needs PySide6, which these releases do not package: `pip install --user --break-system-packages PySide6-Essentials` |
+| **From a clone** | `git clone https://github.com/herculepirate/tagmender` | `python3 tagmender.py ...`; see Requirements below |
+
+Optional, for everything to work: `sudo apt install ffmpeg libchromaprint-tools tesseract-ocr`
+(audio checks of unusual formats, AcoustID fingerprints, reading scans). The Discogs Enrichment
+and CoverUp plugin code comes with the AppImage and the .deb. Then `tagmender setup` stores your
+Discogs token (and an AcoustID key) in `~/.config/tagmender/`, readable only by you.
+
+**First time? Read [First run](docs/FIRST_RUN.md)**: preview first, try one folder, undo once.
+Nothing is changed until you apply a preview, and every job can be undone.
 
 Documentation: [profiles and naming](docs/PROFILES.md) · [providers and keys](docs/PROVIDERS.md) ·
 [formats](docs/FORMATS.md) · [architecture](docs/ARCHITECTURE.md) ·

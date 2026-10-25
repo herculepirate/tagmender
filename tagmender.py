@@ -829,7 +829,9 @@ def cmd_gui(args):
     try:
         import gui
     except ImportError as exc:
-        _err(f"The desktop app needs PySide6 ({exc}). Install it: pip install PySide6")
+        _err(f"The desktop app needs PySide6 ({exc}). Install it with "
+             "`pip install --user --break-system-packages PySide6-Essentials` (Debian 12 and Ubuntu/Mint "
+             "24.04 do not package it), or use the AppImage, which includes it.")
         return EXIT_ERR
     return gui.main()
 

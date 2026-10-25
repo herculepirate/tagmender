@@ -517,9 +517,10 @@ class Overview(QWidget):
         self.worker = start(self, work, self.applied, self.progress, self.oops)
 
     def applied(self, res):
+        by_index = {r["index"]: r for r in res["albums"] if "index" in r}    # (two albums of one folder)
         by = {a["album"]: a for a in res["albums"]}
-        for a in self.plan["albums"]:
-            r = by.get(a["source_dir"])
+        for i, a in enumerate(self.plan["albums"]):
+            r = by_index.get(i) if by_index else by.get(a["source_dir"])
             if r:
                 a["status"] = {"done": "done"}.get(r["status"], r["status"])
                 if r["status"] in ("failed", "conflict"):

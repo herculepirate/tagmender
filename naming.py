@@ -127,38 +127,53 @@ def with_editions(template: str, mode: str) -> str:
     return template
 
 
-_PICARD_EDITION = [
-    "$noop( Edition: Vinyl / WEB / Tape, plus the pressing's own year for a reissue.",
-    "       Original CD = no suffix; unknown media = no suffix )",
-    "$set(usedate,$if(%originaldate%,%originaldate%,%date%))",
-    "$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($or($in(%media%,Digital),$in(%media%,File)),WEB,$if($in(%media%,Cassette),Tape,"
-    "$if(%media%,CD,)))))",
-    "$set(_edyear,$if($and(%date%,$ne($left(%date%,4),$left(%usedate%,4))),$left(%date%,4),))",
-    "$set(_edition,$if(%_edkind%,$if($or($ne(%_edkind%,CD),%_edyear%),$trim(%_edyear% %_edkind%)),))",
-]
+def _picard_edition(mode: str, prefix: str = "") -> list:
+    """Picard script lines setting %{prefix}_edition% as John's scripts do (Vinyl / WEB /
+    Tape, plus the pressing's own year for a reissue; an original CD and unknown media get
+    nothing); "edition" mode: the kind alone."""
+    v = (prefix + "_") if prefix else "_"
+    lines = [
+        f"$set({v}usedate,$if(%originaldate%,%originaldate%,%date%))",
+        f"$set({v}edkind,$if($in(%media%,Vinyl),Vinyl,$if($or($in(%media%,Digital),$in(%media%,File)),WEB,$if($in(%media%,Cassette),Tape,"
+        f"$if(%media%,CD,)))))",
+        f"$set({v}edyear,$if($and(%date%,$ne($left(%date%,4),$left(%{v}usedate%,4))),$left(%date%,4),))",
+        f"$set({v}edition,$if(%{v}edkind%,$if($or($ne(%{v}edkind%,CD),%{v}edyear%),$trim(%{v}edyear% %{v}edkind%)),))",
+    ]
+    if mode == "edition":
+        lines.append(f"$set({v}edition,$if($ne(%{v}edkind%,CD),%{v}edkind%))")
+    return lines
 
 
 def picard_script(mode: str, album_tag: str = "off", template: str = "") -> str:
-    """The Picard lines that do what these settings do. For a preset that is a Picard
-    script already (all-music, various-artists, classical-performer): that script, with
-    the edition as set. Otherwise the edition lines (as in those scripts) and the piece to
-    add after the album in the folder part of the naming script; and, when the Album tag
-    carries the edition too, the tagger-script line for that."""
-    out = []
-    if mode in EDITION_VAR or album_tag in EDITION_VAR:
-        if template and "$set(_edition," in template:
-            out += ["$noop( File naming script (Options > File Naming) )", with_editions(template, mode)]
-        elif mode in EDITION_VAR:
-            out += ["$noop( In the file naming script, before the folders: )", *_PICARD_EDITION]
-            if mode == "edition":
-                out.append("$set(_edition,$if($ne(%_edkind%,CD),%_edkind%))")
-            out += ["$noop( and right after the album in the folder part: )", "$if(%_edition%, [%_edition%])"]
+    """The Picard lines that do what these settings do: the file naming script (a preset
+    that is a Picard script already - all-music, various-artists, classical-performer - with
+    the edition as set; otherwise the edition lines and the piece to add after the album in
+    the folder part), then, after a blank line, the tagger script that adds the edition to
+    the Album tag. With the edition in the Album tag, the naming script takes it out of the
+    album again before naming the folder, as TagMender does, so it never shows twice."""
+    naming_part = []
+    strip_tag = []
+    if album_tag in EDITION_VAR:                 # the album as it was, for the folder name
+        strip_tag = [*_picard_edition(album_tag, "_tmt"),
+                     "$set(_tm_album,$if(%_tmt_edition%,$replace(%album%, [%_tmt_edition%],),%album%))"]
+    if template and "$set(_edition," in template:
+        script = with_editions(template, mode) if mode in EDITION_VAR else with_editions(template, "off")
+        if strip_tag:
+            script = script.replace("%album%", "%_tm_album%")
+        script = re.sub(r"\n\s*\n", "\n", script)       # (a blank line separates the two scripts)
+        naming_part = ["$noop( File naming script - Options, File Naming )", *strip_tag, script]
+    elif mode in EDITION_VAR:
+        naming_part = ["$noop( In the file naming script, before the folders: )", *strip_tag,
+                       *_picard_edition(mode)]
+        if strip_tag:
+            naming_part.append("$noop( use %_tm_album% for the album in the folder part, and right after it: )")
+        else:
+            naming_part.append("$noop( and right after the album in the folder part: )")
+        naming_part.append("$if(%_edition%, [%_edition%])")
+    out = list(naming_part)
     if album_tag in EDITION_VAR:
-        out += ["", "$noop( Tagger script (Options > Scripting): the edition in the Album tag )",
-                *_PICARD_EDITION]
-        if album_tag == "edition":
-            out.append("$set(_edition,$if($ne(%_edkind%,CD),%_edkind%))")
-        out.append("$if(%_edition%,$set(album,%album% [%_edition%]))")
+        out += ["", "$noop( Tagger script - Options, Scripting: the edition in the Album tag )",
+                *_picard_edition(album_tag), "$if(%_edition%,$set(album,%album% [%_edition%]))"]
     return "\n".join(out)
 
 
@@ -327,23 +342,66 @@ def _a(ctx, args, i, default=""):
 
 
 def _f_if(ctx, args):
-    return _a(ctx, args, 1) if _a(ctx, args, 0).strip() else _a(ctx, args, 2)
+    return _a(ctx, args, 1) if _a(ctx, args, 0) else _a(ctx, args, 2)
 
 
 def _f_if2(ctx, args):
     for i in range(len(args)):
         v = _a(ctx, args, i)
-        if v.strip():
+        if v:
             return v
     return ""
 
 
 def _f_num(ctx, args):
-    v = _a(ctx, args, 0).strip()
     try:
-        return str(int(float(v))).zfill(int(_a(ctx, args, 1) or 0))
+        width = max(0, min(int(_a(ctx, args, 1)), 20))
     except ValueError:
-        return v
+        return ""
+    try:
+        value = int(_a(ctx, args, 0))
+    except ValueError:
+        value = 0                                   # (Picard: not a number counts as 0)
+    return f"{value:0{width}d}"
+
+
+def _int_or_none(s):
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _slice(text, n, side):
+    try:
+        n = int(n)
+    except ValueError:
+        return ""
+    return text[:n] if side == "left" else text[-n:]
+
+
+def _pcmp(op, ctx, args):
+    """Picard's _cmp: as int, else float, else text (or the type named: int, float, text, nocase)."""
+    x, y = _a(ctx, args, 0), _a(ctx, args, 1)
+    kind = _a(ctx, args, 2) or "auto"
+    if kind == "auto":
+        kind = "text"
+        for t in (int, float):
+            try:
+                t(x), t(y)
+                kind = t.__name__
+                break
+            except ValueError:
+                pass
+    if kind == "text":
+        return "1" if op(x, y) else ""
+    if kind == "nocase":
+        return "1" if op(x.lower(), y.lower()) else ""
+    t = {"int": int, "float": float}.get(kind)
+    try:
+        return "1" if t and op(t(x), t(y)) else ""
+    except ValueError:
+        return ""
 
 
 def _f_join(ctx, args):
@@ -395,16 +453,28 @@ def _f_rreplace(ctx, args):
 
 
 def _f_rsearch(ctx, args):
+    """Picard's $rsearch(text,pattern[,group]): the group, else the first group that matched,
+    else the whole match; "" for no match or a bad pattern."""
     try:
         m = re.search(_a(ctx, args, 1), _a(ctx, args, 0))
-    except re.error as exc:
-        raise TemplateError(f"$rsearch: bad pattern: {exc}") from None
+    except re.error:
+        return ""
     if not m:
         return ""
-    try:
-        return m.group(1) or ""
-    except IndexError:
-        return m.group(0)
+    if len(args) > 2 and _a(ctx, args, 2):
+        g = _a(ctx, args, 2)
+        try:
+            g = int(g)
+        except ValueError:
+            g = g.strip()
+        try:
+            return m.group(g) or ""
+        except (IndexError, KeyError):
+            return ""
+    for v in m.groups():
+        if v is not None:
+            return v
+    return m.group(0)
 
 
 def _int(s):
@@ -429,12 +499,36 @@ def _arith(op):
 
 
 def _f_firstalphachar(ctx, args):
-    t = _a(ctx, args, 0).strip()
+    t = _a(ctx, args, 0)
     return t[0].upper() if t[:1].isalpha() else _a(ctx, args, 1, "#")
 
 
+def _iswbound(ch: str) -> bool:
+    import unicodedata
+    cat = unicodedata.category(ch)
+    return cat in ("Zs", "Sk") or cat[0] == "P"
+
+
 def _f_title(ctx, args):
-    return " ".join(w[:1].upper() + w[1:] for w in _a(ctx, args, 0).split(" "))
+    """Picard's titlecase: each word's first letter capitalised, a word starting after a
+    space or punctuation ("Jean-Michel", "O.K."), not after an apostrophe in a word."""
+    text = _a(ctx, args, 0)
+    if not text:
+        return text
+    out, cap = text[0].capitalize(), False
+    for i in range(1, len(text)):
+        t = text[i]
+        if t in "\u2019'" and text[i - 1].isalpha():
+            cap = False
+        elif _iswbound(t):
+            cap = True
+        elif cap and t.isalpha():
+            cap = False
+            t = t.capitalize()
+        else:
+            cap = False
+        out += t
+    return out
 
 
 def _f_year(ctx, args):
@@ -445,23 +539,23 @@ def _f_year(ctx, args):
 FUNCS = {
     "if": _f_if, "if2": _f_if2, "num": _f_num, "join": _f_join, "getmulti": _f_getmulti,
     "lenmulti": _f_lenmulti, "firstalphachar": _f_firstalphachar, "title": _f_title, "year": _f_year,
-    "not": lambda c, a: "" if _a(c, a, 0).strip() else "1",
-    "and": lambda c, a: "1" if all(_a(c, a, i).strip() for i in range(len(a))) else "",
-    "or": lambda c, a: "1" if any(_a(c, a, i).strip() for i in range(len(a))) else "",
+    # (the comparisons, tests and text functions behave as Picard's picard/script/functions.py)
+    "not": lambda c, a: "" if _a(c, a, 0) else "1",
+    "and": lambda c, a: "1" if all(_a(c, a, i) for i in range(len(a))) else "",
+    "or": lambda c, a: "1" if any(_a(c, a, i) for i in range(len(a))) else "",
     "eq": lambda c, a: "1" if _a(c, a, 0) == _a(c, a, 1) else "",
     "ne": lambda c, a: "1" if _a(c, a, 0) != _a(c, a, 1) else "",
-    "gt": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x > y) else "",
-    "lt": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x < y) else "",
-    "gte": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x >= y) else "",
-    "lte": lambda c, a: "1" if _cmp(_a(c, a, 0) or 0, _a(c, a, 1) or 0, lambda x, y: x <= y) else "",
-    "left": lambda c, a: _a(c, a, 0)[:_int(_a(c, a, 1)) or 0] if _int(_a(c, a, 1)) is not None else "",
-    "right": lambda c, a: _a(c, a, 0)[-_int(_a(c, a, 1)):] if (_int(_a(c, a, 1)) or 0) > 0 else "",
-    "truncate": lambda c, a: (_a(c, a, 0)[:_int(_a(c, a, 1)) or 0].rstrip()
-                              if _int(_a(c, a, 1)) is not None else _a(c, a, 0)),
+    "gt": lambda c, a: _pcmp(lambda x, y: x > y, c, a),
+    "lt": lambda c, a: _pcmp(lambda x, y: x < y, c, a),
+    "gte": lambda c, a: _pcmp(lambda x, y: x >= y, c, a),
+    "lte": lambda c, a: _pcmp(lambda x, y: x <= y, c, a),
+    "left": lambda c, a: _slice(_a(c, a, 0), _a(c, a, 1), "left"),
+    "right": lambda c, a: _slice(_a(c, a, 0), _a(c, a, 1), "right"),
+    "truncate": lambda c, a: _a(c, a, 0)[:_int_or_none(_a(c, a, 1))].rstrip(),
     "lower": lambda c, a: _a(c, a, 0).lower(),
     "upper": lambda c, a: _a(c, a, 0).upper(),
-    "trim": lambda c, a: _a(c, a, 0).strip(),
-    "replace": lambda c, a: _a(c, a, 0).replace(_a(c, a, 1), _a(c, a, 2)) if _a(c, a, 1) else _a(c, a, 0),
+    "trim": lambda c, a: _a(c, a, 0).strip(_a(c, a, 1)) if _a(c, a, 1) else _a(c, a, 0).strip(),
+    "replace": lambda c, a: _a(c, a, 0).replace(_a(c, a, 1), _a(c, a, 2)),
     "noop": lambda c, a: "",
     "set": _f_set, "unset": _f_unset, "get": lambda c, a: c.var(_var_name(a[0]) or _a(c, a, 0).strip()),
     "rsearch": _f_rsearch,

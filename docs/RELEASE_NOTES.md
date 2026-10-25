@@ -22,9 +22,13 @@ The desktop app shows the matching Picard script lines. John's three Picard nami
 are presets (`all-music`, `various-artists`, `classical-performer`); naming now also knows
 Picard's `$set`, `$rsearch`, `$sortmulti`, `$in`, `$add`, `$sub`, `$mul`, `$div`.
 `$initials` now works as Picard's (letters only: "99 Luftballons" gives "L"), so titles
-whose first word is a number get a new file name under the tagmender preset.
+whose first word is a number get a new file name under the tagmender preset. Names
+follow Picard's Windows-compatible rules exactly: a folder's trailing dot becomes "_"
+("R.E.M_"), a leading dot becomes "_" ("_..And Justice for All"), a file name keeps its
+dots; `$title`, `$num`, `$left`, `$right`, `$if`, comparisons and `$rsearch` behave as
+Picard's.
 
-**File operations reviewed** in sixteen independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in seventeen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.

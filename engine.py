@@ -224,7 +224,7 @@ class Engine:
             owner = owner_of[d]
             keys = own_key.get(owner, set())
             up = owner.parent
-            while up != path and path in up.parents:
+            while up == path or path in up.parents:      # (the named folder itself too: "run Album")
                 if up in own_key and len(keys) == 1 and next(iter(keys))[0] == "tags" and own_key[up] == keys:
                     owner = up
                 up = up.parent
@@ -232,7 +232,7 @@ class Engine:
         groups = []
         for folder in sorted(folders):
             files = folders[folder]
-            if self.profile.excluded_path(folder):
+            if self.profile.excluded_path(folder, named=[path]):
                 continue
             by_album = {}
             keys = album_keys(files, folder)

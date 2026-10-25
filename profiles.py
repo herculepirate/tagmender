@@ -261,10 +261,14 @@ class Profile:
         fmts = {f.lower().lstrip(".") for f in self.data["formats"]}
         return not fmts or Path(path).suffix.lower().lstrip(".") in fmts
 
-    def excluded_path(self, path) -> bool:
+    def excluded_path(self, path, named=()) -> bool:
+        """path lies in one of exclude_paths - unless that is where a folder named on the
+        command line lies (`tagmender retry .../_unresolved`: what you name is looked at)."""
         import fnmatch
         s = str(path)
-        return any(fnmatch.fnmatchcase(s, g) for g in self.data["exclude_paths"])
+        inside = [str(n).rstrip("/") + "/x" for n in named or ()]
+        return any(fnmatch.fnmatchcase(s, g) and not any(fnmatch.fnmatchcase(i, g) for i in inside)
+                   for g in self.data["exclude_paths"])
 
     def policy(self, fld: str) -> str:
         """The profile's own policy for the field; else, for a tag Picard is set to preserve

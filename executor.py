@@ -668,7 +668,8 @@ class Executor:
                 self.log.exception("album %s could not be started", a.get("source_dir"))
                 status, label, detail = "conflict", "Unavailable", f"could not be started: {exc}"
             counts[status] = counts.get(status, 0) + 1
-            self.results.append({"album": a["source_dir"], "status": status, "label": label, "detail": detail})
+            self.results.append({"album": a["source_dir"], "index": i, "status": status, "label": label,
+                                 "detail": detail})
             _record_album(self.job, a["source_dir"], status, label, detail)
         _sweep_stages(self.plan, self.job, self.log)
         final = "done" if not any(k in counts for k in ("failed", "cancelled")) else "partial"
@@ -1089,15 +1090,22 @@ class Executor:
         if lib is None:                                  # (a plan from before library_roots)
             stops = {r.rstrip(os.sep) for r in self.roots}
         else:
-            # the profile's own folders are never removed; a folder named on the command line
-            # (`tagmender run Inbox/Album`) is, once empty, as Picard does - and nothing above
-            # it unless it lies inside one of the profile's folders
+            # never removed: the profile's own folders, every other profile's folders, your
+            # home folder and mount parents, and a folder named on the command line - unless
+            # it is this album's own folder (`tagmender run Inbox/Album`: removed once empty,
+            # as Picard does, and nothing above it unless it lies inside a profile's folders)
             lib = [r.rstrip(os.sep) for r in lib]
-            stops = set(lib)
+            stops = set(lib) | _protected_folders()
+            own = os.path.realpath(a["source_dir"]).rstrip(os.sep)
             for r in self.roots:
                 r = r.rstrip(os.sep)
-                if r not in stops and not any(r.startswith(x + os.sep) for x in lib):
-                    stops.add(os.path.dirname(r))
+                if r in stops:
+                    continue
+                if r == own:
+                    if not any(r.startswith(x + os.sep) for x in lib):
+                        stops.add(os.path.dirname(r))
+                else:
+                    stops.add(r)
         roots = stops
         for d in sorted({str(Path(fe["src"]).parent) for fe in a["files"] + a["companions"]},
                         key=len, reverse=True):
@@ -1704,6 +1712,25 @@ def _moved_later(path: Path, job) -> str | None:
     return None
 
 
+def _protected_folders() -> set:
+    """Folders a clean-up never removes: every profile's sources, destination and
+    unresolved folder, the home folder, and the folders shares are mounted under."""
+    out = {os.path.realpath(os.path.expanduser("~"))} | {m.rstrip(os.sep) for m in planmod.MOUNT_PARENTS}
+    try:
+        import profiles as pf
+        for n in pf.names():
+            try:
+                p = pf.load(n)
+            except Exception:
+                continue
+            for d in [s.get("path") for s in p["sources"]] + [p["destination"], p["unresolved"].get("move_to")]:
+                if d:
+                    out.add(os.path.realpath(os.path.expanduser(d)).rstrip(os.sep))
+    except Exception:
+        pass
+    return out
+
+
 def _watcher_forgets(jd: Path):
     """The watcher must not do an undone job again by itself. Each album's record says
     "undone", with the signatures of its files as the undo left them: the watcher looks at
@@ -1722,8 +1749,19 @@ def _watcher_forgets(jd: Path):
             if not files:
                 continue
             folder = Path(a["source_dir"])
-            key = watcher.album_key(folder, files)
-            sigs = {watcher.shape(folder), watcher.shape(folder, files)}
+            # the files the watcher's group of this album holds: the plan's, those it skipped,
+            # and the same tracks in another format beside them (left out by identification)
+            group = set(files) | {Path(s_["file"]) for s_ in a.get("skipped") or [] if s_.get("file")}
+            stems = {(p.parent, p.stem) for p in group}
+            for d in {p.parent for p in group}:
+                try:
+                    group |= {x for x in d.iterdir() if x.is_file() and x.suffix.lower() in ex.AUDIO_EXT
+                              and (x.parent, x.stem) in stems}
+                except OSError:
+                    pass
+            group = sorted(group)
+            key = watcher.album_key(folder, group)
+            sigs = {watcher.shape(folder, files), watcher.shape(folder, group)}
             db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
                        (key, plan.get("profile") or "", "|".join(sorted(sigs)), "undone", 0, 0, time.time(), ""))
         db.commit()

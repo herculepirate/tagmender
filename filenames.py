@@ -39,13 +39,20 @@ MIN_KEEP = 8
 SUFFIX_LEN = 6                       # " ~1a2b"
 
 
-def safe_component(text: str, compat="windows") -> str:
+def safe_component(text: str, compat="windows", file_stem=False) -> str:
+    """One folder or file name, as Picard's make_save_path makes it: a leading dot becomes
+    "_" ("...And Justice for All" -> "_..And Justice for All": never a hidden folder) and,
+    with Windows-compatible names, a folder name's trailing dot becomes "_" ("R.E.M." ->
+    "R.E.M_"; a file name keeps its dots, its extension follows them)."""
     s = unicodedata.normalize("NFC", str(text))
     s = (_WIN_BAD if compat == "windows" else _LINUX_BAD).sub("_", s)
-    s = re.sub(r"^[.\s]+", "", s)           # "...And Justice for All" would be a hidden folder
     s = s.strip()
+    if s.startswith("."):
+        s = "_" + s[1:]
     if compat == "windows":
-        s = s.rstrip(". ")
+        s = s.rstrip(" ")
+        if s.endswith(".") and not file_stem:
+            s = s[:-1] + "_"
         m = _RESERVED.match(s)
         if m:                                   # "AUX. Remixes" is reserved too: AUX_. Remixes
             s = m.group(1) + "_" + s[len(m.group(1)):]
@@ -55,7 +62,10 @@ def safe_component(text: str, compat="windows") -> str:
 
 
 def _units(s: str, compat: str) -> int:
-    """The larger of UTF-8 bytes and (with windows compatibility) UTF-16 code units."""
+    """The larger of UTF-8 bytes and (with windows compatibility) UTF-16 code units;
+    characters for compat "chars" (the path length limit)."""
+    if compat == "chars":
+        return len(s)
     b = len(s.encode("utf-8", "surrogateescape"))
     return max(b, len(s.encode("utf-16-le", "surrogatepass")) // 2) if compat == "windows" else b
 
@@ -102,7 +112,7 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
     abbr = limits.get("abbreviations") or {}
     notes = []
     ext = extension if extension.startswith(".") or not extension else "." + extension
-    parts = [safe_component(c, compat) for c in components]
+    parts = [safe_component(c, compat, file_stem=(i == len(components) - 1)) for i, c in enumerate(components)]
     if not parts:
         return None, ["the naming template gave an empty path"]
     reserve = len(ext) + SUFFIX_LEN       # always leave room for a collision suffix
@@ -113,14 +123,14 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
     # a. abbreviations where a component is too long
     for i, p in enumerate(parts):
         if not _fits(p, limit_of(i), compat) and abbr:
-            q = safe_component(abbreviate(p, abbr), compat)
+            q = safe_component(abbreviate(p, abbr), compat, file_stem=(i == len(parts) - 1))
             if q != p:
                 notes.append(f"abbreviated {p!r} -> {q!r}")
                 parts[i] = q
     # b. each component within its own limit
     for i, p in enumerate(parts):
         if not _fits(p, limit_of(i), compat):
-            q = safe_component(truncate_words(p, limit_of(i), compat), compat)
+            q = safe_component(truncate_words(p, limit_of(i), compat), compat, file_stem=(i == len(parts) - 1))
             notes.append(f"shortened {p!r} -> {q!r}")
             parts[i] = q
 
@@ -136,9 +146,9 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
         p = parts[i]
         target = max(MIN_KEEP, len(p) - over)
         if target < len(p):
-            q = truncate_words(p, target, "linux")      # characters here, not bytes
+            q = truncate_words(p, target, "chars")      # characters here, not bytes
             q = q if len(q) >= MIN_KEEP or len(p) <= MIN_KEEP else p[:MIN_KEEP]
-            q = safe_component(q, compat)
+            q = safe_component(q, compat, file_stem=(i == len(parts) - 1))
             if q != p:
                 notes.append(f"shortened {p!r} -> {q!r} for the path length limit")
                 parts[i] = q

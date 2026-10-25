@@ -260,7 +260,7 @@ def _fit_name(name: str, limits: dict) -> str:
     and short enough to take a collision suffix."""
     compat = limits.get("compat", "windows")
     stem, ext = os.path.splitext(name)
-    stem = fnm.safe_component(stem, compat) if stem else stem
+    stem = fnm.safe_component(stem, compat, file_stem=True) if stem else stem
     limit = int(limits.get("max_name_bytes", 255)) - fnm.SUFFIX_LEN - len(ext.encode("utf-8", "surrogateescape"))
     if len(stem.encode("utf-8", "surrogateescape")) > limit:
         stem = fnm.truncate_words(stem, limit, compat)
@@ -543,7 +543,7 @@ class Planner:
                 entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "profile formats",
                                          "matched": f.suffix.lower()})
                 kept.remove(f)
-            elif p.excluded_path(f):
+            elif p.excluded_path(f, named=self.extra_roots):
                 entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "profile exclude_paths",
                                          "matched": str(f)})
                 kept.remove(f)
@@ -612,7 +612,8 @@ class Planner:
                 d = str((t.get("discnumber") or ["1"])[0]).split("/")[0]
                 n = str((t.get("tracknumber") or ["1"])[0]).split("/")[0]
                 return (int(d) if d.isdigit() else 1, int(n) if n.isdigit() else 1, str(f))
-            f0 = min(kept, key=_order)
+            has_media = [f for f in kept if ((targets.get(f) or {}).get("media") or [""])[0]]
+            f0 = min(has_media or kept, key=_order)       # (the first disc that says what it is)
             try:
                 b0 = tagio.read(f0)
                 ch0, _r0 = diff_tags(b0, dict(targets.get(f0) or {}), p, conf, [])
@@ -680,10 +681,12 @@ class Planner:
                 else:
                     names = dict(merged, **rel_tags)
                     if folder_mode != "off":
-                        # (for the name only, every file has its release's first-disc media and
-                        # date - a Picard script works the edition out from those - and the album
-                        # without the edition the Album tag carries: the folder adds its own)
-                        names.update(rel)
+                        # (for the name only: a Picard script working the edition out itself
+                        # from %media% and %date% gets the release's first-disc values for every
+                        # file; and the album goes in without the edition the Album tag carries -
+                        # the folder adds its own)
+                        if "$set(_edkind," in template:
+                            names.update(rel)
                         al = str((names.get("album") or [""])[0])
                         if tag_ed and al.endswith(f" [{tag_ed}]"):
                             names["album"] = [al[:-len(f" [{tag_ed}]")]]

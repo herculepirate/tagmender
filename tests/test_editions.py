@@ -84,8 +84,9 @@ class Variable(unittest.TestCase):
         naming.compile_template(s)
         self.assertIn("$if(%_edition%,$set(album,%album% [%_edition%]))", naming.picard_script("off", "edition"))
         # a preset that is a Picard script: that script itself
+        import re
         self.assertEqual(naming.picard_script("edition_year", "off", naming.PRESETS["all-music"]).split("\n", 1)[1],
-                         naming.PRESETS["all-music"])
+                         re.sub(r"\n\s*\n", "\n", naming.PRESETS["all-music"]))   # (no blank lines)
 
 
 class JohnsScripts(unittest.TestCase):

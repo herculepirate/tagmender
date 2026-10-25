@@ -94,10 +94,29 @@ def shape(folder: Path, files=None) -> str:
     return "shape:" + h.hexdigest()[:16]
 
 
-def snapshot(folder: Path, files=None):
-    """(signature, newest mtime, has a partial file) of a folder, or only of `files` (loose
-    tracks at a watched root are judged by themselves, not by everything below the root)."""
+def snapshot(folder: Path, files=None, deep=True):
+    """(signature, newest mtime, has a partial file) of a folder, or only of `files` (an album
+    is judged by its own files: loose tracks at a watched root not by everything below the
+    root, one album of a mixed folder not by the other). A download in progress is looked
+    for in the folder - below it too when deep (an album folder; not a watched root)."""
     entries, newest, partial = [], 0.0, False
+    if files is not None:                # (anything new in the folder is "still changing" too)
+        try:
+            around = Path(folder).rglob("*") if deep else Path(folder).iterdir()
+            for p in around:
+                n = p.name.lower()
+                if executor.STAGE_TAG in n:
+                    continue
+                if n.endswith(PARTIAL) or n.startswith(("~$", ".~lock.")):
+                    partial = True
+                    break
+                try:
+                    if deep and p.is_file():
+                        newest = max(newest, p.stat().st_mtime)
+                except OSError:
+                    pass
+        except OSError:
+            pass
     for p in sorted(Path(x) for x in files) if files is not None else sorted(Path(folder).rglob("*")):
         if not p.is_file():
             continue
@@ -158,9 +177,9 @@ class Watcher:
             roots.append(prof["unresolved"].get("move_to"))
         return all(r and Path(r).expanduser().is_dir() and planmod.mounted(Path(r).expanduser()) for r in roots)
 
-    def due(self, folder: Path, prof, db, key=None, files=None, members=None) -> tuple[bool, str]:
+    def due(self, folder: Path, prof, db, key=None, files=None, members=None, deep=True) -> tuple[bool, str]:
         key = key or planmod.db_text(folder)
-        sig, newest, partial = snapshot(folder, files)
+        sig, newest, partial = snapshot(folder, files, deep)
         if partial:
             return False, "partial download inside"
         if time.time() - newest < prof["watch"]["settle_minutes"] * 60:
@@ -193,8 +212,8 @@ class Watcher:
             return True, "retry"
         return False, status
 
-    def record(self, db, folder, prof, status, attempts, detail="", key=None, files=None):
-        sig, _n, _p = snapshot(folder, files) if Path(folder).exists() else ("gone", 0, False)
+    def record(self, db, folder, prof, status, attempts, detail="", key=None, files=None, deep=True):
+        sig, _n, _p = snapshot(folder, files, deep) if Path(folder).exists() else ("gone", 0, False)
         if status in ("provider_error", "failed", "conflict", "blocked"):
             nxt = time.time() + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
         elif status == "unresolved":
@@ -237,9 +256,10 @@ class Watcher:
                     continue
                 seen.add(key)
                 k = self.key(g)
-                scope = g.files if os.path.realpath(g.folder) == os.path.realpath(root) else None
+                deep = os.path.realpath(g.folder) != os.path.realpath(root)
+                scope = g.files                            # the album's own files (see snapshot)
                 try:
-                    go, why = self.due(g.folder, prof, db, k, scope, g.files)
+                    go, why = self.due(g.folder, prof, db, k, scope, g.files, deep)
                 except Exception:                              # one album never stops the watcher
                     self.log.exception("watch: %s could not be looked at", g.folder)
                     continue
@@ -280,12 +300,12 @@ class Watcher:
                         status = "waiting_destination"      # tried again once it is back
                     self.record(db, g.folder, prof, status, attempts,
                                 ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
-                                key=k, files=scope)
+                                key=k, files=scope, deep=deep)
                     done[str(g.folder)] = shown
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher
                     self.log.exception("watch: %s failed", g.folder)
-                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k, files=scope)
+                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k, files=scope, deep=deep)
                     done[str(g.folder)] = "error"
         db.close()
         return done

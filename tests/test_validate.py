@@ -215,6 +215,7 @@ class Fixes(unittest.TestCase):
                                                    notes="durations 4/4 agree"),
             "/l/Exhorder/2003 - X": dict(verdict="unsure", status="review", picked="mb:rr"),
             "/l/A/not approved": dict(verdict="other pressing", picked="mb:z", notes="durations agree"),
+            "/l/Candlemass/2008 - D": dict(verdict="other pressing", picked="discogs:25872463", picked_mb_twin="e9bd"),
         }
         for p_, r in rows.items():
             st.execute("INSERT INTO validation VALUES (?,?)", (p_, json.dumps(
@@ -222,14 +223,17 @@ class Fixes(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         try:
             (tmp / "approved.tsv").write_text("# approved by John\n/l/Bell Witch/2015 - Demo 2011\n"
-                                              "/l/Exhorder/2003 - X/\tdiscogs:22314946\n")
+                                              "/l/Exhorder/2003 - X/\tdiscogs:22314946\n"
+                                              "/l/Candlemass/2008 - D\tdiscogs:25872463\n")
             approved = va.read_approved(tmp / "approved.tsv")
             path, fixes = va.export_fixes(st, tmp, "v", approved)
-            self.assertEqual(sorted(f["folder"] for f in fixes), ["/l/Bell Witch/2015 - Demo 2011", "/l/Exhorder/2003 - X"])
+            self.assertEqual(sorted(f["folder"] for f in fixes), ["/l/Bell Witch/2015 - Demo 2011",
+                                                                  "/l/Candlemass/2008 - D", "/l/Exhorder/2003 - X"])
             got = {p_: json.loads(r)["best"] for p_, r in sqlite3.connect(path).execute("SELECT path, result FROM results")}
             self.assertEqual((got["/l/Exhorder/2003 - X"]["source"], got["/l/Exhorder/2003 - X"]["id"]),
                              ("discogs", "22314946"))
             self.assertEqual(got["/l/Bell Witch/2015 - Demo 2011"]["mb_id"], "d6f7")
+            self.assertEqual(got["/l/Candlemass/2008 - D"]["mb_id"], "e9bd")      # the pick named: twin kept
             (tmp / "bad.tsv").write_text("/l/x\tsomething\n")
             with self.assertRaises(ValueError):
                 va.read_approved(tmp / "bad.tsv")

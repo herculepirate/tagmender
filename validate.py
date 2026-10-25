@@ -285,7 +285,7 @@ def export_fixes(state, out_dir, current, approved=None):
     for r in rows:
         if r.get("folder") in approved:
             rel = approved[r["folder"]]
-            if rel:
+            if rel and rel != r.get("picked"):          # the same pick keeps its MusicBrainz twin
                 r = dict(r, picked=rel, picked_mb_twin=rel[3:] if rel.startswith("mb:") else "",
                          notes="approved by you; " + (r.get("notes") or ""))
             elif not r.get("picked"):

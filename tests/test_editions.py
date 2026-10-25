@@ -57,7 +57,9 @@ class Variable(unittest.TestCase):
 
     def test_kinds(self):
         for media, kind in (('7" Vinyl', "Vinyl"), ("10\"", "Vinyl"), ("Vinyl", "Vinyl"), ("Cassette", "Tape"),
-                            ("Digital Media", "WEB"), ("SACD", "CD"), ("Enhanced CD", "CD")):
+                            ("Digital Media", "WEB"), ("SACD", "CD"), ("Enhanced CD", "CD"),
+                            ("File, FLAC, Album, Stereo", "WEB"),     # Sunn O))) 2026: the Discogs plugin's media
+                            ("CD, Album, Reissue, Remastered", "CD")):
             self.assertEqual(naming.edition_parts({"media": [media]})[0], kind, media)
 
     def test_every_preset_gets_it_in_the_album_folder_only(self):
@@ -119,6 +121,17 @@ class JohnsScripts(unittest.TestCase):
                           "1986 - Reign in Blood [WEB]", "2004 - I"])
         for p in ("all-music", "various-artists", "classical-performer"):
             self.assertEqual(naming.with_editions(naming.PRESETS[p], "edition_year"), naming.PRESETS[p])
+
+    def test_a_cut_title_never_ends_on_a_separator(self):
+        """"Beethoven: Symphony No. 5 / No. 7 Complete" cut to five words ended on "/" (a
+        subfolder in Picard, "_" here); a download from Discogs ("File, FLAC") is WEB."""
+        t = dict(album="Beethoven: Symphony No. 5 / No. 7 Complete", originaldate="1963", date="1988", media="CD")
+        self.assertEqual(self.render("all-music", "edition_year", **t)[1], "1963 - Beethoven: Symphony No. 5 [1988 CD]")
+        self.assertEqual(self.render("various-artists", "edition_year", **t)[1], "Beethoven: Symphony No. 5 - 1988")
+        self.assertEqual(self.render("classical-performer", "edition_year", **t)[1],
+                         "1963 - Beethoven: Symphony No. 5 [1988 CD]")
+        t = dict(album="Sunn O)))", originaldate="2026", date="2026-04-03", media="File, FLAC, Album, Stereo")
+        self.assertEqual(self.render("all-music", "edition_year", **t)[1], "2026 - Sunn O))) [WEB]")
 
     def test_the_rest_of_the_scripts(self):
         t = dict(album="A Very Long Album Title With Many Words", albumartists=["Simon", "Art Garfunkel"],

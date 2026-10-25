@@ -27,20 +27,20 @@ for folder in loads:
         if isinstance(f, MP4):
             f.tags.clear()
             f.tags["----:com.apple.iTunes:MusicBrainz Album Id"] = [MP4FreeForm(mbid.encode())]
-            f.tags["----:com.apple.iTunes:MusicBrainz Release Track Id"] = [MP4FreeForm(f"t{n}".encode())]
+            f.tags["----:com.apple.iTunes:MusicBrainz Release Track Id"] = [MP4FreeForm(f"{mbid[:8]}-t{n}".encode())]
             f.tags["----:com.apple.iTunes:DISCOGS_RELEASE_ID"] = [MP4FreeForm(b"123")]
             f.tags["\xa9nam"] = [f"Song {n}"]
             f.save()
         elif isinstance(f.tags, ID3):
             f.tags.clear()
-            for d, v in (("MusicBrainz Album Id", mbid), ("MusicBrainz Release Track Id", f"t{n}"), ("DISCOGS_RELEASE_ID", "123")):
+            for d, v in (("MusicBrainz Album Id", mbid), ("MusicBrainz Release Track Id", f"{mbid[:8]}-t{n}"), ("DISCOGS_RELEASE_ID", "123")):
                 f.tags.add(TXXX(encoding=3, desc=d, text=[v]))
             f.tags.add(TIT2(encoding=3, text=[f"Song {n}"]))
             f.save()
         else:
             f.tags.clear()
             f.tags["MUSICBRAINZ_ALBUMID"] = [mbid]
-            f.tags["MUSICBRAINZ_RELEASETRACKID"] = [f"t{n}"]
+            f.tags["MUSICBRAINZ_RELEASETRACKID"] = [f"{mbid[:8]}-t{n}"]
             f.tags["DISCOGS_RELEASE_ID"] = ["123"]
             f.tags["TITLE"] = [f"Song {n}"]
             f.save()

@@ -644,7 +644,10 @@ def verify(album, files_rec, candidates):
         # Picard saved the file when it carries a track ID of this release. On a retag the
         # old release's track ID is still there until Picard saves, so it does not count
         # (AVKRVST - The Approbation: "tagged" with only the seeded album ID, old fields kept).
-        return bool(ids["trackid"]) and ids["trackid"] != (rec.get("old_trackid") or "")
+        # A file that already carried this very release keeps its track ID when saved
+        # (Sepultura - Beneath the Remains: disc 1 already had it, disc 2 was the download).
+        return bool(ids["trackid"]) and (ids["trackid"] != (rec.get("old_trackid") or "")
+                                         or (rec.get("old_albumid") or "") == album["mbid"])
 
     def discogs(ids, rec):
         return bool(ids["discogs"]) and (ids["discogs"] != (rec.get("old_discogs") or "") or saved(ids, rec))
@@ -798,7 +801,8 @@ def main():
                 for p in a["files"]:
                     before = read_ids(p)                     # a retag: the old release's IDs are there
                     rec = {"path": p, "key": audio_key(p), "backup": backup_tags(p, blob_dir),
-                           "old_trackid": before["trackid"], "old_discogs": before["discogs"]}
+                           "old_trackid": before["trackid"], "old_discogs": before["discogs"],
+                           "old_albumid": before["albumid"]}
                     a["records"].append(rec)
                 # every album prepared so far in this batch (later ones have no backup yet)
                 with open(run_dir / "journal.json", "w") as fh:

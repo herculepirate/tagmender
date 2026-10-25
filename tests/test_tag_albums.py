@@ -428,6 +428,36 @@ class Runs(Base):
         self.assertIn("'not saved': 1", out)
         self.assertNotIn("'tagged", out)
 
+    def test_retag_saved_by_picard_is_tagged(self):
+        """A retag Picard saves is "tagged", also for files that already carried this very
+        release (Sepultura - Beneath the Remains: disc 1 had it, disc 2 was a download)."""
+        self.make_album()
+        self.add_result(self.album, mbid=MBID)
+        self.run_tool("--apply")                                 # tagged with the right release
+        moved = next(p.parent for p in self.root.rglob("*.flac"))
+        for p in ta.audio_files(moved)[:2]:                      # half of it: another release
+            ta.write_albumid(p, OTHER)
+            f = mutagen.File(p)                                  # ... and that release's track IDs
+            if p.suffix == ".flac" or p.suffix == ".opus":
+                f.tags["MUSICBRAINZ_RELEASETRACKID"] = ["other-track"]
+            elif p.suffix == ".mp3":
+                from mutagen.id3 import TXXX
+                f.tags.delall("TXXX:MusicBrainz Release Track Id")
+                f.tags.add(TXXX(encoding=3, desc="MusicBrainz Release Track Id", text=["other-track"]))
+            else:
+                from mutagen.mp4 import MP4FreeForm
+                f.tags["----:com.apple.iTunes:MusicBrainz Release Track Id"] = [MP4FreeForm(b"other-track")]
+            f.save()
+        self.dbc.execute("DELETE FROM results")
+        self.add_result(moved, mbid=MBID)
+        rc, out = self.run_tool("--retag", "--apply")
+        self.assertIn("{'tagged': 1}", out)
+        self.dbc.execute("DELETE FROM results")
+        moved = next(p.parent for p in self.root.rglob("*.flac"))
+        self.add_result(moved, mbid=OTHER)                       # the whole album to another release
+        rc, out = self.run_tool("--retag", "--apply")
+        self.assertIn("{'tagged': 1}", out)
+
     def test_refuses_when_picard_is_open(self):
         self.make_album()
         orig = ta.picard_running

@@ -1121,6 +1121,7 @@ class RemasterEditions(unittest.TestCase):
         self.assertEqual(mc.media_kind('12" Vinyl'), "vinyl")
         self.assertEqual(mc.media_kind("Digital Media"), "digital")
         self.assertEqual(mc.media_kind("File"), "digital")
+        self.assertEqual(mc.media_kind("File, FLAC, Album, Stereo"), "digital")    # the Discogs plugin's media
         self.assertEqual(mc.media_kind("Enhanced CD"), "cd")
 
     def test_remaster_dated_a_year_or_two_off_is_that_edition(self):

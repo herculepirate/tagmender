@@ -810,7 +810,7 @@ def media_kind(fmt):
     f = str(fmt or "").casefold()
     if "vinyl" in f or re.search(r'\b(?:7|10|12)"', f) or f in ("lp", "flexi-disc"):
         return "vinyl"
-    if "digital" in f or f in ("file", "download"):
+    if "digital" in f or f.split(",")[0].strip() in ("file", "download"):   # Discogs: "File, FLAC, Album"
         return "digital"
     if "cd" in f:
         return "cd"

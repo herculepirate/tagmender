@@ -432,5 +432,19 @@ class R5_12_RemoveEmptyDirsIgnored(Base):
         self.assertTrue(self.album.is_dir(), "emptied source folder removed although remove_empty_dirs is false")
 
 
+
+class BonusDiscInsideItsAlbum(Base5):
+    """The matcher's rule (match_albums._owners): a folder inside a folder holding the album
+    belongs to it (Rotting Christ - A Dead Poem keeps its bonus disc)."""
+
+    def test_one_group(self):
+        top = self.lib / "Rotting Christ" / "Albums" / "1997 - A Dead Poem"
+        a = audio(top / "01.flac", 500)
+        b = audio(top / "1997 - Darkness We Feel (free bonus CD)" / "01.flac", 600)
+        e = eng_mod.Engine.__new__(eng_mod.Engine)
+        e.profile = self.profile()
+        groups = e.albums_in(self.lib)
+        self.assertEqual([(g.folder, sorted(map(str, g.files))) for g in groups], [(top, sorted([str(a), str(b)]))])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

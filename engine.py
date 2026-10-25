@@ -128,15 +128,27 @@ class Engine:
         path = Path(path).expanduser()
         if path.is_file():
             return [Group(path.parent, [path], [], single=True)]
-        folders = {}
+        found = {}
         for dirpath, dirs, names in os.walk(path):
             dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete")
             d = Path(dirpath)
             audio = sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
-            if not audio:
-                continue
-            owner = d.parent if d != path and is_disc_dir(d) else d
-            folders.setdefault(owner, []).extend(audio)
+            if audio:
+                found[d] = audio
+        # each audio folder's album folder, as the matcher sees it (match_albums._owners): a
+        # disc folder belongs to its parent, and so does any folder inside a folder holding
+        # the album (a bonus disc filed inside its album's folder)
+        disc = {d: d != path and is_disc_dir(d) for d in found}
+        have = set(found) | {d.parent for d in found if disc[d]}
+        folders = {}
+        for d in sorted(found):
+            owner = d.parent if disc[d] else d
+            up = owner.parent
+            while up != path and path in up.parents:
+                if up in have:
+                    owner = up
+                up = up.parent
+            folders.setdefault(owner, []).extend(found[d])
         groups = []
         for folder in sorted(folders):
             files = folders[folder]

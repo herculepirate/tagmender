@@ -603,6 +603,15 @@ def cmd_recover(args):
     return code
 
 
+def _is_unresolved(g) -> bool:
+    import tagio
+    try:
+        t = tagio.read(g.files[0])
+    except Exception:
+        return False
+    return str((t.get("tagmender") or [""])[0]).lower() == "unresolved"
+
+
 def _unresolved_albums(path):
     import engine
     import reasons
@@ -651,10 +660,14 @@ def cmd_retry(args):
         print("No unresolved albums there.")
         return EXIT_OK
     e = engine.Engine(prof)
-    props = []
+    props, seen = [], set()
     for i, f in enumerate(folders):
         _progress(i, len(folders), str(f))
         for g in e.albums_in(f):
+            key = tuple(sorted(map(str, g.files)))
+            if key in seen or not _is_unresolved(g):        # only the unresolved albums, once each
+                continue
+            seen.add(key)
             prop = e.identify(g)
             e.add_artwork(prop)                    # artwork and tagging level, as `run` does
             e.apply_level(prop)

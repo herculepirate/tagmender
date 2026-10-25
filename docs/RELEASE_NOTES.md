@@ -11,7 +11,7 @@ The desktop app shows the matching Picard script lines. John's three Picard nami
 are presets (`all-music`, `various-artists`, `classical-performer`); naming now also knows
 Picard's `$set`, `$rsearch`, `$sortmulti`, `$in`, `$add`, `$sub`, `$mul`, `$div`.
 
-**File operations reviewed** in fourteen independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in fifteen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.

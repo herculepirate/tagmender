@@ -48,6 +48,39 @@ def _db():
     return db
 
 
+def _files_key(folder, files) -> str:
+    import hashlib
+    h = hashlib.sha1("\n".join(sorted(map(str, files))).encode("utf-8", "surrogateescape")).hexdigest()[:12]
+    return planmod.db_text(f"{folder}#{h}")
+
+
+def album_key(folder: Path, files) -> str:
+    """Watcher.key for an album known by its folder and files (as undo knows it): the folder,
+    or the folder and its files when the folder holds other music too."""
+    mine = {str(f) for f in files}
+    try:
+        others = [p for p in Path(folder).iterdir() if p.is_file() and p.suffix.lower() in ex.AUDIO_EXT
+                  and not p.name.startswith(".") and str(p) not in mine]
+    except OSError:
+        others = []
+    return _files_key(folder, files) if others else planmod.db_text(folder)
+
+
+def shape(folder: Path, files=None) -> str:
+    """Which audio files there are, and their sizes (not their times): what undo leaves is
+    compared with this - a track added, removed or retagged changes it, a touched time not."""
+    import hashlib
+    h = hashlib.sha1()
+    paths = sorted(Path(x) for x in files) if files is not None else sorted(Path(folder).rglob("*"))
+    for p in paths:
+        if p.suffix.lower() in ex.AUDIO_EXT and executor.STAGE_TAG not in p.name:
+            try:
+                h.update(f"{p}|{p.stat().st_size}\n".encode("utf-8", "surrogateescape"))
+            except OSError:
+                continue
+    return "shape:" + h.hexdigest()[:16]
+
+
 def snapshot(folder: Path, files=None):
     """(signature, newest mtime, has a partial file) of a folder, or only of `files` (loose
     tracks at a watched root are judged by themselves, not by everything below the root)."""
@@ -100,9 +133,7 @@ class Watcher:
         several albums, which files are this album's."""
         if not g.others:
             return planmod.db_text(g.folder)
-        import hashlib
-        h = hashlib.sha1("\n".join(sorted(map(str, g.files))).encode("utf-8", "surrogateescape")).hexdigest()[:12]
-        return planmod.db_text(f"{g.folder}#{h}")
+        return _files_key(g.folder, g.files)
 
     @staticmethod
     def destination_ready(prof) -> bool:
@@ -114,7 +145,7 @@ class Watcher:
             roots.append(prof["unresolved"].get("move_to"))
         return all(r and Path(r).expanduser().is_dir() and planmod.mounted(Path(r).expanduser()) for r in roots)
 
-    def due(self, folder: Path, prof, db, key=None, files=None) -> tuple[bool, str]:
+    def due(self, folder: Path, prof, db, key=None, files=None, members=None) -> tuple[bool, str]:
         key = key or planmod.db_text(folder)
         sig, newest, partial = snapshot(folder, files)
         if partial:
@@ -130,7 +161,8 @@ class Watcher:
             return True, "new"
         signature, status, attempts, next_try, ts = row
         if status == "undone":                       # a job undone by hand is not done again by itself
-            return (True, "changed since the undo") if newest > (ts or 0) else (False, "undone")
+            return (True, "changed since the undo") if shape(folder, files) not in (signature or "").split("|") \
+                else (False, "undone")
         if signature != sig:
             return True, "changed"
         if status == "excluded":                     # looked at again when the rules or an override change
@@ -138,7 +170,7 @@ class Watcher:
             if detail != ex.rules_hash(rules):
                 return True, "rules changed"
             ovr = ex.State().overrides()
-            if any(ex._overridden(x, ovr) for x in [folder, *(files or [])]):
+            if any(ex._overridden(x, ovr) for x in [folder, *(members or files or [])]):
                 return True, "process anyway"          # the folder, or one of its loose tracks
             return False, "excluded (unchanged)"
         if status == "waiting_destination":          # planned while the stick/share was out
@@ -194,7 +226,7 @@ class Watcher:
                 k = self.key(g)
                 scope = g.files if os.path.realpath(g.folder) == os.path.realpath(root) else None
                 try:
-                    go, why = self.due(g.folder, prof, db, k, scope)
+                    go, why = self.due(g.folder, prof, db, k, scope, g.files)
                 except Exception:                              # one album never stops the watcher
                     self.log.exception("watch: %s could not be looked at", g.folder)
                     continue

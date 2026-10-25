@@ -695,6 +695,18 @@ class Executor:
                 (fe in a["files"] and "ctime_ns" in fp and st.st_ctime_ns != fp["ctime_ns"])
             if changed:
                 return "conflict", "Changed", f"{Path(fe['src']).name} changed since the plan was made"
+        # the album's folders take their cover, log and cue along: only while they hold just
+        # this album's music (a track added since would stay behind alone)
+        planned = {fe["src"] for fe in a["files"]} | {fe["copy_of"] for fe in a["files"] if fe.get("copy_of")} \
+            | {s_.get("file") for s_ in a.get("skipped") or []}
+        for d in sorted({str(Path(c["src"]).parent) for c in a["companions"] if c.get("op") != "rewrite"}):
+            try:
+                extra = sorted(n for n in os.listdir(d) if Path(n).suffix.lower() in ex.AUDIO_EXT
+                               and not n.startswith(".") and os.path.join(d, n) not in planned)
+            except OSError:
+                continue
+            if extra:
+                return "conflict", "Changed", f"{extra[0]} was added to {Path(d).name} since the plan was made; plan again"
         self.journal.write(ev="album_begin", album=i, source=a["source_dir"])
         done_steps = []
         self.created = []
@@ -1224,8 +1236,15 @@ def _undo_relink(src: Path, dst: Path, backup, digest, jd, op="relink_move"):
         return
     if not src.exists():
         if dst.exists() and _tags_sig_backup_free(dst, backup):
-            os.link(dst, src)                       # nothing was written: give src its name back
-            return
+            try:
+                os.link(dst, src)                   # nothing was written: give src its name back
+                return
+            except OSError as exc:                  # one disk under two mounts (bind, mergerfs):
+                if exc.errno != errno.EXDEV:        # no link between them - a copy then
+                    raise
+                mkdirs_like_parent(src.parent)
+                _put_back(dst, src, os.stat(dst))
+                return
         mkdirs_like_parent(src.parent)
         _put_back(dst, src, os.stat(dst))
         if backup:
@@ -1236,10 +1255,19 @@ def _undo_relink(src: Path, dst: Path, backup, digest, jd, op="relink_move"):
         _restore(src, backup, jd)                    # an earlier, interrupted undo got this far
     if dst.exists() and _same_file(src, dst):
         return
+    if dst.exists() and _same_bytes_file(src, dst):
+        return                                       # (a copy of src already, across two mounts)
     stage = _stage_name(dst, "undo-link")
     if os.path.lexists(stage):
         os.unlink(stage)
-    os.link(src, stage)
+    try:
+        os.link(src, stage)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        _copy_fsync(src, stage)                      # one disk under two mounts: a copy of src
+        if dst.exists():
+            _keep_owner(stage, os.stat(dst))
     try:
         os.replace(stage, dst)
     except BaseException:
@@ -1259,6 +1287,13 @@ def _matches_backup(path: Path, backup) -> bool:
     except Exception:
         return False
     return False
+
+
+def _same_bytes_file(a: Path, b: Path) -> bool:
+    try:
+        return os.path.getsize(a) == os.path.getsize(b) and payload.file_sha256(a) == payload.file_sha256(b)
+    except OSError:
+        return False
 
 
 def _tags_sig_backup_free(dst: Path, backup) -> bool:
@@ -1613,32 +1648,42 @@ def _moved_later(path: Path, job) -> str | None:
         return None
     for name in names:                    # (by when each job began: two jobs may share a second)
         events = Journal(root / name).read()
-        if not events or events[0].get("t", 0) <= started:
+        if not events or events[0].get("t", 0) <= started or any(e.get("ev") == "undone" for e in events):
             continue
+        back = {tuple(e["key"]) for e in events if e.get("ev") in ("undo_step", "rollback_step")}
+        rolled = {e["album"] for e in events if e.get("ev") == "album_rolled_back" and not e.get("problems")}
         for e in events:
             if e.get("ev") in ("file", "companion") and e.get("src") == p and e.get("op") != "copy" \
-                    and e.get("src") != e.get("dst"):
-                return name
+                    and e.get("src") != e.get("dst") and e.get("album") not in rolled and \
+                    (e["ev"], e.get("album"), e.get("idx")) not in back:
+                return name                # (a step it undid or rolled back put the file back)
     return None
 
 
 def _watcher_forgets(jd: Path):
-    """The watcher must not do an undone job again by itself: its record of each album's
-    folder says "undone" (it looks again only once the files change after this)."""
+    """The watcher must not do an undone job again by itself. Each album's record says
+    "undone", with the signatures of its files as the undo left them: the watcher looks at
+    it again only once those change (a track added, removed or edited)."""
     try:
-        albums = json.loads((jd / "plan.json").read_text(encoding="utf-8"))["albums"]
+        plan = json.loads((jd / "plan.json").read_text(encoding="utf-8"))
         db = sqlite3.connect(ex.STATE_DIR / "state.db", timeout=60)
-    except (OSError, ValueError, KeyError, sqlite3.Error):
+    except (OSError, ValueError, sqlite3.Error):
         return
     try:
-        if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='processed'").fetchone():
-            return
-        for a in albums:
-            k = db_text(a["source_dir"])
-            db.execute("UPDATE processed SET status='undone', ts=? WHERE folder=? OR substr(folder, 1, ?) = ?",
-                       (time.time(), k, len(k) + 1, k + "#"))
+        import watcher
+        db.execute("CREATE TABLE IF NOT EXISTS processed (folder TEXT PRIMARY KEY, profile TEXT, signature TEXT,"
+                   " status TEXT, attempts INTEGER, next_try REAL, ts REAL, detail TEXT)")
+        for a in plan.get("albums") or []:
+            files = [Path(fe["src"]) for fe in a.get("files") or [] if not fe.get("copy_of")]
+            if not files:
+                continue
+            folder = Path(a["source_dir"])
+            key = watcher.album_key(folder, files)
+            sigs = {watcher.shape(folder), watcher.shape(folder, files)}
+            db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
+                       (key, plan.get("profile") or "", "|".join(sorted(sigs)), "undone", 0, 0, time.time(), ""))
         db.commit()
-    except sqlite3.Error:
+    except Exception:                    # the watcher's memory is a convenience: never fail an undo
         pass
     finally:
         db.close()
@@ -1676,7 +1721,13 @@ def _undo(job, jd, journal, events, force):
         if not check.exists() and op == "move" and src.exists():
             check = src                                 # an interrupted undo had moved it back
         why = None
-        if op in ("move", "relink_move") and not dst.exists() and not src.exists():
+        if op == "tag" and not os.path.lexists(src):
+            later = _moved_later(src, job)
+            if later:
+                why = f"{src} was moved by a later job ({later}); undo that one first"
+            else:
+                gone.add((a, j))                       # deleted since: no tags to put back
+        elif op in ("move", "relink_move") and not dst.exists() and not src.exists():
             later = _moved_later(dst, job)
             if later:
                 why = f"{dst} was moved by a later job ({later}); undo that one first - its album waits"

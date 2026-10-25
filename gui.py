@@ -556,8 +556,23 @@ class Overview(QWidget):
     def process_anyway(self):
         a = self.selected()
         if a and a["status"] == "excluded":
-            ex.State().allow(a["source_dir"])
-            self.summary.setText(f"Rules will not exclude {Path(a['source_dir']).name}. Preview again to include it.")
+            folder = Path(a["source_dir"])
+            mine = {fe["src"] for fe in a.get("files") or []} | {s.get("file") for s in a.get("skipped") or []} \
+                | set(a.get("excluded_files") or [])
+            mine.discard(None)
+            try:                                       # other music in the folder or below it?
+                others = any(p.suffix.lower() in ex.AUDIO_EXT and str(p) not in mine and p.is_file()
+                             for p in folder.rglob("*"))
+            except OSError:
+                others = False
+            if others and mine:                        # a loose track, or one album of a mixed folder:
+                for f in sorted(mine):                 # only its own files, never the whole folder
+                    ex.State().allow(f)
+                what = Path(sorted(mine)[0]).name if len(mine) == 1 else f"{len(mine)} files in {folder.name}"
+            else:
+                ex.State().allow(folder)
+                what = folder.name
+            self.summary.setText(f"Rules will not exclude {what}. Preview again to include it.")
 
 
 class Jobs(QWidget):

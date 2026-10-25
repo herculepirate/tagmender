@@ -529,7 +529,8 @@ class Planner:
             if whole is not None:
                 entry.update(status="excluded", label=whole.label,
                              rule={"id": whole.rule.id, "name": whole.rule.name, "action": whole.action,
-                                   "matched": whole.where})
+                                   "matched": whole.where},
+                             excluded_files=[str(f) for f in files])     # (for "process anyway")
                 return entry
             for f, e in dec.excluded.items():
                 entry["skipped"].append({"file": str(f), "label": e.label, "rule": e.rule.id, "matched": e.where})

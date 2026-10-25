@@ -147,13 +147,21 @@ _DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*\d+\b|^\d{1,2}$",
 def album_dirs(top):
     """Album folders under an artist folder, however deep (Artist/Albums/<album>); a
     disc folder counts as its parent's. Same rule as match_albums.album_dirs."""
-    owners = []
+    top, audio = Path(top), []
     for dirpath, dirs, names in os.walk(top):
         dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete")
         d = Path(dirpath)
-        if d == Path(top) or not any(Path(n).suffix.lower() in AUDIO_EXT for n in names):
-            continue
-        owner = d.parent if _DISC_DIR.match(d.name) and d.parent != Path(top) else d
+        if d != top and any(Path(n).suffix.lower() in AUDIO_EXT for n in names):
+            audio.append(d)
+    have = set(audio) | {d.parent for d in audio if _DISC_DIR.match(d.name) and d.parent != top}
+    owners = []
+    for d in audio:                    # a disc folder, or any folder inside an album folder, is the album's
+        owner = d.parent if _DISC_DIR.match(d.name) and d.parent != top else d
+        up = owner.parent
+        while up != top and top in up.parents:
+            if up in have:
+                owner = up
+            up = up.parent
         if owner not in owners:
             owners.append(owner)
     # every direct subfolder still gets a row (one holding only an ISO or scans, as before)

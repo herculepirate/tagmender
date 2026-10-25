@@ -164,12 +164,15 @@ class Validate(unittest.TestCase):
 
     def test_albums_nested_deeper_in_the_artist_folder_are_found(self):
         """Rotting Christ/Albums/<11 albums>: each album is found on its own; disc folders
-        still belong to their album; an artist's top-level album too."""
+        still belong to their album, and so does a bonus disc filed inside the album's
+        folder under its own name (A Dead Poem / Darkness We Feel); an artist's top-level
+        album too."""
         lib = self.tmp / "lib"
         for rel in ("Rotting Christ/Albums/1993 - Thy Mighty Contract/01.flac",
                     "Rotting Christ/Albums/1997 - A Dead Poem/Disc 01/101.flac",
                     "Rotting Christ/Albums/1997 - A Dead Poem/Disc 02/201.flac",
                     "Rotting Christ/2016 - Rituals/01.flac",
+                    "Rotting Christ/Albums/1997 - A Dead Poem/1997 - Darkness We Feel (free bonus CD)/01.flac",
                     "Rotting Christ/2delete/old/01.flac"):
             (lib / rel).parent.mkdir(parents=True, exist_ok=True)
             (lib / rel).write_bytes(b"")
@@ -272,6 +275,28 @@ class Fixes(unittest.TestCase):
                 va.read_approved(tmp / "bad.tsv")
         finally:
             shutil.rmtree(tmp)
+
+    def test_only_evidence_about_the_copy_replaces_a_tag(self):
+        row = lambda notes, media="CD": {"status": "auto", "notes": notes,   # noqa: E731
+                                         "tags_release": f"A | US | 2020 | L | C1 | {media}"}
+        yes = ["artist 1.00; barcode agrees; durations 9/9 agree",
+               "pressing chosen by catalogue number FO116CD on the scans; label Фоно on the scans",
+               "pressing chosen by disc ID (track positions of the CD) matches",
+               "catalogue number (folder name) agrees; 6 release(s) left out: folder catalogue number is not on it"]
+        no = ["pressing chosen by label Century Media on the scans (not on 35434954)",          # licensor
+              "pressing chosen by track lengths closest (off by 0.3s on average, others 2.4s+)",
+              "pressing chosen by digital release (folder name) (not on x)",                    # "[RM 2015]"
+              "pressing chosen by your preferred country order (CA, US) puts USA first"]
+        for n in yes:
+            self.assertTrue(va.evidence_decided(row(n)), n)
+        for n in no:
+            self.assertFalse(va.evidence_decided(row(n)), n)
+        cd_rip = "pressing chosen by CD (tracks are whole CD sectors, as ripped from a disc) (not on x)"
+        self.assertTrue(va.evidence_decided(row(cd_rip, "Digital Media")))       # Jesu: CD rip tagged as download
+        self.assertFalse(va.evidence_decided(row(cd_rip, "CD")))                 # same format: nothing to fix
+        hires = "pressing chosen by digital release (hi-res audio, which no CD carries) (not on x)"
+        self.assertTrue(va.evidence_decided(row(hires, "CD")))                   # AVKRVST
+        self.assertFalse(va.evidence_decided(row(hires, "Digital Media")))       # Cynic - ReFocus
 
 def types_dm():
     return {"dm": None}

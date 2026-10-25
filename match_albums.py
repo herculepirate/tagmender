@@ -636,15 +636,28 @@ def album_dirs(top):
     """The album folders under an artist folder, however deep (Rotting Christ/Albums/
     1993 - Thy Mighty Contract): every folder holding audio, a disc folder ("Disc 02",
     "CD1") counting as its parent's. Hidden, "_" and 2delete folders are skipped."""
-    owners = []
+    top, audio = Path(top), []
     for dirpath, dirs, names in os.walk(top):
         dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete")
         d = Path(dirpath)
-        if d == Path(top):
-            continue
-        if not any(Path(n).suffix.lower() in AUDIO_EXT and not n.startswith(".") for n in names):
-            continue
-        owner = d.parent if DISC_DIR.match(d.name) and d.parent != Path(top) else d
+        if d != top and any(Path(n).suffix.lower() in AUDIO_EXT and not n.startswith(".") for n in names):
+            audio.append(d)
+    return _owners(top, audio, DISC_DIR)
+
+
+def _owners(top, audio, disc_re):
+    """Each audio folder's album folder: a disc folder belongs to its parent, and so does any
+    folder inside a folder that holds audio itself (Rotting Christ - A Dead Poem: its bonus
+    disc "1997 - Darkness We Feel (free bonus CD)" sits inside the album's folder)."""
+    have = set(audio) | {d.parent for d in audio if disc_re.match(d.name) and d.parent != top}
+    owners = []
+    for d in audio:
+        owner = d.parent if disc_re.match(d.name) and d.parent != top else d
+        up = owner.parent
+        while up != top and top in up.parents:
+            if up in have:
+                owner = up
+            up = up.parent
         if owner not in owners:
             owners.append(owner)
     return sorted(owners)

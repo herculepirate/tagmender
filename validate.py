@@ -242,15 +242,43 @@ def verdict(out, mb_id, dg_id, http, cache):
 FALLBACKS = ("preferred country order", "same pressing listed twice", "label's original pressing")
 
 
+# What identifies YOUR copy: its own numbers (barcode, catalogue number, disc ID), the
+# country printed on it, a catalogue number or country your folder name states.
+_STRONG = re.compile(r"barcode (?:\(OCR\) )?agrees|pressing chosen by barcode|catalogue number(?: \((?:OCR|folder name)\))? agrees|"
+                     r"pressing chosen by catalogue number|disc ID|made in \S.* on the scans|"
+                     r"left out: folder (?:catalogue number|name says [A-Z]{2}\b)")
+# What the files are (a CD rip, a download, a vinyl rip): decides only against a tag whose
+# format contradicts it (Jesu - Terminus: a CD rip tagged as the download).
+_FORMAT = re.compile(r"pressing chosen by (?:digital release \((?:hi-res|lossless)|CD \(tracks are whole|"
+                     r"physical release)|left out: folder name says (?:cd|vinyl)")
+
+
+def _picked_kind(notes):
+    m = re.search(r"pressing chosen by (digital release|CD|physical release)", notes)
+    if m:
+        return {"digital release": "digital", "CD": "cd", "physical release": "physical"}[m.group(1)]
+    m = re.search(r"left out: folder name says (cd|vinyl)", notes)
+    return m.group(1) if m else ""
+
+
 def evidence_decided(rec):
-    """The pick rests on evidence about YOUR copy (a catalogue number, barcode, disc ID,
-    label, country or address on the scans, the folder name, the audio), not on a
-    fallback (your country order, or one of two identical entries)."""
+    """The pick rests on evidence about YOUR copy, strong enough to replace a tag you
+    already have: its barcode, catalogue number or disc ID, the country printed on it, or
+    a catalogue number or country your folder name states; or what the files are (CD rip,
+    download) when the tagged release is of another format. Not: your country order, one
+    of two identical entries, the closest track lengths, a label alone (licensed editions
+    print the licensor's), or a "digital" guessed from a folder name ("[RM 2015]")."""
     notes = rec.get("notes") or ""
     if rec.get("status") != "auto" or any(f in notes for f in FALLBACKS):
         return False
-    return bool(re.search(r"pressing chosen by|left out:|catalogue number .*agrees|barcode .*agrees|"
-                          r"disc ID|proves the album|Discogs chosen", notes))
+    if _STRONG.search(notes) or "proves the album" in notes:
+        return True
+    if _FORMAT.search(notes):
+        tagged = mc.media_kind(((rec.get("tags_release") or "").split(" | ") or [""])[-1].split("/")[0])
+        kind = _picked_kind(notes)
+        if tagged and kind and not (kind == tagged or (kind == "physical" and tagged != "digital")):
+            return True
+    return False
 
 
 def read_approved(path):

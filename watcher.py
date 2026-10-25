@@ -52,7 +52,9 @@ def snapshot(folder: Path):
         if not p.is_file():
             continue
         name = p.name.lower()
-        if name.endswith(PARTIAL) or name.startswith("~") or executor.STAGE_TAG in name:
+        if executor.STAGE_TAG in name:                     # TagMender's own staging files
+            continue
+        if name.endswith(PARTIAL) or name.startswith(("~$", ".~lock.")):
             partial = True
             continue
         try:
@@ -88,14 +90,24 @@ class Watcher:
         pairs = [(Path(s["path"]).expanduser(), p) for p in self.profiles for s in p["sources"] if s.get("watch")]
         return sorted(pairs, key=lambda rp: -len(str(rp[0])))
 
-    def due(self, folder: Path, prof, db) -> tuple[bool, str]:
+    @staticmethod
+    def key(g) -> str:
+        """What the watcher remembers an album by: its folder, and in a folder holding
+        several albums, which files are this album's."""
+        if not g.others:
+            return str(g.folder)
+        import hashlib
+        return f"{g.folder}#" + hashlib.sha1("\n".join(sorted(map(str, g.files))).encode()).hexdigest()[:12]
+
+    def due(self, folder: Path, prof, db, key=None) -> tuple[bool, str]:
+        key = key or str(folder)
         sig, newest, partial = snapshot(folder)
         if partial:
             return False, "partial download inside"
         if time.time() - newest < prof["watch"]["settle_minutes"] * 60:
             return False, "still changing"
         row = db.execute("SELECT signature, status, attempts, next_try FROM processed WHERE folder=?",
-                         (str(folder),)).fetchone()
+                         (key,)).fetchone()
         rules = ex.load_rules(prof.name)
         if ex.State().still_ignored(folder, ex.signature(ex.audio_files(folder)), ex.rules_hash(rules)):
             return False, "ignored (unchanged)"
@@ -105,7 +117,7 @@ class Watcher:
         if signature != sig:
             return True, "changed"
         if status == "excluded":                     # looked at again when the rules or an override change
-            detail = db.execute("SELECT detail FROM processed WHERE folder=?", (str(folder),)).fetchone()[0]
+            detail = db.execute("SELECT detail FROM processed WHERE folder=?", (key,)).fetchone()[0]
             if detail != ex.rules_hash(rules):
                 return True, "rules changed"
             if ex._overridden(folder, ex.State().overrides()):
@@ -116,7 +128,7 @@ class Watcher:
             return True, "retry"
         return False, status
 
-    def record(self, db, folder, prof, status, attempts, detail=""):
+    def record(self, db, folder, prof, status, attempts, detail="", key=None):
         sig, _n, _p = snapshot(folder) if Path(folder).exists() else ("gone", 0, False)
         if status == "provider_error":
             nxt = time.time() + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
@@ -125,7 +137,7 @@ class Watcher:
         else:
             nxt = 0
         db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
-                   (str(folder), prof.name, sig, status, attempts, nxt, time.time(), detail))
+                   (key or str(folder), prof.name, sig, status, attempts, nxt, time.time(), detail))
         db.commit()
 
     def tick(self):
@@ -133,8 +145,11 @@ class Watcher:
         done = {}
         db = _db()
         for job in executor.pending_jobs():
-            self.log.warning("recovering interrupted job %s", job)
-            executor.recover(job)
+            try:
+                executor.recover(job)
+                self.log.warning("recovered interrupted job %s", job)
+            except executor.StepError as exc:            # still running in another process
+                self.log.info("job %s: %s", job, exc)
         seen = set()
         for root, prof in self.roots():
             if not root.is_dir():
@@ -148,10 +163,11 @@ class Watcher:
                 if key in seen:
                     continue
                 seen.add(key)
-                go, why = self.due(g.folder, prof, db)
+                k = self.key(g)
+                go, why = self.due(g.folder, prof, db, k)
                 if not go:
                     continue
-                prev = db.execute("SELECT attempts FROM processed WHERE folder=?", (str(g.folder),)).fetchone()
+                prev = db.execute("SELECT attempts FROM processed WHERE folder=?", (k,)).fetchone()
                 attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
                 try:
                     prop = e.identify(g)
@@ -172,12 +188,13 @@ class Watcher:
                               "provider_error" if retryable else
                               "unresolved" if prop.status == "unresolved" else outcome)
                     self.record(db, g.folder, prof, status, attempts,
-                                ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""))
+                                ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
+                                key=k)
                     done[str(g.folder)] = status
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher
                     self.log.exception("watch: %s failed", g.folder)
-                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200])
+                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k)
                     done[str(g.folder)] = "error"
         db.close()
         return done

@@ -419,10 +419,10 @@ class Interrupted(Base):
             with self.assertRaises(KeyboardInterrupt):
                 executor.Executor(p).run()
         self.assertEqual(executor.pending_jobs(), [p["job"]])
-        self.assertTrue(list(self.album.glob(".*.part")))           # the crash left a staging copy
+        self.assertFalse(list(self.album.glob(".*.part")))          # Ctrl-C: the staging copy is removed
         self.assertEqual(self.f1.read_bytes(), before)
         done = executor.recover(p["job"])
-        self.assertTrue(any("removed unfinished copy" in d for d in done))
+        self.assertTrue(any("left as it was" in d for d in done), done)
         self.assertFalse(list(self.album.glob(".*.part")))
         self.assertEqual(executor.pending_jobs(), [])
 

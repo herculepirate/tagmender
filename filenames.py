@@ -43,8 +43,9 @@ def safe_component(text: str, compat="windows") -> str:
     s = unicodedata.normalize("NFC", str(text))
     if compat == "windows":
         s = _WIN_BAD.sub("_", s).rstrip(". ")
-        if _RESERVED.match(s):
-            s += "_"
+        m = _RESERVED.match(s)
+        if m:                                   # "AUX. Remixes" is reserved too: AUX_. Remixes
+            s = m.group(1) + "_" + s[len(m.group(1)):]
     else:
         s = _LINUX_BAD.sub("_", s)
     s = s.strip()

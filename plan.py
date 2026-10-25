@@ -25,6 +25,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -118,6 +119,25 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     return changes, rows
 
 
+MOUNT_PARENTS = ("/media", "/mnt", "/run/media")
+
+
+def mounted(folder) -> bool:
+    """False for a folder under /media, /mnt or /run/media when nothing is mounted between
+    it and that parent: the share it belongs to is not mounted, and anything written there
+    would land on the system disk."""
+    real = os.path.realpath(os.path.expanduser(str(folder)))
+    parent = next((m for m in MOUNT_PARENTS if real.startswith(m + os.sep)), None)
+    if parent is None:
+        return True
+    p = Path(real)
+    while str(p) != parent and p != p.parent:
+        if os.path.ismount(p):
+            return True
+        p = p.parent
+    return False
+
+
 MAX_TREE = 5000                           # entries looked at below one album folder
 
 
@@ -178,6 +198,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
                 if q == src_dir or q == q.parent:
                     break
                 q = q.parent
+    by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
     out = []
     for d, here in tree:
         anchor = d
@@ -189,7 +210,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
                 continue
             if d in music_below and p.suffix.lower() not in exts:
                 continue
-            out.append((p, dest_dir / p.name))
+            track = by_stem.get((d, p.stem))                # "01 a.lrc" goes with "01 a.flac"
+            out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
     return out, ""
 
 
@@ -246,6 +268,7 @@ class Planner:
         self.overrides = ex.State().overrides() if overrides is None else overrides
         self.claimed = {}          # folded destination path -> source (collisions inside the plan)
         self.created_dirs = set()
+        self._dirs = {}
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
@@ -318,6 +341,12 @@ class Planner:
                 entry["conflicts"].append(f"destination {dest_root} is not available (unmounted?); "
                                           "TagMender never creates it")
                 return entry
+            if not mounted(dest_root):
+                entry["status"] = "blocked"
+                entry["conflicts"].append(f"destination {dest_root} is on the system disk, not on the share "
+                                          "mounted there (unmounted?)")
+                return entry
+            entry["dest_root"] = {"path": str(dest_root), "dev": os.stat(dest_root).st_dev}
         template = naming.template_for(p["naming"])
         for f in kept:
             try:
@@ -343,17 +372,19 @@ class Planner:
                 for k, v in changes.items():
                     if v is None:
                         merged.pop(k, None)
-                if not identified:                       # as it is, below its album folder's name
+                if not identified:      # as it is, with its folders below the profile's source
                     src_root = Path(prop.source_dir)
                     try:
                         rel = f.relative_to(src_root)
                     except ValueError:
                         rel = Path(f.name)
-                    dst = dest_root / src_root.name / rel
+                    dst = dest_root / self._below_source(src_root) / rel
                     notes = []
                 else:
                     comps = naming.render(template, merged)
                     dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
+                    if dst is not None:
+                        dst = self._spelled(dst, dest_root)
                 entry["notes"] += notes
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
@@ -410,6 +441,9 @@ class Planner:
             has_image = folder.exists() and any(x.suffix.lower() in (".jpg", ".jpeg", ".png") for x in folder.iterdir())
             has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
                                          (".jpg", ".jpeg", ".png") for c in entry["companions"])
+            for fe in entry["files"]:
+                if fe["dst"] in embed and fe["op"] == "none":
+                    fe["op"] = "tag"                          # only the cover is new
             entry["artwork"] = {"front": art["front"], "source": art.get("source", ""),
                                 "embed_into": embed, "file": None if (has_image or not p["artwork"]["files"])
                                 else str(folder / "cover.jpg"),
@@ -429,6 +463,64 @@ class Planner:
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
 
+    def _below_source(self, folder: Path) -> Path:
+        """The album folder's path below the deepest profile source holding it
+        ("Artist/Album"), else its last two folders."""
+        real = os.path.realpath(str(folder))
+        best = None
+        for s_ in self.profile["sources"]:
+            r = os.path.realpath(os.path.expanduser(s_["path"]))
+            if real.startswith(r.rstrip(os.sep) + os.sep) and (best is None or len(r) > len(best)):
+                best = r
+        if best:
+            return Path(os.path.relpath(real, best))
+        return Path(folder.parent.name) / folder.name
+
+    def _spelled(self, path: Path, root: Path) -> Path:
+        """path, with each folder below root spelled as it already is on disk when the only
+        difference is the Unicode form (and, with Windows-compatible names, letter case):
+        never a second, look-alike "Beyoncé" folder."""
+        windows = self.profile["filenames"].get("compat") == "windows"
+        cur = Path(root)
+        rel = Path(path).relative_to(root)
+        parts = list(rel.parts)
+        for k, comp in enumerate(parts[:-1]):
+            if (cur / comp).is_dir():
+                cur = cur / comp
+                continue
+            listing = self._listing(cur)
+            key = unicodedata.normalize("NFC", comp)
+            key = key.casefold() if windows else key
+            if key not in listing:
+                return cur.joinpath(*parts[k:])
+            cur = cur / listing[key]
+        return cur / parts[-1]
+
+    def _listing(self, d: Path) -> dict:
+        if d not in self._dirs:
+            windows = self.profile["filenames"].get("compat") == "windows"
+            out = {}
+            try:
+                for name in os.listdir(d):
+                    k = unicodedata.normalize("NFC", name)
+                    out.setdefault(k.casefold() if windows else k, name)
+            except OSError:
+                pass
+            self._dirs[d] = out
+        return self._dirs[d]
+
+    def _taken_alike(self, cand: Path, src: Path) -> bool:
+        """With Windows-compatible names, a file whose name differs only in case or Unicode
+        form is taken too (Windows and SMB see one name)."""
+        if self.profile["filenames"].get("compat") != "windows" or not cand.parent.is_dir():
+            return False
+        k = unicodedata.normalize("NFC", cand.name).casefold()
+        for name in os.listdir(cand.parent):
+            if unicodedata.normalize("NFC", name).casefold() == k:
+                other = cand.parent / name
+                return not (src.exists() and os.path.samefile(other, src))
+        return False
+
     def _unique(self, dst: Path, src: Path, entry):
         """dst, or dst with a stable suffix when another file has (or will have) that name;
         None (with a conflict noted) when even that is taken."""
@@ -437,7 +529,8 @@ class Planner:
                 dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)
             key = fnm.fold(cand)
             other = self.claimed.get(key)
-            taken_on_disk = cand.exists() and not (src.exists() and os.path.samefile(cand, src))
+            taken_on_disk = (cand.exists() and not (src.exists() and os.path.samefile(cand, src))) or \
+                (not cand.exists() and self._taken_alike(cand, src))
             if other in (None, str(src)) and not taken_on_disk:
                 self.claimed[key] = str(src)
                 if attempt:

@@ -563,7 +563,7 @@ def cmd_jobs(args):
 def cmd_undo(args):
     import executor
     try:
-        out = executor.undo(args.job)
+        out = executor.undo(args.job, force=args.force)
     except executor.StepError as exc:
         _err(str(exc))
         return EXIT_ERR
@@ -725,6 +725,8 @@ def work_parsers(sub):
     prof(a)
     a = sub.add_parser("undo", help="put back what a job changed")
     a.add_argument("job")
+    a.add_argument("--force", action="store_true",
+                   help="also put tags back on files whose tags were edited after the job")
     a = sub.add_parser("recover", help="tidy up after an interrupted job")
     a.add_argument("job", nargs="?")
     for name in ("unresolved", "retry"):

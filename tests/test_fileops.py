@@ -21,6 +21,11 @@ import plan as pl  # noqa: E402
 import profiles as pf  # noqa: E402
 import tagio  # noqa: E402
 from test_executor import Base, audio, target  # noqa: E402
+import errno  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
+import exclusions as ex  # noqa: E402
+import unicodedata  # noqa: E402
 
 
 class Crash(BaseException):
@@ -160,8 +165,8 @@ class DiscSets(Base):
                            reason="no_candidate: nothing", reason_codes=["no_candidate"])
         entry = pl.build([prop], prof)["albums"][0]
         self.assertEqual(sorted(fe["dst"] for fe in entry["files"]),
-                         [str(hold / "2005 - Box" / "Disc 01" / "01.flac"),
-                          str(hold / "2005 - Box" / "Disc 02" / "01.flac")])
+                         [str(hold / "Band" / "2005 - Box" / "Disc 01" / "01.flac"),
+                          str(hold / "Band" / "2005 - Box" / "Disc 02" / "01.flac")])
 
     def test_moved_album_takes_its_scans_logs_and_per_disc_cue_sheets(self):
         box = self.lib / "Band" / "2005 - Box"
@@ -326,6 +331,194 @@ class Timestamps(Base):
         executor.Executor(p).run()
         self.assertEqual(tagio.read(self.f1)["album"], ["Real Album"])
         self.assertEqual(int(os.stat(self.f1).st_mtime), 1_600_000_000)
+
+
+def stray(*folders):
+    return [str(p) for f in folders for p in Path(f).rglob(".*.part")]
+
+
+class Review(Base):
+    """Bugs an independent review found (each test failed before its fix)."""
+
+    def no_change_plan(self, prof):
+        t1, t2 = target(1, "First"), target(2, "Second")
+        for f, t in ((self.f1, t1), (self.f2, t2)):
+            tagio.write(f, dict(t, tagmender=["Resolved"]))
+        p = pl.build([self.proposal(targets=[t1, t2])], prof)
+        assert all(fe["op"] == "move" and not fe["changes"] for fe in p["albums"][0]["files"])
+        return p
+
+    def test_disk_full_while_staging_leaves_no_partial_copy(self):
+        p = pl.build([self.proposal()], self.profile(operation="copy", destination=str(self.dest)))
+
+        def full(a, b, n=0):
+            b.write(a.read(1000))
+            raise OSError(errno.ENOSPC, "No space left on device")
+        with mock.patch.object(shutil, "copyfileobj", full):
+            res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"failed": 1})
+        self.assertEqual(stray(self.dest, self.lib), [])
+        p2 = pl.build([self.proposal()], self.profile())
+        with mock.patch.object(shutil, "copyfileobj", full):
+            executor.Executor(p2).run()
+        self.assertEqual(stray(self.lib), [])
+
+    def test_crash_while_staging_a_companion(self):
+        p = pl.build([self.proposal()], self.profile(operation="move", destination=str(self.dest)))
+        with mock.patch.object(payload, "file_sha256", side_effect=Crash):
+            with self.assertRaises(Crash):
+                executor.Executor(p).run()
+        executor.recover(p["job"])
+        self.assertEqual(stray(self.dest, self.lib), [])
+
+    def test_source_that_cannot_be_removed_leaves_no_second_link(self):
+        p = self.no_change_plan(self.profile(operation="move", destination=str(self.dest)))
+        real = os.unlink
+
+        def deny(path, *a, **k):
+            if str(path) == str(self.f1):
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path, *a, **k)
+        with mock.patch.object(executor.os, "unlink", deny):
+            res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"failed": 1})
+        self.assertEqual([x for x in self.dest.rglob("*") if x.is_file()], [])
+        self.assertTrue(self.f1.exists() and self.f2.exists())
+
+    def test_undo_leaves_tags_edited_after_the_job_unless_forced(self):
+        p = pl.build([self.proposal()], self.profile())
+        executor.Executor(p).run()
+        tagio.write(self.f1, {"comment": ["my own note"]})
+        out = executor.undo(p["job"])
+        self.assertTrue(any("edited after the job" in x for x in out), out)
+        self.assertEqual(tagio.read(self.f1)["comment"], ["my own note"])
+        self.assertEqual(tagio.read(self.f2)["album"], ["Some Album"])      # the other file was put back
+        out = executor.undo(p["job"], force=True)                            # a second run finishes it
+        self.assertEqual(tagio.read(self.f1)["album"], ["Some Album"])
+        self.assertNotIn("comment", tagio.read(self.f1))
+        with self.assertRaises(executor.StepError):
+            executor.undo(p["job"])
+
+    def test_undo_that_met_a_problem_can_be_run_again(self):
+        p = pl.build([self.proposal()], self.profile(operation="move", destination=str(self.dest)))
+        executor.Executor(p).run()
+        self.album.mkdir(parents=True, exist_ok=True)
+        (self.album / "01 a.flac").write_bytes(b"in the way")
+        out = executor.undo(p["job"])
+        self.assertTrue(any(x.startswith("PROBLEM") for x in out))
+        (self.album / "01 a.flac").unlink()
+        out = executor.undo(p["job"])
+        self.assertFalse(any(x.startswith("PROBLEM") for x in out), out)
+        self.assertTrue((self.album / "01 a.flac").exists() and (self.album / "02 b.flac").exists())
+        self.assertEqual([x for x in self.dest.rglob("*") if x.is_file()], [])
+
+    def test_file_rule_added_after_planning_keeps_companions_with_the_skipped_track(self):
+        p = pl.build([self.proposal()], self.profile(operation="move", destination=str(self.dest)))
+        ex.save_rule(ex.Rule.from_dict({"id": "f", "name": "skip b", "action": "skip", "target": "file",
+                                        "when": {"all": [{"field": "title", "op": "contains", "value": "b"}]}}))
+        executor.Executor(p).run()
+        self.assertTrue((self.album / "rip.cue").exists())
+        self.assertTrue((self.album / "02 b.flac").exists())
+
+    def test_lyrics_file_follows_its_track(self):
+        (self.album / "01 a.lrc").write_text("[00:00.00]la la")
+        p = pl.build([self.proposal()], self.profile(operation="move", destination=str(self.dest)))
+        executor.Executor(p).run()
+        self.assertTrue((self.dest / "Real Artist" / "2001 - Real Album" / "01.F.lrc").exists())
+
+    def test_two_unresolved_albums_of_the_same_name_stay_apart(self):
+        a1 = audio(self.lib / "Artist A" / "Greatest Hits" / "01.flac", 300)
+        a2 = audio(self.lib / "Artist B" / "Greatest Hits" / "01.flac", 400)
+        prof = self.profile(unresolved={"action": "move", "move_to": str(self.dest)})
+        props = [self.proposal(source_dir=str(f.parent), files=[str(f)], targets=[], status="unresolved",
+                               confidence=0, reason="no candidate") for f in (a1, a2)]
+        executor.Executor(pl.build(props, prof)).run()
+        self.assertTrue((self.dest / "Artist A" / "Greatest Hits" / "01.flac").exists())
+        self.assertTrue((self.dest / "Artist B" / "Greatest Hits" / "01.flac").exists())
+
+    def test_in_place_tagging_never_follows_a_link_out_of_the_library(self):
+        outside = self.tmp / "outside" / "Album"
+        outside.parent.mkdir()
+        shutil.move(str(self.album), outside)
+        self.album.symlink_to(outside)
+        before = tagio.read(outside / "01 a.flac").get("album")
+        executor.Executor(pl.build([self.proposal()], self.profile())).run()
+        self.assertEqual(tagio.read(outside / "01 a.flac").get("album"), before)
+
+    def test_cover_is_embedded_into_files_whose_tags_need_nothing(self):
+        from PIL import Image
+        t1, t2 = dict(target(1, "First"), tagmender=["Resolved"]), dict(target(2, "Second"), tagmender=["Resolved"])
+        tagio.write(self.f1, t1)
+        tagio.write(self.f2, t2)
+        front = self.tmp / "front.jpg"
+        Image.new("RGB", (600, 600), (1, 2, 3)).save(front)
+        (self.album / "folder.jpg").write_bytes(front.read_bytes())
+        prop = self.proposal(targets=[t1, t2], artwork={"front": str(front), "source": "t"})
+        executor.Executor(pl.build([prop], self.profile())).run()
+        self.assertTrue(tagio.read(self.f1).get("~pictures"))
+        self.assertEqual(pl.build([prop], self.profile())["albums"][0]["status"], "unchanged")
+
+    def test_an_existing_folder_in_another_unicode_form_is_reused(self):
+        nfd = unicodedata.normalize("NFD", "Beyonc\u00e9")
+        (self.dest / nfd / "2001 - Real Album").mkdir(parents=True)
+        prop = self.proposal(targets=[target(1, "First", artist="Beyonc\u00e9"),
+                                      target(2, "Second", artist="Beyonc\u00e9")])
+        executor.Executor(pl.build([prop], self.profile(operation="copy", destination=str(self.dest)))).run()
+        self.assertEqual([x.name for x in self.dest.iterdir()], [nfd])
+
+    def test_destination_on_an_unmounted_share_is_blocked(self):
+        mp = self.tmp / "media" / "nas"
+        mp.mkdir(parents=True)
+        prof = self.profile(operation="move", destination=str(mp))
+        with mock.patch.object(pl, "MOUNT_PARENTS", (str(self.tmp / "media"),)):
+            self.assertEqual(pl.build([self.proposal()], prof)["albums"][0]["status"], "blocked")
+            with mock.patch.object(pl.os.path, "ismount", lambda p: str(p) == str(mp)):
+                p = pl.build([self.proposal()], prof)
+        self.assertEqual(p["albums"][0]["status"], "ready")
+        p["albums"][0]["dest_root"]["dev"] += 1                      # a different filesystem there now
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"conflict": 1})
+        self.assertTrue(self.f1.exists())
+
+    def test_mixed_folder_both_albums_are_watched(self):
+        import engine as eng_mod
+        import watcher
+        shutil.rmtree(self.album)
+        mixed = self.lib / "Downloads"
+        a = audio(mixed / "a1.flac", 300, album="Alpha", artist="X", title="a1")
+        b = audio(mixed / "b1.flac", 400, album="Beta", artist="Y", title="b1")
+        old = time.time() - 3600
+        for f in (a, b):
+            os.utime(f, (old, old))
+        real_albums_in = eng_mod.Engine.albums_in
+
+        class FakeEngine:
+            def __init__(self, prof, log=None, **kw):
+                self.profile, self.job = prof, "w" + os.urandom(3).hex()
+
+            def albums_in(self, root):
+                return real_albums_in(self, root)
+
+            def identify(self, g):
+                title = tagio.read(g.files[0]).get("album", ["?"])[0]
+                return pl.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
+                                   targets=[target(i + 1, f"T{i}", album=title) for i in range(len(g.files))],
+                                   provider="discogs", release_id="1", confidence=99, margin=20,
+                                   release={"album": [title]})
+        prof = self.profile(sources=[{"path": str(self.lib), "watch": True}], unattended=True,
+                            watch={"settle_minutes": 0, "interval_seconds": 1, "workers": 1})
+        with mock.patch.object(watcher.eng_mod, "Engine", FakeEngine):
+            w = watcher.Watcher(profiles=[prof], once=True)
+            w.tick()
+            w.tick()
+        self.assertEqual(tagio.read(a).get("tagmender"), ["Resolved"])
+        self.assertEqual(tagio.read(b).get("tagmender"), ["Resolved"])
+
+
+class ReservedAfterCut(unittest.TestCase):
+    def test_a_long_title_starting_with_a_device_name(self):
+        path, _ = fnm.make_path("/lib", ["A", "Aux. " + "Very long words " * 30, "t"], ".flac", {})
+        self.assertNotRegex(path.parts[-2], r"(?i)^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$")
 
 
 if __name__ == "__main__":

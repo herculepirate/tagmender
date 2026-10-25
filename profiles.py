@@ -81,7 +81,9 @@ DEFAULTS = {
     #   CoverUp; local: the album's own scans); when - "needed" (only for albums missing a cover
     #   in a track or the folder) or "always"; enlarge - a cover smaller than min_px (but at
     #   least 250 px) is enlarged to min_px; generate - when nothing is found: off | template
-    #   (CoverUp's offline renderer) | ai (the AI service set in CoverUp) | auto (CoverUp's order)
+    #   (CoverUp's offline renderer) | ai (the AI service set in CoverUp) | auto (CoverUp's order);
+    #   replace - larger_only: an album's own cover smaller than min_px (embedded or cover.jpg) is
+    #   replaced by a larger one found, else by itself enlarged (backed up, undoable) | never
     "artwork": {"enabled": True, "provider": "coverup", "sources": ["coverup", "caa", "discogs"],
                 "when": "needed", "enlarge": True, "generate": "off", "embed_front": True, "files": True,
                 "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000},
@@ -240,6 +242,10 @@ def validate(data: dict) -> list[str]:
         p.append(f"artwork.sources must be a list of {', '.join(ARTWORK_SOURCES)}")
     if art.get("when", "needed") not in ("needed", "always"):
         p.append("artwork.when must be needed or always")
+    if art.get("replace", "larger_only") not in ("never", "larger_only"):
+        p.append("artwork.replace must be never or larger_only")
+    if not isinstance(art.get("min_px", 0), int) or isinstance(art.get("min_px"), bool) or art.get("min_px", 0) < 0:
+        p.append("artwork.min_px must be a whole number of pixels, 0 or more")
     if art.get("generate", "off") not in ARTWORK_GENERATE:
         p.append(f"artwork.generate must be one of {', '.join(ARTWORK_GENERATE)}")
     import naming as _naming

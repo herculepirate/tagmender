@@ -261,13 +261,151 @@ class CoverUp:
             return EMBED_MAX_SIDE
 
 
+COVER_STEMS = ("cover", "folder", "front")
+REPLACE_MODES = ("never", "larger_only")
+
+
+def _size_of(data: bytes):
+    from PIL import Image
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size
+    except Exception:
+        return None
+
+
+def embedded_front(path):
+    """The track's front cover as embedded (bytes), or None: the picture typed "front cover",
+    else the first one (many rippers leave the type as "other")."""
+    import base64
+    from mutagen.flac import FLAC, Picture
+    from mutagen.id3 import ID3
+    from mutagen.mp4 import MP4
+    import tagio
+    try:
+        f = tagio.mutagen_file(path)
+    except Exception:
+        return None
+    pics = []                                       # (type, bytes)
+    try:
+        if isinstance(f, FLAC):
+            pics = [(p.type, p.data) for p in f.pictures]
+        elif isinstance(f, MP4):
+            pics = [(3, bytes(c)) for c in (f.tags or {}).get("covr", [])]
+        elif isinstance(getattr(f, "tags", None), ID3):
+            pics = [(fr.type, fr.data) for fr in f.tags.getall("APIC")]
+        elif f is not None and f.tags is not None:
+            for v in f.tags.get("metadata_block_picture", []) or []:
+                try:
+                    p = Picture(base64.b64decode(v))
+                    pics.append((p.type, p.data))
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    for t, d in pics:
+        if t == 3:
+            return d
+    return pics[0][1] if pics else None
+
+
+def folder_cover(folder) -> Path | None:
+    """The album folder's own cover file (cover.jpg, folder.png, Front.jpeg ...), the largest
+    if there are several; None when there is none."""
+    best = None
+    try:
+        for x in Path(folder).iterdir():
+            if x.is_file() and x.stem.lower() in COVER_STEMS and x.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                sz = _size_of(x.read_bytes())
+                if sz and (best is None or min(sz) > best[1]):
+                    best = (x, min(sz))
+    except OSError:
+        return None
+    return best[0] if best else None
+
+
+def small_covers(folder, files, profile) -> dict:
+    """The album's covers smaller than artwork.min_px on the short side, which a larger
+    cover replaces (artwork.replace "larger_only"): {"file": (path, w, h) or None,
+    "embedded": {track: (w, h)}, "smallest": short side of the largest of them, "own":
+    (path or bytes of the album's best existing cover, w, h)}. Empty when replacing is off."""
+    art = profile["artwork"]
+    low = int(art.get("min_px") or 0)
+    if art.get("replace", "larger_only") != "larger_only" or not low:
+        return {}
+    out = {"file": None, "embedded": {}, "own": None}
+    best = None
+    if art.get("files", True):
+        c = folder_cover(folder)
+        if c is not None:
+            sz = _size_of(c.read_bytes())
+            if sz:
+                best = (c, *sz)
+                if min(sz) < low:
+                    out["file"] = (c, *sz)
+    if art.get("embed_front", True):
+        for f in files:
+            data = embedded_front(f)
+            sz = _size_of(data) if data else None
+            if sz and min(sz) < low:
+                out["embedded"][str(f)] = sz
+            if sz and (best is None or min(sz) > min(best[1:])):
+                best = (data, *sz)
+    if not out["file"] and not out["embedded"]:
+        return {}
+    out["own"] = best
+    return out
+
+
+def own_cover(small: dict, staging: Path) -> dict | None:
+    """The album's best existing cover as a found front (for enlarging when nothing larger
+    is found anywhere)."""
+    own = (small or {}).get("own")
+    if not own:
+        return None
+    what, w, h = own
+    data = what.read_bytes() if isinstance(what, Path) else what
+    staging.mkdir(parents=True, exist_ok=True)
+    try:
+        path, w, h = _stage(data, staging)
+    except Exception:
+        return None
+    return {"front": str(path), "width": w, "height": h, "source": "the album's own cover"}
+
+
+def as_format(front: Path, suffix: str, staging: Path) -> Path:
+    """front as the file type a name ending in suffix promises (a cover.png stays a PNG)."""
+    from PIL import Image
+    want = "PNG" if suffix.lower() == ".png" else "JPEG"
+    with Image.open(front) as im:
+        if im.format == want:
+            return front
+        icc = im.info.get("icc_profile")
+        im = _rgb(im) if want == "JPEG" else im.convert("RGBA" if "A" in im.getbands() else "RGB")
+        buf = io.BytesIO()
+        im.save(buf, want, **({"quality": JPEG_QUALITY} if want == "JPEG" else {}),
+                **({"icc_profile": icc} if icc else {}))
+    staging.mkdir(parents=True, exist_ok=True)
+    path = staging / (hashlib.sha1(buf.getvalue()).hexdigest()[:16] + (".png" if want == "PNG" else ".jpg"))
+    path.write_bytes(buf.getvalue())
+    return path
+
+
 def needs_art(folder, files, profile) -> str:
     """Why the album needs a cover ("" when it does not): a track without an embedded front
-    (when covers are embedded), or no picture in its folder (when cover files are written)."""
+    (when covers are embedded), or no picture in its folder (when cover files are written),
+    or a cover smaller than artwork.min_px (artwork.replace "larger_only")."""
     import tagio
     art = profile["artwork"]
     if art.get("when", "needed") == "always":
         return "always looked for"
+    small = small_covers(folder, files, profile)
+    if small.get("file"):
+        c, w, h = small["file"]
+        return f"{c.name} is {w}x{h}, smaller than {art['min_px']} px"
+    if small.get("embedded"):
+        t, (w, h) = next(iter(small["embedded"].items()))
+        return f"the cover in {Path(t).name} is {w}x{h}, smaller than {art['min_px']} px"
     if art.get("embed_front", True):
         for f in files:
             try:
@@ -421,13 +559,16 @@ def _enlarged(got: dict, min_px: int, quality=JPEG_QUALITY) -> dict | None:
                 source=got.get("source", "") + " (enlarged)")
 
 
-def find_front(providers, folder, ids, artist="", album="", log=None, files=None) -> dict | None:
+def find_front(providers, folder, ids, artist="", album="", log=None, files=None, own=None) -> dict | None:
     """The first provider's front that is big enough (artwork.min_px on its short side; a
     smaller one of at least LOW_RES_FLOOR is enlarged when artwork.enlarge is on), with
     "embed": the copy that goes into each track (at most embed_max_side, as CoverUp). When
-    no provider has one, a cover is generated if artwork.generate says so."""
+    no provider has one, a cover is generated if artwork.generate says so. own: the album's
+    own (too small) cover, enlarged when nothing larger is found - never generated over."""
     notes = []
     small = None                                     # (the best too-small front, to enlarge)
+    if own and providers and getattr(providers[0], "enlarge", False) and own.get("width"):
+        small = (providers[0], own)
     for p in providers:
         try:
             if isinstance(p, CoverUp):
@@ -456,6 +597,8 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
             notes.append(f"{p.name}: {got['note']}")
     if small is not None:                            # nothing big enough: the best small one, enlarged
         p, got = small
+        if own and got is not own and min(own["width"], own["height"]) >= min(got["width"], got["height"]):
+            got = own                                # (what was found is no larger than the album's own)
         big = _enlarged(got, int(getattr(p, "min_px", 0) or 0),
                         p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY)
         if big is not None:
@@ -464,6 +607,8 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
             except Exception as exc:
                 notes.append(f"{p.name}: {exc}")
     for p in providers:                              # nothing at all: made, if the profile says so
+        if own:
+            break                                    # (the album has a cover: never one made over it)
         mode = getattr(p, "generate_mode", "off")
         if isinstance(p, CoverUp) and mode != "off":
             try:

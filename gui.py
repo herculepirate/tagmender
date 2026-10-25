@@ -1288,6 +1288,10 @@ class Profiles(QWidget):
         self.art_when.addItem("Only for albums missing a cover", "needed")
         self.art_when.addItem("For every album", "always")
         self.art_enlarge = QCheckBox("Enlarge a small cover (down to 250 px) to the minimum size")
+        self.art_replace = QCheckBox("Replace an album's own cover when it is smaller than the minimum size")
+        self.art_replace.setToolTip("By a larger cover found, or - when there is none - the album's own cover "
+                                    "enlarged.\nThe old pictures and cover file are kept by the job: undo puts "
+                                    "them back.")
         self.art_gen = QComboBox()
         for label, mode in (("Never", "off"), ("CoverUp's template (offline, free)", "template"),
                             ("CoverUp's AI service", "ai"), ("CoverUp's order: fan art, AI, template", "auto")):
@@ -1347,6 +1351,7 @@ class Profiles(QWidget):
         form.addRow("Cover source", self.art_src)
         form.addRow("Look for covers", self.art_when)
         form.addRow("", self.art_enlarge)
+        form.addRow("", self.art_replace)
         form.addRow("Create a cover when none is found", self.art_gen)
         form.addRow("", self.unattended)
         save = QPushButton("Save profile")
@@ -1442,6 +1447,7 @@ class Profiles(QWidget):
             self.art_src.setCurrentIndex(idx)
             self.art_when.setCurrentIndex(max(0, self.art_when.findData(p["artwork"].get("when", "needed"))))
             self.art_enlarge.setChecked(bool(p["artwork"].get("enlarge", True)))
+            self.art_replace.setChecked(p["artwork"].get("replace", "larger_only") == "larger_only")
             self.art_gen.setCurrentIndex(max(0, self.art_gen.findData(p["artwork"].get("generate", "off"))))
             self.level.setCurrentText(p["tag_level"])
             for k, c in self.aud.items():
@@ -1594,7 +1600,8 @@ class Profiles(QWidget):
         data.setdefault("unresolved", {})["action"] = self.unres.currentText()
         data.setdefault("artwork", {})["enabled"] = self.art.isChecked()
         data["artwork"].update({"sources": list(self.art_src.currentData()), "when": self.art_when.currentData(),
-                                "enlarge": self.art_enlarge.isChecked(), "generate": self.art_gen.currentData()})
+                                "enlarge": self.art_enlarge.isChecked(), "generate": self.art_gen.currentData(),
+                                "replace": "larger_only" if self.art_replace.isChecked() else "never"})
         data["artwork"].pop("provider", None)           # (sources says it now)
         data["tag_level"] = self.level.currentText()
         data.setdefault("audiophile", {}).update({k: c.isChecked() for k, c in self.aud.items()})

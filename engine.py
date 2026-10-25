@@ -506,8 +506,14 @@ class Engine:
             if self._art is None:
                 self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
                                           self.token, self.log)
+            small = artwork.small_covers(prop.source_dir, prop.files, self.profile)
+            own = artwork.own_cover(small, ex.STATE_DIR / "staging" / self.job) if small else None
             got = artwork.find_front(self._art, prop.source_dir, ids, (t.get("albumartist") or [""])[0],
-                                     (t.get("album") or [""])[0], self.log, files=prop.files)
+                                     (t.get("album") or [""])[0], self.log, files=prop.files, own=own)
+            if got and got.get("front") and small:
+                # what the larger cover replaces (artwork.replace "larger_only"); backed up, undoable
+                got["replace"] = {"file": str(small["file"][0]) if small.get("file") else None,
+                                  "embedded": sorted(small.get("embedded") or {})}
         except Exception as exc:
             got = {"note": f"artwork: {exc}"}
         if got and got.get("front"):

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Small covers are replaced** (artwork.replace "larger_only", the default; "Replace an album's
+own cover when it is smaller than the minimum size" in the app). A cover smaller than
+artwork.min_px (500 px) - embedded in a track, or the folder's cover/folder/front file - is
+replaced by a larger one found; when nothing larger is found anywhere, by the album's own cover
+enlarged (artwork.enlarge, not under 250 px). Only the front cover is replaced: other pictures
+(back, booklet) stay, a cover.png stays a PNG, nothing is generated over an album's own cover.
+The old pictures and the old file are kept by the job; undo puts them back.
+
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)
 into that profile's library once nothing in them changes. The app's Watched folders page

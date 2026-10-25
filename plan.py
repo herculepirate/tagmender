@@ -21,6 +21,7 @@ What decides what:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -789,9 +790,12 @@ class Planner:
         # 5. artwork (staged by the artwork provider; never replaces a picture already embedded)
         art = prop.artwork if p["artwork"]["enabled"] else None
         if art and art.get("front") and Path(art["front"]).exists():
+            rep = art.get("replace") or {}
+            smaller = set(rep.get("embedded") or [])      # tracks whose own cover is too small
             embed = [fe["dst"] for fe in entry["files"]
                      if p["artwork"]["embed_front"] and Path(fe["src"]).suffix.lower() in EMBEDDABLE
-                     and not tagio.read(fe["src"]).get("~pictures")]
+                     and (fe["src"] in smaller or not tagio.read(fe["src"]).get("~pictures"))]
+            embed_replace = [fe["dst"] for fe in entry["files"] if fe["dst"] in embed and fe["src"] in smaller]
             # the album's own folder: for a disc set in "Disc 01", "Disc 02" ... that is the folder
             # holding the disc folders, not the first disc's
             folder = (Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
@@ -812,6 +816,24 @@ class Planner:
                     cover = None                              # another album's file goes there
                 else:
                     self.claimed[key] = me
+            replaced = None                   # the album's small cover file, now the larger one
+            rf = rep.get("file")
+            if rf and Path(rf).exists() and not _holds_other_music(Path(rf).parent, entry):
+                try:
+                    import artwork as _artwork
+                    new = _artwork.as_format(Path(art["front"]), Path(rf).suffix,
+                                             ex.STATE_DIR / "staging" / self.job)
+                    rw = {"from": str(new), "sha256": hashlib.sha256(new.read_bytes()).hexdigest(),
+                          "cover": True}
+                    ce = next((c for c in entry["companions"] if c["src"] == rf), None)
+                    if ce is None:
+                        ce = {"src": rf, "dst": rf, "op": "rewrite", "fingerprint": _fp(Path(rf))}
+                        entry["companions"].append(ce)
+                    if not ce.get("rewrite"):
+                        ce["rewrite"] = rw
+                        replaced = ce["dst"]
+                except Exception as exc:
+                    entry["notes"].append(f"{Path(rf).name}: not replaced ({exc})")
             emb = art.get("embed")
             if not emb and embed:                  # (a provider result without its embedding copy)
                 try:
@@ -822,6 +844,7 @@ class Planner:
             entry["artwork"] = {"front": art["front"], "embed": emb or art["front"],
                                 "source": art.get("source", ""), "why": art.get("why", ""),
                                 "embed_into": embed, "file": str(cover) if cover else None,
+                                "embed_replace": embed_replace, "replaced_file": replaced,
                                 "width": art.get("width"), "height": art.get("height")}
         # 6. lyrics files (.lrc) next to the tracks; never over a file that is already there
         entry["sidecars"] = []
@@ -1135,12 +1158,17 @@ def preview(plan: dict, verbose=False) -> str:
                     af = "; ".join(r["after"]) or "—"
                     out.append(f"           {r['action']:<9} {r['field']}: {b[:50]} => {af[:50]}")
         for c in a["companions"]:
-            out.append(f"    {c['op']:<5} {Path(c['src']).name}  ->  {c['dst']}"
-                       + ("  (file references updated)" if c.get("rewrite") else ""))
+            note = "" if not c.get("rewrite") else \
+                "  (replaced by the larger cover; the old one is kept for undo)" if c["rewrite"].get("cover") \
+                else "  (file references updated)"
+            out.append(f"    {c['op']:<5} {Path(c['src']).name}  ->  {c['dst']}{note}")
         if a.get("artwork"):
             art = a["artwork"]
             if art["embed_into"]:
-                out.append(f"    art   front cover embedded into {len(art['embed_into'])} file(s) from {art['source']}")
+                rep = len(art.get("embed_replace") or [])
+                out.append(f"    art   front cover embedded into {len(art['embed_into'])} file(s) from {art['source']}"
+                           + (f" ({art.get('width')}x{art.get('height')}; replaces a smaller cover in {rep})"
+                              if rep else ""))
             if art["file"]:
                 out.append(f"    art   {art['file']}")
         for sc in a.get("sidecars") or []:

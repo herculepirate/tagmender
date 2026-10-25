@@ -490,9 +490,19 @@ def _embed_image(art: dict):
     return None
 
 
-def embed_front(path, data: bytes, mime="image/jpeg"):
+def _front_index(types) -> int | None:
+    """Which picture is the front cover: the one typed so, else the first (a rip that left the
+    type as "other") - the one TagMender measured (artwork.embedded_front)."""
+    types = list(types)
+    if 3 in types:
+        return types.index(3)
+    return 0 if types else None
+
+
+def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
+    """Add the front cover; replace: in place of the track's own (smaller) front cover, every
+    other picture kept."""
     import base64
-    import mutagen
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
@@ -500,20 +510,47 @@ def embed_front(path, data: bytes, mime="image/jpeg"):
     if isinstance(f, FLAC):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
-        f.add_picture(pic)
+        if replace:
+            keep = list(f.pictures)
+            k = _front_index(p.type for p in keep)
+            if k is not None:
+                del keep[k]
+            f.clear_pictures()
+            for p in [pic] + keep:
+                f.add_picture(p)
+        else:
+            f.add_picture(pic)
     elif isinstance(f, MP4):
         if f.tags is None:
             f.add_tags()
         fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
-        f.tags["covr"] = list(f.tags.get("covr", [])) + [MP4Cover(data, fmt)]
+        old = list(f.tags.get("covr", []))
+        f.tags["covr"] = [MP4Cover(data, fmt)] + old[1:] if replace and old else old + [MP4Cover(data, fmt)]
     elif isinstance(getattr(f, "tags", None), ID3) or type(f).__name__ in ("MP3", "AIFF", "WAVE"):
         if f.tags is None:
             f.add_tags()
+        if replace:
+            apics = f.tags.getall("APIC")
+            k = _front_index(a.type for a in apics)
+            if k is not None:
+                del f.tags[apics[k].HashKey]
         f.tags.add(APIC(encoding=3, mime=mime, type=3, desc="", data=data))
     elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
-        f.tags["METADATA_BLOCK_PICTURE"] = [base64.b64encode(pic.write()).decode("ascii")]
+        new = base64.b64encode(pic.write()).decode("ascii")
+        old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or []) if replace else []
+        if old:
+            types = []
+            for v in old:
+                try:
+                    types.append(Picture(base64.b64decode(v)).type)
+                except Exception:
+                    types.append(None)
+            k = _front_index(types)
+            if k is not None:
+                del old[k]
+        f.tags["METADATA_BLOCK_PICTURE"] = [new] + old
     else:
         raise tagio.Unsupported(f"no front-cover embedding for {type(f).__name__}")
     if isinstance(getattr(f, "tags", None), ID3):
@@ -585,6 +622,30 @@ def _keeps_times(jd: Path) -> bool:
             return bool(json.load(fh).get("preserve_timestamps"))
     except (OSError, ValueError):
         return False
+
+
+def _rewrite_ready(rw: dict) -> bool:
+    """A rewrite from a staged file (a larger cover) still has that file, unchanged."""
+    try:
+        return payload.file_sha256(Path(rw["from"])) == rw.get("sha256")
+    except OSError:
+        return False
+
+
+def _write_rewrite(rw: dict, src: Path, stage: Path):
+    """stage holds what src becomes: a cue sheet's new text, or the larger cover (its new
+    content, the old file's permissions; its time is now)."""
+    if rw.get("from"):
+        _copy_fsync(Path(rw["from"]), stage)
+        if payload.file_sha256(stage) != rw.get("sha256"):
+            raise StepError(f"{src.name}: the new cover did not copy intact")
+        shutil.copymode(src, stage)
+        return
+    with open(stage, "x", encoding=rw["encoding"], newline="") as fh:
+        fh.write(rw["text"])
+        fh.flush()
+        os.fsync(fh.fileno())
+    shutil.copystat(src, stage)
 
 
 def _restore_text(saved: Path, path: Path):
@@ -835,7 +896,7 @@ class Executor:
                 if changes:
                     tagio.write(stage, changes)
                 if embed:
-                    embed_front(stage, *_embed_image(art))
+                    embed_front(stage, *_embed_image(art), replace=fe["dst"] in (art.get("embed_replace") or []))
                 if self.preserve_times:
                     os.utime(stage, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
                 after = payload.digest(stage)
@@ -894,7 +955,7 @@ class Executor:
                 if changes:
                     tagio.write(stage, changes)
                 if embed:
-                    embed_front(stage, *_embed_image(art))
+                    embed_front(stage, *_embed_image(art), replace=str(dst) in (art.get("embed_replace") or []))
                 if self.preserve_times:
                     st0 = os.stat(src)
                     os.utime(stage, ns=(st0.st_atime_ns, st0.st_mtime_ns))
@@ -931,6 +992,12 @@ class Executor:
     def companion_step(self, i, j, ce, done_steps):
         src, dst, op = Path(ce["src"]), Path(ce["dst"]), ce["op"]
         _check_target(dst, self.roots)
+        rw = ce.get("rewrite") or {}
+        if rw.get("from") and not _rewrite_ready(rw):   # the larger cover is gone (staging pruned)
+            self.journal.write(ev="note", album=i, text=f"{src.name} kept: the cover planned for it is gone")
+            if op == "rewrite":
+                return
+            ce = dict(ce, rewrite=None)                 # moved with the album as it is
         if op == "rewrite":                       # a cue sheet that stays, naming renamed files
             stage = _stage_name(src, self.job)
             self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin")
@@ -964,11 +1031,7 @@ class Executor:
             if ce.get("rewrite"):
                 stage = _stage_name(src, self.job)
                 try:
-                    with open(stage, "x", encoding=ce["rewrite"]["encoding"], newline="") as fh:
-                        fh.write(ce["rewrite"]["text"])
-                        fh.flush()
-                        os.fsync(fh.fileno())
-                    shutil.copystat(src, stage)
+                    _write_rewrite(ce["rewrite"], src, stage)
                     _keep_owner(stage, os.stat(src))
                     os.replace(stage, src)
                 except BaseException:
@@ -1018,11 +1081,7 @@ class Executor:
             saved = self.jd / "companions" / f"{i}-{j}{src.suffix}"
             saved.parent.mkdir(exist_ok=True)
             _copy_fsync(src, saved)
-            with open(stage, "w", encoding=ce["rewrite"]["encoding"], newline="") as fh:
-                fh.write(ce["rewrite"]["text"])
-                fh.flush()
-                os.fsync(fh.fileno())
-            shutil.copystat(src, stage)
+            _write_rewrite(ce["rewrite"], src, stage)
         else:
             _space_for(dst.parent, os.path.getsize(src))
             _copy_fsync(src, stage)
@@ -1527,7 +1586,12 @@ def _recover(job, jd, journal, events):
             ce = planned[a]["companions"][j]
         except (IndexError, KeyError, TypeError):
             return False
-        if ce.get("rewrite"):
+        if ce.get("rewrite") and ce["rewrite"].get("from"):
+            # the larger cover - or, its staged file gone at apply time, the old one moved as it was
+            got = payload.file_sha256(dst)
+            return got is not None and (got == ce["rewrite"].get("sha256") or
+                                        (src != dst and src.exists() and got == payload.file_sha256(src)))
+        elif ce.get("rewrite"):
             want = hashlib.sha256(ce["rewrite"]["text"].encode(ce["rewrite"]["encoding"])).hexdigest()
         else:
             want = payload.file_sha256(src) if src.exists() else None

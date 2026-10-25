@@ -27,4 +27,9 @@ end without any PROBLEM line.
     python3 -W ignore tests/fuzz/fuzz_more.py
     python3 -W ignore tests/fuzz/fuzz_strict.py
 
+`fuzz_bind.py` (root only) does the same between two bind mounts of one filesystem, where
+rename and link fail with EXDEV (Docker volumes, mergerfs).
+
+    sudo python3 -W ignore tests/fuzz/fuzz_bind.py
+
 Each ends with "NO FINDINGS" when everything came back.

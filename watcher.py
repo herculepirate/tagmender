@@ -35,6 +35,9 @@ import profiles as pf
 
 PARTIAL = (".part", ".crdownload", ".tmp", ".!qb", ".partial", ".download", ".opdownload")
 PROVIDER_RETRY = [600, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600]
+# outcomes tried again later: a provider outage, an unresolved album, and an album that
+# failed or was blocked for what may be a passing reason (a share dropping, a locked file)
+RETRIED = ("unresolved", "provider_error", "failed", "conflict", "blocked")
 
 
 def _db():
@@ -95,12 +98,23 @@ class Watcher:
         """What the watcher remembers an album by: its folder, and in a folder holding
         several albums, which files are this album's."""
         if not g.others:
-            return str(g.folder)
+            return planmod.db_text(g.folder)
         import hashlib
-        return f"{g.folder}#" + hashlib.sha1("\n".join(sorted(map(str, g.files))).encode()).hexdigest()[:12]
+        h = hashlib.sha1("\n".join(sorted(map(str, g.files))).encode("utf-8", "surrogateescape")).hexdigest()[:12]
+        return planmod.db_text(f"{g.folder}#{h}")
+
+    @staticmethod
+    def destination_ready(prof) -> bool:
+        """The folders a copy or move profile files albums into are there (mounted)."""
+        roots = []
+        if prof["operation"] in ("copy", "move"):
+            roots.append(prof["destination"])
+        if (prof.get("unresolved") or {}).get("action") == "move":
+            roots.append(prof["unresolved"].get("move_to"))
+        return all(r and Path(r).expanduser().is_dir() and planmod.mounted(Path(r).expanduser()) for r in roots)
 
     def due(self, folder: Path, prof, db, key=None) -> tuple[bool, str]:
-        key = key or str(folder)
+        key = key or planmod.db_text(folder)
         sig, newest, partial = snapshot(folder)
         if partial:
             return False, "partial download inside"
@@ -123,21 +137,24 @@ class Watcher:
             if ex._overridden(folder, ex.State().overrides()):
                 return True, "process anyway"
             return False, "excluded (unchanged)"
-        if status in ("unresolved", "provider_error") and (attempts or 0) < prof["retry"]["max_attempts"] \
+        if status == "waiting_destination":          # planned while the stick/share was out
+            return (True, "destination back") if self.destination_ready(prof) else (False, status)
+        if status in RETRIED and (attempts or 0) < prof["retry"]["max_attempts"] \
                 and time.time() >= (next_try or 0):
             return True, "retry"
         return False, status
 
     def record(self, db, folder, prof, status, attempts, detail="", key=None):
         sig, _n, _p = snapshot(folder) if Path(folder).exists() else ("gone", 0, False)
-        if status == "provider_error":
+        if status in ("provider_error", "failed", "conflict", "blocked"):
             nxt = time.time() + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
         elif status == "unresolved":
             nxt = time.time() + prof["retry"]["after_days"] * 86400
         else:
             nxt = 0
         db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
-                   (key or str(folder), prof.name, sig, status, attempts, nxt, time.time(), detail))
+                   (key or planmod.db_text(folder), prof.name, sig, status, attempts, nxt, time.time(),
+                    planmod.db_text(detail)))
         db.commit()
 
     def tick(self):
@@ -196,10 +213,13 @@ class Watcher:
                     status = ("excluded" if a["status"] == "excluded" or outcome == "excluded" else
                               "provider_error" if retryable else
                               "unresolved" if prop.status == "unresolved" else outcome)
+                    shown = status
+                    if status == "blocked" and not self.destination_ready(prof):
+                        status = "waiting_destination"      # tried again once it is back
                     self.record(db, g.folder, prof, status, attempts,
                                 ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
                                 key=k)
-                    done[str(g.folder)] = status
+                    done[str(g.folder)] = shown
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher
                     self.log.exception("watch: %s failed", g.folder)

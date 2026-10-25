@@ -181,6 +181,25 @@ def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
     return False
 
 
+def db_text(s) -> str:
+    """s as the state database can store it (see executor.db_text)."""
+    s = str(s)
+    try:
+        s.encode("utf-8")
+        return s
+    except UnicodeEncodeError:
+        return "bytes:" + os.fsencode(s).hex()
+
+
+def db_path(s: str) -> str:
+    if s.startswith("bytes:"):
+        try:
+            return os.fsdecode(bytes.fromhex(s[6:]))
+        except ValueError:
+            pass
+    return s
+
+
 def copies_of(src, under=None) -> list:
     """Where earlier jobs copied this file (newest first), from the state database; with
     `under`, only the copies inside that folder (this profile's destination: another copy
@@ -190,12 +209,13 @@ def copies_of(src, under=None) -> list:
     try:
         db = sqlite3.connect(ex.STATE_DIR / "state.db", timeout=30)
         try:
-            rows = db.execute("SELECT dst FROM copies WHERE src=? ORDER BY ts DESC", (str(src),)).fetchall()
+            rows = db.execute("SELECT dst FROM copies WHERE src=? ORDER BY ts DESC",
+                              (db_text(src),)).fetchall()
         finally:
             db.close()
     except sqlite3.Error:
         return []
-    out = [r[0] for r in rows]
+    out = [db_path(r[0]) for r in rows]
     if under is not None:
         root = os.path.realpath(os.path.expanduser(str(under)))
         out = [d for d in out if os.path.realpath(d).startswith(root.rstrip(os.sep) + os.sep)]
@@ -245,15 +265,29 @@ def _fit_name(name: str, limits: dict) -> str:
     return stem + ext
 
 
-def _one_name(a, b) -> bool:
-    """a and b are one directory entry spelled two ways (case or Unicode form on a
-    filesystem that treats them alike), not two hard links."""
-    if fnm.fold(a) != fnm.fold(b):
-        return False
+def same_entry(a, b) -> bool:
+    """a and b are one name of one file - one directory entry - however the paths spell it
+    (through a relative or symlinked folder, or in another letter case or Unicode form on a
+    filesystem that treats them alike); False for two hard links of one file, and for two
+    different files."""
+    a, b = Path(a), Path(b)
     try:
-        return not (Path(a).name in os.listdir(Path(a).parent) and Path(b).name in os.listdir(Path(b).parent))
+        if not os.path.samefile(a, b) or not os.path.samefile(a.parent, b.parent):
+            return False                                     # two files, or two folders: two names
+    except OSError:
+        return False
+    if a.name == b.name:
+        return True
+    if fnm.fold(a.name) != fnm.fold(b.name):
+        return False                                         # two names in one folder: hard links
+    try:                       # both spellings listed: two hard links on a case-sensitive disk
+        names = os.listdir(a.parent)
     except OSError:
         return True
+    return not (a.name in names and b.name in names)
+
+
+_one_name = same_entry
 
 
 MOUNT_PARENTS = ("/media", "/mnt", "/run/media")
@@ -405,11 +439,14 @@ def _cue_rewrites(path: Path, renames: dict):
             continue
     if text is None:
         return None
-    table = {}
+    table, stems = {}, {}
     for old, new in renames.items():
         old_n, new_n = old.replace("\\", "/"), new.replace("\\", "/")
         if old_n != new_n:
             table[old_n.casefold()] = new_n
+            o, n = os.path.splitext(old_n), os.path.splitext(new_n)
+            if o[1].lower() in AUDIO_EXT:
+                stems.setdefault(o[0].casefold(), set()).add(n[0])
     if not table:
         return None
 
@@ -417,7 +454,13 @@ def _cue_rewrites(path: Path, renames: dict):
         key = name.replace("\\", "/")
         while key.startswith("./"):
             key = key[2:]
-        return table.get(key.casefold())
+        hit = table.get(key.casefold())
+        if hit is None:          # EAC's cue names the rip's WAV files: "01 a.wav" for "01 a.flac"
+            stem, ext = os.path.splitext(key)
+            got = stems.get(stem.casefold()) if ext.lower() in AUDIO_EXT else None
+            if got and len(got) == 1:
+                hit = next(iter(got)) + ext              # the cue's own extension, as it had it
+        return hit
 
     bom = text.startswith("\ufeff")
     if bom:
@@ -626,7 +669,8 @@ class Planner:
                 if dst is None:
                     continue
                 fe["dst"] = str(dst)
-                if Path(dst) == f:                       # already where the template puts it
+                if Path(dst) == f or (Path(dst).name == f.name and same_entry(dst, f)):
+                    fe["dst"] = str(f)                   # already where the template puts it
                     fe["op"] = "tag" if changes else "none"
                 else:
                     fe["op"] = op
@@ -933,13 +977,17 @@ class Planner:
 
 
 def build(proposals, profile, job_id=None, **kw) -> dict:
+    for prop in proposals:          # absolute paths: undo and recover may run from another folder
+        prop.source_dir = os.path.abspath(os.path.expanduser(str(prop.source_dir)))
+        prop.files = [os.path.abspath(os.path.expanduser(str(f))) for f in prop.files]
     return Planner(profile, job_id, **kw).build(proposals)
 
 
 def save(plan: dict, path) -> Path:
     path = Path(path)
     tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(plan, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
+    # ASCII: a file name that is not valid UTF-8 (surrogate escapes) comes back exactly
+    tmp.write_text(json.dumps(plan, indent=1, ensure_ascii=True, default=str), encoding="ascii")
     os.replace(tmp, path)
     return path
 

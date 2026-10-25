@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**File operations reviewed** in ten independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in eleven independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.
@@ -35,7 +35,15 @@ crash/error fuzzers in tests/fuzz/)
   renaming only.
 - Undo refuses to run while a share the job used is unmounted, and leaves an album's cover,
   scans, log and cue with its music when the music stays (edited since the job).
-- `tagmender jobs prune` also removes old fetched artwork.
+- `tagmender jobs prune` also removes old fetched artwork (not that of plans still waiting).
+- A track already in place is recognised under any spelling of its path (`run .`, a
+  symlinked folder, another letter case on an SMB/exFAT share): never taken for a hard link.
+- Plans and journals hold absolute paths, and file names that are not valid UTF-8.
+- Undo moves an album back whole or not at all; restores keep preserved timestamps; a
+  folder left holding only .DS_Store/Thumbs.db/desktop.ini is removed, as Picard does
+  (the files are kept for undo); new folders take their parent's owner and mode.
+- EAC cue sheets naming the rip's WAV files are rewritten; the watcher retries failed and
+  blocked albums, and copies an album once its destination is mounted again.
 
 **New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
 - Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.

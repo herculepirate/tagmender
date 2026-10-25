@@ -315,9 +315,17 @@ class R10_08_ArtworkStagingPruned(Base):
         t = time.time() - 90 * 86400
         for x in (old / "front.jpg", old):
             os.utime(x, (t, t))
+        waiting = ex.STATE_DIR / "staging" / "20200101-000000-cccc"     # its plan is still waiting
+        waiting.mkdir()
+        (waiting / "front.jpg").write_bytes(b"x")
+        for x in (waiting / "front.jpg", waiting):
+            os.utime(x, (t, t))
+        (ex.STATE_DIR / "plans").mkdir(parents=True, exist_ok=True)
+        (ex.STATE_DIR / "plans" / "20200101-000000-cccc-1.json").write_text("{}")
         executor.prune(30)
         self.assertFalse(old.exists())
         self.assertTrue((new / "front.jpg").exists())
+        self.assertTrue((waiting / "front.jpg").exists())
 
 
 if __name__ == "__main__":

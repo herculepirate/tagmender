@@ -409,6 +409,26 @@ def signature(paths):
     return h.hexdigest()[:16]
 
 
+def _t(s) -> str:
+    """A path as the state database can store it: one that is not valid UTF-8 (surrogate
+    escapes, which sqlite refuses) as "bytes:" and its bytes in hex (as plan.db_text)."""
+    s = str(s)
+    try:
+        s.encode("utf-8")
+        return s
+    except UnicodeEncodeError:
+        return "bytes:" + os.fsencode(s).hex()
+
+
+def _from_t(s: str) -> str:
+    if s.startswith("bytes:"):
+        try:
+            return os.fsdecode(bytes.fromhex(s[6:]))
+        except ValueError:
+            pass
+    return s
+
+
 class State:
     def __init__(self, path=None):
         self.path = Path(path) if path else STATE_DIR / "state.db"
@@ -424,20 +444,20 @@ class State:
     # ignores ----------------------------------------------------------------
     def remember(self, item, exclusion, sig, rhash):
         self.db.execute("INSERT OR REPLACE INTO ignored VALUES (?,?,?,?,?,?)",
-                        (str(item), exclusion.rule.id, exclusion.rule.name, rhash, sig, time.time()))
+                        (_t(item), exclusion.rule.id, exclusion.rule.name, rhash, sig, time.time()))
         self.db.commit()
 
     def still_ignored(self, item, sig, rhash):
         """The item was ignored, and neither its files nor the rules changed since:
         no need to look at it again."""
         row = self.db.execute("SELECT signature, rules_hash, rule_name FROM ignored WHERE item=?",
-                              (str(item),)).fetchone()
+                              (_t(item),)).fetchone()
         if row and row[0] == sig and row[1] == rhash and str(item) not in self.overrides():
             return row[2]
         return None
 
     def forget(self, item):
-        self.db.execute("DELETE FROM ignored WHERE item=?", (str(item),))
+        self.db.execute("DELETE FROM ignored WHERE item=?", (_t(item),))
         self.db.commit()
 
     def ignored(self):
@@ -445,29 +465,29 @@ class State:
 
     # process anyway ---------------------------------------------------------
     def allow(self, path):
-        path = str(Path(path).expanduser().resolve())
+        path = _t(Path(path).expanduser().resolve())
         self.db.execute("INSERT OR REPLACE INTO overrides VALUES (?,?)", (path, time.time()))
         self.db.execute("DELETE FROM ignored WHERE item = ? OR substr(item, 1, ?) = ?",
                         (path, len(path) + 1, path + os.sep))
         self.db.commit()
 
     def disallow(self, path):
-        self.db.execute("DELETE FROM overrides WHERE path=?", (str(Path(path).expanduser().resolve()),))
+        self.db.execute("DELETE FROM overrides WHERE path=?", (_t(Path(path).expanduser().resolve()),))
         self.db.commit()
 
     def overrides(self):
-        return {r[0] for r in self.db.execute("SELECT path FROM overrides")}
+        return {_from_t(r[0]) for r in self.db.execute("SELECT path FROM overrides")}
 
     # history ----------------------------------------------------------------
     def log(self, job, item, exclusion, detail=""):
         self.db.execute("INSERT INTO history VALUES (?,?,?,?,?,?,?)",
-                        (time.time(), job, str(item), exclusion.label, exclusion.rule.id, exclusion.rule.name,
-                         detail or exclusion.where))
+                        (time.time(), job, _t(item), exclusion.label, exclusion.rule.id, exclusion.rule.name,
+                         _t(detail or exclusion.where)))
         self.db.commit()
 
     def log_raw(self, job, item, label, rule_id, rule_name, detail=""):
         self.db.execute("INSERT INTO history VALUES (?,?,?,?,?,?,?)",
-                        (time.time(), job, str(item), label, rule_id, rule_name, detail))
+                        (time.time(), job, _t(item), label, rule_id, rule_name, detail))
         self.db.commit()
 
     def history(self, limit=200):

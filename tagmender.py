@@ -503,7 +503,11 @@ def _execute(p, args):
         if not _confirm(f"\nApply these changes to {len(actionable)} album(s)? [y/N] "):
             _err("Not applied. Use --yes, or set the profile to unattended.")
             return EXIT_NOT_APPLIED
-    res = executor.Executor(p, progress=_progress).run()
+    try:
+        res = executor.Executor(p, progress=_progress).run()
+    except executor.StepError as exc:            # already run, another job pending or running
+        _err(f"Not applied: {exc}")
+        return EXIT_ERR
     if sys.stderr.isatty():
         print(file=sys.stderr)
     if args.json:
@@ -771,6 +775,11 @@ WORK = {"scan": cmd_scan, "plan": cmd_plan, "apply": cmd_apply, "run": cmd_run, 
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):      # a file name that is not valid UTF-8 is printed, not fatal
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = None
     if argv[:1] in (["--version"], ["-V"]):

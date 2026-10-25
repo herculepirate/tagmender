@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,6 +50,7 @@ import plan as planmod
 import tagio
 
 STAGE_TAG = ".tm-"
+JUNK = {".DS_Store", "desktop.ini", "Desktop.ini", "Thumbs.db"}   # picard/util/emptydir.py JUNK_FILES
 SPACE_MARGIN = 16 * 1024 * 1024
 
 
@@ -75,7 +77,9 @@ class Journal:
 
     def write(self, **ev):
         ev["t"] = time.time()
-        line = json.dumps(ev, ensure_ascii=False, default=str) + "\n"
+        # ASCII (non-ASCII letters as \\u escapes): a line cut by a power loss can never end
+        # inside a letter, and a file name that is not valid UTF-8 (surrogate escapes) is kept
+        line = json.dumps(ev, ensure_ascii=True, default=str) + "\n"
         with open(self.path, "a+b") as fh:
             if fh.tell() > 0:                    # a line cut short by a crash: start a new one
                 fh.seek(-1, os.SEEK_END)
@@ -150,9 +154,18 @@ def _record_job(job, **kw):
     db.close()
 
 
+db_text = planmod.db_text       # a path as the state database can store it
+
+
+def _shown(s) -> str:
+    """Text for the state database to show (odd bytes of a file name as \\x.. escapes)."""
+    return str(s).encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
+
+
 def _record_album(job, album, status, label="", detail=""):
     db = _db()
-    db.execute("INSERT INTO job_albums VALUES (?,?,?,?,?,?)", (job, album, status, label, detail, time.time()))
+    db.execute("INSERT INTO job_albums VALUES (?,?,?,?,?,?)",
+               (job, db_text(album), status, _shown(label), _shown(detail), time.time()))
     db.commit()
     db.close()
 
@@ -162,9 +175,10 @@ def _record_copy(src, dst, job, remove=False):
     try:
         db = _db()
         if remove:
-            db.execute("DELETE FROM copies WHERE src=? AND dst=?", (str(src), str(dst)))
+            db.execute("DELETE FROM copies WHERE src=? AND dst=?", (db_text(src), db_text(dst)))
         else:
-            db.execute("INSERT OR REPLACE INTO copies VALUES (?,?,?,?)", (str(src), str(dst), job, time.time()))
+            db.execute("INSERT OR REPLACE INTO copies VALUES (?,?,?,?)", (db_text(src), db_text(dst), job,
+                                                                         time.time()))
         db.commit()
         db.close()
     except sqlite3.Error:
@@ -194,7 +208,7 @@ def file_lock(path):
     """No two TagMender processes change the same file at once."""
     d = ex.STATE_DIR / "locks"
     d.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha1(os.path.realpath(str(path)).encode()).hexdigest()
+    key = hashlib.sha1(os.path.realpath(str(path)).encode("utf-8", "surrogateescape")).hexdigest()
     with open(d / key, "w") as fh:
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -266,6 +280,12 @@ def _make_dirs(d: Path, roots, journal, album, created=None):
     for m in reversed(missing):
         journal.write(ev="dir_create_begin", album=album, path=str(m))
         m.mkdir()
+        try:                       # the folder it is made in gives owner, group and mode: a root
+            pst = os.stat(m.parent)        # job on a share (Unraid: nobody:users) makes no folder
+            _keep_owner(m, pst)            # that the share's users cannot write to
+            os.chmod(m, stat.S_IMODE(pst.st_mode) & ~stat.S_ISVTX)
+        except OSError:
+            pass
         journal.write(ev="dir_created", album=album, path=str(m))
         if created is not None:
             created.append(m)
@@ -313,7 +333,8 @@ def _tags_sig(path) -> str:
     except Exception:
         return ""
     return hashlib.sha1(json.dumps(sorted((k, [str(x) for x in v] if isinstance(v, list) else str(v))
-                                          for k, v in t.items()), ensure_ascii=False).encode()).hexdigest()
+                                          for k, v in t.items()), ensure_ascii=False)
+                        .encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def _keep_owner(path: Path, st):
@@ -383,17 +404,23 @@ def _same_file(a, b) -> bool:
 
 
 def _case_only(a, b) -> bool:
-    """a and b are one file under two spellings of one name (letter case or Unicode form on
-    a filesystem that treats them alike), not two hard links with different names."""
-    import unicodedata
-    fa = unicodedata.normalize("NFC", str(a)).casefold()
-    fb = unicodedata.normalize("NFC", str(b)).casefold()
-    if str(a) == str(b) or fa != fb or not _same_file(a, b):
+    """a and b are one directory entry under two spellings (letter case or Unicode form on
+    a filesystem that treats them alike, or a relative or symlinked folder), not two hard
+    links: renaming one to the other must go through a temporary name, and unlinking either
+    would delete the file."""
+    a, b = Path(a), Path(b)
+    if str(a) == str(b) or not _same_file(a, b) or not _same_file(a.parent, b.parent):
         return False
-    try:                       # two entries listed: two hard links on a case-sensitive disk
-        return not (Path(a).name in os.listdir(Path(a).parent) and Path(b).name in os.listdir(Path(b).parent))
+    if a.name == b.name:
+        return True
+    import unicodedata
+    if unicodedata.normalize("NFC", a.name).casefold() != unicodedata.normalize("NFC", b.name).casefold():
+        return False
+    try:                       # both spellings listed: two hard links on a case-sensitive disk
+        names = os.listdir(a.parent)
     except OSError:
         return True
+    return not (a.name in names and b.name in names)
 
 
 def _case_tmp(src: Path) -> Path:
@@ -491,11 +518,22 @@ def _restore(path: Path, backup: dict, jd: Path):
         else:
             _copy_fsync(Path(backup["path"]), stage)
         _keep_owner(stage, st)
+        if _keeps_times(jd):              # the job kept the file's time: so does putting it back
+            os.utime(stage, ns=(st.st_atime_ns, st.st_mtime_ns))
         os.replace(stage, path)
     except BaseException:
         stage.unlink(missing_ok=True)
         raise
     _fsync_dir(path.parent)
+
+
+def _keeps_times(jd: Path) -> bool:
+    """The job's plan kept modification times (preserve_timestamps)."""
+    try:
+        with open(Path(jd) / "plan.json", encoding="utf-8") as fh:
+            return bool(json.load(fh).get("preserve_timestamps"))
+    except (OSError, ValueError):
+        return False
 
 
 def _restore_text(saved: Path, path: Path):
@@ -675,7 +713,16 @@ class Executor:
                 raise StepError(f"{src.name}: its audio data cannot be verified after writing tags "
                                 "(format not recognised and ffmpeg unavailable); not written")
             n = f"{i}-{j}"
-            linked = bool(fe.get("linked")) and dst.exists() and _same_file(src, dst)
+            if dst.exists() and planmod.same_entry(src, dst):
+                # the very file under another spelling of its path (a plan from an older
+                # version, or a folder renamed since): there is nothing to move, and
+                # "dropping the source's name" would delete the only one
+                if op == "move" and Path(src).name == Path(dst).name:
+                    op, dst = "tag", src
+                    if not changes and not embed:
+                        return
+            linked = bool(fe.get("linked")) and dst.exists() and _same_file(src, dst) and \
+                not planmod.same_entry(src, dst)
             if linked:
                 op = "relink_" + op                       # dst is already a hard link to src
             backup = _backup(src, self.jd, n, writes=bool(changes or embed)) \
@@ -952,15 +999,25 @@ class Executor:
         done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
 
     def cleanup_dirs(self, i, a):
-        """Remove source folders this album's move left empty (never a profile root)."""
+        """Remove source folders this album's move left empty (never a profile root). As
+        Picard's "delete empty directories", a folder holding only what Windows and macOS
+        leave everywhere (JUNK) counts as empty; those files are kept in the job folder, so
+        undo puts them back."""
         roots = {r.rstrip(os.sep) for r in self.roots}
         for d in sorted({str(Path(fe["src"]).parent) for fe in a["files"] + a["companions"]},
                         key=len, reverse=True):
             p = Path(d)
             while p.exists() and os.path.realpath(str(p)) not in roots and p != p.parent:
                 try:
-                    if any(p.iterdir()):
+                    inside = list(p.iterdir())
+                    if any(x.name not in JUNK or not x.is_file() or x.is_symlink() for x in inside):
                         break
+                    for x in inside:
+                        keep = self.jd / "junk" / hashlib.sha1(str(x).encode("utf-8", "surrogateescape")
+                                                               ).hexdigest()[:16] / x.name
+                        keep.parent.mkdir(parents=True, exist_ok=True)
+                        self.journal.write(ev="junk_removed", album=i, path=str(x), saved=str(keep))
+                        shutil.move(str(x), str(keep))
                     p.rmdir()
                     self.journal.write(ev="dir_removed", album=i, path=str(p))
                 except OSError:
@@ -1346,6 +1403,15 @@ def _recover(job, jd, journal, events):
                 if p.exists() and (os.stat(p).st_size, os.stat(p).st_mtime_ns) == (c["size"], c["mtime_ns"]):
                     p.unlink()
                 journal.write(ev="rollback_step", key=["created", c["path"]])
+        for x in events:                 # .DS_Store / Thumbs.db of a folder its clean-up removed
+            if x.get("ev") == "junk_removed" and x["album"] == a:
+                saved, path = Path(x["saved"]), Path(x["path"])
+                try:
+                    if saved.exists() and not os.path.lexists(path):
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(saved, path)
+                except OSError as exc:
+                    problems.append(f"{path}: {exc}")
         for ev in reversed([x for x in events if x.get("ev") in ("dir_created", "dir_create_begin")
                             and x["album"] == a]):
             try:
@@ -1400,7 +1466,7 @@ def undo(job, force=False) -> list[str]:
         return _undo(job, jd, journal, events, force)
 
 
-def _undo_unreachable(jd, files, comps, rolled) -> str | None:
+def _undo_unreachable(jd, files, comps, rolled, events=()) -> str | None:
     """Why undo cannot run now: a share the job wrote to or took files from is not mounted
     (or its folder is gone). Undo would otherwise find the copies "gone" and
     forget them, or put an album back onto the system disk under an empty mount point."""
@@ -1410,6 +1476,7 @@ def _undo_unreachable(jd, files, comps, rolled) -> str | None:
         return None
     touched = {a for (a, _j), f in list(files.items()) + list(comps.items())
                if f.get("state") in ("committed", "source_removed") and a not in rolled}
+    touched |= {e["album"] for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled}
     for i in sorted(touched):
         if i >= len(albums):
             continue
@@ -1419,9 +1486,15 @@ def _undo_unreachable(jd, files, comps, rolled) -> str | None:
             r = Path(root["path"])              # (not its device number: a share remounted
             if not r.is_dir() or not planmod.mounted(r):   # after a reboot may get another)
                 return f"the destination {r} is not available (unmounted?)"
-        moves = any(f.get("op") in ("move", "relink_move") for (x, _j), f in files.items() if x == i)
-        if moves and a.get("source_dir") and not planmod.mounted(a["source_dir"]):
-            return f"the share {a['source_dir']} came from is not mounted"
+        if a.get("source_dir") and not planmod.mounted(a["source_dir"]) and \
+                any(f.get("op") != "copy" for (x, _j), f in files.items() if x == i):
+            return f"the share holding {a['source_dir']} is not mounted"
+    paths = [p for (a, _j), f in list(files.items()) + list(comps.items()) if a in touched
+             for p in (f.get("src"), f.get("dst")) if p]
+    paths += [e["path"] for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] in touched]
+    for p in dict.fromkeys(str(Path(p).parent) for p in paths):
+        if not planmod.mounted(p):                       # a file on a share that is not mounted now
+            return f"the share holding {p} is not mounted"
     return None
 
 
@@ -1433,7 +1506,7 @@ def _undo(job, jd, journal, events, force):
     already = {tuple(e["key"]) for e in events if e.get("ev") == "undo_step"}
     files, comps = _replay(events)
     out, problems = [], []
-    gone = _undo_unreachable(jd, files, comps, rolled)
+    gone = _undo_unreachable(jd, files, comps, rolled, events)
     if gone:
         raise StepError(f"{gone}; nothing was undone - undo again when it is back")
     _clear_undo_leftovers(files, comps)                  # an earlier undo cut short
@@ -1453,8 +1526,11 @@ def _undo(job, jd, journal, events, force):
         if not check.exists() and f.get("op") == "move" and Path(f["src"]).exists():
             check = Path(f["src"])                      # an interrupted undo had moved it back
         why = None
-        if f.get("op") == "copy" and dst.exists() and f.get("size") is not None and \
-                (os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]):
+        if f.get("op") == "copy" and dst.exists() and f.get("size") is not None and not force and \
+                (os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and \
+                not (f.get("tags_sig") and _tags_sig(dst) == f["tags_sig"] and
+                     (not f.get("digest") or payload.digest(dst) == f["digest"])):
+            # (only its time changed - a later job's undo put its tags back - it is still the copy)
             why = f"{dst} was changed after the job; left in place"
         elif f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
             why = f"{check} holds different audio now; left alone"
@@ -1465,6 +1541,10 @@ def _undo(job, jd, journal, events, force):
                    f"(tagmender undo --force {job} puts the old tags back anyway)")
         verdict[(a, j)] = (why, check)
     staying = {a for (a, _j), (why, _c) in verdict.items() if why and files[(a, _j)].get("op") != "tag"}
+    for (a, j), (why, check) in list(verdict.items()):   # an album moves back whole, or not at all
+        if a in staying and not why and files[(a, j)].get("op") != "tag":
+            verdict[(a, j)] = (f"{check}: stays with the rest of its album (a track of it changed after "
+                               f"the job; tagmender undo --force {job} puts the album back anyway)", check)
 
     covers = [e for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled]
     for e in reversed(covers):
@@ -1503,6 +1583,11 @@ def _undo(job, jd, journal, events, force):
     removed = [e for e in events if e.get("ev") == "dir_removed" and e.get("album") not in staying]
     for e in removed:
         Path(e["path"]).mkdir(parents=True, exist_ok=True)
+    for e in events:                     # .DS_Store / Thumbs.db of the folders removed: back in them
+        if e.get("ev") == "junk_removed" and e.get("album") not in staying and e["album"] not in rolled:
+            saved, path = Path(e["saved"]), Path(e["path"])
+            if saved.exists() and not os.path.lexists(path) and path.parent.is_dir():
+                shutil.copy2(saved, path)
     for (a, j), f in sorted(files.items(), reverse=True):
         if (a, j) not in verdict:
             continue
@@ -1553,9 +1638,15 @@ def prune(days: int) -> list[str]:
     # artwork the engine fetched for plans (STATE_DIR/staging/<job>): a plan that old is
     # refused anyway once its files changed, and the folder otherwise grows with every run
     staging = ex.STATE_DIR / "staging"
+    try:                                     # plans still waiting to be applied keep theirs
+        waiting = [x.stem for x in (ex.STATE_DIR / "plans").glob("*.json")]
+    except OSError:
+        waiting = []
     if staging.is_dir():
         for d in staging.iterdir():
             try:
+                if any(w == d.name or w.startswith(d.name + "-") for w in waiting):
+                    continue
                 if d.is_dir() and not d.is_symlink() and d.stat().st_mtime < cutoff and \
                         not any(x.stat().st_mtime >= cutoff for x in d.rglob("*")):
                     shutil.rmtree(d, ignore_errors=True)

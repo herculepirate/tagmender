@@ -199,7 +199,7 @@ class Engine:
 
     # ---- what is in a path ------------------------------------------------
     def albums_in(self, path) -> list[Group]:
-        path = Path(path).expanduser()
+        path = Path(os.path.abspath(Path(path).expanduser()))  # plans and journals hold absolute paths
         if path.is_file():
             return [Group(path.parent, [path], [], single=True)]
         found = {}
@@ -550,7 +550,7 @@ class Engine:
 
     def plan(self, path, progress=None, cancel=None) -> dict:
         props = self.proposals(path, progress, cancel)
-        p = planmod.build(props, self.profile, self.job, extra_roots=[Path(path).expanduser()])
+        p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))])
         p["provider_notes"] = self.notes
         return p
 

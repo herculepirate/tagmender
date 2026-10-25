@@ -204,6 +204,38 @@ class Fixes(unittest.TestCase):
             shutil.rmtree(tmp)
 
 
+    def test_albums_you_approved_are_exported_too(self):
+        """Bell Witch - Demo 2011: nothing about the copy decides the pick, but John approved
+        it; Exhorder: he named the release to use."""
+        st = sqlite3.connect(":memory:")
+        st.execute("CREATE TABLE validation (path TEXT PRIMARY KEY, row TEXT)")
+        st.execute("CREATE TABLE http_cache (url TEXT PRIMARY KEY, body TEXT, ts REAL)")
+        rows = {
+            "/l/Bell Witch/2015 - Demo 2011": dict(verdict="other pressing", picked="mb:d6f7", picked_mb_twin="d6f7",
+                                                   notes="durations 4/4 agree"),
+            "/l/Exhorder/2003 - X": dict(verdict="unsure", status="review", picked="mb:rr"),
+            "/l/A/not approved": dict(verdict="other pressing", picked="mb:z", notes="durations agree"),
+        }
+        for p_, r in rows.items():
+            st.execute("INSERT INTO validation VALUES (?,?)", (p_, json.dumps(
+                dict({"folder": p_, "version": "v", "status": "auto", "tags_mb": "t"}, **r))))
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "approved.tsv").write_text("# approved by John\n/l/Bell Witch/2015 - Demo 2011\n"
+                                              "/l/Exhorder/2003 - X/\tdiscogs:22314946\n")
+            approved = va.read_approved(tmp / "approved.tsv")
+            path, fixes = va.export_fixes(st, tmp, "v", approved)
+            self.assertEqual(sorted(f["folder"] for f in fixes), ["/l/Bell Witch/2015 - Demo 2011", "/l/Exhorder/2003 - X"])
+            got = {p_: json.loads(r)["best"] for p_, r in sqlite3.connect(path).execute("SELECT path, result FROM results")}
+            self.assertEqual((got["/l/Exhorder/2003 - X"]["source"], got["/l/Exhorder/2003 - X"]["id"]),
+                             ("discogs", "22314946"))
+            self.assertEqual(got["/l/Bell Witch/2015 - Demo 2011"]["mb_id"], "d6f7")
+            (tmp / "bad.tsv").write_text("/l/x\tsomething\n")
+            with self.assertRaises(ValueError):
+                va.read_approved(tmp / "bad.tsv")
+        finally:
+            shutil.rmtree(tmp)
+
 def types_dm():
     return {"dm": None}
 

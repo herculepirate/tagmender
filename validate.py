@@ -255,12 +255,45 @@ def evidence_decided(rec):
                           r"disc ID|proves the album|Discogs chosen", notes))
 
 
-def export_fixes(state, out_dir, current):
+def read_approved(path):
+    """Albums you approved for a retag, one per line: the folder, then optionally a tab
+    and the release to use ("mb:<MBID>" or "discogs:<id>"); without one, the pick of
+    the latest check is used. Lines starting with # are comments."""
+    out = {}
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        folder, _, rel = line.partition("\t")
+        rel = rel.strip()
+        if rel and not re.fullmatch(r"(?:mb:[0-9a-f-]{36}|discogs:\d+)", rel):
+            raise ValueError(f"approved list: release must be mb:<MBID> or discogs:<id>, not {rel!r}")
+        out[folder.strip().rstrip("/")] = rel
+    return out
+
+
+def export_fixes(state, out_dir, current, approved=None):
     """fixes.db for tag_albums.py --retag (and web_tag.py): the albums whose tags hold
-    another release than the one the evidence points to."""
+    another release than the one the evidence points to, and the albums you approved
+    (a pick nothing about the copy decides, or another release you named)."""
+    approved = approved or {}
     rows = [json.loads(r) for (r,) in state.execute("SELECT row FROM validation")]
-    fixes = [r for r in rows if r.get("verdict") in ("differs", "other pressing") and evidence_decided(r)
-             and r.get("version") == current]
+    fixes = []
+    for r in rows:
+        if r.get("folder") in approved:
+            rel = approved[r["folder"]]
+            if rel:
+                r = dict(r, picked=rel, picked_mb_twin=rel[3:] if rel.startswith("mb:") else "",
+                         notes="approved by you; " + (r.get("notes") or ""))
+            elif not r.get("picked"):
+                continue                               # nothing picked and nothing named
+            fixes.append(r)
+        elif (r.get("verdict") in ("differs", "other pressing") and evidence_decided(r)
+              and r.get("version") == current):
+            fixes.append(r)
     path = out_dir / "fixes.db"
     if path.exists():
         path.unlink()
@@ -309,6 +342,9 @@ def main():
     ap.add_argument("--limit", type=int)
     ap.add_argument("--no-ocr", action="store_true")
     ap.add_argument("--redo", action="store_true")
+    ap.add_argument("--approved", default=None,
+                    help="albums you approved for a retag (folder[TAB]mb:<MBID>|discogs:<id> per line); "
+                         "default: approved.tsv in the output folder, when it exists")
     ap.add_argument("--export-fixes", action="store_true",
                     help="only write fixes.db (albums the evidence says are tagged as the wrong release) and stop")
     args = ap.parse_args()
@@ -338,7 +374,8 @@ def main():
     if not args.no_ocr:
         ma.check_ocr_ready()
     if args.export_fixes:
-        path, fixes = export_fixes(state, out_dir, ma.result_version())
+        approved = read_approved(args.approved or out_dir / "approved.tsv")
+        path, fixes = export_fixes(state, out_dir, ma.result_version(), approved)
         for r in fixes:
             print(f"  {r['folder']}\n      tags {r.get('tags_release') or r.get('tags_mb')}\n      ->   {r.get('picked_release')}"
                   f"  ({r.get('picked')})")

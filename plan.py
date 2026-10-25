@@ -430,6 +430,21 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     return out, ""
 
 
+def _holds_other_music(folder: Path, entry) -> bool:
+    """folder (with its disc folders) holds, or will hold, music that is not this album's."""
+    ours = {fe["src"] for fe in entry["files"]} | {fe["dst"] for fe in entry["files"]} \
+        | {s_.get("file") for s_ in entry.get("skipped") or []}
+    try:
+        for x in folder.iterdir():
+            kids = [x] if x.is_file() else (list(x.rglob("*")) if x.is_dir() and _DISC_NAME.match(x.name) else [])
+            for k in kids:
+                if k.suffix.lower() in AUDIO_EXT and not k.name.startswith(".") and str(k) not in ours:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def _cue_rewrites(path: Path, renames: dict):
     """New text of a cue sheet or playlist whose entries name files being renamed or moved,
     or None. renames: {old path relative to the sheet's folder: new path relative to where
@@ -788,12 +803,15 @@ class Planner:
                 if fe["dst"] in embed and fe["op"] == "none":   # only the cover is new
                     fe["op"] = "tag" if fe["dst"] == fe["src"] else op
             cover = None if (has_image or not p["artwork"]["files"]) else folder / "cover.jpg"
+            if cover is not None and _holds_other_music(folder, entry):
+                cover = None                  # a folder shared with other music: its cover is no one album's
             if cover is not None:
                 key = fnm.fold(cover)
-                if self.claimed.get(key) not in (None, f"artwork:{prop.source_dir}"):
+                me = f"artwork:{prop.source_dir}:{sorted(_release_ids(prop))}:{sorted(map(str, prop.files))}"
+                if self.claimed.get(key) not in (None, me):
                     cover = None                              # another album's file goes there
                 else:
-                    self.claimed[key] = f"artwork:{prop.source_dir}"
+                    self.claimed[key] = me
             emb = art.get("embed")
             if not emb and embed:                  # (a provider result without its embedding copy)
                 try:

@@ -345,9 +345,16 @@ def panels(data, img):
             box = (0, round(i * h / n), w, round((i + 1) * h / n))
         crop = img.crop(box)
         buf = io.BytesIO()
-        crop.convert("RGB").save(buf, "JPEG", quality=95)
+        _jpeg(crop, buf, img)
         out.append((names[i], buf.getvalue(), crop.width, crop.height))
     return out
+
+
+def _jpeg(im, buf, src):
+    """im as a JPEG into buf: depth-safe (16-bit scans), keeping src's colour profile."""
+    from coverup_pil_imaging import to_rgb
+    icc = src.info.get("icc_profile")
+    to_rgb(im).save(buf, "JPEG", quality=95, **({"icc_profile": icc} if icc else {}))
 
 
 def square_of_panel(label, data):
@@ -366,7 +373,7 @@ def square_of_panel(label, data):
         y = {"top": 0, "bottom": h - s}.get(label, (h - s) // 2)
         box = (0, y, s, y + s)
     buf = io.BytesIO()
-    img.crop(box).convert("RGB").save(buf, "JPEG", quality=95)
+    _jpeg(img.crop(box), buf, img)
     return buf.getvalue(), s, s
 
 

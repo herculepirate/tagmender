@@ -39,22 +39,12 @@ def _rgb(im):
     """im as RGB, the right way up (EXIF orientation applied); transparency flattened onto
     white, as CoverUp does; 16-bit and 32-bit grey scaled down, never clipped to white."""
     from PIL import Image, ImageOps
+    from coverup_pil_imaging import to_rgb
     try:
         im = ImageOps.exif_transpose(im)
     except Exception:
         pass
-    if im.mode in ("I;16", "I;16L", "I;16B", "I;16N", "I"):
-        hi = 65535.0 if im.mode != "I" or (im.getextrema() or (0, 0))[1] > 255 else 255.0
-        im = im.convert("I").point(lambda v: v * (255.0 / hi)).convert("L")
-    elif im.mode == "F":
-        lo, hi = im.getextrema()
-        im = im.point(lambda v: (v - lo) * 255.0 / ((hi - lo) or 1)).convert("L")
-    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
-        im = im.convert("RGBA")
-        bg = Image.new("RGB", im.size, (255, 255, 255))
-        bg.paste(im, mask=im.split()[-1])
-        return bg
-    return im.convert("RGB")
+    return to_rgb(im)
 
 
 def _stage(data: bytes, staging: Path, quality=JPEG_QUALITY) -> tuple[Path, int, int]:
@@ -67,7 +57,8 @@ def _stage(data: bytes, staging: Path, quality=JPEG_QUALITY) -> tuple[Path, int,
         w, h = im.size
         if im.format != "JPEG" or im.mode not in ("RGB", "L"):
             buf = io.BytesIO()
-            _rgb(im).save(buf, "JPEG", quality=int(quality))
+            icc = im.info.get("icc_profile")                # (the scan's colours, as it is shown)
+            _rgb(im).save(buf, "JPEG", quality=int(quality), **({"icc_profile": icc} if icc else {}))
             data = buf.getvalue()
             w, h = Image.open(io.BytesIO(data)).size       # (after turning it the right way up)
     path = staging / (hashlib.sha1(data).hexdigest()[:16] + ".jpg")
@@ -88,13 +79,14 @@ def embed_copy(front: Path, staging: Path, max_side=EMBED_MAX_SIDE, quality=JPEG
         if im.format == "JPEG" and im.mode in ("RGB", "L") and (not side or max(im.size) <= side) \
                 and len(data) < EMBED_LIMIT and upright:
             return Path(front)
+        icc = im.info.get("icc_profile")
         out = _rgb(im)
         if side and max(out.size) > side:
             out.thumbnail((side, side), Image.LANCZOS)
         q = int(quality)
         while True:
             buf = io.BytesIO()
-            out.save(buf, "JPEG", quality=q)
+            out.save(buf, "JPEG", quality=q, **({"icc_profile": icc} if icc else {}))
             if len(buf.getvalue()) < EMBED_LIMIT or q <= 50:
                 break
             q -= 10
@@ -145,7 +137,9 @@ class CoverUp:
         # the album is described by its own files only: the tags, IDs and embedded pictures of
         # other music in or below the folder are not this album's
         info = cb.album_info(Path(folder), ma, mc, files=files if shared else None)
-        info["ids"].update({k: v for k, v in ids.items() if v})
+        given = {k: v for k, v in ids.items() if v}
+        if given:                         # the identification decides which release this is: the
+            info["ids"] = given           # files' own (older, perhaps rejected) IDs never search
         if artist:
             info["artist"] = artist
         if album:
@@ -167,6 +161,16 @@ class CoverUp:
                 pass
         actions, notes = cb.decide(pipe, res, info, s, self.args, _Log())
         front = next((a for a in actions if a["type"] == "front"), None)
+        if front is None and "local" in s["providers_enabled"]:
+            # CoverUp keeps the album's own picture when nothing found is bigger ("existing
+            # file ... is as large as anything found"): that picture is the front then
+            from coverup.model import ArtType
+            mine = [c for c in res.candidates if c.provider == "local" and c.art_type == ArtType.FRONT
+                    and not cb.R.is_generated(c.data) and (c.extra.get("local_path") or c.extra.get("path"))]
+            if mine:
+                best = max(mine, key=lambda c: (c.width or 0) * (c.height or 0))
+                front = {"type": "front", "cand": best, "local": True,
+                         "why": f"the album's own {best.width}x{best.height} picture (nothing bigger found)"}
         if front is None:
             return {"note": "; ".join(notes) or "CoverUp found no front cover"}
         c = front["cand"]
@@ -177,6 +181,7 @@ class CoverUp:
             # may be a TIFF or a CMYK JPEG, and it may move with the album before cover.jpg
             # is made)
             path, w, h = _stage(Path(local).read_bytes(), self.staging, q)
+            path, w, h = self._file_size(path, w, h, q)
             return {"front": str(path), "source": "coverup:local", "width": w, "height": h,
                     "why": front["why"], "local": str(local)}
         if c.data is None:
@@ -184,10 +189,21 @@ class CoverUp:
         if c.data is None:
             return {"note": f"CoverUp chose {c.provider} but the download failed"}
         limit = getattr(self, "limit", MAX_BYTES)
-        if len(c.data) > limit:
+        if c.provider != "local" and len(c.data) > limit:      # (a download; never the album's own scan)
             return {"note": f"CoverUp's {c.provider} image is {len(c.data)} bytes, over the profile's {limit}"}
         path, w, h = _stage(c.data, self.staging, q)
+        path, w, h = self._file_size(path, w, h, q)
         return {"front": str(path), "source": f"coverup:{c.provider}", "width": w, "height": h, "why": front["why"]}
+
+    def _file_size(self, path, w, h, q):
+        """The cover file at most CoverUp's file_max_side (0: as it is)."""
+        side = int(self.s.get("file_max_side", 0) or 0)
+        if side and max(w, h) > side:
+            path = embed_copy(path, self.staging, side, q)
+            from PIL import Image
+            with Image.open(path) as im:
+                w, h = im.size
+        return path, w, h
 
     def jpeg_quality(self):
         return int(self.s.get("jpeg_quality", JPEG_QUALITY) or JPEG_QUALITY)
@@ -213,19 +229,31 @@ def _own_music(folder: Path) -> list:
     return out
 
 
+def _album_id(path):
+    """(title without the disc, album artist or artist), lower case; ("", "") untagged."""
+    from engine import _album_title, _first
+    m = ex.read_meta(path)
+    title = _album_title(m)
+    who = (_first(m, "albumartist") or _first(m, "artist")).casefold()
+    return (title, who) if title else ("", "")
+
+
 def _other_music(folder: Path, files) -> bool:
-    """folder (or a folder below it) holds music that is not among files - not counting the
-    same tracks in another format (FLAC and Opus side by side), hidden files and NAS index
-    folders (Synology's @eaDir, .AppleDouble)."""
+    """folder (or a folder below it) holds another album's music: a track that is not among
+    files and is tagged as another album. Copies of the album's own tracks (FLAC and Opus
+    side by side, "02 b (1).flac") and its untagged bonus folder are the album's; hidden
+    files and NAS index folders (Synology's @eaDir, .AppleDouble) are nobody's."""
     mine = {str(f) for f in files}
-    stems = {(str(Path(f).parent), Path(f).stem) for f in files}
+    ours = {_album_id(f) for f in files} if files else set()
     try:
         for p in folder.rglob("*"):
             rel = p.relative_to(folder).parts
             if any(x.startswith((".", "@")) for x in rel) or p.suffix.lower() not in ex.AUDIO_EXT:
                 continue
-            if str(p) in mine or (str(p.parent), p.stem) in stems or not p.is_file():
+            if str(p) in mine or not p.is_file():
                 continue
+            if _album_id(p) in ours:
+                continue                                  # the same album (a copy, a bonus track)
             return True
     except OSError:
         return False

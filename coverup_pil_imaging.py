@@ -96,18 +96,31 @@ def dimensions(data: bytes) -> tuple[int, int] | None:
     return (info[0], info[1]) if info else size_of(data)
 
 
+def to_rgb(img: Image.Image) -> Image.Image:
+    """img as RGB without clipping: 16-bit and 32-bit grey scaled down to 8 bits (Pillow's
+    plain convert("RGB") turns them white), float grey stretched; alpha onto white."""
+    if img.mode in ("I;16", "I;16L", "I;16B", "I;16N", "I"):
+        hi = 65535.0 if img.mode != "I" or (img.getextrema() or (0, 0))[1] > 255 else 255.0
+        img = img.convert("I").point(lambda v: v * (255.0 / hi)).convert("L")
+    elif img.mode == "F":
+        lo, hi = img.getextrema()
+        img = img.point(lambda v: (v - lo) * 255.0 / ((hi - lo) or 1)).convert("L")
+    if _has_alpha(img):
+        img = img.convert("RGBA")
+        flat = Image.new("RGB", img.size, (255, 255, 255))
+        flat.paste(img, mask=img.split()[-1])
+        return flat
+    return img if img.mode == "RGB" else img.convert("RGB")
+
+
 def encode(img: Image.Image, fmt: str = "jpeg", quality: int = 92) -> bytes:
     fmt = fmt.lower()
     buf = io.BytesIO()
     if fmt == "jpeg":
-        if _has_alpha(img):                      # flatten onto white, like CoverUp
-            img = img.convert("RGBA")
-            flat = Image.new("RGB", img.size, (255, 255, 255))
-            flat.paste(img, mask=img.split()[-1])
-            img = flat
-        elif img.mode != "RGB":
-            img = img.convert("RGB")
-        img.save(buf, "JPEG", quality=max(1, min(100, int(quality))), optimize=True)
+        icc = img.info.get("icc_profile")
+        img = to_rgb(img)                        # (alpha onto white, like CoverUp; 16-bit scaled)
+        img.save(buf, "JPEG", quality=max(1, min(100, int(quality))), optimize=True,
+                 **({"icc_profile": icc} if icc else {}))
     else:
         img.save(buf, "PNG")
     return buf.getvalue()

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**Artwork / CoverUp reviewed** in two rounds (tests/test_artwork_review*.py): covers are always JPEG
+**Artwork / CoverUp reviewed** in three rounds (tests/test_artwork_review*.py): covers are always JPEG
 (a TIFF/WebP/PNG/CMYK scan is converted, transparency onto white), the embedded copy is
 capped at CoverUp's embed_max_side so a hi-res scan never fails an album, ID3v2.3 stays
 v2.3, a cover that is gone at apply time is skipped instead of failing the album, CoverUp
@@ -11,7 +11,9 @@ another album's pictures are never taken (loose tracks, shared folders), and cov
 not added beside a cover.webp/gif/tif. An album sharing its folder is described to CoverUp
 by its own files (never another album's embedded front or release IDs); 16-bit scans,
 EXIF-rotated scans, CoverUp's jpeg_quality, earlier generated covers and Synology @eaDir
-folders are handled.
+folders are handled. No cover.jpg goes into a folder shared with other music; CoverUp
+searches only the release the identification gave; an album's own picture that nothing
+beats is used; colour profiles are kept; CoverUp's file_max_side applies to cover.jpg.
 
 **New: editions of one album in separate folders** (profile naming settings, and in the
 desktop app): "Separate editions in folder names" (Off / Edition / Edition + reissue year)

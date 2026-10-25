@@ -66,6 +66,11 @@ class Gui(te.Base):
         self.win.show()
 
     def tearDown(self):
+        end = time.time() + 30                     # work still running on a thread finishes first
+        while time.time() < end and any(self.gui._alive(th) for pg in self.win.pages.values()
+                                        for th, _w in getattr(pg, "_threads", [])):
+            self.app.processEvents()
+            time.sleep(0.02)
         self.win.close()
         super().tearDown()
 

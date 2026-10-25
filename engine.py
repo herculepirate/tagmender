@@ -198,13 +198,17 @@ class Engine:
         self._art = None
 
     # ---- what is in a path ------------------------------------------------
-    def albums_in(self, path) -> list[Group]:
+    def albums_in(self, path, skip=()) -> list[Group]:
+        """The albums below path; skip: folders not looked into at all (a library inside a
+        watched folder: its tracks are never even opened)."""
         path = Path(os.path.abspath(Path(path).expanduser()))  # plans and journals hold absolute paths
         if path.is_file():
             return [Group(path.parent, [path], [], single=True)]
         found = {}
+        skip = {os.path.realpath(str(x)) for x in skip}
         for dirpath, dirs, names in os.walk(path):
-            dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete")
+            dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "2delete"
+                             and os.path.realpath(os.path.join(dirpath, d)) not in skip)
             d = Path(dirpath)
             audio = sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
             if audio:
@@ -501,15 +505,17 @@ class Engine:
             return
         try:
             import artwork
-            if not artwork.needs_art(prop.source_dir, prop.files, self.profile):
+            folder, files = self._art_view(prop)
+            small = artwork.small_covers(folder, files, self.profile)
+            if not artwork.needs_art(folder, files, self.profile, small=small):
                 return                        # every track and the folder have a cover: nothing to look for
             if self._art is None:
                 self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
                                           self.token, self.log)
-            small = artwork.small_covers(prop.source_dir, prop.files, self.profile)
             own = artwork.own_cover(small, ex.STATE_DIR / "staging" / self.job) if small else None
             got = artwork.find_front(self._art, prop.source_dir, ids, (t.get("albumartist") or [""])[0],
-                                     (t.get("album") or [""])[0], self.log, files=prop.files, own=own)
+                                     (t.get("album") or [""])[0], self.log, files=prop.files, own=own,
+                                     keep=bool(small))
             if got and got.get("front") and small:
                 # what the larger cover replaces (artwork.replace "larger_only"); backed up, undoable
                 got["replace"] = {"file": str(small["file"][0]) if small.get("file") else None,
@@ -520,6 +526,22 @@ class Engine:
             prop.artwork = got
         elif got and got.get("note"):
             prop.why = list(prop.why) + [f"no cover: {got['note']}"]
+
+    def _art_view(self, prop):
+        """Where the album's covers are judged: for a copy profile whose copies exist already,
+        the copies (what the library has; the source is never changed); else the album itself."""
+        if self.profile["operation"] != "copy" or not self.profile["destination"]:
+            return prop.source_dir, prop.files
+        copies = []
+        for f in prop.files:
+            c = [x for x in planmod.copies_of(f, under=self.profile["destination"]) if Path(x).is_file()]
+            if not c:
+                return prop.source_dir, prop.files
+            copies.append(Path(c[0]))
+        folder = Path(os.path.commonpath([str(c.parent) for c in copies]))
+        if is_disc_dir(folder):
+            folder = folder.parent
+        return folder, copies
 
     # ---- everything ---------------------------------------------------------
     def apply_level(self, prop: planmod.Proposal):

@@ -826,7 +826,7 @@ class Planner:
                     rw = {"from": str(new), "sha256": hashlib.sha256(new.read_bytes()).hexdigest(),
                           "cover": True}
                     ce = next((c for c in entry["companions"] if c["src"] == rf), None)
-                    stays = all(fe["dst"] == fe["src"] for fe in entry["files"])
+                    stays = bool(entry["files"]) and all(fe["dst"] == fe["src"] for fe in entry["files"])
                     if ce is None and stays:              # tagged where it is: the cover beside it
                         ce = {"src": rf, "dst": rf, "op": "rewrite", "fingerprint": _fp(Path(rf))}
                         entry["companions"].append(ce)

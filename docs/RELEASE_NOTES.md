@@ -13,7 +13,15 @@ The old pictures and the old file are kept by the job; undo puts them back. Revi
 (nor overwritten: MP3 picture descriptions stay apart); a folder shared with other music lends
 no album its cover; a cover embedded as large as TagMender embeds is not replaced again on the
 next run; a copy or move never rewrites the source's cover file; a small cover.jpg beside a
-large embedded front gets that front as it is.
+large embedded front gets that front as it is. Third review (tests/test_review3_cover_watch.py):
+a cover.jpg that is a symbolic link is left alone (it stopped the album being tagged); CoverUp's
+embed_max_side is read before CoverUp is first used (else albums were replaced on every run);
+a copy profile judges covers at its copies (existing copies get the larger cover; a second run
+looks nothing up), and never rewrites a source cover when no track is copied; untagged tracks
+of other albums in the folder make it a shared folder; an unreadable largest cover falls back to
+the next, and nothing is generated over an album that has covers; a track with only a back
+cover gets a front beside it; a watcher pass never opens the library inside the watched folder;
+in the Flatpak the background watcher runs in its own sandbox instance (it outlives the app).
 
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)

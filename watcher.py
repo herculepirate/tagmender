@@ -16,8 +16,8 @@ An album is processed when:
     times; a provider outage or throttling is retried sooner, with growing pauses.
 
 An interrupted job found at start is recovered first. Profiles that are not
-`unattended` only plan: the plans wait in ~/.local/state/tagmender/plans/ for
-`tagmender apply`.
+`unattended` only plan: the plans wait in ~/.local/state/tagmender/plans/ for approval
+(`tagmender watch --approve`, or Apply on the app's Watched folders page).
 """
 from __future__ import annotations
 
@@ -320,7 +320,7 @@ class Watcher:
                 continue
             e = eng_mod.Engine(prof, log=self.log)
             libs = self.library_inside(root, prof)
-            for g in e.albums_in(root):
+            for g in (e.albums_in(root, skip=libs) if libs else e.albums_in(root)):
                 if self.stop:
                     break
                 real = Path(os.path.realpath(g.folder))
@@ -780,11 +780,18 @@ def _portal_background(autostart: bool, call=None) -> str:
 
 
 def _start_detached():
+    """Start `tagmender watch --nice` on its own. In the Flatpak through the Flatpak portal
+    (flatpak-spawn): a new instance of the app's sandbox, which outlives the app - a process
+    started inside the app's own sandbox ends with it."""
+    import shutil
     import subprocess
     import sys
-    script = Path(__file__).resolve().parent / "tagmender.py"
-    subprocess.Popen([sys.executable, "-u", str(script), "watch", "--nice"], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    if in_flatpak() and shutil.which("flatpak-spawn"):
+        cmd = ["flatpak-spawn", "tagmender", "watch", "--nice"]
+    else:
+        cmd = [sys.executable, "-u", str(Path(__file__).resolve().parent / "tagmender.py"), "watch", "--nice"]
+    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
 
 
 def service_status(run=None) -> str:

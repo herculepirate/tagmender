@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import re
 import urllib.request
 from pathlib import Path
 
@@ -274,9 +275,8 @@ def _size_of(data: bytes):
         return None
 
 
-def embedded_front(path):
-    """The track's front cover as embedded (bytes), or None: the picture typed "front cover",
-    else one typed "other" (many rippers leave the type so); never a back cover or booklet."""
+def _pictures(path) -> list:
+    """The track's embedded pictures as (type, bytes); [] when none or unreadable."""
     import base64
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import ID3
@@ -285,8 +285,8 @@ def embedded_front(path):
     try:
         f = tagio.mutagen_file(path)
     except Exception:
-        return None
-    pics = []                                       # (type, bytes)
+        return []
+    pics = []
     try:
         if isinstance(f, FLAC):
             pics = [(p.type, p.data) for p in f.pictures]
@@ -302,12 +302,22 @@ def embedded_front(path):
                 except Exception:
                     continue
     except Exception:
-        return None
+        return []
+    return pics
+
+
+def _pick_front(pics):
     for want in (3, 0):                  # the front cover, else an untyped ("other") picture
         for t, d in pics:
             if t == want:
                 return d
     return None                          # (a back cover or booklet page is never "the front")
+
+
+def embedded_front(path):
+    """The track's front cover as embedded (bytes), or None: the picture typed "front cover",
+    else one typed "other" (many rippers leave the type so); never a back cover or booklet."""
+    return _pick_front(_pictures(path))
 
 
 def folder_cover(folder) -> Path | None:
@@ -316,7 +326,8 @@ def folder_cover(folder) -> Path | None:
     best = None
     try:
         for x in Path(folder).iterdir():
-            if x.is_file() and x.stem.lower() in COVER_STEMS and x.suffix.lower() in (".jpg", ".jpeg", ".png"):
+            if x.is_file() and not x.is_symlink() and x.stem.lower() in COVER_STEMS and \
+                    x.suffix.lower() in (".jpg", ".jpeg", ".png"):      # (a link points at someone else's file)
                 sz = _size_of(x.read_bytes())
                 if sz and (best is None or min(sz) > best[1]):
                     best = (x, min(sz))
@@ -328,14 +339,15 @@ def folder_cover(folder) -> Path | None:
 def small_covers(folder, files, profile) -> dict:
     """The album's covers smaller than artwork.min_px on the short side, which a larger
     cover replaces (artwork.replace "larger_only"): {"file": (path, w, h) or None,
-    "embedded": {track: (w, h)}, "smallest": short side of the largest of them, "own":
-    (path or bytes of the album's best existing cover, w, h)}. Empty when replacing is off."""
+    "embedded": {track: (w, h)} ((0, 0): pictures, but no front among them), "owns": the
+    album's existing covers, largest first, as (path or bytes, w, h)}. Empty when replacing
+    is off or nothing is small."""
+    from plan import EMBEDDABLE
     art = profile["artwork"]
     low = int(art.get("min_px") or 0)
     if art.get("replace", "larger_only") != "larger_only" or not low:
         return {}
-    out = {"file": None, "embedded": {}, "own": None}
-    best = None
+    out = {"file": None, "embedded": {}, "owns": []}
     cap = embed_cap()
     # a folder holding other music too: its cover file is no one album's (never replaced, never "own")
     if art.get("files", True) and not _other_music(Path(folder), files):
@@ -343,22 +355,29 @@ def small_covers(folder, files, profile) -> dict:
         if c is not None:
             sz = _size_of(c.read_bytes())
             if sz:
-                best = (c, *sz)
+                out["owns"].append((c, *sz))
                 if min(sz) < low:
                     out["file"] = (c, *sz)
     if art.get("embed_front", True):
         for f in files:
-            data = embedded_front(f)
-            sz = _size_of(data) if data else None
+            if Path(f).suffix.lower() not in EMBEDDABLE:
+                continue                          # (a cover there is never written: never looked for)
+            pics = _pictures(f)
+            data = _pick_front(pics)
+            if data is None:
+                if pics:
+                    out["embedded"][str(f)] = (0, 0)          # a back cover or booklet alone: a front is added
+                continue
+            sz = _size_of(data)
             # small, unless it is as large as TagMender embeds (embed_max_side caps the long side:
             # with min_px above that, or a wide cover, it would be replaced again on every run)
             if sz and min(sz) < low and max(sz) < cap - 2:
                 out["embedded"][str(f)] = sz
-            if sz and (best is None or min(sz) > min(best[1:])):
-                best = (data, *sz)
+            if sz:
+                out["owns"].append((data, *sz))
     if not out["file"] and not out["embedded"]:
         return {}
-    out["own"] = best
+    out["owns"].sort(key=lambda o: -min(o[1:]))
     return out
 
 
@@ -368,36 +387,37 @@ _CAP = []
 def embed_cap() -> int:
     """The smallest long side TagMender embeds covers at: EMBED_MAX_SIDE, or CoverUp's
     embed_max_side when that is smaller (0 there: no cap of its own)."""
-    if not _CAP:
-        cap = EMBED_MAX_SIDE
-        try:
-            import coverup_batch as cb
-            import picard_config
-            found = picard_config.ini_path()
-            st = cb.batch_settings(str(found) if found else cb.DEFAULT_INI, "full")[0]
-            v = int(st["embed_max_side"] or 0)
-            if v > 0:
-                cap = min(cap, v)
-        except BaseException:                 # CoverUp not there: TagMender's own size
-            pass
-        _CAP.append(cap)
-    return _CAP[0]
+    if _CAP:
+        return _CAP[0]
+    cap = EMBED_MAX_SIDE
+    try:
+        import coverup_batch as cb
+        import coverup_loader
+        import picard_config
+        coverup_loader.load_coverup(str(companions.coverup_dir()))
+        found = picard_config.ini_path()
+        st = cb.batch_settings(str(found) if found else cb.DEFAULT_INI, "full")[0]
+        v = int(st["embed_max_side"] or 0)
+        if v > 0:
+            cap = min(cap, v)
+        _CAP.append(cap)                      # (only what CoverUp said is kept; a failure is tried again)
+    except BaseException:                     # CoverUp not there: TagMender's own size
+        pass
+    return cap
 
 
 def own_cover(small: dict, staging: Path) -> dict | None:
-    """The album's best existing cover as a found front (for enlarging when nothing larger
-    is found anywhere)."""
-    own = (small or {}).get("own")
-    if not own:
-        return None
-    what, w, h = own
-    data = what.read_bytes() if isinstance(what, Path) else what
+    """The album's best existing cover that can be read, as a found front (for enlarging
+    when nothing larger is found anywhere)."""
     staging.mkdir(parents=True, exist_ok=True)
-    try:
-        path, w, h = _stage(data, staging)
-    except Exception:
-        return None
-    return {"front": str(path), "width": w, "height": h, "source": "the album's own cover"}
+    for what, _w, _h in (small or {}).get("owns") or []:
+        try:
+            data = what.read_bytes() if isinstance(what, Path) else what
+            path, w, h = _stage(data, staging)
+        except Exception:
+            continue                          # (a truncated or unreadable picture: the next one)
+        return {"front": str(path), "width": w, "height": h, "source": "the album's own cover"}
+    return None
 
 
 def as_format(front: Path, suffix: str, staging: Path) -> Path:
@@ -418,7 +438,7 @@ def as_format(front: Path, suffix: str, staging: Path) -> Path:
     return path
 
 
-def needs_art(folder, files, profile) -> str:
+def needs_art(folder, files, profile, small=None) -> str:
     """Why the album needs a cover ("" when it does not): a track without an embedded front
     (when covers are embedded), or no picture in its folder (when cover files are written),
     or a cover smaller than artwork.min_px (artwork.replace "larger_only")."""
@@ -426,13 +446,14 @@ def needs_art(folder, files, profile) -> str:
     art = profile["artwork"]
     if art.get("when", "needed") == "always":
         return "always looked for"
-    small = small_covers(folder, files, profile)
+    small = small_covers(folder, files, profile) if small is None else small
     if small.get("file"):
         c, w, h = small["file"]
         return f"{c.name} is {w}x{h}, smaller than {art['min_px']} px"
     if small.get("embedded"):
         t, (w, h) = next(iter(small["embedded"].items()))
-        return f"the cover in {Path(t).name} is {w}x{h}, smaller than {art['min_px']} px"
+        return (f"{Path(t).name} has pictures but no front cover" if not w else
+                f"the cover in {Path(t).name} is {w}x{h}, smaller than {art['min_px']} px")
     if art.get("embed_front", True):
         for f in files:
             try:
@@ -473,6 +494,11 @@ def _album_id(path):
     return (title, who) if title else ("", "")
 
 
+def _bare_stem(p: Path) -> str:
+    """"02 b (1)" and "02 b" alike: a duplicate's name."""
+    return re.sub(r"\s*\(\d+\)$", "", p.stem).casefold()
+
+
 def _other_music(folder: Path, files) -> bool:
     """folder (or a folder below it) holds another album's music: a track that is not among
     files and is tagged as another album. Copies of the album's own tracks (FLAC and Opus
@@ -480,6 +506,8 @@ def _other_music(folder: Path, files) -> bool:
     files and NAS index folders (Synology's @eaDir, .AppleDouble) are nobody's."""
     mine = {str(f) for f in files}
     ours = {_album_id(f) for f in files} if files else set()
+    ours.discard(("", ""))                  # (untagged is no album: never "the same" as this one)
+    stems = {_bare_stem(Path(f)) for f in files}
     try:
         for p in folder.rglob("*"):
             rel = p.relative_to(folder).parts
@@ -487,8 +515,11 @@ def _other_music(folder: Path, files) -> bool:
                 continue
             if str(p) in mine or not p.is_file():
                 continue
-            if _album_id(p) in ours:
+            aid = _album_id(p)
+            if aid in ours:
                 continue                                  # the same album (a copy, a bonus track)
+            if aid == ("", "") and (len(rel) > 1 or _bare_stem(p) in stems):
+                continue                                  # its untagged bonus folder, a copy of its own track
             return True
     except OSError:
         return False
@@ -586,7 +617,8 @@ def _enlarged(got: dict, min_px: int, quality=JPEG_QUALITY) -> dict | None:
                 source=got.get("source", "") + " (enlarged)")
 
 
-def find_front(providers, folder, ids, artist="", album="", log=None, files=None, own=None) -> dict | None:
+def find_front(providers, folder, ids, artist="", album="", log=None, files=None, own=None,
+               keep=False) -> dict | None:
     """The first provider's front that is big enough (artwork.min_px on its short side; a
     smaller one of at least LOW_RES_FLOOR is enlarged when artwork.enlarge is on), with
     "embed": the copy that goes into each track (at most embed_max_side, as CoverUp). When
@@ -639,7 +671,7 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
             except Exception as exc:
                 notes.append(f"{p.name}: {exc}")
     for p in providers:                              # nothing at all: made, if the profile says so
-        if own:
+        if own or keep:
             break                                    # (the album has a cover: never one made over it)
         mode = getattr(p, "generate_mode", "off")
         if isinstance(p, CoverUp) and mode != "off":

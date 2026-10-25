@@ -2480,8 +2480,8 @@ class UnreachableWebSearch(unittest.TestCase):
             ma.urllib.request.urlopen = saved
 
 class WebSearchEngines(unittest.TestCase):
-    """John's choice (2026-10-24): Tavily first, his own SearXNG as the backup,
-    DuckDuckGo only when neither is set up or both fail."""
+    """John's choice (2026-10-24): Tavily first, DuckDuckGo only when Tavily is not
+    set up or fails (SearXNG dropped at his request)."""
 
     def setUp(self):
         self.env = {k: _os.environ.pop(k, None) for k in ("TAGMENDER_SEARXNG_URL", "TAVILY_API_KEY")}
@@ -2531,14 +2531,12 @@ class WebSearchEngines(unittest.TestCase):
         stored = " ".join(u + b for u, b in h.db.execute("SELECT url, body FROM http_cache"))
         self.assertNotIn("tvly-secret", stored)
 
-    def test_searxng_when_tavily_fails(self):
-        _os.environ["TAGMENDER_SEARXNG_URL"] = "http://searx.local:8080"
+    def test_duckduckgo_when_tavily_fails_and_searxng_is_never_asked(self):
+        _os.environ["TAGMENDER_SEARXNG_URL"] = "http://searx.local:8080"     # left over: ignored
         _os.environ["TAVILY_API_KEY"] = "tvly-secret"
         h = self.serve(tavily_ok=False)
-        text, engine = ma.web_search(h, '"QDISS0201CDD" Exhorder')
-        self.assertEqual(engine, "searxng")
-        self.assertIn("22314946", text)
-        self.assertTrue(any("searx.local:8080/search?" in u and "format=json" in u for u, _h, _d in self.asked))
+        self.assertEqual(ma.web_search(h, '"QDISS0201CDD" Exhorder')[1], "duckduckgo")
+        self.assertFalse(any("searx" in u for u, _h, _d in self.asked))
 
     def test_duckduckgo_only_without_either(self):
         h = self.serve()

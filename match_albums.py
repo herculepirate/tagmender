@@ -1032,7 +1032,7 @@ class Http:
     # short timeout, and left alone for a while after failing, so an unreachable search
     # engine cannot hold every album up for minutes (6 retries x 60 s per query).
     OPTIONAL_HOSTS = {"duckduckgo": (1, 15, 3, 1800),    # attempts, timeout s, failures, pause s
-                      "searxng": (1, 20, 3, 1800), "tavily": (1, 30, 3, 1800)}
+                      "tavily": (1, 30, 3, 1800)}
 
     def host_down(self, host):
         down = getattr(self, "down", None) or {}
@@ -2089,10 +2089,8 @@ def _setting(env, name):
 
 def web_search(http, query):
     """Web results for a query, as text holding their URLs. Tavily first
-    (~/.config/tagmender/tavily_key or TAVILY_API_KEY), then your own SearXNG
-    (~/.config/tagmender/searxng_url or TAGMENDER_SEARXNG_URL; its JSON output must be
-    enabled), then DuckDuckGo's HTML page. Each is optional; one failing or finding
-    nothing hands on to the next. Returns (text, engine)."""
+    (~/.config/tagmender/tavily_key or TAVILY_API_KEY), then DuckDuckGo's HTML page
+    when Tavily is not set up, fails or finds nothing. Returns (text, engine)."""
     key = _setting("TAVILY_API_KEY", "tavily_key")
     m = re.search(r"tavilyApiKey=([\w-]+)", key)          # the MCP URL pasted whole
     key = m.group(1) if m else key
@@ -2102,14 +2100,6 @@ def web_search(http, query):
                                   "tavily", headers={"Authorization": f"Bearer {key}"}) or {}
             if data.get("results"):
                 return json.dumps(data["results"]), "tavily"
-        except Exception:
-            pass
-    searx = _setting("TAGMENDER_SEARXNG_URL", "searxng_url").rstrip("/")
-    if searx:
-        try:
-            data = http.get_json(f"{searx}/search?q={q(query)}&format=json", "searxng") or {}
-            if data.get("results"):
-                return json.dumps(data["results"]), "searxng"
         except Exception:
             pass
     try:

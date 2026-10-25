@@ -34,7 +34,11 @@ folder's photo (Artist/folder.jpg beside a loose single and the artist's albums)
 for the single's cover, replaced or embedded; an album held twice in one folder (FLAC and MP3)
 gets its small cover replaced once, then no more lookups; covers are judged by the tracks
 TagMender writes; a finished job is marked ENDED, so the watcher no longer rereads every job's
-journal before every pass and job.
+journal before every pass and job. Sixth review (tests/test_review6_cover.py): the artwork
+step and the plan ask one question - does this folder hold another album's music? - so a picture
+in an artist folder is never an untagged single's cover, a folder that will never get a cover
+file is not looked up again on every run, and an album's untagged copies and its files in
+_old/2delete folders do not stop its small cover being replaced.
 
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)

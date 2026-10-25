@@ -433,20 +433,13 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
 
 def _holds_other_music(folder: Path, entry, group=None) -> bool:
     """folder - or any folder below it - holds, or will hold, music that is not this album's
-    (an artist folder with a loose single and the artist's albums: its folder.jpg is no
-    one album's). group: every file of the album as found (its second copies too)."""
+    (an artist folder with a loose single and the artist's albums: its folder.jpg is no one
+    album's). The same rule the artwork step used to choose the album's covers
+    (artwork._other_music). group: every file of the album as found (its second copies too)."""
+    import artwork as _artwork
     ours = {fe["src"] for fe in entry["files"]} | {fe["dst"] for fe in entry["files"]} \
-        | {s_.get("file") for s_ in entry.get("skipped") or []} | {str(g) for g in group or []}
-    try:
-        for k in folder.rglob("*"):
-            rel = k.relative_to(folder).parts
-            if any(x.startswith((".", "@")) for x in rel):
-                continue                          # (hidden files, NAS index folders: nobody's)
-            if k.suffix.lower() in AUDIO_EXT and str(k) not in ours and k.is_file():
-                return True
-    except OSError:
-        return False
-    return False
+        | {s_.get("file") for s_ in entry.get("skipped") or [] if s_.get("file")} | {str(g) for g in group or []}
+    return _artwork._other_music(Path(folder), sorted(ours))
 
 
 def _cue_rewrites(path: Path, renames: dict):

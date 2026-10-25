@@ -366,8 +366,10 @@ def small_covers(folder, files, profile, ours=None) -> dict:
     replacing = art.get("replace", "larger_only") == "larger_only" and low > 0
     out = {"file": None, "embedded": {}, "owns": []}
     cap = embed_cap(profile)
-    # a folder holding other music too: its cover file is no one album's (never replaced, never "own")
-    if art.get("files", True) and not _other_music(Path(folder), ours or files):
+    # a folder holding other music too: its cover file is no one album's (never replaced, never
+    # "own", and none is written there - the plan asks the same question)
+    out["shared"] = _other_music(Path(folder), ours or files)
+    if art.get("files", True) and not out["shared"]:
         c = folder_cover(folder)
         if c is not None:
             try:
@@ -486,7 +488,7 @@ def needs_art(folder, files, profile, small=None) -> str:
                     return f"{Path(f).name} has no cover"
             except Exception:
                 return f"{Path(f).name} could not be read"
-    if art.get("files", True):
+    if art.get("files", True) and not small.get("shared"):     # (a shared folder never gets one)
         try:
             if not any(x.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp")
                        for d in _album_dirs(folder) for x in d.iterdir() if x.is_file()):
@@ -529,35 +531,50 @@ def _bare_stem(p: Path) -> str:
     return re.sub(r"\s*\(\d+\)$", "", p.stem).casefold()
 
 
+def _nobodys(part: str) -> bool:
+    """Folders whose files are no album's: hidden ones, NAS index folders (Synology's @eaDir),
+    and the ones TagMender never looks into (_old, _unresolved, 2delete)."""
+    return part.startswith((".", "@", "_")) or part == "2delete"
+
+
 def _other_music(folder: Path, files) -> bool:
-    """folder (or a folder below it) holds another album's music: a track that is not among
-    files and is tagged as another album. Copies of the album's own tracks (FLAC and Opus
-    side by side, "02 b (1).flac") and its untagged bonus folder are the album's; hidden
-    files and NAS index folders (Synology's @eaDir, .AppleDouble) are nobody's."""
+    """folder (or any folder below it) holds music that is not this album's - so a picture
+    there is no one album's cover. files: every file of the album (as grouped, and where the
+    plan puts them). The album's own: copies of its tracks ("02 b (1).flac", "01 - a.mp3"
+    beside "01 a.flac"), tracks tagged as the same album, its untagged disc folders, and - for
+    an untagged album of several tracks - an untagged bonus folder smaller than the album
+    itself. A loose single beside the artist's album folders is not an album with bonus
+    folders: that folder's picture is the artist's."""
     mine = {str(f) for f in files}
-    ours = {_album_id(f) for f in files} if files else set()
-    untagged = bool(files) and ours <= {("", "")}     # the album itself carries no tags
-    ours.discard(("", ""))                  # (untagged is no album: never "the same" as this one)
+    ids = {_album_id(f) for f in files} if files else set()
+    untagged = bool(files) and ids <= {("", "")}      # the album itself carries no tags
+    ids.discard(("", ""))                   # (untagged is no album: never "the same" as this one)
     stems = {_bare_stem(Path(f)) for f in files}
+    top = sum(1 for f in files if Path(f).parent == Path(folder))
     try:
-        for p in folder.rglob("*"):
-            rel = p.relative_to(folder).parts
-            if any(x.startswith((".", "@")) for x in rel) or p.suffix.lower() not in ex.AUDIO_EXT:
-                continue
-            if str(p) in mine or not p.is_file():
-                continue
-            aid = _album_id(p)
-            if aid in ours:
-                continue                                  # the same album (a copy, a bonus track)
-            if aid == ("", "") and _bare_stem(p) in stems:
-                continue                                  # a copy of one of its own tracks
-            if aid == ("", "") and len(rel) > 1 and (_is_disc(folder / rel[0]) or untagged):
-                continue                                  # its untagged disc folder; an untagged album's
-            #                                               untagged bonus folder (a TAGGED single beside
-            #                                               untagged album folders: the artist's folder)
-            return True
+        found = [p for p in folder.rglob("*")
+                 if p.suffix.lower() in ex.AUDIO_EXT and not any(_nobodys(x) for x in p.relative_to(folder).parts)
+                 and str(p) not in mine and p.is_file()]
     except OSError:
         return False
+    per_sub = {}
+    for p in found:
+        rel = p.relative_to(folder).parts
+        if len(rel) > 1:
+            per_sub[rel[0]] = per_sub.get(rel[0], 0) + 1
+    for p in found:
+        rel = p.relative_to(folder).parts
+        aid = _album_id(p)
+        if aid in ids:
+            continue                                  # the same album (a copy, a bonus track)
+        if _bare_stem(p) in stems and aid in (("", ""), *ids):
+            continue                                  # a copy of one of its own tracks
+        if aid == ("", "") and len(rel) > 1:
+            if _is_disc(folder / rel[0]):
+                continue                              # its untagged disc folder
+            if untagged and top >= 2 and per_sub[rel[0]] < top:
+                continue                              # an untagged album's (smaller) untagged bonus folder
+        return True
     return False
 
 

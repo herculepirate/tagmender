@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon/tagmender-icon-animated.svg" width="160" height="160" alt="TagMender icon"></p>
+
 # TagMender
 
 Identifies the music in a large library with **MusicBrainz and Discogs as equal sources**,

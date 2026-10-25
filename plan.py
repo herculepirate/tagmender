@@ -120,6 +120,17 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     return changes, rows
 
 
+def _one_name(a, b) -> bool:
+    """a and b are one directory entry spelled two ways (case or Unicode form on a
+    filesystem that treats them alike), not two hard links."""
+    if fnm.fold(a) != fnm.fold(b):
+        return False
+    try:
+        return not (Path(a).name in os.listdir(Path(a).parent) and Path(b).name in os.listdir(Path(b).parent))
+    except OSError:
+        return True
+
+
 MOUNT_PARENTS = ("/media", "/mnt", "/run/media")
 
 
@@ -283,6 +294,7 @@ class Planner:
         self.claimed = {}          # folded destination path -> source (collisions inside the plan)
         self.created_dirs = set()
         self._dirs = {}
+        self._inodes = {}
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
@@ -369,6 +381,17 @@ class Planner:
                 entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "unsupported_format",
                                          "matched": str(exc)})
                 continue
+            try:
+                ino = (os.stat(f).st_dev, os.stat(f).st_ino)
+            except OSError:
+                ino = None
+            if ino and self._inodes.get(ino, str(f)) != str(f):
+                entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "same_file",
+                                         "matched": f"the same file as {self._inodes[ino]} (a hard link); "
+                                                    "left where it is"})
+                continue
+            if ino:
+                self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
             if identified and p["mark_resolved"]:
                 target.setdefault("tagmender", ["Resolved"])
@@ -415,7 +438,7 @@ class Planner:
                     fe["op"] = "tag" if changes else "none"
                 else:
                     fe["op"] = op
-                    if Path(dst).exists() and os.path.samefile(dst, f) and fnm.fold(dst) != fnm.fold(f):
+                    if Path(dst).exists() and os.path.samefile(dst, f) and not _one_name(dst, f):
                         fe["linked"] = True              # the destination is a hard link to this file
                         if op == "copy" and not changes:
                             fe["op"] = "none"            # already there
@@ -465,11 +488,17 @@ class Planner:
             has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
                                          (".jpg", ".jpeg", ".png") for c in entry["companions"])
             for fe in entry["files"]:
-                if fe["dst"] in embed and fe["op"] == "none":
-                    fe["op"] = "tag"                          # only the cover is new
+                if fe["dst"] in embed and fe["op"] == "none":   # only the cover is new
+                    fe["op"] = "tag" if fe["dst"] == fe["src"] else op
+            cover = None if (has_image or not p["artwork"]["files"]) else folder / "cover.jpg"
+            if cover is not None:
+                key = fnm.fold(cover)
+                if self.claimed.get(key) not in (None, f"artwork:{prop.source_dir}"):
+                    cover = None                              # another album's file goes there
+                else:
+                    self.claimed[key] = f"artwork:{prop.source_dir}"
             entry["artwork"] = {"front": art["front"], "source": art.get("source", ""),
-                                "embed_into": embed, "file": None if (has_image or not p["artwork"]["files"])
-                                else str(folder / "cover.jpg"),
+                                "embed_into": embed, "file": str(cover) if cover else None,
                                 "width": art.get("width"), "height": art.get("height")}
         # 6. lyrics files (.lrc) next to the tracks; never over a file that is already there
         entry["sidecars"] = []

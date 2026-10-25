@@ -32,6 +32,7 @@ from pathlib import Path
 import exclusions as ex
 import filenames as fnm
 import naming
+import payload
 import reasons
 import tagio
 
@@ -128,10 +129,16 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     return changes, rows
 
 
-def _release_identity(prop) -> str:
-    rel = prop.release or {}
-    title = str((rel.get("album") or [""])[0])
-    return f"{prop.provider}:{prop.release_id}" if prop.release_id else f"title:{title.casefold()}"
+def _release_ids(prop) -> frozenset:
+    """The release IDs this album will carry (MusicBrainz and/or Discogs), else its title."""
+    ids = set()
+    for t in prop.targets or []:
+        ids |= _ids_of(t)
+    if not ids and prop.release_id:
+        ids.add(f"id:{prop.release_id}")
+    if not ids:
+        ids.add("title:" + str(((prop.release or {}).get("album") or [""])[0]).casefold())
+    return frozenset(ids)
 
 
 def _ids_of(tags: dict) -> set:
@@ -142,42 +149,49 @@ def _ids_of(tags: dict) -> set:
     return out
 
 
-def _other_release_there(album_dir: Path, me: str, own_files) -> bool:
-    """album_dir already holds music of a different release (not this album's own files)."""
+def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
+    """album_dir already holds music explicitly tagged as a different release: files that
+    carry release IDs and share none with this album. Files of this plan (moving away or
+    this album's own, under any name) and untagged files never count."""
     if not album_dir.is_dir():
         return False
-    own = {str(f) for f in own_files}
-    own_ino = set()
-    for f in own_files:
-        try:
-            st = os.stat(f)
-            own_ino.add((st.st_dev, st.st_ino))
-        except OSError:
-            pass
     for dirpath, dirs, names in os.walk(album_dir):
         dirs[:] = [d for d in dirs if _DISC_NAME.match(d)]
         for n in names:
             p = os.path.join(dirpath, n)
-            if Path(n).suffix.lower() not in AUDIO_EXT or p in own or n.startswith("."):
+            if Path(n).suffix.lower() not in AUDIO_EXT or n.startswith("."):
                 continue
             try:
                 st = os.stat(p)
-                if (st.st_dev, st.st_ino) in own_ino:            # this album's own file, another name
-                    continue
             except OSError:
                 continue
+            if p in ignore or (st.st_dev, st.st_ino) in ignore:
+                continue
             try:
-                tags = tagio.read(p)
+                ids = _ids_of(tagio.read(p))
             except Exception:
                 continue
-            ids = _ids_of(tags)
-            if me.startswith("title:"):
-                return str((tags.get("album") or [""])[0]).casefold() != me[6:]
-            _prov, _, rid = me.partition(":")
-            if ids:
-                return not any(i.endswith(":" + rid) for i in ids)
-            return True                                   # untagged music of something else
+            if ids and not (ids & me):
+                return True
     return False
+
+
+def _same_bytes(there: Path, c: Path, pairs: dict, profile) -> bool:
+    """there already holds what c would become at that place (itself, or its rewrite)."""
+    try:
+        have = there.read_bytes()
+    except OSError:
+        return False
+    if c.suffix.lower() in CUE_LIKE:
+        rel = {os.path.relpath(s_, c.parent): os.path.relpath(d_, there.parent) for s_, d_ in pairs.items()}
+        rel.update({str(s_): str(d_) for s_, d_ in pairs.items()})
+        rw = _cue_rewrites(c, rel)
+        if rw and rw[0] is not None:
+            return have == rw[0].encode(rw[1])
+    try:
+        return have == c.read_bytes()
+    except OSError:
+        return False
 
 
 def _fit_name(name: str, limits: dict) -> str:
@@ -250,6 +264,9 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             else:
                 return [], "files of one folder go to different folders; companion files stay where they are"
     dmap = {k: next(iter(v)) for k, v in dmap.items()}
+    if src_dir in dmap and _DISC_NAME.match(dmap[src_dir].name) and \
+            any(v != dmap[src_dir] and v.parent == dmap[src_dir].parent for v in dmap.values()):
+        dmap[src_dir] = dmap[src_dir].parent        # disc 1 in the album folder, disc 2 inside it
     if src_dir not in dmap:
         top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
         if any(d != top and d.parent != top for d in dmap.values()):
@@ -375,6 +392,7 @@ class Planner:
     def __init__(self, profile, job_id=None, rules=None, overrides=None, extra_roots=()):
         self.profile = profile
         self.extra_roots = [os.path.realpath(os.path.expanduser(str(r))) for r in extra_roots]
+        self.extra_roots = [os.path.dirname(r) if os.path.isfile(r) else r for r in self.extra_roots]
         self.job = job_id or time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
         self.rules = ex.load_rules(profile.name if profile.name != "default" else None) if rules is None else rules
         self.overrides = ex.State().overrides() if overrides is None else overrides
@@ -383,6 +401,7 @@ class Planner:
         self._dirs = {}
         self._inodes = {}
         self._album_dirs = {}
+        self._planned = set()
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
@@ -527,6 +546,17 @@ class Planner:
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
                     continue
+                if op == "copy" and Path(dst).exists() and not os.path.samefile(dst, f) and \
+                        fnm.fold(dst) not in self.claimed and payload.digest(dst) == payload.digest(f) \
+                        and payload.digest(f) is not None:
+                    # copied by an earlier run: bring the copy's tags up to date, nothing else
+                    self.claimed[fnm.fold(dst)] = str(f)
+                    have = tagio.read(dst)
+                    changes2, rows2 = diff_tags(have, target, p, conf if identified else 100.0, [])
+                    fe.update(src=str(dst), dst=str(dst), op="tag" if changes2 else "none", changes=changes2,
+                              diff=rows2, fingerprint=_fp(dst), copy_of=str(f))
+                    entry["files"].append(fe)
+                    continue
                 dst = self._unique(dst, f, entry)
                 if dst is None:
                     continue
@@ -547,9 +577,10 @@ class Planner:
         moved = [fe for fe in entry["files"] if fe["op"] in ("copy", "move")]
         if moved:
             # every file of the album, those already in place too: their folder is the album's
-            pairs = {fe["src"]: fe["dst"] for fe in entry["files"]}
+            pairs = {fe.get("copy_of", fe["src"]): fe["dst"] for fe in entry["files"]}
             src_root = Path(prop.source_dir)
-            at_root = os.path.realpath(src_root) in self.library_roots()
+            real_src = os.path.realpath(src_root)
+            at_root = real_src in self.library_roots() or (real_src in self.roots() and len(pairs) == 1)
             comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root)
             if why_not:
                 entry["notes"].append(why_not)
@@ -559,6 +590,8 @@ class Planner:
                     continue
                 if want != c:
                     want = want.with_name(_fit_name(want.name, p["filenames"]))
+                if want != c and want.exists() and _same_bytes(want, c, pairs, p):
+                    continue                                  # copied there by an earlier run
                 dst = c if want == c else self._unique(want, c, entry)
                 if dst is None:
                     continue
@@ -624,12 +657,23 @@ class Planner:
         That's What I Call Music! 47" and "... 48" shortened to five words would share one."""
         album_dir = dst.parent.parent if _DISC_NAME.match(dst.parent.name) else dst.parent
         if "map" not in cache:
-            me = _release_identity(prop)
+            me = _release_ids(prop)
             key = fnm.fold(album_dir)
             owner = self._album_dirs.get(key)
-            clash = (owner is not None and owner != me) or \
-                (owner is None and _other_release_there(album_dir, me, own_files))
-            new = album_dir.with_name(album_dir.name + fnm.collision_suffix(me)) if clash else album_dir
+            single = len(prop.files) == 1             # singles share Artist/ or Artist/Singles by design
+            clash = not single and ((owner is not None and not (owner & me)) or
+                                    (owner is None and _other_release_there(album_dir, me, self._planned)))
+            new = album_dir
+            if clash:
+                tag = fnm.collision_suffix(" ".join(sorted(me)))
+                limits = self.profile["filenames"]
+                room = int(limits.get("max_dir_bytes", 255)) - len(tag.encode("utf-8"))
+                base = album_dir.name
+                if len(base.encode("utf-8")) > room:
+                    base = fnm.truncate_words(base, room, limits.get("compat", "windows"))
+                new = album_dir.with_name(base + tag)
+            if not single:
+                self._album_dirs[fnm.fold(new)] = me
             self._album_dirs[fnm.fold(new)] = me
             cache["map"] = (album_dir, new)
         old, new = cache["map"]
@@ -719,6 +763,15 @@ class Planner:
         return None
 
     def build(self, proposals) -> dict:
+        # every file this plan starts from (and its inode): never "another release" in a folder
+        for pr in proposals:
+            for f in pr.files:
+                self._planned.add(str(f))
+                try:
+                    st = os.stat(f)
+                    self._planned.add((st.st_dev, st.st_ino))
+                except OSError:
+                    pass
         albums = [self.album(pr) for pr in proposals]
         counts = {}
         for a in albums:

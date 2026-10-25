@@ -135,17 +135,22 @@ class Engine:
             audio = sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
             if audio:
                 found[d] = audio
-        # each audio folder's album folder, as the matcher sees it (match_albums._owners): a
-        # disc folder belongs to its parent, and so does any folder inside a folder holding
-        # the album (a bonus disc filed inside its album's folder)
+        # each audio folder's album folder: a disc folder belongs to its parent; a folder
+        # inside an album's folder belongs to that album (a bonus disc filed inside it, as
+        # match_albums._owners has it) only when both are tagged as that same album -
+        # otherwise it is an album of its own
         disc = {d: d != path and is_disc_dir(d) for d in found}
-        have = set(found) | {d.parent for d in found if disc[d]}
+        owner_of = {d: (d.parent if disc[d] else d) for d in found}
+        own_key = {}
+        for d in found:
+            own_key.setdefault(owner_of[d], set()).update(ex.album_key(ex.read_meta(f)) for f in found[d])
         folders = {}
         for d in sorted(found):
-            owner = d.parent if disc[d] else d
+            owner = owner_of[d]
+            keys = own_key.get(owner, set())
             up = owner.parent
             while up != path and path in up.parents:
-                if up in have:
+                if up in own_key and len(keys) == 1 and next(iter(keys))[0] == "tags" and own_key[up] == keys:
                     owner = up
                 up = up.parent
             folders.setdefault(owner, []).extend(found[d])
@@ -157,8 +162,10 @@ class Engine:
             by_album = {}
             for f in files:
                 by_album.setdefault(ex.album_key(ex.read_meta(f)), []).append(f)
-            if len(by_album) > 1 and all(k[0] == "folder" for k in by_album):
-                by_album = {("folder", str(folder)): files}   # an untagged disc set is one album
+            tagged = [k for k in by_album if k[0] == "tags"]
+            spans_discs = len({f.parent for f in files}) > 1
+            if len(by_album) > 1 and spans_discs and len(tagged) <= 1:
+                by_album = {(tagged or [("folder", str(folder))])[0]: files}   # one disc set, partly tagged
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1))
                 continue

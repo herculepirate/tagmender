@@ -196,8 +196,10 @@ class R5_05_TwoReleasesOneFolder(Base):
             (alb / "cover.jpg").write_bytes(f"cover {n}".encode())
             title = f"Now That's What I Call Music! {n}"
             props.append(self.proposal(source_dir=str(alb), files=[str(f), str(g)], release_id=str(n),
-                                       targets=[target(1, f"Song {n}a", album=title, artist="Various Artists"),
-                                                target(2, f"Song {n}b", album=title, artist="Various Artists")]))
+                                       targets=[target(1, f"Song {n}a", album=title, artist="Various Artists",
+                                                       discogs_release_id=[str(n)]),
+                                                target(2, f"Song {n}b", album=title, artist="Various Artists",
+                                                       discogs_release_id=[str(n)])]))
         prof = self.profile(operation="move", destination=str(self.dest))
         p = pl.build(props, prof)
         folders = [{str(Path(fe["dst"]).parent) for fe in a["files"]} for a in p["albums"]]
@@ -434,13 +436,15 @@ class R5_12_RemoveEmptyDirsIgnored(Base):
 
 
 class BonusDiscInsideItsAlbum(Base5):
-    """The matcher's rule (match_albums._owners): a folder inside a folder holding the album
-    belongs to it (Rotting Christ - A Dead Poem keeps its bonus disc)."""
+    """A folder inside a folder holding the album belongs to it when both are tagged as that
+    album (Rotting Christ - A Dead Poem keeps its bonus disc); untagged or otherwise
+    tagged folders are albums of their own."""
 
     def test_one_group(self):
         top = self.lib / "Rotting Christ" / "Albums" / "1997 - A Dead Poem"
-        a = audio(top / "01.flac", 500)
-        b = audio(top / "1997 - Darkness We Feel (free bonus CD)" / "01.flac", 600)
+        a = audio(top / "01.flac", 500, album="A Dead Poem", albumartist="Rotting Christ")
+        b = audio(top / "1997 - Darkness We Feel (free bonus CD)" / "01.flac", 600, album="A Dead Poem",
+                  albumartist="Rotting Christ")
         e = eng_mod.Engine.__new__(eng_mod.Engine)
         e.profile = self.profile()
         groups = e.albums_in(self.lib)

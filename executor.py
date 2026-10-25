@@ -576,9 +576,11 @@ class Executor:
                 st = os.stat(fe["src"])
             except FileNotFoundError:
                 return "conflict", "Changed", f"{fe['src']} is gone since the plan was made"
+            # an edit that kept size and time still changes the change time (audio files only:
+            # a companion hard-linked elsewhere changes it when another album moves; inode
+            # numbers are left out, some shares do not keep them)
             changed = (st.st_size, st.st_mtime_ns) != (fp["size"], fp["mtime_ns"]) or \
-                ("ino" in fp and st.st_ino != fp["ino"]) or \
-                ("ctime_ns" in fp and st.st_ctime_ns != fp["ctime_ns"])   # an edit that kept size and time
+                (fe in a["files"] and "ctime_ns" in fp and st.st_ctime_ns != fp["ctime_ns"])
             if changed:
                 return "conflict", "Changed", f"{Path(fe['src']).name} changed since the plan was made"
         self.journal.write(ev="album_begin", album=i, source=a["source_dir"])

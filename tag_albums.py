@@ -442,7 +442,11 @@ def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow
         if all(i["trackid"] for i in ids) and not retag:
             skipped.append((path, "already tagged by Picard"))
             continue
-        if retag and not other and all(i["trackid"] for i in ids):
+        if (retag and not other and all(i["trackid"] for i in ids)
+                and all(read_tagmender(p)[0] == "Resolved" for p in files)):
+            # done by an earlier retag. Without TAGMENDER=Resolved the release ID may be only
+            # the seed of a run Picard did not save, next to the old release's track IDs
+            # (Enslaved - Frost: skipped as "already tagged" though Picard never saved it)
             skipped.append((path, "already tagged with this release"))
             continue
         out.append({"path": path, "mbid": b["id"], "artist": b.get("artist", ""), "title": b.get("title", ""),
@@ -810,6 +814,9 @@ def main():
                                           "extras": x["extras"]} for x in batch if "records" in x], fh)
                 for p in a["files"]:
                     write_albumid(Path(p), a["mbid"])
+                    # until Picard saves it, the album is not done: a seed left behind by a run
+                    # that stopped is never taken for "already tagged with this release"
+                    write_tagmender(Path(p), "Seeded", "release ID written; Picard has not saved yet")
             journal += [{"album": a["path"], "mbid": a["mbid"], "files": a["records"], "extras": a["extras"],
                          "moves": a.setdefault("moves", [])} for a in batch]
             started = time.time()
@@ -837,6 +844,11 @@ def main():
                       + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
                 for rec in a["records"]:
                     rec["new_path"] = v["new_paths"].get(rec["path"], "")
+                    if not rec["new_path"] and Path(rec["path"]).exists():
+                        try:                          # not saved: take the seeded release ID out again
+                            restore_tags(Path(rec["path"]), rec["backup"], blob_dir)
+                        except Exception as exc:
+                            print(f"    could not take the release ID out of {rec['path']}: {exc}")
                 if v["saved"]:                                # 4b: TAGMENDER=Resolved / Unresolved
                     status = "Resolved" if state.startswith("tagged") else "Unresolved"
                     reason = "" if status == "Resolved" else f"Picard saved {v['saved']} of {n} files"

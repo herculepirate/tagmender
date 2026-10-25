@@ -293,6 +293,30 @@ class WebTag(Base):
                          '12" Vinyl')
         self.assertEqual(wt.discogs_media({"formats": [{"name": "File"}]}), "Digital Media")
 
+    def test_the_chosen_pressing_is_not_proved_again_from_the_old_tags(self):
+        """Pestilence - Obsideo, King Diamond - Deadly Lullabyes Live: the barcode in the
+        files was the old release's, and Discogs lists some lengths differently; the pressing
+        the matcher proved (or you approved) is used when its tracks line up one to one."""
+        self._plugin_or_skip()
+        for p in self.album.iterdir():                            # the old release's barcode
+            f = mutagen.File(p, easy=True)
+            if f is not None and p.suffix == ".flac":
+                f["barcode"] = ["5099999999999"]
+                f.save()
+        web = self._discogs_cd(rel_ok=True)
+        rel = web.get_json("https://api.discogs.com/releases/556", "discogs")
+        rel["tracklist"][0]["duration"] = "9:59"                  # one length listed differently
+        self.run_main(web, "--apply", "--keep-folders")
+        self.assertEqual(mutagen.File(self.album / "01.flac")["DISCOGS_RELEASE_ID"], ["556"])
+        rel["tracklist"].pop()                                    # tracks no longer line up
+        for p in self.album.iterdir():
+            f = mutagen.File(p)
+            if f is not None and f.tags is not None and "DISCOGS_RELEASE_ID" in f.tags:
+                del f.tags["DISCOGS_RELEASE_ID"]
+                f.save()
+        self.run_main(web, "--apply", "--keep-folders")
+        self.assertNotIn("DISCOGS_RELEASE_ID", mutagen.File(self.album / "01.flac"))
+
     def test_discogs_only_match_is_tagged_from_its_release(self):
         sys.path.insert(0, _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
                         or str(HERE / "herculepirate" / "picard-discogs-enrichment"))

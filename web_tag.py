@@ -510,6 +510,10 @@ def find(http, album, cfg, ocr="", matched=None):
         res = mc.classify(scored, cfg)
         if res["status"] == "auto":
             return name, res["best"], res["why"]
+        if name == "Discogs" and len(cands) == 1 and len(cands[0]["tracks"]) == len(album["tracks"]):
+            # the matcher proved this pressing (or you approved it): its tracks only have to
+            # line up one to one; the score is kept as information, not asked again
+            return name, scored[0], res["why"]
         if res.get("best") and (near is None or res["best"]["confidence"] > near[1]["confidence"]):
             near = (name, res["best"], res["why"])
     return None, (near[1] if near else None), (near[2] if near else [])
@@ -748,8 +752,12 @@ def main(argv=None):
             report.append({"album": o["path"], "source": "", "page": "", "matched": "", "confidence": "",
                            "result": pre.summary().reason()})
             continue
+        chosen = o.get("status") == "auto" and (o.get("best") or {}).get("source") == "discogs"
+        # a chosen Discogs pressing replaces the tags: read the album as the matcher did, blind to
+        # the catalogue number and barcode of the release the files carry now (King Diamond -
+        # Deadly Lullabyes Live: "barcode differs" was the Massacre CD's barcode in the tags)
         album = ma.read_album(base, o.get("artist_folder") or base.parent.name, o.get("album_folder") or base.name,
-                              exclude=pre.excluded)
+                              exclude=pre.excluded, blind=chosen)
         if not album["tracks"]:
             continue
         source, best, why = find(http, album, cfg, cached_ocr(db, base), o)

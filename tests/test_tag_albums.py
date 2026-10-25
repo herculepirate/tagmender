@@ -458,6 +458,31 @@ class Runs(Base):
         rc, out = self.run_tool("--retag", "--apply")
         self.assertIn("{'tagged': 1}", out)
 
+    def test_a_retag_picard_did_not_save_is_tried_again(self):
+        """Enslaved - Frost: Picard did not save it, the files kept the seeded release ID next
+        to the old track IDs, and the next run skipped it as "already tagged". Now the seed is
+        taken out again, and only albums marked TAGMENDER=Resolved count as done."""
+        self.make_album()
+        self.add_result(self.album, mbid=OTHER)
+        self.run_tool("--apply")                                 # tagged with the old release
+        moved = next(p.parent for p in self.root.rglob("*.flac"))
+        self.dbc.execute("DELETE FROM results")
+        self.add_result(moved, mbid=MBID)
+        rc, out = self.run_tool("--retag", "--apply", skip=moved.name)
+        self.assertIn("'not saved': 1", out)
+        self.assertEqual({ta.read_ids(p)["albumid"] for p in ta.audio_files(moved)}, {OTHER})   # seed gone
+        for p in ta.audio_files(moved):                          # a seed left by a run that stopped
+            ta.write_albumid(p, MBID)
+            ta.write_tagmender(p, "Seeded")
+        albums, skipped = ta.select_albums(self.db, retag=True)
+        self.assertEqual([a["path"] for a in albums], [str(moved)])
+        rc, out = self.run_tool("--retag", "--apply")
+        self.assertIn("{'tagged': 1}", out)
+        done = next(p.parent for p in self.root.rglob("*.flac"))
+        self.dbc.execute("DELETE FROM results")
+        self.add_result(done, mbid=MBID)
+        self.assertEqual(ta.select_albums(self.db, retag=True)[0], [])           # now it is done
+
     def test_refuses_when_picard_is_open(self):
         self.make_album()
         orig = ta.picard_running

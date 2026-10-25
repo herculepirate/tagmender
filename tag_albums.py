@@ -639,13 +639,23 @@ def verify(album, files_rec, candidates):
             if ids["albumid"] == album["mbid"]:
                 by_key.setdefault(audio_key(p), []).append((p, ids))
     result = {"saved": 0, "with_discogs": 0, "not_saved": [], "new_paths": {}}
+
+    def saved(ids, rec):
+        # Picard saved the file when it carries a track ID of this release. On a retag the
+        # old release's track ID is still there until Picard saves, so it does not count
+        # (AVKRVST - The Approbation: "tagged" with only the seeded album ID, old fields kept).
+        return bool(ids["trackid"]) and ids["trackid"] != (rec.get("old_trackid") or "")
+
+    def discogs(ids, rec):
+        return bool(ids["discogs"]) and (ids["discogs"] != (rec.get("old_discogs") or "") or saved(ids, rec))
+
     for rec in files_rec:
         old = Path(rec["path"])
         if old.exists():
             ids = read_ids(old)
-            if ids["trackid"]:                           # saved in place (not moved)
+            if saved(ids, rec):                          # saved in place (not moved)
                 result["saved"] += 1
-                result["with_discogs"] += bool(ids["discogs"])
+                result["with_discogs"] += discogs(ids, rec)
                 result["new_paths"][rec["path"]] = rec["path"]
             else:
                 result["not_saved"].append(rec["path"])
@@ -654,8 +664,8 @@ def verify(album, files_rec, candidates):
         if found:
             p, ids = found.pop(0)
             result["new_paths"][rec["path"]] = str(p)
-            result["saved"] += 1 if ids["trackid"] else 0
-            result["with_discogs"] += bool(ids["discogs"])
+            result["saved"] += 1 if saved(ids, rec) else 0
+            result["with_discogs"] += discogs(ids, rec)
         else:
             result["not_saved"].append(rec["path"] + " (moved, new place not found)")
     return result
@@ -786,7 +796,9 @@ def main():
                 a["extras"] = extra_files(a["path"])
                 a["records"] = []
                 for p in a["files"]:
-                    rec = {"path": p, "key": audio_key(p), "backup": backup_tags(p, blob_dir)}
+                    before = read_ids(p)                     # a retag: the old release's IDs are there
+                    rec = {"path": p, "key": audio_key(p), "backup": backup_tags(p, blob_dir),
+                           "old_trackid": before["trackid"], "old_discogs": before["discogs"]}
                     a["records"].append(rec)
                 # every album prepared so far in this batch (later ones have no backup yet)
                 with open(run_dir / "journal.json", "w") as fh:

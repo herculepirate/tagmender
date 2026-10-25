@@ -413,6 +413,21 @@ class Runs(Base):
         self.run_tool("--undo", self.run_id())
         self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
 
+    def test_retag_picard_did_not_save_is_not_reported_as_tagged(self):
+        """AVKRVST - The Approbation: on a retag the old release's track IDs are still in the
+        files, so a file Picard did not save looked saved ("tagged") with only the seeded
+        album ID and the old release's media, country and label."""
+        self.make_album()
+        self.add_result(self.album, mbid=OTHER)
+        rc, out = self.run_tool("--apply")                       # tagged with the old release
+        self.assertIn("'tagged", out)
+        moved = next(p.parent for p in self.root.rglob("*.flac"))   # where Picard filed it
+        self.dbc.execute("DELETE FROM results")
+        self.add_result(moved, mbid=MBID)                        # validate: another release
+        rc, out = self.run_tool("--retag", "--apply", skip="Old Album")
+        self.assertIn("'not saved': 1", out)
+        self.assertNotIn("'tagged", out)
+
     def test_refuses_when_picard_is_open(self):
         self.make_album()
         orig = ta.picard_running

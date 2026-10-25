@@ -144,12 +144,19 @@ class Watcher:
         """One pass over every watched root. Returns {folder: what happened}."""
         done = {}
         db = _db()
+        busy = executor.busy_jobs()
+        if busy:                                          # another process is changing files now
+            self.log.info("job %s is running in another process; this pass waits", busy[0])
+            db.close()
+            return done
         for job in executor.pending_jobs():
             try:
                 executor.recover(job)
                 self.log.warning("recovered interrupted job %s", job)
-            except executor.StepError as exc:            # still running in another process
+            except executor.StepError as exc:            # started meanwhile in another process
                 self.log.info("job %s: %s", job, exc)
+                db.close()
+                return done
         seen = set()
         for root, prof in self.roots():
             if not root.is_dir():
@@ -171,7 +178,9 @@ class Watcher:
                 attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
                 try:
                     prop = e.identify(g)
-                    plan = planmod.build([prop], prof, e.job + f"-{len(done)}", extra_roots=[root])
+                    n_jobs = getattr(self, "_n", 0) + 1
+                    self._n = n_jobs
+                    plan = planmod.build([prop], prof, e.job + f"-{n_jobs}", extra_roots=[root])
                     a = plan["albums"][0]
                     if prof["unattended"]:
                         res = executor.Executor(plan, log=self.log).run()

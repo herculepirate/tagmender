@@ -120,6 +120,18 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     return changes, rows
 
 
+def _fit_name(name: str, limits: dict) -> str:
+    """A companion's own name, made safe for the destination (Windows-forbidden characters)
+    and short enough to take a collision suffix."""
+    compat = limits.get("compat", "windows")
+    stem, ext = os.path.splitext(name)
+    stem = fnm.safe_component(stem, compat) if stem else stem
+    limit = int(limits.get("max_name_bytes", 255)) - fnm.SUFFIX_LEN - len(ext.encode("utf-8"))
+    if len(stem.encode("utf-8")) > limit:
+        stem = fnm.truncate_words(stem, limit, compat)
+    return stem + ext
+
+
 def _one_name(a, b) -> bool:
     """a and b are one directory entry spelled two ways (case or Unicode form on a
     filesystem that treats them alike), not two hard links."""
@@ -153,7 +165,7 @@ def mounted(folder) -> bool:
 MAX_TREE = 5000                           # entries looked at below one album folder
 
 
-def _companions(src_dir: Path, moved: dict, profile, shallow=False):
+def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False):
     """([(companion, destination)], why not): the non-audio files that go with an album
     that moves or is copied, as Picard's "move additional files" and foobar2000's "move
     entire source folder content" do:
@@ -189,9 +201,9 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
     tree, seen, foreign = [], 0, []
     targets = {os.path.realpath(str(x)) for x in dmap.values()}
 
-    def overlaps(d):                       # a folder the album is moving into (or out of it)
+    def overlaps(d):                       # a folder the album is moving into, or one holding it
         r = os.path.realpath(str(d))
-        return any(t == r or t.startswith(r + os.sep) or r.startswith(t + os.sep) for t in targets)
+        return any(t == r or t.startswith(r + os.sep) for t in targets)
     for dirpath, dirs, names in os.walk(src_dir):
         d = Path(dirpath)
         dirs[:] = sorted(x for x in dirs if not x.startswith(".") and not (d / x).is_symlink()
@@ -205,7 +217,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
             continue
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
-            return _companions(src_dir, moved, profile, shallow=True)[0], \
+            return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only)[0], \
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
@@ -230,6 +242,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
             if d in music_below and p.suffix.lower() not in exts:
                 continue
             track = by_stem.get((d, p.stem))                # "01 a.lrc" goes with "01 a.flac"
+            if tracks_only and not track:
+                continue                                    # a library root's own files stay
             out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
     return out, ""
 
@@ -452,11 +466,16 @@ class Planner:
             # every file of the album, those already in place too: their folder is the album's
             pairs = {fe["src"]: fe["dst"] for fe in entry["files"]}
             src_root = Path(prop.source_dir)
-            comps, why_not = _companions(src_root, pairs, p,
-                                         shallow=os.path.realpath(src_root) in self.roots())
+            at_root = os.path.realpath(src_root) in self.library_roots()
+            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root)
             if why_not:
                 entry["notes"].append(why_not)
             for c, want in comps:
+                if want != c and want.exists() and os.path.samefile(want, c) and not _one_name(want, c):
+                    entry["notes"].append(f"{c.name} is already at {want} (a hard link); left as it is")
+                    continue
+                if want != c:
+                    want = want.with_name(_fit_name(want.name, p["filenames"]))
                 dst = c if want == c else self._unique(want, c, entry)
                 if dst is None:
                     continue
@@ -605,6 +624,15 @@ class Planner:
                 "roots": self.roots(), "albums": albums, "summary": counts,
                 "discogs_settings": _enrichment_summary(self.profile),
                 "preserve_timestamps": self.profile.preserve_timestamps()}
+
+    def library_roots(self):
+        """The profile's own folders (not a folder named on the command line)."""
+        p = self.profile
+        r = [os.path.realpath(os.path.expanduser(s["path"])) for s in p["sources"]]
+        for d in (p["destination"], p["unresolved"].get("move_to")):
+            if d:
+                r.append(os.path.realpath(os.path.expanduser(d)))
+        return r
 
     def roots(self):
         p = self.profile

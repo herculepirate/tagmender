@@ -11,4 +11,12 @@ second `undo` must bring the library back exactly, with no hidden `.tm-*` file l
     TAGMENDER_DISCOGS_PLUGIN=~/Documents/Github/picard-discogs-enrichment python3 -W ignore tests/fuzz/fuzz_crash.py
     TAGMENDER_DISCOGS_PLUGIN=~/Documents/Github/picard-discogs-enrichment python3 -W ignore tests/fuzz/fuzz_recover.py
 
-Both end with "NO FINDINGS" when everything came back.
+`fuzz_multi.py` does the same for plans whose albums interact (one album moving into
+another's folder, one album's destination being another's source, one album failing in
+various orders). `fuzz_raise.py` makes the N-th file operation fail once with an I/O error
+instead of a crash (a share dropping for a moment), for every N, in all those scenarios.
+
+    python3 -W ignore tests/fuzz/fuzz_multi.py
+    python3 -W ignore tests/fuzz/fuzz_raise.py
+
+Each ends with "NO FINDINGS" when everything came back.

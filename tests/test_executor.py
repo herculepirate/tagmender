@@ -422,15 +422,14 @@ class Interrupted(Base):
         self.assertFalse(list(self.album.glob(".*.part")))          # Ctrl-C: the staging copy is removed
         self.assertEqual(self.f1.read_bytes(), before)
         done = executor.recover(p["job"])
-        self.assertTrue(any("left as it was" in d for d in done), done)
+        self.assertTrue(any("put back as it was" in d for d in done), done)
         self.assertFalse(list(self.album.glob(".*.part")))
         self.assertEqual(executor.pending_jobs(), [])
 
-    def test_crash_between_commit_and_source_removal_finishes_the_move(self):
+    def test_crash_between_commit_and_source_removal_puts_the_album_back(self):
         prof = self.profile(operation="move", destination=str(self.dest))
         p = pl.build([self.proposal()], prof)
         real_unlink = os.unlink
-        state = {"n": 0}
 
         def crash_on_source_unlink(path, *a, **k):
             if str(path) == str(self.f1):
@@ -441,10 +440,11 @@ class Interrupted(Base):
                 executor.Executor(p).run()
         new = self.dest / "Real Artist" / "2001 - Real Album" / "01.F.flac"
         self.assertTrue(new.exists() and self.f1.exists())           # both copies: nothing lost
-        executor.recover(p["job"])
-        self.assertTrue(new.exists())
-        self.assertFalse(self.f1.exists())
-        del state
+        done = executor.recover(p["job"])
+        self.assertTrue(any("put back as it was" in d for d in done), done)
+        self.assertFalse(new.exists())                                # albums are never left half-moved
+        self.assertTrue(self.f1.exists() and self.f2.exists())
+        self.assertEqual(tagio.read(self.f1)["album"], ["Some Album"])
 
 
 class Undo(Base):

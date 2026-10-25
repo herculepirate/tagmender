@@ -160,13 +160,12 @@ class B03_RecoveredCommitLosesChangeChecks(Base):
             executor.Executor(p).run()
         executor.recover(p["job"])
 
-    def test_copy_edited_after_recover_is_deleted_by_undo(self):
+    def test_interrupted_copy_is_put_back_by_recover(self):
         p = pl.build([self.proposal()], self.profile(operation="copy", destination=str(self.dest)))
         self.crash_at_commit(p)
-        copy = next(self.dest.rglob("01.F.flac"))
-        tagio.write(copy, {"comment": ["mine now"]})
+        self.assertEqual(list(self.dest.rglob("*.flac")), [])          # the album was put back
         out = executor.undo(p["job"])
-        self.assertTrue(copy.exists(), out)
+        self.assertFalse([o for o in out if o.startswith("PROBLEM")], out)
 
     def test_tags_edited_after_recover_are_overwritten_without_force(self):
         p = pl.build([self.proposal()], self.profile())

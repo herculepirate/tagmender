@@ -79,6 +79,30 @@ class Validate(unittest.TestCase):
         audio(self.tmp / "lib" / "C" / "D" / "01.flac", title="untagged")
         self.assertEqual(va.file_ids(self.tmp / "lib" / "C" / "D"), ("", ""))
 
+    def test_an_album_whose_discs_carry_different_releases(self):
+        """Sepultura - Beneath the Remains: disc 1 tagged as the 2020 Roadrunner CD, disc 2 as
+        a download; only the first files were read, so it looked like it agreed."""
+        d = self.tmp / "lib" / "Sepultura" / "1989 - Beneath the Remains"
+        other = "fab10c94-4de7-46b8-ae07-87eca645cfaf"
+        for i in range(1, 8):
+            audio(d / "Disc 01" / f"1{i:02d}.flac", MUSICBRAINZ_ALBUMID=MBID)
+        for i in range(1, 4):
+            audio(d / "Disc 02" / f"2{i:02d}.flac", MUSICBRAINZ_ALBUMID=other)
+        self.assertEqual(va.file_ids(d), (MBID, ""))
+        self.assertEqual(va.mixed_ids(d), sorted([MBID, other]))
+        self.assertEqual(va.mixed_ids(self.tmp / "lib" / "Sepultura" / "none"), [])
+        # an album that agreed under the old check is checked again; one that is not mixed stays settled
+        st = sqlite3.connect(":memory:")
+        st.execute("CREATE TABLE validation (path TEXT PRIMARY KEY, row TEXT)")
+        clean = self.tmp / "lib" / "A" / "Clean"
+        audio(clean / "01.flac", MUSICBRAINZ_ALBUMID=MBID)
+        for p_ in (d, clean):
+            st.execute("INSERT INTO validation VALUES (?,?)",
+                       (str(p_), json.dumps({"folder": str(p_), "verdict": "agree", "version": "old"})))
+        self.assertEqual(va.settled(st, "v"), {str(clean)})
+        self.assertTrue(json.loads(st.execute("SELECT row FROM validation WHERE path=?",
+                                              (str(clean),)).fetchone()[0])["ids_checked"])
+
     def test_original_folder_names_come_from_the_journals(self):
         run = self.tmp / "run-1"
         run.mkdir()
@@ -216,6 +240,10 @@ class Fixes(unittest.TestCase):
             "/l/A/unsure": dict(verdict="unsure", status="review", picked="mb:y", notes="pressing chosen by disc ID"),
             "/l/A/old": dict(verdict="differs", status="auto", picked="mb:z", notes="catalogue number agrees",
                              version="old"),
+            "/l/A/mixed": dict(verdict="mixed releases", status="auto", picked="mb:m1", picked_mb_twin="m1",
+                               tags_mixed=["m1", "m2"], notes="pressing chosen by your preferred country order"),
+            "/l/A/mixed-review": dict(verdict="mixed releases", status="review", picked="mb:m1",
+                                      picked_mb_twin="m1", tags_mixed=["m1", "m2"], notes=""),
         }
         for p_, r in rows.items():
             st.execute("INSERT INTO validation VALUES (?,?)",
@@ -223,9 +251,9 @@ class Fixes(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         try:
             path, fixes = va.export_fixes(st, tmp, "v")
-            self.assertEqual([f["folder"] for f in fixes], ["/l/A/by-scans"])
+            self.assertEqual(sorted(f["folder"] for f in fixes), ["/l/A/by-scans", "/l/A/mixed"])
             db = sqlite3.connect(path)
-            o = json.loads(db.execute("SELECT result FROM results").fetchone()[0])
+            o = json.loads(db.execute("SELECT result FROM results WHERE path='/l/A/by-scans'").fetchone()[0])
             self.assertEqual((o["status"], o["best"]["mb_id"], o["version"]), ("auto", "de", "v"))
         finally:
             shutil.rmtree(tmp)

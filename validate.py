@@ -52,7 +52,22 @@ except ImportError:
 
 
 def file_ids(folder):
-    """The release IDs in the album's tags: (MusicBrainz release, Discogs release)."""
+    """The release IDs in the album's tags: (MusicBrainz release, Discogs release), the
+    one most files carry."""
+    mb, dg = _release_counts(folder)
+    return (mb.most_common(1)[0][0] if mb else ""), (dg.most_common(1)[0][0] if dg else "")
+
+
+def mixed_ids(folder):
+    """The MusicBrainz releases of an album whose files carry more than one, else [].
+    Sepultura - Beneath the Remains: disc 1 tagged as the 2020 CD, disc 2 as a download."""
+    mb, _dg = _release_counts(folder)
+    return sorted(mb) if len(mb) > 1 else []
+
+
+def _release_counts(folder):
+    """How many files carry each MusicBrainz and each Discogs release ID (every file:
+    the second disc may carry another release than the first)."""
     mb, dg = collections.Counter(), collections.Counter()
     for p in sorted(Path(folder).rglob("*")):
         if p.suffix.lower() not in ma.AUDIO_EXT:
@@ -74,9 +89,9 @@ def file_ids(folder):
                 mb[val.strip()] += 1
             elif key in ("discogs_release_id", "discogs_releaseid", "discogs release id"):
                 dg[val.strip()] += 1
-        if sum(mb.values()) + sum(dg.values()) >= 6:
-            break
-    return (mb.most_common(1)[0][0] if mb else ""), (dg.most_common(1)[0][0] if dg else "")
+    mb.pop("", None)
+    dg.pop("", None)
+    return mb, dg
 
 
 def album_folders(library, artist=None):
@@ -321,6 +336,10 @@ def export_fixes(state, out_dir, current, approved=None, only_approved=False):
         elif (not only_approved and r.get("verdict") in ("differs", "other pressing") and evidence_decided(r)
               and r.get("version") == current):
             fixes.append(r)
+        elif (not only_approved and r.get("verdict") == "mixed releases" and r.get("version") == current
+              and r.get("status") == "auto"
+              and (evidence_decided(r) or (r.get("picked_mb_twin") or "") in (r.get("tags_mixed") or []))):
+            fixes.append(r)                            # the whole album to the one release
     path = out_dir / "fixes.db"
     if path.exists():
         path.unlink()
@@ -349,10 +368,18 @@ def settled(state, current):
     """Albums needing no new check: they agree (or have nothing to compare), or the
     current matcher already checked them."""
     done = set()
-    for p, r in state.execute("SELECT path, row FROM validation"):
-        r = json.loads(r)
+    for p, row in state.execute("SELECT path, row FROM validation").fetchall():
+        r = json.loads(row)
+        if r.get("verdict") == "agree" and not r.get("ids_checked"):
+            # checked when only the first files' release IDs were read: an album whose other
+            # discs carry another release is checked again
+            if Path(p).is_dir() and mixed_ids(p):
+                continue
+            r["ids_checked"] = True
+            state.execute("UPDATE validation SET row=? WHERE path=?", (json.dumps(r), p))
         if r.get("verdict") in ("agree", "not tagged", "ignored") or r.get("version") == current:
             done.add(p)
+    state.commit()
     return done
 
 
@@ -434,13 +461,16 @@ def main():
         row = {"FullPath": str(d), "AlbumArtistFolder": artist_folder, "AlbumFolder": Path(original).name,
                "Status": "untagged"}
         rec = {"folder": str(d), "original_folder": Path(original).name, "tags_mb": mb_id, "tags_discogs": dg_id,
-               "version": current, "checked": round(time.time())}
+               "version": current, "checked": round(time.time()), "ids_checked": True}
         if not mb_id and not dg_id:
             rec.update(verdict="not tagged")
         else:
             try:
                 out = ma.process(row, http, cfg, dm, margs)
                 v, why = verdict(out, mb_id, dg_id, http, {"dm": dm})
+                mixed = mixed_ids(d)
+                if mixed:                                  # one album, several releases in its files
+                    v, why = "mixed releases", f"the files carry {len(mixed)} releases: {', '.join(mixed)}"
                 b = out.get("best") or {}
                 rec.update(verdict=v, why=why, status=out.get("status"),
                            picked=f"{b.get('source', '')}:{b.get('id', '')}" if b else "",
@@ -449,7 +479,9 @@ def main():
                            picked_release=" | ".join(str(b.get(k) or "") for k in ("title", "country", "label", "year")),
                            confidence=b.get("confidence", ""),
                            notes="; ".join(b.get("notes") or [])[:500])
-                if v in ("differs", "other pressing", "unsure", "no match") and mb_id:
+                if mixed:
+                    rec["tags_mixed"] = mixed
+                if v in ("differs", "other pressing", "unsure", "no match", "mixed releases") and mb_id:
                     mine = describe_mb(http, mb_id)
                     rec["tags_release"] = short(mine)
                     try:
@@ -465,10 +497,11 @@ def main():
         state.execute("INSERT OR REPLACE INTO validation VALUES (?,?)", (str(d), json.dumps(rec)))
         state.commit()
         counts[rec["verdict"]] += 1
-        mark = {"agree": "✓", "differs": "✗", "other pressing": "≈", "not tagged": "·"}.get(rec["verdict"], "?")
+        mark = {"agree": "✓", "differs": "✗", "other pressing": "≈", "not tagged": "·",
+                "mixed releases": "✗"}.get(rec["verdict"], "?")
         print(f"[{n}/{len(folders)}] {mark} {rec['verdict']:<26} {d.parent.name} | {d.name}"
               + (f"\n      tags {mb_id or dg_id}  vs  picked {rec.get('picked')}"
-                 if rec["verdict"] in ("differs", "other pressing") else ""),
+                 if rec["verdict"] in ("differs", "other pressing", "mixed releases") else ""),
               flush=True)
 
     rows = [json.loads(r) for (r,) in state.execute("SELECT row FROM validation ORDER BY path")]

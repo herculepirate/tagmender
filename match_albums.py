@@ -1184,6 +1184,11 @@ def mb_search(http, album, cfg):
         queries.append(f'catno:"{c}"')
     if album.get("pressing_year"):
         queries.append(f'release:"{title}" AND artist:"{first}" AND date:{album["pressing_year"]}*')
+    # The format the folder names ("[Vinyl Rip]") searched for itself: the title alone
+    # turns up the CDs first (Sunn O))) & Ulver - Terrestrials: only CDs were fetched)
+    fmt = {"vinyl": "vinyl", "cd": "cd", "digital": '"digital media"'}.get(album.get("media_hint") or "")
+    if fmt:
+        queries.append(f'release:"{title}" AND artist:"{first}" AND format:{fmt}')
     # Collaborators are separate artists in MusicBrainz, so search ONE name.
     queries.append(f'release:"{title}" AND artist:"{first}"')
     typeless = mc.drop_release_type(title)
@@ -1359,6 +1364,9 @@ def discogs_search(http, album, cfg, dm):
         searches.append(f"catno={q(c)}")
     if album.get("pressing_year"):
         searches.append(f"artist={q(first)}&release_title={q(title)}&year={album['pressing_year']}")
+    dfmt = {"vinyl": "Vinyl", "cd": "CD", "digital": "File"}.get(album.get("media_hint") or "")
+    if dfmt:                                                # the format the folder names, first
+        searches.append(f"artist={q(first)}&release_title={q(title)}&format={dfmt}")
     searches.append(f"artist={q(first)}&release_title={q(title)}")
     typeless = mc.drop_release_type(title)
     if typeless != title:                                   # "Garbage EP" is listed as "Garbage"
@@ -1405,8 +1413,10 @@ def discogs_search(http, album, cfg, dm):
     mine = {mc.norm_code(c) for c in album.get("catnos") or ()}
     found_count = any(len(c["tracks"]) == n_files for c in out)
     found_catno = not mine or any(mine & set(c["catnos"]) for c in out)
+    hint = album.get("media_hint") or ""
+    found_format = not hint or any(hint in (c.get("formats") or ()) for c in out)
     master = next((r.get("master_id") for r in results if r.get("master_id") and pre(r) >= 0.7), None)
-    if master and not (found_count and found_catno):
+    if master and not (found_count and found_catno and found_format):
         data = http.get_json(f"https://api.discogs.com/masters/{master}/versions?per_page=100", "discogs")
         have = {str(c["id"]) for c in out}
         versions = [v for v in (data or {}).get("versions", []) if str(v.get("id")) not in have]
@@ -1416,7 +1426,8 @@ def discogs_search(http, album, cfg, dm):
             det = http.get_json(f"https://api.discogs.com/releases/{v['id']}", "discogs")
             if det:
                 cand = discogs_candidate(det, dm)
-                if len(cand["tracks"]) == n_files or (mine & set(cand["catnos"])):
+                if (len(cand["tracks"]) == n_files or (mine & set(cand["catnos"]))
+                        or (hint and hint in (cand.get("formats") or ()))):
                     out.append(cand)
     return out
 

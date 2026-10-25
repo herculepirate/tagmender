@@ -1035,6 +1035,45 @@ class ShopTrackIds(unittest.TestCase):
         finally:
             shutil.rmtree(d)
 
+
+class FormatTheFolderNames(unittest.TestCase):
+    """Sunn O))) & Ulver - 2014 - Terrestrials [Vinyl Rip 24bit 192khz]: the title search
+    found the Japanese CD (with the same track count), so the album's other versions were
+    never fetched and the vinyl was "not found". The format the folder names is searched
+    for itself, and the master's versions are fetched when no candidate has it."""
+
+    def test_the_vinyl_the_folder_names_is_fetched(self):
+        def rel(rid, country, fmt):
+            return {"id": rid, "title": "Terrestrials", "year": 2014, "country": country,
+                    "artists": [{"name": "Sunn O)))", "id": 1}, {"name": "Ulver", "id": 2, "join": "&"}],
+                    "labels": [{"name": "L", "catno": f"X{rid}"}], "formats": [{"name": fmt, "qty": "1"}],
+                    "tracklist": [{"position": str(i + 1), "title": f"T{i}", "duration": "12:00", "type_": "track"}
+                                  for i in range(3)]}
+        asked = []
+
+        class H:
+            def get_json(self, url, host):
+                asked.append(url)
+                if "/database/search" in url:
+                    if "format=Vinyl" in url:
+                        return {"results": []}           # the format filter alone may find nothing
+                    return {"results": [{"id": 1, "title": "Sunn O))) & Ulver - Terrestrials", "year": "2014",
+                                         "master_id": 10}]}
+                if url.endswith("/releases/1"):
+                    return rel(1, "Japan", "CD")
+                if "/masters/10/versions" in url:
+                    return {"versions": [{"id": 1, "format": "CD", "country": "Japan"},
+                                         {"id": 2, "format": "2xVinyl, LP", "country": "US"}]}
+                if url.endswith("/releases/2"):
+                    return rel(2, "US", "Vinyl")
+                return None
+        a = album(artist="Sunn O))) & Ulver", title="Terrestrials", year=2014, media_hint="vinyl",
+                  folder="2014 - Terrestrials [Vinyl Rip 24bit 192khz]", catno_search=[],
+                  tracks=[{"disc": 1, "num": i + 1, "title": f"T{i}", "secs": 720.0} for i in range(3)])
+        out = ma.discogs_search(H(), a, mc.DEFAULT_CFG, ma.load_plugin(PLUGIN_DIR))
+        self.assertIn("2", [str(c["id"]) for c in out])
+        self.assertTrue(any("format=Vinyl" in u for u in asked))
+
 class FilesNameTheArtist(unittest.TestCase):
     """Aghora - Entheogenic Frequencies Orchestral Representations: filed under Aghora,
     but the files' own ARTIST and COPYRIGHT tags and the ripper's .info name Gustavo

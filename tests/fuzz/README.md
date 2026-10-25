@@ -19,4 +19,12 @@ instead of a crash (a share dropping for a moment), for every N, in all those sc
     python3 -W ignore tests/fuzz/fuzz_multi.py
     python3 -W ignore tests/fuzz/fuzz_raise.py
 
+`fuzz_more.py` runs fuzz_crash.py's kill points over more scenarios (junk-only folders,
+created covers and lyrics, hard-linked copies, a disc set with a per-disc cue), and
+`fuzz_strict.py` also kills undo itself and requires an undo where nothing was edited to
+end without any PROBLEM line.
+
+    python3 -W ignore tests/fuzz/fuzz_more.py
+    python3 -W ignore tests/fuzz/fuzz_strict.py
+
 Each ends with "NO FINDINGS" when everything came back.

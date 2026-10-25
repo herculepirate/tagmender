@@ -208,11 +208,15 @@ def read_ids_and_art(path):
     return ids, pics
 
 
-def album_info(album_dir, ma, mc, match_db=None):
-    """Everything the batch needs about one album folder."""
+def album_info(album_dir, ma, mc, match_db=None, files=None):
+    """Everything the batch needs about one album folder - or, with `files`, about those
+    files only (an album sharing its folder: the others' tags, IDs and pictures stay out)."""
     from coverup.imageinfo import probe
-    files = sorted(p for p in Path(album_dir).rglob("*")
-                   if p.is_file() and p.suffix.lower() in ma.AUDIO_EXT and not p.name.startswith("."))
+    if files is not None:
+        files = sorted(Path(p) for p in files)
+    else:
+        files = sorted(p for p in Path(album_dir).rglob("*")
+                       if p.is_file() and p.suffix.lower() in ma.AUDIO_EXT and not p.name.startswith("."))
     tags = [ma.read_file(p) for p in files]
     ids, front_embedded, any_embedded, front_embedded_data = {}, None, False, None
     embedded_generated = False

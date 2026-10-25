@@ -36,8 +36,19 @@ EMBED_LIMIT = 16_000_000       # a FLAC picture block holds less than 16 MiB
 
 
 def _rgb(im):
-    """im as RGB; transparency flattened onto white, as CoverUp does."""
-    from PIL import Image
+    """im as RGB, the right way up (EXIF orientation applied); transparency flattened onto
+    white, as CoverUp does; 16-bit and 32-bit grey scaled down, never clipped to white."""
+    from PIL import Image, ImageOps
+    try:
+        im = ImageOps.exif_transpose(im)
+    except Exception:
+        pass
+    if im.mode in ("I;16", "I;16L", "I;16B", "I;16N", "I"):
+        hi = 65535.0 if im.mode != "I" or (im.getextrema() or (0, 0))[1] > 255 else 255.0
+        im = im.convert("I").point(lambda v: v * (255.0 / hi)).convert("L")
+    elif im.mode == "F":
+        lo, hi = im.getextrema()
+        im = im.point(lambda v: (v - lo) * 255.0 / ((hi - lo) or 1)).convert("L")
     if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
         im = im.convert("RGBA")
         bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -58,6 +69,7 @@ def _stage(data: bytes, staging: Path, quality=JPEG_QUALITY) -> tuple[Path, int,
             buf = io.BytesIO()
             _rgb(im).save(buf, "JPEG", quality=int(quality))
             data = buf.getvalue()
+            w, h = Image.open(io.BytesIO(data)).size       # (after turning it the right way up)
     path = staging / (hashlib.sha1(data).hexdigest()[:16] + ".jpg")
     path.write_bytes(data)
     return path, w, h
@@ -72,8 +84,9 @@ def embed_copy(front: Path, staging: Path, max_side=EMBED_MAX_SIDE, quality=JPEG
     with Image.open(io.BytesIO(data)) as im:
         im.load()
         side = int(max_side or 0)
+        upright = (im.getexif() or {}).get(0x0112, 1) in (0, 1)
         if im.format == "JPEG" and im.mode in ("RGB", "L") and (not side or max(im.size) <= side) \
-                and len(data) < EMBED_LIMIT:
+                and len(data) < EMBED_LIMIT and upright:
             return Path(front)
         out = _rgb(im)
         if side and max(out.size) > side:
@@ -125,22 +138,29 @@ class CoverUp:
         from coverup import imaging
         from coverup.pipeline import Pipeline
         cb = self.cb
-        info = cb.album_info(Path(folder), ma, mc)
+        s = self.s
+        if files is None:                 # (no file list: the folder's own music and its disc folders')
+            files = _own_music(Path(folder))
+        shared = _other_music(Path(folder), files)
+        # the album is described by its own files only: the tags, IDs and embedded pictures of
+        # other music in or below the folder are not this album's
+        info = cb.album_info(Path(folder), ma, mc, files=files if shared else None)
         info["ids"].update({k: v for k, v in ids.items() if v})
         if artist:
             info["artist"] = artist
         if album:
             info["album"] = mc.search_title(album)
-        s = self.s
-        if files is None:                 # (no file list: the folder's own music and its disc folders')
-            files = _own_music(Path(folder))
-        if _other_music(Path(folder), files):
+        if shared:
             # a loose track beside other albums, or one album of a folder holding several: the
             # pictures there (and below) are not this album's own - online sources only
             s = s.with_(providers_enabled=[p for p in s["providers_enabled"] if p != "local"])
+            info["images"] = []
         pipe = Pipeline(s, self.http, fingerprint=imaging.fingerprint)
         res = pipe.run(cb.make_query(info))
-        res.candidates = [c for c in res.candidates if not (c.provider == "local" and cb.R.is_generated(c.data))]
+        gen_local = [c for c in res.candidates if c.provider == "local" and cb.R.is_generated(c.data)]
+        if gen_local:                     # a cover CoverUp generated earlier never blocks a real one
+            res.candidates = [c for c in res.candidates if c not in gen_local]
+            pipe.select(res)
 
         class _Log:
             def write(self, *_a):
@@ -163,8 +183,14 @@ class CoverUp:
             pipe.fetch_full(c)
         if c.data is None:
             return {"note": f"CoverUp chose {c.provider} but the download failed"}
+        limit = getattr(self, "limit", MAX_BYTES)
+        if len(c.data) > limit:
+            return {"note": f"CoverUp's {c.provider} image is {len(c.data)} bytes, over the profile's {limit}"}
         path, w, h = _stage(c.data, self.staging, q)
         return {"front": str(path), "source": f"coverup:{c.provider}", "width": w, "height": h, "why": front["why"]}
+
+    def jpeg_quality(self):
+        return int(self.s.get("jpeg_quality", JPEG_QUALITY) or JPEG_QUALITY)
 
     def embed_max_side(self):
         try:
@@ -188,13 +214,22 @@ def _own_music(folder: Path) -> list:
 
 
 def _other_music(folder: Path, files) -> bool:
-    """folder (or a folder below it) holds music that is not among files."""
+    """folder (or a folder below it) holds music that is not among files - not counting the
+    same tracks in another format (FLAC and Opus side by side), hidden files and NAS index
+    folders (Synology's @eaDir, .AppleDouble)."""
     mine = {str(f) for f in files}
+    stems = {(str(Path(f).parent), Path(f).stem) for f in files}
     try:
-        return any(p.suffix.lower() in ex.AUDIO_EXT and str(p) not in mine and not p.name.startswith(".")
-                   for p in folder.rglob("*"))
+        for p in folder.rglob("*"):
+            rel = p.relative_to(folder).parts
+            if any(x.startswith((".", "@")) for x in rel) or p.suffix.lower() not in ex.AUDIO_EXT:
+                continue
+            if str(p) in mine or (str(p.parent), p.stem) in stems or not p.is_file():
+                continue
+            return True
     except OSError:
         return False
+    return False
 
 
 class CoverArtArchive:
@@ -277,8 +312,9 @@ def find_front(providers, folder, ids, artist="", album="", log=None, files=None
                              f"{low} px")
                 continue
             side = p.embed_max_side() if isinstance(p, CoverUp) else EMBED_MAX_SIDE
+            q = p.jpeg_quality() if isinstance(p, CoverUp) else JPEG_QUALITY
             try:
-                got["embed"] = str(embed_copy(Path(got["front"]), Path(got["front"]).parent, side))
+                got["embed"] = str(embed_copy(Path(got["front"]), Path(got["front"]).parent, side, q))
             except Exception as exc:                         # not an image after all
                 notes.append(f"{p.name}: {exc}")
                 continue

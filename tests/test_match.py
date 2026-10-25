@@ -2479,6 +2479,72 @@ class UnreachableWebSearch(unittest.TestCase):
         finally:
             ma.urllib.request.urlopen = saved
 
+class WebSearchEngines(unittest.TestCase):
+    """John's choice (2026-10-24): Tavily first, his own SearXNG as the backup,
+    DuckDuckGo only when neither is set up or both fail."""
+
+    def setUp(self):
+        self.env = {k: _os.environ.pop(k, None) for k in ("TAGMENDER_SEARXNG_URL", "TAVILY_API_KEY")}
+        self.saved = ma.urllib.request.urlopen
+        self.asked = []
+
+    def tearDown(self):
+        ma.urllib.request.urlopen = self.saved
+        for k, v in self.env.items():
+            if v is not None:
+                _os.environ[k] = v
+            else:
+                _os.environ.pop(k, None)
+
+    def serve(self, searx_ok=True, tavily_ok=True):
+        import io
+        import urllib.error
+        link = "https://www.discogs.com/release/22314946-Exhorder-Slaughter-In-The-Vatican-The-Law"
+
+        def fake(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else req
+            self.asked.append((url, dict(req.header_items()) if hasattr(req, "header_items") else {},
+                               getattr(req, "data", None)))
+            if "searx.local" in url:
+                if not searx_ok:
+                    raise urllib.error.URLError("refused")
+                body = {"results": [{"url": link, "title": "Exhorder"}]}
+            elif "api.tavily.com" in url:
+                if not tavily_ok:
+                    raise urllib.error.URLError("refused")
+                body = {"results": [{"url": link, "content": "QDISS0201CDD"}]}
+            else:
+                body = None
+            return io.BytesIO(json.dumps(body).encode() if body else b"<html>nothing</html>")
+        ma.urllib.request.urlopen = fake
+        return ma.Http(sqlite3.connect(":memory:"), {"mb_delay": 0, "discogs_delay": 0}, "")
+
+    def test_tavily_first_and_the_key_is_never_stored(self):
+        _os.environ["TAGMENDER_SEARXNG_URL"] = "http://searx.local:8080/"
+        _os.environ["TAVILY_API_KEY"] = "https://mcp.tavily.com/mcp/?tavilyApiKey=tvly-secret"   # pasted whole
+        h = self.serve()
+        self.assertEqual(ma.web_release_links(h, ["QDISS0201CDD"], "Exhorder"), (["22314946"], []))
+        self.assertTrue(all("api.tavily.com" in u for u, _h, _d in self.asked))
+        tav = self.asked[0]
+        self.assertEqual(tav[1].get("Authorization"), "Bearer tvly-secret")
+        self.assertNotIn(b"tvly-secret", tav[2])
+        stored = " ".join(u + b for u, b in h.db.execute("SELECT url, body FROM http_cache"))
+        self.assertNotIn("tvly-secret", stored)
+
+    def test_searxng_when_tavily_fails(self):
+        _os.environ["TAGMENDER_SEARXNG_URL"] = "http://searx.local:8080"
+        _os.environ["TAVILY_API_KEY"] = "tvly-secret"
+        h = self.serve(tavily_ok=False)
+        text, engine = ma.web_search(h, '"QDISS0201CDD" Exhorder')
+        self.assertEqual(engine, "searxng")
+        self.assertIn("22314946", text)
+        self.assertTrue(any("searx.local:8080/search?" in u and "format=json" in u for u, _h, _d in self.asked))
+
+    def test_duckduckgo_only_without_either(self):
+        h = self.serve()
+        self.assertEqual(ma.web_search(h, "x")[1], "duckduckgo")
+        self.assertTrue(all("duckduckgo" in u for u, _h, _d in self.asked))
+
 class DiscogsDown(FakeHttp):
     """Discogs raises `exc`; MusicBrainz works normally."""
     def __init__(self, exc):

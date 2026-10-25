@@ -1031,7 +1031,50 @@ class Http:
     # Hosts that only add evidence (the web search of an investigation): asked once with a
     # short timeout, and left alone for a while after failing, so an unreachable search
     # engine cannot hold every album up for minutes (6 retries x 60 s per query).
-    OPTIONAL_HOSTS = {"duckduckgo": (1, 15, 3, 1800)}    # attempts, timeout s, failures, pause s
+    OPTIONAL_HOSTS = {"duckduckgo": (1, 15, 3, 1800),    # attempts, timeout s, failures, pause s
+                      "searxng": (1, 20, 3, 1800), "tavily": (1, 30, 3, 1800)}
+
+    def host_down(self, host):
+        down = getattr(self, "down", None) or {}
+        return down.get(host, (0, 0))[1] > time.time()
+
+    def host_failed(self, host):
+        down = getattr(self, "down", None)
+        if down is None:
+            down = self.down = {}
+        _a, _t, max_fail, pause_s = self.OPTIONAL_HOSTS[host]
+        fails = down.get(host, (0, 0))[0] + 1
+        until = time.time() + pause_s if fails >= max_fail else 0
+        down[host] = (0 if until else fails, until)
+        if until:
+            print(f"    {host} unreachable, not asked again for {pause_s // 60} minutes", file=sys.stderr)
+
+    def post_json(self, url, payload, host, headers=None):
+        """A JSON POST (Tavily), cached by URL and body; never retried (an optional host).
+        Credentials go in `headers` only, so they are never part of the cache key."""
+        body = json.dumps(payload, sort_keys=True)
+        key = f"POST {url} {body}"
+        row = self.db.execute("SELECT body FROM http_cache WHERE url=?", (key,)).fetchone()
+        if row:
+            return json.loads(row[0])
+        if self.host_down(host):
+            raise ProviderUnavailable(host, "outage", "skipped: failed repeatedly, trying again later")
+        _a, timeout, _f, _p = self.OPTIONAL_HOSTS.get(host, (1, 30, 3, 1800))
+        req = urllib.request.Request(url, data=body.encode(), method="POST",
+                                     headers=dict({"User-Agent": USER_AGENT, "Content-Type": "application/json",
+                                                   "Accept": "application/json"}, **(headers or {})))
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                text = r.read().decode("utf-8")
+            data = json.loads(text)
+        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+            if host in self.OPTIONAL_HOSTS:
+                self.host_failed(host)
+            raise ProviderUnavailable(host, "outage", f"{type(exc).__name__}") from None
+        (getattr(self, "down", None) or {}).pop(host, None)
+        self.db.execute("INSERT OR REPLACE INTO http_cache (url, body, ts) VALUES (?,?,?)", (key, text, time.time()))
+        self.db.commit()
+        return data
 
     def get_text(self, url, host):
         row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (url,)).fetchone()
@@ -1088,11 +1131,7 @@ class Http:
                 print(f"    {host} network error {e}, retrying", file=sys.stderr)
                 time.sleep(10 * (attempt + 1) + random.uniform(0, 1))
         if host in self.OPTIONAL_HOSTS:
-            fails = down.get(host, (0, 0))[0] + 1
-            until = time.time() + pause_s if fails >= max_fail else 0
-            down[host] = (0 if until else fails, until)
-            if until:
-                print(f"    {host} unreachable, not asked again for {pause_s // 60} minutes", file=sys.stderr)
+            self.host_failed(host)
         raise ProviderUnavailable(host, last_kind, f"giving up on {url.split('?')[0]}")
 
 
@@ -2038,6 +2077,47 @@ _WEB_DISCOGS = re.compile(r"discogs\.com/(?:[a-z]{2}/)?(?:[^/\s\"'<>]+/)?release
 _WEB_MB = re.compile(r"musicbrainz\.org/release/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
+def _setting(env, name):
+    """A setting from the environment, else from ~/.config/tagmender/<name>."""
+    value = os.environ.get(env, "").strip()
+    if not value:
+        f = Path(f"~/.config/tagmender/{name}").expanduser()
+        if f.is_file():
+            value = f.read_text().strip()
+    return value
+
+
+def web_search(http, query):
+    """Web results for a query, as text holding their URLs. Tavily first
+    (~/.config/tagmender/tavily_key or TAVILY_API_KEY), then your own SearXNG
+    (~/.config/tagmender/searxng_url or TAGMENDER_SEARXNG_URL; its JSON output must be
+    enabled), then DuckDuckGo's HTML page. Each is optional; one failing or finding
+    nothing hands on to the next. Returns (text, engine)."""
+    key = _setting("TAVILY_API_KEY", "tavily_key")
+    m = re.search(r"tavilyApiKey=([\w-]+)", key)          # the MCP URL pasted whole
+    key = m.group(1) if m else key
+    if key and hasattr(http, "post_json"):
+        try:
+            data = http.post_json("https://api.tavily.com/search", {"query": query, "max_results": 10},
+                                  "tavily", headers={"Authorization": f"Bearer {key}"}) or {}
+            if data.get("results"):
+                return json.dumps(data["results"]), "tavily"
+        except Exception:
+            pass
+    searx = _setting("TAGMENDER_SEARXNG_URL", "searxng_url").rstrip("/")
+    if searx:
+        try:
+            data = http.get_json(f"{searx}/search?q={q(query)}&format=json", "searxng") or {}
+            if data.get("results"):
+                return json.dumps(data["results"]), "searxng"
+        except Exception:
+            pass
+    try:
+        return http.get_text("https://html.duckduckgo.com/html/?q=" + q(query), "duckduckgo") or "", "duckduckgo"
+    except Exception:
+        return "", ""
+
+
 def web_release_links(http, codes, artist, limit=6):
     """Releases the web ties to codes read from the scans: a search for each code
     (with and without the artist) and the Discogs and MusicBrainz release pages among
@@ -2045,10 +2125,7 @@ def web_release_links(http, codes, artist, limit=6):
     dg, mb = [], []
     for code in list(codes)[:limit]:
         for query in (f'"{code}" {artist}', f'"{code}" discogs'):
-            try:
-                html = http.get_text("https://html.duckduckgo.com/html/?q=" + q(query), "duckduckgo") or ""
-            except Exception:
-                continue
+            html, _engine = web_search(http, query)
             html = urllib.parse.unquote(html)
             for rid in _WEB_DISCOGS.findall(html):
                 if rid not in dg:

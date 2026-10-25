@@ -448,6 +448,19 @@ def _plugin():
     return _DM or None
 
 
+def discogs_media(det):
+    """The release's format as Picard writes MEDIA: "CD", '12" Vinyl', "Cassette",
+    "Digital Media" (a Discogs "File"); the first format of a release names it."""
+    fmt = (det.get("formats") or [{}])[0] or {}
+    name = str(fmt.get("name") or "")
+    if name == "File":
+        return "Digital Media"
+    if name == "Vinyl":
+        size = next((d for d in fmt.get("descriptions") or [] if re.fullmatch(r'\d+"', d)), "")
+        return f"{size} Vinyl".strip()
+    return name or "Digital Media"
+
+
 def discogs_matched(http, release_id):
     """The Discogs release the matcher already proved, as a source to tag from
     (MusicBrainz has no release for it, so Picard cannot tag it)."""
@@ -459,7 +472,10 @@ def discogs_matched(http, release_id):
     c.update(url=det.get("uri") or f"https://www.discogs.com/release/{release_id}",
              date=str(det.get("released") or det.get("year") or ""),
              genre="; ".join((det.get("styles") or []) + (det.get("genres") or [])),
-             cover=((det.get("images") or [{}])[0] or {}).get("uri", ""), discogs_release=str(release_id))
+             cover=((det.get("images") or [{}])[0] or {}).get("uri", ""), discogs_release=str(release_id),
+             media=discogs_media(det), catno_text="; ".join(dict.fromkeys(
+                 str(lb.get("catno") or "").strip() for lb in det.get("labels") or []
+                 if str(lb.get("catno") or "").strip().lower() not in ("", "none"))))
     for i, tr in enumerate(c["tracks"]):
         tr.setdefault("num", i + 1)
     return [c]
@@ -475,8 +491,11 @@ def find(http, album, cfg, ocr="", matched=None):
     sources = list(SOURCES)
     best = (matched or {}).get("best") or {}
     if (matched or {}).get("status") == "auto" and best.get("source") == "discogs":
-        sources.insert(0, ("Discogs", lambda http, a, t: discogs_matched(http, best["id"])))
-    if linked:                                    # the files' own tags name their Bandcamp page
+        # the matcher (or you, in approved.tsv) chose this Discogs pressing: tag from it or
+        # not at all, never from a shop's listing of the album (King Diamond - Deadly
+        # Lullabyes Live, Metal Blade 3984-14499-2, was tagged from iTunes)
+        sources = [("Discogs", lambda http, a, t: discogs_matched(http, best["id"]))]
+    elif linked:                                  # the files' own tags name their Bandcamp page
         sources.insert(0, ("Bandcamp (linked in the tags)",
                            lambda http, a, t: [c for c in (bandcamp_album(http, u) for u in linked[:2]) if c]))
     for name, fetch in sources:
@@ -508,7 +527,7 @@ def tags_for(album, cand, http, artist_cache, source_name, token=""):
     common = {
         "album": cand["title"], "albumartist": cand["artist"], "date": cand["date"] or (str(cand["year"] or "")),
         "label": cand["label"], "barcode": next(iter(cand["barcodes"]), ""), "genre": cand.get("genre", ""),
-        "totaldiscs": str(total_discs), "media": "Digital Media",
+        "totaldiscs": str(total_discs), "media": cand.get("media") or "Digital Media",
         "musicbrainz_albumartistid": [i for i in alb_ids if i],
         "discogs_albumartist_id": [d for _m, d in alb if d],
         "tagmender": "Resolved",
@@ -517,6 +536,9 @@ def tags_for(album, cand, http, artist_cache, source_name, token=""):
         "discogs_release_id": cand.get("discogs_release", ""),
         "tagmender_source": cand["url"],
     }
+    if source_name == "Discogs":                 # the pressing itself: its number and country
+        common.update(catalognumber=cand.get("catno_text") or "",
+                      releasecountry=mc.country_code(cand.get("country")) or "")
     out = []
     for t, c in zip(album["tracks"], cand["tracks"]):
         names = track_artists(cand["artist"], c)
@@ -535,14 +557,16 @@ _ID3 = {"album": "TALB", "albumartist": "TPE2", "artist": "TPE1", "title": "TIT2
         "label": "TPUB", "genre": "TCON", "media": "TMED"}
 _ID3_TXXX = {"barcode": "BARCODE", "artists": "ARTISTS", "musicbrainz_artistid": "MusicBrainz Artist Id",
              "discogs_artist_id": "DISCOGS_ARTIST_ID", "discogs_albumartist_id": "DISCOGS_ALBUMARTIST_ID",
-             "discogs_release_id": "DISCOGS_RELEASE_ID",
+             "discogs_release_id": "DISCOGS_RELEASE_ID", "catalognumber": "CATALOGNUMBER",
+             "releasecountry": "MusicBrainz Album Release Country",
              "musicbrainz_albumartistid": "MusicBrainz Album Artist Id", "tagmender": "TAGMENDER",
              "tagmender_reason": "TAGMENDER_REASON", "tagmender_source": "TAGMENDER_SOURCE"}
 _MP4 = {"album": "\xa9alb", "albumartist": "aART", "artist": "\xa9ART", "title": "\xa9nam", "date": "\xa9day",
         "genre": "\xa9gen"}
 _MP4_FREE = {"label": "LABEL", "barcode": "BARCODE", "media": "MEDIA", "artists": "ARTISTS",
              "discogs_artist_id": "DISCOGS_ARTIST_ID", "discogs_albumartist_id": "DISCOGS_ALBUMARTIST_ID",
-             "discogs_release_id": "DISCOGS_RELEASE_ID",
+             "discogs_release_id": "DISCOGS_RELEASE_ID", "catalognumber": "CATALOGNUMBER",
+             "releasecountry": "MusicBrainz Album Release Country",
              "musicbrainz_artistid": "MusicBrainz Artist Id",
              "musicbrainz_albumartistid": "MusicBrainz Album Artist Id", "tagmender": "TAGMENDER",
              "tagmender_reason": "TAGMENDER_REASON", "tagmender_source": "TAGMENDER_SOURCE"}

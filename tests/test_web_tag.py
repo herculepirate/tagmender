@@ -239,8 +239,63 @@ class WebTag(Base):
         html_page = mb_seed.page([(found[0][0], list(fields.items()))])
         self.assertIn('action="https://musicbrainz.org/release/add"', html_page)
 
+    def _plugin_or_skip(self):
+        sys.path.insert(0, _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
+                        or str(HERE / "herculepirate" / "picard-discogs-enrichment"))
+        try:
+            import discogs_mapping
+        except ImportError:
+            self.skipTest("plugin not available")
+        wt._DM = discogs_mapping
+
+    def _discogs_cd(self, rel_ok=True):
+        """King Diamond - Deadly Lullabyes Live: the approved Discogs pressing, a US CD."""
+        rel = {"id": 556, "title": "The Exuviae of Gods, Pt. 2", "uri": "https://www.discogs.com/release/556",
+               "released": "2004-09-19", "country": "US", "styles": [], "genres": ["Rock"],
+               "artists": [{"name": "Mournful Congregation", "id": 1}],
+               "labels": [{"name": "Metal Blade Records", "catno": "3984-14499-2"}],
+               "formats": [{"name": "CD", "qty": "1", "descriptions": ["Album"]}], "identifiers": [],
+               "tracklist": [{"position": str(i + 1), "type_": "track", "title": f"Track {i + 1}",
+                              "duration": f"{s // 60}:{s % 60:02d}"} for i, s in enumerate(LENS)]}
+
+        class D(FakeWeb):
+            def get_json(self, url, host):
+                if url.endswith("/releases/556"):
+                    self.urls.append(url)
+                    return rel if rel_ok else None
+                return super().get_json(url, host)
+        db = sqlite3.connect(self.db)
+        db.execute("UPDATE results SET result=?", (json.dumps({
+            "path": str(self.album), "status": "auto", "artist_folder": "Mournful Congregation",
+            "album_folder": self.album.name, "best": {"source": "discogs", "id": "556"}}),))
+        db.commit()
+        return D(deezer=True, bandcamp=True)        # Deezer and Bandcamp have the album too
+
+    def test_the_chosen_discogs_pressing_and_nothing_else(self):
+        """King Diamond - Deadly Lullabyes Live (Metal Blade, 3984-14499-2): the Discogs pressing
+        you approved is written with its own media, catalogue number and country; when it
+        cannot be loaded, nothing is written (it was tagged from iTunes)."""
+        self._plugin_or_skip()
+        web = self._discogs_cd(rel_ok=False)
+        self.run_main(web, "--apply", "--keep-folders")
+        f = mutagen.File(self.album / "01.flac")
+        self.assertNotIn("DISCOGS_RELEASE_ID", f)
+        self.assertNotEqual((f.get("TAGMENDER") or [""])[0], "Resolved")
+        self.assertFalse(any("deezer" in u or "bandcamp" in u or "itunes" in u for u in web.urls), web.urls)
+        web = self._discogs_cd(rel_ok=True)
+        self.run_main(web, "--apply", "--keep-folders")
+        f = mutagen.File(self.album / "01.flac")
+        self.assertEqual((f["DISCOGS_RELEASE_ID"], f["MEDIA"], f["CATALOGNUMBER"], f["RELEASECOUNTRY"]),
+                         (["556"], ["CD"], ["3984-14499-2"], ["US"]))
+        m = mutagen.File(self.album / "02.mp3")
+        self.assertEqual(str(m.tags["TXXX:CATALOGNUMBER"]), "3984-14499-2")
+        self.assertEqual(wt.discogs_media({"formats": [{"name": "Vinyl", "descriptions": ['12"', "LP"]}]}),
+                         '12" Vinyl')
+        self.assertEqual(wt.discogs_media({"formats": [{"name": "File"}]}), "Digital Media")
+
     def test_discogs_only_match_is_tagged_from_its_release(self):
-        sys.path.insert(0, str(HERE / "herculepirate" / "picard-discogs-enrichment"))
+        sys.path.insert(0, _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
+                        or str(HERE / "herculepirate" / "picard-discogs-enrichment"))
         try:
             import discogs_mapping
         except ImportError:

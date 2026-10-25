@@ -41,16 +41,15 @@ SUFFIX_LEN = 6                       # " ~1a2b"
 
 def safe_component(text: str, compat="windows") -> str:
     s = unicodedata.normalize("NFC", str(text))
+    s = (_WIN_BAD if compat == "windows" else _LINUX_BAD).sub("_", s)
+    s = re.sub(r"^[.\s]+", "", s)           # "...And Justice for All" would be a hidden folder
+    s = s.strip()
     if compat == "windows":
-        s = _WIN_BAD.sub("_", s).rstrip(". ")
+        s = s.rstrip(". ")
         m = _RESERVED.match(s)
         if m:                                   # "AUX. Remixes" is reserved too: AUX_. Remixes
             s = m.group(1) + "_" + s[len(m.group(1)):]
-    else:
-        s = _LINUX_BAD.sub("_", s)
-    s = s.strip()
-    s = re.sub(r"^[.\s]+", "", s) or s       # "...And Justice for All" would be a hidden folder
-    if s in ("", ".", ".."):
+    if not s or set(s) <= {"."}:
         s = "_"
     return s
 

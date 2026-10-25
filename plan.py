@@ -38,6 +38,7 @@ import tagio
 PLAN_VERSION = 1
 AUDIO_EXT = ex.AUDIO_EXT
 CUE_LIKE = {".cue", ".m3u", ".m3u8"}
+EMBEDDABLE = {".flac", ".mp3", ".m4a", ".mp4", ".aiff", ".aif", ".wav", ".ogg", ".oga", ".opus"}
 
 
 @dataclass
@@ -174,15 +175,22 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
             return []
     if any(p not in moved for p in audio_in(src_dir)):
         return [], "folder holds other music too; companion files stay where they are"
-    tree, seen = [], 0
+    tree, seen, foreign = [], 0, []
+    targets = {os.path.realpath(str(x)) for x in dmap.values()}
+
+    def overlaps(d):                       # a folder the album is moving into (or out of it)
+        r = os.path.realpath(str(d))
+        return any(t == r or t.startswith(r + os.sep) or r.startswith(t + os.sep) for t in targets)
     for dirpath, dirs, names in os.walk(src_dir):
         d = Path(dirpath)
-        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and not (d / x).is_symlink())
+        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and not (d / x).is_symlink()
+                         and not overlaps(d / x))
         if shallow:
             dirs[:] = []
         here = [d / n for n in names if not n.startswith(".")]
         if d != src_dir and any(p.suffix.lower() in AUDIO_EXT and p not in moved for p in here):
             dirs[:] = []                                   # another album's folder: left alone
+            foreign.append(d)
             continue
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
@@ -190,7 +198,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False):
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
-    for d, here in tree:
+    for d, here in [(f_, [f_ / "x.flac"]) for f_ in foreign] + tree:
         if any(p.suffix.lower() in AUDIO_EXT for p in here):
             q = d
             while True:
@@ -241,6 +249,10 @@ def _cue_rewrites(path: Path, renames: dict):
     def swap(name):
         return table.get(name.replace("\\", "/").casefold())
 
+    bom = text.startswith("\ufeff")
+    if bom:
+        text = text[1:]
+
     def line(ln):
         m = re.match(r'^(\s*FILE\s+")([^"]+)(".*)$', ln, re.I)
         if m and swap(m.group(2)):
@@ -252,6 +264,8 @@ def _cue_rewrites(path: Path, renames: dict):
     new = "\n".join(line(ln) for ln in text.split("\n"))
     if new == text:
         return None
+    if bom:
+        new = "\ufeff" + new
     try:
         new.encode(enc)
     except UnicodeEncodeError:
@@ -378,7 +392,11 @@ class Planner:
                         rel = f.relative_to(src_root)
                     except ValueError:
                         rel = Path(f.name)
-                    dst = dest_root / self._below_source(src_root) / rel
+                    real_hold = os.path.realpath(dest_root)
+                    if os.path.realpath(str(src_root)).startswith(real_hold.rstrip(os.sep) + os.sep):
+                        dst = f                         # already in the holding folder: stays
+                    else:
+                        dst = dest_root / self._below_source(src_root) / rel
                     notes = []
                 else:
                     comps = naming.render(template, merged)
@@ -397,6 +415,10 @@ class Planner:
                     fe["op"] = "tag" if changes else "none"
                 else:
                     fe["op"] = op
+                    if Path(dst).exists() and os.path.samefile(dst, f) and fnm.fold(dst) != fnm.fold(f):
+                        fe["linked"] = True              # the destination is a hard link to this file
+                        if op == "copy" and not changes:
+                            fe["op"] = "none"            # already there
             entry["files"].append(fe)
         if entry["conflicts"]:
             entry["status"] = "blocked"
@@ -433,7 +455,8 @@ class Planner:
         art = prop.artwork if p["artwork"]["enabled"] else None
         if art and art.get("front") and Path(art["front"]).exists():
             embed = [fe["dst"] for fe in entry["files"]
-                     if p["artwork"]["embed_front"] and not tagio.read(fe["src"]).get("~pictures")]
+                     if p["artwork"]["embed_front"] and Path(fe["src"]).suffix.lower() in EMBEDDABLE
+                     and not tagio.read(fe["src"]).get("~pictures")]
             # the album's own folder: for a disc set in "Disc 01", "Disc 02" ... that is the folder
             # holding the disc folders, not the first disc's
             folder = (Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
@@ -492,7 +515,9 @@ class Planner:
             key = unicodedata.normalize("NFC", comp)
             key = key.casefold() if windows else key
             if key not in listing:
-                return cur.joinpath(*parts[k:])
+                listing[key] = comp                      # later albums of this plan use this spelling
+                cur = cur / comp
+                continue
             cur = cur / listing[key]
         return cur / parts[-1]
 
@@ -518,7 +543,7 @@ class Planner:
         for name in os.listdir(cand.parent):
             if unicodedata.normalize("NFC", name).casefold() == k:
                 other = cand.parent / name
-                return not (src.exists() and os.path.samefile(other, src))
+                return not (src.exists() and os.path.samefile(other, src) and fnm.fold(other) == fnm.fold(src))
         return False
 
     def _unique(self, dst: Path, src: Path, entry):
@@ -529,7 +554,9 @@ class Planner:
                 dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)
             key = fnm.fold(cand)
             other = self.claimed.get(key)
-            taken_on_disk = (cand.exists() and not (src.exists() and os.path.samefile(cand, src))) or \
+            same_file = src.exists() and cand.exists() and os.path.samefile(cand, src)
+            # this file, spelled differently, or a hard link to it already there (an *arr import)
+            taken_on_disk = (cand.exists() and not same_file) or \
                 (not cand.exists() and self._taken_alike(cand, src))
             if other in (None, str(src)) and not taken_on_disk:
                 self.claimed[key] = str(src)

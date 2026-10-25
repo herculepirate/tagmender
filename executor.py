@@ -330,6 +330,15 @@ def _same_file(a, b) -> bool:
         return False
 
 
+def _case_only(a, b) -> bool:
+    """a and b are one file under two spellings of one name (letter case or Unicode form on
+    a filesystem that treats them alike), not two hard links with different names."""
+    import unicodedata
+    fa = unicodedata.normalize("NFC", str(a)).casefold()
+    fb = unicodedata.normalize("NFC", str(b)).casefold()
+    return str(a) != str(b) and fa == fb and _same_file(a, b)
+
+
 def _case_tmp(src: Path) -> Path:
     return src.parent / f"{STAGE_TAG}case-{hashlib.sha1(str(src).encode('utf-8', 'surrogateescape')).hexdigest()[:12]}"
 
@@ -401,28 +410,41 @@ def _backup(src: Path, jd: Path, n: int) -> dict:
 
 
 def _restore(path: Path, backup: dict, jd: Path):
-    """The file's tags (or the whole file) as backed up, through a staging copy: a crash
-    never leaves a half-written file."""
+    """The file's tags (or the whole file) as backed up, through a staging copy that keeps
+    the file's owner: a crash never leaves a half-written file."""
     import tag_albums as ta
-    if backup["kind"] == "tags":
-        stage = _stage_name(path, "undo")
-        _copy_fsync(path, stage)
-        try:
+    stage = _stage_name(path, "undo")
+    st = os.stat(path)
+    try:
+        if backup["kind"] == "tags":
+            _copy_fsync(path, stage)
             before = payload.digest(path)
             ta.restore_tags(stage, backup["rec"], jd / "blobs")
             if before is not None and payload.digest(stage) != before:
                 raise StepError(f"{path.name}: audio data differed after restoring tags; left as it is")
             with open(stage, "rb+") as fh:
                 os.fsync(fh.fileno())
-        except BaseException:
-            stage.unlink(missing_ok=True)
-            raise
+        else:
+            _copy_fsync(Path(backup["path"]), stage)
+        _keep_owner(stage, st)
         os.replace(stage, path)
-        _fsync_dir(path.parent)
-    else:
-        stage = _stage_name(path, "undo")
-        _copy_fsync(Path(backup["path"]), stage)
-        os.replace(stage, path)
+    except BaseException:
+        stage.unlink(missing_ok=True)
+        raise
+    _fsync_dir(path.parent)
+
+
+def _put_back(data_from: Path, path: Path, owner_of=None):
+    """A copy of data_from at path (which must not exist), through a staging copy."""
+    stage = _stage_name(path, "undo")
+    try:
+        _copy_fsync(data_from, stage)
+        if owner_of is not None:
+            _keep_owner(stage, owner_of)
+        _place(stage, path)
+    except BaseException:
+        stage.unlink(missing_ok=True)
+        raise
 
 
 # --------------------------------------------------------------------------
@@ -558,9 +580,15 @@ class Executor:
                 raise StepError(f"{src.name}: its audio data cannot be verified after writing tags "
                                 "(format not recognised and ffmpeg unavailable); not written")
             n = f"{i}-{j}"
-            backup = _backup(src, self.jd, n) if op in ("tag", "move") else None
+            linked = bool(fe.get("linked")) and dst.exists() and _same_file(src, dst)
+            if linked:
+                op = "relink_" + op                       # dst is already a hard link to src
+            backup = _backup(src, self.jd, n) if op in ("tag", "move", "relink_move", "relink_copy") else None
             self.journal.write(ev="file", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
-                               digest=src_digest, backup=backup)
+                               digest=src_digest, backup=backup, changed=bool(changes or embed))
+            if linked:
+                self._relink_step(i, j, op, src, dst, changes, embed, art, backup, src_digest, done_steps)
+                return
             if op == "move" and not changes and not embed and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
                 _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
@@ -601,9 +629,13 @@ class Executor:
                 stage.unlink(missing_ok=True)
                 raise
             self.journal.write(ev="file", album=i, idx=j, state="staged", stage=str(stage))
-            case_only = op == "move" and dst != src and _same_file(src, dst)
+            case_only = op == "move" and _case_only(src, dst)
             if op == "tag" or case_only:
-                os.replace(stage, src)
+                try:
+                    os.replace(stage, src)
+                except BaseException:
+                    stage.unlink(missing_ok=True)
+                    raise
                 _fsync_dir(src.parent)
                 if case_only:
                     _rename_case(src, dst)
@@ -624,6 +656,45 @@ class Executor:
                 _fsync_dir(src.parent)
                 self.journal.write(ev="file", album=i, idx=j, state="source_removed")
 
+    def _relink_step(self, i, j, op, src, dst, changes, embed, art, backup, src_digest, done_steps):
+        """The destination already is this file under another name (a hard link). A move
+        just drops the source's name; new tags go to the destination as a new file."""
+        if changes or embed:
+            stage = _stage_name(dst, self.job)
+            try:
+                _copy_fsync(src, stage)
+                _keep_owner(stage, os.stat(src))
+                if changes:
+                    tagio.write(stage, changes)
+                if embed:
+                    embed_front(stage, Path(art["front"]).read_bytes(),
+                                "image/png" if str(art["front"]).lower().endswith(".png") else "image/jpeg")
+                if self.preserve_times:
+                    st0 = os.stat(src)
+                    os.utime(stage, ns=(st0.st_atime_ns, st0.st_mtime_ns))
+                if src_digest is not None and payload.digest(stage) != src_digest:
+                    raise StepError(f"{src.name}: audio data differed after writing tags; original kept")
+                got = tagio.read(stage)
+                for k, v in changes.items():
+                    if (got.get(k) or []) != (v or []):
+                        raise StepError(f"{src.name}: tag {k} did not read back as written")
+                with open(stage, "rb+") as fh:
+                    os.fsync(fh.fileno())
+                self.journal.write(ev="file", album=i, idx=j, state="staged", stage=str(stage))
+                os.replace(stage, dst)
+            except BaseException:
+                stage.unlink(missing_ok=True)
+                raise
+            _fsync_dir(dst.parent)
+        st = os.stat(dst)
+        self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
+                           mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst))
+        done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
+        if op == "relink_move":
+            os.unlink(src)
+            _fsync_dir(src.parent)
+            self.journal.write(ev="file", album=i, idx=j, state="source_removed")
+
     def _existing(self, p: Path) -> Path:
         while not p.exists() and p != p.parent:
             p = p.parent
@@ -643,9 +714,15 @@ class Executor:
                 raise
             self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="staged",
                                saved=str(saved))
-            os.replace(stage, src)
+            try:
+                os.replace(stage, src)
+            except BaseException:
+                stage.unlink(missing_ok=True)
+                raise
             _fsync_dir(src.parent)
-            self.journal.write(ev="companion", album=i, idx=j, state="committed")
+            st = os.stat(src)
+            self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
+                               mtime_ns=st.st_mtime_ns)
             done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved), None))
             return
         _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
@@ -660,7 +737,9 @@ class Executor:
         self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="staged",
                            saved=str(saved) if saved else None)
         _place_staged(stage, dst)
-        self.journal.write(ev="companion", album=i, idx=j, state="committed")
+        st = os.stat(dst)
+        self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
+                           mtime_ns=st.st_mtime_ns)
         done_steps.append(("companion", i, j, op, str(src), str(dst), saved, None))
         if op == "move":
             os.unlink(src)
@@ -682,6 +761,7 @@ class Executor:
             _copy_fsync(src, stage)
             if payload.file_sha256(stage) != payload.file_sha256(src):
                 raise StepError(f"{src.name}: copy did not verify")
+        _keep_owner(stage, os.stat(src))
         return saved
 
     def cover_file(self, i, a, done_steps):
@@ -689,9 +769,15 @@ class Executor:
         _check_target(dst, self.roots)
         if dst.exists():
             return
-        self.journal.write(ev="create_begin", kind="cover_file", album=i, path=str(dst))
+        front = Path(a["artwork"]["front"])
+        self.journal.write(ev="create_begin", kind="cover_file", album=i, path=str(dst),
+                           sha256=payload.file_sha256(front))
         stage = _stage_name(dst, self.job)
-        _copy_fsync(Path(a["artwork"]["front"]), stage)
+        try:
+            _copy_fsync(front, stage)
+        except BaseException:
+            stage.unlink(missing_ok=True)
+            raise
         _place_staged(stage, dst)
         st = os.stat(dst)
         self.journal.write(ev="cover_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns)
@@ -703,12 +789,18 @@ class Executor:
         _check_target(dst, self.roots)
         if dst.exists():
             return
-        self.journal.write(ev="create_begin", kind="new_file", album=i, path=str(dst))
+        data = sc["text"].encode("utf-8")
+        self.journal.write(ev="create_begin", kind="new_file", album=i, path=str(dst),
+                           sha256=hashlib.sha256(data).hexdigest())
         stage = _stage_name(dst, self.job)
-        with open(stage, "w", encoding="utf-8") as fh:
-            fh.write(sc["text"])
-            fh.flush()
-            os.fsync(fh.fileno())
+        try:
+            with open(stage, "wb") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+        except BaseException:
+            stage.unlink(missing_ok=True)
+            raise
         _place_staged(stage, dst)
         st = os.stat(dst)
         self.journal.write(ev="new_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns)
@@ -735,6 +827,8 @@ class Executor:
         for step in reversed(steps):
             try:
                 _undo_step(step, self.jd, rolling_back=True)
+                key = ["created", step[5]] if step[0] == "cover" else [step[0], step[1], step[2]]
+                self.journal.write(ev="rollback_step", key=key)
             except Exception as exc:
                 problems.append(str(exc))
         return problems
@@ -748,7 +842,7 @@ def _same_fs(a: Path, b: Path) -> bool:
 
 
 def _place_move(src: Path, dst: Path):
-    if src != dst and _same_file(src, dst):               # only the letter case changes
+    if _case_only(src, dst):                              # only the letter case changes
         _rename_case(src, dst)
         _fsync_dir(src.parent)
         return
@@ -764,32 +858,53 @@ def _undo_step(step, jd, rolling_back=False):
         dst.unlink(missing_ok=True)
         return
     if kind == "companion":
-        if op == "move" and rolling_back and src.exists():
-            if dst.exists() and not _same_file(src, dst):
-                dst.unlink()                              # the source was never removed
-            return
-        if op == "rewrite":
+        if op == "rewrite":                             # a sheet rewritten where it was
             stage = _stage_name(src, "undo")
-            _copy_fsync(Path(extra), stage)
-            os.replace(stage, src)
+            try:
+                _copy_fsync(Path(extra), stage)
+                if src.exists():
+                    _keep_owner(stage, os.stat(src))
+                os.replace(stage, src)
+            except BaseException:
+                stage.unlink(missing_ok=True)
+                raise
             return
-        if op == "move":
-            if not src.exists():
-                src.parent.mkdir(parents=True, exist_ok=True)
-                if extra:                                      # rewritten: the original was saved
-                    _copy_fsync(Path(extra), src)
-                    dst.unlink(missing_ok=True)
-                else:
-                    _place_move(dst, src) if _same_fs(dst, src.parent) else (_copy_fsync(dst, src), dst.unlink())
+        if op == "copy":
+            dst.unlink(missing_ok=True)
+            return
+        original = Path(extra) if extra else dst       # what belongs back at src
+        if src.exists() and dst.exists() and _same_file(src, dst) and not _case_only(src, dst):
+            dst.unlink()                                # linked back, not yet unlinked: finish
+            return
+        if src.exists():
+            if dst.exists() and not _same_file(src, dst) and \
+                    (rolling_back or payload.file_sha256(src) == payload.file_sha256(original)):
+                dst.unlink()                            # the source is (back) in place already
+                return
+            if rolling_back or not dst.exists():
+                return
+            raise StepError(f"cannot move back: {src} exists")
+        src.parent.mkdir(parents=True, exist_ok=True)
+        if not extra and _same_fs(dst, src.parent):
+            _place_move(dst, src)
         else:
+            _put_back(original, src, os.stat(dst) if dst.exists() else None)
             dst.unlink(missing_ok=True)
         return
     backup = extra
+    if op in ("relink_move", "relink_copy"):
+        _undo_relink(src, dst, backup, digest, jd)
+        return
     if op == "tag":
         _restore(src, backup, jd)
     elif op == "copy":
         dst.unlink(missing_ok=True)
     elif op == "move":
+        if src.exists() and dst.exists() and _same_file(src, dst) and not _case_only(src, dst):
+            dst.unlink()                                 # linked back, not yet unlinked: finish
+            if backup:
+                _restore(src, backup, jd)
+            return
         if src.exists() and not dst.exists() and (digest is None or payload.digest(src) == digest):
             if backup:                                   # moved back before an interruption
                 _restore(src, backup, jd)
@@ -800,7 +915,7 @@ def _undo_step(step, jd, rolling_back=False):
             if backup:
                 _restore(src, backup, jd)
             return
-        if src.exists() and dst != src and _same_file(src, dst):     # a case-only rename
+        if src.exists() and _case_only(src, dst):                     # a case-only rename
             _rename_case(dst, src)
             if backup:
                 _restore(src, backup, jd)
@@ -815,12 +930,51 @@ def _undo_step(step, jd, rolling_back=False):
         if _same_fs(dst, src.parent):
             _place_move(dst, src)
         else:
-            stage = _stage_name(src, "undo")
-            _copy_fsync(dst, stage)
-            _place(stage, src)
+            _put_back(dst, src, os.stat(dst))
             dst.unlink()
         if backup:
             _restore(src, backup, jd)
+
+
+def _undo_relink(src: Path, dst: Path, backup, digest, jd):
+    """Before the job src and dst were one file under two names: make them so again, with
+    the old tags."""
+    if not src.exists():
+        if dst.exists() and _tags_sig_backup_free(dst, backup):
+            os.link(dst, src)                       # nothing was written: give src its name back
+            return
+        src.parent.mkdir(parents=True, exist_ok=True)
+        _put_back(dst, src, os.stat(dst))
+        if backup:
+            _restore(src, backup, jd)
+    elif digest is not None and payload.digest(src) != digest:
+        raise StepError(f"{src} holds different audio now; left alone")
+    if dst.exists() and _same_file(src, dst):
+        return
+    stage = _stage_name(dst, "undo")
+    os.link(src, stage)
+    try:
+        os.replace(stage, dst)
+    except BaseException:
+        stage.unlink(missing_ok=True)
+        raise
+
+
+def _tags_sig_backup_free(dst: Path, backup) -> bool:
+    """True when dst still is the very file the job started from (no tags were written)."""
+    if not backup or backup.get("kind") != "tags":
+        return False
+    try:
+        return _same_backup(dst, backup)
+    except Exception:
+        return False
+
+
+def _same_backup(dst: Path, backup) -> bool:
+    import tempfile
+    import tag_albums as ta
+    with tempfile.TemporaryDirectory() as d:
+        return ta.backup_tags(dst, d) == backup["rec"]
 
 
 # --------------------------------------------------------------------------
@@ -842,66 +996,129 @@ def _replay(events):
 def recover(job) -> list[str]:
     """Bring an interrupted job to a clean state. Returns what was done, in words.
 
-    A crash can fall between any two steps of a commit; the files themselves say how far
-    it got. For each file whose last journal line is not "committed":
-      - its staging copy is still there and the destination is not: never committed;
-        the staging copy is removed and the file is as it was;
-      - the destination is the staging copy (linked, the staging name not yet removed),
-        or the staging copy is gone and the destination is there: it was committed; the
-        journal is completed so that undo can put it back;
-      - a rename-move whose new name is linked while the old one is still there: finished.
-    A committed move whose source is still there has its source removed once the new
-    file's audio is verified."""
+    Staging files of every step are removed. An album whose rollback was cut short has its
+    rollback finished. For an album that was in progress, the files say how far each step
+    got: a destination that is the staging copy (linked, the staging name not yet
+    removed), or a staging copy gone with the destination there, was committed, and the
+    journal is completed (with the file's size, time and tags, so undo still notices later
+    edits); a rename-move linked but not yet unlinked is finished. A committed move whose
+    source is still there loses its source once the new file's audio is verified. Cover and
+    lyrics files are adopted only when they hold exactly what the job was writing."""
     jd = job_dir(job)
     journal = Journal(jd)
-    events = journal.read()
-    if not events:
+    if not journal.read():
         raise StepError(f"no job {job}")
-    if any(e.get("ev") in ("end", "recovered") for e in events):
-        return [f"job {job} finished normally; nothing to recover"]
     with job_lock(job):
-        return _recover(job, journal, events)
+        events = journal.read()
+        if any(e.get("ev") in ("end", "recovered") for e in events):
+            return [f"job {job} finished normally; nothing to recover"]
+        return _recover(job, jd, journal, events)
 
 
-def _recover(job, journal, events):
+def _recover(job, jd, journal, events):
     files, comps = _replay(events)
+    failed = {e["album"] for e in events if e.get("ev") == "album_failed"}
+    rolled = {e["album"] for e in events if e.get("ev") == "album_rolled_back"}
+    rolled_steps = {tuple(e["key"]) for e in events if e.get("ev") == "rollback_step"}
     done = []
 
-    def stages(dst):
-        out = [_stage_name(Path(dst), job)] + _old_stage_names(Path(dst), job)
+    def stages(path):
+        out = [_stage_name(Path(path), job)] + _old_stage_names(Path(path), job)
         return [s for s in out if s.exists()]
+
+    def clear(path):
+        """Remove staging files for path; True when one of them was path itself (linked)."""
+        linked = False
+        for s in stages(path):
+            if Path(path).exists() and _same_file(s, path):
+                linked = True
+            else:
+                done.append(f"removed unfinished copy {s}")
+            s.unlink()
+        return linked
 
     def audio_ok(path, digest):
         return digest is None or payload.digest(path) == digest
 
+    # 1. case-only renames cut short, staging files of every step
     for (a, j), f in sorted(files.items()):
-        src, dst, op = Path(f["src"]), Path(f["dst"]), f.get("op")
-        state = f["state"]
-        if _case_tmp(src).exists() and not src.exists():            # a case-only rename cut short
+        src = Path(f["src"])
+        if _case_tmp(src).exists() and not src.exists():
             os.rename(_case_tmp(src), src)
             done.append(f"{src.name}: case-only rename undone")
+    file_had = {k: bool(stages(f["dst"])) for k, f in files.items()}
+    comp_had = {k: bool(stages(c["dst"])) for k, c in comps.items()}
+    file_linked = {k: clear(f["dst"]) for k, f in files.items()}
+    comp_linked = {k: clear(c["dst"]) for k, c in comps.items()}
+    created = {e["path"] for e in events if e.get("ev") in ("cover_file", "new_file")}
+    for e in events:
+        if e.get("ev") == "create_begin":
+            linked = clear(e["path"])
+            p = Path(e["path"])
+            if e["path"] in created or not p.exists() or e["album"] in failed:
+                continue
+            if linked or (e.get("sha256") and payload.file_sha256(p) == e["sha256"]):
+                st = os.stat(p)
+                journal.write(ev=e["kind"], album=e["album"], path=str(p), size=st.st_size,
+                              mtime_ns=st.st_mtime_ns, recovered=True)
+                done.append(f"{p.name}: was created before the interruption; undo can remove it")
+
+    # 2. rollbacks cut short are finished
+    for a in sorted(failed - rolled):
+        problems = []
+        steps = [("file", aa, j, f.get("op"), f["src"], f["dst"], f.get("backup"), f.get("digest"))
+                 for (aa, j), f in files.items() if aa == a and f["state"] in ("committed", "source_removed")]
+        steps += [("companion", aa, j, c.get("op"), c["src"], c["dst"], c.get("saved"), None)
+                  for (aa, j), c in comps.items() if aa == a and c["state"] in ("committed", "source_removed")]
+        for step in sorted(steps, key=lambda s: (s[0] != "companion", s[2]), reverse=True):
+            if (step[0], step[1], step[2]) in rolled_steps:
+                continue
+            try:
+                _undo_step(step, jd, rolling_back=True)
+                journal.write(ev="rollback_step", key=[step[0], step[1], step[2]])
+            except Exception as exc:
+                problems.append(f"{step[4]}: {exc}")
+        for e in events:
+            if e.get("ev") in ("cover_file", "new_file") and e["album"] == a and \
+                    ("created", e["path"]) not in rolled_steps:
+                p = Path(e["path"])
+                if p.exists() and (os.stat(p).st_size, os.stat(p).st_mtime_ns) == (e["size"], e["mtime_ns"]):
+                    p.unlink()
+        journal.write(ev="album_rolled_back", album=a, problems=problems, recovered=True)
+        done.append(f"album {a}: its interrupted rollback was finished" +
+                    (f" (problems: {problems})" if problems else ""))
+        rolled.add(a)
+
+    # 3. albums in progress: what the files say
+    for (a, j), f in sorted(files.items()):
+        if a in rolled:
+            continue
+        src, dst, op = Path(f["src"]), Path(f["dst"]), f.get("op")
+        state = f["state"]
         if state in ("begin", "staged"):
-            st = stages(dst)
-            linked = [s for s in st if dst.exists() and _same_file(s, dst) and s != dst]
             if op == "tag":
-                committed = state == "staged" and not st          # the rename had happened
+                committed = state == "staged" and not file_had[(a, j)]       # the replace had happened
+            elif op in ("relink_move", "relink_copy"):
+                committed = (state == "staged" and not file_had[(a, j)]) or \
+                    (op == "relink_move" and not src.exists())
             elif op == "move" and src != dst and src.exists() and dst.exists() and _same_file(src, dst) \
-                    and str(src).casefold() != str(dst).casefold():
+                    and not _case_only(src, dst):
                 os.unlink(src)                                  # rename-move: linked, not yet unlinked
                 committed = True
             else:
-                committed = bool(linked) or (state == "staged" and not st and dst.exists()) or \
-                    (op == "move" and not st and dst.exists() and not src.exists())
-            for s in st:
-                s.unlink()
-                if s not in linked:
-                    done.append(f"removed unfinished copy {s}")
+                committed = file_linked[(a, j)] or (state == "staged" and not file_had[(a, j)] and dst.exists()) \
+                    or (op == "move" and dst.exists() and not src.exists())
             if committed:
-                journal.write(ev="file", album=a, idx=j, state="committed", recovered=True)
+                st = os.stat(dst)
+                journal.write(ev="file", album=a, idx=j, state="committed", recovered=True,
+                              size=st.st_size, mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst))
                 state = "committed"
                 done.append(f"{src.name}: was written before the interruption; undo can put it back")
             else:
                 done.append(f"{src.name}: left as it was before the job")
+        if state == "committed" and op == "relink_move" and src.exists():
+            src.unlink()
+            journal.write(ev="file", album=a, idx=j, state="source_removed")
         if state == "committed" and op == "move":
             if src.exists() and dst.exists() and src != dst and not _same_file(src, dst) and \
                     audio_ok(dst, f.get("digest")):
@@ -910,37 +1127,20 @@ def _recover(job, journal, events):
             if not src.exists() or _same_file(src, dst):
                 journal.write(ev="file", album=a, idx=j, state="source_removed")
     for (a, j), c in sorted(comps.items()):
+        if a in rolled:
+            continue
         src, dst = Path(c["src"]), Path(c["dst"])
         state = c["state"]
-        if state == "staged":
-            st = stages(dst)
-            linked = [s for s in st if dst.exists() and _same_file(s, dst)]
-            for s in st:
-                s.unlink()
-                if s not in linked:
-                    done.append(f"removed unfinished copy {s}")
-            if linked or (not st and dst.exists()):
-                journal.write(ev="companion", album=a, idx=j, state="committed", recovered=True)
-                state = "committed"
-        if state == "committed" and c.get("op") == "move" and src.exists() and dst.exists():
+        if state == "staged" and dst.exists() and (comp_linked[(a, j)] or not comp_had[(a, j)]):
+            st = os.stat(dst)
+            journal.write(ev="companion", album=a, idx=j, state="committed", recovered=True,
+                          size=st.st_size, mtime_ns=st.st_mtime_ns)
+            state = "committed"
+        if state == "committed" and c.get("op") == "move" and src.exists() and dst.exists() and \
+                not _same_file(src, dst):
             src.unlink()
             journal.write(ev="companion", album=a, idx=j, state="source_removed")
             done.append(f"{src.name}: move finished")
-    finished = {e["path"] for e in events if e.get("ev") in ("cover_file", "new_file")}
-    for e in events:                                            # cover and lyrics files being placed
-        if e.get("ev") == "create_begin" and e["path"] not in finished:
-            p = Path(e["path"])
-            for s in stages(p):
-                if p.exists() and _same_file(s, p):
-                    s.unlink()
-                else:
-                    s.unlink()
-                    done.append(f"removed unfinished copy {s}")
-            if p.exists():
-                st = os.stat(p)
-                journal.write(ev=e["kind"], album=e["album"], path=str(p), size=st.st_size,
-                              mtime_ns=st.st_mtime_ns, recovered=True)
-                done.append(f"{p.name}: was created before the interruption; undo can remove it")
     journal.write(ev="recovered", actions=done)
     _record_job(job, ended=time.time(), status="recovered")
     return done or ["nothing was half-done"]
@@ -953,17 +1153,17 @@ def undo(job, force=False) -> list[str]:
     done, so an undo that was interrupted or met a problem can simply be run again."""
     jd = job_dir(job)
     journal = Journal(jd)
-    events = journal.read()
-    if not events:
+    if not journal.read():
         raise StepError(f"no job {job}")
-    if any(e.get("ev") == "undone" for e in events):
-        raise StepError(f"job {job} was already undone")
-    if not any(e.get("ev") in ("end", "recovered") for e in events):
-        raise StepError(f"job {job} did not finish; run `tagmender recover {job}` first")
-    if (jd / "PRUNED").exists():
-        raise StepError(f"job {job} can no longer be undone: its backups were pruned on "
-                        f"{(jd / 'PRUNED').read_text().strip()}")
     with job_lock(job):
+        events = journal.read()
+        if any(e.get("ev") == "undone" for e in events):
+            raise StepError(f"job {job} was already undone")
+        if not any(e.get("ev") in ("end", "recovered") for e in events):
+            raise StepError(f"job {job} did not finish; run `tagmender recover {job}` first")
+        if (jd / "PRUNED").exists():
+            raise StepError(f"job {job} can no longer be undone: its backups were pruned on "
+                            f"{(jd / 'PRUNED').read_text().strip()}")
         return _undo(job, jd, journal, events, force)
 
 
@@ -991,6 +1191,12 @@ def _undo(job, jd, journal, events, force):
     for (a, j), c in sorted(comps.items(), reverse=True):
         if a in rolled or c["state"] not in ("committed", "source_removed") or ("companion", a, j) in already:
             continue
+        cdst = Path(c["dst"])
+        if c.get("size") is not None and cdst.exists() and not force and \
+                (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
+            problems.append(f"{cdst} was changed after the job; left as it is "
+                            f"(tagmender undo --force {job} puts it back anyway)")
+            continue
         try:
             _undo_step(("companion", a, j, c["op"], c["src"], c["dst"], c.get("saved"), None), jd)
             out.append(f"put back {Path(c['src']).name}")
@@ -1014,14 +1220,15 @@ def _undo(job, jd, journal, events, force):
         if f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
             problems.append(f"{check} holds different audio now; left alone")
             continue
-        if f.get("op") in ("tag", "move") and f.get("tags_sig") and check == (Path(f["src"]) if f["op"] == "tag"
+        if f.get("op") in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and check == (Path(f["src"]) if f["op"] == "tag"
                                                                                  else dst) \
                 and check.exists() and _tags_sig(check) != f["tags_sig"] and not force:
             problems.append(f"{check}: its tags were edited after the job; left as they are "
                             f"(tagmender undo --force {job} puts the old tags back anyway)")
             continue
         try:
-            _undo_step(("file", a, j, f["op"], f["src"], f["dst"], f.get("backup"), f.get("digest")), jd)
+            with file_lock(check if check.exists() else Path(f["src"])):
+                _undo_step(("file", a, j, f["op"], f["src"], f["dst"], f.get("backup"), f.get("digest")), jd)
             out.append(f"put back {Path(f['src']).name}")
             did("file", a, j)
         except Exception as exc:
@@ -1048,12 +1255,16 @@ def prune(days: int) -> list[str]:
     if not jobs_dir().is_dir():
         return out
     for d in jobs_dir().iterdir():
-        ev = Journal(d).read()
-        if not ev or not any(e.get("ev") in ("end", "recovered", "undone") for e in ev):
+        try:
+            with job_lock(d.name):
+                ev = Journal(d).read()
+                if not ev or not any(e.get("ev") in ("end", "recovered", "undone") for e in ev):
+                    continue
+                if ev[-1]["t"] < cutoff and not (d / "PRUNED").exists():
+                    for sub in ("blobs", "files", "companions"):
+                        shutil.rmtree(d / sub, ignore_errors=True)
+                    (d / "PRUNED").write_text(time.strftime("%Y-%m-%d %H:%M"))
+                    out.append(d.name)
+        except StepError:                                      # in use: next time
             continue
-        if ev[-1]["t"] < cutoff:
-            for sub in ("blobs", "files", "companions"):
-                shutil.rmtree(d / sub, ignore_errors=True)
-            (d / "PRUNED").write_text(time.strftime("%Y-%m-%d %H:%M"))
-            out.append(d.name)
     return out

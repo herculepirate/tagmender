@@ -489,11 +489,13 @@ def _confirm(prompt):
 def _execute(p, args):
     import executor
     import plan as planmod
-    actionable = [a for a in p["albums"] if a["status"] in ("ready", "unresolved")
-                  and any(fe["op"] != "none" for fe in a["files"])]
+    actionable = [a for a in p["albums"] if a["status"] in ("ready", "unresolved") and planmod.has_work(a)]
+    blocked = [a for a in p["albums"] if a["status"] == "blocked"]
+    for a in blocked:
+        _err(f"Blocked    {a['source_dir']}  ({'; '.join(a.get('conflicts') or [])})")
     if not actionable:
         print("Nothing to change.")
-        return EXIT_OK
+        return EXIT_PARTIAL if blocked else EXIT_OK
     unattended = (p.get("profile_data") or {}).get("unattended")
     if not (args.yes or unattended):
         if not args.json:
@@ -512,8 +514,8 @@ def _execute(p, args):
                 print(f"{a['label'] or a['status']:<10} {a['album']}" + (f"  ({a['detail']})" if a["detail"] else ""))
         print(f"Job {res['job']}: " + ", ".join(f"{v} {k}" for k, v in sorted(res["counts"].items()))
               + f"\nUndo with: tagmender undo {res['job']}")
-    return EXIT_PARTIAL if res["status"] != "done" or any(a["status"] in ("failed", "conflict")
-                                                         for a in res["albums"]) else EXIT_OK
+    return EXIT_PARTIAL if res["status"] != "done" or blocked or any(
+        a["status"] in ("failed", "conflict", "blocked") for a in res["albums"]) else EXIT_OK
 
 
 def cmd_apply(args):
@@ -577,11 +579,20 @@ def cmd_recover(args):
     jobs = [args.job] if args.job else executor.pending_jobs()
     if not jobs:
         print("No interrupted jobs.")
+    code = EXIT_OK
     for j in jobs:
         print(f"{j}:")
-        for line in executor.recover(j):
+        try:
+            lines = executor.recover(j)
+        except executor.StepError as exc:
+            _err(f"  {exc}")
+            code = EXIT_ERR
+            continue
+        for line in lines:
             print(f"  {line}")
-    return EXIT_OK
+        if any("problems:" in line or line.startswith("PROBLEM") for line in lines):
+            code = EXIT_PARTIAL
+    return code
 
 
 def _unresolved_albums(path):

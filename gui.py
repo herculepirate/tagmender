@@ -441,7 +441,7 @@ class Overview(QWidget):
 
     def actionable(self):
         return sum(1 for a in (self.plan or {}).get("albums", [])
-                   if a["status"] in ("ready", "unresolved") and any(fe["op"] != "none" for fe in a["files"]))
+                   if a["status"] in ("ready", "unresolved") and planmod.has_work(a))
 
     def set_path(self, path):
         self.path = path

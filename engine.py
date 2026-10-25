@@ -44,7 +44,24 @@ import mb_tags
 import plan as planmod
 import reasons
 
-DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*\d+\b|^\d{1,2}$", re.I)
+DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|one|two|three|four|five|six|seven|eight|"
+                      r"nine|ten|[a-h])\b|^\d{1,2}$", re.I)
+_NUMBER_ONLY = re.compile(r"^\d{1,2}$")
+
+
+def is_disc_dir(d: Path) -> bool:
+    """A disc folder ("CD1", "Disc 2", "Disc One", "Side A"). A folder named only by a
+    number counts when its siblings are numbered 1, 2, ... too: "Adele/19" and "Adele/21"
+    are albums, "Box/1" and "Box/2" are discs."""
+    if not DISC_DIR.match(d.name):
+        return False
+    if not _NUMBER_ONLY.match(d.name):
+        return True
+    try:
+        nums = sorted(int(x.name) for x in d.parent.iterdir() if x.is_dir() and _NUMBER_ONLY.match(x.name))
+    except OSError:
+        return False
+    return len(nums) >= 2 and nums[0] == 1 and nums == list(range(1, len(nums) + 1))
 
 
 @dataclass
@@ -118,7 +135,7 @@ class Engine:
             audio = sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
             if not audio:
                 continue
-            owner = d.parent if DISC_DIR.match(d.name) and d != path else d
+            owner = d.parent if d != path and is_disc_dir(d) else d
             folders.setdefault(owner, []).extend(audio)
         groups = []
         for folder in sorted(folders):
@@ -128,6 +145,8 @@ class Engine:
             by_album = {}
             for f in files:
                 by_album.setdefault(ex.album_key(ex.read_meta(f)), []).append(f)
+            if len(by_album) > 1 and all(k[0] == "folder" for k in by_album):
+                by_album = {("folder", str(folder)): files}   # an untagged disc set is one album
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1))
                 continue
@@ -140,6 +159,20 @@ class Engine:
                     groups.append(Group(folder, members, others, single=len(members) == 1))
         return groups
 
+    @staticmethod
+    def _outside(g: Group) -> list:
+        """Audio files below the group's folder that are not the group's own: a loose track's
+        neighbours in a library root, another album nested inside this one, folders the
+        grouping skips. Identification and the plan never see them."""
+        mine = {str(f) for f in g.files}
+        out = []
+        for dirpath, _dirs, names in os.walk(g.folder):
+            for n in names:
+                p = os.path.join(dirpath, n)
+                if Path(n).suffix.lower() in ex.AUDIO_EXT and p not in mine:
+                    out.append(Path(p))
+        return out
+
     # ---- identification ------------------------------------------------------
     def identify(self, g: Group) -> planmod.Proposal:
         errors = {k: v.split(":")[0] for k, v in self.notes.items()}
@@ -150,8 +183,9 @@ class Engine:
                                     status="unresolved", reason="excluded by a rule", reason_codes=["other"])
         row = {"FullPath": str(g.folder), "AlbumArtistFolder": g.folder.parent.name, "AlbumFolder": g.folder.name,
                "Status": "untagged"}
+        outside = self._outside(g)
         args = argparse.Namespace(ocr=self.ocr, max_images=15, process_anyway=False, use_mb=self.use_mb,
-                                  use_discogs=self.use_discogs, provider_errors=errors, exclude_files=g.others)
+                                  use_discogs=self.use_discogs, provider_errors=errors, exclude_files=outside)
         out = None
         if self.use_mb or self.use_discogs:
             try:
@@ -167,8 +201,9 @@ class Engine:
                 errors[{"mb": "musicbrainz"}.get(exc.host, exc.host)] = exc.kind
                 self.log.warning("%s", exc, extra={"provider": exc.host})
         album = ma.read_album(g.folder, g.folder.parent.name, g.folder.name,
-                              exclude={str(x) for x in g.others})
-        files = [t["path"] for t in album["tracks"] if t.get("path")] or [str(f) for f in g.files]
+                              exclude={str(x) for x in outside})
+        mine = {str(f) for f in g.files}
+        files = [t["path"] for t in album["tracks"] if t.get("path") in mine] or [str(f) for f in g.files]
         base = dict(source_dir=str(g.folder), files=files, provider_errors=errors)
         if out and out.get("status") in ("ignored", "skipped"):   # a rule matched the identified release
             return self._unresolved(out, files, base, errors)

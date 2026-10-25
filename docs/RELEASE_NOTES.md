@@ -2,7 +2,20 @@
 
 ## Unreleased
 
-**File operations reviewed** (tests/test_fileops.py; an independent review found the rest)
+**File operations reviewed** in five independent rounds (tests/test_fileops*.py, and four
+crash/error fuzzers in tests/fuzz/)
+- An interrupted album is put back as it was by `tagmender recover`; run the plan again.
+- A new job waits for an interrupted one to be recovered, or for one running elsewhere.
+- A loose track in a library root, or one file named on the command line, is planned on
+  its own (it had taken every file below its folder with it); nested albums stay separate.
+- Disc folders: "CD 1", "Disc One", "Side A"; a folder named only by a number is a disc
+  only beside its siblings 1, 2, ... ("Adele/19" and "Adele/21" are albums). An untagged
+  disc set stays one album.
+- Two releases the template gives one folder get folders of their own; `max_album_words`
+  is honoured; `remove_empty_dirs: false` keeps emptied folders.
+- A saved plan is refused for a file edited since (also when size and time were kept).
+- `apply`/`run` exit 1 when albums were blocked (e.g. an unmounted destination);
+  `recover` exits 1 on problems.
 - Crash-safe at every step: `recover` works out from the files what a crash left and completes
   the journal, so undo can always put things back; undo can be re-run and leaves files whose
   tags were edited after the job alone (`undo --force` to override).

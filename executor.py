@@ -576,7 +576,10 @@ class Executor:
                 st = os.stat(fe["src"])
             except FileNotFoundError:
                 return "conflict", "Changed", f"{fe['src']} is gone since the plan was made"
-            if (st.st_size, st.st_mtime_ns) != (fp["size"], fp["mtime_ns"]):
+            changed = (st.st_size, st.st_mtime_ns) != (fp["size"], fp["mtime_ns"]) or \
+                ("ino" in fp and st.st_ino != fp["ino"]) or \
+                ("ctime_ns" in fp and st.st_ctime_ns != fp["ctime_ns"])   # an edit that kept size and time
+            if changed:
                 return "conflict", "Changed", f"{Path(fe['src']).name} changed since the plan was made"
         self.journal.write(ev="album_begin", album=i, source=a["source_dir"])
         done_steps = []
@@ -597,7 +600,8 @@ class Executor:
             for sc in a.get("sidecars") or []:
                 if Path(sc["src"]) not in dec.excluded:
                     self.new_file(i, sc, done_steps)
-            if self.plan["operation"] == "move" or any(fe["op"] == "move" for fe in a["files"]):
+            if (self.plan["operation"] == "move" or any(fe["op"] == "move" for fe in a["files"])) and \
+                    (self.plan.get("profile_data") or {}).get("remove_empty_dirs", True):
                 self.cleanup_dirs(i, a)
         except Exception as exc:                                  # roll the album back, then carry on
             self.log.error("album %s failed: %s", a["source_dir"], exc)

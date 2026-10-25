@@ -66,7 +66,15 @@ class Proposal:
 
 def _fp(path):
     st = os.stat(path)
-    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "ino": st.st_ino}
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "ino": st.st_ino, "ctime_ns": st.st_ctime_ns}
+
+
+def has_work(entry: dict) -> bool:
+    """The album has something to do: a file to write, move or copy, a companion, a new
+    cover file or cover to embed, or a lyrics file."""
+    art = entry.get("artwork") or {}
+    return any(fe["op"] != "none" for fe in entry.get("files") or []) or bool(entry.get("companions")) \
+        or bool(entry.get("sidecars")) or bool(art.get("file")) or bool(art.get("embed_into"))
 
 
 def _vals(v):
@@ -120,6 +128,58 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     return changes, rows
 
 
+def _release_identity(prop) -> str:
+    rel = prop.release or {}
+    title = str((rel.get("album") or [""])[0])
+    return f"{prop.provider}:{prop.release_id}" if prop.release_id else f"title:{title.casefold()}"
+
+
+def _ids_of(tags: dict) -> set:
+    out = set()
+    for k, pfx in (("musicbrainz_albumid", "musicbrainz"), ("discogs_release_id", "discogs")):
+        for v in tags.get(k) or []:
+            out.add(f"{pfx}:{v}")
+    return out
+
+
+def _other_release_there(album_dir: Path, me: str, own_files) -> bool:
+    """album_dir already holds music of a different release (not this album's own files)."""
+    if not album_dir.is_dir():
+        return False
+    own = {str(f) for f in own_files}
+    own_ino = set()
+    for f in own_files:
+        try:
+            st = os.stat(f)
+            own_ino.add((st.st_dev, st.st_ino))
+        except OSError:
+            pass
+    for dirpath, dirs, names in os.walk(album_dir):
+        dirs[:] = [d for d in dirs if _DISC_NAME.match(d)]
+        for n in names:
+            p = os.path.join(dirpath, n)
+            if Path(n).suffix.lower() not in AUDIO_EXT or p in own or n.startswith("."):
+                continue
+            try:
+                st = os.stat(p)
+                if (st.st_dev, st.st_ino) in own_ino:            # this album's own file, another name
+                    continue
+            except OSError:
+                continue
+            try:
+                tags = tagio.read(p)
+            except Exception:
+                continue
+            ids = _ids_of(tags)
+            if me.startswith("title:"):
+                return str((tags.get("album") or [""])[0]).casefold() != me[6:]
+            _prov, _, rid = me.partition(":")
+            if ids:
+                return not any(i.endswith(":" + rid) for i in ids)
+            return True                                   # untagged music of something else
+    return False
+
+
 def _fit_name(name: str, limits: dict) -> str:
     """A companion's own name, made safe for the destination (Windows-forbidden characters)
     and short enough to take a collision suffix."""
@@ -162,6 +222,7 @@ def mounted(folder) -> bool:
     return False
 
 
+_DISC_NAME = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|[a-h])\b", re.I)
 MAX_TREE = 5000                           # entries looked at below one album folder
 
 
@@ -181,8 +242,13 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     dmap = {}
     for s_, d_ in moved.items():
         dmap.setdefault(s_.parent, set()).add(d_.parent)
-    if any(len(v) > 1 for v in dmap.values()):
-        return [], "files of one folder go to different folders; companion files stay where they are"
+    for k, v in list(dmap.items()):
+        if len(v) > 1:                     # a flat disc set going into "Disc 01", "Disc 02": its album folder
+            parents = {x.parent for x in v}
+            if len(parents) == 1 and all(_DISC_NAME.match(x.name) for x in v):
+                dmap[k] = parents
+            else:
+                return [], "files of one folder go to different folders; companion files stay where they are"
     dmap = {k: next(iter(v)) for k, v in dmap.items()}
     if src_dir not in dmap:
         top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
@@ -257,12 +323,16 @@ def _cue_rewrites(path: Path, renames: dict):
         raw = path.read_bytes()
     except OSError:
         return None
-    for enc in ("utf-8", "cp1252", "latin-1"):
+    encs = ("utf-16",) if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else ("utf-8", "cp1252", "latin-1")
+    text = None
+    for enc in encs:
         try:
             text = raw.decode(enc)
             break
         except UnicodeDecodeError:
             continue
+    if text is None:
+        return None
     table = {}
     for old, new in renames.items():
         old_n, new_n = old.replace("\\", "/"), new.replace("\\", "/")
@@ -272,7 +342,10 @@ def _cue_rewrites(path: Path, renames: dict):
         return None
 
     def swap(name):
-        return table.get(name.replace("\\", "/").casefold())
+        key = name.replace("\\", "/")
+        while key.startswith("./"):
+            key = key[2:]
+        return table.get(key.casefold())
 
     bom = text.startswith("\ufeff")
     if bom:
@@ -309,6 +382,7 @@ class Planner:
         self.created_dirs = set()
         self._dirs = {}
         self._inodes = {}
+        self._album_dirs = {}
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
@@ -388,6 +462,10 @@ class Planner:
                 return entry
             entry["dest_root"] = {"path": str(dest_root), "dev": os.stat(dest_root).st_dev}
         template = naming.template_for(p["naming"])
+        words = int(p["filenames"].get("max_album_words") or 5)
+        if not (p["naming"] or {}).get("template", "").strip() and words != 5:
+            template = template.replace("$words(%album%,5)", f"$words(%album%,{words})")
+        album_dirs = {}
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -433,13 +511,18 @@ class Planner:
                     if os.path.realpath(str(src_root)).startswith(real_hold.rstrip(os.sep) + os.sep):
                         dst = f                         # already in the holding folder: stays
                     else:
-                        dst = dest_root / self._below_source(src_root) / rel
+                        compat = p["filenames"].get("compat", "windows")
+                        below = Path(*[fnm.safe_component(x, compat) for x in self._below_source(src_root).parts]) \
+                            if self._below_source(src_root).parts else Path()
+                        dst = dest_root / below / Path(*[fnm.safe_component(x, compat) for x in rel.parts[:-1]]) \
+                            / _fit_name(rel.name, p["filenames"])
                     notes = []
                 else:
                     comps = naming.render(template, merged)
                     dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
                     if dst is not None:
                         dst = self._spelled(dst, dest_root)
+                        dst = self._own_album_dir(dst, prop, kept, album_dirs)
                 entry["notes"] += notes
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
@@ -484,6 +567,7 @@ class Planner:
                 if c.suffix.lower() in CUE_LIKE:
                     rel = {os.path.relpath(s_, c.parent): os.path.relpath(d_, dst.parent)
                            for s_, d_ in pairs.items()}
+                    rel.update({str(s_): str(d_) for s_, d_ in pairs.items()})       # absolute entries
                     rw = _cue_rewrites(c, rel)
                     if rw and rw[0] is None:
                         entry["notes"].append(f"{c.name}: the new file names cannot be written in its "
@@ -502,8 +586,8 @@ class Planner:
             # the album's own folder: for a disc set in "Disc 01", "Disc 02" ... that is the folder
             # holding the disc folders, not the first disc's
             folder = (Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
-                      if entry["files"] else Path(prop.source_dir))
-            has_image = folder.exists() and any(x.suffix.lower() in (".jpg", ".jpeg", ".png") for x in folder.iterdir())
+                      if entry["files"] else (None if op == "copy" else Path(prop.source_dir)))
+            has_image = folder is None or folder.exists() and any(x.suffix.lower() in (".jpg", ".jpeg", ".png") for x in folder.iterdir())
             has_image = has_image or any(Path(c["dst"]).parent == folder and Path(c["dst"]).suffix.lower() in
                                          (".jpg", ".jpeg", ".png") for c in entry["companions"])
             for fe in entry["files"]:
@@ -533,6 +617,26 @@ class Planner:
                 not (entry["artwork"] and (entry["artwork"]["embed_into"] or entry["artwork"]["file"])):
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
+
+    def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
+        """dst, moved into an album folder of its own when the template gives this release
+        the same folder as a different release (in this plan, or already on disk): "Now
+        That's What I Call Music! 47" and "... 48" shortened to five words would share one."""
+        album_dir = dst.parent.parent if _DISC_NAME.match(dst.parent.name) else dst.parent
+        if "map" not in cache:
+            me = _release_identity(prop)
+            key = fnm.fold(album_dir)
+            owner = self._album_dirs.get(key)
+            clash = (owner is not None and owner != me) or \
+                (owner is None and _other_release_there(album_dir, me, own_files))
+            new = album_dir.with_name(album_dir.name + fnm.collision_suffix(me)) if clash else album_dir
+            self._album_dirs[fnm.fold(new)] = me
+            cache["map"] = (album_dir, new)
+        old, new = cache["map"]
+        try:
+            return new / dst.relative_to(old)
+        except ValueError:
+            return dst
 
     def _below_source(self, folder: Path) -> Path:
         """The album folder's path below the deepest profile source holding it

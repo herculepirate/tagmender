@@ -352,12 +352,14 @@ def folder_cover(folder) -> Path | None:
     return None
 
 
-def small_covers(folder, files, profile) -> dict:
+def small_covers(folder, files, profile, ours=None) -> dict:
     """The album's covers: {"owns": its existing front covers, largest first, as (path or
     bytes, w, h) - never another album's (a shared folder's cover file is no one's); and,
     with artwork.replace "larger_only", those smaller than artwork.min_px on the short side,
     which a larger cover replaces: "file": (path, w, h) or None, "embedded": {track: (w, h)}
-    ((0, 0): pictures, but no front among them)}."""
+    ((0, 0): pictures, but no front among them)}. files: the tracks TagMender writes; ours:
+    every file of the album as found (its second copies too), for telling its folder's cover
+    from another album's."""
     from plan import EMBEDDABLE
     art = profile["artwork"]
     low = int(art.get("min_px") or 0)
@@ -365,7 +367,7 @@ def small_covers(folder, files, profile) -> dict:
     out = {"file": None, "embedded": {}, "owns": []}
     cap = embed_cap(profile)
     # a folder holding other music too: its cover file is no one album's (never replaced, never "own")
-    if art.get("files", True) and not _other_music(Path(folder), files):
+    if art.get("files", True) and not _other_music(Path(folder), ours or files):
         c = folder_cover(folder)
         if c is not None:
             try:
@@ -517,6 +519,11 @@ def _album_id(path):
     return (title, who) if title else ("", "")
 
 
+def _is_disc(d: Path) -> bool:
+    from engine import is_disc_dir
+    return is_disc_dir(d)
+
+
 def _bare_stem(p: Path) -> str:
     """"02 b (1)" and "02 b" alike: a duplicate's name."""
     return re.sub(r"\s*\(\d+\)$", "", p.stem).casefold()
@@ -529,6 +536,7 @@ def _other_music(folder: Path, files) -> bool:
     files and NAS index folders (Synology's @eaDir, .AppleDouble) are nobody's."""
     mine = {str(f) for f in files}
     ours = {_album_id(f) for f in files} if files else set()
+    untagged = bool(files) and ours <= {("", "")}     # the album itself carries no tags
     ours.discard(("", ""))                  # (untagged is no album: never "the same" as this one)
     stems = {_bare_stem(Path(f)) for f in files}
     try:
@@ -541,8 +549,12 @@ def _other_music(folder: Path, files) -> bool:
             aid = _album_id(p)
             if aid in ours:
                 continue                                  # the same album (a copy, a bonus track)
-            if aid == ("", "") and (len(rel) > 1 or _bare_stem(p) in stems):
-                continue                                  # its untagged bonus folder, a copy of its own track
+            if aid == ("", "") and _bare_stem(p) in stems:
+                continue                                  # a copy of one of its own tracks
+            if aid == ("", "") and len(rel) > 1 and (_is_disc(folder / rel[0]) or untagged):
+                continue                                  # its untagged disc folder; an untagged album's
+            #                                               untagged bonus folder (a TAGGED single beside
+            #                                               untagged album folders: the artist's folder)
             return True
     except OSError:
         return False

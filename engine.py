@@ -512,8 +512,8 @@ class Engine:
             return
         try:
             import artwork
-            folder, files = self._art_view(prop)
-            small = artwork.small_covers(folder, files, self.profile)
+            folder, files, ours = self._art_view(prop)
+            small = artwork.small_covers(folder, files, self.profile, ours=ours)
             if not artwork.needs_art(folder, files, self.profile, small=small):
                 return                        # every track and the folder have a cover: nothing to look for
             if self._art is None:
@@ -538,22 +538,23 @@ class Engine:
             prop.why = list(prop.why) + [f"no cover: {got['note']}"]
 
     def _art_view(self, prop):
-        """Where the album's covers are judged: for a copy profile whose copies exist already,
-        the copies (what the library has; the source is never changed); else the album itself."""
+        """Where the album's covers are judged: (folder, the tracks TagMender writes, every file
+        of the album as found). For a copy profile whose copies exist already, the copies (what
+        the library has; the source is never changed); else the album itself."""
         own = list(getattr(prop, "group_files", None) or prop.files)
         if self.profile["operation"] != "copy" or not self.profile["destination"]:
-            return prop.source_dir, own
+            return prop.source_dir, list(prop.files), own
         copies = []
         for f in prop.files:                  # (files never copied - another format, skipped - do not count)
             c = [x for x in planmod.copies_of(f, under=self.profile["destination"]) if Path(x).is_file()]
             if c:
                 copies.append(Path(c[0]))
         if not copies:
-            return prop.source_dir, own
+            return prop.source_dir, list(prop.files), own
         folder = Path(os.path.commonpath([str(c.parent) for c in copies]))
         if is_disc_dir(folder):
             folder = folder.parent
-        return folder, copies
+        return folder, copies, copies
 
     # ---- everything ---------------------------------------------------------
     def apply_level(self, prop: planmod.Proposal):

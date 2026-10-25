@@ -272,7 +272,7 @@ class GroupFilesReachArtwork(Base):
         with mock.patch.object(eng_mod.Engine, "_identify",
                                lambda self_, g_: pl.Proposal(source_dir=str(g_.folder), files=[str(self.f1)])):
             prop = e.identify(g)
-        self.assertEqual(e._art_view(prop)[1], [str(f) for f in g.files])
+        self.assertEqual(e._art_view(prop)[2], [str(f) for f in g.files])
 
 
 for _cls in (PartialCopy, OneDiscFolder, UndoOverEdit,):                 # (Replace's own tests run in test_cover_replace)

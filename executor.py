@@ -88,6 +88,8 @@ class Journal:
             fh.write(line.encode("utf-8"))
             fh.flush()
             os.fsync(fh.fileno())
+        if ev.get("ev") in ("end", "recovered"):
+            _mark_ended(self.path.parent)
 
     def read(self):
         if not self.path.exists():
@@ -115,15 +117,32 @@ def busy_jobs(but=None) -> list[str]:
     return out
 
 
+ENDED = "ENDED"                  # in a job folder: its journal has its end (read no further)
+
+
 def pending_jobs() -> list[str]:
+    """Jobs whose journal has no end (interrupted, or running now). A finished job's folder
+    is marked ENDED, so its journal - large for a library-wide job - is read once, not on
+    every look (the watcher looks before every pass and every job)."""
     out = []
     if not jobs_dir().is_dir():
         return out
     for d in sorted(jobs_dir().iterdir()):
+        if (d / ENDED).exists() or not d.is_dir():
+            continue
         j = Journal(d).read()
         if j and not any(e.get("ev") in ("end", "recovered") for e in j):
             out.append(d.name)
+        elif j:
+            _mark_ended(d)
     return out
+
+
+def _mark_ended(d: Path):
+    try:
+        (d / ENDED).touch()
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------------------

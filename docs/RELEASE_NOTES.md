@@ -29,7 +29,12 @@ album with a good cover of its own never gets a generated one and needs no looku
 embed size applies only to profiles using CoverUp; an idle watcher pass never walks the
 watched folder for a loose track; undo leaves a cover the user put in after the job alone;
 the background service gets the plugin locations (never keys; those from
-~/.config/tagmender/env if present).
+~/.config/tagmender/env if present). Fifth review (tests/test_review5_cover_watch.py): an artist
+folder's photo (Artist/folder.jpg beside a loose single and the artist's albums) is never taken
+for the single's cover, replaced or embedded; an album held twice in one folder (FLAC and MP3)
+gets its small cover replaced once, then no more lookups; covers are judged by the tracks
+TagMender writes; a finished job is marked ENDED, so the watcher no longer rereads every job's
+journal before every pass and job.
 
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)

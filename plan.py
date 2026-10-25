@@ -431,16 +431,19 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     return out, ""
 
 
-def _holds_other_music(folder: Path, entry) -> bool:
-    """folder (with its disc folders) holds, or will hold, music that is not this album's."""
+def _holds_other_music(folder: Path, entry, group=None) -> bool:
+    """folder - or any folder below it - holds, or will hold, music that is not this album's
+    (an artist folder with a loose single and the artist's albums: its folder.jpg is no
+    one album's). group: every file of the album as found (its second copies too)."""
     ours = {fe["src"] for fe in entry["files"]} | {fe["dst"] for fe in entry["files"]} \
-        | {s_.get("file") for s_ in entry.get("skipped") or []}
+        | {s_.get("file") for s_ in entry.get("skipped") or []} | {str(g) for g in group or []}
     try:
-        for x in folder.iterdir():
-            kids = [x] if x.is_file() else (list(x.rglob("*")) if x.is_dir() and _DISC_NAME.match(x.name) else [])
-            for k in kids:
-                if k.suffix.lower() in AUDIO_EXT and not k.name.startswith(".") and str(k) not in ours:
-                    return True
+        for k in folder.rglob("*"):
+            rel = k.relative_to(folder).parts
+            if any(x.startswith((".", "@")) for x in rel):
+                continue                          # (hidden files, NAS index folders: nobody's)
+            if k.suffix.lower() in AUDIO_EXT and str(k) not in ours and k.is_file():
+                return True
     except OSError:
         return False
     return False
@@ -814,7 +817,8 @@ class Planner:
                 if fe["dst"] in embed and fe["op"] == "none":   # only the cover is new
                     fe["op"] = "tag" if fe["dst"] == fe["src"] else op
             cover = None if (has_image or not p["artwork"]["files"]) else folder / "cover.jpg"
-            if cover is not None and _holds_other_music(folder, entry):
+            group = getattr(prop, "group_files", None)
+            if cover is not None and _holds_other_music(folder, entry, group):
                 cover = None                  # a folder shared with other music: its cover is no one album's
             if cover is not None:
                 key = fnm.fold(cover)
@@ -825,7 +829,7 @@ class Planner:
                     self.claimed[key] = me
             replaced = None                   # the album's small cover file, now the larger one
             rf = rep.get("file")
-            if rf and Path(rf).exists() and not _holds_other_music(Path(rf).parent, entry):
+            if rf and Path(rf).exists() and not _holds_other_music(Path(rf).parent, entry, group):
                 try:
                     import artwork as _artwork
                     new = _artwork.as_format(Path(art["front"]), Path(rf).suffix,

@@ -89,10 +89,10 @@ class Journal:
         if not self.path.exists():
             return []
         out = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        for line in self.path.read_bytes().splitlines():
             try:
-                out.append(json.loads(line))
-            except ValueError:
+                out.append(json.loads(line.decode("utf-8")))
+            except ValueError:                     # (UnicodeDecodeError too: cut inside a letter)
                 pass                               # a line cut short by a crash
         return out
 
@@ -912,6 +912,9 @@ class Executor:
         if dst.exists():
             return
         front = Path(a["artwork"]["front"])
+        if not front.exists():              # a scan of the album ("Scans/Front.jpg"), moved with it just now
+            front = next((Path(c["dst"]) for c in a.get("companions") or []
+                          if c["src"] == str(front) and Path(c["dst"]).exists()), front)
         self.journal.write(ev="create_begin", kind="cover_file", album=i, path=str(dst),
                            sha256=payload.file_sha256(front))
         stage = _stage_name(dst, self.job)
@@ -1397,6 +1400,31 @@ def undo(job, force=False) -> list[str]:
         return _undo(job, jd, journal, events, force)
 
 
+def _undo_unreachable(jd, files, comps, rolled) -> str | None:
+    """Why undo cannot run now: a share the job wrote to or took files from is not mounted
+    (or its folder is gone). Undo would otherwise find the copies "gone" and
+    forget them, or put an album back onto the system disk under an empty mount point."""
+    try:
+        albums = json.loads((jd / "plan.json").read_text(encoding="utf-8"))["albums"]
+    except (OSError, ValueError, KeyError):
+        return None
+    touched = {a for (a, _j), f in list(files.items()) + list(comps.items())
+               if f.get("state") in ("committed", "source_removed") and a not in rolled}
+    for i in sorted(touched):
+        if i >= len(albums):
+            continue
+        a = albums[i]
+        root = a.get("dest_root") or {}
+        if root.get("path"):
+            r = Path(root["path"])              # (not its device number: a share remounted
+            if not r.is_dir() or not planmod.mounted(r):   # after a reboot may get another)
+                return f"the destination {r} is not available (unmounted?)"
+        moves = any(f.get("op") in ("move", "relink_move") for (x, _j), f in files.items() if x == i)
+        if moves and a.get("source_dir") and not planmod.mounted(a["source_dir"]):
+            return f"the share {a['source_dir']} came from is not mounted"
+    return None
+
+
 def _undo(job, jd, journal, events, force):
     # albums put back completely by their rollback are skipped; where the rollback met a
     # problem, undo does the steps it did not finish
@@ -1405,15 +1433,46 @@ def _undo(job, jd, journal, events, force):
     already = {tuple(e["key"]) for e in events if e.get("ev") == "undo_step"}
     files, comps = _replay(events)
     out, problems = [], []
+    gone = _undo_unreachable(jd, files, comps, rolled)
+    if gone:
+        raise StepError(f"{gone}; nothing was undone - undo again when it is back")
     _clear_undo_leftovers(files, comps)                  # an earlier undo cut short
 
     def did(*key):
         journal.write(ev="undo_step", key=list(key))
 
+    # which tracks stay where the job put them (changed since), first: an album whose music
+    # stays keeps its cover, scans, log and cue with it
+    verdict = {}
+    for (a, j), f in sorted(files.items(), reverse=True):
+        if a in rolled or f["state"] not in ("committed", "source_removed") or ("file", a, j) in already \
+                or ("file", a, j) in rolled_steps:
+            continue
+        dst = Path(f["dst"])
+        check = Path(f["src"]) if f.get("op") == "tag" else dst
+        if not check.exists() and f.get("op") == "move" and Path(f["src"]).exists():
+            check = Path(f["src"])                      # an interrupted undo had moved it back
+        why = None
+        if f.get("op") == "copy" and dst.exists() and f.get("size") is not None and \
+                (os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]):
+            why = f"{dst} was changed after the job; left in place"
+        elif f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
+            why = f"{check} holds different audio now; left alone"
+        elif f.get("op") in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and \
+                check == (Path(f["src"]) if f["op"] == "tag" else dst) and check.exists() and \
+                _tags_sig(check) != f["tags_sig"] and not force:
+            why = (f"{check}: its tags were edited after the job; left as they are "
+                   f"(tagmender undo --force {job} puts the old tags back anyway)")
+        verdict[(a, j)] = (why, check)
+    staying = {a for (a, _j), (why, _c) in verdict.items() if why and files[(a, _j)].get("op") != "tag"}
+
     covers = [e for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled]
     for e in reversed(covers):
         p = Path(e["path"])
         if ("created", str(p)) in already or ("created", str(p)) in rolled_steps:
+            continue
+        if e["album"] in staying:
+            problems.append(f"{p} stays with the album's music, which stays where the job put it")
             continue
         if p.exists() and (os.stat(p).st_size, os.stat(p).st_mtime_ns) == (e["size"], e["mtime_ns"]):
             p.unlink()
@@ -1427,6 +1486,9 @@ def _undo(job, jd, journal, events, force):
                 or ("companion", a, j) in rolled_steps:
             continue
         cdst = Path(c["dst"])
+        if a in staying:
+            problems.append(f"{cdst} stays with the album's music, which stays where the job put it")
+            continue
         if c.get("size") is not None and cdst.exists() and not force and \
                 (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
             problems.append(f"{cdst} was changed after the job; left as it is "
@@ -1438,29 +1500,15 @@ def _undo(job, jd, journal, events, force):
             did("companion", a, j)
         except Exception as exc:
             problems.append(f"{c['src']}: {exc}")
-    removed = [e for e in events if e.get("ev") == "dir_removed"]
+    removed = [e for e in events if e.get("ev") == "dir_removed" and e.get("album") not in staying]
     for e in removed:
         Path(e["path"]).mkdir(parents=True, exist_ok=True)
     for (a, j), f in sorted(files.items(), reverse=True):
-        if a in rolled or f["state"] not in ("committed", "source_removed") or ("file", a, j) in already \
-                or ("file", a, j) in rolled_steps:
+        if (a, j) not in verdict:
             continue
-        dst = Path(f["dst"])
-        if f.get("op") == "copy" and dst.exists() and f.get("size") is not None and \
-                (os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]):
-            problems.append(f"{dst} was changed after the job; left in place")
-            continue
-        check = Path(f["src"]) if f.get("op") == "tag" else dst
-        if not check.exists() and f.get("op") == "move" and Path(f["src"]).exists():
-            check = Path(f["src"])                      # an interrupted undo had moved it back
-        if f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
-            problems.append(f"{check} holds different audio now; left alone")
-            continue
-        if f.get("op") in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and check == (Path(f["src"]) if f["op"] == "tag"
-                                                                                 else dst) \
-                and check.exists() and _tags_sig(check) != f["tags_sig"] and not force:
-            problems.append(f"{check}: its tags were edited after the job; left as they are "
-                            f"(tagmender undo --force {job} puts the old tags back anyway)")
+        why, check = verdict[(a, j)]
+        if why:
+            problems.append(why)
             continue
         try:
             with file_lock(check if check.exists() else Path(f["src"])):
@@ -1489,9 +1537,7 @@ def prune(days: int) -> list[str]:
     """Delete the backups of finished jobs older than DAYS (their undo goes with them)."""
     out = []
     cutoff = time.time() - days * 86400
-    if not jobs_dir().is_dir():
-        return out
-    for d in jobs_dir().iterdir():
+    for d in (jobs_dir().iterdir() if jobs_dir().is_dir() else []):
         try:
             with job_lock(d.name):
                 ev = Journal(d).read()
@@ -1504,4 +1550,16 @@ def prune(days: int) -> list[str]:
                     out.append(d.name)
         except StepError:                                      # in use: next time
             continue
+    # artwork the engine fetched for plans (STATE_DIR/staging/<job>): a plan that old is
+    # refused anyway once its files changed, and the folder otherwise grows with every run
+    staging = ex.STATE_DIR / "staging"
+    if staging.is_dir():
+        for d in staging.iterdir():
+            try:
+                if d.is_dir() and not d.is_symlink() and d.stat().st_mtime < cutoff and \
+                        not any(x.stat().st_mtime >= cutoff for x in d.rglob("*")):
+                    shutil.rmtree(d, ignore_errors=True)
+                    out.append(f"staging/{d.name}")
+            except OSError:
+                continue
     return out

@@ -225,9 +225,15 @@ def audio_key(path):
 # --------------------------------------------------------------------------
 # Full tag backup and restore (for --undo)
 # --------------------------------------------------------------------------
+def _open(path):
+    """mutagen.File, which also reads TagMender's staging copies (".tm-...flac.part")."""
+    import tagio
+    return tagio.mutagen_file(path)
+
+
 def backup_tags(path, blob_dir):
     """Every tag of the file as stored, pictures written to blob_dir by checksum."""
-    f = mutagen.File(path)
+    f = _open(path)
     rec = {"format": type(f).__name__ if f else "", "tags": None, "pictures": []}
     if f is None:
         return rec
@@ -273,7 +279,7 @@ def _mp4_value(values, blob_dir):
 def restore_tags(path, rec, blob_dir):
     from mutagen.flac import Picture
     from mutagen.mp4 import MP4Cover
-    f = mutagen.File(path)
+    f = _open(path)
     if f is None:
         raise ValueError("cannot open")
     tags = rec.get("tags")

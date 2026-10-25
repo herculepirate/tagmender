@@ -75,8 +75,9 @@ def _one_compilation(files, metas, title, folder) -> bool:
         return True
     fold = lambda s: re.sub(r"[\W_]+", " ", s.casefold()).strip()  # noqa: E731
     t = fold(title)
-    if t and any(t in fold(d.name) for d in {folder, *{f.parent for f in files}}):
-        return True
+    named = re.compile(r"(?:^| )" + re.escape(t) + r"(?: |$)") if t else None
+    if named and any(named.search(fold(d.name)) for d in {folder, *{f.parent for f in files}}):
+        return True                            # "1999 - Hits 1999"; not "Demos" for "Demo"
     nums, totals = [], set()
     for f in files:
         n, _, tot = _first(metas[f], "tracknumber").partition("/")

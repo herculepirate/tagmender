@@ -370,7 +370,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         anchor = d
         while anchor not in dmap:
             anchor = anchor.parent
-        dest_dir = dmap[anchor] / d.relative_to(anchor)
+        compat = (profile.get("filenames") or {}).get("compat", "windows")
+        dest_dir = dmap[anchor].joinpath(*[fnm.safe_component(x, compat) for x in d.relative_to(anchor).parts])
         for p in sorted(here):
             if p.is_symlink() or not p.is_file() or p.suffix.lower() in AUDIO_EXT:
                 continue

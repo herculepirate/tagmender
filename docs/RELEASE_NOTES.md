@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**File operations reviewed** in nine independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in ten independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.
@@ -33,6 +33,9 @@ crash/error fuzzers in tests/fuzz/)
 - Staging copies are named `.tm-<job>-<hash>.flac.part`, so no player or lister takes one
   for a track; a plain move of DSD/WAV/WavPack files keeps no backup copy and is undone by
   renaming only.
+- Undo refuses to run while a share the job used is unmounted, and leaves an album's cover,
+  scans, log and cue with its music when the music stays (edited since the job).
+- `tagmender jobs prune` also removes old fetched artwork.
 
 **New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
 - Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.

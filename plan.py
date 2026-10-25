@@ -866,12 +866,13 @@ class Planner:
 
     def _below_source(self, folder: Path) -> Path:
         """The album folder's path below the deepest profile source holding it
-        ("Artist/Album"), else its last two folders."""
+        ("Artist/Album"; nothing for loose tracks at the top of a source), else its last two
+        folders."""
         real = os.path.realpath(str(folder))
         best = None
         for s_ in self.profile["sources"]:
             r = os.path.realpath(os.path.expanduser(s_["path"]))
-            if real.startswith(r.rstrip(os.sep) + os.sep) and (best is None or len(r) > len(best)):
+            if (real == r or real.startswith(r.rstrip(os.sep) + os.sep)) and (best is None or len(r) > len(best)):
                 best = r
         if best:
             return Path(os.path.relpath(real, best))

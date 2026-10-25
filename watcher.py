@@ -121,22 +121,25 @@ class Watcher:
             return False, "partial download inside"
         if time.time() - newest < prof["watch"]["settle_minutes"] * 60:
             return False, "still changing"
-        row = db.execute("SELECT signature, status, attempts, next_try FROM processed WHERE folder=?",
+        row = db.execute("SELECT signature, status, attempts, next_try, ts FROM processed WHERE folder=?",
                          (key,)).fetchone()
         rules = ex.load_rules(prof.name)
         if ex.State().still_ignored(folder, ex.signature(ex.audio_files(folder)), ex.rules_hash(rules)):
             return False, "ignored (unchanged)"
         if not row:
             return True, "new"
-        signature, status, attempts, next_try = row
+        signature, status, attempts, next_try, ts = row
+        if status == "undone":                       # a job undone by hand is not done again by itself
+            return (True, "changed since the undo") if newest > (ts or 0) else (False, "undone")
         if signature != sig:
             return True, "changed"
         if status == "excluded":                     # looked at again when the rules or an override change
             detail = db.execute("SELECT detail FROM processed WHERE folder=?", (key,)).fetchone()[0]
             if detail != ex.rules_hash(rules):
                 return True, "rules changed"
-            if ex._overridden(folder, ex.State().overrides()):
-                return True, "process anyway"
+            ovr = ex.State().overrides()
+            if any(ex._overridden(x, ovr) for x in [folder, *(files or [])]):
+                return True, "process anyway"          # the folder, or one of its loose tracks
             return False, "excluded (unchanged)"
         if status == "waiting_destination":          # planned while the stick/share was out
             return (True, "destination back") if self.destination_ready(prof) else (False, status)
@@ -201,6 +204,9 @@ class Watcher:
                 attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
                 try:
                     prop = e.identify(g)
+                    for step in ("add_artwork", "apply_level"):   # as `tagmender run` does
+                        if hasattr(e, step):
+                            getattr(e, step)(prop)
                     n_jobs = getattr(self, "_n", 0) + 1
                     self._n = n_jobs
                     plan = planmod.build([prop], prof, e.job + f"-{n_jobs}", extra_roots=[root])
@@ -210,6 +216,8 @@ class Watcher:
                         outcome = res["albums"][0]["status"] if res["albums"] else a["status"]
                     elif a["status"] == "blocked":                # nothing to apply: planned again later
                         outcome = "blocked"
+                    elif not planmod.has_work(a):                 # nothing to change: no plan to keep
+                        outcome = a["status"]
                     else:
                         pdir = ex.STATE_DIR / "plans"
                         pdir.mkdir(parents=True, exist_ok=True)

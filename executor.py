@@ -768,12 +768,17 @@ class Executor:
             if op == "move" and not changes and not embed and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
                 _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
-                _place_move(src, dst)                     # same filesystem: a rename, nothing copied
-                self.journal.write(ev="file", album=i, idx=j, state="committed", moved_by="rename",
-                                   tags_sig=_tags_sig(dst))
-                self.journal.write(ev="file", album=i, idx=j, state="source_removed")
-                done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
-                return
+                try:
+                    _place_move(src, dst)                 # same filesystem: a rename, nothing copied
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV:          # bind mounts / mergerfs of one disk: copy
+                        raise
+                else:
+                    self.journal.write(ev="file", album=i, idx=j, state="committed", moved_by="rename",
+                                       tags_sig=_tags_sig(dst))
+                    self.journal.write(ev="file", album=i, idx=j, state="source_removed")
+                    done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
+                    return
             if op in ("copy", "move"):
                 _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
             stage = _stage_name(dst, self.job)
@@ -1099,6 +1104,18 @@ def _same_fs(a: Path, b: Path) -> bool:
         return False
 
 
+def _try_rename_back(dst: Path, src: Path) -> bool:
+    """_place_move(dst, src); False when the two folders are one disk under two mounts
+    (bind mounts, Docker volumes, mergerfs) that refuse a rename between them: copy instead."""
+    try:
+        _place_move(dst, src)
+        return True
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        return False
+
+
 def _place_move(src: Path, dst: Path):
     if _case_only(src, dst):                              # only the letter case changes
         _rename_case(src, dst)
@@ -1148,11 +1165,10 @@ def _undo_step(step, jd, rolling_back=False):
                 return
             raise StepError(f"cannot move back: {src} exists")
         mkdirs_like_parent(src.parent)
-        if not extra and _same_fs(dst, src.parent):
-            _place_move(dst, src)
-        else:
-            _put_back(original, src, os.stat(dst) if dst.exists() else None)
-            dst.unlink(missing_ok=True)
+        if not extra and _same_fs(dst, src.parent) and _try_rename_back(dst, src):
+            return
+        _put_back(original, src, os.stat(dst) if dst.exists() else None)
+        dst.unlink(missing_ok=True)
         return
     backup = extra
     if op in ("relink_move", "relink_copy"):
@@ -1191,9 +1207,7 @@ def _undo_step(step, jd, rolling_back=False):
                 return
             raise StepError(f"cannot move back: {src} exists")
         mkdirs_like_parent(src.parent)
-        if _same_fs(dst, src.parent):
-            _place_move(dst, src)
-        else:
+        if not (_same_fs(dst, src.parent) and _try_rename_back(dst, src)):
             _put_back(dst, src, os.stat(dst))
             dst.unlink()
         if backup:
@@ -1488,6 +1502,7 @@ def _recover(job, jd, journal, events):
                     if saved.exists() and not os.path.lexists(path):
                         mkdirs_like_parent(path.parent)
                         shutil.copy2(saved, path)
+                        _keep_owner(path, os.stat(path.parent))
                 except OSError as exc:
                     problems.append(f"{path}: {exc}")
         for ev in reversed([x for x in events if x.get("ev") in ("dir_created", "dir_create_begin")
@@ -1586,6 +1601,49 @@ def _undo_unreachable(jd, files, comps, rolled, events=()) -> str | None:
     return None
 
 
+def _moved_later(path: Path, job) -> str | None:
+    """The later job that moved or renamed path (it was the source of one of its steps)."""
+    p = str(path)
+    root = jobs_dir()
+    mine = Journal(root / job).read()
+    started = mine[0].get("t", 0) if mine else 0
+    try:
+        names = sorted(d.name for d in root.iterdir() if d.name != job)
+    except OSError:
+        return None
+    for name in names:                    # (by when each job began: two jobs may share a second)
+        events = Journal(root / name).read()
+        if not events or events[0].get("t", 0) <= started:
+            continue
+        for e in events:
+            if e.get("ev") in ("file", "companion") and e.get("src") == p and e.get("op") != "copy" \
+                    and e.get("src") != e.get("dst"):
+                return name
+    return None
+
+
+def _watcher_forgets(jd: Path):
+    """The watcher must not do an undone job again by itself: its record of each album's
+    folder says "undone" (it looks again only once the files change after this)."""
+    try:
+        albums = json.loads((jd / "plan.json").read_text(encoding="utf-8"))["albums"]
+        db = sqlite3.connect(ex.STATE_DIR / "state.db", timeout=60)
+    except (OSError, ValueError, KeyError, sqlite3.Error):
+        return
+    try:
+        if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='processed'").fetchone():
+            return
+        for a in albums:
+            k = db_text(a["source_dir"])
+            db.execute("UPDATE processed SET status='undone', ts=? WHERE folder=? OR substr(folder, 1, ?) = ?",
+                       (time.time(), k, len(k) + 1, k + "#"))
+        db.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        db.close()
+
+
 def _undo(job, jd, journal, events, force):
     # albums put back completely by their rollback are skipped; where the rollback met a
     # problem, undo does the steps it did not finish
@@ -1605,9 +1663,9 @@ def _undo(job, jd, journal, events, force):
     # which tracks stay where the job put them, first: an album moves back whole or not at
     # all, with its cover, scans, log and cue. Two kinds of reason: a change made since the
     # job (--force overrides it) and a state undo cannot put right (never overridden)
-    prior_undo = any(e.get("ev") in ("undo_begin", "undo_step", "undo_partial") for e in events)
+    touched_by_undo = {tuple(e["key"]) for e in events if e.get("ev") == "undo_file_begin"}
     journal.write(ev="undo_begin")
-    verdict, hard = {}, set()
+    verdict, hard, gone = {}, set(), set()
     for (a, j), f in sorted(files.items(), reverse=True):
         if a in rolled or f["state"] not in ("committed", "source_removed") or ("file", a, j) in already \
                 or ("file", a, j) in rolled_steps:
@@ -1618,18 +1676,27 @@ def _undo(job, jd, journal, events, force):
             check = src                                 # an interrupted undo had moved it back
         why = None
         if op in ("move", "relink_move") and not dst.exists() and not src.exists():
-            why = (f"{dst} is no longer where the job put it (moved by a later job? undo that one "
-                   f"first); its album waits")
-            hard.add(a)
-        elif op in ("move", "relink_move") and not prior_undo and src.exists() and dst.exists() and \
-                not _same_file(src, dst):
+            later = _moved_later(dst, job)
+            if later:
+                why = f"{dst} was moved by a later job ({later}); undo that one first - its album waits"
+                hard.add(a)
+            elif force:
+                gone.add((a, j))                       # nothing to put back; the rest goes back
+            else:
+                why = (f"{dst} is gone (deleted after the job?); the rest of its album stays "
+                       f"(tagmender undo --force {job} puts the rest back)")
+        elif op in ("move", "relink_move") and src.exists() and dst.exists() and not _same_file(src, dst) and \
+                (a, j) not in touched_by_undo:
+            # (an earlier undo that was cut short while putting this very file back made it)
             why = f"{src} holds a file again (downloaded again?); the album stays where the job put it"
             hard.add(a)
-        elif op == "copy" and dst.exists() and f.get("size") is not None and not force and \
-                (os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and \
-                not (f.get("tags_sig") and _tags_sig(dst) == f["tags_sig"] and
-                     (not f.get("digest") or payload.digest(dst) == f["digest"])):
-            # (only its time changed - a later job's undo put its tags back - it is still the copy)
+        elif op == "copy" and dst.exists() and f.get("size") is not None and not force and (
+                ((os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and
+                 not (f.get("tags_sig") and _tags_sig(dst) == f["tags_sig"] and
+                      (not f.get("digest") or payload.digest(dst) == f["digest"]))) or
+                (f.get("tags_sig") and _tags_sig(dst) != f["tags_sig"])):
+            # (a copy whose only change is its time - a later job's undo put its tags back - is
+            # still the copy; one with other tags is not, even when the editor kept its time)
             why = f"{dst} was changed after the job; left in place"
         elif f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
             why = f"{check} holds different audio now; left alone"
@@ -1681,6 +1748,9 @@ def _undo(job, jd, journal, events, force):
         elif p.exists():
             problems.append(f"{p} was changed after the job; left in place")
             continue
+        elif _moved_later(p, job):
+            problems.append(f"{p} was moved by a later job; undo that one first")
+            continue
         did("created", str(p))
     for (a, j), c in sorted(comps.items(), reverse=True):
         if a in rolled or c["state"] not in ("committed", "source_removed") or ("companion", a, j) in already \
@@ -1689,6 +1759,15 @@ def _undo(job, jd, journal, events, force):
         cdst = Path(c["dst"])
         if a in staying:
             problems.append(f"{cdst} stays with the album's music, which stays where the job put it")
+            continue
+        if c.get("op") in ("move", "copy") and not c.get("saved") and not os.path.lexists(cdst) and \
+                not Path(c["src"]).exists():
+            later = _moved_later(cdst, job)
+            if later:
+                problems.append(f"{cdst} was moved by a later job ({later}); undo that one first")
+            else:                                        # deleted since: nothing to put back
+                out.append(f"{cdst.name} is gone (deleted after the job?); nothing to put back")
+                did("companion", a, j)
             continue
         # (a moved companion changed since - lyrics a player updated - goes back with its edit;
         # a copy changed since is no longer only the job's: it stays)
@@ -1711,6 +1790,7 @@ def _undo(job, jd, journal, events, force):
             saved, path = Path(e["saved"]), Path(e["path"])
             if saved.exists() and not os.path.lexists(path) and path.parent.is_dir():
                 shutil.copy2(saved, path)
+                _keep_owner(path, os.stat(path.parent))
     for (a, j), f in sorted(files.items(), reverse=True):
         if (a, j) not in verdict:
             continue
@@ -1718,7 +1798,12 @@ def _undo(job, jd, journal, events, force):
         if why:
             problems.append(why)
             continue
+        if (a, j) in gone:
+            out.append(f"{Path(f['dst']).name} is gone (deleted after the job?); nothing to put back")
+            did("file", a, j)
+            continue
         try:
+            journal.write(ev="undo_file_begin", key=[a, j])
             with file_lock(check if check.exists() else Path(f["src"])):
                 _undo_step(("file", a, j, f["op"], f["src"], f["dst"], f.get("backup"), f.get("digest")), jd)
             out.append(f"put back {Path(f['src']).name}")
@@ -1739,6 +1824,7 @@ def _undo(job, jd, journal, events, force):
         except OSError as exc:
             if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOENT):
                 problems.append(f"{p}: could not remove the folder the job made ({exc.strerror})")
+    _watcher_forgets(jd)
     if problems:
         journal.write(ev="undo_partial", restored=len(out), problems=problems)
         _record_job(job, status="undone with problems (run undo again when they are fixed)")

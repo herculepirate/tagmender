@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**File operations reviewed** in thirteen independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in fourteen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.
@@ -51,6 +51,11 @@ crash/error fuzzers in tests/fuzz/)
   into the inbox, or when its rewritten cue or new cover changed since; lyrics a player
   updated go back with their edits; an undo cut short can be finished.
 - A saved plan still applies after a share was remounted with another device number.
+- Undo tells a track deleted since from one a later job moved (`--force` puts the rest
+  back), keeps a copy whose tags were edited with its time kept, and is not redone by the
+  watcher; moves work between bind mounts / mergerfs branches of one disk.
+- The watcher and `retry` fetch artwork and apply the tagging level, as `run` does; an
+  unresolved loose track goes straight into `move_to`.
 
 **New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
 - Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.

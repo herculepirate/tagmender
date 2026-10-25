@@ -654,7 +654,11 @@ def cmd_retry(args):
     props = []
     for i, f in enumerate(folders):
         _progress(i, len(folders), str(f))
-        props += [e.identify(g) for g in e.albums_in(f)]
+        for g in e.albums_in(f):
+            prop = e.identify(g)
+            e.add_artwork(prop)                    # artwork and tagging level, as `run` does
+            e.apply_level(prop)
+            props.append(prop)
     p = planmod.build(props, prof, e.job, extra_roots=[Path(args.path).expanduser()])
     if args.output:
         planmod.save(p, args.output)

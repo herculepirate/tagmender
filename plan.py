@@ -181,8 +181,11 @@ def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
     return False
 
 
-def copies_of(src) -> list:
-    """Where earlier jobs copied this file (newest first), from the state database."""
+def copies_of(src, under=None) -> list:
+    """Where earlier jobs copied this file (newest first), from the state database; with
+    `under`, only the copies inside that folder (this profile's destination: another copy
+    profile's library, or the one this profile copied to before its destination changed,
+    is not this one's)."""
     import sqlite3
     try:
         db = sqlite3.connect(ex.STATE_DIR / "state.db", timeout=30)
@@ -190,9 +193,26 @@ def copies_of(src) -> list:
             rows = db.execute("SELECT dst FROM copies WHERE src=? ORDER BY ts DESC", (str(src),)).fetchall()
         finally:
             db.close()
-        return [r[0] for r in rows]
     except sqlite3.Error:
         return []
+    out = [r[0] for r in rows]
+    if under is not None:
+        root = os.path.realpath(os.path.expanduser(str(under)))
+        out = [d for d in out if os.path.realpath(d).startswith(root.rstrip(os.sep) + os.sep)]
+    return out
+
+
+def _legacy_names(tags: dict) -> dict | None:
+    """The tags as TagMender before 72671d5 named folders with them: an album artist with
+    no ALBUMARTISTS tag split at ",", "&" and " and " (so "Simon & Garfunkel" was filed
+    under "Garfunkel & Simon"). None when that gives the same name."""
+    if tags.get("albumartists"):
+        return None
+    aa = ((tags.get("albumartist") or tags.get("artist") or [""])[0]) or ""
+    parts = [a.strip() for a in re.split(r"\s*(?:,|&| and )\s*", aa) if a.strip()]
+    if len(parts) < 2 or sorted(dict.fromkeys(parts), key=str.casefold) == [aa]:
+        return None
+    return dict(tags, albumartists=parts)
 
 
 def _same_bytes(there: Path, c: Path, pairs: dict, profile) -> bool:
@@ -518,7 +538,7 @@ class Planner:
         template = naming.template_for(p["naming"])
         album_dirs = {}
         if op == "copy" and identified:
-            album_dirs["prior"] = self._prior_album_dir(kept)
+            album_dirs["prior"] = self._prior_album_dir(kept, dest_root)
         words = int(p["filenames"].get("max_album_words") or 5)
         if not (p["naming"] or {}).get("template", "").strip() and words != 5:
             template = template.replace("$words(%album%,5)", f"$words(%album%,{words})")
@@ -583,7 +603,14 @@ class Planner:
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
                     continue
-                earlier = self._earlier_copy(dst, f) if op == "copy" else None
+                earlier = None
+                if op == "copy":
+                    legacy = None
+                    old_tags = _legacy_names(merged) if identified else None
+                    if old_tags is not None:
+                        legacy, _n = fnm.make_path(dest_root, naming.render(template, old_tags), f.suffix.lower(),
+                                                   p["filenames"])
+                    earlier = self._earlier_copy(dst, f, dest_root, legacy)
                 if earlier is not None:
                     # copied by an earlier run: bring the copy's tags up to date, nothing else
                     dst = earlier
@@ -688,15 +715,18 @@ class Planner:
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
 
-    def _earlier_copy(self, dst: Path, src: Path):
-        """The copy an earlier run made of src: where TagMender recorded it, or at the
-        template's name, or at the suffixed name it was given when the plain one was taken.
-        None when there is none."""
+    def _earlier_copy(self, dst: Path, src: Path, dest_root=None, legacy=None):
+        """The copy an earlier run made of src into this destination: where TagMender
+        recorded it, or at the template's name, or at the suffixed name it was given when the
+        plain one was taken, or at the name an older TagMender gave it (legacy). None when
+        there is none."""
         want = payload.digest(src)
         if want is None:
             return None
-        cands = [Path(p) for p in copies_of(src)]
-        cands += [dst, dst.with_name(dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)]
+        cands = [Path(p) for p in copies_of(src, dest_root)]
+        for d in (dst, legacy):
+            if d is not None:
+                cands += [d, d.with_name(d.stem + fnm.collision_suffix(str(src)) + d.suffix)]
         for cand in cands:
             try:
                 if not cand.exists() or os.path.samefile(cand, src) or fnm.fold(cand) in self.claimed:
@@ -707,14 +737,14 @@ class Planner:
                 return cand
         return None
 
-    def _prior_album_dir(self, files) -> Path | None:
+    def _prior_album_dir(self, files, dest_root=None) -> Path | None:
         """The album folder an earlier run of a copy profile put this album's copies in (as
         recorded), when they are still there: the album stays there - no second copy when a
         folder clash went away or the template now gives another path."""
         found = {}
         for f in files:
             want = None
-            for p in copies_of(f):
+            for p in copies_of(f, dest_root):
                 p = Path(p)
                 if not p.exists():
                     continue

@@ -49,21 +49,77 @@ DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|one|two|thr
 _NUMBER_ONLY = re.compile(r"^\d{1,2}$")
 
 
-_DISC_SUFFIX = re.compile(r"\s*(?:[-:,]\s*)?[\(\[\{]?\s*(?:disc|disk|cd|dvd)\s*\d+(?:\s*(?:of|/)\s*\d+)?"
-                          r"\s*[\)\]\}]?\s*$", re.I)
+_DISC_WORD = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+# "(Disc 1)", "[CD 2 of 3]", "(Disc One)", "(Disc 2: Live)" anywhere in the title, and an
+# unbracketed "- Disc 2" / "CD1" at its end
+_DISC_SUFFIX = re.compile(r"\s*[\(\[\{]\s*(?:disc|disk|cd|dvd)\s*" + _DISC_WORD +
+                          r"(?:\s*(?:of|/)\s*\d+)?(?:\s*[:\-\u2013]\s*[^\)\]\}]*)?\s*[\)\]\}]"
+                          r"|\s*(?:[-:,\u2013]\s*)?\b(?:disc|disk|cd|dvd)\s*" + _DISC_WORD +
+                          r"(?:\s*(?:of|/)\s*\d+)?\s*$", re.I)
 
 
-def _group_key(meta: dict):
-    """Which album a file belongs to, for grouping: exclusions.album_key, with the disc
-    left out of the title ("Album (Disc 1)" and "Album (Disc 2)" are one album) and, when
-    no album artist is tagged, the title alone (a compilation's tracks have their own
-    artists)."""
-    key = ex.album_key(meta)
-    if key[0] != "tags":
-        return key
-    album = _DISC_SUFFIX.sub("", key[2]) or key[2]
-    has_aa = bool((meta.get("albumartist") or [""])[0].strip())
-    return ("tags", key[1] if has_aa else "", album)
+def _first(meta, k):
+    return ((meta.get(k) or [""])[0] or "").strip()
+
+
+def _album_title(meta) -> str:
+    album = _first(meta, "album").casefold()
+    return re.sub(r"\s+", " ", _DISC_SUFFIX.sub("", album)).strip() or album
+
+
+def _one_compilation(files, metas, title, folder) -> bool:
+    """Tracks sharing an album title, by several artists, with no album artist: one
+    compilation (a freedb/EAC rip of a Various Artists CD) when they say so, when their
+    folder is named after the album, or when their track numbers are a set of one album's."""
+    if any(_first(metas[f], "compilation").lower() in ("1", "true", "yes") for f in files):
+        return True
+    fold = lambda s: re.sub(r"[\W_]+", " ", s.casefold()).strip()  # noqa: E731
+    t = fold(title)
+    if t and any(t in fold(d.name) for d in {folder, *{f.parent for f in files}}):
+        return True
+    nums, totals = [], set()
+    for f in files:
+        n, _, tot = _first(metas[f], "tracknumber").partition("/")
+        if not n.strip().isdigit():
+            return False
+        nums.append((_first(metas[f], "discnumber").partition("/")[0].strip(), int(n)))
+        totals.add(tot.strip() or _first(metas[f], "totaltracks") or _first(metas[f], "tracktotal"))
+    return len(set(nums)) == len(nums) and len(totals) == 1 and "" not in totals
+
+
+def album_keys(files, folder) -> dict:
+    """{file: which album it belongs to} for the audio files of one folder (with its disc
+    folders): exclusions.album_key, with the disc left out of the title ("Album (Disc 1)"
+    and "Album (Disc Two)" are one album). Within one title, tracks without an album artist
+    join the album artist the others have; with no album artist at all, tracks by different
+    artists are one compilation only when they look like one (_one_compilation) - otherwise
+    "Greatest Hits" by Queen and by ABBA stay two albums."""
+    metas = {f: ex.read_meta(f) for f in files}
+    out, by_title = {}, {}
+    for f in files:
+        k = ex.album_key(metas[f])
+        if k[0] != "tags":
+            out[f] = k
+        else:
+            by_title.setdefault(_album_title(metas[f]), []).append(f)
+    for title, fs in by_title.items():
+        aa = {f: _first(metas[f], "albumartist").casefold() for f in fs}
+        ar = {f: _first(metas[f], "artist").casefold() for f in fs}
+        aas = {v for v in aa.values() if v}
+        if aas:
+            for f in fs:
+                who = aa[f] or (next(iter(aas)) if len(aas) == 1 else ar[f])
+                out[f] = ("tags", who, title)
+            continue
+        artists = set(ar.values())
+        if len(artists) > 1 and not _one_compilation(fs, metas, title, Path(folder)):
+            for f in fs:
+                out[f] = ("tags", ar[f], title)
+        else:
+            who = next(iter(artists)) if len(artists) == 1 else ""
+            for f in fs:
+                out[f] = ("tags", who, title)
+    return out
 
 
 def is_disc_dir(d: Path) -> bool:
@@ -160,7 +216,8 @@ class Engine:
         owner_of = {d: (d.parent if disc[d] else d) for d in found}
         own_key = {}
         for d in found:
-            own_key.setdefault(owner_of[d], set()).update(_group_key(ex.read_meta(f)) for f in found[d])
+            own_key.setdefault(owner_of[d], []).extend(found[d])
+        own_key = {o: set(album_keys(fs, o).values()) for o, fs in own_key.items()}
         folders = {}
         for d in sorted(found):
             owner = owner_of[d]
@@ -177,8 +234,9 @@ class Engine:
             if self.profile.excluded_path(folder):
                 continue
             by_album = {}
+            keys = album_keys(files, folder)
             for f in files:
-                by_album.setdefault(_group_key(ex.read_meta(f)), []).append(f)
+                by_album.setdefault(keys[f], []).append(f)
             tagged = [k for k in by_album if k[0] == "tags"]
             spans_discs = len({f.parent for f in files}) > 1
             if len(by_album) > 1 and spans_discs and len(tagged) <= 1:

@@ -213,8 +213,10 @@ def rules_hash(rules):
 # --------------------------------------------------------------------------
 # Metadata of a file, for the conditions
 # --------------------------------------------------------------------------
-_ID3 = {"TALB": "album", "TIT2": "title", "TPE1": "artist", "TPE2": "albumartist", "TCON": "genre"}
-_MP4 = {"\xa9alb": "album", "\xa9nam": "title", "\xa9ART": "artist", "aART": "albumartist", "\xa9gen": "genre"}
+_ID3 = {"TALB": "album", "TIT2": "title", "TPE1": "artist", "TPE2": "albumartist", "TCON": "genre",
+        "TRCK": "tracknumber", "TPOS": "discnumber", "TCMP": "compilation"}
+_MP4 = {"\xa9alb": "album", "\xa9nam": "title", "\xa9ART": "artist", "aART": "albumartist", "\xa9gen": "genre",
+        "trkn": "tracknumber", "disk": "discnumber", "cpil": "compilation"}
 
 
 def read_meta(path):

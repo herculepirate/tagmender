@@ -19,6 +19,7 @@ that with payload.digest() before and after every write.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import mutagen
@@ -141,9 +142,57 @@ CI_ONLY = {"replaygain_album_gain", "replaygain_album_peak", "replaygain_album_r
            "replaygain_track_peak", "replaygain_track_range", "replaygain_reference_loudness"}
 
 
+_STAGE = re.compile(r"^\.tm-.+?(\.[^./]{1,8})\.part$")
+
+
+def _kinds():
+    from mutagen.aac import AAC
+    from mutagen.ac3 import AC3
+    from mutagen.aiff import AIFF
+    from mutagen.dsdiff import DSDIFF
+    from mutagen.dsf import DSF
+    from mutagen.flac import FLAC
+    from mutagen.id3 import ID3FileType
+    from mutagen.monkeysaudio import MonkeysAudio
+    from mutagen.mp3 import MP3
+    from mutagen.musepack import Musepack
+    from mutagen.oggflac import OggFLAC
+    from mutagen.oggopus import OggOpus
+    from mutagen.oggspeex import OggSpeex
+    from mutagen.oggtheora import OggTheora
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.optimfrog import OptimFROG
+    from mutagen.smf import SMF
+    from mutagen.tak import TAK
+    from mutagen.trueaudio import TrueAudio
+    from mutagen.wave import WAVE
+    from mutagen.wavpack import WavPack
+    return [MP3, TrueAudio, OggTheora, OggSpeex, OggVorbis, OggFLAC, FLAC, AIFF, APEv2File, MP4, ID3FileType,
+            WavPack, Musepack, MonkeysAudio, OptimFROG, ASF, OggOpus, AAC, AC3, SMF, TAK, DSF, DSDIFF, WAVE]
+
+
+def mutagen_file(path):
+    """mutagen.File, which also opens TagMender's staging copies (".tm-<job>-<hash>.flac.part"):
+    their name ends in ".part", so no other tool lists them as audio, and the format is told
+    from the extension inside the name as mutagen would from a plain one (a FLAC file with
+    an ID3 tag in front is only a FLAC file by its name)."""
+    m = _STAGE.match(Path(path).name)
+    if not m:
+        return mutagen.File(path)
+    fake = "x" + m.group(1)
+    with open(path, "rb") as fo:
+        header = fo.read(128)
+        scored = []
+        for k in _kinds():
+            fo.seek(0)
+            scored.append((k.score(fake, fo, header), k.__name__, k))
+    score, _n, kind = max(scored, key=lambda x: (x[0], x[1]))
+    return kind(path) if score > 0 else None
+
+
 def open_file(path):
     try:
-        f = mutagen.File(path)
+        f = mutagen_file(path)
     except Exception as exc:
         raise Unsupported(f"cannot read {Path(path).name}: {exc}") from exc
     if f is None:

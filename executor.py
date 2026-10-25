@@ -8,7 +8,7 @@ How a file is changed - never in place:
   1. The source is checked against the plan (size, modification time): a file changed
      since planning is not touched, and its album is skipped.
   2. The source is copied to a hidden staging file next to its destination
-     (.NAME.tm-<job>.part), after checking there is room for it.
+     (.tm-<job>-<hash><ext>.part), after checking there is room for it.
   3. Tags (and a front cover) are written to the staging copy, then read back; its audio
      data is compared with the source's (payload.digest). Any difference: the staging
      copy is deleted and the original stays as it was.
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import glob
 import hashlib
 import json
 import os
@@ -355,14 +356,23 @@ def _stage_name(dst: Path, job) -> Path:
     filesystem's 255-byte limit would not fit with a prefix and suffix added."""
     h = hashlib.sha1(Path(dst).name.encode("utf-8", "surrogateescape")).hexdigest()[:12]
     ext = Path(dst).suffix if len(Path(dst).suffix) <= 8 else ""
-    return Path(dst).parent / f"{STAGE_TAG}{job}-{h}.part{ext}"   # the extension: how mutagen tells formats
+    # the extension inside (how tagio.mutagen_file tells formats), ".part" last: no music
+    # player, tagger or lister takes a staging copy for a track or a cover
+    return Path(dst).parent / f"{STAGE_TAG}{job}-{h}{ext}.part"
 
 
 def _old_stage_names(dst: Path, job):
     """Staging files named the way earlier versions named them (recover still finds them)."""
     h = hashlib.sha1(Path(dst).name.encode("utf-8", "surrogateescape")).hexdigest()[:12]
-    return list(Path(dst).parent.glob(f".{Path(dst).name}{STAGE_TAG}{job}.part")) + \
-        [p for p in [Path(dst).parent / f"{STAGE_TAG}{job}-{h}.part"] if os.path.lexists(p)]
+    d, ext = Path(dst).parent, Path(dst).suffix if len(Path(dst).suffix) <= 8 else ""
+    return list(d.glob(f".{glob.escape(Path(dst).name)}{STAGE_TAG}{job}.part")) + \
+        [p for p in dict.fromkeys([d / f"{STAGE_TAG}{job}-{h}.part", d / f"{STAGE_TAG}{job}-{h}.part{ext}"])
+         if os.path.lexists(p)]
+
+
+def _all_stage_names(dst: Path, job) -> list:
+    """The staging files of dst for this job that exist, under this and earlier names."""
+    return [s for s in [_stage_name(dst, job)] if os.path.lexists(s)] + _old_stage_names(dst, job)
 
 
 def _same_file(a, b) -> bool:
@@ -412,7 +422,7 @@ def embed_front(path, data: bytes, mime="image/jpeg"):
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
-    f = mutagen.File(path)
+    f = tagio.mutagen_file(path)
     if isinstance(f, FLAC):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
@@ -438,8 +448,10 @@ def embed_front(path, data: bytes, mime="image/jpeg"):
 # --------------------------------------------------------------------------
 # backups
 # --------------------------------------------------------------------------
-def _backup(src: Path, jd: Path, n: int) -> dict:
-    """Tag snapshot when the tag backup covers the format, else a copy of the file."""
+def _backup(src: Path, jd: Path, n: int, writes: bool = True) -> dict:
+    """Tag snapshot when the tag backup covers the format, else a copy of the file - or,
+    for a format backed up whole when the step writes nothing (a plain move), only a note
+    of that: the file is never rewritten, so neither its undo nor a copy is needed."""
     import tag_albums as ta
     blobs = jd / "blobs"
     blobs.mkdir(exist_ok=True)
@@ -449,6 +461,8 @@ def _backup(src: Path, jd: Path, n: int) -> dict:
         fam = None
     if fam in ("id3", "mp4", "vorbis") and src.suffix.lower() not in (".wav", ".aif", ".aiff", ".dsf", ".dff"):
         return {"kind": "tags", "rec": ta.backup_tags(src, blobs)}
+    if not writes:
+        return {"kind": "unwritten"}
     files = jd / "files"
     files.mkdir(exist_ok=True)
     dest = files / f"{n}{src.suffix}"
@@ -460,7 +474,8 @@ def _restore(path: Path, backup: dict, jd: Path):
     """The file's tags (or the whole file) as backed up, through a staging copy that keeps
     the file's owner: a crash never leaves a half-written file."""
     import tag_albums as ta
-    if backup.get("kind") == "tags" and _tags_sig_backup_free(path, backup):
+    if backup.get("kind") == "unwritten" or \
+            (backup.get("kind") == "tags" and _tags_sig_backup_free(path, backup)):
         return                                    # the tags are as backed up: nothing to write
     stage = _stage_name(path, "undo-tags")
     st = os.stat(path)
@@ -663,7 +678,8 @@ class Executor:
             linked = bool(fe.get("linked")) and dst.exists() and _same_file(src, dst)
             if linked:
                 op = "relink_" + op                       # dst is already a hard link to src
-            backup = _backup(src, self.jd, n) if op in ("tag", "move", "relink_move", "relink_copy") else None
+            backup = _backup(src, self.jd, n, writes=bool(changes or embed)) \
+                if op in ("tag", "move", "relink_move", "relink_copy") else None
             self.journal.write(ev="file", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
                                digest=src_digest, backup=backup, changed=bool(changes or embed))
             if linked:
@@ -971,14 +987,13 @@ def _sweep_stages(plan: dict, job, log=None) -> list:
         if (a.get("artwork") or {}).get("file"):
             paths.add(a["artwork"]["file"])
         for p in filter(None, paths):
-            s = _stage_name(Path(p), job)
             try:
-                if os.path.lexists(s):
+                for s in _all_stage_names(Path(p), job):
                     s.unlink()
                     out.append(str(s))
             except OSError as exc:
                 if log:
-                    log.warning("could not remove staging copy %s: %s", s, exc)
+                    log.warning("could not remove a staging copy of %s: %s", p, exc)
     return out
 
 
@@ -1120,6 +1135,8 @@ def _undo_relink(src: Path, dst: Path, backup, digest, jd):
 
 def _tags_sig_backup_free(dst: Path, backup) -> bool:
     """True when dst still is the very file the job started from (no tags were written)."""
+    if backup and backup.get("kind") == "unwritten":
+        return True
     if not backup or backup.get("kind") != "tags":
         return False
     try:
@@ -1196,8 +1213,7 @@ def _clear_undo_leftovers(files: dict, comps: dict) -> list:
             done.append(f"{dst.name}: case-only rename put back where the undo found it")
         for p in {src, dst}:
             for tag in ("undo-put", "undo-tags", "undo-link", "undo"):
-                s = _stage_name(p, tag)
-                if os.path.lexists(s):
+                for s in _all_stage_names(p, tag):
                     s.unlink()
                     done.append(f"removed unfinished copy {s}")
     return done

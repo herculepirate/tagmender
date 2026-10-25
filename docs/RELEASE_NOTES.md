@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**File operations reviewed** in five independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in nine independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.
@@ -24,6 +24,15 @@ crash/error fuzzers in tests/fuzz/)
 - Long file names, case-only renames on SMB shares, unmounted shares, look-alike folders,
   hidden ("...And Justice for All") and reserved ("AUX.") names, symlinks out of the library,
   ownership, and timestamps (as Picard is set) are handled.
+- Grouping: tracks missing the album artist tag join the album the others name; "Album
+  (Disc One)", "(Disc 2: Live)" and "(CD 1) [Remastered]" are one album; same-titled albums
+  by different artists in one folder stay apart unless they are one compilation.
+- Copy profiles keep to their own destination (a second copy profile, or a changed
+  destination, gets its own copies) and find copies an earlier version filed under
+  "Garfunkel & Simon/".
+- Staging copies are named `.tm-<job>-<hash>.flac.part`, so no player or lister takes one
+  for a track; a plain move of DSD/WAV/WavPack files keeps no backup copy and is undone by
+  renaming only.
 
 **New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
 - Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.

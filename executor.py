@@ -268,6 +268,34 @@ def _check_target(dst: Path, roots):
         raise StepError(f"{dst} is outside the folders this profile may change")
 
 
+def _like_parent(m: Path):
+    """A folder just made takes the owner, group and mode of the folder it is in: a root job
+    on a share (Unraid: nobody:users, 2775) makes no folder the share's users cannot use."""
+    try:
+        pst = os.stat(m.parent)
+        _keep_owner(m, pst)
+        os.chmod(m, stat.S_IMODE(pst.st_mode) & ~stat.S_ISVTX)
+    except OSError:
+        pass
+
+
+def mkdirs_like_parent(d: Path):
+    """d and the folders above it that are missing, each like its parent (undo, rollback
+    and recover put removed folders back this way)."""
+    d = Path(d)
+    missing = []
+    p = d
+    while not os.path.lexists(p) and p != p.parent:
+        missing.append(p)
+        p = p.parent
+    for m in reversed(missing):
+        try:
+            m.mkdir()
+        except FileExistsError:
+            continue
+        _like_parent(m)
+
+
 def _make_dirs(d: Path, roots, journal, album, created=None):
     """Create d below an existing root, journalling each folder created (undo removes them)."""
     missing = []
@@ -280,12 +308,7 @@ def _make_dirs(d: Path, roots, journal, album, created=None):
     for m in reversed(missing):
         journal.write(ev="dir_create_begin", album=album, path=str(m))
         m.mkdir()
-        try:                       # the folder it is made in gives owner, group and mode: a root
-            pst = os.stat(m.parent)        # job on a share (Unraid: nobody:users) makes no folder
-            _keep_owner(m, pst)            # that the share's users cannot write to
-            os.chmod(m, stat.S_IMODE(pst.st_mode) & ~stat.S_ISVTX)
-        except OSError:
-            pass
+        _like_parent(m)
         journal.write(ev="dir_created", album=album, path=str(m))
         if created is not None:
             created.append(m)
@@ -594,7 +617,12 @@ class Executor:
         if self.journal.read():
             raise StepError(f"job {self.job} has already run (use a new plan, or `tagmender undo {self.job}`)")
         planmod.save(self.plan, self.jd / "plan.json")
-        self.journal.write(ev="begin", job=self.job, profile=self.plan["profile"])
+        # folders under /mnt or /media that are no mounted share now (a plain folder there):
+        # undo and recover must not take them for a share that went away
+        local = sorted({os.path.realpath(d) for a in self.plan["albums"]
+                        for d in (a.get("source_dir"), (a.get("dest_root") or {}).get("path")) if d
+                        and not planmod.mounted(d)})
+        self.journal.write(ev="begin", job=self.job, profile=self.plan["profile"], unmounted=local)
         _record_job(self.job, profile=self.plan["profile"], started=time.time(), status="running")
         prof = self.plan["profile"]
         self.rules = ex.load_rules(prof if prof != "default" else None)
@@ -1112,7 +1140,7 @@ def _undo_step(step, jd, rolling_back=False):
             if rolling_back or not dst.exists():
                 return
             raise StepError(f"cannot move back: {src} exists")
-        src.parent.mkdir(parents=True, exist_ok=True)
+        mkdirs_like_parent(src.parent)
         if not extra and _same_fs(dst, src.parent):
             _place_move(dst, src)
         else:
@@ -1121,7 +1149,7 @@ def _undo_step(step, jd, rolling_back=False):
         return
     backup = extra
     if op in ("relink_move", "relink_copy"):
-        _undo_relink(src, dst, backup, digest, jd)
+        _undo_relink(src, dst, backup, digest, jd, op)
         return
     if op == "tag":
         _restore(src, backup, jd)
@@ -1155,7 +1183,7 @@ def _undo_step(step, jd, rolling_back=False):
                 dst.unlink()                                 # the source was never removed
                 return
             raise StepError(f"cannot move back: {src} exists")
-        src.parent.mkdir(parents=True, exist_ok=True)
+        mkdirs_like_parent(src.parent)
         if _same_fs(dst, src.parent):
             _place_move(dst, src)
         else:
@@ -1165,20 +1193,20 @@ def _undo_step(step, jd, rolling_back=False):
             _restore(src, backup, jd)
 
 
-def _undo_relink(src: Path, dst: Path, backup, digest, jd):
+def _undo_relink(src: Path, dst: Path, backup, digest, jd, op="relink_move"):
     """Before the job src and dst were one file under two names: make them so again, with
-    the old tags."""
+    the old tags. (A copy never wrote its source: a source edited since keeps its edits.)"""
     if not src.exists():
         if dst.exists() and _tags_sig_backup_free(dst, backup):
             os.link(dst, src)                       # nothing was written: give src its name back
             return
-        src.parent.mkdir(parents=True, exist_ok=True)
+        mkdirs_like_parent(src.parent)
         _put_back(dst, src, os.stat(dst))
         if backup:
             _restore(src, backup, jd)
     elif digest is not None and payload.digest(src) != digest:
         raise StepError(f"{src} holds different audio now; left alone")
-    elif backup and not _tags_sig_backup_free(src, backup):
+    elif op != "relink_copy" and backup and not _tags_sig_backup_free(src, backup):
         _restore(src, backup, jd)                    # an earlier, interrupted undo got this far
     if dst.exists() and _same_file(src, dst):
         return
@@ -1281,6 +1309,16 @@ def _clear_undo_leftovers(files: dict, comps: dict) -> list:
 
 def _recover(job, jd, journal, events):
     files, comps = _replay(events)
+    # what a crash left is read from the files: never while a share holding them is down
+    # (the album would look "not moved yet", be put back on the system disk under the empty
+    # mount point, and the job be marked recovered)
+    finished_ = {e["album"] for e in events if e.get("ev") in ("album_done", "album_rolled_back")}
+    paths = [p for (a, _j), f in list(files.items()) + list(comps.items()) if a not in finished_
+             for p in (f.get("src"), f.get("dst")) if p]
+    for p in dict.fromkeys(str(Path(p).parent) for p in paths):
+        if _down(p, events):
+            raise StepError(f"the share holding {p} is not mounted; nothing was recovered - "
+                            f"recover again when it is back")
     failed = {e["album"] for e in events if e.get("ev") == "album_failed"}
     rolled = {e["album"] for e in events if e.get("ev") == "album_rolled_back"}
     finished = {e["album"] for e in events if e.get("ev") == "album_done"}
@@ -1408,7 +1446,7 @@ def _recover(job, jd, journal, events):
                 saved, path = Path(x["saved"]), Path(x["path"])
                 try:
                     if saved.exists() and not os.path.lexists(path):
-                        path.parent.mkdir(parents=True, exist_ok=True)
+                        mkdirs_like_parent(path.parent)
                         shutil.copy2(saved, path)
                 except OSError as exc:
                     problems.append(f"{path}: {exc}")
@@ -1466,6 +1504,16 @@ def undo(job, force=False) -> list[str]:
         return _undo(job, jd, journal, events, force)
 
 
+def _down(folder, events) -> bool:
+    """folder's share is not mounted now - and it was when the job ran (a plain folder
+    under /mnt is never mounted: that is how it was)."""
+    if planmod.mounted(folder):
+        return False
+    real = os.path.realpath(str(folder))
+    local = next((e.get("unmounted") or [] for e in events if e.get("ev") == "begin"), [])
+    return not any(real == u or real.startswith(u.rstrip(os.sep) + os.sep) for u in local)
+
+
 def _undo_unreachable(jd, files, comps, rolled, events=()) -> str | None:
     """Why undo cannot run now: a share the job wrote to or took files from is not mounted
     (or its folder is gone). Undo would otherwise find the copies "gone" and
@@ -1484,16 +1532,16 @@ def _undo_unreachable(jd, files, comps, rolled, events=()) -> str | None:
         root = a.get("dest_root") or {}
         if root.get("path"):
             r = Path(root["path"])              # (not its device number: a share remounted
-            if not r.is_dir() or not planmod.mounted(r):   # after a reboot may get another)
+            if not r.is_dir() or _down(r, events):   # after a reboot may get another)
                 return f"the destination {r} is not available (unmounted?)"
-        if a.get("source_dir") and not planmod.mounted(a["source_dir"]) and \
+        if a.get("source_dir") and _down(a["source_dir"], events) and \
                 any(f.get("op") != "copy" for (x, _j), f in files.items() if x == i):
             return f"the share holding {a['source_dir']} is not mounted"
     paths = [p for (a, _j), f in list(files.items()) + list(comps.items()) if a in touched
-             for p in (f.get("src"), f.get("dst")) if p]
+             for p in ((f.get("dst"),) if f.get("op") == "copy" else (f.get("src"), f.get("dst"))) if p]
     paths += [e["path"] for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] in touched]
     for p in dict.fromkeys(str(Path(p).parent) for p in paths):
-        if not planmod.mounted(p):                       # a file on a share that is not mounted now
+        if _down(p, events):                             # a file on a share that is not mounted now
             return f"the share holding {p} is not mounted"
     return None
 
@@ -1542,9 +1590,11 @@ def _undo(job, jd, journal, events, force):
         verdict[(a, j)] = (why, check)
     staying = {a for (a, _j), (why, _c) in verdict.items() if why and files[(a, _j)].get("op") != "tag"}
     for (a, j), (why, check) in list(verdict.items()):   # an album moves back whole, or not at all
-        if a in staying and not why and files[(a, j)].get("op") != "tag":
+        if a in staying and not why and not force and files[(a, j)].get("op") != "tag":
             verdict[(a, j)] = (f"{check}: stays with the rest of its album (a track of it changed after "
-                               f"the job; tagmender undo --force {job} puts the album back anyway)", check)
+                               f"the job; tagmender undo --force {job} puts the others back anyway)", check)
+    if force:                            # --force: what can go back does; the changed tracks stay
+        staying = set()
 
     covers = [e for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled]
     for e in reversed(covers):
@@ -1582,7 +1632,7 @@ def _undo(job, jd, journal, events, force):
             problems.append(f"{c['src']}: {exc}")
     removed = [e for e in events if e.get("ev") == "dir_removed" and e.get("album") not in staying]
     for e in removed:
-        Path(e["path"]).mkdir(parents=True, exist_ok=True)
+        mkdirs_like_parent(Path(e["path"]))
     for e in events:                     # .DS_Store / Thumbs.db of the folders removed: back in them
         if e.get("ev") == "junk_removed" and e.get("album") not in staying and e["album"] not in rolled:
             saved, path = Path(e["saved"]), Path(e["path"])
@@ -1605,6 +1655,13 @@ def _undo(job, jd, journal, events, force):
     for e in reversed([e for e in events if e.get("ev") == "dir_created"]):
         p = Path(e["path"])
         try:
+            inside = list(p.iterdir()) if p.is_dir() else []
+            if inside and all(x.name in JUNK and x.is_file() and not x.is_symlink() for x in inside):
+                for x in inside:                         # only what Finder/Explorer left: as Picard
+                    keep = jd / "junk" / ("undo-" + hashlib.sha1(str(x).encode("utf-8", "surrogateescape")
+                                                                 ).hexdigest()[:16]) / x.name
+                    keep.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(x), str(keep))
             p.rmdir()
         except OSError as exc:
             if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOENT):

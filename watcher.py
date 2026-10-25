@@ -188,7 +188,11 @@ class Watcher:
                     continue
                 seen.add(key)
                 k = self.key(g)
-                go, why = self.due(g.folder, prof, db, k)
+                try:
+                    go, why = self.due(g.folder, prof, db, k)
+                except Exception:                              # one album never stops the watcher
+                    self.log.exception("watch: %s could not be looked at", g.folder)
+                    continue
                 if not go:
                     continue
                 prev = db.execute("SELECT attempts FROM processed WHERE folder=?", (k,)).fetchone()
@@ -202,6 +206,8 @@ class Watcher:
                     if prof["unattended"]:
                         res = executor.Executor(plan, log=self.log).run()
                         outcome = res["albums"][0]["status"] if res["albums"] else a["status"]
+                    elif a["status"] == "blocked":                # nothing to apply: planned again later
+                        outcome = "blocked"
                     else:
                         pdir = ex.STATE_DIR / "plans"
                         pdir.mkdir(parents=True, exist_ok=True)

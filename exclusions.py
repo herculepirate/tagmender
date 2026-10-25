@@ -403,9 +403,9 @@ def signature(paths):
     for p in sorted(str(x) for x in paths):
         try:
             st = os.stat(p)
-            h.update(f"{p}|{st.st_size}|{int(st.st_mtime)}\n".encode())
+            h.update(f"{p}|{st.st_size}|{int(st.st_mtime)}\n".encode("utf-8", "surrogateescape"))
         except OSError:
-            h.update(f"{p}|gone\n".encode())
+            h.update(f"{p}|gone\n".encode("utf-8", "surrogateescape"))
     return h.hexdigest()[:16]
 
 
@@ -487,7 +487,7 @@ class State:
 
     def log_raw(self, job, item, label, rule_id, rule_name, detail=""):
         self.db.execute("INSERT INTO history VALUES (?,?,?,?,?,?,?)",
-                        (time.time(), job, _t(item), label, rule_id, rule_name, detail))
+                        (time.time(), job, _t(item), label, rule_id, rule_name, _t(detail)))
         self.db.commit()
 
     def history(self, limit=200):

@@ -259,8 +259,8 @@ def _fit_name(name: str, limits: dict) -> str:
     compat = limits.get("compat", "windows")
     stem, ext = os.path.splitext(name)
     stem = fnm.safe_component(stem, compat) if stem else stem
-    limit = int(limits.get("max_name_bytes", 255)) - fnm.SUFFIX_LEN - len(ext.encode("utf-8"))
-    if len(stem.encode("utf-8")) > limit:
+    limit = int(limits.get("max_name_bytes", 255)) - fnm.SUFFIX_LEN - len(ext.encode("utf-8", "surrogateescape"))
+    if len(stem.encode("utf-8", "surrogateescape")) > limit:
         stem = fnm.truncate_words(stem, limit, compat)
     return stem + ext
 
@@ -825,9 +825,9 @@ class Planner:
             if clash:
                 tag = fnm.collision_suffix(" ".join(sorted(me)))
                 limits = self.profile["filenames"]
-                room = int(limits.get("max_dir_bytes", 255)) - len(tag.encode("utf-8"))
+                room = int(limits.get("max_dir_bytes", 255)) - len(tag.encode("utf-8", "surrogateescape"))
                 base = album_dir.name
-                if len(base.encode("utf-8")) > room:
+                if len(base.encode("utf-8", "surrogateescape")) > room:
                     base = fnm.truncate_words(base, room, limits.get("compat", "windows"))
                 new = album_dir.with_name(base + tag)
             if not shared:

@@ -56,8 +56,8 @@ def safe_component(text: str, compat="windows") -> str:
 
 def _units(s: str, compat: str) -> int:
     """The larger of UTF-8 bytes and (with windows compatibility) UTF-16 code units."""
-    b = len(s.encode("utf-8"))
-    return max(b, len(s.encode("utf-16-le")) // 2) if compat == "windows" else b
+    b = len(s.encode("utf-8", "surrogateescape"))
+    return max(b, len(s.encode("utf-16-le", "surrogatepass")) // 2) if compat == "windows" else b
 
 
 def _fits(s, limit, compat):
@@ -90,7 +90,7 @@ def truncate_words(text: str, limit: int, compat: str) -> str:
 
 
 def collision_suffix(key: str) -> str:
-    return " ~" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:4]
+    return " ~" + hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:4]
 
 
 def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):

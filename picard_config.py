@@ -134,6 +134,14 @@ def preserved_tags(path: Path | None = None) -> set:
     return {x.strip().lower() for x in raw.replace("\n", ",").split(",") if x.strip()}
 
 
+def picard_bool(name: str, default: bool = False, path: Path | None = None) -> bool:
+    """One of Picard's own true/false settings ([setting] in Picard.ini)."""
+    cp = _read(path if path is not None else ini_path())
+    if cp is None or not cp.has_option("setting", name):
+        return default
+    return cp.get("setting", name).strip().lower() == "true"
+
+
 def source(path: Path | None = None) -> str:
     p = path if path is not None else ini_path()
     return str(p) if p is not None and from_ini(p) else "the plugin's defaults (no Picard.ini settings found)"

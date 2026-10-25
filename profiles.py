@@ -89,7 +89,8 @@ DEFAULTS = {
     "filenames": {"compat": "windows", "max_name_bytes": 255, "max_dir_bytes": 255, "max_path_chars": 4096,
                   "max_album_words": 5, "abbreviations": {}},
     "backup_retention_days": 30,
-    "allow_unverified_writes": False,     # write tags to formats whose audio data cannot be checked
+    "allow_unverified_writes": False,
+    "preserve_timestamps": None,          # keep files' modification times (None: as Picard is set)     # write tags to formats whose audio data cannot be checked
     # albums nothing could identify
     "unresolved": {"action": "mark", "move_to": "", "allow_partial": False},
     "retry": {"after_days": 30, "max_attempts": 6},
@@ -208,6 +209,8 @@ def validate(data: dict) -> list[str]:
             p.append(f"sources[{i}] needs a path")
         elif not os.path.isabs(os.path.expanduser(s["path"])):
             p.append(f"sources[{i}].path must be absolute")
+    if d["preserve_timestamps"] not in (None, True, False):
+        p.append("preserve_timestamps must be true, false or null (as Picard is set)")
     import levels
     if d["tag_level"] not in levels.LEVELS:
         p.append(f"tag_level must be one of {', '.join(levels.LEVELS)}")
@@ -277,6 +280,15 @@ class Profile:
             return set()
         import picard_config
         return {t for t in picard_config.preserved_tags() if not t.startswith("tagmender")}
+
+    def preserve_timestamps(self) -> bool:
+        v = self.data.get("preserve_timestamps")
+        if v is None:
+            if not self.data.get("follow_picard", True):
+                return False
+            import picard_config
+            return picard_config.picard_bool("preserve_timestamps")
+        return bool(v)
 
     def enrichment(self) -> dict:
         """Discogs Enrichment settings for this profile (see picard_config)."""

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -117,36 +118,118 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     return changes, rows
 
 
-def _companions(src_dir: Path, album_files: list, profile):
-    """Non-audio companion files of this album: only when every audio file in the folder
-    belongs to it (a mixed folder's cue sheet or scans are not this album's alone)."""
+MAX_TREE = 5000                           # entries looked at below one album folder
+
+
+def _companions(src_dir: Path, moved: dict, profile, shallow=False):
+    """([(companion, destination)], why not): the non-audio files that go with an album
+    that moves or is copied, as Picard's "move additional files" and foobar2000's "move
+    entire source folder content" do:
+      - in each folder holding this album's music (the album folder, its disc folders):
+        the files whose extension is in the profile's "companions";
+      - in folders with no music anywhere inside (Scans, covers, artwork ...): everything;
+      - nothing from a folder holding music that is not moving with this album (a mixed
+        folder, a bonus album in a subfolder), nor from below it.
+    Each goes to the same place relative to where the music lands. Hidden files and
+    symbolic links stay. moved: {source file: destination file}."""
     exts = {e.lower() for e in profile["companions"]}
-    in_folder = {p for p in src_dir.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXT}
-    if not in_folder <= {Path(f) for f in album_files}:
+    moved = {Path(k): Path(v) for k, v in moved.items()}
+    dmap = {}
+    for s_, d_ in moved.items():
+        dmap.setdefault(s_.parent, []).append(d_.parent)
+    dmap = {k: Path(os.path.commonpath([str(x) for x in v])) for k, v in dmap.items()}
+    if src_dir not in dmap:
+        dmap[src_dir] = Path(os.path.commonpath([str(d.parent) for d in moved.values()]))
+
+    def audio_in(d):
+        try:
+            return [p for p in d.iterdir() if p.suffix.lower() in AUDIO_EXT and p.is_file()
+                    and not p.name.startswith(".")]
+        except OSError:
+            return []
+    if any(p not in moved for p in audio_in(src_dir)):
         return [], "folder holds other music too; companion files stay where they are"
+    tree, seen = [], 0
+    for dirpath, dirs, names in os.walk(src_dir):
+        d = Path(dirpath)
+        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and not (d / x).is_symlink())
+        if shallow:
+            dirs[:] = []
+        here = [d / n for n in names if not n.startswith(".")]
+        if d != src_dir and any(p.suffix.lower() in AUDIO_EXT and p not in moved for p in here):
+            dirs[:] = []                                   # another album's folder: left alone
+            continue
+        seen += len(here) + len(dirs)
+        if seen > MAX_TREE:
+            return _companions(src_dir, moved, profile, shallow=True)[0], \
+                "album folder holds too many files to look through; only its own companion files go"
+        tree.append((d, here))
+    music_below = set()
+    for d, here in tree:
+        if any(p.suffix.lower() in AUDIO_EXT for p in here):
+            q = d
+            while True:
+                music_below.add(q)
+                if q == src_dir or q == q.parent:
+                    break
+                q = q.parent
     out = []
-    for p in sorted(src_dir.iterdir()):
-        if p.is_file() and p.suffix.lower() in exts and not p.name.startswith("."):
-            out.append(p)
+    for d, here in tree:
+        anchor = d
+        while anchor not in dmap:
+            anchor = anchor.parent
+        dest_dir = dmap[anchor] / d.relative_to(anchor)
+        for p in sorted(here):
+            if p.is_symlink() or not p.is_file() or p.suffix.lower() in AUDIO_EXT:
+                continue
+            if d in music_below and p.suffix.lower() not in exts:
+                continue
+            out.append((p, dest_dir / p.name))
     return out, ""
 
 
 def _cue_rewrites(path: Path, renames: dict):
-    """New text of a cue sheet / playlist whose FILE lines name files being renamed, or None."""
+    """New text of a cue sheet or playlist whose entries name files being renamed or moved,
+    or None. renames: {old path relative to the sheet's folder: new path relative to where
+    the sheet goes}. Every entry is replaced in one pass (so 01->02 and 02->03 never chain),
+    as a quoted FILE name or as a whole playlist line; "\\" separators count as "/"."""
     try:
         raw = path.read_bytes()
-        text = raw.decode("utf-8")
-        enc = "utf-8"
-    except UnicodeDecodeError:
-        text, enc = raw.decode("latin-1"), "latin-1"
     except OSError:
         return None
-    new = text
-    for old, newname in renames.items():
-        if old != newname and old in new:
-            new = new.replace(f'"{old}"', f'"{newname}"')
-            new = "\n".join(newname if ln.strip() == old else ln for ln in new.split("\n"))
-    return (new, enc) if new != text else None
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    table = {}
+    for old, new in renames.items():
+        old_n, new_n = old.replace("\\", "/"), new.replace("\\", "/")
+        if old_n != new_n:
+            table[old_n.casefold()] = new_n
+    if not table:
+        return None
+
+    def swap(name):
+        return table.get(name.replace("\\", "/").casefold())
+
+    def line(ln):
+        m = re.match(r'^(\s*FILE\s+")([^"]+)(".*)$', ln, re.I)
+        if m and swap(m.group(2)):
+            return m.group(1) + swap(m.group(2)) + m.group(3)
+        body = ln.rstrip("\r")
+        if body.strip() and not body.lstrip().startswith("#") and swap(body.strip()):
+            return ln[:len(ln) - len(ln.lstrip())] + swap(body.strip()) + ln[len(body):]
+        return ln
+    new = "\n".join(line(ln) for ln in text.split("\n"))
+    if new == text:
+        return None
+    try:
+        new.encode(enc)
+    except UnicodeEncodeError:
+        return None, enc                                # the new names cannot be written in its encoding
+    return new, enc
 
 
 class Planner:
@@ -231,7 +314,6 @@ class Planner:
                                           "TagMender never creates it")
                 return entry
         template = naming.template_for(p["naming"])
-        renames = {}
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -256,8 +338,13 @@ class Planner:
                 for k, v in changes.items():
                     if v is None:
                         merged.pop(k, None)
-                if not identified:
-                    dst = dest_root / f.parent.name / f.name
+                if not identified:                       # as it is, below its album folder's name
+                    src_root = Path(prop.source_dir)
+                    try:
+                        rel = f.relative_to(src_root)
+                    except ValueError:
+                        rel = Path(f.name)
+                    dst = dest_root / src_root.name / rel
                     notes = []
                 else:
                     comps = naming.render(template, merged)
@@ -274,8 +361,6 @@ class Planner:
                     fe["op"] = "tag" if changes else "none"
                 else:
                     fe["op"] = op
-                if Path(dst).name != f.name:
-                    renames[f.name] = Path(dst).name
             entry["files"].append(fe)
         if entry["conflicts"]:
             entry["status"] = "blocked"
@@ -283,18 +368,25 @@ class Planner:
         # 4. companion files go with an album that moves or is copied
         moved = [fe for fe in entry["files"] if fe["op"] in ("copy", "move")]
         if moved and len(moved) == len(entry["files"]):
-            album_dst = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in moved]))
-            comps, why_not = _companions(Path(prop.source_dir), [fe["src"] for fe in moved], p)
+            pairs = {fe["src"]: fe["dst"] for fe in moved}
+            src_root = Path(prop.source_dir)
+            comps, why_not = _companions(src_root, pairs, p,
+                                         shallow=os.path.realpath(src_root) in self.roots())
             if why_not:
                 entry["notes"].append(why_not)
-            for c in comps:
-                dst = self._unique(album_dst / c.name, c, entry)
+            for c, want in comps:
+                dst = self._unique(want, c, entry)
                 if dst is None:
                     continue
                 ce = {"src": str(c), "dst": str(dst), "op": moved[0]["op"], "fingerprint": _fp(c)}
-                if c.suffix.lower() in CUE_LIKE and renames:
-                    rw = _cue_rewrites(c, renames)
-                    if rw:
+                if c.suffix.lower() in CUE_LIKE:
+                    rel = {os.path.relpath(s_, c.parent): os.path.relpath(d_, dst.parent)
+                           for s_, d_ in pairs.items()}
+                    rw = _cue_rewrites(c, rel)
+                    if rw and rw[0] is None:
+                        entry["notes"].append(f"{c.name}: the new file names cannot be written in its "
+                                              f"{rw[1]} encoding; it keeps the old names")
+                    elif rw:
                         ce["rewrite"] = {"text": rw[0], "encoding": rw[1]}
                 entry["companions"].append(ce)
         # 5. artwork (staged by the artwork provider; never replaces a picture already embedded)
@@ -353,7 +445,8 @@ class Planner:
         return {"version": PLAN_VERSION, "job": self.job, "created": time.time(), "profile": self.profile.name,
                 "profile_data": self.profile.to_dict(), "operation": self.profile["operation"],
                 "roots": self.roots(), "albums": albums, "summary": counts,
-                "discogs_settings": _enrichment_summary(self.profile)}
+                "discogs_settings": _enrichment_summary(self.profile),
+                "preserve_timestamps": self.profile.preserve_timestamps()}
 
     def roots(self):
         p = self.profile

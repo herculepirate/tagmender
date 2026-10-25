@@ -48,6 +48,7 @@ def safe_component(text: str, compat="windows") -> str:
     else:
         s = _LINUX_BAD.sub("_", s)
     s = s.strip()
+    s = re.sub(r"^[.\s]+", "", s) or s       # "...And Justice for All" would be a hidden folder
     if s in ("", ".", ".."):
         s = "_"
     return s
@@ -85,7 +86,7 @@ def truncate_words(text: str, limit: int, compat: str) -> str:
         out = text
         while out and not _fits(out, limit, compat):
             out = out[:-1]
-    return out.rstrip(" .,-–—_")
+    return out.rstrip(" .,-–—_") or out
 
 
 def collision_suffix(key: str) -> str:
@@ -119,7 +120,7 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
     # b. each component within its own limit
     for i, p in enumerate(parts):
         if not _fits(p, limit_of(i), compat):
-            q = truncate_words(p, limit_of(i), compat)
+            q = safe_component(truncate_words(p, limit_of(i), compat), compat)
             notes.append(f"shortened {p!r} -> {q!r}")
             parts[i] = q
 
@@ -137,6 +138,7 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
         if target < len(p):
             q = truncate_words(p, target, "linux")      # characters here, not bytes
             q = q if len(q) >= MIN_KEEP or len(p) <= MIN_KEEP else p[:MIN_KEEP]
+            q = safe_component(q, compat)
             if q != p:
                 notes.append(f"shortened {p!r} -> {q!r} for the path length limit")
                 parts[i] = q

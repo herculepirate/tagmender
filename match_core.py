@@ -724,6 +724,14 @@ def pressing_clues(ocr_text, cand):
                             or (len(c) >= 7 and _zeroless(c) in hay_z)):
             agree["catalogue number"] = f"catalogue number {c.upper()} on the scans"
             break
+        # a short code ("BS 004" is "bs4" once normalised: At The Gates - Gardens Of Grief on
+        # Black Sun) counts when it stands printed as a code of its own, its zeros perhaps
+        # read as O ("BS.OO4")
+        m = re.fullmatch(r"([a-z]{2,})(\d{1,3})", c)
+        if m and re.search(r"(?<![A-Za-z0-9])" + m.group(1) + r"[\s.\-/]*[0Oo]*" + m.group(2) + r"(?![0-9])",
+                           ocr_text, re.I):
+            agree["catalogue number"] = f"catalogue number {c.upper()} on the scans"
+            break
     digits_hay = re.sub(r"\D", "", ocr_text)
     for b in sorted(cand.get("barcodes") or ()):
         key = barcode_key(b)

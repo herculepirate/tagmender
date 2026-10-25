@@ -1193,6 +1193,18 @@ class OriginalPressing(unittest.TestCase):
         self.assertIn("label's original pressing", " ".join(out["best"]["notes"]))
 
 
+
+class ShortCatalogueNumbers(unittest.TestCase):
+    def test_a_short_code_printed_on_its_own_counts(self):
+        """At The Gates - Gardens Of Grief: the back reads "BS.OO4, P&G BLACK SUN RECORDS 1995";
+        BS 004 normalises to "bs4", too short for the general rule, so the Black Sun pressing
+        tied with the 1991 one."""
+        c = cand(catnos={mc.norm_code("BS 004")})
+        agree, _ = mc.pressing_clues("2 BS.OO4, P&G BLAGK SUN RECORDS 1995 ALL RIGHTS RESERVED", c)   # as read
+        self.assertIn("catalogue number", agree)
+        agree, _ = mc.pressing_clues("Track lengths: ABS 0045 and BS 0041 elsewhere", c)
+        self.assertNotIn("catalogue number", agree)          # part of another code: no
+
 class AlbumKnownPressingNot(unittest.TestCase):
     def test_a_tie_between_pressings_of_a_certain_album_is_album_only(self):
         a = album()

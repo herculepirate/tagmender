@@ -8,7 +8,7 @@ corners), made for the Linux desktop.
 
 | File | Use |
 | --- | --- |
-| `tagmender.svg` | The desktop icon: squircle with margin and soft shadow. Same file as `packaging/tagmender.svg` (AppImage and .deb) |
+| `tagmender.svg` | The desktop icon: a close-up of the disc and monogram (2.17×, so the letters stay readable down to 24 px), in a squircle with margin and soft shadow. Same file as `packaging/tagmender.svg` (AppImage and .deb) |
 | `tagmender-animated.svg` | The same icon with flowing ripples, for the README and the web |
 | `png/tagmender-<size>.png` | The desktop icon as PNG, 16 – 1024 px, rendered with librsvg |
 | `tagmender-icon.svg` | Master artwork, full-bleed square with no corners or shadow: edit this one |

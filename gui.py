@@ -621,8 +621,15 @@ class Jobs(QWidget):
     def recover(self):
         import executor
         lines = []
+        busy = set(executor.busy_jobs())
         for j in executor.pending_jobs():
-            lines += [f"{j}:"] + [f"  {x}" for x in executor.recover(j)]
+            if j in busy:
+                lines.append(f"{j}: running in another TagMender process (the watcher?); not interrupted")
+                continue
+            try:
+                lines += [f"{j}:"] + [f"  {x}" for x in executor.recover(j)]
+            except executor.StepError as exc:
+                lines.append(f"{j}: {exc}")
         self.out.setPlainText("\n".join(lines) or "Nothing to recover.")
         self.reload()
 
@@ -1327,7 +1334,7 @@ class Main(QMainWindow):
             a.triggered.connect(fn)
             self.addAction(a)
         import executor
-        if executor.pending_jobs():
+        if set(executor.pending_jobs()) - set(executor.busy_jobs()):
             self.statusBar().showMessage("A job was interrupted. Recover it under Jobs.")
 
     def go(self, name):

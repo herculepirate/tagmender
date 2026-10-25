@@ -542,10 +542,11 @@ def cmd_jobs(args):
     if args.job == "prune":
         days = args.days if args.days is not None else _profile(args)["backup_retention_days"]
         done = executor.prune(days)
-        jobs = [d for d in done if not d.startswith("staging/")]
+        jobs = [d for d in done if not d.startswith(("staging/", "plans/"))]
         print(f"Backups deleted for {len(jobs)} job(s) older than {days} days (they can no longer be undone).")
-        if len(done) > len(jobs):
-            print(f"Old fetched artwork removed for {len(done) - len(jobs)} plan(s).")
+        art = [d for d in done if d.startswith("staging/")]
+        if art:
+            print(f"Old fetched artwork removed for {len(art)} plan(s).")
         return EXIT_OK
     if args.job:
         rows = executor.job_albums(args.job)

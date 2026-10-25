@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-**File operations reviewed** in twelve independent rounds (tests/test_fileops*.py, and four
+**File operations reviewed** in thirteen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
 - An interrupted album is put back as it was by `tagmender recover`; run the plan again.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.
@@ -47,6 +47,10 @@ crash/error fuzzers in tests/fuzz/)
 - `recover` waits for a share that is down (it never rebuilds an album on the system disk);
   undo of a copy needs only the destination; folders put back by undo, rollback and recover
   take their parent's owner and mode; undo of a hard-linked copy keeps later source edits.
+- Undo keeps an album together when a later job moved it, when it was downloaded again
+  into the inbox, or when its rewritten cue or new cover changed since; lyrics a player
+  updated go back with their edits; an undo cut short can be finished.
+- A saved plan still applies after a share was remounted with another device number.
 
 **New: tagging levels** (profile `tag_level`, and in the desktop app's profile settings)
 - Basic: album artist, artist, album, title, track and disc numbers and totals, date, genre.

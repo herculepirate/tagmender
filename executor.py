@@ -515,6 +515,7 @@ def _backup(src: Path, jd: Path, n: int, writes: bool = True) -> dict:
         return {"kind": "unwritten"}
     files = jd / "files"
     files.mkdir(exist_ok=True)
+    _space_for(files, os.path.getsize(src))      # (the state folder may be on a small system disk)
     dest = files / f"{n}{src.suffix}"
     _copy_fsync(src, dest)
     return {"kind": "file", "path": str(dest)}
@@ -670,7 +671,11 @@ class Executor:
         droot = a.get("dest_root")
         if droot:
             try:
-                same = os.stat(droot["path"]).st_dev == droot["dev"]
+                if "mount" in droot:     # the same mount point (a share remounted after a reboot
+                    same = os.path.isdir(droot["path"]) and planmod.mounted(droot["path"]) and \
+                        planmod.mount_point(droot["path"]) == droot["mount"]   # may get another device number)
+                else:
+                    same = os.stat(droot["path"]).st_dev == droot["dev"]
             except OSError:
                 same = False
             if not same:
@@ -995,6 +1000,7 @@ class Executor:
         stage = _stage_name(dst, self.job)
         try:
             _copy_fsync(front, stage)
+            _keep_owner(stage, os.stat(dst.parent))     # the album folder's owner (a root job on a share)
         except BaseException:
             stage.unlink(missing_ok=True)
             raise
@@ -1018,6 +1024,7 @@ class Executor:
                 fh.write(data)
                 fh.flush()
                 os.fsync(fh.fileno())
+            _keep_owner(stage, os.stat(dst.parent))
         except BaseException:
             stage.unlink(missing_ok=True)
             raise
@@ -1195,7 +1202,12 @@ def _undo_step(step, jd, rolling_back=False):
 
 def _undo_relink(src: Path, dst: Path, backup, digest, jd, op="relink_move"):
     """Before the job src and dst were one file under two names: make them so again, with
-    the old tags. (A copy never wrote its source: a source edited since keeps its edits.)"""
+    the old tags. (A copy never wrote its source: a source edited since keeps its edits, a
+    source deleted since stays deleted - the copy just gets its old tags back.)"""
+    if op == "relink_copy" and not src.exists():
+        if dst.exists() and backup:
+            _restore(dst, backup, jd)
+        return
     if not src.exists():
         if dst.exists() and _tags_sig_backup_free(dst, backup):
             os.link(dst, src)                       # nothing was written: give src its name back
@@ -1221,6 +1233,20 @@ def _undo_relink(src: Path, dst: Path, backup, digest, jd, op="relink_move"):
         raise
 
 
+def _matches_backup(path: Path, backup) -> bool:
+    """path holds what the job's backup of it holds (its tags, or the whole file)."""
+    if not backup:
+        return False
+    try:
+        if backup.get("kind") == "tags":
+            return _same_backup(path, backup)
+        if backup.get("kind") == "file" and backup.get("path"):
+            return payload.file_sha256(path) == payload.file_sha256(Path(backup["path"]))
+    except Exception:
+        return False
+    return False
+
+
 def _tags_sig_backup_free(dst: Path, backup) -> bool:
     """True when dst still is the very file the job started from (no tags were written)."""
     if backup and backup.get("kind") == "unwritten":
@@ -1233,11 +1259,23 @@ def _tags_sig_backup_free(dst: Path, backup) -> bool:
         return False
 
 
+def _rec_key(rec):
+    """A tag backup record compared without the order of its tags (mutagen lists Vorbis
+    comment keys from a set: the order differs between two reads of one file)."""
+    rec = dict(rec or {})
+    tags = dict(rec.get("tags") or {})
+    for k in ("vorbis", "mp4"):
+        if k in tags:
+            tags[k] = sorted(json.dumps(x, sort_keys=True, default=str) for x in tags[k])
+    rec["tags"] = tags
+    return json.dumps(rec, sort_keys=True, default=str)
+
+
 def _same_backup(dst: Path, backup) -> bool:
     import tempfile
     import tag_albums as ta
     with tempfile.TemporaryDirectory() as d:
-        return ta.backup_tags(dst, d) == backup["rec"]
+        return _rec_key(ta.backup_tags(dst, d)) == _rec_key(backup["rec"])
 
 
 # --------------------------------------------------------------------------
@@ -1314,7 +1352,9 @@ def _recover(job, jd, journal, events):
     # mount point, and the job be marked recovered)
     finished_ = {e["album"] for e in events if e.get("ev") in ("album_done", "album_rolled_back")}
     paths = [p for (a, _j), f in list(files.items()) + list(comps.items()) if a not in finished_
-             for p in (f.get("src"), f.get("dst")) if p]
+             for p in ((f.get("dst"),) if f.get("op") == "copy" else (f.get("src"), f.get("dst"))) if p]
+    paths += [e["path"] for e in events if e.get("ev") in ("create_begin", "cover_file", "new_file")
+              and e.get("album") not in finished_]
     for p in dict.fromkeys(str(Path(p).parent) for p in paths):
         if _down(p, events):
             raise StepError(f"the share holding {p} is not mounted; nothing was recovered - "
@@ -1562,19 +1602,30 @@ def _undo(job, jd, journal, events, force):
     def did(*key):
         journal.write(ev="undo_step", key=list(key))
 
-    # which tracks stay where the job put them (changed since), first: an album whose music
-    # stays keeps its cover, scans, log and cue with it
-    verdict = {}
+    # which tracks stay where the job put them, first: an album moves back whole or not at
+    # all, with its cover, scans, log and cue. Two kinds of reason: a change made since the
+    # job (--force overrides it) and a state undo cannot put right (never overridden)
+    prior_undo = any(e.get("ev") in ("undo_begin", "undo_step", "undo_partial") for e in events)
+    journal.write(ev="undo_begin")
+    verdict, hard = {}, set()
     for (a, j), f in sorted(files.items(), reverse=True):
         if a in rolled or f["state"] not in ("committed", "source_removed") or ("file", a, j) in already \
                 or ("file", a, j) in rolled_steps:
             continue
-        dst = Path(f["dst"])
-        check = Path(f["src"]) if f.get("op") == "tag" else dst
-        if not check.exists() and f.get("op") == "move" and Path(f["src"]).exists():
-            check = Path(f["src"])                      # an interrupted undo had moved it back
+        op, src, dst = f.get("op"), Path(f["src"]), Path(f["dst"])
+        check = src if op == "tag" else dst
+        if not check.exists() and op == "move" and src.exists():
+            check = src                                 # an interrupted undo had moved it back
         why = None
-        if f.get("op") == "copy" and dst.exists() and f.get("size") is not None and not force and \
+        if op in ("move", "relink_move") and not dst.exists() and not src.exists():
+            why = (f"{dst} is no longer where the job put it (moved by a later job? undo that one "
+                   f"first); its album waits")
+            hard.add(a)
+        elif op in ("move", "relink_move") and not prior_undo and src.exists() and dst.exists() and \
+                not _same_file(src, dst):
+            why = f"{src} holds a file again (downloaded again?); the album stays where the job put it"
+            hard.add(a)
+        elif op == "copy" and dst.exists() and f.get("size") is not None and not force and \
                 (os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and \
                 not (f.get("tags_sig") and _tags_sig(dst) == f["tags_sig"] and
                      (not f.get("digest") or payload.digest(dst) == f["digest"])):
@@ -1582,19 +1633,39 @@ def _undo(job, jd, journal, events, force):
             why = f"{dst} was changed after the job; left in place"
         elif f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
             why = f"{check} holds different audio now; left alone"
-        elif f.get("op") in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and \
-                check == (Path(f["src"]) if f["op"] == "tag" else dst) and check.exists() and \
-                _tags_sig(check) != f["tags_sig"] and not force:
+        elif op in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and \
+                check == (src if op == "tag" else dst) and check.exists() and not force and \
+                _tags_sig(check) != f["tags_sig"] and not _matches_backup(check, f.get("backup")):
+            # (tags as the backup has them: an undo cut short had put them back already)
             why = (f"{check}: its tags were edited after the job; left as they are "
                    f"(tagmender undo --force {job} puts the old tags back anyway)")
         verdict[(a, j)] = (why, check)
     staying = {a for (a, _j), (why, _c) in verdict.items() if why and files[(a, _j)].get("op") != "tag"}
+    # a cue sheet the job rewrote, or a cover/lyrics file it made, changed since: putting the
+    # album back would lose the edit or leave the file behind - the album stays (--force: back)
+    for (a, j), c in comps.items():
+        if a in rolled or c["state"] not in ("committed", "source_removed") or ("companion", a, j) in already \
+                or not c.get("saved") or c.get("size") is None:
+            continue
+        cdst = Path(c["dst"])
+        if cdst.exists() and (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
+            staying.add(a)
+            problems.append(f"{cdst} was changed after the job (tagmender undo --force {job} puts the "
+                            f"album back anyway, with the file as the job found it)")
+    for e in events:
+        if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled and \
+                ("created", e["path"]) not in already and Path(e["path"]).exists() and \
+                (os.stat(e["path"]).st_size, os.stat(e["path"]).st_mtime_ns) != (e["size"], e["mtime_ns"]) and \
+                any(f.get("op") in ("move", "relink_move") for (x, _j), f in files.items() if x == e["album"]):
+            staying.add(e["album"])
+            problems.append(f"{e['path']} was changed after the job; the album stays with it")
     for (a, j), (why, check) in list(verdict.items()):   # an album moves back whole, or not at all
-        if a in staying and not why and not force and files[(a, j)].get("op") != "tag":
-            verdict[(a, j)] = (f"{check}: stays with the rest of its album (a track of it changed after "
-                               f"the job; tagmender undo --force {job} puts the others back anyway)", check)
+        if a in staying and not why and (not force or a in hard) and files[(a, j)].get("op") != "tag":
+            verdict[(a, j)] = (f"{check}: stays with the rest of its album (see above; tagmender undo "
+                               f"--force {job} puts what it can back anyway)" if a not in hard else
+                               f"{check}: stays with the rest of its album (see above)", check)
     if force:                            # --force: what can go back does; the changed tracks stay
-        staying = set()
+        staying = set(hard)
 
     covers = [e for e in events if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled]
     for e in reversed(covers):
@@ -1619,10 +1690,12 @@ def _undo(job, jd, journal, events, force):
         if a in staying:
             problems.append(f"{cdst} stays with the album's music, which stays where the job put it")
             continue
-        if c.get("size") is not None and cdst.exists() and not force and \
+        # (a moved companion changed since - lyrics a player updated - goes back with its edit;
+        # a copy changed since is no longer only the job's: it stays)
+        if c.get("op") == "copy" and c.get("size") is not None and cdst.exists() and not force and \
                 (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
             problems.append(f"{cdst} was changed after the job; left as it is "
-                            f"(tagmender undo --force {job} puts it back anyway)")
+                            f"(tagmender undo --force {job} removes it anyway)")
             continue
         try:
             _undo_step(("companion", a, j, c["op"], c["src"], c["dst"], c.get("saved"), None), jd)
@@ -1695,10 +1768,17 @@ def prune(days: int) -> list[str]:
     # artwork the engine fetched for plans (STATE_DIR/staging/<job>): a plan that old is
     # refused anyway once its files changed, and the folder otherwise grows with every run
     staging = ex.STATE_DIR / "staging"
-    try:                                     # plans still waiting to be applied keep theirs
-        waiting = [x.stem for x in (ex.STATE_DIR / "plans").glob("*.json")]
+    waiting = []                             # plans still waiting to be applied keep theirs
+    try:
+        for x in (ex.STATE_DIR / "plans").glob("*.json"):
+            if (jobs_dir() / x.stem / "journal.jsonl").exists():   # applied: its job has the plan
+                if x.stat().st_mtime < cutoff:
+                    x.unlink()
+                    out.append(f"plans/{x.name}")
+                continue
+            waiting.append(x.stem)
     except OSError:
-        waiting = []
+        pass
     if staging.is_dir():
         for d in staging.iterdir():
             try:

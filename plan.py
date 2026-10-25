@@ -293,6 +293,14 @@ _one_name = same_entry
 MOUNT_PARENTS = ("/media", "/mnt", "/run/media")
 
 
+def mount_point(folder) -> str:
+    """The mount point folder lies on ("/" when on the system disk)."""
+    p = Path(os.path.realpath(os.path.expanduser(str(folder))))
+    while p != p.parent and not os.path.ismount(p):
+        p = p.parent
+    return str(p)
+
+
 def mounted(folder) -> bool:
     """False for a folder under /media, /mnt or /run/media when nothing is mounted between
     it and that parent: the share it belongs to is not mounted, and anything written there
@@ -578,7 +586,8 @@ class Planner:
                 entry["conflicts"].append(f"destination {dest_root} is on the system disk, not on the share "
                                           "mounted there (unmounted?)")
                 return entry
-            entry["dest_root"] = {"path": str(dest_root), "dev": os.stat(dest_root).st_dev}
+            entry["dest_root"] = {"path": str(dest_root), "dev": os.stat(dest_root).st_dev,
+                                  "mount": mount_point(dest_root)}
         template = naming.template_for(p["naming"])
         album_dirs = {}
         if op == "copy" and identified:
@@ -699,7 +708,7 @@ class Planner:
                     continue
                 if want != c:
                     want = want.with_name(_fit_name(want.name, p["filenames"]))
-                if want != c and want.exists() and _same_bytes(want, c, pairs, p):
+                if want != c and want.exists() and not same_entry(want, c) and _same_bytes(want, c, pairs, p):
                     continue                                  # copied there by an earlier run
                 dst = c if want == c else self._unique(want, c, entry)
                 if dst is None:

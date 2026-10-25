@@ -48,10 +48,11 @@ def _db():
     return db
 
 
-def snapshot(folder: Path):
-    """(signature, newest mtime, has a partial file)."""
+def snapshot(folder: Path, files=None):
+    """(signature, newest mtime, has a partial file) of a folder, or only of `files` (loose
+    tracks at a watched root are judged by themselves, not by everything below the root)."""
     entries, newest, partial = [], 0.0, False
-    for p in sorted(Path(folder).rglob("*")):
+    for p in sorted(Path(x) for x in files) if files is not None else sorted(Path(folder).rglob("*")):
         if not p.is_file():
             continue
         name = p.name.lower()
@@ -113,9 +114,9 @@ class Watcher:
             roots.append(prof["unresolved"].get("move_to"))
         return all(r and Path(r).expanduser().is_dir() and planmod.mounted(Path(r).expanduser()) for r in roots)
 
-    def due(self, folder: Path, prof, db, key=None) -> tuple[bool, str]:
+    def due(self, folder: Path, prof, db, key=None, files=None) -> tuple[bool, str]:
         key = key or planmod.db_text(folder)
-        sig, newest, partial = snapshot(folder)
+        sig, newest, partial = snapshot(folder, files)
         if partial:
             return False, "partial download inside"
         if time.time() - newest < prof["watch"]["settle_minutes"] * 60:
@@ -144,8 +145,8 @@ class Watcher:
             return True, "retry"
         return False, status
 
-    def record(self, db, folder, prof, status, attempts, detail="", key=None):
-        sig, _n, _p = snapshot(folder) if Path(folder).exists() else ("gone", 0, False)
+    def record(self, db, folder, prof, status, attempts, detail="", key=None, files=None):
+        sig, _n, _p = snapshot(folder, files) if Path(folder).exists() else ("gone", 0, False)
         if status in ("provider_error", "failed", "conflict", "blocked"):
             nxt = time.time() + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
         elif status == "unresolved":
@@ -188,8 +189,9 @@ class Watcher:
                     continue
                 seen.add(key)
                 k = self.key(g)
+                scope = g.files if os.path.realpath(g.folder) == os.path.realpath(root) else None
                 try:
-                    go, why = self.due(g.folder, prof, db, k)
+                    go, why = self.due(g.folder, prof, db, k, scope)
                 except Exception:                              # one album never stops the watcher
                     self.log.exception("watch: %s could not be looked at", g.folder)
                     continue
@@ -218,18 +220,19 @@ class Watcher:
                         v in ("outage", "rate_limited", "invalid_response") for v in errs.values())
                     status = ("excluded" if a["status"] == "excluded" or outcome == "excluded" else
                               "provider_error" if retryable else
+                              "blocked" if a["status"] == "blocked" or outcome == "blocked" else
                               "unresolved" if prop.status == "unresolved" else outcome)
                     shown = status
                     if status == "blocked" and not self.destination_ready(prof):
                         status = "waiting_destination"      # tried again once it is back
                     self.record(db, g.folder, prof, status, attempts,
                                 ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
-                                key=k)
+                                key=k, files=scope)
                     done[str(g.folder)] = shown
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher
                     self.log.exception("watch: %s failed", g.folder)
-                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k)
+                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k, files=scope)
                     done[str(g.folder)] = "error"
         db.close()
         return done

@@ -109,8 +109,8 @@ class Gui(te.Base):
         with mock.patch.object(QInputDialog, "getText", return_value=(link, True)), \
                 mock.patch.object(type(ov), "preview") as again:
             ov.choose_release()
-        self.assertEqual(ov.forced, {_os.path.realpath(a["source_dir"]): {
-            "ref": link, "files": sorted(fe["src"] for fe in a["files"])}})
+        self.assertEqual(ov.forced, {_os.path.realpath(a["source_dir"]): [{
+            "ref": link, "files": sorted(fe["src"] for fe in a["files"])}]})
         again.assert_called_once()
         with mock.patch.object(QInputDialog, "getText", return_value=("not a link", True)), \
                 mock.patch.object(self.gui.QMessageBox, "warning") as warned, \

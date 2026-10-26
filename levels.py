@@ -68,10 +68,16 @@ def restrict(target: dict, profile) -> dict:
     drop = {f.lower() for f in lf.get("drop") or []}
     if level(profile) == "basic":
         keep = set(BASIC_FIELDS) | set(ALWAYS) | {f.lower() for f in lf.get("add") or []}
-        out = {k: v for k, v in target.items() if k.lower() in keep and k.lower() not in NEVER_AT_BASIC}
+        out = {k: v for k, v in target.items() if (k.lower() in keep and k.lower() not in NEVER_AT_BASIC)
+               or k.startswith("~")}            # (Picard's hidden variables: for naming, never written)
+        if out.get("~remove"):
+            out["~remove"] = [x for x in out["~remove"] if str(x).lower() in keep]
     else:
         out = dict(target)
-    return {k: v for k, v in out.items() if k.lower() not in drop or k.lower() in ALWAYS}
+    out = {k: v for k, v in out.items() if k.lower() not in drop or k.lower() in ALWAYS}
+    if out.get("~remove"):                       # (what Picard deletes: never a field this level leaves alone)
+        out["~remove"] = [x for x in out["~remove"] if str(x).lower() not in drop or str(x).lower() in ALWAYS]
+    return out
 
 
 # --------------------------------------------------------------------------

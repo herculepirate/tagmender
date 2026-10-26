@@ -276,12 +276,21 @@ class Engine:
     # ---- identification ------------------------------------------------------
     def forced_for(self, g: Group, alone: bool = True):
         """The release the user chose for this album: force maps an album folder to a link (for
-        the folder's only album) or to {"ref": link, "files": [the album's files]} (one album of
-        a folder holding several)."""
+        the folder's only album), or to {"ref": link, "files": [the album's files]} - or a list
+        of those, one per album of a folder holding several. A choice is this album's when it
+        names files of it (the album's files as the plan listed them: its second copies, or
+        its copies of a copy profile, may be missing; the most files in common wins)."""
         v = (getattr(self, "force", None) or {}).get(os.path.realpath(str(g.folder)))
-        if isinstance(v, dict):
+        if isinstance(v, (dict, list)):
             mine = {os.path.realpath(str(f)) for f in g.files}
-            return v.get("ref") if mine == {os.path.realpath(str(f)) for f in v.get("files") or []} else None
+            best, most = None, 0
+            for c in ([v] if isinstance(v, dict) else v):
+                if not isinstance(c, dict) or not c.get("ref"):
+                    continue
+                n = len(mine & {os.path.realpath(str(f)) for f in c.get("files") or []})
+                if n > most:
+                    best, most = c.get("ref"), n
+            return best
         return v if v and alone else None
 
     def identify(self, g: Group) -> planmod.Proposal:
@@ -471,6 +480,11 @@ class Engine:
                 remove += [g for g in gone if g not in merged]
             if remove:
                 merged["~remove"] = list(dict.fromkeys(remove))
+            # Picard's hidden variables (%_multiartist%, %_releasecomment%, what a tagger script
+            # $set): for the file naming script only - never written (every "~" field is skipped)
+            for k, v in hidden.items():
+                if k not in merged and v not in (None, "", []):
+                    merged[k] = v
             targets.append({k: (v if isinstance(v, list) else [v]) for k, v in merged.items()})
             prov.update(where)
         provider = "musicbrainz" if order[0] == "musicbrainz" else "discogs"
@@ -487,7 +501,10 @@ class Engine:
         """An identified album whose pressing is unknown: no release IDs, catalogue number or
         barcode; label, country, media and date only when every tied pressing agrees."""
         tied = info.get("tied") or []
-        p.targets = [mc.album_only_tags(t, tied) for t in p.targets]
+        # (Picard's hidden variables of the one pressing - its comment, catalogue number ... -
+        # are no album-only facts: only those of the album's tracks stay)
+        p.targets = [{k: v for k, v in mc.album_only_tags(t, tied).items()
+                      if not k.startswith("~") or k in ALBUM_ONLY_HIDDEN} for t in p.targets]
         p.release_id, p.url = "", ""
         p.provenance = {k: v for k, v in p.provenance.items() if k not in mc.PRESSING_FIELDS}
         p.why = list(p.why) + [f"pressing unknown ({len(tied)} pressings fit equally): album tags only; "
@@ -794,10 +811,21 @@ class Engine:
         return p
 
 
+ALBUM_ONLY_HIDDEN = {"~remove", "~multiartist", "~absolutetracknumber", "~totalalbumtracks", "~albumartists",
+                     "~albumartistcomment", "~artists", "~artistcomment", "~artists_sort", "~artists_comments",
+                     "~artists_countries", "~recordingtitle", "~recordingcomment", "~length", "~video", "~datatrack",
+                     "~discpregap", "~silence", "~releasegroup", "~releasegroupcomment",
+                     "~releasegroup_firstreleasedate", "~primaryreleasetype", "~secondaryreleasetype",
+                     "~recording_firstreleasedate", "~iswc", "~workcomment", "~lyricistsort", "~writersort",
+                     "~performance_attributes"}
+
+
 def run_tagger_scripts(scripts, tags: dict, hidden: dict, log=None):
     """(tags, removed): the track's tags after Picard's tagger scripts, run as Picard runs them
     on a track (picard/album.py: each script in turn, whitespace stripped after each), with
-    Picard's hidden variables (%_releasecomment%, %_totalalbumtracks% ...) to read."""
+    Picard's hidden variables (%_releasecomment%, %_totalalbumtracks% ...) to read. hidden is
+    updated with the hidden variables as the scripts leave them ($set(_shelf,...)), which
+    the file naming script reads in Picard."""
     import picard_script as ps
     m = ps.Metadata()
     for k, v in list(hidden.items()) + list(tags.items()):
@@ -812,10 +840,19 @@ def run_tagger_scripts(scripts, tags: dict, hidden: dict, log=None):
             m[k] = [str(x).strip() for x in vals]
     out = {k: list(v) for k, v in m.rawitems() if not k.startswith("~")}
     gone = sorted(k for k in m.deleted_tags if not k.startswith("~") and k not in out)
+    hidden.clear()
+    hidden.update({k: list(v) for k, v in m.rawitems() if k.startswith("~") and k != "~remove"})
     return out, gone
 
 
 _MBID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.IGNORECASE)
+
+
+def plan_entry_files(a: dict) -> list:
+    """The album's own files, from its plan entry (for a release the user chooses for it): a
+    copy profile's earlier copy names the file it was copied from."""
+    return sorted({fe.get("copy_of") or fe["src"] for fe in a.get("files") or []} |
+                  {x.get("file") for x in a.get("skipped") or [] if x.get("file")})
 
 
 def parse_release_ref(ref: str):

@@ -264,6 +264,11 @@ def validate(data: dict) -> list[str]:
     if art.get("generate", "off") not in ARTWORK_GENERATE:
         p.append(f"artwork.generate must be one of {', '.join(ARTWORK_GENERATE)}")
     import naming as _naming
+    tpl = (d["naming"] or {}).get("template") or ""
+    if not isinstance(tpl, str):
+        p.append("naming.template must be a naming script (text)")
+    elif tpl.strip():
+        p += [f"naming.template: {x}" for x in _naming.check(tpl)]
     for k in ("editions", "album_editions"):
         if (d["naming"] or {}).get(k, "off") not in _naming.EDITIONS:
             p.append(f"naming.{k} must be one of {', '.join(_naming.EDITIONS)}")

@@ -35,8 +35,22 @@ Picard. Picard's tagger scripts (Options > Scripting) run on each track after Di
 Enrichment, as Picard runs them, with Picard's hidden variables (%_releasecomment%,
 %_absolutetracknumber%, %_primaryreleasetype%, %_artists_sort% ...); a tag a script
 `$delete`s is removed, and so is a compilation flag on a release not by Various Artists, as
-Picard does (never a field the profile preserves). A profile can list its own scripts
-(`picard.enable_tagger_scripts`, `picard.list_of_scripts`).
+Picard does (never a field the profile preserves, a field the tagging level leaves alone, or
+on a match below the replace threshold). A profile can list its own scripts
+(`picard.enable_tagger_scripts`, `picard.list_of_scripts`). The naming script sees Picard's
+hidden variables too, and what a tagger script `$set`s: with the `picard` preset, every track
+of an album with one guest-artist track is now named "Artist - Title", as Picard names it
+(files named before are renamed once). A custom naming script that fails on an album makes
+that album a conflict; one that does not parse is refused when the profile is saved.
+
+**Picard's Options > Tags settings for saving files**: the ID3v2 version (v2.3 or v2.4), the
+ID3v2.3 join character, ID3v1 tags written or removed, APEv2 tags removed from MP3 and ID3 tags
+from FLAC - read from Picard.ini or set in the profile (`picard.write_id3v23` ...; the profile
+editor has the ID3 choices). Without them each file keeps its ID3 version and ID3v1 tag, as
+before. They apply when a file is written, and the preview says so. Undo now puts back an
+MP3's own ID3v1 and APEv2 tags and a FLAC file's ID3 tags exactly; before, undo rebuilt an
+ID3v1 tag from the restored ID3v2 tag. A WAV file's RIFF INFO now carries every field the file
+holds, as Picard writes it, not only the fields that changed.
 
 **Choose the release yourself**, as Picard's "Other versions": `tagmender plan ALBUM --release
 LINK` (or `run`), or "Use another release…" in the app's preview, with a MusicBrainz or Discogs
@@ -54,6 +68,15 @@ the album is - flat in the artist folder, or being moved out of it (a moved albu
 along) - and the tracks' picture follows a corrected one also with "embed only"; a picture of
 the user's own beside TagMender's is never touched, and a download never replaces a picture
 made from the user's photo.
+
+**Artist photos and covers when albums move (fifteenth review).** Your own artist photo now
+replaces an artist.jpg TagMender downloaded earlier (the download is kept for undo) - also
+when the albums move over several runs, or a copy profile made the copies with a download -
+and your artist.png wins over a downloaded artist.jpg beside it. Artist folders named by
+sort name ("Bowie, David") are recognised. An album moved out of its artist folder gets a
+cover where it lands (the artist's pictures that stay behind are no cover of it). poster.jpg,
+art.jpg and thumb.jpg (Plex, Jellyfin) stay in an artist folder like folder.jpg.
+`tagmender artist-photos --forget` no longer forgets which artist.jpg files were downloads.
 
 **Artist photo: only artist.jpg goes into the tracks (thirteenth review).** A folder.jpg in an
 artist folder can be an album's cover as well as the artist's image (Jellyfin, Kodi), so it is

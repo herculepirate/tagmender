@@ -100,6 +100,11 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
         b, a = _vals(before.get(f)), _vals(target.get(f))
         pol = profile.policy(f)
         if f in extra_removals and f not in target:
+            if not (replace_ok or f.startswith("tagmender")):
+                if b:                             # (a match too uncertain to replace a tag deletes none either)
+                    rows.append({"field": f, "before": b, "after": b,
+                                 "action": "kept (confidence below replace threshold)"})
+                continue
             pol = "remove"
         if pol == "lock":
             if a != b:
@@ -730,6 +735,10 @@ class Planner:
             # tagger script $delete-s) - never a field the profile preserves or locks
             removals += [x for x in (target.pop("~remove", None) or [])
                          if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
+            # Picard's hidden variables (%_multiartist%, what a tagger script $set): for the file
+            # naming script only, never written
+            hidden = {"_" + k[1:]: v for k, v in target.items() if k.startswith("~") and len(k) > 1}
+            target = {k: v for k, v in target.items() if not k.startswith("~")}
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
@@ -739,15 +748,18 @@ class Planner:
                   "diff": rows, "fingerprint": _fp(f)}
             if changes and fmt:
                 fe["format"] = fmt
-            if changes and f.suffix.lower() == ".wav":       # (RIFF INFO: the values as they are, as Picard)
-                fe["riff"] = {k: raw.get(k) for k in changes if k in tagio.RIFF_INFO and changes[k] is not None}
+            # the file's tags after the write, as values (not as an ID3v2.3 tag joins them: a
+            # field the file already holds as the target says is named "A & B", not "A_B")
+            merged = {k: (raw[k] if k in raw and _vals(target.get(k)) == _vals(v) else v) for k, v in before.items()}
+            merged.update({k: (raw.get(k) or v) for k, v in changes.items() if v is not None})
+            for k, v in changes.items():
+                if v is None:
+                    merged.pop(k, None)
+            if changes and f.suffix.lower() == ".wav":
+                # RIFF INFO: every field the file holds, the values as they are (Picard's
+                # WAVFile._save writes it from all of the file's metadata)
+                fe["riff"] = {k: list(merged[k]) for k in tagio.RIFF_INFO if merged.get(k)}
             if op in ("copy", "move"):
-                # (named from the values, not from how an ID3v2.3 tag joins them: "A & B", not "A_B")
-                merged = {**{k: v for k, v in before.items()},
-                          **{k: (raw.get(k) or v) for k, v in changes.items() if v is not None}}
-                for k, v in changes.items():
-                    if v is None:
-                        merged.pop(k, None)
                 if not identified:      # as it is, with its folders below the profile's source
                     src_root = Path(prop.source_dir)
                     try:
@@ -765,7 +777,7 @@ class Planner:
                             / _fit_name(rel.name, p["filenames"])
                     notes = []
                 else:
-                    names = dict(merged, **rel_tags)
+                    names = {**hidden, **merged, **rel_tags}
                     if folder_mode != "off":
                         # (for the name only: a Picard script working the edition out itself
                         # from %media% and %date% gets the release's first-disc values for every
@@ -776,8 +788,13 @@ class Planner:
                         al = str((names.get("album") or [""])[0])
                         if tag_ed and al.endswith(f" [{tag_ed}]"):
                             names["album"] = [al[:-len(f" [{tag_ed}]")]]
-                    comps = naming.render(template, names)
-                    dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
+                    try:
+                        comps = naming.render(template, names)
+                    except naming.TemplateError as exc:          # (a custom script that fails here)
+                        comps, notes = None, [f"the naming script failed: {exc}"]
+                    dst = None
+                    if comps is not None:
+                        dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
                     if dst is not None:
                         dst = self._spelled(dst, dest_root)
                         dst = self._own_album_dir(dst, prop, kept, album_dirs)
@@ -800,7 +817,7 @@ class Planner:
                     have = tagio.read(dst)
                     fmt2 = tagio.file_options(dst, self._file_settings())    # (as the copy holds them)
                     changes2, rows2 = diff_tags(have, tagio.stored(dst, raw, fmt2), p,
-                                                conf if identified else 100.0, [])
+                                                conf if identified else 100.0, removals)
                     fe.pop("format", None)
                     if changes2 and fmt2:
                         fe["format"] = fmt2

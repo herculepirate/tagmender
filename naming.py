@@ -307,6 +307,8 @@ def render(template: str, tags: dict) -> list[str]:
         text = _ev(compile_template(template), ctx)
     except ps.ScriptError as exc:
         raise TemplateError(str(exc)) from None
+    except (TypeError, ValueError, OverflowError, MemoryError, RecursionError, IndexError, KeyError) as exc:
+        raise TemplateError(f"{type(exc).__name__}: {exc}") from None      # ($delprefix(), $pad(x,1e12,y) ...)
     return [p.strip() for p in text.replace("\x00", "").split("/") if p.strip()]
 
 

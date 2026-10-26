@@ -598,22 +598,27 @@ class Overview(QWidget):
         import engine
         from PySide6.QtWidgets import QInputDialog
         key = os.path.realpath(a["source_dir"])
-        files = sorted({fe["src"] for fe in a.get("files") or []} | {x.get("file") for x in a.get("skipped") or []
-                                                                     if x.get("file")})
-        was = self.forced.get(key)
+        files = engine.plan_entry_files(a)
+        mine = {os.path.realpath(f) for f in files}
+        choices = [c for c in (self.forced.get(key) or []) if isinstance(c, dict)]
+        was = next((c for c in choices if mine & {os.path.realpath(f) for f in c.get("files") or []}), None)
         ref, ok = QInputDialog.getText(self, APP, f"The release for {Path(a['source_dir']).name}:\n"
                                        "a MusicBrainz or Discogs release link (or ID)",
-                                       text=(was or {}).get("ref", "") if isinstance(was, dict) else (was or ""))
+                                       text=(was or {}).get("ref", ""))
         if not ok:
             return
         ref = ref.strip()
-        if not ref:
-            self.forced.pop(key, None)
-        elif engine.parse_release_ref(ref)[0] is None:
+        if ref and engine.parse_release_ref(ref)[0] is None:
             QMessageBox.warning(self, APP, "That is not a MusicBrainz or Discogs release link.")
             return
+        # (this album only: a folder may hold several, each with its own choice)
+        choices = [c for c in choices if c is not was]
+        if ref:
+            choices.append({"ref": ref, "files": files})
+        if choices:
+            self.forced[key] = choices
         else:
-            self.forced[key] = {"ref": ref, "files": files}    # (this album only: a folder may hold several)
+            self.forced.pop(key, None)
         self.preview()
 
     def process_anyway(self):

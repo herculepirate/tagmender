@@ -134,10 +134,12 @@ def write_albumid(path, mbid):
             f.add_tags()
         f.tags["----:com.apple.iTunes:MusicBrainz Album Id"] = [MP4FreeForm(mbid.encode())]
     elif f.tags is not None and isinstance(f.tags, ID3) or path.suffix.lower() == ".mp3":
-        if f.tags is None:
-            f.add_tags()
-        f.tags.delall("TXXX:MusicBrainz Album Id")
-        f.tags.add(TXXX(encoding=3, desc="MusicBrainz Album Id", text=[mbid]))
+        def edit(t):
+            t.delall("TXXX:MusicBrainz Album Id")
+            t.add(TXXX(encoding=3, desc="MusicBrainz Album Id", text=[mbid]))
+        import tagio
+        tagio.edit_id3(path, f, edit)                # (the tag in its own version, its frames as they are)
+        return
     else:
         if f.tags is None:
             f.add_tags()
@@ -168,13 +170,15 @@ def write_tagmender(path, status, reason=""):
         elif key in f.tags:
             del f.tags[key]
     elif (f.tags is not None and isinstance(f.tags, ID3)) or path.suffix.lower() == ".mp3":
-        if f.tags is None:
-            f.add_tags()
-        f.tags.delall(f"TXXX:{TAGMENDER_TAG}")
-        f.tags.delall(f"TXXX:{TAGMENDER_REASON}")
-        f.tags.add(TXXX(encoding=3, desc=TAGMENDER_TAG, text=[status]))
-        if reason:
-            f.tags.add(TXXX(encoding=3, desc=TAGMENDER_REASON, text=[reason]))
+        def edit(t):
+            t.delall(f"TXXX:{TAGMENDER_TAG}")
+            t.delall(f"TXXX:{TAGMENDER_REASON}")
+            t.add(TXXX(encoding=3, desc=TAGMENDER_TAG, text=[status]))
+            if reason:
+                t.add(TXXX(encoding=3, desc=TAGMENDER_REASON, text=[reason]))
+        import tagio
+        tagio.edit_id3(path, f, edit)                # (the tag in its own version, its frames as they are)
+        return
     else:
         if f.tags is None:
             f.add_tags()
@@ -1618,6 +1622,8 @@ def undo(out_dir, run_id, force=False):
                 failed += 1
                 print(f"  not found: {cur}")
                 continue
+            if rec.get("not_written"):          # (a run that could not write this track: nothing to put back)
+                continue
             try:
                 import executor
                 if rec.get("after_sig") and not force and not executor._sig_is(cur, rec["after_sig"]) and \
@@ -1625,8 +1631,10 @@ def undo(out_dir, run_id, force=False):
                     failed += 1
                     print(f"  {cur}: its tags were edited after the run; left as they are (--force puts them back)")
                     continue
-                # (through a staging copy: a crash never leaves a half-written track)
-                executor.staged_write(cur, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
+                # (through a staging copy: a crash never leaves a half-written track; a track that
+                # is a link - the run wrote through it - is put back in the file it points to)
+                real = Path(os.path.realpath(cur)) if cur.is_symlink() else cur
+                executor.staged_write(real, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
                 old = Path(rec["path"])
                 if cur != old:
                     old.parent.mkdir(parents=True, exist_ok=True)

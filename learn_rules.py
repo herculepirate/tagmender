@@ -74,6 +74,7 @@ def main(argv=None):
     rules = learn(rows, before)
     path = Path(args.rules).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
+    path = Path(os.path.realpath(path))                          # (a link - a dotfiles manager's - stays one)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")       # (whole or not at all)
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")

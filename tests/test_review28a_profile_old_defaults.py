@@ -1,5 +1,5 @@
 # Twenty-eighth independent review (A): Windows compatibility and Delete empty directories
-# now follow Picard.ini when a profile does not set them. A profile saved before (version 1),
+# now follow Picard.ini when a profile does not set them. A profile saved before profiles had versions,
 # which left them out because they were the defaults, keeps those defaults - its file names
 # never change by themselves - and a profile saved now keeps what it says.
 import json
@@ -25,10 +25,10 @@ class OldProfileDefaults(unittest.TestCase):
     def setUp(self):
         picard_config._cache.clear()
 
-    def test_version_1_profile_keeps_the_old_defaults(self):
+    def test_unversioned_profile_keeps_the_old_defaults(self):
         path = profiles.path_of("Lossy")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"version": 1, "name": "Lossy"}))
+        path.write_text(json.dumps({"name": "Lossy"}))       # (no version: before versions)
         p = profiles.load("Lossy")
         self.assertEqual((p["filenames"]["compat"], p["remove_empty_dirs"]), ("windows", True))
 

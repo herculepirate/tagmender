@@ -938,7 +938,8 @@ class Planner:
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
             for k_, v_ in list(target.items()):   # (a value the format holds as none - an M4A total 0: the
-                if v_ is None and raw.get(k_) and before.get(k_) and k_ not in removals:     # file's goes)
+                if v_ is None and raw.get(k_) and before.get(k_) and k_ not in removals and \
+                        p.policy(k_) not in ("preserve", "lock", "fill_missing"):              # file's goes)
                     removals.append(k_)
                     target.pop(k_)
             if raw.get("comment") and not target.get("comment") and before.get("comment") and \
@@ -957,6 +958,13 @@ class Planner:
                   "diff": rows, "fingerprint": _fp(f)}
             if as_is:
                 fe["as_is"] = True
+            elif tagio.opus_pictures_need_fix(f):
+                # (a picture an earlier TagMender wrote with a size and no depth: libopusfile
+                # players show no cover - its size cleared, as Picard writes Opus pictures)
+                fe["fix_pictures"] = True
+                fe["op"] = "tag"
+                fe["diff"] = list(fe["diff"]) + [{"field": "picture", "before": ["size without depth"],
+                                                  "after": ["no size (Opus players show it)"], "action": "repaired"}]
             if changes and fmt:
                 fe["format"] = fmt
             spell = _spelled_names(raw, changes)
@@ -964,6 +972,8 @@ class Planner:
                 fe["names"] = spell
             if _first_values(raw, changes):
                 fe["first"] = _first_values(raw, changes)
+            if changes.get("license") and raw.get("license"):
+                fe["license_count"] = len(raw["license"])      # (one URL: WCOP; several: TXXX:LICENSE)
             kept_ = sorted(t_ for _n, t_ in tagio.NUMBER_PAIRS if t_ in unset_ and t_ not in changes)
             if changes and kept_ and not tagio.combined_pairs(f):
                 fe["keep"] = kept_                   # (a total a script unset: as the file has it)

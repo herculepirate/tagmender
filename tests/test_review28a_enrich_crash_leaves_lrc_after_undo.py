@@ -48,9 +48,9 @@ class EnrichCrashLrc(unittest.TestCase):
         import executor
         real, calls = getattr(executor, "write_json_durably", None), []
 
-        def cut_short(path, data):                        # killed before the second journal write
+        def cut_short(path, data):                        # killed before the journal write after the .lrc
             calls.append(path)
-            if len(calls) == 2:
+            if (album / "01 Song.lrc").exists():
                 raise Killed()
             return real(path, data)
         orig = en.ma.Http

@@ -917,6 +917,75 @@ def _mp4_int(x, zero=False):
     return n if (0 if zero else 1) <= n < 1 << 15 else None
 
 
+def _opus_bad_pictures(f) -> bool:
+    import base64
+    from mutagen.flac import Picture
+    for v in (f.tags or {}).get("METADATA_BLOCK_PICTURE", []) if f.tags is not None else []:
+        try:
+            pic = Picture(base64.b64decode(v))
+        except Exception:
+            continue
+        if not pic.depth and (pic.width or pic.height):
+            return True
+    return False
+
+
+def opus_pictures_need_fix(path) -> bool:
+    """An Opus file's picture has a size but no colour depth (as an earlier TagMender wrote
+    it): libopusfile players refuse it and show no cover."""
+    try:
+        f = open_file(path)
+    except Exception:
+        return False
+    return type(f).__name__ == "OggOpus" and _opus_bad_pictures(f)
+
+
+def fix_opus_pictures(path):
+    """Its pictures' sizes cleared (as Picard writes them), the pictures themselves as they are."""
+    import base64
+    from mutagen.flac import Picture
+    f = open_file(path)
+    if type(f).__name__ != "OggOpus" or not _opus_bad_pictures(f):
+        return
+    out = []
+    for v in f.tags.get("METADATA_BLOCK_PICTURE", []):
+        try:
+            pic = Picture(base64.b64decode(v))
+        except Exception:
+            out.append(v)
+            continue
+        if not pic.depth and (pic.width or pic.height):
+            pic.width = pic.height = 0
+            v = base64.b64encode(pic.write()).decode("ascii")
+        out.append(v)
+    f.tags["METADATA_BLOCK_PICTURE"] = out
+    f.save()
+
+
+def edit_id3(path, f, edit):
+    """edit(tags) on a file's ID3 tag, saved in its own version with every frame it has kept
+    as it is (an MP3's v2.3 tag stays v2.3 - TIME, TRDA, a genre "(17)Rock" untouched - not
+    converted to v2.4 and back): for writers that add or change a frame or two."""
+    from mutagen.id3 import ID3, ID3NoHeaderError
+    if type(f).__name__ not in ("MP3", "EasyMP3", "TrueAudio"):
+        if f.tags is None:
+            f.add_tags()
+        edit(f.tags)
+        save_id3(f, f.tags)
+        return
+    try:
+        t = ID3(str(path), translate=False)
+    except ID3NoHeaderError:
+        t = ID3()
+    if t.version < (2, 3, 0):
+        t.update_to_v24()
+    edit(t)
+    if t.version[:2] == (2, 3):
+        t.save(str(path), v2_version=3, v23_sep=None)
+    else:
+        t.save(str(path), v2_version=4)
+
+
 def latin1_or_utf8(*texts) -> int:
     """The ID3 text encoding Picard uses for number and picture frames, Latin-1 (0) - UTF-8
     (3) when the text has characters Latin-1 has not (Picard would make them "?")."""
@@ -1016,15 +1085,19 @@ def fragmented(path) -> bool:
 
 
 def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None,
-          names: dict | None = None, first: dict | None = None, keep=()) -> None:
+          names: dict | None = None, first: dict | None = None, keep=(), license_count=None,
+          fix_pictures=False) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then). fmt: file_options() - what else saving the file does, as
     Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed). names: {field:
     its spelling} - a custom tag a tagger script made ("MyTag") is written as it spelled it,
     as Picard writes it (an ID3 TXXX, an MP4 custom atom). first: {field: [its first value]}
     of fields an ID3v2.3 tag gets joined, for the ID3v1 tag (see save_id3). keep: totals a
-    tagger script unset - left as the file has them (a Vorbis file's total fields)."""
+    tagger script unset - left as the file has them (a Vorbis file's total fields).
+    license_count: how many licenses the release has (WCOP for one URL, as Picard)."""
     names = {field_name(k): v for k, v in (names or {}).items()}
+    if fix_pictures and not fragmented(path):
+        fix_opus_pictures(path)
     changes = _norm(changes)
     if not changes:
         return
@@ -1076,11 +1149,17 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
             pairs_done.add(pair)
             _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair), changed=changes, keep=set(keep))
             continue
-        if fam == "id3" and k == "license" and vals and (len(vals) > 1 or (
-                v23 and re.search(re.escape(join) + r"\s*[A-Za-z][A-Za-z0-9+.-]*://", str(vals[0])))):
-            tags.delall("WCOP")                # (several licenses: TXXX:LICENSE, never one WCOP of them joined)
+        if fam == "id3" and k == "license" and vals:
+            # (WCOP for one license that is a URL, else TXXX:LICENSE - as Picard decides, by how
+            # many there are: the plan says, the values may come joined for ID3v2.3)
+            n_lic = license_count if license_count is not None else (len(vals) if len(vals) > 1 or not (
+                v23 and re.search(re.escape(join) + r"\s*[A-Za-z][A-Za-z0-9+.-]*://", str(vals[0]))) else 2)
+            tags.delall("WCOP")
             tags.delall("TXXX:LICENSE")
-            tags.add(TXXX(encoding=3, desc="LICENSE", text=[join.join(vals)] if v23 else list(vals)))
+            if n_lic == 1 and len(vals) == 1 and _is_url(vals[0]):
+                tags.add(WCOP(url=vals[0]))
+            else:
+                tags.add(TXXX(encoding=3, desc="LICENSE", text=[join.join(vals)] if v23 else list(vals)))
             continue
         if fam == "id3" and v23 and vals and len(vals) > 1 and k not in ("website",):
             vals = [join.join(vals)]           # (ID3v2.3: several values joined, as Picard joins them)

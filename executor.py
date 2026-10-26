@@ -536,8 +536,9 @@ def staged_write(path, edit, what="tags"):
 
 
 def write_json_durably(path, data):
-    """A JSON record written whole or not at all (temp file, fsync, rename)."""
-    path = Path(path)
+    """A JSON record written whole or not at all (temp file, fsync, rename); a link is
+    written through (it stays a link)."""
+    path = Path(os.path.realpath(path))
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh)
@@ -1106,14 +1107,15 @@ class Executor:
         changes = fe.get("changes") or {}
         art = a.get("artwork") or {}
         embed = _embeds(a, fe["dst"])
-        if op == "tag" and not changes and not embed:
+        fix = bool(fe.get("fix_pictures"))
+        if op == "tag" and not changes and not embed and not fix:
             return                          # only the cover was new, and it is gone: nothing to write
         _check_target(dst, self.roots)
         if op == "tag" and Path(src).is_symlink():
             raise StepError(f"refusing to write through a symbolic link: {src}")
         with file_lock(src):
             src_digest = payload.digest(src)
-            if src_digest is None and (changes or embed) and not self.allow_unverified:
+            if src_digest is None and (changes or embed or fix) and not self.allow_unverified:
                 raise StepError(f"{src.name}: its audio data cannot be verified after writing tags "
                                 "(format not recognised and ffmpeg unavailable); not written")
             n = f"{i}-{j}"
@@ -1123,20 +1125,20 @@ class Executor:
                 # "dropping the source's name" would delete the only one
                 if op == "move" and Path(src).name == Path(dst).name:
                     op, dst = "tag", src
-                    if not changes and not embed:
+                    if not changes and not embed and not fix:
                         return
             linked = bool(fe.get("linked")) and dst.exists() and _same_file(src, dst) and \
                 not planmod.same_entry(src, dst)
             if linked:
                 op = "relink_" + op                       # dst is already a hard link to src
-            backup = _backup(src, self.jd, n, writes=bool(changes or embed)) \
+            backup = _backup(src, self.jd, n, writes=bool(changes or embed or fix)) \
                 if op in ("tag", "move", "relink_move", "relink_copy") else None
             self.journal.write(ev="file", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
-                               digest=src_digest, backup=backup, changed=bool(changes or embed))
+                               digest=src_digest, backup=backup, changed=bool(changes or embed or fix))
             if linked:
                 self._relink_step(i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps)
                 return
-            if op == "move" and not changes and not embed and _same_fs(src, dst.parent if dst.parent.exists()
+            if op == "move" and not changes and not embed and not fix and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
                 _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
                 try:
@@ -1156,12 +1158,12 @@ class Executor:
             _space_for(dst.parent, os.path.getsize(src))
             try:
                 _copy_fsync(src, stage)
-                if src_digest is None and not changes and not embed and \
+                if src_digest is None and not changes and not embed and not fix and \
                         payload.file_sha256(stage) != payload.file_sha256(src):
                     raise StepError(f"{src.name}: copy did not verify")
                 src_st = os.stat(src)
                 _keep_owner(stage, src_st)
-                if changes:
+                if changes or fix:
                     tagio.write(stage, changes, **_write_extras(fe))
                 if embed:
                     _embed_all(stage, a, fe["dst"])
@@ -1718,6 +1720,10 @@ def _write_extras(fe) -> dict:
         out["first"] = fe["first"]
     if fe.get("keep"):
         out["keep"] = fe["keep"]
+    if fe.get("license_count"):
+        out["license_count"] = fe["license_count"]
+    if fe.get("fix_pictures"):
+        out["fix_pictures"] = True
     return out
 
 

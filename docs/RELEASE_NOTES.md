@@ -108,6 +108,16 @@ the watcher keeps two loose albums you undid undone. A profile saved before this
 Windows-safe names and removes empty folders as before, and one saved now keeps what it says;
 only a profile that never says follows Picard's settings.
 
+**Twenty-ninth review.** enrich writes an album's tracks one by one and records each as it
+goes: one it cannot write (a link, a track a job holds) is skipped and said so, and its undo
+never touches a track it did not write; an .lrc is written through a temp file that is never
+left behind, once even for a track in two formats. Profiles saved by the previous release are
+read as it read them. A total of 0 never removes a preserved or locked total. Marking albums
+unresolved, writing album IDs and enrich keep an MP3's ID3v2.3 tag as it is; web tagging
+keeps its version. Undo of a run that wrote through a symbolic link puts back the file it points
+to. Opus covers an earlier version wrote are repaired on the next run. One license URL goes
+into WCOP (a Wayback Machine link too), as Picard writes it.
+
 **Picard parity (twenty-eighth review).** Opus covers carry no size, as Picard writes them
 (players built on libopusfile showed none); a FLAC or Ogg total is written under both names
 whenever its number or total is (TRACKTOTAL alone gets TOTALTRACKS); the "picard" naming preset

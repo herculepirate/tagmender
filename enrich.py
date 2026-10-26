@@ -99,14 +99,18 @@ def _put(path, values):
         f.add_tags()
     vals = {k: (v if isinstance(v, list) else [v]) for k, v in values.items() if v not in (None, "", [])}
     if isinstance(f.tags, ID3):
-        for k, v in vals.items():
-            if k == "GENRE":
-                f.tags.setall("TCON", [TCON(encoding=3, text=v)])
-            elif k == "LYRICS":
-                f.tags.setall("USLT", [USLT(encoding=3, lang="eng", desc="", text=v[0])])
-            else:
-                f.tags.delall(f"TXXX:{k}")
-                f.tags.add(TXXX(encoding=3, desc=k, text=[str(x) for x in v]))
+        def edit(t):
+            v23 = t.version[:2] == (2, 3)
+            for k, v in vals.items():
+                if k == "GENRE":
+                    t.setall("TCON", [TCON(encoding=3, text=["/".join(v)] if v23 else v)])
+                elif k == "LYRICS":
+                    t.setall("USLT", [USLT(encoding=3, lang="eng", desc="", text=v[0])])
+                else:
+                    t.delall(f"TXXX:{k}")
+                    t.add(TXXX(encoding=3, desc=k, text=[str(x) for x in v]))
+        tagio.edit_id3(path, f, edit)                 # (its own version, its other frames as they are)
+        return
     elif isinstance(f, MP4):
         for k, v in vals.items():
             if k == "GENRE":
@@ -118,10 +122,7 @@ def _put(path, values):
     else:
         for k, v in vals.items():
             f.tags[k] = [str(x) for x in v]
-    if isinstance(f.tags, ID3):
-        tagio.save_id3(f, f.tags)                     # (in the tag's own version: a v2.3 tag stays v2.3)
-    else:
-        f.save()
+    f.save()
 
 
 # --------------------------------------------------------------------------
@@ -419,7 +420,8 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
                 if text:
                     found_any = True
                     planned[p]["LYRICS"] = text
-                    if synced and args.lrc and not p.with_suffix(".lrc").exists():
+                    if synced and args.lrc and not p.with_suffix(".lrc").exists() and \
+                            p.with_suffix(".lrc") not in {c for c, _t in created}:   # (once: "01 a.flac" + "01 a.mp3")
                         created.append((p.with_suffix(".lrc"), text))
                 elif i == 2 and not found_any:
                     break                                 # three tracks without lyrics: an instrumental album
@@ -447,23 +449,34 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
         journal.append(entry)
         import executor
         executor.write_json_durably(run_dir / "journal.json", journal)     # (the backups, before any write)
+        failed = []
         for p, tags in changes.items():
-            put(p, tags)
-            for r in recs:                  # (the file as written: undo leaves a later edit alone)
-                if r["path"] == str(p):
-                    r["after_sig"] = executor._tags_sig(p)
+            rec = next(r for r in recs if r["path"] == str(p))
+            try:
+                put(p, tags)
+            except Exception as exc:        # (a link, a track a job holds ...: this one is not written,
+                rec["not_written"] = True   # and its undo leaves it alone; the others go on)
+                failed.append(f"{p.name}: {exc}")
+            else:
+                rec["after_sig"] = executor._tags_sig(p)       # (as written: undo leaves a later edit alone)
+            executor.write_json_durably(run_dir / "journal.json", journal)
         for c, text in created:
-            tmp = c.with_name(f".{c.name}.{os.getpid()}.tmp")     # (whole or not at all)
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(text)
-                fh.flush()
-                os.fsync(fh.fileno())
-            if c.exists():                                         # (one made meanwhile: never written over)
-                tmp.unlink()
-                entry["created_sha"].pop(str(c), None)
-                continue
-            os.replace(tmp, c)
+            tmp = c.with_name(f".{c.name}.{run_dir.name}.tmp")     # (whole or not at all; named by the run)
+            try:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                if c.exists():                                     # (one made meanwhile: never written over)
+                    entry["created_sha"].pop(str(c), None)
+                    continue
+                os.replace(tmp, c)
+            finally:
+                tmp.unlink(missing_ok=True)
         executor.write_json_durably(run_dir / "journal.json", journal)
+        if failed:
+            report[-1]["changes"] += f" (partly: {'; '.join(failed)})"
+            print(f"    not written: {'; '.join(failed)}")
 
 
 def main(argv=None):
@@ -491,6 +504,7 @@ def main(argv=None):
             shas = e.get("created_sha") or {}
             for created in e.get("created", []):
                 c = Path(created)
+                Path(c.with_name(f".{c.name}.run-{args.undo}.tmp")).unlink(missing_ok=True)   # (a run cut short)
                 if not c.exists():
                     continue
                 if not args.force and (created not in shas or

@@ -682,6 +682,8 @@ def write_tags(path, tags):
         if "discnumber" in vals:
             f.tags.setall("TPOS", [TPOS(encoding=3, text=[f"{vals['discnumber'][0]}/{vals.get('totaldiscs', [''])[0]}"
                                                           .rstrip("/")])])
+        tagio.save_id3(f, f.tags, keep_date="date" not in vals)      # (in the tag's own version: v2.3 stays v2.3)
+        return
     else:
         if f.tags is None:
             f.add_tags()

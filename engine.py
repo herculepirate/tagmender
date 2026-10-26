@@ -500,7 +500,56 @@ class Engine:
 
     # ---- artwork -------------------------------------------------------------
     def add_artwork(self, prop: planmod.Proposal):
-        """Fetch the front cover into staging (the executor writes it). Never raises."""
+        """Fetch the front cover - and at Enthusiast and Audiophile the artist's photo - into
+        staging (the executor writes them). Never raises."""
+        self._add_front(prop)
+        try:
+            self._add_artist_photo(prop)
+        except Exception as exc:                          # an artist photo never stops the album
+            self.log.warning("artist photo for %s: %s", prop.source_dir, exc)
+
+    def _add_artist_photo(self, prop: planmod.Proposal):
+        import artwork
+        want = artwork.artist_settings(self.profile)
+        if want is None or prop.status != "identified" or not prop.targets:
+            return
+        t = prop.targets[0]
+        who = (t.get("albumartist") or t.get("artist") or [""])[0]
+        if not who or who.casefold() in ("various artists", "various", "va") or \
+                (t.get("compilation") or [""])[0] == "1":
+            return                                        # (a compilation has no one artist's photo)
+        mbid = (t.get("musicbrainz_albumartistid") or [""])[0]
+        # looked up only while something lacks it: a track without an artist picture (when
+        # embedding), or - tagged where it is - the artist folder without its photo
+        lacking = want["embed"] and any(Path(f).suffix.lower() not in (".m4a", ".mp4") and
+                                        not artwork.has_artist_picture(f) for f in prop.files)
+        if not lacking and want["file"] and self.profile["operation"] == "in_place":
+            album = Path(prop.source_dir)
+            if is_disc_dir(album):
+                album = album.parent
+            lacking = not artwork.artist_folder_has_photo(album.parent)
+        if not lacking:
+            return
+        key = mbid or who.casefold()
+        cache = self.__dict__.setdefault("_artists", {})
+        if key not in cache:
+            cu = next((p for p in (self._art or []) if isinstance(p, artwork.CoverUp)), None)
+            if cu is None:
+                cu = self.__dict__.get("_artist_cu")
+                if cu is None:
+                    cu = artwork.CoverUp(ex.STATE_DIR / "staging" / self.job)
+                    self._artist_cu = cu
+            ids = {"release_mbid": (t.get("musicbrainz_albumid") or [""])[0],
+                   "artist_mbid": "; ".join(t.get("musicbrainz_albumartistid") or []),
+                   "discogs_release_id": (t.get("discogs_release_id") or [""])[0]}
+            got = cu.artist_photo(prop.source_dir, ids, who, files=prop.files)
+            cache[key] = got if got and got.get("image") else None
+            if got and got.get("note"):
+                prop.why = list(prop.why) + [f"no artist photo: {got['note']}"]
+        if cache[key]:
+            prop.artist_photo = dict(cache[key], artist=who)
+
+    def _add_front(self, prop: planmod.Proposal):
         if not self.profile["artwork"]["enabled"] or prop.status != "identified" or not prop.targets:
             return
         t = prop.targets[0]

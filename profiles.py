@@ -86,7 +86,10 @@ DEFAULTS = {
     #   replaced by a larger one found, else by itself enlarged (backed up, undoable) | never
     "artwork": {"enabled": True, "provider": "coverup", "sources": ["coverup", "caa", "discogs"],
                 "when": "needed", "enlarge": True, "generate": "off", "embed_front": True, "files": True,
-                "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000},
+                "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000,
+                # the album artist's photo, at Enthusiast and Audiophile: artist.jpg in the artist
+                # folder (file; "" for none) and in each track as an "Artist/performer" picture
+                "artist": {"enabled": True, "file": "artist.jpg", "embed": True}},
     "lyrics": {"enabled": False, "synced": True, "embed": False, "sidecar": True},
     "mark_resolved": True,                # TAGMENDER=Resolved on what was identified
     # where it goes
@@ -242,6 +245,12 @@ def validate(data: dict) -> list[str]:
         p.append(f"artwork.sources must be a list of {', '.join(ARTWORK_SOURCES)}")
     if art.get("when", "needed") not in ("needed", "always"):
         p.append("artwork.when must be needed or always")
+    ar = art.get("artist") or {}
+    if not isinstance(ar, dict) or not isinstance(ar.get("enabled", True), bool) or \
+            not isinstance(ar.get("embed", True), bool) or not isinstance(ar.get("file", ""), str) or \
+            any(c in (ar.get("file") or "") for c in "/\\") or \
+            (ar.get("file") and not ar["file"].lower().endswith((".jpg", ".jpeg"))):
+        p.append('artwork.artist must be {"enabled": true|false, "file": "artist.jpg" or "", "embed": true|false}')
     if art.get("replace", "larger_only") not in ("never", "larger_only"):
         p.append("artwork.replace must be never or larger_only")
     if not isinstance(art.get("min_px", 0), int) or isinstance(art.get("min_px"), bool) or art.get("min_px", 0) < 0:

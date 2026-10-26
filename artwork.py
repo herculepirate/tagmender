@@ -217,6 +217,46 @@ class CoverUp:
         path, w, h = self._file_size(path, w, h, q)
         return {"front": str(path), "source": f"coverup:{c.provider}", "width": w, "height": h, "why": front["why"]}
 
+    def artist_photo(self, folder, ids: dict, artist="", files=None) -> dict | None:
+        """The album artist's photo (CoverUp's artist sources: fanart.tv, TheAudioDB, Wikimedia
+        Commons, Discogs), staged as a JPEG: {"image", "width", "height", "source"}, or a note.
+        A front-cover search of the same album just now is reused (no second search)."""
+        from coverup import imaging
+        from coverup.model import ArtType
+        from coverup.pipeline import Pipeline
+        cb = self.cb
+        last = getattr(self, "_last", None)
+        if last and last[0] == str(folder) and last[2] is not None and last[2].artist.get(ArtType.ARTIST_THUMB):
+            pipe, res = last[1], last[2]
+        else:
+            import match_albums as ma
+            import match_core as mc
+            if files is None:
+                files = _own_music(Path(folder))
+            info = cb.album_info(Path(folder), ma, mc, files=files)
+            given = {k: v for k, v in ids.items() if v}
+            if given:
+                info["ids"] = given
+            if artist:
+                info["artist"] = artist
+            info["images"] = []
+            s = self.s.with_(artist_art=True, providers_enabled=[
+                p for p in ("fanart", "audiodb", "wikimedia", "discogs") if p in self.s["providers_enabled"]
+                or p in ("audiodb", "wikimedia")])              # (the two that need no key of yours)
+            pipe = Pipeline(s, self.http, fingerprint=imaging.fingerprint)
+            res = pipe.run(cb.make_query(info))
+        c = res.artist.get(ArtType.ARTIST_THUMB)
+        if c is None:
+            return {"note": "no artist photo found"}
+        if c.data is None:
+            pipe.fetch_full(c)
+        if c.data is None:
+            return {"note": f"the artist photo from {c.provider} could not be downloaded"}
+        if len(c.data) > getattr(self, "limit", MAX_BYTES):
+            return {"note": f"the artist photo from {c.provider} is over the profile's size limit"}
+        path, w, h = _stage(c.data, self.staging, self.jpeg_quality())
+        return {"image": str(path), "width": w, "height": h, "source": f"coverup:{c.provider}"}
+
     def generate(self, folder, mode: str) -> dict | None:
         """A generated cover for the album front() just looked at (nothing usable found):
         CoverUp's creative methods - mode "template" (the offline renderer), "ai" (the AI
@@ -463,6 +503,32 @@ def as_format(front: Path, suffix: str, staging: Path) -> Path:
     path = staging / (hashlib.sha1(buf.getvalue()).hexdigest()[:16] + (".png" if want == "PNG" else ".jpg"))
     path.write_bytes(buf.getvalue())
     return path
+
+
+ARTIST_FILE = "artist.jpg"      # what Plex, Jellyfin, Navidrome and LMS read in an artist folder
+ARTIST_EMBED_MAX_SIDE = 800     # the artist photo in every track: small (it is in every track)
+
+
+def artist_settings(profile) -> dict | None:
+    """{"file": name or "", "embed": bool} when the profile gets artist photos: artwork on,
+    tag level Enthusiast or Audiophile, artwork.artist.enabled (on unless set off)."""
+    import levels
+    art = profile["artwork"]
+    a = art.get("artist") or {}
+    if not art.get("enabled") or levels.level(profile) == "basic" or a.get("enabled", True) is False:
+        return None
+    return {"file": a.get("file", ARTIST_FILE) or "", "embed": bool(a.get("embed", True))}
+
+
+def has_artist_picture(path) -> bool:
+    return any(t in (7, 8) for t, _d in _pictures(path))       # lead artist, artist/performer
+
+
+def artist_folder_has_photo(folder) -> bool:
+    try:
+        return any(x.is_file() and x.stem.lower() == "artist" for x in Path(folder).iterdir())
+    except OSError:
+        return False
 
 
 def needs_art(folder, files, profile, small=None) -> str:

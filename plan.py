@@ -66,6 +66,7 @@ class Proposal:
     release: dict = field(default_factory=dict)      # identified album/albumartist/genre, for rules
     artwork: dict | None = None         # {"front": staged file, "source": ..., "width": .., "height": ..}
     sidecars: dict = field(default_factory=dict)     # audio file -> text of a new .lrc next to it
+    artist_photo: dict | None = None    # {"image": staged file, "source", "artist"} (Enthusiast and up)
 
 
 def _fp(path):
@@ -78,7 +79,8 @@ def has_work(entry: dict) -> bool:
     cover file or cover to embed, or a lyrics file."""
     art = entry.get("artwork") or {}
     return any(fe["op"] != "none" for fe in entry.get("files") or []) or bool(entry.get("companions")) \
-        or bool(entry.get("sidecars")) or bool(art.get("file")) or bool(art.get("embed_into"))
+        or bool(entry.get("sidecars")) or bool(art.get("file")) or bool(art.get("embed_into")) \
+        or bool((entry.get("artist_photo") or {}).get("embed_into"))
 
 
 def _vals(v):
@@ -862,11 +864,58 @@ class Planner:
                 if not text or dst.exists() or any(c["dst"] == str(dst) for c in entry["companions"]):
                     continue
                 entry["sidecars"].append({"src": fe["src"], "dst": str(dst), "text": text})
+        # 7. the artist's photo (Enthusiast and up): into the tracks, as a picture of its own type
+        # ("Artist/performer", never in place of another), and as artist.jpg in the artist folder
+        # - the album folder's parent, when that folder is named after the album artist and lies
+        # inside one of the profile's folders (never a library root, never over a file there)
+        entry["artist_photo"] = self._artist_photo(prop, entry, op) if identified else None
         if all(fe["op"] == "none" for fe in entry["files"]) and not entry["companions"] and \
                 not entry["sidecars"] and \
                 not (entry["artwork"] and (entry["artwork"]["embed_into"] or entry["artwork"]["file"])):
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
+
+    def _artist_photo(self, prop, entry, op):
+        import artwork as _artwork
+        ap = getattr(prop, "artist_photo", None)
+        want = _artwork.artist_settings(self.profile) if ap else None
+        if not ap or not want or not entry["files"] or not Path(ap.get("image") or "").exists():
+            return None
+        into = []
+        if want["embed"]:
+            into = [fe["dst"] for fe in entry["files"] if Path(fe["src"]).suffix.lower() in EMBEDDABLE
+                    and Path(fe["src"]).suffix.lower() not in (".m4a", ".mp4")
+                    and not _artwork.has_artist_picture(fe["src"])]
+            for fe in entry["files"]:
+                if fe["dst"] in into and fe["op"] == "none":       # only the artist photo is new
+                    fe["op"] = "tag" if fe["dst"] == fe["src"] else op
+        try:
+            emb = str(_artwork.embed_copy(Path(ap["image"]), ex.STATE_DIR / "staging" / self.job,
+                                          _artwork.ARTIST_EMBED_MAX_SIDE))
+        except Exception:
+            emb, into = None, []
+        if want["file"]:
+            from engine import is_disc_dir
+            album = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
+            if is_disc_dir(album):
+                album = album.parent
+            artist_dir = album.parent
+            roots = [Path(r) for r in self.roots()]
+            named = {fnm.fold(fnm.safe_component(ap.get("artist", ""), self.profile["filenames"]["compat"]))}
+            target = artist_dir / want["file"]
+            key = fnm.fold(target)
+            if any(r in artist_dir.parents for r in roots) and artist_dir not in roots and \
+                    fnm.fold(artist_dir.name) in named and not _artwork.artist_folder_has_photo(artist_dir) and \
+                    self.claimed.get(key) is None and \
+                    not any(sc["dst"] == str(target) for sc in entry["sidecars"]):
+                self.claimed[key] = "artist-photo"
+                data = Path(ap["image"]).read_bytes()
+                entry["sidecars"].append({"src": entry["files"][0]["src"], "dst": str(target), "from": ap["image"],
+                                          "sha256": hashlib.sha256(data).hexdigest(), "kind": "artist"})
+        if not into and not any(sc.get("kind") == "artist" for sc in entry["sidecars"]):
+            return None
+        return {"image": ap["image"], "embed": emb, "embed_into": into, "source": ap.get("source", ""),
+                "artist": ap.get("artist", "")}
 
     def _earlier_copy(self, dst: Path, src: Path, dest_root=None, legacy=None):
         """The copy an earlier run made of src into this destination: where TagMender
@@ -1178,8 +1227,15 @@ def preview(plan: dict, verbose=False) -> str:
                               if rep else ""))
             if art["file"]:
                 out.append(f"    art   {art['file']}")
+        if a.get("artist_photo") and a["artist_photo"]["embed_into"]:
+            ap = a["artist_photo"]
+            out.append(f"    art   artist photo of {ap['artist']} embedded into {len(ap['embed_into'])} file(s) "
+                       f"from {ap['source']}")
         for sc in a.get("sidecars") or []:
-            out.append(f"    lyric {Path(sc['dst']).name}  (time-synced lyrics, new file)")
+            if sc.get("kind") == "artist":
+                out.append(f"    art   {sc['dst']}  (artist photo, new file)")
+            else:
+                out.append(f"    lyric {Path(sc['dst']).name}  (time-synced lyrics, new file)")
     s = plan["summary"]
     out.append("\n" + ", ".join(f"{v} {k}" for k, v in sorted(s.items())))
     return "\n".join(out)

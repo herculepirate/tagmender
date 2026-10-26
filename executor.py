@@ -545,6 +545,77 @@ def _embed_image(art: dict):
     return None
 
 
+ARTIST_TYPE = 8                  # picture type "Artist/performer" (ID3 APIC, FLAC and Vorbis pictures)
+
+
+def _artist_image(a: dict):
+    """(bytes, MIME type) of the artist photo to embed, or None (none planned, or gone)."""
+    ap = a.get("artist_photo") or {}
+    return _embed_image({"embed": ap.get("embed"), "front": ap.get("image")}) if ap else None
+
+
+def _embeds(a: dict, dst) -> bool:
+    """Something is embedded into this track: the front cover, the artist photo."""
+    art = a.get("artwork") or {}
+    front = bool(art.get("front")) and dst in (art.get("embed_into") or []) and _embed_image(art) is not None
+    artist = dst in ((a.get("artist_photo") or {}).get("embed_into") or []) and _artist_image(a) is not None
+    return front or artist
+
+
+def _embed_all(stage, a: dict, dst):
+    art = a.get("artwork") or {}
+    if art.get("front") and dst in (art.get("embed_into") or []) and _embed_image(art) is not None:
+        embed_front(stage, *_embed_image(art), replace=dst in (art.get("embed_replace") or []))
+    if dst in ((a.get("artist_photo") or {}).get("embed_into") or []) and _artist_image(a) is not None:
+        embed_picture(stage, *_artist_image(a), ptype=ARTIST_TYPE)
+
+
+def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE):
+    """Add a picture of another type than the front (the artist photo) - never in place of one
+    the track has: only to a track with no picture of that type. MP4 has no picture types
+    (every picture there is a cover): nothing is added."""
+    import base64
+    from mutagen.flac import FLAC, Picture
+    from mutagen.id3 import APIC, ID3
+    from mutagen.mp4 import MP4
+    f = tagio.mutagen_file(path)
+    if isinstance(f, MP4):
+        return
+    if isinstance(f, FLAC):
+        if any(p.type == ptype for p in f.pictures):
+            return
+        pic = Picture()
+        pic.type, pic.mime, pic.data = ptype, mime, data
+        f.add_picture(pic)
+    elif isinstance(getattr(f, "tags", None), ID3) or type(f).__name__ in ("MP3", "AIFF", "WAVE"):
+        if f.tags is None:
+            f.add_tags()
+        if any(x.type == ptype for x in f.tags.getall("APIC")):
+            return
+        taken = {x.desc for x in f.tags.getall("APIC")}
+        desc = "Artist"
+        while desc in taken:                              # (APIC frames are told apart by description)
+            desc += " "
+        f.tags.add(APIC(encoding=3, mime=mime, type=ptype, desc=desc, data=data))
+    elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
+        old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or [])
+        for v in old:
+            try:
+                if Picture(base64.b64decode(v)).type == ptype:
+                    return
+            except Exception:
+                continue
+        pic = Picture()
+        pic.type, pic.mime, pic.data = ptype, mime, data
+        f.tags["METADATA_BLOCK_PICTURE"] = old + [base64.b64encode(pic.write()).decode("ascii")]
+    else:
+        return
+    if isinstance(getattr(f, "tags", None), ID3):
+        f.save(v2_version=3 if f.tags.version[1] == 3 else 4)
+    else:
+        f.save()
+
+
 def _front_index(types) -> int | None:
     """Which picture is the front cover: the one typed so, else one typed "other" (a rip that
     left the type so) - the one TagMender measured (artwork.embedded_front). None: there is
@@ -899,7 +970,7 @@ class Executor:
         src, dst, op = Path(fe["src"]), Path(fe["dst"]), fe["op"]
         changes = fe.get("changes") or {}
         art = a.get("artwork") or {}
-        embed = bool(art.get("front")) and fe["dst"] in (art.get("embed_into") or []) and _embed_image(art) is not None
+        embed = _embeds(a, fe["dst"])
         if op == "tag" and not changes and not embed:
             return                          # only the cover was new, and it is gone: nothing to write
         _check_target(dst, self.roots)
@@ -928,7 +999,7 @@ class Executor:
             self.journal.write(ev="file", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
                                digest=src_digest, backup=backup, changed=bool(changes or embed))
             if linked:
-                self._relink_step(i, j, op, src, dst, changes, embed, art, backup, src_digest, done_steps)
+                self._relink_step(i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps)
                 return
             if op == "move" and not changes and not embed and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
@@ -958,7 +1029,7 @@ class Executor:
                 if changes:
                     tagio.write(stage, changes)
                 if embed:
-                    embed_front(stage, *_embed_image(art), replace=fe["dst"] in (art.get("embed_replace") or []))
+                    _embed_all(stage, a, fe["dst"])
                 if self.preserve_times:
                     os.utime(stage, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
                 after = payload.digest(stage)
@@ -1006,7 +1077,7 @@ class Executor:
                 _fsync_dir(src.parent)
                 self.journal.write(ev="file", album=i, idx=j, state="source_removed")
 
-    def _relink_step(self, i, j, op, src, dst, changes, embed, art, backup, src_digest, done_steps):
+    def _relink_step(self, i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps):
         """The destination already is this file under another name (a hard link). A move
         just drops the source's name; new tags go to the destination as a new file."""
         if changes or embed:
@@ -1017,7 +1088,7 @@ class Executor:
                 if changes:
                     tagio.write(stage, changes)
                 if embed:
-                    embed_front(stage, *_embed_image(art), replace=str(dst) in (art.get("embed_replace") or []))
+                    _embed_all(stage, a, str(dst))
                 if self.preserve_times:
                     st0 = os.stat(src)
                     os.utime(stage, ns=(st0.st_atime_ns, st0.st_mtime_ns))
@@ -1179,12 +1250,22 @@ class Executor:
         done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
 
     def new_file(self, i, sc, done_steps):
-        """A new text file next to the music (time-synced lyrics); never over an existing one."""
+        """A new file beside the music - time-synced lyrics, the artist photo in the artist
+        folder; never over an existing one."""
         dst = Path(sc["dst"])
         _check_target(dst, self.roots)
         if dst.exists():
             return
-        data = sc["text"].encode("utf-8")
+        if sc.get("from"):                          # a picture (the artist photo), staged at plan time
+            try:
+                data = Path(sc["from"]).read_bytes()
+            except OSError:
+                data = None
+            if data is None or hashlib.sha256(data).hexdigest() != sc.get("sha256"):
+                self.journal.write(ev="note", album=i, text=f"no {dst.name}: the picture planned for it is gone")
+                return
+        else:
+            data = sc["text"].encode("utf-8")
         self.journal.write(ev="create_begin", kind="new_file", album=i, path=str(dst),
                            sha256=hashlib.sha256(data).hexdigest())
         stage = _stage_name(dst, self.job)

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**New: the artist's photo at Enthusiast and Audiophile.** artist.jpg in the artist folder (what
+Plex, Jellyfin, Navidrome and LMS show for the artist) and in each track as an "Artist/performer"
+picture beside the cover (at most 800 px: it is in every track). From CoverUp's artist sources
+(fanart.tv, TheAudioDB, Wikimedia Commons, Discogs), looked up once per artist and only while a
+track or the artist folder lacks it; never over an artist.jpg that is there, never into a folder
+not named after the album artist or a library root, never for a compilation; undo removes it.
+Profile: artwork.artist {"enabled", "file", "embed"}; in the app, "Artist photo" under the covers.
+
 **Small covers are replaced** (artwork.replace "larger_only", the default; "Replace an album's
 own cover when it is smaller than the minimum size" in the app). A cover smaller than
 artwork.min_px (500 px) - embedded in a track, or the folder's cover/folder/front file - is

@@ -123,6 +123,8 @@ def check_web_plan(report_csv: Path, wanted: dict) -> tuple[list, list]:
             w = wanted.get(folder) or {}
             if not w.get("discogs") or w.get("mb"):
                 continue                                    # not one of the Discogs-only ones
+            if row["result"].startswith("already tagged"):
+                continue                                    # an album you tagged keeps its tags
             if row["source"] != "Discogs":
                 problems.append(f"{folder}: would be tagged from {row['source'] or 'nothing'} "
                                 f"({row['result'] or row['matched']}), not Discogs {w['discogs']}")
@@ -173,10 +175,17 @@ def main(argv=None):
             if not fixes.exists():
                 raise Stop(f"no matcher results at {fixes}")
             wanted = approved_releases(fixes, sure_only=True)
+            # only albums with no release yet: an album you tagged keeps its tags (the
+            # matcher's results also cover the tagged albums it re-checked)
+            sys.path.insert(0, str(HERE))
+            import web_tag
+            tagged = [p for p in wanted if not Path(p).is_dir() or web_tag.carries_release(p)]
+            for p in tagged:
+                wanted.pop(p)
             review = [p for p, blob in sqlite3.connect(fixes).execute("SELECT path, result FROM results")
                       if json.loads(blob).get("status") == "review" and Path(p).is_dir()]
-            r.say(f"1. matcher results: {len(wanted)} album(s) it is sure of; {len(review)} left for "
-                  f"review (not tagged; listed in log.txt)")
+            r.say(f"1. matcher results: {len(wanted)} untagged album(s) it is sure of ({len(tagged)} already "
+                  f"tagged, kept); {len(review)} left for review (not tagged; listed in log.txt)")
             r.log.write("\nLeft for review:\n" + "\n".join(sorted(review)) + "\n")
         else:
             out = r.run("validate.py", lib, "--export-fixes", "--only-approved")

@@ -54,6 +54,17 @@ class Checks(unittest.TestCase):
         bad = self.plan([("/l/AVKRVST/The Approbation", "56af"), ("/l/Other/Album", "aaaa")])
         self.assertEqual(len(ra.check_tag_plan(bad, self.wanted)[1]), 2)
 
+    def test_a_kept_tagged_album_is_not_a_problem(self):
+        """Feared, Fractal Universe, Theory In Practice: web_tag kept their tags (right), and
+        the check stopped the whole run because they were not tagged from Discogs."""
+        p = self.tmp / "web.csv"
+        with open(p, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["album", "source", "page", "matched", "confidence", "result"])
+            w.writeheader()
+            w.writerow({"album": "/l/King Diamond/Deadly Lullabyes", "source": "", "page": "", "matched": "",
+                        "confidence": "", "result": "already tagged with a release; kept"})
+        self.assertEqual(ra.check_web_plan(p, self.wanted), ([], []))
+
     def test_albums_picard_skipped_are_reported(self):
         p = self.tmp / "tag_plan.csv"
         with open(p, "w", newline="") as fh:

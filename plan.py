@@ -616,14 +616,11 @@ class Planner:
         remove = list(target.get("~remove") or []) + [g for g in gone if g not in new]
         if remove:
             new["~remove"] = list(dict.fromkeys(remove))
-        # (a field the level does not write: as the file has it, whatever a script made of it)
+        # (a field the level does not write: never written, whatever a script made of it)
         kept = _levels.restrict(new, self.profile)
         for k in list(new):
             if k not in kept and not k.startswith("~"):
-                if k in before:
-                    new[k] = list(before[k])
-                else:
-                    del new[k]
+                del new[k]
         if new.get("~remove"):
             new["~remove"] = list(kept.get("~remove") or [])
         return new
@@ -676,23 +673,6 @@ class Planner:
             return entry
         targets = {Path(f): t for f, t in zip(files, prop.targets or [{}] * len(files))}
         identified = prop.status == "identified"
-        if identified and self._scripts():
-            # Picard's tagger scripts, on each file (its own tags overlaid with the release's
-            # every field, whatever the level then writes); before anything is planned from them
-            full = getattr(prop, "full_targets", None)
-            full = {Path(f): t for f, t in zip(files, full)} if full and len(full) == len(files) else targets
-            import engine as _engine
-            try:
-                for f in kept:
-                    try:
-                        before_s = tagio.read(f)
-                    except tagio.Unsupported:
-                        continue
-                    targets[f] = self._scripted(f, before_s, dict(full.get(f) or targets.get(f) or {}))
-            except _engine.TaggerScriptError as exc:
-                entry["conflicts"].append(f"a tagger script failed on {f.name}: {exc}")
-                entry["status"] = "blocked"
-                return entry
         conf = float(prop.confidence or 0)
         organize_ok = identified and conf >= float(p["thresholds"]["organize_min_confidence"])
         op = p["operation"]
@@ -715,6 +695,23 @@ class Planner:
                 entry["label"] = "Skipped"
                 return entry
             op = "in_place"
+        if identified and self._scripts():
+            # Picard's tagger scripts, on each file (its own tags overlaid with the release's
+            # every field, whatever the level then writes); before anything is planned from them
+            full = getattr(prop, "full_targets", None)
+            full = {Path(f): t for f, t in zip(files, full)} if full and len(full) == len(files) else targets
+            import engine as _engine
+            try:
+                for f in kept:
+                    try:
+                        before_s = tagio.read(f)
+                    except tagio.Unsupported:
+                        continue
+                    targets[f] = self._scripted(f, before_s, dict(full.get(f) or targets.get(f) or {}))
+            except _engine.TaggerScriptError as exc:
+                entry["conflicts"].append(f"a tagger script failed on {f.name}: {exc}")
+                entry["status"] = "blocked"
+                return entry
         # 3. destination root (never created: an unmounted share must not fill the local disk)
         dest_root = None
         if op in ("copy", "move"):
@@ -756,8 +753,14 @@ class Planner:
             f0 = min(has_media or kept, key=_order)       # (the first disc that says what it is)
             try:
                 b0 = tagio.read(f0)
-                ch0, _r0 = diff_tags(b0, dict(targets.get(f0) or {}), p, conf, [])
+                t0 = dict(targets.get(f0) or {})
+                gone0 = [x for x in (t0.get("~remove") or [])
+                         if x not in t0 and p.policy(x) not in ("preserve", "lock", "fill_missing")]
+                ch0, _r0 = diff_tags(b0, t0, p, conf, gone0)
                 m0 = {**b0, **{k: v for k, v in ch0.items() if v is not None}}
+                for k, v in ch0.items():
+                    if v is None:
+                        m0.pop(k, None)
                 rel = {k: list(m0[k]) for k in ("media", "date", "originaldate", "originalyear") if m0.get(k)}
             except Exception:
                 rel = {}

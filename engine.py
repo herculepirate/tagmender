@@ -296,9 +296,11 @@ class Engine:
     def identify(self, g: Group) -> planmod.Proposal:
         ref = self.forced_for(g, getattr(self, "_alone", True))
         prop = self._forced(g, ref) if ref else self._identify(g)
-        if prop.status == "identified" and prop.targets and \
-                len({str((t.get("artist") or [""])[0]) for t in prop.targets}) > 1:
-            for t in prop.targets:        # (Picard's %_multiartist%: the tracks are by more than one artist)
+        # Picard's %_multiartist% (the tracks are by more than one artist): MusicBrainz's comes
+        # with the release (mb_tags, before any plugin); else from the tracks' artists
+        if prop.status == "identified" and prop.targets and not str(prop.provider or "").startswith("musicbrainz") \
+                and len({"; ".join(map(str, t.get("artist") or [])) for t in prop.targets}) > 1:
+            for t in prop.targets:
                 t.setdefault("~multiartist", ["1"])
         # every audio file of the album as found (its second copies too: "01 a.flac" and
         # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)

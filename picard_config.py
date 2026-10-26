@@ -179,11 +179,17 @@ def preserved_tags(path: Path | None = None) -> set:
 
 
 def picard_bool(name: str, default: bool = False, path: Path | None = None) -> bool:
-    """One of Picard's own true/false settings ([setting] in Picard.ini)."""
+    """One of Picard's own true/false settings (an enabled option profile's, else [setting]
+    in Picard.ini)."""
     cp = _read(path if path is not None else ini_path())
-    if cp is None or not cp.has_option("setting", name):
+    if cp is None:
         return default
-    return cp.get("setting", name).strip().lower() == "true"
+    found, v = _from_profiles(cp, name)
+    if found:
+        return v if isinstance(v, bool) else _qt_bool(str(v))
+    if not cp.has_option("setting", name):
+        return default
+    return _qt_bool(cp.get("setting", name))
 
 
 # Picard's settings that change the tags written from MusicBrainz, with Picard 3's defaults
@@ -308,6 +314,10 @@ def _qt_variant(data: str):
             t = u32()
             if qt5:
                 pos += 1                                       # (the "is null" byte of Qt 5)
+            if t == 0:                                         # an invalid (null) QVariant: no value
+                if pos + 4 <= len(b) and b[pos:pos + 4] == b"\xff\xff\xff\xff":
+                    pos += 4
+                return None
             if t == 10:                                        # QString
                 return qstring()
             if t in (9, 11):                                   # QVariantList, QStringList
@@ -523,6 +533,15 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                     if k == "id3v23_join_with" and not (isinstance(s[k], str) and s[k]):
                         s[k] = "/"
         # Picard 3's option profiles: an enabled one that sets an option wins over [setting]
+        # (a Picard 2 profile under Picard 2's names too)
+        if not _from_profiles(cp, "standardize_artist_names")[0]:
+            found, v = _from_profiles(cp, "standardize_artists")
+            if found:
+                s["standardize_artist_names"] = "all" if (v if isinstance(v, bool) else _qt_bool(str(v))) else "none"
+        if not _from_profiles(cp, "translation_locales")[0]:
+            found, v = _from_profiles(cp, "artist_locales")
+            if found and v:
+                s["translation_locales"] = [str(x) for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
         for k in list(TAG_DEFAULTS) + list(FILE_DEFAULTS):
             found, v = _from_profiles(cp, k)
             if not found:

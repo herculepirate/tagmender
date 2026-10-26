@@ -916,16 +916,17 @@ class Planner:
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             whole = target                # (the file's fields as Picard has them for naming, held or not)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
-            if not tagio.separate_totals(f):
-                # (a total lives in its number's frame there - "5/9", trkn (5, 9) - which Picard
-                # makes from the track's fields: a number removed or unset takes no total; a
-                # total unset leaves the number alone in it)
-                unset_ = self.__dict__.get("_unset", {}).get(str(f), set())
-                for num_, tot_ in tagio.ID3_PAIRS:
-                    if (num_ in removals or num_ in unset_) and num_ not in raw:
-                        raw.pop(tot_, None)
-                    elif tot_ in unset_ and tot_ not in raw and tot_ not in removals and before.get(tot_):
-                        removals.append(tot_)
+            # (a total kept in its number's field - "5/9", trkn (5, 9) - which Picard makes from
+            # the track's fields: a number removed or unset takes no total; a total unset leaves
+            # the number alone in it. What is written only: the file is named from its fields
+            # as Picard names it, below)
+            removals_named = list(removals)
+            unset_ = self.__dict__.get("_unset", {}).get(str(f), set())
+            for num_, tot_ in tagio.combined_pairs(f):
+                if (num_ in removals or num_ in unset_) and num_ not in raw:
+                    raw.pop(tot_, None)
+                elif tot_ in unset_ and tot_ not in raw and tot_ not in removals and before.get(tot_):
+                    removals.append(tot_)
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
             if raw.get("comment") and not target.get("comment") and before.get("comment") and \
@@ -986,6 +987,20 @@ class Planner:
                     unheld = {k: v for k, v in whole.items() if v and (not tagio.holds(f, k) or
                                                                         (k in raw and k not in target))}
                     names = {**hidden, **merged, **unheld, **rel_tags}
+                    # (numbers and totals as Picard names a file: the file's own fields with
+                    # the track's over them, less what a script deleted - not as written)
+                    for num_, tot_ in tagio.ID3_PAIRS:
+                        for k_ in (num_, tot_):
+                            pol_ = p.policy(k_)
+                            v_ = whole.get(k_) if whole.get(k_) else before.get(k_)
+                            if pol_ in ("preserve", "lock") or (pol_ == "fill_missing" and before.get(k_)):
+                                v_ = before.get(k_)          # (kept as the file has it)
+                            elif k_ in removals_named and not whole.get(k_):
+                                v_ = None
+                            if v_:
+                                names[k_] = v_
+                            else:
+                                names.pop(k_, None)
                     for k_, sp_ in tagio.spellings(f).items():     # (the file's own TXXX:EDITION as %EDITION%)
                         if k_ in names and k_ not in whole:
                             names[sp_] = names.pop(k_)

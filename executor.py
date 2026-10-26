@@ -493,6 +493,17 @@ def _copy_fsync(src: Path, dst: Path):
     shutil.copystat(src, dst)
 
 
+def _image_size(data: bytes) -> tuple[int, int]:
+    """(width, height) of an image, (0, 0) when it cannot be read."""
+    try:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size
+    except Exception:
+        return 0, 0
+
+
 def staged_write(path, edit, what="tags"):
     """Change a file through a staging copy beside it (edit(stage) writes into the copy): the
     copy takes the file's place - with its owner, and only when its audio is the same - in
@@ -678,6 +689,7 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc=
             return
         pic = Picture()
         pic.type, pic.mime, pic.data, pic.desc = ptype, mime, data, desc
+        pic.width, pic.height = _image_size(data)            # (as Picard records them)
         f.add_picture(pic)
     elif isinstance(getattr(f, "tags", None), ID3) or type(f).__name__ in ("MP3", "AIFF", "WAVE"):
         if f.tags is None:
@@ -709,6 +721,7 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc=
                 return
         pic = Picture()
         pic.type, pic.mime, pic.data, pic.desc = ptype, mime, data, desc
+        pic.width, pic.height = _image_size(data)            # (as Picard records them)
         f.tags["METADATA_BLOCK_PICTURE"] = keep + [base64.b64encode(pic.write()).decode("ascii")]
     else:
         return
@@ -742,6 +755,7 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
     if isinstance(f, FLAC):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
+        pic.width, pic.height = _image_size(data)            # (as Picard records them)
         if replace:
             keep = list(f.pictures)
             k = _front_index(p.type for p in keep)
@@ -775,6 +789,7 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
     elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
+        pic.width, pic.height = _image_size(data)            # (as Picard records them)
         new = base64.b64encode(pic.write()).decode("ascii")
         old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or [])      # (the other pictures always stay)
         if old and replace:

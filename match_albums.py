@@ -838,18 +838,17 @@ def log_tocs(album_dir):
 # --------------------------------------------------------------------------
 # AcoustID fingerprints (Picard's "Scan"): identify the recordings from the audio
 # --------------------------------------------------------------------------
-def picard_preferred_countries(ini="~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"):
-    """Picard's Options > Metadata > Preferred Releases > countries, when set."""
-    import configparser
-    cp = configparser.RawConfigParser(strict=False, interpolation=None)
+def picard_preferred_countries(ini=None):
+    """Picard's Options > Metadata > Preferred Releases > countries, when set: read as
+    picard_config reads Picard's settings (the Picard.ini TagMender uses, one country in Qt's
+    binary form, Picard 3's option profiles); ini: that file instead."""
+    import picard_config
     try:
-        cp.read(Path(ini).expanduser(), encoding="utf-8")
-        raw = cp.get("setting", "preferred_release_countries", fallback="")
+        s = picard_config.tag_settings(path=Path(ini).expanduser() if ini else None)
     except Exception:
         return []
-    if not raw or raw.startswith("@"):
-        return []
-    return [c.strip().upper() for c in raw.split(",") if re.fullmatch(r"\s*[A-Za-z]{2}\s*", c)]
+    return [str(c).strip().upper() for c in s.get("preferred_release_countries") or []
+            if re.fullmatch(r"\s*[A-Za-z]{2}\s*", str(c))]
 
 
 def _discogs_token():

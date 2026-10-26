@@ -387,9 +387,21 @@ class Profile:
         return copy.deepcopy(self.data)
 
 
+def _picard_defaults(base: dict) -> dict:
+    """The defaults that follow Picard's own settings when a profile does not set them:
+    Windows compatibility (file names), Delete empty directories."""
+    import picard_config
+    out = copy.deepcopy(base)
+    out.setdefault("filenames", {})["compat"] = \
+        "windows" if picard_config.picard_bool("windows_compatibility", True) else "linux"
+    out["remove_empty_dirs"] = picard_config.picard_bool("delete_empty_dirs", True)
+    return out
+
+
 def from_dict(data: dict, *, check=True) -> Profile:
     data = upgrade(data)
-    full = _merge(DEFAULTS, data)
+    base = _picard_defaults(DEFAULTS) if (data or {}).get("follow_picard", True) else DEFAULTS
+    full = _merge(base, data)
     if check:
         problems = validate(full)
         if problems:
@@ -437,7 +449,8 @@ def minimal(profile: Profile) -> dict:
             elif base.get(k) != v or (keep_none and k not in base):
                 out[k] = v          # (picard: a setting null says "as each file has it", not "as Picard")
         return out
-    return {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, DEFAULTS)}
+    base = _picard_defaults(DEFAULTS) if profile.data.get("follow_picard", True) else DEFAULTS
+    return {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, base)}
 
 
 def check_template(d: dict) -> list[str]:

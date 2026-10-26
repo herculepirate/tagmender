@@ -915,13 +915,15 @@ def _mp4_int(x, zero=False):
     return n if (0 if zero else 1) <= n < 1 << 15 else None
 
 
-def separate_totals(path) -> bool:
-    """The format keeps a total in a field of its own (Vorbis: TOTALTRACKS), not in its
-    number's ("5/9" in ID3 and APEv2, trkn (5, 9) in MP4)."""
+def combined_pairs(path) -> tuple:
+    """The (number, total) pairs the format keeps in one field - "5/9" in ID3 (and the
+    movement's MVIN), APEv2 and WMA's disc, trkn (5, 9) in MP4; none in Vorbis, whose totals
+    are fields of their own (as are MP4's and APEv2's movement totals)."""
     try:
-        return family(open_file(path)) == "vorbis"
+        fam = family(open_file(path))
     except Exception:
-        return True
+        return ()
+    return ID3_PAIRS if fam == "id3" else (() if fam == "vorbis" else NUMBER_PAIRS)
 
 
 def _pair(current, changes, num, tot):
@@ -1099,14 +1101,23 @@ def _write_pair(fam, f, tags, pair, n, t, changed=None):
     elif fam == "vorbis":
         names = (["TRACKNUMBER"], ["TOTALTRACKS", "TRACKTOTAL"]) if num == "tracknumber" else \
                 (["DISCNUMBER"], ["TOTALDISCS", "DISCTOTAL"])
-        for name in names[0] + names[1]:
-            if name in tags:
-                del tags[name]
-        if n:
-            tags[names[0][0]] = [n]
-        if t:
+        # (each a field of its own, written when it changes, as Picard writes the track's fields -
+        # a total not changing is left as the file has it; one the file had only inside its
+        # "5/9" goes into its own fields when that number is rewritten)
+        had = list(tags[names[0][0]]) if names[0][0] in tags else []
+        inside = bool(had) and "/" in str(had[0]) and not any(x in tags for x in names[1])
+        if changed is None or num in changed:
+            if names[0][0] in tags:
+                del tags[names[0][0]]
+            if n:
+                tags[names[0][0]] = [n]
+        if changed is None or tot in changed or (inside and (num in changed)):
             for name in names[1]:
-                tags[name] = [t]
+                if name in tags:
+                    del tags[name]
+            if t:
+                for name in names[1]:
+                    tags[name] = [t]
     elif fam == "mp4":
         key = "trkn" if num == "tracknumber" else "disk"
         if _mp4_int(n, zero=True) is not None:

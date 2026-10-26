@@ -99,6 +99,14 @@ ID3v2.3 tag stays v2.3). Their undo leaves a track or .lrc edited since alone an
 reported, never replaced with the default rules. `jobs prune` keeps the backups of a job whose
 undo was cut short or had problems.
 
+**More of Picard's settings followed (twenty-seventh review).** Windows compatibility, Delete
+empty directories and Preserve timestamps follow Picard's settings (its option profiles too)
+unless the profile sets them; the preferred release countries are read from the Picard.ini
+TagMender uses (one country, option profiles); a profile option ticked without a value no
+longer hides the profiles. After a script removes or unsets a disc number or total, files are
+named as Picard names them; an M4A's or WavPack's movement total is kept; a FLAC or Ogg total
+not changing is left as it is. Covers embedded into FLAC and Ogg record their size.
+
 **Watched folders and Picard.ini (twenty-sixth review).** "Process anyway" in the app lets
 the album's own files through, never the folder they lie in (for loose tracks in a watched
 folder, that switched the rules off for everything dropped there later); an album you undid

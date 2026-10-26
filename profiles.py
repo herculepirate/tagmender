@@ -423,10 +423,10 @@ def raw(name: str) -> dict:
     except ValueError as exc:
         raise ProfileError(f"profile {name!r} is not valid JSON: {exc}") from None
     data.setdefault("name", name)
-    if int(data.get("version") or 0) < 1:
-        # (a profile from before profiles had versions: unset, these were Windows-safe names and
-        # empty folders removed - so they stay, whatever Picard says now. A version-1 file is
-        # read as the release that saved it last read it: following Picard when unset)
+    if int(data.get("version") or 0) < 2:
+        # (a profile saved before these followed Picard (version 1, as every release but one
+        # wrote it): unset, they were Windows-safe names and empty folders removed - so they stay,
+        # whatever Picard says now)
         data.setdefault("filenames", {}).setdefault("compat", "windows")
         data.setdefault("remove_empty_dirs", True)
     return data

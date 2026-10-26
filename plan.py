@@ -90,6 +90,18 @@ def _vals(v):
     return [str(x) for x in (v if isinstance(v, list) else [v]) if str(x) != ""]
 
 
+def _riff_fields(vals: dict, unset=()) -> dict:
+    """A WAV's RIFF INFO as Picard's WAVFile._save writes it from the file's fields: every
+    comment field - a described or other-language one too - goes to ICMT, the last one
+    written winning (the file's own first, then the script's)."""
+    out = {k: list(vals[k]) for k in tagio.RIFF_INFO if vals.get(k) and k not in unset}
+    comments = [k for k in vals if (k == "comment" or k.startswith("comment:")) and _vals(vals.get(k))
+                and k not in unset]
+    if comments:
+        out["comment"] = _vals(vals[comments[-1]])
+    return out
+
+
 def diff_tags(before: dict, target: dict, profile, confidence: float, extra_removals=()):
     """(changes {field: [..] | None}, rows [{field, before, after, action}])."""
     changes, rows = {}, []
@@ -671,7 +683,12 @@ class Planner:
         gone_ = set(target.get("~remove") or [])        # (what the release deletes: no script sees it)
         # (a file's own ID3 user tag as it is spelled - "CUSTOM": Picard's names are case-sensitive)
         spell = {k: v for k, v in tagio.spellings(f).items() if k not in target}
+        # (and its user tags spelled like a field it keeps elsewhere - TXXX:TOTALTRACKS beside TRCK,
+        # read as "~custom:TOTALTRACKS" - by their own names: %TOTALTRACKS%, $delete(TOTALTRACKS))
+        cust = {k[8:]: list(v) for k, v in before.items()
+                if k.startswith("~custom:") and k[8:] != k[8:].lower() and k not in gone_}
         tags = {**{spell.get(k, k): list(v) for k, v in before.items() if not k.startswith("~") and k not in gone_},
+                **cust,
                 **{k: list(v) if isinstance(v, list) else [v] for k, v in target.items() if not k.startswith("~")}}
         out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden, self._log(), strip=False)
         back = {v: k for k, v in spell.items()}
@@ -687,6 +704,10 @@ class Planner:
         tags = {back.get(k, k): v for k, v in tags.items()}
         # ($delete(custom) is not the file's "CUSTOM": left as it is, as Picard leaves it)
         gone = [back.get(g, g) for g in gone if not (g.lower() in spell and g != spell[g.lower()])]
+        cmap = {n: "~custom:" + n for n in cust}
+        out = {cmap.get(k, k): v for k, v in out.items()}
+        tags = {cmap.get(k, k): v for k, v in tags.items()}
+        gone = [cmap.get(g, g) for g in gone]
         # (what a script $unset: not deleted from the file, but gone from what Picard writes into a
         # WAV's RIFF INFO, which it makes from the track's fields)
         self.__dict__.setdefault("_unset", {})[str(f)] = {k for k in tags if k not in out and k not in gone}
@@ -886,6 +907,11 @@ class Planner:
             if ino:
                 self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
+            # (what a script did to a user tag spelled like a field kept elsewhere: by itself)
+            cust_set = {k: target.pop(k) for k in [k for k in target if k.startswith("~custom:")]}
+            cust_rm = [x for x in (target.get("~remove") or []) if x.startswith("~custom:")]
+            if cust_rm:
+                target["~remove"] = [x for x in target["~remove"] if not x.startswith("~custom:")]
             # (the file as it will be: without what the release or a script deletes)
             gone_ed = {x for x in (target.get("~remove") or [])
                        if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")}
@@ -952,13 +978,44 @@ class Planner:
             # names is written under both when the file is written, as Picard saves it)
             v_inside, v_one = tagio.vorbis_totals(f)
             before_d = {k_: v_ for k_, v_ in before.items() if k_ not in v_inside}
+            for num_, tot_ in tagio.NUMBER_PAIRS:      # (and the number is "5/9" as it stands: rewritten)
+                if tot_ in v_inside and before.get(num_) and before.get(tot_):
+                    before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
-            for tot_ in v_one:
-                kept_pol = p.policy(tot_) in ("preserve", "lock", "fill_missing")
-                if tot_ not in changes and before.get(tot_) and (tot_ not in unset_ or kept_pol) and \
-                        tot_ not in removals:
-                    changes[tot_] = list(before[tot_]) if p.policy(tot_) in ("preserve", "lock", "fill_missing") \
-                        or not target.get(tot_) else list(target[tot_])
+            import levels as _lv
+            if identified and conf >= float(p["thresholds"]["replace_min_confidence"]) and _lv.level(p) != "basic":
+                for k_, v_ in cust_set.items():
+                    if _vals(v_) and _vals(v_) != _vals(before.get(k_)):
+                        changes[k_] = _vals(v_)
+                        rows.append({"field": k_[8:], "before": _vals(before.get(k_)), "after": _vals(v_),
+                                     "action": "changed by a tagger script (a user tag)"})
+                for k_ in cust_rm:
+                    if _vals(before.get(k_)) and k_ not in cust_set:
+                        changes[k_] = None
+                        rows.append({"field": k_[8:], "before": _vals(before.get(k_)), "after": [],
+                                     "action": "removed by a tagger script (a user tag)"})
+            if changes:                   # (a WAV's fields kept only in its RIFF INFO: into ID3, as Picard)
+                for k_ in sorted(tagio.riff_only(f)):
+                    if k_ not in changes and k_ not in removals and before.get(k_) and p.policy(k_) != "lock" and \
+                            _lv.restrict({k_: before[k_]}, p).get(k_) and tagio.holds(f, k_):
+                        changes[k_] = list(before[k_])
+                        rows.append({"field": k_, "before": list(before[k_]), "after": list(before[k_]),
+                                     "action": "written into the ID3 tag (the file had it in its RIFF INFO only), "
+                                               "as Picard"})
+            if changes and "lyrics" not in changes and before.get("lyrics") and p.policy("lyrics") != "lock" and \
+                    "lyrics" not in removals and tagio.unsynced_lyrics_only(f):
+                changes["lyrics"] = list(before["lyrics"])     # (Picard writes them as LYRICS on saving)
+                rows.append({"field": "lyrics", "before": list(before["lyrics"]), "after": list(before["lyrics"]),
+                             "action": "written as LYRICS (the file had them as UNSYNCEDLYRICS), as Picard"})
+            if changes:                   # (only when the file is written anyway, its value as it is)
+                for tot_ in v_one:
+                    # (not one a script unset - Picard then has no total to write - unless preserved)
+                    if tot_ not in changes and before.get(tot_) and tot_ not in removals and \
+                            p.policy(tot_) != "lock" and \
+                            (tot_ not in unset_ or p.policy(tot_) in ("preserve", "fill_missing")):
+                        changes[tot_] = list(before[tot_])
+                        rows.append({"field": tot_, "before": list(before[tot_]), "after": list(before[tot_]),
+                                     "action": "written under both names (TOTALTRACKS and TRACKTOTAL), as Picard"})
             as_is = tagio.fragmented(f)
             named = changes               # (named as its album's other files are, whatever it holds)
             if as_is:                     # (moved or copied with its album as it is, never written to)
@@ -1000,7 +1057,7 @@ class Planner:
                 # RIFF INFO: every field the file holds, the values as they are (Picard's
                 # WAVFile._save writes it from all of the file's metadata)
                 unset = self.__dict__.get("_unset", {}).get(str(f), set())
-                fe["riff"] = {k: list(merged[k]) for k in tagio.RIFF_INFO if merged.get(k) and k not in unset}
+                fe["riff"] = _riff_fields(merged, unset)
             if op in ("copy", "move"):
                 if not identified:      # as it is, with its folders below the profile's source
                     src_root = Path(prop.source_dir)
@@ -1026,10 +1083,11 @@ class Planner:
                     names = {**hidden, **merged, **unheld, **rel_tags}
                     # (numbers and totals as Picard names a file: the file's own fields with
                     # the track's over them, less what a script deleted - not as written)
+                    inside_ = tagio.vorbis_totals(f)[0]     # (a Vorbis "5/9": no total, as Picard reads it)
                     for num_, tot_ in tagio.ID3_PAIRS:
                         for k_ in (num_, tot_):
                             pol_ = p.policy(k_)
-                            v_ = whole.get(k_) if whole.get(k_) else before.get(k_)
+                            v_ = whole.get(k_) if whole.get(k_) else (None if k_ in inside_ else before.get(k_))
                             if pol_ in ("preserve", "lock") or (pol_ == "fill_missing" and before.get(k_)):
                                 v_ = before.get(k_)          # (kept as the file has it)
                             elif k_ in removals_named and not whole.get(k_):
@@ -1041,6 +1099,9 @@ class Planner:
                     for k_, sp_ in tagio.spellings(f).items():     # (the file's own TXXX:EDITION as %EDITION%)
                         if k_ in names and k_ not in whole:
                             names[sp_] = names.pop(k_)
+                    for k_, v_ in before.items():                    # (its TXXX:TOTALTRACKS as %TOTALTRACKS%)
+                        if k_.startswith("~custom:") and k_[8:] != k_[8:].lower() and k_ not in cust_rm:
+                            names[k_[8:]] = _vals(cust_set.get(k_, v_))
                     for rk_ in raw:                     # (a script's $set(MyTag,...) as %MyTag%, not %mytag%,
                         lk_ = tagio.field_name(rk_)     # as Picard's case-sensitive names have it)
                         if rk_ != lk_ and lk_ in names and lk_ not in before and lk_ not in whole:
@@ -1129,10 +1190,14 @@ class Planner:
                     if changes2 and dst.suffix.lower() == ".wav":       # (the copy's own INFO, as for any file)
                         now2 = {k: v for k, v in have.items() if not k.startswith("~")}
                         now2.update({k: (raw.get(k) or v) for k, v in changes2.items() if v is not None})
-                        fe["riff"] = {k: list(now2[k]) for k in tagio.RIFF_INFO
-                                      if now2.get(k) and changes2.get(k, "") is not None}
-                    fe.update(src=str(dst), dst=str(dst), op="tag" if changes2 else "none", changes=changes2,
-                              diff=rows2, fingerprint=_fp(dst), copy_of=str(f))
+                        fe["riff"] = _riff_fields(now2, {k for k, v in changes2.items() if v is None})
+                    fe.pop("fix_pictures", None)
+                    if not fe.get("as_is") and tagio.opus_pictures_need_fix(dst):     # (the copy's own cover)
+                        fe["fix_pictures"] = True
+                        rows2 = list(rows2) + [{"field": "picture", "before": ["size without depth"],
+                                                "after": ["no size (Opus players show it)"], "action": "repaired"}]
+                    fe.update(src=str(dst), dst=str(dst), op="tag" if (changes2 or fe.get("fix_pictures")) else "none",
+                              changes=changes2, diff=rows2, fingerprint=_fp(dst), copy_of=str(f))
                     entry["files"].append(fe)
                     continue
                 dst = self._unique(dst, f, entry)
@@ -1141,12 +1206,12 @@ class Planner:
                 fe["dst"] = str(dst)
                 if Path(dst) == f or (Path(dst).name == f.name and same_entry(dst, f)):
                     fe["dst"] = str(f)                   # already where the template puts it
-                    fe["op"] = "tag" if changes else "none"
+                    fe["op"] = "tag" if (changes or fe.get("fix_pictures")) else "none"
                 else:
                     fe["op"] = op
                     if Path(dst).exists() and os.path.samefile(dst, f) and not _one_name(dst, f):
                         fe["linked"] = True              # the destination is a hard link to this file
-                        if op == "copy" and not changes:
+                        if op == "copy" and not changes and not fe.get("fix_pictures"):
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
         entry["conflicts"] += _linked_tracks(entry)

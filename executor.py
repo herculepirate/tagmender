@@ -400,7 +400,7 @@ def _tags_sig(path, legacy=0, mp4_zero=True, split_custom=True) -> str:
     M4A's track or disc number 0 read as none, as versions before d25358a read it."""
     try:
         t = tagio.read(path, legacy=legacy) if legacy else \
-            (tagio.read(path) if (mp4_zero and split_custom) else
+            (tagio.read(path) if (mp4_zero and split_custom is True) else
              tagio.read(path, mp4_zero=mp4_zero, split_custom=split_custom))
     except Exception:
         return ""
@@ -419,9 +419,9 @@ def _sig_is(path, sig, backup=None, blobs=None) -> bool:
         return False
     if str(sig).startswith("v2:"):
         # (as this version reads tags; or as versions before read an M4A's track 0, or a user
-        # tag spelled like a field: merged into it)
-        return _tags_sig(path) == sig or _tags_sig(path, mp4_zero=False) == sig or \
-            _tags_sig(path, split_custom=False) == sig or _tags_sig(path, mp4_zero=False, split_custom=False) == sig
+        # tag spelled like a field: merged into it - always, or where the file had no other)
+        return any(_tags_sig(path, mp4_zero=z, split_custom=sc) == sig
+                   for sc in (True, "deferred", False) for z in (True, False))
     if _tags_sig(path, legacy=2) == sig:
         return True
     if _tags_sig(path, legacy=1) != sig:
@@ -1140,7 +1140,8 @@ class Executor:
             self.journal.write(ev="file", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
                                digest=src_digest, backup=backup, changed=bool(changes or embed or fix))
             if linked:
-                self._relink_step(i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps)
+                self._relink_step(i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps,
+                                  fix=fix)
                 return
             if op == "move" and not changes and not embed and not fix and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
@@ -1218,15 +1219,15 @@ class Executor:
                 _fsync_dir(src.parent)
                 self.journal.write(ev="file", album=i, idx=j, state="source_removed")
 
-    def _relink_step(self, i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps):
+    def _relink_step(self, i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps, fix=False):
         """The destination already is this file under another name (a hard link). A move
         just drops the source's name; new tags go to the destination as a new file."""
-        if changes or embed:
+        if changes or embed or fix:
             stage = _stage_name(dst, self.job)
             try:
                 _copy_fsync(src, stage)
                 _keep_owner(stage, os.stat(src))
-                if changes:
+                if changes or fix:
                     tagio.write(stage, changes, **_write_extras(a["files"][j] if j < len(a.get("files") or []) else {}))
                 if embed:
                     _embed_all(stage, a, str(dst))

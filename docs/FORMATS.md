@@ -30,8 +30,20 @@ equivalents), as Picard writes them. A custom tag that already exists in another
 keeps its case and is updated there (Picard, whose names are case-sensitive, would add a second
 frame beside it: TXXX:originalyear beside the file's TXXX:ORIGINALYEAR); one of Picard's own
 (MusicBrainz Album Id, BARCODE, ARTISTS ...) is written as Picard names it. A user tag spelled
-like a field the file keeps elsewhere (TXXX:TOTALTRACKS beside TRCK, as ffmpeg leaves them) is
-read as a tag of its own and left alone, as Picard reads it.
+like a field the file keeps elsewhere (TXXX:TOTALTRACKS or TXXX:MUSICBRAINZ_ALBUMID, as ffmpeg
+leaves a converted FLAC's tags) is read as a tag of its own, as Picard reads it - whether or not
+the field is there: the field is then written in its own frame (TRCK "1/2", TXXX:MusicBrainz
+Album Id), and tagger scripts and naming see the user tag by its own name (%TOTALTRACKS%,
+`$delete(TOTALTRACKS)`). Two differences from Picard: in an M4A, a custom atom spelled like a
+number or total (----:TOTALTRACKS) gets the field's value and so does trkn/disk, as Picard
+writes them, but one spelled like another field (----:TITLE, ffmpeg's ----:MUSICBRAINZ_TRACKID,
+a recording ID) is left as it is (Picard writes the field into it, not into ©nam); in WavPack/APE/Musepack a
+TRACKNUMBER or DISCNUMBER item gets the number and so does Track/Disc (Picard writes one of
+them), and an item spelled as the field (ALBUMARTIST, RELEASETYPE) is written where it is.
+In a FLAC or Ogg file, lyrics only in UNSYNCEDLYRICS (Mp3tag, Bandcamp) are the lyrics, written
+as LYRICS whenever the file is written, as Picard 3.0.2 does; a WAV's RIFF INFO entries are read
+for the fields its ID3 tag has not, and go into the ID3 tag when the file is written, as Picard
+reads and saves them; ICMT takes a described or other-language comment too.
 
 ## What TagMender never does while tagging
 - transcode, resample, normalise or repair audio (the audio check fails the write otherwise);

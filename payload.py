@@ -49,8 +49,10 @@ def _trailer_start(fh, size):
     while changed and end > 0:
         changed = False
         if end >= 128:
-            fh.seek(end - 128)
-            if fh.read(3) == b"TAG":
+            fh.seek(max(end - 131, 0))
+            head = fh.read(131 if end >= 131 else 128)
+            # (not the "TAG" of an APEv2 header 131 bytes from the end: an APEv2 tag of that size)
+            if head[-128:-125] == b"TAG" and not (len(head) == 131 and head[:8] == b"APETAGEX"):
                 end -= 128
                 changed = True
                 continue

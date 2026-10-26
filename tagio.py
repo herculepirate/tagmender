@@ -369,6 +369,22 @@ def _split_ape_comment(value: str) -> tuple[str, str]:
     return "comment", value
 
 
+# Picard's fields each format keeps somewhere else than a user tag of that name: a user tag
+# spelled so (TXXX:TOTALTRACKS, TXXX:MUSICBRAINZ_ALBUMID, an M4A's ----:TOTALTRACKS, an APEv2
+# TOTALTRACKS item) is a custom tag of its own - but the TXXX frames Picard upgrades
+# (TXXX:ALBUMARTISTSORT into TSO2, TXXX:mood on ID3v2.3 ...) are the field where it has no other
+_PAIRS = {"tracknumber", "totaltracks", "discnumber", "totaldiscs"}
+_ELSEWHERE = {
+    "id3": frozenset(set(ID3_TEXT) | _PAIRS | {"movementnumber", "movementtotal", "comment", "lyrics", "website",
+                                              "musicbrainz_recordingid", "performer"}
+                     | {k for k, v in ID3_FREETEXT.items() if v.lower() != k}),
+    "mp4": frozenset((set(MP4_TEXT) - _MP4_WAS_FREE) | set(MP4_BOOL) | set(MP4_INT) | _PAIRS | {"bpm"}
+                     | {k for k, v in MP4_FREE.items() if v.lower() != k}),
+    "apev2": frozenset(_PAIRS),
+}
+_UPGRADED = {"ALBUMARTISTSORT", "COMPOSERSORT", "mood", "RELEASEDATE"}
+
+
 def spellings(path) -> dict:
     """{field: its spelling} of an ID3 file's own user tags (TXXX) that are none of Picard's
     names and not in lower case ("CUSTOM", as foobar2000 and Mp3tag write them): Picard's
@@ -380,10 +396,15 @@ def spellings(path) -> dict:
     except Exception:
         return {}
     out = {}
+    try:
+        whole = read(path)
+    except Exception:
+        whole = {}
     for frame in f.tags.getall("TXXX"):
         desc = str(frame.desc)
         if desc != desc.lower() and desc.lower() not in _ID3_FREE_R and \
-                not (desc in ("mood", "RELEASEDATE") and f.tags.version[:2] == (2, 3)):
+                not (desc in ("mood", "RELEASEDATE") and f.tags.version[:2] == (2, 3)) and \
+                "~custom:" + desc not in whole:         # (not one beside the field's own frame: %COMPOSERSORT%)
             out.setdefault(desc.lower(), desc)
     return out
 
@@ -398,17 +419,27 @@ def read(path, legacy=False, mp4_zero=True, split_custom=True) -> dict[str, list
     fam = family(f)
     tags = f.tags
     out: dict[str, list[str]] = {}
+    # (a WAV's RIFF INFO entries - often all a WAV rip has: the fields its ID3 tag has not, as
+    # Picard 3.0.2 reads them; it writes them into the ID3 tag on saving)
+    info = riff_info(path) if (split_custom is True and not legacy and type(f).__name__ == "WAVE") else {}
     if tags is None:
-        return out
+        return dict(info)
     # a user tag (TXXX, an MP4 custom atom, an APEv2 item) none of Picard's names, but spelled
-    # like a field the file keeps elsewhere - TXXX:TOTALTRACKS beside TRCK "1/9", as ffmpeg
+    # like a field the format keeps elsewhere - TXXX:TOTALTRACKS beside TRCK "1", as ffmpeg
     # leaves them: a custom tag of its own ("~custom:TOTALTRACKS"), as Picard reads it, never
-    # merged into the field
+    # the field (which is then missing, and written in its own frame). split_custom="deferred":
+    # as the version before read them - the field when the file had it nowhere else; False:
+    # as the versions before that - always the field.
     deferred = [] if (split_custom and not legacy) else None
+    elsewhere = _ELSEWHERE.get(fam, frozenset()) if split_custom is True and not legacy else frozenset()
+    # (an ID3v2.3 tag's place for its mood and release date is a TXXX, however it is spelled)
+    v23_ = fam == "id3" and getattr(tags, "version", (2, 4))[:2] == (2, 3)
 
     def custom(name, orig, vals):
         if deferred is None:
             _add(out, name, vals)
+        elif name in elsewhere and orig not in _UPGRADED and not (v23_ and name in ("mood", "releasedate")):
+            _add(out, "~custom:" + orig, vals)
         else:
             deferred.append((name, orig, vals))
     if fam == "id3":
@@ -472,9 +503,13 @@ def read(path, legacy=False, mp4_zero=True, split_custom=True) -> dict[str, list
         if pics:
             out["~pictures"] = [str(pics)]
     elif fam == "vorbis":
+        unsynced = []
         for key, vals in tags.as_dict().items():
             k = key.lower()
             if k == "metadata_block_picture":
+                continue
+            if split_custom is True and not legacy and (k == "unsyncedlyrics" or k.startswith("unsyncedlyrics:")):
+                unsynced.append((key, vals))         # (Mp3tag's, Bandcamp's place for the lyrics: below)
                 continue
             val = vals[0] if vals else ""
             if k in ("tracknumber", "discnumber") and "/" in str(val):
@@ -493,6 +528,11 @@ def read(path, legacy=False, mp4_zero=True, split_custom=True) -> dict[str, list
             if name.startswith("performer:"):
                 name = _LEGACY + name
             _add(out, name, vals)
+        # (UNSYNCEDLYRICS is the lyrics, as Picard 3.0.2 reads it, where the file has no LYRICS -
+        # Picard then writes LYRICS on saving; beside a LYRICS it is a tag of its own)
+        has_lyrics = "lyrics" in out
+        for key, vals in unsynced:
+            _add(out, key.lower() if has_lyrics else "lyrics", vals)
         pics = len(getattr(f, "pictures", []) or []) + len(tags.get("metadata_block_picture", []))
         if pics:
             out["~pictures"] = [str(pics)]
@@ -569,7 +609,49 @@ def read(path, legacy=False, mp4_zero=True, split_custom=True) -> dict[str, list
             _add(out, "~custom:" + orig, vals)
         else:
             _add(out, name, vals)
+    for name, vals in info.items():
+        if name not in out:
+            out[name] = list(vals)
     return out
+
+
+def riff_info(path) -> dict:
+    """{field: [value]} of a WAV file's RIFF INFO entries Picard reads (UTF-8, else
+    Windows-1252; trailing NULs stripped)."""
+    from mutagen._riff import RiffFile
+    out = {}
+    try:
+        with open(path, "rb") as fh:
+            riff = RiffFile(fh)
+            info = next((c for c in riff.root.subchunks() if c.id == "LIST" and getattr(c, "name", None) == "INFO"),
+                        None)
+            if info is None:
+                return {}
+            for c in info.subchunks():
+                name = _RIFF_R.get(c.id)
+                if not name:
+                    continue
+                raw = c.read()
+                try:
+                    v = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    v = raw.decode("windows-1252", errors="replace")
+                v = v.rstrip("\0")
+                if v:
+                    out[name] = [v]
+    except Exception:
+        return {}
+    return out
+
+
+def riff_only(path) -> set:
+    """The fields a WAV file has only in its RIFF INFO (none in its ID3 tag)."""
+    try:
+        if type(open_file(path)).__name__ != "WAVE":
+            return set()
+        return set(riff_info(path)) - set(read(path, split_custom="deferred"))
+    except Exception:
+        return set()
 
 
 # --------------------------------------------------------------------------
@@ -588,8 +670,8 @@ def field_name(k: str) -> str:
 def _norm(changes):
     out = {}
     for k, v in changes.items():
-        k = field_name(k)
-        if k.startswith("~"):
+        k = k if str(k).startswith("~custom:") else field_name(k)     # (a user tag: as it is spelled)
+        if k.startswith("~") and not k.startswith("~custom:"):
             continue
         vals = None if v is None else [str(x) for x in (v if isinstance(v, (list, tuple)) else [v]) if str(x) != ""]
         if k in out and out[k] and vals:                # ("performer:EWI" twice: the names merged)
@@ -670,13 +752,9 @@ def _id3v1_first(path, tags, first):
     for k, fid in (("title", "TIT2"), ("artist", "TPE1"), ("album", "TALB"), ("genre", "TCON")):
         if first.get(k):
             frames[fid] = Frames[fid](encoding=3, text=[str(first[k][0])])
+    if not has_id3v1(path):
+        return
     with open(path, "r+b") as fh:
-        fh.seek(0, 2)
-        if fh.tell() < 128:
-            return
-        fh.seek(-128, 2)
-        if fh.read(3) != b"TAG":
-            return
         data = MakeID3v1(frames)
         fh.seek(-128, 2)
         fh.write(data)
@@ -704,6 +782,8 @@ def file_options(path, settings: dict | None) -> dict:
     out = {}
 
     def end(n):
+        if n == 128:                                 # (an ID3v1 tag: not an APEv2 header's "TAG")
+            return b"TAG" if has_id3v1(path) else b""
         try:
             with open(path, "rb") as fh:
                 fh.seek(-n, 2)
@@ -1002,17 +1082,48 @@ def edit_id3(path, f, edit):
         edit(f.tags)
         save_id3(f, f.tags)
         return
-    try:
-        t = ID3(str(path), translate=False)
+    from mutagen.id3._id3v1 import find_id3v1
+    try:                                             # (its ID3v1 tag not merged in: load_v1=False)
+        t = ID3(str(path), translate=False, load_v1=False)
     except ID3NoHeaderError:
         t = ID3()
+    with open(path, "rb") as fh:                     # its ID3v1 tag, kept byte for byte
+        v1, off = find_id3v1(fh)
+        trailer = b""
+        if v1 is not None and off < 0:
+            fh.seek(off, 2)
+            trailer = fh.read()
     if t.version < (2, 3, 0):
         t.update_to_v24()
     edit(t)
     if t.version[:2] == (2, 3):
-        t.save(str(path), v2_version=3, v23_sep=None)
+        t.save(str(path), v2_version=3, v23_sep=None, v1=1)
     else:
-        t.save(str(path), v2_version=4)
+        t.save(str(path), v2_version=4, v1=1)
+    if trailer:                                      # (mutagen rewrote it from the ID3v2 tag: its own back)
+        with open(path, "r+b") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(size - 128)
+            if fh.read() != trailer:
+                fh.seek(size - 128)
+                fh.truncate()
+                fh.write(trailer)
+
+
+def has_id3v1(path) -> bool:
+    """The file ends in an ID3v1 tag (not the "TAG" inside the header of a 131-byte APEv2 tag)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            if size < 128:
+                return False
+            fh.seek(max(size - 131, 0))
+            head = fh.read()
+    except OSError:
+        return False
+    return head[-128:-125] == b"TAG" and not (len(head) == 131 and head[:8] == b"APETAGEX")
 
 
 def latin1_or_utf8(*texts) -> int:
@@ -1024,6 +1135,19 @@ def latin1_or_utf8(*texts) -> int:
         return 0
     except UnicodeEncodeError:
         return 3
+
+
+def unsynced_lyrics_only(path) -> bool:
+    """A Vorbis file keeps its lyrics only in UNSYNCEDLYRICS (Mp3tag, Bandcamp): read as the
+    lyrics, which Picard writes as LYRICS whenever it saves the file."""
+    try:
+        f = open_file(path)
+    except Exception:
+        return False
+    if family(f) != "vorbis" or f.tags is None:
+        return False
+    keys = {k.lower() for k in f.tags.keys()}
+    return "lyrics" not in keys and any(k == "unsyncedlyrics" or k.startswith("unsyncedlyrics:") for k in keys)
 
 
 def vorbis_totals(path) -> tuple[set, set]:
@@ -1080,6 +1204,9 @@ RIFF_INFO = {"artist": "IART", "comment": "ICMT", "copyright": "ICOP", "date": "
              "title": "INAM", "album": "IPRD", "tracknumber": "ITRK", "releasecountry": "ICNT",
              "encodedby": "IENC", "engineer": "IENG", "language": "ILNG", "media": "IMED", "composer": "IMUS",
              "producer": "IPRO", "writer": "IWRI"}
+
+
+_RIFF_R = {v: k for k, v in RIFF_INFO.items()}
 
 
 def _write_riff_info(path, changes, encoding="windows-1252"):
@@ -1177,6 +1304,10 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
     if fam in ("vorbis", "apev2") and any(is_comment(k) for k in changes):
         _set_performers(fam, tags, {k: v for k, v in changes.items() if is_comment(k)}, "comment")
         changes = {k: v for k, v in changes.items() if not is_comment(k)}
+    # (a user tag spelled like a field the format keeps elsewhere - TXXX:TOTALTRACKS -, changed
+    # by a tagger script by its own name: that tag, as it is spelled)
+    customs = {k[8:]: v for k, v in changes.items() if k.startswith("~custom:")}
+    changes = {k: v for k, v in changes.items() if not k.startswith("~custom:")}
     if fam == "apev2":
         changes = _ape_merge(changes, lambda: current)
     credits = {k: v for k, v in changes.items() if (is_performer(k) and (fam != "mp4" or ":" in k))
@@ -1229,7 +1360,41 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
             globals()[f"_set_{fam}"](f, tags, k, vals, spell=names.get(k))
         else:
             globals()[f"_set_{fam}"](f, tags, k, vals)
+    for name, vals in customs.items():
+        if fam == "id3":
+            tags.delall("TXXX:" + name)
+            if vals:
+                tags.add(TXXX(encoding=3, desc=name, text=[join.join(vals)] if v23 else list(vals)))
+        elif fam == "mp4":
+            tags.pop(_FF + name, None)
+            if vals:
+                tags[_FF + name] = [MP4FreeForm(str(v).encode("utf-8")) for v in vals]
+        elif fam == "apev2":
+            if name in tags:
+                del tags[name]
+            if vals:
+                tags[name] = list(vals)
+    if fam == "mp4":
+        # (a custom atom spelled like a number or total the file keeps in trkn/disk -
+        # ----:TOTALTRACKS -: Picard saves the field there too, as the file spells it)
+        for k, vals in changes.items():
+            if vals and k in _PAIRS:                 # (only the totals and numbers: ffmpeg's ----:MUSICBRAINZ_TRACKID
+                                                    # is a recording ID, Picard's field of that name not)
+                for x in [x for x in tags if x.startswith(_FF) and x[len(_FF):].lower() == k
+                          and x[len(_FF):].lower() not in _MP4_FREE_R and x[len(_FF):] not in customs]:
+                    tags[x] = [MP4FreeForm(str(v).encode("utf-8")) for v in vals]
     if fam == "id3":
+        # (the older places Picard moves on loading - and so writes the frame from on any save:
+        # TXXX:ALBUMARTISTSORT into TSO2, TXXX:COMPOSERSORT into TSOC, where the file has none)
+        for old, fid in (("TXXX:ALBUMARTISTSORT", "TSO2"), ("TXXX:COMPOSERSORT", "TSOC")):
+            if old in tags and fid not in tags:
+                fr = tags.pop(old)
+                tags.add(Frames[fid](encoding=fr.encoding, text=list(fr.text)))
+        # (and the obsolete names it renames on saving: TXXX:Artists, TXXX:Work)
+        for old, new in (("Artists", "ARTISTS"), ("Work", "WORK")):
+            if "TXXX:" + old in tags and "TXXX:" + new not in tags:
+                fr = tags.pop("TXXX:" + old)
+                tags.add(TXXX(encoding=fr.encoding, desc=new, text=list(fr.text)))
         save_id3(f, tags, keep_original_date="originaldate" not in changes, keep_date="date" not in changes,
                  v2=fmt.get("v2"), v1=fmt.get("v1"), join=join, first=first if v23 else None)
         if type(f).__name__ == "WAVE":
@@ -1265,6 +1430,8 @@ def _write_pair(fam, f, tags, pair, n, t, changed=None, keep=frozenset()):
         # "5/9" goes into its own fields when that number is rewritten)
         had = list(tags[names[0][0]]) if names[0][0] in tags else []
         inside = bool(had) and "/" in str(had[0]) and not any(x in tags for x in names[1])
+        if inside and changed is not None and tot not in changed:
+            t = ""                                   # (a total only inside "5/9" is none, as Picard reads it)
         # (a number field holding "5/9" is rewritten as the number alone when the total changes:
         # readers - and Picard - take the total from it first)
         if changed is None or num in changed or (tot in changed and had and "/" in str(had[0])):
@@ -1289,10 +1456,15 @@ def _write_pair(fam, f, tags, pair, n, t, changed=None, keep=frozenset()):
             del tags[key]
     elif fam == "apev2":
         key = "Track" if num == "tracknumber" else "Disc"
-        if key in tags:
-            del tags[key]
+        # (and an item spelled TRACKNUMBER / DISCNUMBER: Picard writes the number there, as it is
+        # spelled - its casemap)
+        own = [x for x in tags.keys() if x.lower() == num and tags[x].kind == 0]
+        for x in [key] + own:
+            if x in tags:
+                del tags[x]
         if n:
-            tags[key] = f"{n}/{t}" if t else n
+            for x in [key] + own:
+                tags[x] = f"{n}/{t}" if t else n
     elif fam == "asf":
         key = "WM/TrackNumber" if num == "tracknumber" else "WM/PartOfSet"
         if key in tags:
@@ -1493,10 +1665,19 @@ def _set_mp4(f, tags, k, vals, spell=None):
 
 def _set_apev2(f, tags, k, vals):
     name = APE.get(k, k.title())
-    if name in tags:
-        del tags[name]
+    # (an item the file spells as the field's own name - ALBUMARTIST (Mp3tag), RELEASETYPE
+    # (ffmpeg) -: Picard writes the field there (its casemap), not beside it; with Picard's
+    # item there too, both)
+    # (never another field's own item: MUSICBRAINZ_TRACKID is the recording ID's)
+    own = [x for x in tags.keys() if x.lower() == k and x.lower() != name.lower() and x.lower() not in _APE_R
+           and tags[x].kind == 0]
+    names = own if (own and name not in tags) else [name] + own
+    for x in names:
+        if x in tags:
+            del tags[x]
     if vals:
-        tags[name] = vals
+        for x in names:
+            tags[x] = vals
 
 
 def _set_asf(f, tags, k, vals):

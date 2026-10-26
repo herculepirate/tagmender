@@ -25,10 +25,10 @@ class OldProfileDefaults(unittest.TestCase):
     def setUp(self):
         picard_config._cache.clear()
 
-    def test_unversioned_profile_keeps_the_old_defaults(self):
+    def test_version_1_profile_keeps_the_old_defaults(self):
         path = profiles.path_of("Lossy")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"name": "Lossy"}))       # (no version: before versions)
+        path.write_text(json.dumps({"version": 1, "name": "Lossy"}))
         p = profiles.load("Lossy")
         self.assertEqual((p["filenames"]["compat"], p["remove_empty_dirs"]), ("windows", True))
 

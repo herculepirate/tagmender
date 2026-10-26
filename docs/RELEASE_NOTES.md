@@ -129,6 +129,21 @@ both, as Picard writes them; a preserved total beats a script's $unset. A naming
 %MyTag% names files alike on every run. $unset(comment) beside a described comment in the file
 removes the plain one.
 
+**Thirtieth review.** ffmpeg-converted files get Picard's own frames: the totals in TRCK/TPOS,
+the MusicBrainz IDs, release type and dates under Picard's names (a TXXX:TOTALTRACKS or
+TXXX:MUSICBRAINZ_ALBUMID beside them is a tag of its own, which a tagger script can read or
+`$delete` by its name); removing such a field no longer fails the album. A FLAC or Ogg "5/9"
+deleted by a script no longer brings its old total back, and names no disc from it. A
+WavPack/APE album whose APEv2 tag is 131 bytes is no longer failed as "audio data differed";
+an APEv2 ALBUMARTIST or RELEASETYPE item is updated where it is. UNSYNCEDLYRICS is read as the
+lyrics and a WAV's RIFF INFO as its tags where its ID3 tag has none, as Picard reads them.
+Marking unresolved, writing album IDs and enrich keep an MP3's ID3v1 tag byte for byte (it was
+merged into the ID3v2 tag). The watcher leaves alone albums undone with the previous version.
+The Opus cover repair also reaches files already in place, and a Vorbis total under one name
+gets the other only when the file is written anyway. TXXX:ALBUMARTISTSORT, :COMPOSERSORT,
+:Artists and :Work move to Picard's frames when the file is written; a TXXX beside the field's
+own frame no longer hides the field from scripts and naming.
+
 **Picard parity (twenty-eighth review).** Opus covers carry no size, as Picard writes them
 (players built on libopusfile showed none); a FLAC or Ogg total is written under both names
 whenever its number or total is (TRACKTOTAL alone gets TOTALTRACKS); the "picard" naming preset

@@ -82,7 +82,7 @@ def album_key(folder: Path, files) -> str:
     return _files_key(folder, files) if others else planmod.db_text(folder)
 
 
-def shape(folder: Path, files=None) -> str:
+def shape(folder: Path, files=None, **how) -> str:
     """Which audio files there are, their sizes and their tags (not their times): what undo
     leaves is compared with this - a track added, removed or retagged changes it (tags
     rewritten inside their padding keep the size), a touched time not."""
@@ -94,7 +94,7 @@ def shape(folder: Path, files=None) -> str:
     for p in paths:
         if p.suffix.lower() in ex.AUDIO_EXT and executor.STAGE_TAG not in p.name:
             try:
-                tags = tagio.read(p)
+                tags = tagio.read(p, **how)
             except Exception:
                 tags = {}
             try:
@@ -104,6 +104,15 @@ def shape(folder: Path, files=None) -> str:
             h.update(json.dumps(sorted((k, [str(x) for x in v] if isinstance(v, list) else str(v))
                                        for k, v in tags.items()), ensure_ascii=True).encode() + b"\n")
     return "shape:" + h.hexdigest()[:16]
+
+
+def shape_in(folder: Path, files, signature) -> bool:
+    """The folder's shape is one recorded (as this version reads tags, or as earlier versions
+    did: an M4A's track 0, a user tag spelled like a field merged into it)."""
+    sigs = set((signature or "").split("|"))
+    return any(shape(folder, files, **how) in sigs for how in
+               ({"mp4_zero": z, "split_custom": sc} if (sc, z) != (True, True) else {}
+                for sc in (True, "deferred", False) for z in (True, False)))
 
 
 def snapshot(folder: Path, files=None, deep=True):
@@ -225,13 +234,13 @@ class Watcher:
             for alt in sorted(alts - {key}):
                 other = db.execute("SELECT signature, status, ts FROM processed WHERE folder=?", (alt,)).fetchone()
                 if other and other[1] == "undone" and (not row or (other[2] or 0) >= (row[4] or 0)) and \
-                        shape(folder, files) in (other[0] or "").split("|"):
+                        shape_in(folder, files, other[0]):
                     return False, "undone"
         if not row:
             return True, "new"
         signature, status, attempts, next_try, ts = row
         if status == "undone":                       # a job undone by hand is not done again by itself
-            return (True, "changed since the undo") if shape(folder, files) not in (signature or "").split("|") \
+            return (True, "changed since the undo") if not shape_in(folder, files, signature) \
                 else (False, "undone")
         if signature != sig:
             return True, "changed"

@@ -567,13 +567,21 @@ def _embed_all(stage, a: dict, dst):
     if art.get("front") and dst in (art.get("embed_into") or []) and _embed_image(art) is not None:
         embed_front(stage, *_embed_image(art), replace=dst in (art.get("embed_replace") or []))
     if dst in ((a.get("artist_photo") or {}).get("embed_into") or []) and _artist_image(a) is not None:
-        embed_picture(stage, *_artist_image(a), ptype=ARTIST_TYPE)
+        ap = a["artist_photo"]
+        embed_picture(stage, *_artist_image(a), ptype=ARTIST_TYPE, desc=ap.get("mark") or "",
+                      replace=dst in (ap.get("replace") or []))
 
 
-def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE):
+def _ours(desc) -> bool:
+    import artwork
+    return str(desc or "").startswith(artwork.ARTIST_MARK)
+
+
+def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc="", replace=False):
     """Add a picture of another type than the front (the artist photo) - never in place of one
-    the track has: only to a track with no picture of that type. MP4 has no picture types
-    (every picture there is a cover): nothing is added."""
+    the track has: only to a track with no picture of that type. replace: in place of the
+    artist picture TagMender embedded before (its description says so); one of the user's
+    own stays. MP4 has no picture types (every picture there is a cover): nothing is added."""
     import base64
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
@@ -582,32 +590,47 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE):
     if isinstance(f, MP4):
         return
     if isinstance(f, FLAC):
+        if replace and any(p.type == ptype and _ours(p.desc) for p in f.pictures):
+            keep = [p for p in f.pictures if not (p.type == ptype and _ours(p.desc))]
+            f.clear_pictures()
+            for p in keep:
+                f.add_picture(p)
         if any(p.type == ptype for p in f.pictures):
             return
         pic = Picture()
-        pic.type, pic.mime, pic.data = ptype, mime, data
+        pic.type, pic.mime, pic.data, pic.desc = ptype, mime, data, desc
         f.add_picture(pic)
     elif isinstance(getattr(f, "tags", None), ID3) or type(f).__name__ in ("MP3", "AIFF", "WAVE"):
         if f.tags is None:
             f.add_tags()
+        if replace:
+            for x in list(f.tags.getall("APIC")):
+                if x.type == ptype and _ours(x.desc):
+                    del f.tags[x.HashKey]
         if any(x.type == ptype for x in f.tags.getall("APIC")):
             return
         taken = {x.desc for x in f.tags.getall("APIC")}
-        desc = "Artist"
+        desc = desc or "Artist"
         while desc in taken:                              # (APIC frames are told apart by description)
             desc += " "
         f.tags.add(APIC(encoding=3, mime=mime, type=ptype, desc=desc, data=data))
     elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
         old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or [])
+        keep = []
         for v in old:
             try:
-                if Picture(base64.b64decode(v)).type == ptype:
-                    return
+                p = Picture(base64.b64decode(v))
             except Exception:
+                keep.append(v)
                 continue
+            if replace and p.type == ptype and _ours(p.desc):
+                continue
+            keep.append(v)
+            if p.type == ptype:
+                return
         pic = Picture()
-        pic.type, pic.mime, pic.data = ptype, mime, data
-        f.tags["METADATA_BLOCK_PICTURE"] = old + [base64.b64encode(pic.write()).decode("ascii")]
+        pic.type, pic.mime, pic.data, pic.desc = ptype, mime, data, desc
+        f.tags["METADATA_BLOCK_PICTURE"] = keep + [base64.b64encode(pic.write()).decode("ascii")]
     else:
         return
     if isinstance(getattr(f, "tags", None), ID3):

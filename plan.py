@@ -326,7 +326,8 @@ _DISC_NAME = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|[a-h])\b"
 MAX_TREE = 5000                           # entries looked at below one album folder
 
 
-def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist=""):
+def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist="",
+                single=False):
     """([(companion, destination)], why not): the non-audio files that go with an album
     that moves or is copied, as Picard's "move additional files" and foobar2000's "move
     entire source folder content" do:
@@ -386,7 +387,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             continue
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
-            return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only, artist=artist)[0], \
+            return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only, artist=artist,
+                               single=single)[0], \
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
@@ -400,12 +402,23 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 q = q.parent
     by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
     ours = {s_.parent for s_ in moved}
-    # an artist folder (named after the album artist) holding the artist's other albums, with
-    # this album's tracks loose in it: its own pictures (the artist photo) are no one album's
+    # an artist folder holding the artist's other albums, with this album's tracks loose in it:
+    #  - a loose single (one track) beside folders that are neither its discs nor its bonus:
+    #    the folder's own files are no one album's (they all stay);
+    #  - an album ripped flat, in a folder named after its artist (not a self-titled album's
+    #    own folder, "Band/Band/"): its files go with it, but the artist photo and the
+    #    folder's own art (fanart, logo ...) stay.
     import artwork as _artwork
+    compat_ = (profile.get("filenames") or {}).get("compat", "windows")
     discs_here = any(q.parent == src_dir and _DISC_NAME.match(q.name) for q in ours)
-    src_shared = bool(foreign) and _artwork.named_after(src_dir, artist,
-                                                        (profile.get("filenames") or {}).get("compat", "windows"))
+    loose = [s_ for s_ in moved if s_.parent == src_dir]
+    src_shared = len(loose) == 1 and not discs_here and any(
+        f_ != src_dir and not _DISC_NAME.match(f_.relative_to(src_dir).parts[0])
+        and not _artwork._BONUS.match(f_.relative_to(src_dir).parts[0])
+        for f_ in foreign if src_dir in f_.parents)
+    artist_folder = src_shared or (bool(foreign) and _artwork.named_after(src_dir, artist, compat_)
+                                   and not _artwork.named_after(src_dir.parent, artist, compat_))
+    keep = _artwork.artist_folder_keeps(src_dir, single=loose if single else ()) if artist_folder else set()
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus
         album), only the folders holding this album's own music, and what is inside them,
@@ -434,8 +447,26 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 continue                                    # a library root's own files stay
             if foreign and not track and not shared_ok(d):
                 continue                                    # the album folder is shared with another album
+            if d == src_dir and p in keep:
+                continue                                    # the artist folder's own photo and art
             out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
     return out, ""
+
+
+def _album_artist(prop) -> tuple[str, bool]:
+    """(the album artist, whether the release is a single): from the release matched, else
+    (an unresolved album) from the tracks' own tags."""
+    t = prop.targets[0] if prop.targets else {}
+    who = (t.get("albumartist") or t.get("artist") or [""])[0] if t else ""
+    if not who:
+        from engine import _first
+        for f in prop.files[:3]:
+            m = ex.read_meta(Path(f))
+            who = (_first(m, "albumartist") or _first(m, "artist") or "").strip()
+            if who:
+                break
+    single = "single" in [str(x).lower() for x in (t.get("releasetype") or [])]
+    return who or "", single
 
 
 def _holds_other_music(folder: Path, entry, group=None) -> bool:
@@ -761,9 +792,9 @@ class Planner:
             src_root = Path(prop.source_dir)
             real_src = os.path.realpath(src_root)
             at_root = real_src in self.library_roots() or (real_src in self.roots() and len(pairs) == 1)
-            who = ((prop.targets[0].get("albumartist") or prop.targets[0].get("artist") or [""])[0]
-                   if prop.targets else "") or ""
-            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root, artist=who)
+            who, single = _album_artist(prop)
+            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root, artist=who,
+                                         single=single)
             if why_not:
                 entry["notes"].append(why_not)
             for c, want in comps:
@@ -894,29 +925,50 @@ class Planner:
                                              self.profile["filenames"]["compat"])
         staging = ex.STATE_DIR / "staging" / self.job
         image, source = ap["image"], ap.get("source", "")
-        there = _artwork.artist_folder_photo(artist_dir) if artist_dir is not None else None
+        _who, single = _album_artist(prop)
+        mine = [Path(fe["src"]) for fe in entry["files"]] if single else ()
+        there = _artwork.artist_folder_photo(artist_dir, single=mine) if artist_dir is not None else None
+        claims = self.__dict__.setdefault("artist_dirs", {})
+        dkey = fnm.fold(artist_dir) if artist_dir is not None else None
         if there is not None:
             # the artist folder (where the album is, or goes) has its photo - the user's own, or
             # one corrected by hand: that one goes into the tracks, never a second one
             try:
-                image = str(_artwork._stage(there.read_bytes(), staging)[0])
+                data = there.read_bytes()
+                image = str(_artwork._stage(data, staging)[0])
                 source = f"the artist folder's {there.name}"
             except Exception:
                 return None
+        elif dkey is not None and dkey in claims:
+            image, source, data = claims[dkey]     # another album of this folder, this run: its photo
         else:
             try:                          # (a copy of its own: the photo planned is the photo written)
                 image = str(_artwork._stage(Path(image).read_bytes(), staging)[0])
+                data = Path(image).read_bytes()
             except Exception:
                 return None
-        into = []
+        if dkey is not None:
+            claims.setdefault(dkey, (image, source, data))
+        # the photo's identity - of the artist folder's file, as it is or will be - goes into the
+        # description of the picture embedded: a corrected artist.jpg replaces it on a later run
+        ident = _artwork.photo_identity(data)
+        into, replace = [], []
         if want["embed"]:
             fronts = set((entry.get("artwork") or {}).get("embed_into") or [])
-            # beside a front cover only (one the track has, or gets now): an artist photo is never
-            # a track's only picture - players would show it as the cover
-            into = [fe["dst"] for fe in entry["files"] if Path(fe["src"]).suffix.lower() in EMBEDDABLE
-                    and Path(fe["src"]).suffix.lower() not in (".m4a", ".mp4")
-                    and not _artwork.has_artist_picture(fe["src"])
-                    and (fe["dst"] in fronts or _artwork.has_front(fe["src"]))]
+            for fe in entry["files"]:
+                ext_ = Path(fe["src"]).suffix.lower()
+                if ext_ not in EMBEDDABLE or ext_ in (".m4a", ".mp4"):
+                    continue
+                # beside a front cover only (one the track has, or gets now): an artist photo is
+                # never a track's only picture - players would show it as the cover
+                if not (fe["dst"] in fronts or _artwork.has_front(fe["src"])):
+                    continue
+                marks = _artwork.our_artist_marks(fe["src"])
+                if marks and any(m != ident for m in marks):
+                    into.append(fe["dst"])                 # TagMender's own, from another photo
+                    replace.append(fe["dst"])
+                elif not _artwork.has_artist_picture(fe["src"]):
+                    into.append(fe["dst"])
             for fe in entry["files"]:
                 if fe["dst"] in into and fe["op"] == "none":       # only the artist photo is new
                     fe["op"] = "tag" if fe["dst"] == fe["src"] else op
@@ -935,7 +987,8 @@ class Planner:
         if not into and not any(sc.get("kind") == "artist" for sc in entry["sidecars"]):
             return None
         return {"image": image, "embed": emb, "embed_into": into, "source": source,
-                "artist": ap.get("artist", "")}
+                "artist": ap.get("artist", ""), "mark": _artwork.artist_mark(ident),
+                "replace": [x for x in replace if x in into]}
 
     def _earlier_copy(self, dst: Path, src: Path, dest_root=None, legacy=None):
         """The copy an earlier run made of src into this destination: where TagMender
@@ -1250,7 +1303,9 @@ def preview(plan: dict, verbose=False) -> str:
         if a.get("artist_photo") and a["artist_photo"]["embed_into"]:
             ap = a["artist_photo"]
             out.append(f"    art   artist photo of {ap['artist']} embedded into {len(ap['embed_into'])} file(s) "
-                       f"from {ap['source']}")
+                       f"from {ap['source']}"
+                       + (f" (in place of the one TagMender embedded before in {len(ap['replace'])})"
+                          if ap.get("replace") else ""))
         for sc in a.get("sidecars") or []:
             if sc.get("kind") == "artist":
                 out.append(f"    art   {sc['dst']}  (artist photo, new file)")

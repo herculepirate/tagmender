@@ -546,26 +546,94 @@ def has_front(path) -> bool:
 
 
 ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album folders) both are its photo
+# the artist folder's own art for Kodi, Jellyfin, Plex: never any one album's
+ARTIST_FOLDER_ART = ("artist", "fanart", "logo", "clearlogo", "banner", "clearart", "landscape", "backdrop")
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+ARTIST_MARK = "TagMender artist photo "     # + the photo's identity: TagMender's own embedded artist picture
 
 
-def _flat_album_here(folder: Path, names) -> bool:
-    """Two or more tracks of one album lie loose in folder (an album ripped flat into the
-    artist folder): a folder.jpg there is that album's cover. One loose track (a single)
-    is not an album."""
-    albums = {}
+def artist_mark(identity: str) -> str:
+    """The description TagMender gives the artist picture it embeds: the photo it came from
+    is known later (a corrected artist.jpg replaces it; a picture of the user's own never)."""
+    return ARTIST_MARK + identity[:16]
+
+
+def photo_identity(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def our_artist_marks(path) -> list:
+    """The identities in the descriptions of TagMender's own artist pictures in the track."""
+    import base64
+    from mutagen.flac import FLAC, Picture
+    from mutagen.id3 import ID3
+    import tagio
+    try:
+        f = tagio.mutagen_file(path)
+    except Exception:
+        return []
+    descs = []
+    try:
+        if isinstance(f, FLAC):
+            descs = [p.desc for p in f.pictures if p.type == 8]
+        elif isinstance(getattr(f, "tags", None), ID3):
+            descs = [fr.desc for fr in f.tags.getall("APIC") if fr.type == 8]
+        elif f is not None and f.tags is not None:
+            for v in f.tags.get("metadata_block_picture", []) or []:
+                try:
+                    p = Picture(base64.b64decode(v))
+                except Exception:
+                    continue
+                if p.type == 8:
+                    descs.append(p.desc)
+    except Exception:
+        return []
+    return [str(d)[len(ARTIST_MARK):].strip() for d in descs if str(d).startswith(ARTIST_MARK)]
+
+
+def artist_folder_keeps(folder, single=()) -> set:
+    """The files of an artist folder that stay when an album moves out of it: its photo and
+    its own art (fanart, logo, banner ...)."""
+    keep = set()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return keep
     for n in names:
-        if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."):
+        st, ext = os.path.splitext(n)
+        if st.lower() in ARTIST_FOLDER_ART and ext.lower() in IMAGE_EXT:
+            keep.add(Path(folder) / n)
+    ph = artist_folder_photo(folder, single)
+    if ph is not None:
+        keep.add(ph)
+    return keep
+
+
+def _flat_album_here(folder: Path, names, single=()) -> bool:
+    """An album lies ripped flat in folder (the artist folder): two or more loose tracks
+    tagged as one album, or three or more loose untagged tracks. A folder.jpg there is that
+    album's cover. One or two untagged loose tracks (a single, an A- and B-side) are no
+    album. single: the files of a single being planned now, left out of the count."""
+    skip = {os.path.basename(str(x)) for x in single}
+    albums, untagged = {}, 0
+    for n in names:
+        if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith(".") and n not in skip:
             t = _album_id(Path(folder) / n)[0]
             if t:
                 albums[t] = albums.get(t, 0) + 1
                 if albums[t] >= 2:
                     return True
+            else:
+                untagged += 1
+                if untagged >= 3:
+                    return True
     return False
 
 
-def artist_folder_photo(folder) -> Path | None:
+def artist_folder_photo(folder, single=()) -> Path | None:
     """The artist folder's own photo: artist.jpg, or folder.jpg (Kodi, Jellyfin) - unless
-    an album lies ripped flat in the folder (then folder.jpg is its cover)."""
+    an album lies ripped flat in the folder (then folder.jpg is its cover). single: see
+    _flat_album_here."""
     try:
         names = sorted(os.listdir(folder))
     except OSError:
@@ -575,7 +643,7 @@ def artist_folder_photo(folder) -> Path | None:
         st, ext = os.path.splitext(n)
         if st.lower() in ARTIST_STEMS and ext.lower() in (".jpg", ".jpeg", ".png"):
             pics.setdefault(st.lower(), n)
-    stems = ("artist",) if "folder" in pics and _flat_album_here(Path(folder), names) else ARTIST_STEMS
+    stems = ("artist",) if "folder" in pics and _flat_album_here(Path(folder), names, single) else ARTIST_STEMS
     for stem in stems:
         if stem in pics:
             x = Path(folder) / pics[stem]
@@ -647,32 +715,58 @@ def _photo_cache_dir() -> Path:
     return ex.STATE_DIR / "artist_photos"
 
 
-def cached_artist_photo(key: str):
-    """(True, {"image": ...}) or (True, None) for "none found, asked lately"; (False, None):
-    never asked. Kept across runs, so an artist is looked up once, not once per album and run;
-    "none found" is asked again after 30 days."""
-    import time as _time
+def _cache_files(key: str):
     h = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:20]
     d = _photo_cache_dir()
-    img, none = d / f"{h}.jpg", d / f"{h}.none"
-    if img.exists() and _time.time() - img.stat().st_mtime > IMAGE_DAYS * 86400:
-        return False, None                # (asked again now and then: a better or corrected photo)
-    if img.exists():
-        try:
-            with __import__("PIL.Image", fromlist=["Image"]).open(img) as im:
-                w, h2 = im.size
-        except Exception:
-            return False, None
-        src = (d / f"{h}.src").read_text().strip() if (d / f"{h}.src").exists() else "artist photo"
-        return True, {"image": str(img), "width": w, "height": h2, "source": src}
-    if none.exists() and _time.time() - none.stat().st_mtime < NONE_DAYS * 86400:
+    return d, h, d / f"{h}.jpg", d / f"{h}.none"
+
+
+def _kept(d, h, img) -> dict | None:
+    try:
+        with __import__("PIL.Image", fromlist=["Image"]).open(img) as im:
+            w, h2 = im.size
+    except Exception:
+        return None
+    try:
+        src = (d / f"{h}.src").read_text().strip() or "artist photo"
+    except OSError:
+        src = "artist photo"
+    return {"image": str(img), "width": w, "height": h2, "source": src}
+
+
+def cached_artist_photo(key: str):
+    """(True, {"image": ...}) or (True, None) for "none found, asked lately"; (False, None):
+    never asked, or asked long ago. Kept across runs, so an artist is looked up once, not
+    once per album and run: a photo is asked again after IMAGE_DAYS, "none found" after
+    NONE_DAYS. Photos found by name only (keys "dir:...") are never kept."""
+    import time as _time
+    d, h, img, none = _cache_files(key)
+    now = _time.time()
+    if img.exists() and not key.startswith("dir:") and now - img.stat().st_mtime <= IMAGE_DAYS * 86400:
+        got = _kept(d, h, img)
+        if got is not None:
+            return True, got
+    if none.exists() and now - none.stat().st_mtime < NONE_DAYS * 86400:
+        if img.exists() and not key.startswith("dir:"):      # asked again lately, nothing better: the old one
+            got = _kept(d, h, img)
+            if got is not None:
+                return True, got
         return True, None
     return False, None
 
 
+def stale_artist_photo(key: str) -> dict | None:
+    """The photo kept for key however old (a search to refresh it failed: it still serves)."""
+    if key.startswith("dir:"):
+        return None
+    d, h, img, _none = _cache_files(key)
+    return _kept(d, h, img) if img.exists() else None
+
+
 def forget_artist_photos(match: str = "") -> int:
-    """Forget the artist photos kept for later runs (all, or those whose key - a MusicBrainz
-    artist ID, or an artist folder - contains match). Returns how many."""
+    """Forget the artist photos kept for later runs (all - every file in the cache folder -
+    or those whose key, a MusicBrainz artist ID or an artist folder, contains match).
+    Returns how many."""
     d = _photo_cache_dir()
     n = 0
     if not d.is_dir():
@@ -683,8 +777,16 @@ def forget_artist_photos(match: str = "") -> int:
             keys[f.stem] = f.read_text()
         except OSError:
             continue
+    if not match:                         # (entries an older TagMender kept have no .key)
+        hashes = {f.name.split(".")[0] for f in d.iterdir() if not f.name.startswith(".")}
+        for f in d.iterdir():
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        return len(hashes)
     for h, key in keys.items():
-        if match and match.casefold() not in key.casefold():
+        if match.casefold() not in key.casefold():
             continue
         for ext in (".jpg", ".src", ".none", ".key"):
             try:
@@ -696,8 +798,9 @@ def forget_artist_photos(match: str = "") -> int:
 
 
 def remember_artist_photo(key: str, got, name: str = ""):
-    h = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:20]
-    d = _photo_cache_dir()
+    """Keep what a search found for key: the photo, or "none found". When none is found and
+    a photo is kept from before, that one goes on serving (returned)."""
+    d, h, img, none = _cache_files(key)
     d.mkdir(parents=True, exist_ok=True)
     try:
         (d / f"{h}.key").write_text(f"{key}\t{name}")       # (for listing and forget_artist_photos)
@@ -707,11 +810,19 @@ def remember_artist_photo(key: str, got, name: str = ""):
             tmp = d / f".{h}.{os.getpid()}.tmp"            # (two TagMenders at once never share one)
             small = embed_copy(Path(got["image"]), ex.STATE_DIR / "staging" / "artist-cache", CACHE_MAX_SIDE)
             tmp.write_bytes(small.read_bytes())
-            os.replace(tmp, d / f"{h}.jpg")
+            os.replace(tmp, img)
             tmp.write_text(got.get("source", ""))
             os.replace(tmp, d / f"{h}.src")
-            return dict(got, image=str(d / f"{h}.jpg"))
-        (d / f"{h}.none").touch()
+            try:
+                none.unlink()
+            except FileNotFoundError:
+                pass
+            return dict(got, image=str(img))
+        old = stale_artist_photo(key)
+        if old is not None:               # (nothing better found: the kept one serves another IMAGE_DAYS)
+            os.utime(img)
+            return old
+        none.touch()
     except OSError:
         pass
     return got

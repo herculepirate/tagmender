@@ -781,19 +781,26 @@ def _watch_manage(args):
 
 def cmd_artist_photos(args):
     """The artist photos kept between runs (so an artist is looked up once): list or forget them
-    - after a wrong match, forget it, delete the artist.jpg and run again."""
+    - after a wrong match, put the right photo in the artist folder as artist.jpg (or delete
+    it), forget it and run again: the tracks' artist picture follows the artist folder."""
     import artwork
     d = artwork._photo_cache_dir()
     if args.forget is not None:
         n = artwork.forget_artist_photos(args.forget)
         print(f"forgot {n} artist photo(s)" + (f" matching {args.forget!r}" if args.forget else ""))
         return EXIT_OK
+    listed = 0
     for k in sorted(d.glob("*.key")) if d.is_dir() else []:
         h = k.stem
-        state = "photo" if (d / f"{h}.jpg").exists() else "none found" if (d / f"{h}.none").exists() else "-"
+        state = "photo" if (d / f"{h}.jpg").exists() else "none found" if (d / f"{h}.none").exists() else ""
+        if not state:
+            continue                      # (found by name only: never kept)
+        listed += 1
         src = (d / f"{h}.src").read_text().strip() if (d / f"{h}.src").exists() else ""
         key, _t, name = k.read_text().partition("\t")
         print(f"{state:<11} {name or '?'}  ({key})  {src}")
+    if not listed:
+        print("no artist photos kept")
     return EXIT_OK
 
 

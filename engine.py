@@ -540,6 +540,15 @@ class Engine:
             artist_dir = artwork.artist_dir_for(folder, who, roots, self.profile["filenames"]["compat"])
             if artist_dir is not None and not artwork.artist_folder_has_photo(artist_dir):
                 lacking = True
+            elif artist_dir is not None and want["embed"] and not lacking:
+                # the artist folder's photo was changed (a wrong one corrected): the picture
+                # TagMender embedded from the old one is replaced
+                try:
+                    ident = artwork.photo_identity(artwork.artist_folder_photo(artist_dir).read_bytes())
+                except Exception:
+                    ident = None
+                lacking = ident is not None and any(m != ident for f in files
+                                                    for m in artwork.our_artist_marks(f))
         elif want["file"]:
             lacking = True                # (moved or copied: where it lands is the plan's; cached below)
         if not lacking:
@@ -560,6 +569,10 @@ class Engine:
         key = mbid or (f"dir:{os.path.realpath(str(artist_dir))}" if artist_dir is not None else who.casefold())
         lasting = bool(mbid) or artist_dir is not None
         cache = self.__dict__.setdefault("_artists", {})
+        by_dir = self.__dict__.setdefault("_artist_dirs", {})
+        real_dir = os.path.realpath(str(artist_dir)) if artist_dir is not None else None
+        if key not in cache and real_dir in by_dir:
+            cache[key] = by_dir[real_dir]           # another album of this artist folder, this run
         if key not in cache:
             known, got = artwork.cached_artist_photo(key) if lasting else (False, None)
             if not known:
@@ -577,7 +590,11 @@ class Engine:
                 # "none found" is kept (asked again after 30 days); a failed search is not
                 if lasting and ((got and got.get("image")) or (got or {}).get("note") == "no artist photo found"):
                     got = artwork.remember_artist_photo(key, got if got and got.get("image") else None, who)
+                if lasting and not (got and got.get("image")):
+                    got = artwork.stale_artist_photo(key) or got     # (the search failed: the kept one serves)
             cache[key] = got if got and got.get("image") else None
+            if real_dir is not None and cache[key]:
+                by_dir.setdefault(real_dir, cache[key])
         if cache[key]:
             prop.artist_photo = dict(cache[key], artist=who)
 

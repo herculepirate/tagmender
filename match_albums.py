@@ -732,6 +732,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tocs": disc_tocs(infos) or log_toc or cue_tocs(album_dir, infos),
         "rip_log_toc": bool(log_toc),
         "scans": scan_evidence(album_dir),
+        "packaging": packaging_evidence(album_dir),
         "isrcs": [i.get("isrc") for _p, i in infos if i.get("isrc")],
         "store_tracks": sorted({i["store_track"] for _p, i in infos if i.get("store_track")}),
         "credit_text": " ".join(sorted({i.get("credit") or "" for _p, i in infos})) + " " + notes_text(album_dir),
@@ -1265,7 +1266,7 @@ def mb_candidate(rel):
         "catnos": {mc.norm_code(i.get("catalog-number")) for i in infos if i.get("catalog-number")},
         "barcodes": {mc.norm_code(rel["barcode"])} if rel.get("barcode") else set(),
         "disc_count": len([m for m in audio_media if m.get("tracks")]) or len(audio_media) or 1,
-        "tracks": tracks, "disc_titles": disc_titles,
+        "tracks": tracks, "disc_titles": disc_titles, "packaging": mc.packaging_kind(rel.get("packaging")),
         "formats": {k for k in (mc.media_kind(m.get("format")) for m in audio_media) if k},
     }
 
@@ -1485,6 +1486,8 @@ def discogs_candidate(rel, dm):
         "catnos": {mc.norm_code(l["catno"]) for l in labels
                    if l.get("catno") and str(l["catno"]).casefold() != "none"},
         "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks, "disc_titles": disc_titles,
+        "packaging": next((k for f in rel.get("formats") or [] for d in f.get("descriptions") or []
+                           for k in [mc.packaging_kind(d)] if k), ""),
         "formats": {k for k in (mc.media_kind(f.get("name")) for f in rel.get("formats") or []) if k},
     }
 
@@ -1626,6 +1629,23 @@ def scan_evidence(album_dir):
                 if w >= 1000 and 1.15 <= w / max(h, 1) <= 1.5:
                     return {"physical": True, "why": f"a tray-card scan ({p.name})"}
     return {"physical": False, "why": ""}
+
+
+def packaging_evidence(album_dir):
+    """The packaging your scans are named after: "scan-digipak.jpg", "Digi Cover.png",
+    "Digibook 01.jpg", "Jewel case back.jpg" (Cynic - Carbon-Based Anatomy: the jewel case
+    and digipak pressings share barcode and number; only the scans tell them apart).
+    Returns a set of mc.packaging_kind values; empty when the names say nothing."""
+    out = set()
+    for dirpath, dirs, names in os.walk(album_dir):
+        dirs[:] = [d for d in dirs if not _NOT_A_SCAN_DIR.match(d)]
+        for n in names:
+            p = Path(dirpath) / n
+            if p.suffix.lower() in IMAGE_EXT and not web_image(p):
+                k = mc.packaging_kind(p.stem)
+                if k:
+                    out.add(k)
+    return out
 
 
 def list_images(base, max_n):

@@ -1297,6 +1297,30 @@ class PressingEvidence(unittest.TestCase):
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
         self.assertFalse(r["best"].get("own_catno_absent"))
 
+    def test_the_scans_packaging_picks_the_pressing(self):
+        """Cynic - 2015 - Carbon-Based Anatomy: the jewel case and the digipak share the barcode
+        and number; the folder's "scan-digipak.jpg" says which one this is."""
+        code = {mc.norm_code("SOM 381")}
+        a = album(title="Carbon-Based Anatomy", folder="2015 - Carbon-Based Anatomy",
+                  catnos=code, barcodes={"802644838124"}, packaging={"digipak"})
+        jewel = cand(id="jewel", country="XE", title="Carbon-Based Anatomy", catnos=code,
+                     barcodes={"802644838124"}, packaging="jewel")
+        digi = cand(id="digi", country="XE", title="Carbon-Based Anatomy", catnos=code,
+                    barcodes={"802644838124"}, packaging="digipak")
+        for order in ((jewel, digi), (digi, jewel)):
+            r = self.pick(a, *order)
+            self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "digi"), r["why"])
+        # scans that name no packaging decide nothing
+        r = self.pick(dict(a, packaging=set()), jewel, digi)
+        self.assertNotEqual(r["status"], "auto")
+
+    def test_packaging_names(self):
+        for text, kind in (("scan-digipak", "digipak"), ("digi0000", "digipak"), ("Digipack front", "digipak"),
+                           ("Digibook 01", "digibook"), ("Jewel Case", "jewel"), ("Slim Jewel Case", "jewel"),
+                           ("Mediabook", "mediabook"), ("Gatefold Cover", "gatefold"),
+                           ("digital booklet", ""), ("Digital Media", ""), ("book0000", ""), ("", "")):
+            self.assertEqual(mc.packaging_kind(text), kind, text)
+
     def test_the_folders_own_number_outweighs_lost_points(self):
         """ISIS - 2004 - 2012 - Live I - VI [Daymare Recordings, Japan, DYMC-150]: the catalogue
         number and every track agree, but the folder's year (the recording years) and a

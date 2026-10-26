@@ -832,7 +832,7 @@ def media_kind(fmt):
 
 
 CLUE_WEIGHTS = {"disc TOC": 3, "barcode": 3, "catalogue number": 3, "source link": 3, "isrc": 2,
-                "fingerprint": 2, "date": 2, "label": 1,
+                "fingerprint": 2, "date": 2, "label": 1, "packaging": 1,
                 "country": 1, "format": 1, "physical": 1, "track lengths": 1, "track titles": 1, "script": 1}
 
 
@@ -850,6 +850,21 @@ def _bracket_text(folder, pressing_only=False):
         # "(Live at Roadburn 2011 - Holland)" says where it was played, not where it was pressed
         parts = [p for p in parts if not re.search(r"\blive\b|\brecorded\b|\b(?:at|in)\s+[A-Z]", p, re.I)]
     return " ".join(parts)
+
+
+_PACKAGING = (("digibook", r"digi-?book"), ("mediabook", r"media-?book"),
+              ("digipak", r"digi-?pa(?:c?k)|(?<![a-z])digi(?![a-z])"),
+              ("jewel", r"jewel"), ("gatefold", r"gatefold"))
+
+
+def packaging_kind(text):
+    """"digipak", "digibook", "mediabook", "jewel", "gatefold" or "" from a packaging name
+    (MusicBrainz "Jewel Case", "Digipak"; Discogs "Digipak"; a scan named "Digi Cover")."""
+    t = str(text or "").casefold()
+    for kind, rx in _PACKAGING:
+        if re.search(rx, t):
+            return kind
+    return ""
 
 
 def file_clues(album, cand, clues, against):
@@ -934,6 +949,14 @@ def file_clues(album, cand, clues, against):
                 # "Germany" on a European pressing (made there, sold across Europe) agrees
                 against.append(f"folder name says {'/'.join(sorted(named))}, "
                                f"this pressing is from {cand.get('country')}")
+    # the packaging your scans are named after: digipak, digibook, jewel case
+    mine = set(album.get("packaging") or ())
+    theirs = cand.get("packaging") or ""
+    if mine and theirs:
+        if theirs in mine:
+            clues.setdefault("packaging", f"{theirs} packaging, like your scans")
+        elif len(mine) == 1 and theirs != "gatefold" and "gatefold" not in mine:
+            against.append(f"your scans show a {next(iter(mine))}, this pressing is a {theirs}")
     # what it was made from: folder name, then the audio itself
     hint = album.get("media_hint") or ""
     audio = album.get("audio") or {}
@@ -1103,7 +1126,9 @@ def same_pressing_listed_twice(tied):
     k = next(iter(keys))
     # barcodes must agree where both entries have one (an entry often lacks it)
     codes = {tuple(sorted(barcode_key(b) for b in s["cand"].get("barcodes") or ())) for s in tied} - {()}
-    if len(keys) != 1 or not k[0] or len(codes) > 1 or any(s.get("clues_against") for s in tied):
+    # a jewel case and a digipak with the same numbers are two products, not one listed twice
+    packs = {s["cand"].get("packaging") for s in tied} - {"", None}
+    if len(keys) != 1 or not k[0] or len(codes) > 1 or len(packs) > 1 or any(s.get("clues_against") for s in tied):
         return None
     # the better-scoring entry first (Sleep's Holy Mountain [2015 ReIssue]: the entry
     # dated 2015 over one dated 1992 with the same barcode), then the fuller one

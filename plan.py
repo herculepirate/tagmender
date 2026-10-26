@@ -400,10 +400,13 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 q = q.parent
     by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
     ours = {s_.parent for s_ in moved}
-    # a source folder holding another album's music (an artist folder with a loose single and
-    # the artist's albums): its own pictures are no one album's - the artist photo stays
+    # a source folder whose other music sits in folders that are neither its discs nor its
+    # bonus ("Bonus CD", "Extras" ...) - an artist folder with a loose single and the artist's
+    # albums: its own pictures are no one album's; the artist photo stays
     import artwork as _artwork
-    src_shared = bool(foreign) and _artwork._other_music(src_dir, list(moved))
+    src_shared = any(f_ != src_dir and not _DISC_NAME.match(f_.relative_to(src_dir).parts[0])
+                     and not _artwork._BONUS.match(f_.relative_to(src_dir).parts[0])
+                     for f_ in foreign if src_dir in f_.parents)
 
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus

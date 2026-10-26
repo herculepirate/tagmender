@@ -276,7 +276,7 @@ class CoverUp:
         fan art, AI, template). Marked as generated, so a real cover replaces it later."""
         if mode not in ("template", "ai", "auto") or not self._last or self._last[0] != str(folder):
             return None
-        _f, pipe, res, query, info, s = self._last
+        _f, pipe, res, query, info, s = self._last[:6]
         cb = self.cb
         order = {"template": ["template"], "ai": ["ai"]}.get(mode) or list(s["creative_method_order"] or [])
         s = s.with_(creative_method_order=order)

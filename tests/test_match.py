@@ -1122,6 +1122,11 @@ class RemasterEditions(unittest.TestCase):
         self.assertEqual(mc.media_kind("Digital Media"), "digital")
         self.assertEqual(mc.media_kind("File"), "digital")
         self.assertEqual(mc.media_kind("File, FLAC, Album, Stereo"), "digital")    # the Discogs plugin's media
+        # a format written after the number: Kreator - Enemy Of God Revisited (SPV 69848 CD+DVD)
+        self.assertTrue(mc.catno_same("SPV 69848", "SPV 69848 CD+DVD"))
+        self.assertTrue(mc.catno_same("NB 3053-5", "NB 3053-5 2CD"))
+        self.assertFalse(mc.catno_same("SPV 69848", "SPV 6984L CD+DVD"))
+        self.assertFalse(mc.catno_same("NB 3099-0", "NB 3099-2"))
         self.assertEqual(mc.media_kind("Enhanced CD"), "cd")
 
     def test_remaster_dated_a_year_or_two_off_is_that_edition(self):
@@ -1277,6 +1282,67 @@ class PressingEvidence(unittest.TestCase):
         r = self.pick(album(title="The Mediator", folder="2013 - The Mediator [Germany]"),
                       cand(id="ru", country="RU", title=long), cand(id="us", country="US", title=long))
         self.assertNotEqual(r["status"], "auto")
+
+    def test_folder_number_with_a_disc_digit_and_country_decide(self):
+        """Obscura - 2011 - Omnivium [Relapse Records, US, RR 7157-2, LTD Edn]: three pressings
+        carry RR 7157 and the barcode; "RR 7157-2" is the same number and "US" picks one."""
+        code = {mc.norm_code("RR 7157-2")}
+        a = album(title="Omnivium", folder="2011 - Omnivium [Relapse Records, US, RR 7157-2, LTD Edn]",
+                  catnos=code, catnos_from_folder=code, barcodes={"781676715725"})
+        rr = {mc.norm_code("RR 7157")}
+        r = self.pick(a, cand(id="xe", country="XE", title="Omnivium", catnos=rr, barcodes={"781676715725"}),
+                      cand(id="de", country="DE", title="Omnivium", catnos=rr, barcodes={"781676715725"}),
+                      cand(id="us", country="US", title="Omnivium", catnos={mc.norm_code("RR7157")},
+                           barcodes={"781676715725"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
+        self.assertFalse(r["best"].get("own_catno_absent"))
+
+    def test_the_folders_own_number_outweighs_lost_points(self):
+        """ISIS - 2004 - 2012 - Live I - VI [Daymare Recordings, Japan, DYMC-150]: the catalogue
+        number and every track agree, but the folder's year (the recording years) and a
+        different disc split cost points: 89.5 < 90 left it for review."""
+        code = {mc.norm_code("DYMC-150")}
+        secs = [200, 300, 250, 400, 350, 280, 320]
+        a = album(artist="Isis", title="Live I - VI", year=2004, discs=3,
+                  folder="2004 - 2012 - Live I - VI [Daymare Recordings, Japan, DYMC-150]",
+                  catnos=code, catnos_from_folder=code,
+                  tracks=[{"disc": 1, "num": i + 1, "title": f"T{i}", "secs": float(s + (60 if i == 6 else 0))}
+                          for i, s in enumerate(secs)])
+        c = cand(id="jp", artist="Isis", title="Live I - VI", year=2012, country="JP", label="Daymare Recordings",
+                 catnos=code, disc_count=4,
+                 tracks=[{"disc": 1 + i // 2, "title": f"T{i}", "secs": s} for i, s in enumerate(secs)])
+        s = mc.score_candidate(a, c, CFG)
+        r = mc.classify([s], CFG)
+        self.assertEqual(r["status"], "auto", (s["confidence"], r["why"]))
+        # without the number, the same points stay under the bar
+        r = self.pick(dict(a, folder="2004 - 2012 - Live I - VI", catnos=set(), catnos_from_folder=set()),
+                      dict(c, catnos=set(), label="Other"))
+        self.assertNotEqual(r["status"], "auto")
+
+    def test_one_disc_of_a_box_set(self):
+        """Testament - 1988 - The New Order (2013, Warner, 8122796510-1): disc 2 of the 5CD
+        Original Album Series. Compared with whole releases it fitted none; now the box's
+        disc that has the folder's tracks, lengths and name is the match, under the box's ID."""
+        names = ["The Legacy", "The New Order", "Practice What You Preach"]
+        lens = {1: [200, 210, 220], 2: [300, 310, 320, 330], 3: [400, 410, 420]}
+        box = cand(id="box", artist="Testament", title="Original Album Series", year=2013,
+                   catnos={mc.norm_code("8122796510")}, disc_count=3,
+                   tracks=[{"disc": d, "title": f"t{d}{i}", "secs": s} for d in lens for i, s in enumerate(lens[d])],
+                   disc_titles={i + 1: n for i, n in enumerate(names)})
+        orig = cand(id="1988", artist="Testament", title="The New Order", year=1988,
+                    catnos={mc.norm_code("7 81849-2")},
+                    tracks=[{"disc": 1, "title": f"t2{i}", "secs": s} for i, s in enumerate(lens[2])])
+        code = {mc.norm_code("8122796510-1")}
+        a = album(artist="Testament", title="The New Order", year=1988, pressing_year=2013,
+                  folder="1988 - The New Order (2013, Warner, 8122796510-1)", catnos=code, catnos_from_folder=code,
+                  tracks=[{"disc": 1, "num": i + 1, "title": f"t2{i}", "secs": s + 1.0} for i, s in enumerate(lens[2])])
+        r = self.pick(a, orig, box)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"], r["best"]["cand"]["box_disc"]), ("auto", "box", 2),
+                         r["why"])
+        self.assertIn("disc 2 of Original Album Series", r["best"]["notes"])
+        self.assertTrue(mc.catno_same("8122796510-1", "8122796510"))
+        # a disc named otherwise is never taken for the album
+        self.assertIsNone(mc._box_disc(dict(a, title="Souls of Black"), box))
 
     def test_label_and_country_in_the_folder_name(self):
         a = album(folder="2007 - Fiction [Century Media, 9976158, Germany]")
@@ -2041,6 +2107,40 @@ class RealWorldCases(unittest.TestCase):
                          {"format": "DVD-Video", "tracks": [{"title": "v", "length": 60000}]}]}
         c = ma.mb_candidate(rel)
         self.assertEqual((len(c["tracks"]), c["disc_count"]), (1, 1))
+
+    def test_box_set_blu_ray_and_vinyl_single_are_not_in_the_files(self):
+        """Kreator - Dying Alive (NB 3053-5): 3 CDs ripped; the box's Blu-ray ("BD-1"...) is
+        video and its 7" (sides A, B) was not ripped, so neither counts against the files."""
+        cds = [{"position": f"CD{d}-{i}", "title": f"c{d}{i}", "duration": "3:00"}
+               for d, n in ((1, 3), (2, 2)) for i in range(1, n + 1)]
+        rel = {"id": 10, "title": "Dying Alive", "artists": [{"name": "Kreator"}],
+               "labels": [{"name": "Nuclear Blast", "catno": "NB 3053-5"}],
+               "formats": [{"name": "Blu-ray", "qty": "1"}, {"name": "CD", "qty": "2"},
+                           {"name": "Vinyl", "qty": "1", "descriptions": ['7"']}],
+               "tracklist": [{"position": f"BD-{i}", "title": f"v{i}", "duration": "4:00"} for i in range(1, 4)]
+               + cds + [{"position": "A", "title": "s1", "duration": "3:00"},
+                        {"position": "B", "title": "s2", "duration": "3:00"}]}
+        c = ma.discogs_candidate(rel, self.dm)
+        self.assertEqual((len(c["tracks"]), sum(1 for t in c["tracks"] if t.get("box_vinyl"))), (7, 2))
+        files = album(artist="Kreator", title="Dying Alive",
+                      tracks=[{"disc": t["disc"], "num": i + 1, "title": t["title"], "secs": 180.0}
+                              for i, t in enumerate(c["tracks"][:5])])
+        s = mc.score_candidate(files, c, CFG)
+        self.assertTrue(s["tracks_ok"], s["notes"])
+        mbrel = {"id": "r", "title": "Dying Alive", "artist-credit": [{"name": "Kreator"}],
+                 "media": [{"format": "CD", "tracks": [{"title": "a", "length": 180000}]},
+                           {"format": '7" Vinyl', "tracks": [{"title": "s", "length": 180000}]}]}
+        self.assertEqual([t.get("box_vinyl", False) for t in ma.mb_candidate(mbrel)["tracks"]], [False, True])
+        # the mailorder box of Kreator - Gods Of Violence: LPs, a 10" and a tape written "LP-A1",
+        # '10"-A1', "MC-B2" next to the CDs
+        box = dict(rel, formats=rel["formats"] + [{"name": "Cassette", "qty": "1"}],
+                   tracklist=cds + [{"position": p_, "title": p_, "duration": "3:00"}
+                                    for p_ in ("LP-A1", "LP-B2", '10"-A1', "MC-B2")])
+        c = ma.discogs_candidate(box, self.dm)
+        self.assertEqual([t.get("box_vinyl", False) for t in c["tracks"]], [False] * 5 + [True] * 4)
+        # a vinyl-only release keeps every side
+        lp = dict(rel, formats=[{"name": "Vinyl", "qty": "2"}], tracklist=rel["tracklist"][-2:])
+        self.assertFalse(any(t.get("box_vinyl") for t in ma.discogs_candidate(lp, self.dm)["tracks"]))
 
     def test_discogs_credit_matches_what_the_plugin_writes(self):
         rel = {"id": 7, "title": "Works", "year": 1999,

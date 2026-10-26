@@ -448,12 +448,24 @@ _EUROPE = {"DE", "GB", "FR", "NL", "BE", "AT", "CH", "IT", "ES", "PT", "SE", "NO
            "GR", "IE", "HU", "LU", "XE"}
 
 
+_FMT_WORD = r"(?:\d?\s?CDs?|DVD|LP|BD|Blu-?ray|Box|Digi\w*|Ltd)"
+_FORMATS_AFTER = re.compile(rf"\s+{_FMT_WORD}(?:\s*[+&/]\s*{_FMT_WORD})*\s*$", re.I)
+
+
 def catno_same(a, b):
     """Two catalogue numbers for one product, however written: equal; with a format
     word added or inside ("SPV 91978" / "SPV 91978 Box", "MASS 1389" / "MASS CD 1389 DG",
     "CG-0004" / "DIGICD CG-0004"); with the label's letters in front ("CD0540" /
     "MAS CD0540", "079" / "GUN 079"); with a trailing disc digit ("RR 9117" / "RR 9117 2");
     or a long number with and without its check digit ("99833708" / "9983370")."""
+    # formats written after the number: "SPV 69848 CD+DVD" is SPV 69848 (Kreator - Enemy
+    # Of God Revisited); only after a space, so "FO40CD" keeps its CD
+    a, b = (_FORMATS_AFTER.sub("", str(x or "")) or str(x or "") for x in (a, b))
+    # a box set's number with the disc after it: "8122796510-1" is disc 1 of 8122796510
+    for x, y in ((a, b), (b, a)):
+        m = re.fullmatch(r"\s*(\d{7,})\s*-\s*\d{1,2}\s*", x)
+        if m and norm_code(y) == m.group(1):
+            return True
     a, b = norm_code(a), norm_code(b)
     if not a or not b:
         return False
@@ -911,6 +923,10 @@ def file_clues(album, cand, clues, against):
                 break
         named = {c for n, c in _COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in fw}
         named |= {c for n, c in (("usa", "US"), ("uk", "GB"), ("eu", "XE")) if f" {n} " in fw}
+        # "US" as a field of its own, in capitals: "[Relapse Records, US, RR 7157-2, LTD Edn]"
+        # (never the word "us" of a title)
+        if any(f.strip() == "US" for f in re.split(r"[,;]", folder)):
+            named.add("US")
         if named and cc and cc != "XW":
             if cc in named:
                 clues.setdefault("country", f"{_readable_country(cc)} in the folder name")
@@ -1118,6 +1134,32 @@ def other_version(album, cand):
     return ""
 
 
+def _box_disc(album, cand):
+    """The disc of a multi-disc release that IS the album: the same number of tracks, every
+    length within 3 s, and named like the album (its disc title or a box title that says
+    nothing of it). Returned as a candidate of that disc alone, under the release's ID, so
+    Picard tags the files as that disc of the box. None when no disc fits."""
+    discs = {}
+    for t in cand.get("tracks") or []:
+        discs.setdefault(t.get("disc") or 1, []).append(t)
+    if len(discs) < 2:
+        return None
+    files = album["tracks"]
+    best = None
+    for d, tr in sorted(discs.items()):
+        if len(tr) != len(files) or any(not t.get("secs") for t in tr):
+            continue
+        off = max(abs(a["secs"] - t["secs"]) for a, t in zip(files, tr))
+        name = (cand.get("disc_titles") or {}).get(d) or ""
+        if off <= 3 and name and title_sim(album["title"], name) >= 0.85 and (best is None or off < best[0]):
+            best = (off, d, tr, name)
+    if not best:
+        return None
+    _off, d, tr, name = best
+    return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=name, disc_count=1,
+                box_disc=d, box_title=cand.get("title") or "")
+
+
 def score_candidate(album, cand, cfg, ocr_text=""):
     """Score one candidate against one album. Returns a dict with the
     confidence (0-100), the evidence for it and every gate that failed."""
@@ -1135,18 +1177,38 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                             for x in learned):
         a_sim = 1.0
         notes.append(f"you file {cand['artist']} under {album.get('artist_folder') or album['artist']}")
+    n_file, n_cand = len(album["tracks"]), len(cand["tracks"])
+    box_note = ""
+    if n_file and n_file < n_cand and len({t.get("disc") for t in album["tracks"]}) == 1:
+        # one disc of a box set ("The Legacy" from Testament - Original Album Series, folder
+        # "(2013, Warner, 8122796510-1)"): the disc whose tracks and lengths are the files'
+        box = _box_disc(album, cand)
+        if box:
+            cand = box
+            n_cand = len(cand["tracks"])
+            box_note = (f"disc {cand['box_disc']} of {cand['box_title']}")
     t_sim = title_sim(album["title"], cand["title"])
     pts += cfg["w_artist"] * a_sim
     avail += cfg["w_artist"]
     pts += cfg["w_title"] * t_sim
     avail += cfg["w_title"]
     notes.append(f"artist {a_sim:.2f}, title {t_sim:.2f}")
+    if box_note:
+        notes.append(box_note)
     lacks = missing_collaborators(album["artist"], [cand["artist"], cand.get("artist_alt") or "",
                                                      cand.get("artist_sort") or ""])
     if lacks:
         notes.append(f"credit lacks {', '.join(lacks)}")
 
     n_file, n_cand = len(album["tracks"]), len(cand["tracks"])
+    if n_file and n_file != n_cand and any(t.get("box_vinyl") for t in cand["tracks"]):
+        # a CD set with a vinyl single in the box (Kreator - Dying Alive, NB 3053-5: 3 CDs
+        # and a 7"): the CDs were ripped, the 7" was not
+        cds = [t for t in cand["tracks"] if not t.get("box_vinyl")]
+        if len(cds) == n_file:
+            cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
+            n_cand = n_file
+            notes.append("the vinyl single in the box is not in your files")
     tracks_ok = n_file > 0 and n_file == n_cand
     avail += cfg["w_tracks"]
     if tracks_ok:
@@ -1288,7 +1350,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     own = sorted(c for c in (album.get("catnos") or ())
                  if (re.search(r"[a-z]", c) and re.search(r"\d", c) and len(c) >= 4)
                  or len(re.sub(r"\D", "", c)) >= 6)
-    own_absent = bool(own) and not (set(own) & set(cand.get("catnos") or ()))
+    # written either way ("RR 7157-2" in the folder, "RR 7157" on the release): catno_same
+    own_absent = bool(own) and not catnos_agree(own, cand.get("catnos") or ())
     len_err = titles_agree = None
     if tracks_ok:
         diffs = [abs(t["secs"] - c["secs"]) for t, c in zip(album["tracks"], cand["tracks"]) if c["secs"] > 0]
@@ -1481,7 +1544,17 @@ def classify(scored, cfg):
                 why.append("durations unavailable")
             else:
                 why.append(f"only {best['dur_frac']:.0%} of durations agree")
-    if best["confidence"] < cfg["auto_min_confidence"] and not lengths_excused and not (
+    # Your copy's own number proves the album and the pressing: the files' barcode or the
+    # catalogue number your folder or tags name, every track there, the lengths agreeing.
+    # Points lost elsewhere (a folder year that is the recording years, "2004 - 2012"; a
+    # disc split differently) do not undo that proof (ISIS - Live I - VI, DYMC-150: 89.5).
+    own_number = (proven and not split_credit and best["dur_frac"] is not None
+                  and best["dur_frac"] >= min_dur and not best.get("conflict")
+                  and (barcode_decides or best["code"] in ("catalogue number", "catalogue number (folder name)")))
+    if best["confidence"] < cfg["auto_min_confidence"] and own_number and not lengths_excused:
+        best["notes"] = best["notes"] + [f"confidence {best['confidence']} is under {cfg['auto_min_confidence']}, "
+                                         f"but the {best['code']} proves this release"]
+    elif best["confidence"] < cfg["auto_min_confidence"] and not lengths_excused and not (
             proven and (best["artist_sim"] < cfg["auto_min_artist"] or best["title_sim"] < cfg["auto_min_title"])
             and not split_credit):
         why.append(f"confidence {best['confidence']} < {cfg['auto_min_confidence']}")

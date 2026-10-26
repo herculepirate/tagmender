@@ -1236,12 +1236,20 @@ def mb_candidate(rel):
     tracks = []
     audio_media = [m for m in rel.get("media", [])
                    if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
+    kinds = {mc.media_kind(m.get("format")) for m in audio_media} - {""}
+    mixed_vinyl = bool(kinds & {"vinyl", "cassette"}) and bool(kinds & {"cd", "digital"})
+    disc_titles = {}
     for mi, media in enumerate(audio_media, 1):
+        if media.get("title"):
+            disc_titles[mi] = media["title"]       # a box set's discs: "The Legacy", "The New Order"
+        box_vinyl = mixed_vinyl and mc.media_kind(media.get("format")) in ("vinyl", "cassette")
         for t in media.get("tracks", []):
             if (t.get("recording") or {}).get("video"):
                 continue                               # an enhanced CD's video, never an audio file
             tracks.append({"disc": mi, "title": t.get("title", ""),
                            "secs": (t.get("length") or 0) / 1000.0})
+            if box_vinyl:
+                tracks[-1]["box_vinyl"] = True         # a 7" in a CD box (Kreator - Dying Alive)
     infos = rel.get("label-info") or []
     return {
         "source": "mb", "id": rel["id"], "url": f"https://musicbrainz.org/release/{rel['id']}",
@@ -1257,7 +1265,7 @@ def mb_candidate(rel):
         "catnos": {mc.norm_code(i.get("catalog-number")) for i in infos if i.get("catalog-number")},
         "barcodes": {mc.norm_code(rel["barcode"])} if rel.get("barcode") else set(),
         "disc_count": len([m for m in audio_media if m.get("tracks")]) or len(audio_media) or 1,
-        "tracks": tracks,
+        "tracks": tracks, "disc_titles": disc_titles,
         "formats": {k for k in (mc.media_kind(m.get("format")) for m in audio_media) if k},
     }
 
@@ -1396,7 +1404,8 @@ def flatten_tracklist(tracklist, dm, parent_position=None):
     return out
 
 
-_VIDEO_POS = re.compile(r"^\s*(?:video|vid|v\d|dvd|cd-?rom|data|enh(?:anced)?|multimedia|mm)\b", re.I)
+_VIDEO_POS = re.compile(r"^\s*(?:video|vid|v\d|dvd|bd|blu-?ray|hd-?dvd|vhs|cd-?rom|data|enh(?:anced)?|multimedia|mm)\b",
+                        re.I)
 _VIDEO_TITLE = re.compile(r"\((?:video|videoclip|video clip|music video|live video|multimedia)[^)]*\)\s*$|"
                           r"^\s*(?:video|videoclip|multimedia|cd-?rom)(?:\s+(?:track|part|section|clip))?\s*[:\-]|"
                           r"\b(?:screensaver|wallpapers?|bonus multimedia|enhanced (?:part|section))\b", re.I)
@@ -1410,13 +1419,18 @@ def drop_video_tracks(tracks, rel):
     lists a DVD/CD-ROM part, so a song called "Video Killed the Radio Star" stays."""
     desc = " ".join(" ".join([f.get("name") or ""] + list(f.get("descriptions") or []))
                     for f in rel.get("formats") or []).casefold()
-    if not re.search(r"enhanced|dvd|cd-?rom|multimedia|video", desc):
+    if not re.search(r"enhanced|dvd|blu-?ray|cd-?rom|multimedia|video", desc):
         return tracks
     out = list(tracks)
     while out and (_VIDEO_POS.match(str(out[-1].get("position") or "")) or _VIDEO_TITLE.search(out[-1]["title"])):
         out.pop()
     # videos marked anywhere by their position ("Video 1") are never audio
     return [t for t in out if not _VIDEO_POS.match(str(t.get("position") or ""))]
+
+
+# a vinyl or tape side: "A", "B2", "LP-C1", '10"-A1', "MC-B2" (Kreator - Gods Of Violence box)
+_SIDE_POS = re.compile(r'(?:(?:LP|MC|Cass(?:ette)?|Tape|Vinyl|\d{1,2}(?:"|\u201d|in(?:ch)?)?)\d*[-.\s])?[A-H]\d{0,2}',
+                       re.I)
 
 
 def discogs_candidate(rel, dm):
@@ -1430,9 +1444,13 @@ def discogs_candidate(rel, dm):
     discs = dm.parse_discs(rel)
     disc_count = dm.release_disc_count(rel)     # same rule as the plugin
     tracks = []
+    kinds = {mc.media_kind(f.get("name")) for f in rel.get("formats") or []} - {""}
+    mixed_vinyl = bool(kinds & {"vinyl", "cassette"}) and bool(kinds & {"cd", "digital"})
     for t in flat:
         m = _POS_DISC.match(str(t["position"]))
         tracks.append({"disc": int(m.group(1)) if m else 1, "title": t["title"], "secs": t["secs"]})
+        if mixed_vinyl and _SIDE_POS.fullmatch(str(t["position"]).strip()):
+            tracks[-1]["box_vinyl"] = True        # a 7" in a CD box: side A / B
     if discs and len(discs) > 1 and not any(_POS_DISC.match(str(t["position"])) for t in flat):
         # numbered by heading rows instead of position prefixes
         n = 0
@@ -1441,6 +1459,15 @@ def discogs_candidate(rel, dm):
                 if n < len(tracks):
                     tracks[n]["disc"] = d["number"]
                 n += 1
+    # a box set's discs named by the heading rows before them ("The Legacy", "The New Order")
+    disc_titles, heading = {}, ""
+    for row in rel.get("tracklist") or []:
+        if row.get("type_") == "heading":
+            heading = str(row.get("title") or "").strip()
+        elif row.get("type_", "track") == "track":
+            m = _POS_DISC.match(str(row.get("position") or ""))
+            if m and heading and int(m.group(1)) not in disc_titles:
+                disc_titles[int(m.group(1))] = heading
     labels = rel.get("labels") or []
     barcodes = {mc.norm_code(i["value"]) for i in rel.get("identifiers", [])
                 if i.get("type") == "Barcode" and i.get("value")}
@@ -1457,7 +1484,7 @@ def discogs_candidate(rel, dm):
         "label": "; ".join(sorted({dm.clean_artist_name(l.get("name")) for l in labels})),
         "catnos": {mc.norm_code(l["catno"]) for l in labels
                    if l.get("catno") and str(l["catno"]).casefold() != "none"},
-        "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks,
+        "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks, "disc_titles": disc_titles,
         "formats": {k for k in (mc.media_kind(f.get("name")) for f in rel.get("formats") or []) if k},
     }
 

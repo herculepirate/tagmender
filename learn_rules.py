@@ -14,6 +14,7 @@ Reads audit CSVs (audit_untagged.py) of tagged libraries and writes
 import argparse
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -25,10 +26,14 @@ RULES = Path("~/.config/tagmender/rules.json").expanduser()
 
 
 def load_rules(path=RULES):
+    """The rules file's JSON; {} when there is none. One that cannot be read is an error: it
+    is never written over (the aliases and lists in it are the user's)."""
     try:
         return json.loads(Path(path).expanduser().read_text())
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return {}
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"{path} cannot be read ({exc}); fix it first - it is left as it is") from None
 
 
 def learn(rows, rules=None, min_albums=1):
@@ -69,7 +74,12 @@ def main(argv=None):
     rules = learn(rows, before)
     path = Path(args.rules).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")       # (whole or not at all)
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
     for folder, credits in sorted(rules["artist_aliases"].items()):
         print(f"  {folder}  ->  {', '.join(credits)}")
     print(f"{len(rules['artist_aliases'])} artist folder rule(s) in {path}")

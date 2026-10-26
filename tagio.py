@@ -1106,7 +1106,9 @@ def _write_pair(fam, f, tags, pair, n, t, changed=None):
         # "5/9" goes into its own fields when that number is rewritten)
         had = list(tags[names[0][0]]) if names[0][0] in tags else []
         inside = bool(had) and "/" in str(had[0]) and not any(x in tags for x in names[1])
-        if changed is None or num in changed:
+        # (a number field holding "5/9" is rewritten as the number alone when the total changes:
+        # readers - and Picard - take the total from it first)
+        if changed is None or num in changed or (tot in changed and had and "/" in str(had[0])):
             if names[0][0] in tags:
                 del tags[names[0][0]]
             if n:

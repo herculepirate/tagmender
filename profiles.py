@@ -29,7 +29,7 @@ from pathlib import Path
 
 import exclusions as ex
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2          # 2: Windows compatibility and Delete empty directories follow Picard when unset
 
 OPERATIONS = ("in_place", "copy", "move")
 POLICIES = ("preserve", "fill_missing", "replace", "remove", "lock")
@@ -423,6 +423,11 @@ def raw(name: str) -> dict:
     except ValueError as exc:
         raise ProfileError(f"profile {name!r} is not valid JSON: {exc}") from None
     data.setdefault("name", name)
+    if int(data.get("version") or 0) < 2:
+        # (a profile saved before these followed Picard's settings: unset, they were Windows-safe
+        # names and empty folders removed - so they stay, whatever Picard says now)
+        data.setdefault("filenames", {}).setdefault("compat", "windows")
+        data.setdefault("remove_empty_dirs", True)
     return data
 
 
@@ -449,8 +454,12 @@ def minimal(profile: Profile) -> dict:
             elif base.get(k) != v or (keep_none and k not in base):
                 out[k] = v          # (picard: a setting null says "as each file has it", not "as Picard")
         return out
-    base = _picard_defaults(DEFAULTS) if profile.data.get("follow_picard", True) else DEFAULTS
-    return {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, base)}
+    out = {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, DEFAULTS)}
+    # (a profile saved keeps its file names and empty-folder setting whatever Picard says later;
+    # only one that never says follows Picard's)
+    out.setdefault("filenames", {})["compat"] = profile.data["filenames"]["compat"]
+    out["remove_empty_dirs"] = profile.data["remove_empty_dirs"]
+    return out
 
 
 def check_template(d: dict) -> list[str]:

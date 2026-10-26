@@ -118,7 +118,10 @@ def _put(path, values):
     else:
         for k, v in vals.items():
             f.tags[k] = [str(x) for x in v]
-    f.save()
+    if isinstance(f.tags, ID3):
+        tagio.save_id3(f, f.tags)                     # (in the tag's own version: a v2.3 tag stays v2.3)
+    else:
+        f.save()
 
 
 # --------------------------------------------------------------------------
@@ -437,7 +440,10 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
         recs = [{"path": str(p), "new_path": str(p), "key": "", "backup": ta.backup_tags(p, blob_dir)}
                 for p in changes]
         entry = {"album": str(folder), "mbid": None, "files": recs, "extras": [], "moves": [],
-                 "created": [str(c) for c, _t in created], "created_sha": {}}
+                 "created": [str(c) for c, _t in created],
+                 # (what each .lrc will hold, known before it is written: an undo after a cut-short
+                 # run removes what it made)
+                 "created_sha": {str(c): hashlib.sha256(text.encode("utf-8")).hexdigest() for c, text in created}}
         journal.append(entry)
         import executor
         executor.write_json_durably(run_dir / "journal.json", journal)     # (the backups, before any write)
@@ -447,8 +453,16 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
                 if r["path"] == str(p):
                     r["after_sig"] = executor._tags_sig(p)
         for c, text in created:
-            c.write_text(text, encoding="utf-8")
-            entry["created_sha"][str(c)] = hashlib.sha256(c.read_bytes()).hexdigest()
+            tmp = c.with_name(f".{c.name}.{os.getpid()}.tmp")     # (whole or not at all)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            if c.exists():                                         # (one made meanwhile: never written over)
+                tmp.unlink()
+                entry["created_sha"].pop(str(c), None)
+                continue
+            os.replace(tmp, c)
         executor.write_json_durably(run_dir / "journal.json", journal)
 
 

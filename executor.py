@@ -510,21 +510,28 @@ def staged_write(path, edit, what="tags"):
     one rename, so a crash never leaves a half-written track. Used by every writer outside a
     job (enrich, CoverUp batch, their undo)."""
     path = Path(path)
-    st = os.stat(path)
-    stage = _stage_name(path, "edit")
-    try:
-        _copy_fsync(path, stage)
-        before = payload.digest(path)
-        edit(stage)
-        if before is not None and payload.digest(stage) != before:
-            raise StepError(f"{path.name}: audio data differed after writing {what}; left as it is")
-        with open(stage, "rb+") as fh:
-            os.fsync(fh.fileno())
-        _keep_owner(stage, st)
-        os.replace(stage, path)
-    except BaseException:
-        stage.unlink(missing_ok=True)
-        raise
+    if path.is_symlink():                  # (the link would become a copy: never written through)
+        raise StepError(f"{path.name} is a symbolic link; TagMender does not write through links")
+    with file_lock(path):                  # (no job changes it meanwhile, nor this it under a job)
+        st = os.stat(path)
+        stage = _stage_name(path, "edit")
+        try:
+            _copy_fsync(path, stage)
+            before = payload.digest(path)
+            edit(stage)
+            if before is not None and payload.digest(stage) != before:
+                raise StepError(f"{path.name}: audio data differed after writing {what}; left as it is")
+            with open(stage, "rb+") as fh:
+                os.fsync(fh.fileno())
+            _keep_owner(stage, st)
+            now = os.stat(path)            # (still the file it was: not moved, replaced or changed)
+            if (now.st_ino, now.st_dev, now.st_size, now.st_mtime_ns) != \
+                    (st.st_ino, st.st_dev, st.st_size, st.st_mtime_ns):
+                raise StepError(f"{path.name} changed while it was being written; left as it is")
+            os.replace(stage, path)
+        except BaseException:
+            stage.unlink(missing_ok=True)
+            raise
     _fsync_dir(path.parent)
 
 

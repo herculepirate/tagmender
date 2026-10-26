@@ -99,6 +99,15 @@ ID3v2.3 tag stays v2.3). Their undo leaves a track or .lrc edited since alone an
 reported, never replaced with the default rules. `jobs prune` keeps the backups of a job whose
 undo was cut short or had problems.
 
+**Twenty-eighth review.** An album whose FLAC/Ogg track numbers hold their total ("5/9", as
+ffmpeg leaves them) is tagged again (it failed on every run); enrich and CoverUp's batch never
+write through a symbolic link, take TagMender's file lock and check the track is still the one
+they copied before it is replaced; enrich keeps an ID3v2.3 tag v2.3 and an undo after a cut-short
+run removes the .lrc files it made; learn_rules never writes over a rules.json it cannot read;
+the watcher keeps two loose albums you undid undone. A profile saved before this release keeps
+Windows-safe names and removes empty folders as before, and one saved now keeps what it says;
+only a profile that never says follows Picard's settings.
+
 **More of Picard's settings followed (twenty-seventh review).** Windows compatibility, Delete
 empty directories and Preserve timestamps follow Picard's settings (its option profiles too)
 unless the profile sets them; the preferred release countries are read from the Picard.ini

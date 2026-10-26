@@ -57,6 +57,20 @@ never taken for the user's word: a picture made from the user's photo is not rep
 No lookup for an album that gets no front cover (the photo would never go into it), and
 cover.webp, .gif and .bmp move with their albums.
 
+**ID3v2.3, credits and Picard.ini (thirteenth review).** What TagMender plans is now what the
+file can hold, as it will hold it: in an ID3v2.3 tag several values are joined with "/", the
+original date is a year, and a date without its day is a year - so v2.3 albums no longer fail
+with "did not read back as written" (several artists or release types, a full original date)
+and their plans settle. A v2.3 tag's other dates are kept as they are when only another field
+changes, embedding a cover keeps the tag valid v2.3, and undo puts a v2.3 tag back byte for
+byte. Instrument names keep their case ("Hammond organ", as Picard). Release-group credits
+come before the release's, and discs and track totals are numbered as Picard numbers them (a
+CD + DVD + CD release's second CD is disc 3 of 3). WAV files get the RIFF INFO chunk Picard
+writes (title, artist, album ... for Explorer and Audacity). Picard.ini values are read as
+Qt writes them: a list of one item (one translation locale, one preferred country, one
+preserved tag), quoted text, and Picard 2's names. The app frees what each background job
+used (a watched-folders window open for days grew).
+
 **Desktop app**: the results of background work (preview, apply, watched folders ...) are now
 handled on the window's own thread; before, they ran on the worker's thread, which could leave
 the window showing stale numbers or crash it.

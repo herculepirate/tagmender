@@ -707,7 +707,8 @@ class Planner:
                 target = {"tagmender": ["Unresolved"], "tagmender_reason": [entry["identification"]["reason"]]}
             removals = ["tagmender_reason"] if identified and before.get("tagmender_reason") and \
                 str((before.get("tagmender") or [""])[0]).lower() == "unresolved" else []
-            target = {k: v for k, v in target.items() if tagio.holds(f, k)}   # (what the format has a place for)
+            # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
+            target = tagio.stored(f, {k: v for k, v in target.items() if tagio.holds(f, k)})
             changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
             fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
                   "diff": rows, "fingerprint": _fp(f)}

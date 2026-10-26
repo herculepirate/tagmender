@@ -165,7 +165,9 @@ def start(owner, fn, done, progress=None, failed=None):
     for sig in (w.finished, w.failed):
         sig.connect(th.quit)
     th.finished.connect(th.deleteLater)
-    owner._threads = getattr(owner, "_threads", []) + [(th, w)]
+    for r in relays:                                    # (after the result was handled: queued in order)
+        th.finished.connect(r.deleteLater)
+    owner._threads = [(t, x) for t, x in getattr(owner, "_threads", []) if _alive(t)] + [(th, w)]
     th.start()
     return w
 

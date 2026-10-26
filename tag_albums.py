@@ -201,7 +201,8 @@ def picard_preserves_tagmender(ini):
     try:
         cp.read(Path(ini).expanduser(), encoding="utf-8")
         clear = cp.get("setting", "clear_existing_tags", fallback="false").strip().lower() == "true"
-        kept = {x.strip().lower() for x in cp.get("setting", "preserved_tags", fallback="").split(",")}
+        import picard_config
+        kept = {x.lower() for x in picard_config._qt_list(cp.get("setting", "preserved_tags", fallback=""))}
     except Exception:
         return True
     return not clear or TAGMENDER_TAG.lower() in kept
@@ -245,7 +246,10 @@ def backup_tags(path, blob_dir):
     if isinstance(f.tags, ID3):
         tmp = Path(blob_dir) / f"backup-{os.getpid()}.id3"
         tmp.write_bytes(b"")
-        f.tags.save(str(tmp), v2_version=4 if f.tags.version[1] >= 4 else 3)
+        if f.tags.version[1] >= 4:
+            f.tags.save(str(tmp), v2_version=4)
+        else:                                 # (as the file has it: v2.3 frames, never mutagen's v2.4 view)
+            ID3(str(path), translate=False).save(str(tmp), v2_version=3)
         rec["tags"] = {"id3": _blob(tmp.read_bytes(), blob_dir), "id3_version": f.tags.version[1]}
         tmp.unlink()
     elif isinstance(f, MP4):
@@ -290,9 +294,10 @@ def restore_tags(path, rec, blob_dir):
     if tags and "id3" in tags:
         tmp = Path(blob_dir) / f"restore-{os.getpid()}.id3"
         tmp.write_bytes((Path(blob_dir) / tags["id3"]).read_bytes())
-        id3 = ID3(str(tmp))
+        v23 = tags.get("id3_version", 4) < 4
+        id3 = ID3(str(tmp), translate=not v23)
         tmp.unlink()
-        id3.save(str(path), v2_version=4 if tags.get("id3_version", 4) >= 4 else 3)
+        id3.save(str(path), v2_version=3 if v23 else 4)
         return
     if rec.get("format") == "MP3" or str(path).lower().endswith(".mp3"):
         try:

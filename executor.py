@@ -634,7 +634,7 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc=
     else:
         return
     if isinstance(getattr(f, "tags", None), ID3):
-        f.save(v2_version=3 if f.tags.version[1] == 3 else 4)
+        tagio.save_id3(f, f.tags)                         # (a v2.3 tag stays valid v2.3)
     else:
         f.save()
 
@@ -710,7 +710,7 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
     else:
         raise tagio.Unsupported(f"no front-cover embedding for {type(f).__name__}")
     if isinstance(getattr(f, "tags", None), ID3):
-        f.save(v2_version=3 if f.tags.version[1] == 3 else 4)    # an ID3v2.3 tag stays v2.3
+        tagio.save_id3(f, f.tags)                         # an ID3v2.3 tag stays valid v2.3
     else:
         f.save()
 

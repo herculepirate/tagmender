@@ -158,8 +158,9 @@ class MbTags(unittest.TestCase):
         self.assertEqual(t["musicbrainz_trackid"], ["r1-t1"])
         self.assertEqual(t["musicbrainz_albumartistid"], ["a-1"])
         self.assertEqual(t["albumartistsort"], ["Band, The"])
+        # (the DVD counts as Picard counts it: disc 1 of 2; its video is never an audio file's)
         self.assertEqual((t["tracknumber"], t["totaltracks"], t["discnumber"], t["totaldiscs"]),
-                         (["2"], ["3"], ["1"], ["1"]))
+                         (["2"], ["3"], ["1"], ["2"]))
         self.assertEqual(t["releasetype"], ["album", "live"])
         self.assertEqual(t["releasestatus"], ["official"])
         self.assertEqual((t["originaldate"], t["date"]), (["1999-01-01"], ["2005-03-01"]))

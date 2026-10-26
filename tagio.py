@@ -442,15 +442,96 @@ def read(path) -> dict[str, list[str]]:
 # --------------------------------------------------------------------------
 # writing
 # --------------------------------------------------------------------------
+def field_name(k: str) -> str:
+    """The field name as TagMender keys it: lower case - but a performer's role keeps its case
+    ("performer:Hammond organ"), as Picard keeps it."""
+    k = str(k)
+    if k[:10].lower() == "performer:":
+        return "performer:" + k[10:]
+    return k.lower()
+
+
 def _norm(changes):
     out = {}
     for k, v in changes.items():
-        k = k.lower()
+        k = field_name(k)
         if k.startswith("~"):
             continue
-        out[k] = None if v is None else [str(x) for x in (v if isinstance(v, (list, tuple)) else [v]) if str(x) != ""]
-        if out[k] == []:
-            out[k] = None
+        vals = None if v is None else [str(x) for x in (v if isinstance(v, (list, tuple)) else [v]) if str(x) != ""]
+        if k in out and out[k] and vals:                # ("performer:EWI" twice: the names merged)
+            vals = list(dict.fromkeys(out[k] + vals))
+        out[k] = vals or None
+    return out
+
+
+def save_id3(f, tags, keep_original_date=True, keep_date=True):
+    """Save an ID3 tag in its own version. A v2.3 tag stays valid v2.3: frames v2.3 does not
+    have are converted (TDRC to TYER and TDAT, TDOR to TORY, TIPL and TMCL to IPLS, ...) as
+    Picard does (compatid3.py), keeping the sort frames most players read in v2.3 too; an
+    original date (TDOR) or a date without its day (TDRC) that is not being changed is kept as
+    it is (TORY and TYER hold a year only)."""
+    if getattr(tags, "version", (2, 4, 0))[:2] != (2, 3):
+        f.save()
+        return
+    keep = [fr for key in ("TSOP", "TSOA", "TSOT", "TSST") for fr in tags.getall(key)]
+    tdor = [fr for fr in tags.getall("TDOR") if any(len(str(x)) > 4 for x in fr.text)] if keep_original_date else []
+    # (a date with its month but no day: TYER would keep the year only)
+    tdrc = [fr for fr in tags.getall("TDRC") if any(4 < len(str(x)) < 10 for x in fr.text)] if keep_date else []
+    tags.update_to_v23()
+    for fr in keep:
+        tags.add(fr)
+    if tdor:
+        tags.delall("TORY")
+        for fr in tdor:
+            tags.add(fr)
+    if tdrc:
+        for x in ("TYER", "TDAT", "TIME"):
+            tags.delall(x)
+        for fr in tdrc:
+            tags.add(fr)
+    f.save(v2_version=3, v23_sep="/")
+
+
+def stored(path, target: dict) -> dict:
+    """target as the file will hold it, and as read() will give it back: what an ID3v2.3 tag
+    makes of it (several values joined with "/", the original date a year, a date without
+    its day a year), and a performer without a role whose name ends in "(...)" read as that
+    role (Vorbis, APEv2, as Picard reads it). The planner compares and writes this, so a plan
+    settles and every write reads back as written."""
+    ext = Path(str(path)).suffix.lower()
+    out = {field_name(k): v for k, v in target.items()}
+    fam = None
+    v23 = False
+    try:
+        f = open_file(path)
+        fam = family(f)
+        v23 = fam == "id3" and getattr(f.tags, "version", (2, 4, 0))[:2] == (2, 3)
+    except Unsupported:
+        return out
+    if fam in ("vorbis", "apev2") and out.get("performer"):
+        plain = []
+        for v in out["performer"]:
+            k, name = _split_performer(str(v))
+            if k == "performer":
+                plain.append(v)
+            else:
+                out[k] = list(dict.fromkeys(list(out.get(k) or []) + [name]))
+        out["performer"] = plain
+        if not plain:
+            del out["performer"]
+    if v23:
+        for k, v in list(out.items()):
+            if not isinstance(v, list) or not v:
+                continue
+            vals = [str(x) for x in v]
+            if k == "originaldate":
+                vals = [x[:4] for x in vals]
+            elif k == "date":
+                vals = [x[:4] if len(x) < 10 else x for x in vals]
+            if len(vals) > 1 and not (is_performer(k) or k in _TIPL_R or k == "website"):
+                vals = ["/".join(vals)]
+            out[k] = vals
+    del ext
     return out
 
 
@@ -459,6 +540,43 @@ def _pair(current, changes, num, tot):
     n = changes[num] if num in changes else current.get(num)
     t = changes[tot] if tot in changes else current.get(tot)
     return (n[0] if n else ""), (t[0] if t else "")
+
+
+# WAV: Picard also writes the RIFF INFO chunk (picard/formats/wav.py; on by default), which
+# Windows Explorer, Audacity and foobar2000 show
+RIFF_INFO = {"artist": "IART", "comment": "ICMT", "copyright": "ICOP", "date": "ICRD", "genre": "IGNR",
+             "title": "INAM", "album": "IPRD", "tracknumber": "ITRK", "releasecountry": "ICNT",
+             "encodedby": "IENC", "engineer": "IENG", "language": "ILNG", "media": "IMED", "composer": "IMUS",
+             "producer": "IPRO", "writer": "IWRI"}
+
+
+def _write_riff_info(path, changes, encoding="windows-1252"):
+    """The INFO entries of the fields changed (", " between values; removed with the field)."""
+    from mutagen._riff import RiffFile
+    import picard_text  # noqa: F401  (registers Picard's "simplify" codec error handler)
+    todo = {RIFF_INFO[k]: v for k, v in changes.items() if k in RIFF_INFO}
+    if not todo:
+        return
+    with open(path, "r+b") as fh:
+        riff = RiffFile(fh)
+        info = next((c for c in riff.root.subchunks() if c.id == "LIST" and getattr(c, "name", None) == "INFO"),
+                    None)
+        if info is None:
+            if not any(todo.values()):
+                return
+            info = riff.insert_chunk("LIST", b"INFO")
+        for cid, vals in todo.items():
+            chunk = next((c for c in info.subchunks() if c.id == cid), None)
+            if not vals:
+                if chunk is not None:
+                    chunk.delete()
+                continue
+            data = ", ".join(vals).encode(encoding, errors="simplify") + b"\x00"
+            if chunk is not None:
+                chunk.resize(len(data))
+                chunk.write(data)
+            else:
+                info.insert_chunk(cid, data)
 
 
 def write(path, changes: dict) -> None:
@@ -505,17 +623,9 @@ def write(path, changes: dict) -> None:
         else:
             globals()[f"_set_{fam}"](f, tags, k, vals)
     if fam == "id3":
-        if v23:
-            # a v2.3 tag stays one: frames v2.3 does not have are converted (TDRC to TYER and
-            # TDAT, TDOR to TORY, TIPL and TMCL to IPLS ...) as Picard does (compatid3.py),
-            # keeping the sort frames most players read in v2.3 too
-            keep = [fr for key in ("TSOP", "TSOA", "TSOT", "TSST") for fr in tags.getall(key)]
-            tags.update_to_v23()
-            for fr in keep:
-                tags.add(fr)
-            f.save(v2_version=3, v23_sep="/")
-        else:
-            f.save()
+        save_id3(f, tags, keep_original_date="originaldate" not in changes, keep_date="date" not in changes)
+        if type(f).__name__ == "WAVE":
+            _write_riff_info(path, changes)
     else:
         f.save()
 

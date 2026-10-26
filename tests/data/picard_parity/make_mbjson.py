@@ -52,9 +52,10 @@ def run_picard(kind, node, s):
     picard_set(s)
     m = Metadata()
     if kind == "release":
-        mj.release_to_metadata(node, m)
+        # as picard/album.py: the release group's metadata first, the release's over it
         if "release-group" in node:
             mj.release_group_to_metadata(node["release-group"], m)
+        mj.release_to_metadata(node, m)
         if m["musicbrainz_albumartistid"] == "89ad4ac3-39f7-470e-963a-56509c546377":
             m["albumartistsort"] = m["albumartist"] = s.get("va_name", BASE["va_name"])
     elif kind == "recording":

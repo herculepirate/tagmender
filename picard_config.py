@@ -106,7 +106,7 @@ def plugin_defaults() -> dict:
 def _value(key, raw):
     if key in BOOLS:
         return str(raw).strip().lower() in ("true", "1", "yes", "on")
-    return str(raw).strip()
+    return _qt_text(str(raw)).strip()
 
 
 def from_ini(path: Path | None = None) -> dict:
@@ -136,6 +136,8 @@ def preserved_tags(path: Path | None = None) -> set:
     if cp is None:
         return set()
     raw = cp.get("setting", "preserved_tags", fallback="")
+    if raw.strip().startswith("@") or '"' in raw:            # (one tag: Qt's binary form; or quoted)
+        return {x.lower() for x in _qt_list(raw)}
     return {x.strip().lower() for x in raw.replace("\n", ",").split(",") if x.strip()}
 
 
@@ -180,20 +182,120 @@ _TAG_BOOLS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, bool))
 _TAG_INTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool))
 
 
+def _qt_unescape(raw: str) -> list:
+    """The strings of one value as Qt's QSettings writes it to an ini file (IniFormat): items
+    split by top-level commas, "..." quoting, \\n \\t \\0 \\xHHHH escapes; an item
+    "@Variant(...)" is a value in Qt's binary form (see _qt_variant)."""
+    out, cur, quoted, i, n, any_text = [], [], False, 0, len(raw), False
+    raw = raw.strip()
+    n = len(raw)
+    while i < n:
+        c = raw[i]
+        if c == '"':
+            quoted = not quoted
+            any_text = True
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            e = raw[i + 1]
+            if e == "x":
+                j = i + 2
+                while j < n and j < i + 6 and raw[j] in "0123456789abcdefABCDEF":
+                    j += 1
+                cur.append(chr(int(raw[i + 2:j] or "0", 16)))
+                i = j
+                continue
+            cur.append({"n": "\n", "t": "\t", "r": "\r", "0": "\0", "a": "\a", "b": "\b", "f": "\f",
+                        "v": "\v"}.get(e, e))
+            i += 2
+            continue
+        if c == "," and not quoted:
+            out.append("".join(cur).strip() if not any_text else "".join(cur))
+            cur, any_text = [], False
+            i += 1
+            while i < n and raw[i] == " ":
+                i += 1
+            continue
+        cur.append(c)
+        i += 1
+    out.append("".join(cur))
+    return out
+
+
+def _qt_variant(data: str):
+    """A list of strings (or a string) from Qt's binary QVariant form, as Qt 5 and 6 write
+    it for a list of one string; None when it is something else."""
+    import struct
+    b = data.encode("latin-1", "replace")
+
+    def parse(qt5):
+        pos = 0
+
+        def u32():
+            nonlocal pos
+            v = struct.unpack(">I", b[pos:pos + 4])[0]
+            pos += 4
+            return v
+
+        def qstring():
+            nonlocal pos
+            ln = u32()
+            if ln == 0xFFFFFFFF:
+                return ""
+            v = b[pos:pos + ln].decode("utf-16-be")
+            pos += ln
+            return v
+
+        def variant():
+            nonlocal pos
+            t = u32()
+            if qt5:
+                pos += 1                                       # (the "is null" byte of Qt 5)
+            if t == 10:                                        # QString
+                return qstring()
+            if t in (9, 11):                                   # QVariantList, QStringList
+                return [variant() if t == 9 else qstring() for _ in range(u32())]
+            raise ValueError(t)
+        v = variant()
+        if pos != len(b):
+            raise ValueError("left over")
+        return v
+    for qt5 in (False, True):
+        try:
+            return parse(qt5)
+        except (ValueError, struct.error, UnicodeDecodeError):
+            continue
+    return None
+
+
+def _qt_value(raw: str):
+    """A string, or a list of strings, from an ini value as Qt wrote it."""
+    items = _qt_unescape(raw)
+    vals = []
+    for it in items:
+        if it.startswith("@Variant(") and it.endswith(")"):
+            v = _qt_variant(it[9:-1])
+            if isinstance(v, list):
+                vals.extend(str(x) for x in v)
+                continue
+            if isinstance(v, str):
+                vals.append(v)
+                continue
+            continue
+        if it.startswith("@Invalid("):
+            continue
+        vals.append(it)
+    return vals if len(items) > 1 or (items and items[0].startswith("@Variant(")) else (vals[0] if vals else "")
+
+
 def _qt_list(raw: str) -> list:
-    """A list as Qt writes it to an ini file: "a, b"; "@Invalid()" for an empty one."""
-    raw = str(raw).strip()
-    if not raw or raw.startswith("@"):
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
+    v = _qt_value(raw)
+    return [x.strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
 
 
 def _qt_text(raw: str) -> str:
-    """A text Qt wrote to an ini file: quoted, with \\n for line breaks."""
-    raw = str(raw).strip()
-    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
-        raw = raw[1:-1]
-    return raw.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+    v = _qt_value(raw)
+    return ", ".join(v) if isinstance(v, list) else v
 
 
 def picard_version(path: Path | None = None) -> tuple:
@@ -217,6 +319,11 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
             if cp.has_option("setting", "standardize_artists"):          # Picard 2
                 s["standardize_artist_names"] = "all" if get("standardize_artists").strip().lower() == "true" \
                     else "none"
+            if cp.has_option("setting", "artist_locales") and not cp.has_option("setting", "translation_locales"):
+                s["translation_locales"] = _qt_list(get("artist_locales")) or s["translation_locales"]
+            if cp.has_option("setting", "standardize_instruments") and \
+                    not cp.has_option("setting", "standardize_vocals"):     # (Picard 2: one setting for both)
+                s["standardize_vocals"] = get("standardize_instruments").strip().lower() == "true"
             for k in TAG_DEFAULTS:
                 if not cp.has_option("setting", k):
                     continue
@@ -228,12 +335,10 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                         s[k] = int(raw.strip())
                     except ValueError:
                         pass
-                elif k == "genres_filter":
-                    s[k] = _qt_text(raw)
                 elif k in _LISTS:
                     s[k] = _qt_list(raw)
                 else:
-                    s[k] = raw.strip()
+                    s[k] = _qt_text(raw)
     for k, v in (overrides or {}).items():
         if k in TAG_DEFAULTS:
             s[k] = v

@@ -365,9 +365,11 @@ def album_tags(rel, settings=None, per_medium=None) -> dict:
     if tr.get("script"):
         t["script"] = [tr["script"]]
     if s["release_ars"]:
+        # the release group's first, then the release's (picard/album.py reads the release group
+        # first); credits on one medium only (a DJ mix of disc 2) come from the release
         per_medium = {} if per_medium is None else per_medium
+        relations(rg.get("relations"), t, s, per_medium={})
         relations(rel.get("relations"), t, s, per_medium=per_medium)
-        relations(rg.get("relations"), t, s, per_medium=per_medium)
     if VARIOUS_ARTISTS_ID in ids[:1] and len(ids) == 1:
         t["albumartist"] = t["albumartistsort"] = [s["va_name"]]
     return {k: v for k, v in t.items() if v and any(v)}
@@ -476,7 +478,10 @@ def release_tags(rel, settings=None) -> list[dict]:
     # wherever the artist IDs match, as Picard does (album.py _copy_artist_nodes)
     release_artists = _artist_nodes(rel.get("artist-credit"))
     media = audio_media(rel)
-    total_discs = len([m for m in media if m.get("tracks")]) or len(media) or 1
+    # numbered as Picard numbers them: the medium's own position among all media (a CD + DVD +
+    # CD release's second CD is disc 3 of 3) and its own track count - only the audio tracks
+    # are written (the n-th entry is the album's n-th audio file)
+    total_discs = len(rel.get("media") or []) or 1
     out = []
     for disc, m in enumerate(media, 1):
         tracks = [t for t in m.get("tracks") or [] if not (t.get("recording") or {}).get("video")]
@@ -501,8 +506,11 @@ def release_tags(rel, settings=None) -> list[dict]:
             d.setdefault("artists", common.get("albumartists", []))
             d.setdefault("musicbrainz_artistid", common.get("musicbrainz_albumartistid", []))
             if not d.get("tracknumber"):
-                d["tracknumber"] = [str(len([x for x in out if x["discnumber"] == [str(disc)]]) + 1)]
-            d.update({"totaltracks": [str(len(tracks))], "discnumber": [str(disc)],
+                d["tracknumber"] = [str(len([x for x in out if x["discnumber"] == [str(m.get("position") or disc)]]) + 1)]
+            count = m.get("track-count")
+            count = (int(count) + (1 if m.get("pregap") else 0)) if isinstance(count, int) else \
+                len(m.get("tracks") or [])
+            d.update({"totaltracks": [str(count)], "discnumber": [str(m.get("position") or disc)],
                       "totaldiscs": [str(total_discs)]})
             if s["use_genres"]:
                 va_rel = common.get("musicbrainz_albumartistid") == [VARIOUS_ARTISTS_ID]

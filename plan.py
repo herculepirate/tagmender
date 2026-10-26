@@ -787,7 +787,11 @@ class Planner:
             if ino:
                 self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
-            tag_ed = naming.edition({**before, **target, **rel_tags}, album_mode) if album_mode != "off" else ""
+            # (the file as it will be: without what the release or a script deletes)
+            gone_ed = {x for x in (target.get("~remove") or [])
+                       if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")}
+            tag_ed = naming.edition({**{k: v for k, v in before.items() if k not in gone_ed}, **target, **rel_tags},
+                                    album_mode) if album_mode != "off" else ""
             if identified and tag_ed and (target.get("album") or [""])[0]:
                 album = str(target["album"][0])
                 if not album.endswith(f" [{tag_ed}]"):      # "I" -> "I [2019 Vinyl]", once

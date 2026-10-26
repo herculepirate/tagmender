@@ -181,9 +181,14 @@ def _role(k: str) -> str:
     return k.split(":", 1)[1] if ":" in k else ""
 
 
-def _split_performer(value: str) -> tuple[str, str]:
-    """("performer:Piano", "Joe Barr") from "Joe Barr (Piano)" (picard/formats/vorbis.py)."""
-    name = "performer:"
+def is_comment(k: str) -> bool:
+    return k == "comment" or k.startswith("comment:")
+
+
+def _split_performer(value: str, base: str = "performer") -> tuple[str, str]:
+    """("performer:Piano", "Joe Barr") from "Joe Barr (Piano)" (picard/formats/vorbis.py; a
+    comment "text (desc)" reads as comment:desc the same way)."""
+    name = base + ":"
     if value.endswith(")"):
         start, count = len(value) - 2, 1
         while count > 0 and start > 0:
@@ -194,7 +199,18 @@ def _split_performer(value: str) -> tuple[str, str]:
             start -= 1
         if start > 0:
             return name + value[start + 2:-1], value[:start].rstrip()
-    return "performer", value
+    return base, value
+
+
+def _lang_desc(k: str, default="eng") -> tuple[str, str]:
+    """(language, description) of "comment:desc", "lyrics:eng:desc" (Picard's parse_lang_desc_tag)."""
+    _t, _c, rest = k.partition(":")
+    lang, _c2, desc = rest.partition(":")
+    if len(lang) == 3:
+        return lang, desc
+    if lang:
+        return default, rest
+    return default, desc
 
 
 def holds(path, field: str) -> bool:
@@ -202,9 +218,10 @@ def holds(path, field: str) -> bool:
     have none for performer:<role> credits; WMA none for custom tags."""
     ext = Path(str(path)).suffix.lower()
     if ext in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp"):
-        return not field.startswith("performer:")
+        return not field.startswith("performer:") and not (field.startswith("comment:") and len(field) > 8)
     if ext in (".wma", ".asf"):
-        return field in ASF_MAP or field == "totaldiscs" or field in CI_ONLY     # (no total tracks)
+        return field in ASF_MAP or field == "totaldiscs" or field in CI_ONLY or \
+            field.startswith("lyrics:")                                          # (no total tracks)
     return True
 CI_ONLY = {"replaygain_album_gain", "replaygain_album_peak", "replaygain_album_range", "replaygain_track_gain",
            "replaygain_track_peak", "replaygain_track_range", "replaygain_reference_loudness"}
@@ -337,10 +354,10 @@ def read(path) -> dict[str, list[str]]:
                 n, t = _split_pair(frame.text[0])
                 _add(out, "discnumber", [n])
                 _add(out, "totaldiscs", [t])
-            elif fid == "COMM" and frame.desc == "":
-                _add(out, "comment", frame.text)
+            elif fid == "COMM":
+                _add(out, "comment" + (":" + frame.desc if frame.desc else ""), frame.text)
             elif fid == "USLT":
-                _add(out, "lyrics", [frame.text])
+                _add(out, "lyrics" + (":" + frame.desc if frame.desc else ""), [frame.text])
             elif fid == "WOAR":
                 _add(out, "website", [frame.url])
             elif fid == "WCOP":
@@ -367,9 +384,9 @@ def read(path) -> dict[str, list[str]]:
             name = VORBIS_R.get(k, k)
             if name in ("totaltracks", "totaldiscs") and name in out:
                 continue                                    # TOTALTRACKS and TRACKTOTAL both present
-            if name == "performer":
+            if name in ("performer", "comment"):        # ("Joe Barr (Piano)", "EAC (ripper)": Picard)
                 for v in vals:
-                    pk, pv = _split_performer(v)
+                    pk, pv = _split_performer(v, name)
                     _add(out, pk, [pv])
                 continue
             if name.startswith("performer:"):
@@ -414,9 +431,9 @@ def read(path) -> dict[str, list[str]]:
                 n, t = _split_pair(vals[0])
                 _add(out, "tracknumber" if k == "track" else "discnumber", [n])
                 _add(out, "totaltracks" if k == "track" else "totaldiscs", [t])
-            elif k == "performer":
+            elif k in ("performer", "comment"):
                 for v in vals:
-                    pk, pv = _split_performer(v)
+                    pk, pv = _split_performer(v, k)
                     _add(out, pk, [pv])
             else:
                 name = _APE_R.get(k, k)
@@ -446,8 +463,9 @@ def field_name(k: str) -> str:
     """The field name as TagMender keys it: lower case - but a performer's role keeps its case
     ("performer:Hammond organ"), as Picard keeps it."""
     k = str(k)
-    if k[:10].lower() == "performer:":
-        return "performer:" + k[10:]
+    for base in ("performer:", "comment:", "lyrics:"):      # (a role or description keeps its case)
+        if k[:len(base)].lower() == base:
+            return base + k[len(base):]
     return k.lower()
 
 
@@ -653,17 +671,23 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(f.tags) == 3)
     except Unsupported:
         return out
-    if fam in ("vorbis", "apev2") and out.get("performer"):
-        plain = []
-        for v in out["performer"]:
-            k, name = _split_performer(str(v))
-            if k == "performer":
-                plain.append(v)
-            else:
-                out[k] = list(dict.fromkeys(list(out.get(k) or []) + [name]))
-        out["performer"] = plain
-        if not plain:
-            del out["performer"]
+    for base in ("performer", "comment"):
+        if fam in ("vorbis", "apev2") and out.get(base):
+            plain = []
+            for v in out[base]:
+                k, name = _split_performer(str(v), base)
+                if k == base:
+                    plain.append(v)
+                else:
+                    out[k] = list(dict.fromkeys(list(out.get(k) or []) + [name]))
+            out[base] = plain
+            if not plain:
+                del out[base]
+    if fam != "id3":                                 # (one lyrics field there: "lyrics:desc" goes into it)
+        for k in [k for k in out if k.startswith("lyrics:")]:
+            v = out.pop(k)
+            if v:
+                out["lyrics"] = list(out.get("lyrics") or []) + list(v)
     if v23:
         for k, v in list(out.items()):
             if not isinstance(v, list) or not v:
@@ -762,6 +786,14 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
     tags = f.tags
     pairs_done = set()
     v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(tags) == 3)
+    if fam != "id3" and any(k.startswith("lyrics:") for k in changes):
+        for k in [k for k in changes if k.startswith("lyrics:")]:
+            v = changes.pop(k)                      # (one lyrics field there)
+            if v:
+                changes["lyrics"] = list(changes.get("lyrics") or []) + list(v)
+    if fam in ("vorbis", "apev2") and any(is_comment(k) for k in changes):
+        _set_performers(fam, tags, {k: v for k, v in changes.items() if is_comment(k)}, "comment")
+        changes = {k: v for k, v in changes.items() if not is_comment(k)}
     credits = {k: v for k, v in changes.items() if (is_performer(k) and (fam != "mp4" or ":" in k))
                or (fam == "id3" and k in _TIPL_R)}
     if credits:
@@ -863,16 +895,19 @@ def _set_id3(f, tags, k, vals):
         if vals:
             tags.add(UFID(owner=UFID_OWNER, data=vals[0].encode("ascii")))
         return
-    if k == "comment":
-        for key in [x for x in tags if x.startswith("COMM:") and tags[x].desc == ""]:
+    if is_comment(k):                               # (COMM with its description: Picard's comment:desc)
+        lang, desc = _lang_desc(k) if ":" in k else ("eng", "")
+        for key in [x for x in tags if x.startswith("COMM:") and tags[x].desc == desc]:
             del tags[key]
         if vals:
-            tags.add(COMM(encoding=3, lang="eng", desc="", text=vals))
+            tags.add(COMM(encoding=3, lang=lang, desc=desc, text=vals))
         return
-    if k == "lyrics":
-        tags.delall("USLT")
+    if k == "lyrics" or k.startswith("lyrics:"):
+        lang, desc = _lang_desc(k, "xxx") if ":" in k else ("xxx", "")
+        for key in [x for x in tags if x.startswith("USLT:") and tags[x].desc == desc]:
+            del tags[key]
         if vals:
-            tags.add(USLT(encoding=3, lang="xxx", desc="", text="\n".join(vals)))
+            tags.add(USLT(encoding=3, lang=lang, desc=desc, text="\n".join(vals)))
         return
     if k.startswith("~v23:"):                       # mood, releasedate in a v2.3 tag (Picard)
         name = {"mood": "mood", "releasedate": "RELEASEDATE"}[k[5:]]
@@ -947,15 +982,16 @@ def _set_id3_people(tags, credits, v23=False):
         tags.add(TIPL(encoding=3, people=tipl))
 
 
-def _set_performers(fam, tags, credits):
+def _set_performers(fam, tags, credits, base="performer"):
     """PERFORMER ("Performer" in APEv2) as "name (role)": the roles in credits replaced, the
-    others kept; the custom PERFORMER:ROLE an earlier TagMender wrote goes."""
+    others kept; the custom PERFORMER:ROLE an earlier TagMender wrote goes. base "comment":
+    COMMENT as "text (description)" the same way (Picard)."""
     if not credits:
         return
-    key = "PERFORMER" if fam == "vorbis" else next((x for x in tags.keys() if x.lower() == "performer"), "Performer")
+    key = base.upper() if fam == "vorbis" else next((x for x in tags.keys() if x.lower() == base), base.title())
     old = list(tags[key]) if key in tags else []
     roles = {_role(k).lower() for k in credits}
-    keep = [v for v in old if (_role(_split_performer(v)[0]).lower() not in roles)]
+    keep = [v for v in old if (_role(_split_performer(v, base)[0]).lower() not in roles)]
     new = list(keep)
     for k, vals in credits.items():
         role = _role(k)

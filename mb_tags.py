@@ -595,7 +595,12 @@ def release_tags(rel, settings=None) -> list[dict]:
             t_ac = _with_nodes(t.get("artist-credit"), release_artists)
             r_ac = _with_nodes(_with_nodes(rec.get("artist-credit"), release_artists), _artist_nodes(t_ac))
             tt = track_tags(dict(t, **{"artist-credit": t_ac, "recording": dict(rec, **{"artist-credit": r_ac})}), s)
-            artists.add((tt.get("artist") or common.get("albumartist") or [""])[0])
+            # (Picard counts the artist as Track._customize_metadata leaves it: the Various
+            # Artists name, punctuation converted)
+            who = (tt.get("artist") or common.get("albumartist") or [""])[0]
+            if VARIOUS_ARTISTS_ID in (tt.get("musicbrainz_artistid") or []):
+                who = s["va_name"]
+            artists.add(_asciipunct(who) if s["convert_punctuation"] and isinstance(who, str) else who)
             if kind != "track" or id(m) not in audio or rec.get("video"):
                 continue                      # (a pregap, data or video track: no audio file of the album's)
             d = {k: list(v) for k, v in common.items()}

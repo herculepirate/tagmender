@@ -90,6 +90,16 @@ apply the same plan, which a job never runs twice. Turning "Also save it as arti
 your own artist photo there (for a moved album, the one in the folder it came from), not a
 download.
 
+**Naming and scripts as Picard 3 (twenty-fourth review).** With Windows compatibility on and
+Picard's "Windows long path support" off (its default off Windows), a path below the
+destination's mount point is shortened to Windows' 259 characters exactly as Picard shortens
+it (`picard.windows_long_paths: true` turns it off). The naming script sees every field of the
+file, those its format has no place for too (a WMA's total tracks, an M4A's "A1"), and names
+as they are spelled (%_Shelf%, %MyTag%); a "./" folder in it is dropped. Tagger scripts see a
+file's own ID3 user tags as they are spelled (%CUSTOM%; $delete(custom) leaves CUSTOM). A
+track or disc number a script writes as "N/total" no longer fails the album; M4A track 0 is
+written; ID3v2.3 credits keep their order; a WAV's RIFF INFO leaves out what a script unset.
+
 **Tagger scripts and naming, closer to Picard (twenty-third review).** In M4A files numbers
 are written as Picard writes them (a script's "01" is track 1; a track number that is not a
 number, as a vinyl side "A1", is left as the file has it) - such a script no longer fails the

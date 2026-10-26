@@ -369,6 +369,25 @@ def _split_ape_comment(value: str) -> tuple[str, str]:
     return "comment", value
 
 
+def spellings(path) -> dict:
+    """{field: its spelling} of an ID3 file's own user tags (TXXX) that are none of Picard's
+    names and not in lower case ("CUSTOM", as foobar2000 and Mp3tag write them): Picard's
+    tagger scripts see them so (%CUSTOM%, not %custom%)."""
+    try:
+        f = open_file(path)
+        if family(f) != "id3" or f.tags is None:
+            return {}
+    except Exception:
+        return {}
+    out = {}
+    for frame in f.tags.getall("TXXX"):
+        desc = str(frame.desc)
+        if desc != desc.lower() and desc.lower() not in _ID3_FREE_R and \
+                not (desc in ("mood", "RELEASEDATE") and f.tags.version[:2] == (2, 3)):
+            out.setdefault(desc.lower(), desc)
+    return out
+
+
 def read(path, legacy=False) -> dict[str, list[str]]:
     """{field: [values]} with Picard's names. Pictures are counted in '~pictures'. legacy:
     as an earlier TagMender read a file, for the fingerprints its jobs recorded - 1 (True):
@@ -467,11 +486,11 @@ def read(path, legacy=False) -> dict[str, list[str]]:
         for key, vals in tags.items():
             if key == "covr":
                 out["~pictures"] = [str(len(vals))]
-            elif key == "trkn" and vals:
-                _add(out, "tracknumber", [vals[0][0] or ""])
+            elif key == "trkn" and vals:            # (track 0 is "0", as Picard reads it)
+                _add(out, "tracknumber", [vals[0][0] if (vals[0][0] or not legacy) else ""])
                 _add(out, "totaltracks", [vals[0][1] or ""])
             elif key == "disk" and vals:
-                _add(out, "discnumber", [vals[0][0] or ""])
+                _add(out, "discnumber", [vals[0][0] if (vals[0][0] or not legacy) else ""])
                 _add(out, "totaldiscs", [vals[0][1] or ""])
             elif key == "tmpo":
                 _add(out, "bpm", vals)
@@ -820,6 +839,15 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         if fam in ("mp4", "asf"):
             new = new[-1:]                           # (one value there: Picard keeps the last)
         out["lyrics"] = new
+    for num, tot in NUMBER_PAIRS:
+        # ("1/2" or " 3 " from a tagger script: written as number and total - the file reads it
+        # back so; Picard writes the text as it is, "1/2/2" in ID3)
+        v = out.get(num)
+        if isinstance(v, list) and v and (str(v[0]) != str(v[0]).strip() or "/" in str(v[0])):
+            a_, _sl, b_ = str(v[0]).strip().partition("/")
+            out[num] = [a_.strip()] if a_.strip() else None
+            if b_.strip() and not out.get(tot):
+                out[tot] = [b_.strip()]
     if fam == "apev2":
         out = _ape_merge(out, lambda: read(path))
     if fam == "mp4":
@@ -827,8 +855,8 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         # that is not a number is not written, the file's left as it is; a total that is not, 0)
         for num, tot in (("tracknumber", "totaltracks"), ("discnumber", "totaldiscs")):
             if out.get(num):
-                n = _mp4_int(out[num][0])
-                if not n:
+                n = _mp4_int(out[num][0], zero=True)
+                if n is None:
                     out.pop(num)
                     out.pop(tot, None)
                     continue
@@ -1053,8 +1081,8 @@ def _write_pair(fam, f, tags, pair, n, t):
                 tags[name] = [t]
     elif fam == "mp4":
         key = "trkn" if num == "tracknumber" else "disk"
-        if _mp4_int(n):
-            tags[key] = [(_mp4_int(n), _mp4_int(t) or 0)]
+        if _mp4_int(n, zero=True) is not None:
+            tags[key] = [(_mp4_int(n, zero=True), _mp4_int(t) or 0)]
         elif not n and key in tags:
             del tags[key]
     elif fam == "apev2":
@@ -1156,19 +1184,24 @@ def _set_id3_people(tags, credits, v23=False):
         low = {r.lower() for r in roles}
         for lst in lists:
             lst[:] = [p for p in lst if p[0].lower() not in low]
+    seq = []                                        # (the new credits in their order, for v2.3)
     for k, vals in credits.items():
         if is_performer(k):
             role = _role(k)
-            drop((tmcl, tipl), (role,) if role else ("", "performer"))
-            tmcl.extend([[role or "performer", v] for v in vals or []])
+            drop((tmcl, tipl, seq), (role,) if role else ("", "performer"))
+            new = [[role or "performer", v] for v in vals or []]
+            tmcl.extend(new)
         else:
             role = _TIPL_R[k]
-            drop((tipl,), (role,))
-            tipl.extend([[role, v] for v in vals or []])
+            drop((tipl, seq), (role,))
+            new = [[role, v] for v in vals or []]
+            tipl.extend(new)
+        seq.extend(new)
         for x in [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == k.lower()]:
             del tags[x]
-    if v23:                                         # (one IPLS in v2.3: all in TIPL, as Picard)
-        tipl, tmcl = tipl + tmcl, []
+    if v23:                                         # (one IPLS in v2.3: all in TIPL, the credits in
+        ids = {id(p) for p in seq}                  # the order they come, as Picard writes them)
+        tipl, tmcl = [p for p in tipl + tmcl if id(p) not in ids] + seq, []
     if tmcl:
         tags.add(TMCL(encoding=3, people=tmcl))
     if tipl:

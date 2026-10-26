@@ -669,9 +669,19 @@ class Planner:
         hidden = {k: list(v) for k, v in target.items() if k.startswith("~") and k != "~remove"}
         hidden = {**tagio.file_vars(f), **hidden}
         gone_ = set(target.get("~remove") or [])        # (what the release deletes: no script sees it)
-        tags = {**{k: list(v) for k, v in before.items() if not k.startswith("~") and k not in gone_},
+        # (a file's own ID3 user tag as it is spelled - "CUSTOM": Picard's names are case-sensitive)
+        spell = {k: v for k, v in tagio.spellings(f).items() if k not in target}
+        tags = {**{spell.get(k, k): list(v) for k, v in before.items() if not k.startswith("~") and k not in gone_},
                 **{k: list(v) if isinstance(v, list) else [v] for k, v in target.items() if not k.startswith("~")}}
         out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden, self._log(), strip=False)
+        back = {v: k for k, v in spell.items()}
+        out = {back.get(k, k): v for k, v in out.items()}
+        tags = {back.get(k, k): v for k, v in tags.items()}
+        # ($delete(custom) is not the file's "CUSTOM": left as it is, as Picard leaves it)
+        gone = [back.get(g, g) for g in gone if not (g.lower() in spell and g != spell[g.lower()])]
+        # (what a script $unset: not deleted from the file, but gone from what Picard writes into a
+        # WAV's RIFF INFO, which it makes from the track's fields)
+        self.__dict__.setdefault("_unset", {})[str(f)] = {k for k in tags if k not in out and k not in gone}
         # (the release's fields, and what a script changed: never the file's other fields as
         # they are - a copy's own edits stay the copy's)
         new = {k: v for k, v in out.items() if v and (k in target or tags.get(k) != v)}
@@ -687,6 +697,22 @@ class Planner:
         if new.get("~remove"):
             new["~remove"] = list(kept.get("~remove") or [])
         return new
+
+    def _name_limits(self, dest_root) -> dict:
+        """The profile's file name limits, with Picard's Windows path shortening when Windows
+        compatibility is on and Picard's "Windows long path support" off (its default off
+        Windows): the room the destination takes below its mount point reserved, as Picard
+        reserves it (a drive "X:\\" and the separator)."""
+        lim = dict(self.profile["filenames"])
+        if lim.get("compat", "windows") == "windows" and not self._picard().get("windows_long_paths"):
+            base = os.path.abspath(str(dest_root))
+            mount = base                                  # (as Picard finds it: on the path as given)
+            while mount and not os.path.ismount(mount) and os.path.dirname(mount) != mount:
+                mount = os.path.dirname(mount)
+            mount = mount or os.sep
+            rel_to = os.path.dirname(base) if mount == os.sep else mount
+            lim["win_reserved"] = len(base) - len(rel_to) + 3 + 1
+        return lim
 
     def _file_settings(self) -> dict:
         """Picard's settings for what saving a file does beside its fields (ID3v2 version,
@@ -875,6 +901,7 @@ class Planner:
                       if k.startswith("~") and len(k) > 1 and k != "~remove"}
             target = {k: v for k, v in target.items() if not k.startswith("~")}
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
+            whole = target                # (the file's fields as Picard has them for naming, held or not)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
@@ -911,7 +938,8 @@ class Planner:
             if changes and f.suffix.lower() == ".wav":
                 # RIFF INFO: every field the file holds, the values as they are (Picard's
                 # WAVFile._save writes it from all of the file's metadata)
-                fe["riff"] = {k: list(merged[k]) for k in tagio.RIFF_INFO if merged.get(k)}
+                unset = self.__dict__.get("_unset", {}).get(str(f), set())
+                fe["riff"] = {k: list(merged[k]) for k in tagio.RIFF_INFO if merged.get(k) and k not in unset}
             if op in ("copy", "move"):
                 if not identified:      # as it is, with its folders below the profile's source
                     src_root = Path(prop.source_dir)
@@ -930,7 +958,11 @@ class Planner:
                             / _fit_name(rel.name, p["filenames"])
                     notes = []
                 else:
-                    names = {**hidden, **merged, **rel_tags}
+                    # (Picard names a file from all of its fields - those its format has no place
+                    # for, or keeps otherwise (a WMA's total tracks, an M4A's "A1"), too)
+                    unheld = {k: v for k, v in whole.items() if v and (not tagio.holds(f, k) or
+                                                                        (k in raw and k not in target))}
+                    names = {**hidden, **merged, **unheld, **rel_tags}
                     if folder_mode != "off":
                         # (for the name only: a Picard script working the edition out itself
                         # from %media% and %date% gets the release's first-disc values for every
@@ -948,7 +980,7 @@ class Planner:
                         comps, notes = None, [f"the naming script failed: {exc}"]
                     dst = None
                     if comps is not None:
-                        dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])
+                        dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), self._name_limits(dest_root))
                     if dst is not None:
                         dst = self._spelled(dst, dest_root)
                         dst = self._own_album_dir(dst, prop, kept, album_dirs)
@@ -965,7 +997,7 @@ class Planner:
                             legacy, _n = fnm.make_path(
                                 dest_root, naming.render(template, {**hidden, **old_tags, **rel_tags}, self._picard(),
                                                          p["filenames"].get("compat", "windows"), own=f.stem),
-                                f.suffix.lower(), p["filenames"])
+                                f.suffix.lower(), self._name_limits(dest_root))
                         except naming.TemplateError:
                             legacy = None                 # (the old name cannot be made: no earlier copy by it)
                     earlier = self._earlier_copy(dst, f, dest_root, legacy)

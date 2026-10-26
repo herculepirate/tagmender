@@ -28,6 +28,7 @@ whichever order files are planned in.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import unicodedata
 from pathlib import Path
@@ -100,6 +101,72 @@ def truncate_words(text: str, limit: int, compat: str) -> str:
     return out.rstrip(" .,-–—_") or out
 
 
+# ---- Picard's Windows path shortening (picard/util/filenaming.py, Picard 3.0.2) ------------
+# With Windows compatibility on and "Windows long path support" off - Picard's default off
+# Windows - a path below the destination's mount point fits Windows' 259 characters: every
+# name 226 UTF-16 units at most, the folders proportionally shorter when they are too long.
+WIN_MAX_FILEPATH_LEN = 259
+WIN_MAX_DIRPATH_LEN = WIN_MAX_FILEPATH_LEN - 12
+WIN_MAX_NODE_LEN = 255
+
+
+def _u16len(text: str) -> int:
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def _u16cut(text: str, length: int) -> str:
+    raw = text.encode("utf-16-le", "surrogatepass")[:max(0, length) * 2]
+    if len(raw) >= 2 and 0xD800 <= int.from_bytes(raw[-2:], "little") <= 0xDBFF:
+        raw = raw[:-2]                                  # (never half a surrogate pair)
+    return raw.decode("utf-16-le", "surrogatepass")
+
+
+def _win_shorten(dirs: list, stem: str, ext: str, length: int):
+    """Picard's shorten_path in UTF-16 mode: each folder name, and the file name with its
+    extension, at most length units (stripped)."""
+    def cut(name, n):
+        return name and _u16cut(name, n).strip() or ""
+    return [cut(d, length) for d in dirs], cut(stem, length - len(ext))
+
+
+def _ratio_cut(text: str, ratio: float) -> str:
+    limit = max(1, int(math.floor(_u16len(text) / ratio)))
+    return _u16cut(text, limit).strip()
+
+
+def win_short_parts(parts: list, ext: str, reserved: int) -> list:
+    """parts ([folders..., file stem]) shortened as Picard's _make_win_short_filename makes
+    a relative path fit, reserved characters taken by the folder it goes into."""
+    max_node = WIN_MAX_NODE_LEN - 29
+    remaining = WIN_MAX_DIRPATH_LEN - reserved
+    dirs, stem = _win_shorten(parts[:-1], parts[-1], ext, max_node)
+    dirs = [d for d in dirs if d]
+    dirpath = "/".join(dirs)
+    dplen = _u16len(dirpath)
+    if dplen <= remaining:
+        filename_max = WIN_MAX_FILEPATH_LEN - (reserved + dplen + 1)
+        _d, stem = _win_shorten([], stem, ext, filename_max)
+        return dirs + [stem]
+    names = list(dirs)
+    remaining -= len(names) - 1
+    average = float(remaining) / len(names)
+    if average < 1:
+        return dirs + [stem]                            # (Picard: "Path too long"; the limits below say so)
+    short = [dn for dn in names if len(dn) <= average]
+    total = sum(map(_u16len, names))
+    shortchars = sum(map(_u16len, short))
+    if remaining > shortchars + len(names) - len(short):
+        ratio = float(total - shortchars) / (remaining - shortchars)
+        names = [_ratio_cut(dn, ratio) if len(dn) > average else dn for dn in names]
+    else:
+        ratio = float(total) / remaining
+        names = [_ratio_cut(dn, ratio) for dn in names]
+    recovered = remaining - sum(map(_u16len, names))
+    filename_max = WIN_MAX_FILEPATH_LEN - WIN_MAX_DIRPATH_LEN - 1 + recovered
+    _d, stem = _win_shorten([], stem, ext, filename_max)
+    return names + [stem]
+
+
 def collision_suffix(key: str) -> str:
     return " ~" + hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:4]
 
@@ -116,6 +183,12 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
     parts = [safe_component(c, compat, file_stem=(i == len(components) - 1)) for i, c in enumerate(components)]
     if not parts:
         return None, ["the naming template gave an empty path"]
+    if limits.get("win_reserved") is not None:          # (Picard's 259-character Windows paths)
+        short = win_short_parts(parts, ext, int(limits["win_reserved"]))
+        if short != parts:
+            notes.append(f"shortened {'/'.join(parts)!r} -> {'/'.join(short)!r} for Windows' path length "
+                         "(as Picard does; Picard's \"Windows long path support\" setting turns it off)")
+            parts = [safe_component(c, compat, file_stem=(i == len(short) - 1)) for i, c in enumerate(short)]
     reserve = len(ext) + SUFFIX_LEN       # always leave room for a collision suffix
 
     def limit_of(i):

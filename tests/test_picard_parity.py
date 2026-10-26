@@ -279,7 +279,8 @@ class FileNaming(unittest.TestCase):
         self.assertGreater(len(cases), 300)
         for c in cases:
             ours = naming.render(c["template"], c["tags"], c["settings"], "windows")
-            theirs = [x.strip() for x in c["picard"].split("/") if x.strip()]
+            # (a "." folder goes: Picard's make_short_filename normpath()s what the script made)
+            theirs = [x.strip() for x in c["picard"].split("/") if x.strip() and x != "."]
             safe = lambda comps: [fnm.safe_component(x, "windows", i == len(comps) - 1)  # noqa: E731
                                   for i, x in enumerate(comps)]
             self.assertEqual(safe(ours), safe(theirs), c)

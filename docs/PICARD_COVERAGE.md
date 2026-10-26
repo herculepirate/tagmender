@@ -89,14 +89,16 @@ output recorded from Picard's own code.
 | Rename and move files | - | Full | journaled and undoable |
 | Move additional files | off | Full | cue/playlist references updated |
 | Delete empty directories | on | Full | |
-| Windows compatibility | on | Full | plus byte, UTF-16 and path limits, shortening |
+| Windows compatibility | on | Full | plus byte, UTF-16 and path limits, shortening; control characters (a tab) are replaced too, which Picard keeps (Windows does not allow them) |
+| Windows long path support | off (off Windows) | Full | `windows_long_paths`: off, a path below the destination's mount point fits 259 characters, shortened as Picard shortens it |
+| Name collisions | " (1)" | Excluded | a stable " ~1a2b" suffix (the same file always gets the same one); room for it is kept, so a name over 249 bytes is cut 6 bytes shorter than Picard's |
 | Replace non-ASCII characters | off | Full | `ascii_filenames`, Picard's own replacement tables |
 | Replace spaces with underscores | off | Full | `replace_spaces_with_underscores` |
 | Directory separator character | `_` | Full | `replace_dir_separator`: a "/" in a value; checked against Picard's script_to_filename |
 | Windows compatibility replacement characters | `_` | Partial | always `_` |
 | Overwrite existing files | off | Excluded | never overwrites |
 | Naming script language | - | Full | Picard's own script engine (`picard_script/`): all 82 functions, plus `$words` |
-| Tagger scripts (change tags with a script) | - | Full | Picard's own, from Picard.ini (or a profile's `picard.list_of_scripts`), run on each track after Discogs Enrichment, with Picard's hidden variables; `$delete` removes the tag |
+| Tagger scripts (change tags with a script) | - | Full | Picard's own, from Picard.ini (or a profile's `picard.list_of_scripts`), run on each track after Discogs Enrichment, with Picard's hidden variables; `$delete` removes the tag; names are case-sensitive as in Picard. A track or disc number a script writes as "N/total" (or with spaces) is written as the number and its total - Picard writes the text as it is ("1/2/2" in ID3, which it cannot read back) |
 | Plugins in general | - | Excluded | only Discogs Enrichment and CoverUp |
 
 ## MusicBrainz account features

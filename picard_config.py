@@ -177,6 +177,7 @@ TAG_DEFAULTS = {
     "ascii_filenames": False,                     # Options > File Naming
     "replace_spaces_with_underscores": False,
     "replace_dir_separator": "_",
+    "windows_long_paths": False,                  # (off: with Windows compatibility, paths fit 259 characters)
     "enable_tagger_scripts": False,               # Options > Scripting
     "list_of_scripts": [],                        # [(position, name, enabled, script text)]
 }

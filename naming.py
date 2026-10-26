@@ -206,7 +206,9 @@ class Ctx:
     def __init__(self, tags: dict, dir_sep: str = "_", win_compat: bool = False):
         import picard_script as ps
         import picard_text
-        self.tags = {k.lower(): (v if isinstance(v, list) else [v]) for k, v in tags.items() if v not in (None, "")}
+        # (names as they are spelled: Picard's script variables are case-sensitive - a tagger
+        # script's %_Shelf% or %MyTag% is not %_shelf%)
+        self.tags = {k: (v if isinstance(v, list) else [v]) for k, v in tags.items() if v not in (None, "")}
         self._derive()
         self.metadata = ps.Metadata()
         sep = dir_sep if isinstance(dir_sep, str) and "/" not in dir_sep and "\\" not in dir_sep else "_"
@@ -246,7 +248,6 @@ class Ctx:
         return out
 
     def var(self, name, joined=True):
-        name = name.lower()
         key = "~" + name[1:] if name.startswith("_") else name
         vals = self.metadata.getall(key)
         return "; ".join(vals) if joined else list(vals)
@@ -322,7 +323,7 @@ def render(template: str, tags: dict, settings: dict | None = None, compat: str 
     if st.get("replace_spaces_with_underscores"):
         text = re.sub(r"[\s_]+", "_", text.strip())
     parts = text.replace("\x00", "").split("/")
-    out = [p.strip() for p in parts if p.strip()]
+    out = [p.strip() for p in parts if p.strip() and p != "."]       # ("./": none, as Picard's normpath)
     if own and not parts[-1].strip():
         out.append(own)
     return out

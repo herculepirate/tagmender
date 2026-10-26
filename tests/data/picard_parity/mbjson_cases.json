@@ -1,0 +1,3556 @@
+[
+{
+"fixture": "recording",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Ed Sheeran"
+],
+"artists": [
+"Ed Sheeran"
+],
+"artistsort": [
+"Sheeran, Ed"
+],
+"isrc": [
+"GBAHS1400099"
+],
+"language": [
+"eng"
+],
+"musicbrainz_artistid": [
+"b8a7c51f-362c-4dcb-a259-bc6e0095f0a6"
+],
+"musicbrainz_recordingid": [
+"cb2cc207-8125-445c-9ef9-6ea44eee959a"
+],
+"musicbrainz_workid": [
+"dc469dc8-198e-42e5-b5a7-6be2f0a95ac0"
+],
+"performer": [
+"Ed Sheeran"
+],
+"performer:guitar family": [
+"Ed Sheeran"
+],
+"performer:lead vocals": [
+"Ed Sheeran"
+],
+"title": [
+"Thinking Out Loud"
+],
+"work": [
+"Thinking Out Loud"
+],
+"writer": [
+"Ed Sheeran",
+"Amy Wadge"
+]
+}
+},
+{
+"fixture": "recording",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": false,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Ed Sheeran"
+],
+"artists": [
+"Ed Sheeran"
+],
+"artistsort": [
+"Sheeran, Ed"
+],
+"isrc": [
+"GBAHS1400099"
+],
+"language": [
+"eng"
+],
+"musicbrainz_artistid": [
+"b8a7c51f-362c-4dcb-a259-bc6e0095f0a6"
+],
+"musicbrainz_recordingid": [
+"cb2cc207-8125-445c-9ef9-6ea44eee959a"
+],
+"musicbrainz_workid": [
+"dc469dc8-198e-42e5-b5a7-6be2f0a95ac0"
+],
+"performer": [
+"Ed Sheeran"
+],
+"performer:guitar family": [
+"Ed Sheeran"
+],
+"performer:vocals": [
+"Ed Sheeran"
+],
+"title": [
+"Thinking Out Loud"
+],
+"work": [
+"Thinking Out Loud"
+],
+"writer": [
+"Ed Sheeran",
+"Amy Wadge"
+]
+}
+},
+{
+"fixture": "recording",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": false,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Ed Sheeran"
+],
+"artists": [
+"Ed Sheeran"
+],
+"artistsort": [
+"Sheeran, Ed"
+],
+"isrc": [
+"GBAHS1400099"
+],
+"language": [
+"eng"
+],
+"musicbrainz_artistid": [
+"b8a7c51f-362c-4dcb-a259-bc6e0095f0a6"
+],
+"musicbrainz_recordingid": [
+"cb2cc207-8125-445c-9ef9-6ea44eee959a"
+],
+"musicbrainz_workid": [
+"dc469dc8-198e-42e5-b5a7-6be2f0a95ac0"
+],
+"performer": [
+"Ed Sheeran"
+],
+"performer:acoustic guitar": [
+"Ed Sheeran"
+],
+"performer:lead vocals": [
+"Ed Sheeran"
+],
+"title": [
+"Thinking Out Loud"
+],
+"work": [
+"Thinking Out Loud"
+],
+"writer": [
+"Ed Sheeran",
+"Amy Wadge"
+]
+}
+},
+{
+"fixture": "recording",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": false,
+"standardize_vocals": false,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Ed Sheeran"
+],
+"artists": [
+"Ed Sheeran"
+],
+"artistsort": [
+"Sheeran, Ed"
+],
+"isrc": [
+"GBAHS1400099"
+],
+"language": [
+"eng"
+],
+"musicbrainz_artistid": [
+"b8a7c51f-362c-4dcb-a259-bc6e0095f0a6"
+],
+"musicbrainz_recordingid": [
+"cb2cc207-8125-445c-9ef9-6ea44eee959a"
+],
+"musicbrainz_workid": [
+"dc469dc8-198e-42e5-b5a7-6be2f0a95ac0"
+],
+"performer": [
+"Ed Sheeran"
+],
+"performer:acoustic guitar": [
+"Ed Sheeran"
+],
+"performer:vocals": [
+"Ed Sheeran"
+],
+"title": [
+"Thinking Out Loud"
+],
+"work": [
+"Thinking Out Loud"
+],
+"writer": [
+"Ed Sheeran",
+"Amy Wadge"
+]
+}
+},
+{
+"fixture": "recording",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Ed Sheeran",
+"names": [
+"Ed Sheeran"
+],
+"sort": "Sheeran, Ed"
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artists": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artistsort": [
+"Ushirokara Haiyoritai C"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artists": [
+"\u30af\u30fc\u5b50"
+],
+"artistsort": [
+"Ushirokara Haiyoritai C"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"K\u016bko"
+],
+"artists": [
+"K\u016bko"
+],
+"artistsort": [
+"K\u016bko"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u30af\u30fc\u5b50"
+],
+"artists": [
+"\u30af\u30fc\u5b50"
+],
+"artistsort": [
+"K\u016bko"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC",
+"names": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"sort": "Ushirokara Haiyoritai C"
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC",
+"names": [
+"\u30af\u30fc\u5b50"
+],
+"sort": "Ushirokara Haiyoritai C"
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "K\u016bko",
+"names": [
+"K\u016bko"
+],
+"sort": "K\u016bko"
+}
+},
+{
+"fixture": "recording_artist_aliases",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u30af\u30fc\u5b50",
+"names": [
+"\u30af\u30fc\u5b50"
+],
+"sort": "K\u016bko"
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artists": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artistsort": [
+"\u30a6\u30b7\u30ed\u30ab\u30e9\u30cf\u30a4\u30e8\u30ea\u30bf\u30a4C"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artists": [
+"\u30af\u30fc\u5b50"
+],
+"artistsort": [
+"\u30a6\u30b7\u30ed\u30ab\u30e9\u30cf\u30a4\u30e8\u30ea\u30bf\u30a4C"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artists": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"artistsort": [
+"Ushirokara Haiyoritai C"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"de",
+"fr"
+]
+},
+"want": {
+"artist": [
+"K\u016bko"
+],
+"artists": [
+"K\u016bko"
+],
+"artistsort": [
+"K\u016bko"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u30af\u30fc\u5b50"
+],
+"artists": [
+"\u30af\u30fc\u5b50"
+],
+"artistsort": [
+"K\u016bko"
+],
+"musicbrainz_artistid": [
+"9d844524-86b7-4424-98d4-4fae85c7eeb8"
+],
+"musicbrainz_recordingid": [
+"3cf17055-68db-477a-a9b6-a3271f188f27"
+],
+"title": [
+"\u305d\u3057\u3066\u4f1d\u8aac\u306e\u3088\u3046\u306b \u00d7 my burning desire"
+]
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC",
+"names": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"sort": "\u30a6\u30b7\u30ed\u30ab\u30e9\u30cf\u30a4\u30e8\u30ea\u30bf\u30a4C"
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC",
+"names": [
+"\u30af\u30fc\u5b50"
+],
+"sort": "\u30a6\u30b7\u30ed\u30ab\u30e9\u30cf\u30a4\u30e8\u30ea\u30bf\u30a4C"
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC",
+"names": [
+"\u5f8c\u308d\u304b\u3089\u9019\u3044\u3088\u308a\u968aC"
+],
+"sort": "Ushirokara Haiyoritai C"
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"de",
+"fr"
+]
+},
+"want": {
+"name": "K\u016bko",
+"names": [
+"K\u016bko"
+],
+"sort": "K\u016bko"
+}
+},
+{
+"fixture": "recording_artist_aliases_locales",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u30af\u30fc\u5b50",
+"names": [
+"\u30af\u30fc\u5b50"
+],
+"sort": "K\u016bko"
+}
+},
+{
+"fixture": "recording_artist_name_change",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Blind Boy Grunt"
+],
+"artists": [
+"Blind Boy Grunt"
+],
+"artistsort": [
+"Grunt, Blind Boy"
+],
+"musicbrainz_artistid": [
+"72c536dc-7137-4477-a521-567eeb840fa8"
+],
+"musicbrainz_recordingid": [
+"7ef0754b-0543-4f31-8268-bb0a55de5d24"
+],
+"title": [
+"Dreadful Day"
+]
+}
+},
+{
+"fixture": "recording_artist_name_change",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Blind Boy Grunt"
+],
+"artists": [
+"Bob Dylan"
+],
+"artistsort": [
+"Grunt, Blind Boy"
+],
+"musicbrainz_artistid": [
+"72c536dc-7137-4477-a521-567eeb840fa8"
+],
+"musicbrainz_recordingid": [
+"7ef0754b-0543-4f31-8268-bb0a55de5d24"
+],
+"title": [
+"Dreadful Day"
+]
+}
+},
+{
+"fixture": "recording_artist_name_change",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "all",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Bob Dylan"
+],
+"artists": [
+"Bob Dylan"
+],
+"artistsort": [
+"Dylan, Bob"
+],
+"musicbrainz_artistid": [
+"72c536dc-7137-4477-a521-567eeb840fa8"
+],
+"musicbrainz_recordingid": [
+"7ef0754b-0543-4f31-8268-bb0a55de5d24"
+],
+"title": [
+"Dreadful Day"
+]
+}
+},
+{
+"fixture": "recording_artist_name_change",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Blind Boy Grunt",
+"names": [
+"Blind Boy Grunt"
+],
+"sort": "Grunt, Blind Boy"
+}
+},
+{
+"fixture": "recording_artist_name_change",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Blind Boy Grunt",
+"names": [
+"Bob Dylan"
+],
+"sort": "Grunt, Blind Boy"
+}
+},
+{
+"fixture": "recording_artist_name_change",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "all",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Bob Dylan",
+"names": [
+"Bob Dylan"
+],
+"sort": "Dylan, Bob"
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artists": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artistsort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"composer": [
+"Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artists": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"artistsort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"composer": [
+"Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"ja",
+"en_US"
+]
+},
+"want": {
+"artist": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"artists": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"artistsort": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"composer": [
+"Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"de",
+"fr"
+]
+},
+"want": {
+"artist": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"artists": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"artistsort": [
+"Tschaikowski, Pjotr Iljitsch"
+],
+"composer": [
+"Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artists": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artistsort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"composer": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"ja",
+"en_US"
+]
+},
+"want": {
+"artist": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"artists": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"artistsort": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"composer": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"de",
+"fr"
+]
+},
+"want": {
+"artist": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"artists": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"artistsort": [
+"Tschaikowski, Pjotr Iljitsch"
+],
+"composer": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"artists": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"artistsort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"composer": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artists": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"artistsort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"composer": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"ja",
+"en_US"
+]
+},
+"want": {
+"artist": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"artists": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"artistsort": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"composer": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"de",
+"fr"
+]
+},
+"want": {
+"artist": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"artists": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"artistsort": [
+"Tschaikowski, Pjotr Iljitsch"
+],
+"composer": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"composersort": [
+"Tchaikovsky, Pyotr Ilyich"
+],
+"conductor": [
+"Charles Dutoit"
+],
+"engineer": [
+"Colin Moorfoot"
+],
+"musicbrainz_artistid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_composerid": [
+"9ddd7abc-9e1b-471d-8031-583bc6bc8be9"
+],
+"musicbrainz_recordingid": [
+"22bac38a-53c2-4eb3-bbd0-76144c390154"
+],
+"musicbrainz_workid": [
+"c8aebb07-fb03-36d3-ade4-3a2692810615"
+],
+"performer:orchestra": [
+"Orchestre symphonique de Montr\u00e9al"
+],
+"producer": [
+"Ray Minshull"
+],
+"title": [
+"Act 2: IVc. Dance des Cygnes - Dance des Cygnes"
+],
+"work": [
+"Swan Lake, op. 20: Act II, no. 13: Danses des cygnes: III. Danses des Cygnes: Tempo di valse"
+]
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Pyotr Ilyich Tchaikovsky",
+"names": [
+"Pyotr Ilyich Tchaikovsky"
+],
+"sort": "Tchaikovsky, Pyotr Ilyich"
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": true,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Pyotr Ilyich Tchaikovsky",
+"names": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"sort": "Tchaikovsky, Pyotr Ilyich"
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"ja",
+"en_US"
+]
+},
+"want": {
+"name": "\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc",
+"names": [
+"\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+],
+"sort": "\u30c1\u30e3\u30a4\u30b3\u30d5\u30b9\u30ad\u30fc"
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"de",
+"fr"
+]
+},
+"want": {
+"name": "Pjotr Iljitsch Tschaikowski",
+"names": [
+"Pjotr Iljitsch Tschaikowski"
+],
+"sort": "Tschaikowski, Pjotr Iljitsch"
+}
+},
+{
+"fixture": "recording_composer",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439",
+"names": [
+"\u041f\u0451\u0442\u0440 \u0418\u043b\u044c\u0438\u0447 \u0427\u0430\u0439\u043a\u043e\u0432\u0441\u043a\u0438\u0439"
+],
+"sort": "Tchaikovsky, Pyotr Ilyich"
+}
+},
+{
+"fixture": "recording_credits",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"arranger": [
+"Benny Andersson",
+"Bj\u00f6rn Ulvaeus"
+],
+"artist": [
+"ABBA"
+],
+"artists": [
+"ABBA"
+],
+"artistsort": [
+"ABBA"
+],
+"engineer": [
+"Michael B. Tretow"
+],
+"musicbrainz_artistid": [
+"d87e52c5-bb8d-4da8-b941-9f4928627dc8"
+],
+"musicbrainz_recordingid": [
+"2d40c8b2-7524-49e3-af44-ebb924c5b023"
+],
+"performer:EWI": [
+"Michael Brecker"
+],
+"performer:bass": [
+"Rutger Gunnarsson"
+],
+"performer:electric guitar": [
+"Lasse Wellander"
+],
+"performer:membranophone": [
+"Ola Brunkert"
+],
+"performer:solo vocals": [
+"Frida"
+],
+"producer": [
+"Benny Andersson",
+"Bj\u00f6rn Ulvaeus"
+],
+"title": [
+"Knowing Me, Knowing You"
+]
+}
+},
+{
+"fixture": "recording_credits",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"arranger": [
+"Benny Andersson",
+"Bj\u00f6rn Ulvaeus"
+],
+"artist": [
+"ABBA"
+],
+"artists": [
+"ABBA"
+],
+"artistsort": [
+"ABBA"
+],
+"engineer": [
+"Michael B. Tretow"
+],
+"musicbrainz_artistid": [
+"d87e52c5-bb8d-4da8-b941-9f4928627dc8"
+],
+"musicbrainz_recordingid": [
+"2d40c8b2-7524-49e3-af44-ebb924c5b023"
+],
+"performer:EWI": [
+"Michael Brecker"
+],
+"performer:bass": [
+"Rutger Gunnarsson"
+],
+"performer:electric guitar": [
+"Lasse Wellander"
+],
+"performer:membranophone": [
+"Ola Brunkert"
+],
+"performer:solo vocals": [
+"Anni-Frid Lyngstad"
+],
+"producer": [
+"Benny Andersson",
+"Bj\u00f6rn Ulvaeus"
+],
+"title": [
+"Knowing Me, Knowing You"
+]
+}
+},
+{
+"fixture": "recording_credits",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "ABBA",
+"names": [
+"ABBA"
+],
+"sort": "ABBA"
+}
+},
+{
+"fixture": "recording_generic_instrument",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"engineer": [
+"Todd Barriage"
+],
+"mixer": [
+"QueenPb"
+],
+"musicbrainz_recordingid": [
+"161342cf-22b3-45f5-b13a-1c7b37d1c874"
+],
+"performer:instruments": [
+"SixteenInMono"
+],
+"performer:vocals": [
+"Camila",
+"Michi Mochievee"
+],
+"title": [
+"Kill V. Maim"
+]
+}
+},
+{
+"fixture": "recording_instrumental",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"composer": [
+"Bobby Scott"
+],
+"composersort": [
+"Scott, Bobby"
+],
+"language": [
+"zxx"
+],
+"musicbrainz_composerid": [
+"009a9fa1-c002-4fd5-a3e0-bc39a33bb07b"
+],
+"musicbrainz_recordingid": [
+"ed23dfd5-2b52-4c38-8118-9924eeaf0025"
+],
+"musicbrainz_workid": [
+"47dcb656-3e85-39eb-ab71-d2e75564fc44"
+],
+"title": [
+"A Taste of Honey"
+],
+"work": [
+"A Taste of Honey"
+]
+}
+},
+{
+"fixture": "recording_multi_artists_1",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Ed Sheeran feat. Meek Mill & A Boogie Wit da Hoodie"
+],
+"artists": [
+"Ed Sheeran",
+"Meek Mill",
+"A Boogie Wit da Hoodie"
+],
+"artistsort": [
+"Sheeran, Ed feat. Meek Mill & Boogie Wit da Hoodie, A"
+],
+"musicbrainz_artistid": [
+"b8a7c51f-362c-4dcb-a259-bc6e0095f0a6",
+"31bcadcc-e1da-4cad-bec8-2f4f1d41b095",
+"c1708d03-8a66-46eb-848e-fe0d233ffb39"
+],
+"musicbrainz_recordingid": [
+"7684982a-efee-49e5-baf0-82a466f12508"
+],
+"title": [
+"1000 Nights"
+]
+}
+},
+{
+"fixture": "recording_multi_artists_1",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Ed Sheeran feat. Meek Mill & A Boogie Wit da Hoodie",
+"names": [
+"Ed Sheeran",
+"Meek Mill",
+"A Boogie Wit da Hoodie"
+],
+"sort": "Sheeran, Ed feat. Meek Mill & Boogie Wit da Hoodie, A"
+}
+},
+{
+"fixture": "recording_multi_artists_2",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Ed Sheeran feat. Meek Mill & A Boogie Wit da Hoodie"
+],
+"artists": [
+"Ed Sheeran",
+"Meek Mill",
+"A Boogie Wit da Hoodie"
+],
+"artistsort": [
+"Sheeran, Ed feat. Meek Mill & Boogie Wit da Hoodie, A"
+],
+"musicbrainz_artistid": [
+"b8a7c51f-362c-4dcb-a259-bc6e0095f0a6",
+"31bcadcc-e1da-4cad-bec8-2f4f1d41b095",
+"c1708d03-8a66-46eb-848e-fe0d233ffb39"
+],
+"musicbrainz_recordingid": [
+"7684982a-efee-49e5-baf0-82a466f12508"
+],
+"title": [
+"1000 Nights"
+]
+}
+},
+{
+"fixture": "recording_multi_artists_2",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Ed Sheeran feat. Meek Mill & A Boogie Wit da Hoodie",
+"names": [
+"Ed Sheeran",
+"Meek Mill",
+"A Boogie Wit da Hoodie"
+],
+"sort": "Sheeran, Ed feat. Meek Mill & Boogie Wit da Hoodie, A"
+}
+},
+{
+"fixture": "recording_multiple_works",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"arranger": [
+"\u795e\u524d\u6681"
+],
+"composer": [
+"\u795e\u524d\u6681",
+"nishi-ken",
+"\u767d\u77f3\u307f\u306e\u308b",
+"\u7dbe\u539f\u572d\u4e8c",
+"\u91d1\u4e95\u6c5f\u53f3",
+"\u6a4b\u672c\u7531\u9999\u5229",
+"\u83ca\u8c37\u77e5\u6a39",
+"\u7530\u4ee3\u667a\u4e00",
+"ISAO",
+"\u3068\u3082\u306e\u304b\u3064\u307f"
+],
+"composersort": [
+"K\u014dsaki, Satoru",
+"nishi-ken",
+"Shiraishi, Minoru",
+"Ayahara, Keiji",
+"Kanai, Kousuke",
+"Hashimoto, Yukari",
+"Kikuya, Tomoki",
+"Tashiro, Tomokazu",
+"ISAO",
+"Tomono, Katsumi"
+],
+"language": [
+"jpn",
+"eng",
+"zxx"
+],
+"lyricist": [
+"\u795e\u524d\u6681",
+"\u7551\u4e9c\u8cb4",
+"\u767d\u77f3\u307f\u306e\u308b"
+],
+"musicbrainz_composerid": [
+"557e6938-404b-4332-a169-bec2b77fe05b",
+"537321ad-e9ef-4562-8dc7-b715fe79ef64",
+"b2f249b8-b152-4c2c-b4e3-f595ab9a9439",
+"b962b17c-3bff-464d-96d6-1d3fb1ef0fbb",
+"784791ce-64d3-4d23-a8df-8970092bdee7",
+"78857010-bde3-4f1c-8c3c-822ce2db2fcb",
+"1491b044-be66-4528-be9e-dc58a956f836",
+"05143a28-41be-4e8a-9055-7c06a2e31d4c",
+"b70459a0-ecef-4bb1-9098-de4d412eeb5c",
+"a68cd82d-66a6-4eae-9540-aec233389e95"
+],
+"musicbrainz_recordingid": [
+"91b7e04e-529b-4119-bc30-867db56fd400"
+],
+"musicbrainz_workid": [
+"2fc3a055-d9c0-308a-a757-281a6214a137",
+"e36c1245-65fa-3e23-8baf-3c007f08f973",
+"faa32b5b-8cdf-3509-9703-1166a08f6d16",
+"9d61abd9-24b3-3ef0-a75c-bc5726195612",
+"c49da553-f67a-375e-a4b1-527344626e03",
+"eacb3b0a-cb2f-39a2-acee-f1a7672e5625",
+"d646c4f3-882e-4a2e-8c88-7704f77b4097",
+"268ca635-cc42-40be-a79f-4e134323dbd5",
+"df1fe552-440d-3f01-a68a-a9ad90b61f8e",
+"92493d74-6dae-471d-90ad-58e5da0a5d48",
+"311f166c-3898-4cec-a463-0ebcf5df8326",
+"a14833b9-25c4-4c80-be9c-4000fd9ee635",
+"2801c415-a9f0-4a6c-aeee-debb45d9ec03",
+"696529bf-dd7b-4da9-8e6b-82910f1c1efa",
+"95127926-2b6d-384b-8949-8bf696fc58ac",
+"7ec2946a-fca2-301a-aa1a-0589a50de65a",
+"9be12d7d-826f-3c28-9bf6-fe7af7773543",
+"6ec462be-a5ba-4633-ab51-8c7708071765",
+"8859acfd-c764-36a1-acad-b0c1d54931fa",
+"57e19d23-eabc-37ce-8314-451b452f98c9",
+"fd1a3582-a614-3ea6-a1b8-ed0936b62d56",
+"f8474072-cb47-3a7a-a78c-2c20bf6b70a0",
+"89a79c13-3482-3d78-bdde-5d398aff53c4",
+"b5c3f07e-8104-358f-8425-abd64de4faac",
+"0b3f1741-1c42-4ae4-aacd-74f1a7c1f1ad",
+"4d31f396-c55e-4002-bea0-36adb70c3bc1",
+"d76c8c06-a425-4dfd-9137-c49225d6ef43",
+"cc510728-637b-3529-825b-392810eb4650",
+"daa43f0a-c928-3760-9721-9de74e9c6505",
+"70b349b6-8066-4d35-b46c-bdb8d658ae5c"
+],
+"title": [
+"\u7d44\u66f2\u300c\u3089\u304d\u2606\u3059\u305f\u52d5\u753b\u300d"
+],
+"work": [
+"Gravity",
+"\u304b\u3048\u3057\u3066! \u30cb\u30fc\u30bd\u30c3\u30af\u30b9",
+"\u304b\u304a\u308a\u3093\u306e\u30c6\u30fc\u30de -\u5b8c\u5168\u7248-",
+"\u30b1\u30f3\u30ab\u4e88\u5831\u306e\u6642\u9593\u3060\u3088",
+"\u30b3\u30b9\u3063\u3066! \u30aa\u30fc\u30de\u30a4\u30cf\u30cb\u30fc",
+"\u3053\u3059\u3077\u308c\u30ce\u3053\u3053\u308d\u3048",
+"\u3053\u306a\u305f\u306e\u30c6\u30fc\u30de\u3001\u666e\u901a\u30d0\u30fc\u30b8\u30e7\u30f3",
+"\u30bb\u30f3\u30c1\u30e1\u30f3\u30bf\u30eb\u4fee\u5b66\u65c5\u884c",
+"\u3069\u3093\u3060\u3051\u30d5\u30a1\u30f3\u30d5\u30a1\u30fc\u30ec",
+"\u30d0\u30f3\u30ac\u30b9\u30bf\u30fc",
+"\u3076\u3063\u3076\u3076\u3063\u3076\u3076\u30fc\u3060\u306d\u3001\u3089\u304d\u2606\u3059\u305f",
+"\u30d5\u30f3\u30d5\u30f3\u30d5\u30f3\u266a\u3060\u3088\u3001\u3089\u304d\u2606\u3059\u305f",
+"\u30de\u30c3\u30b7\u30fc\uff06\u30de\u30fc\u30ed\u30fc",
+"\u307f\u306a\u307f\u306e\u30c6\u30fc\u30de",
+"\u307f\u306b\u307e\u3080\u30c6\u30f3\u30dd",
+"\u3082\u3001\u5984\u60f3\u30de\u30b7\u30fc\u30f3\u3002",
+"\u3082\u3063\u3066\u3051! \u30bb\u30fc\u30e9\u30fc\u3075\u304f",
+"\u3086\u305f\u304b\u306e\u30c6\u30fc\u30de",
+"\u4e09\u5341\u8def\u5cac",
+"\u4ffa\u306e\u5fd8\u308c\u7269 -\u5b8c\u5168\u7248-",
+"\u5bdd\u30fb\u9003\u30fb\u3052\u3067\u30ea\u30bb\u30c3\u30c8!",
+"\u5e78\u305b\u9858\u3046\u5f7c\u65b9\u304b\u3089",
+"\u604b\u306e\u30df\u30ce\u30eb\u4f1d\u8aac",
+"\u60a0\u9577\u6226\u968a\u30c0\u30e9\u30ec\u30f3\u30b8\u30e3\u30fc",
+"\u6109\u5feb\u3060\u306d\u3001\u3089\u304d\u2606\u3059\u305f",
+"\u66d6\u6627\u30cd\u30c3\u30c8\u3060\u30fc\u308a\u3093",
+"\u67ca\u56db\u59c9\u59b9",
+"\u9ed9\u3063\u3068\u4f11\u307f\u6642\u9593",
+"\u840c\u3048\u8981\u7d20\u3063\u3066\u306a\u3093\u3067\u3059\u304b?",
+"\u8efd\u3084\u304b\u3060\u3088\u3001\u3089\u304d\u2606\u3059\u305f"
+]
+}
+},
+{
+"fixture": "recording_multiple_works",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": true,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"arranger": [
+"Satoru K\u014dsaki"
+],
+"composer": [
+"Satoru K\u014dsaki",
+"nishi-ken",
+"Minoru Shiraishi",
+"Keiji Ayahara",
+"Kousuke Kanai",
+"Yukari Hashimoto",
+"Tomoki Kikuya",
+"Tomokazu Tashiro",
+"ISAO",
+"Katsumi Tomono"
+],
+"composersort": [
+"K\u014dsaki, Satoru",
+"nishi-ken",
+"Shiraishi, Minoru",
+"Ayahara, Keiji",
+"Kanai, Kousuke",
+"Hashimoto, Yukari",
+"Kikuya, Tomoki",
+"Tashiro, Tomokazu",
+"ISAO",
+"Tomono, Katsumi"
+],
+"language": [
+"jpn",
+"eng",
+"zxx"
+],
+"lyricist": [
+"Satoru K\u014dsaki",
+"Aki Hata",
+"Minoru Shiraishi"
+],
+"musicbrainz_composerid": [
+"557e6938-404b-4332-a169-bec2b77fe05b",
+"537321ad-e9ef-4562-8dc7-b715fe79ef64",
+"b2f249b8-b152-4c2c-b4e3-f595ab9a9439",
+"b962b17c-3bff-464d-96d6-1d3fb1ef0fbb",
+"784791ce-64d3-4d23-a8df-8970092bdee7",
+"78857010-bde3-4f1c-8c3c-822ce2db2fcb",
+"1491b044-be66-4528-be9e-dc58a956f836",
+"05143a28-41be-4e8a-9055-7c06a2e31d4c",
+"b70459a0-ecef-4bb1-9098-de4d412eeb5c",
+"a68cd82d-66a6-4eae-9540-aec233389e95"
+],
+"musicbrainz_recordingid": [
+"91b7e04e-529b-4119-bc30-867db56fd400"
+],
+"musicbrainz_workid": [
+"2fc3a055-d9c0-308a-a757-281a6214a137",
+"e36c1245-65fa-3e23-8baf-3c007f08f973",
+"faa32b5b-8cdf-3509-9703-1166a08f6d16",
+"9d61abd9-24b3-3ef0-a75c-bc5726195612",
+"c49da553-f67a-375e-a4b1-527344626e03",
+"eacb3b0a-cb2f-39a2-acee-f1a7672e5625",
+"d646c4f3-882e-4a2e-8c88-7704f77b4097",
+"268ca635-cc42-40be-a79f-4e134323dbd5",
+"df1fe552-440d-3f01-a68a-a9ad90b61f8e",
+"92493d74-6dae-471d-90ad-58e5da0a5d48",
+"311f166c-3898-4cec-a463-0ebcf5df8326",
+"a14833b9-25c4-4c80-be9c-4000fd9ee635",
+"2801c415-a9f0-4a6c-aeee-debb45d9ec03",
+"696529bf-dd7b-4da9-8e6b-82910f1c1efa",
+"95127926-2b6d-384b-8949-8bf696fc58ac",
+"7ec2946a-fca2-301a-aa1a-0589a50de65a",
+"9be12d7d-826f-3c28-9bf6-fe7af7773543",
+"6ec462be-a5ba-4633-ab51-8c7708071765",
+"8859acfd-c764-36a1-acad-b0c1d54931fa",
+"57e19d23-eabc-37ce-8314-451b452f98c9",
+"fd1a3582-a614-3ea6-a1b8-ed0936b62d56",
+"f8474072-cb47-3a7a-a78c-2c20bf6b70a0",
+"89a79c13-3482-3d78-bdde-5d398aff53c4",
+"b5c3f07e-8104-358f-8425-abd64de4faac",
+"0b3f1741-1c42-4ae4-aacd-74f1a7c1f1ad",
+"4d31f396-c55e-4002-bea0-36adb70c3bc1",
+"d76c8c06-a425-4dfd-9137-c49225d6ef43",
+"cc510728-637b-3529-825b-392810eb4650",
+"daa43f0a-c928-3760-9721-9de74e9c6505",
+"70b349b6-8066-4d35-b46c-bdb8d658ae5c"
+],
+"title": [
+"\u7d44\u66f2\u300c\u3089\u304d\u2606\u3059\u305f\u52d5\u753b\u300d"
+],
+"work": [
+"Gravity",
+"\u304b\u3048\u3057\u3066! \u30cb\u30fc\u30bd\u30c3\u30af\u30b9",
+"\u304b\u304a\u308a\u3093\u306e\u30c6\u30fc\u30de -\u5b8c\u5168\u7248-",
+"\u30b1\u30f3\u30ab\u4e88\u5831\u306e\u6642\u9593\u3060\u3088",
+"\u30b3\u30b9\u3063\u3066! \u30aa\u30fc\u30de\u30a4\u30cf\u30cb\u30fc",
+"\u3053\u3059\u3077\u308c\u30ce\u3053\u3053\u308d\u3048",
+"\u3053\u306a\u305f\u306e\u30c6\u30fc\u30de\u3001\u666e\u901a\u30d0\u30fc\u30b8\u30e7\u30f3",
+"\u30bb\u30f3\u30c1\u30e1\u30f3\u30bf\u30eb\u4fee\u5b66\u65c5\u884c",
+"\u3069\u3093\u3060\u3051\u30d5\u30a1\u30f3\u30d5\u30a1\u30fc\u30ec",
+"\u30d0\u30f3\u30ac\u30b9\u30bf\u30fc",
+"\u3076\u3063\u3076\u3076\u3063\u3076\u3076\u30fc\u3060\u306d\u3001\u3089\u304d\u2606\u3059\u305f",
+"\u30d5\u30f3\u30d5\u30f3\u30d5\u30f3\u266a\u3060\u3088\u3001\u3089\u304d\u2606\u3059\u305f",
+"\u30de\u30c3\u30b7\u30fc\uff06\u30de\u30fc\u30ed\u30fc",
+"\u307f\u306a\u307f\u306e\u30c6\u30fc\u30de",
+"\u307f\u306b\u307e\u3080\u30c6\u30f3\u30dd",
+"\u3082\u3001\u5984\u60f3\u30de\u30b7\u30fc\u30f3\u3002",
+"\u3082\u3063\u3066\u3051! \u30bb\u30fc\u30e9\u30fc\u3075\u304f",
+"\u3086\u305f\u304b\u306e\u30c6\u30fc\u30de",
+"\u4e09\u5341\u8def\u5cac",
+"\u4ffa\u306e\u5fd8\u308c\u7269 -\u5b8c\u5168\u7248-",
+"\u5bdd\u30fb\u9003\u30fb\u3052\u3067\u30ea\u30bb\u30c3\u30c8!",
+"\u5e78\u305b\u9858\u3046\u5f7c\u65b9\u304b\u3089",
+"\u604b\u306e\u30df\u30ce\u30eb\u4f1d\u8aac",
+"\u60a0\u9577\u6226\u968a\u30c0\u30e9\u30ec\u30f3\u30b8\u30e3\u30fc",
+"\u6109\u5feb\u3060\u306d\u3001\u3089\u304d\u2606\u3059\u305f",
+"\u66d6\u6627\u30cd\u30c3\u30c8\u3060\u30fc\u308a\u3093",
+"\u67ca\u56db\u59c9\u59b9",
+"\u9ed9\u3063\u3068\u4f11\u307f\u6642\u9593",
+"\u840c\u3048\u8981\u7d20\u3063\u3066\u306a\u3093\u3067\u3059\u304b?",
+"\u8efd\u3084\u304b\u3060\u3088\u3001\u3089\u304d\u2606\u3059\u305f"
+]
+}
+},
+{
+"fixture": "recording_null",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {}
+},
+{
+"fixture": "recording_null",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "",
+"names": [
+""
+],
+"sort": ""
+}
+},
+{
+"fixture": "recording_video",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Paradise Lost"
+],
+"artists": [
+"Paradise Lost"
+],
+"artistsort": [
+"Paradise Lost"
+],
+"composer": [
+"Gregor Mackintosh"
+],
+"composersort": [
+"Mackintosh, Gregor"
+],
+"director": [
+"Edward 209"
+],
+"language": [
+"eng"
+],
+"lyricist": [
+"Nick Holmes"
+],
+"musicbrainz_artistid": [
+"10bf95b6-30e3-44f1-817f-45762cdc0de0"
+],
+"musicbrainz_composerid": [
+"1d82791c-f3b0-4695-985a-35a3f6c7a014"
+],
+"musicbrainz_recordingid": [
+"370889ee-7a70-4d0a-8f4d-e514e0494d7e"
+],
+"musicbrainz_workid": [
+"9a186e42-bf73-3e91-9359-cc7b6579eeb8"
+],
+"producer": [
+"Edward 209"
+],
+"title": [
+"The Enemy"
+],
+"work": [
+"The Enemy"
+]
+}
+},
+{
+"fixture": "recording_video",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "variations",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Paradise Lost"
+],
+"artists": [
+"Paradise Lost"
+],
+"artistsort": [
+"Paradise Lost"
+],
+"composer": [
+"Gregor Mackintosh"
+],
+"composersort": [
+"Mackintosh, Gregor"
+],
+"director": [
+"Edward Mavskegg"
+],
+"language": [
+"eng"
+],
+"lyricist": [
+"Nick Holmes"
+],
+"musicbrainz_artistid": [
+"10bf95b6-30e3-44f1-817f-45762cdc0de0"
+],
+"musicbrainz_composerid": [
+"1d82791c-f3b0-4695-985a-35a3f6c7a014"
+],
+"musicbrainz_recordingid": [
+"370889ee-7a70-4d0a-8f4d-e514e0494d7e"
+],
+"musicbrainz_workid": [
+"9a186e42-bf73-3e91-9359-cc7b6579eeb8"
+],
+"producer": [
+"Edward Mavskegg"
+],
+"title": [
+"The Enemy"
+],
+"work": [
+"The Enemy"
+]
+}
+},
+{
+"fixture": "recording_video",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Paradise Lost",
+"names": [
+"Paradise Lost"
+],
+"sort": "Paradise Lost"
+}
+},
+{
+"fixture": "recording_video_null",
+"kind": "recording",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Tim Green"
+],
+"artists": [
+"Tim Green"
+],
+"artistsort": [
+"Tim Green"
+],
+"musicbrainz_artistid": [
+"5103b22e-514f-46b1-afdf-c99517c791e2"
+],
+"musicbrainz_recordingid": [
+"46b97aca-a524-4993-8ec5-93c736081442"
+],
+"title": [
+"Lune"
+]
+}
+},
+{
+"fixture": "recording_video_null",
+"kind": "credit",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"name": "Tim Green",
+"names": [
+"Tim Green"
+],
+"sort": "Tim Green"
+}
+},
+{
+"fixture": "release",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"The Dark Side of the Moon"
+],
+"albumartist": [
+"Pink Floyd"
+],
+"albumartists": [
+"Pink Floyd"
+],
+"albumartistsort": [
+"Pink Floyd"
+],
+"asin": [
+"b123"
+],
+"barcode": [
+"123"
+],
+"catalognumber": [
+"SHVL 804"
+],
+"date": [
+"1973-03-24"
+],
+"label": [
+"Harvest"
+],
+"musicbrainz_albumartistid": [
+"83d91898-7763-47d7-b03b-b92132375c47"
+],
+"musicbrainz_albumid": [
+"b84ee12a-09ef-421b-82de-0441a926375b"
+],
+"musicbrainz_releasegroupid": [
+"f5093c06-23e3-404f-aeaa-40f72885ee3a"
+],
+"originaldate": [
+"1973-03-24"
+],
+"originalyear": [
+"1973"
+],
+"producer": [
+"Hipgnosis"
+],
+"releasecountry": [
+"GB"
+],
+"releasestatus": [
+"official"
+],
+"releasetype": [
+"album"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": false,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"The Dark Side of the Moon"
+],
+"albumartist": [
+"Pink Floyd"
+],
+"albumartists": [
+"Pink Floyd"
+],
+"albumartistsort": [
+"Pink Floyd"
+],
+"asin": [
+"b123"
+],
+"barcode": [
+"123"
+],
+"catalognumber": [
+"SHVL 804"
+],
+"date": [
+"1973-03-24"
+],
+"label": [
+"Harvest"
+],
+"musicbrainz_albumartistid": [
+"83d91898-7763-47d7-b03b-b92132375c47"
+],
+"musicbrainz_albumid": [
+"b84ee12a-09ef-421b-82de-0441a926375b"
+],
+"musicbrainz_releasegroupid": [
+"f5093c06-23e3-404f-aeaa-40f72885ee3a"
+],
+"originaldate": [
+"1973-03-24"
+],
+"originalyear": [
+"1973"
+],
+"releasecountry": [
+"GB"
+],
+"releasestatus": [
+"official"
+],
+"releasetype": [
+"album"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"ja",
+"en_US"
+]
+},
+"want": {
+"album": [
+"The Dark Side of the Moon"
+],
+"albumartist": [
+"\u30d4\u30f3\u30af\u30fb\u30d5\u30ed\u30a4\u30c9"
+],
+"albumartists": [
+"\u30d4\u30f3\u30af\u30fb\u30d5\u30ed\u30a4\u30c9"
+],
+"albumartistsort": [
+"\u30d4\u30f3\u30af\u30fb\u30d5\u30ed\u30a4\u30c9"
+],
+"asin": [
+"b123"
+],
+"barcode": [
+"123"
+],
+"catalognumber": [
+"SHVL 804"
+],
+"date": [
+"1973-03-24"
+],
+"label": [
+"Harvest"
+],
+"musicbrainz_albumartistid": [
+"83d91898-7763-47d7-b03b-b92132375c47"
+],
+"musicbrainz_albumid": [
+"b84ee12a-09ef-421b-82de-0441a926375b"
+],
+"musicbrainz_releasegroupid": [
+"f5093c06-23e3-404f-aeaa-40f72885ee3a"
+],
+"originaldate": [
+"1973-03-24"
+],
+"originalyear": [
+"1973"
+],
+"producer": [
+"Hipgnosis"
+],
+"releasecountry": [
+"GB"
+],
+"releasestatus": [
+"official"
+],
+"releasetype": [
+"album"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": false,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": true,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"ja",
+"en_US"
+]
+},
+"want": {
+"album": [
+"The Dark Side of the Moon"
+],
+"albumartist": [
+"\u30d4\u30f3\u30af\u30fb\u30d5\u30ed\u30a4\u30c9"
+],
+"albumartists": [
+"\u30d4\u30f3\u30af\u30fb\u30d5\u30ed\u30a4\u30c9"
+],
+"albumartistsort": [
+"\u30d4\u30f3\u30af\u30fb\u30d5\u30ed\u30a4\u30c9"
+],
+"asin": [
+"b123"
+],
+"barcode": [
+"123"
+],
+"catalognumber": [
+"SHVL 804"
+],
+"date": [
+"1973-03-24"
+],
+"label": [
+"Harvest"
+],
+"musicbrainz_albumartistid": [
+"83d91898-7763-47d7-b03b-b92132375c47"
+],
+"musicbrainz_albumid": [
+"b84ee12a-09ef-421b-82de-0441a926375b"
+],
+"musicbrainz_releasegroupid": [
+"f5093c06-23e3-404f-aeaa-40f72885ee3a"
+],
+"originaldate": [
+"1973-03-24"
+],
+"originalyear": [
+"1973"
+],
+"releasecountry": [
+"GB"
+],
+"releasestatus": [
+"official"
+],
+"releasetype": [
+"album"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release_5medias",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"Wish You Were Here"
+],
+"albumartist": [
+"Pink Floyd"
+],
+"albumartists": [
+"Pink Floyd"
+],
+"albumartistsort": [
+"Pink Floyd"
+],
+"asin": [
+"B004ZNAUVW"
+],
+"barcode": [
+"5099902943527"
+],
+"catalognumber": [
+"50999 029435 2 7"
+],
+"date": [
+"2011-07-11"
+],
+"label": [
+"EMI"
+],
+"musicbrainz_albumartistid": [
+"83d91898-7763-47d7-b03b-b92132375c47"
+],
+"musicbrainz_albumid": [
+"f17a0f30-8eb1-4322-b54e-fb71edb78d7c"
+],
+"releasecountry": [
+"XE"
+],
+"releasestatus": [
+"official"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release_djmix",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"Complete Me"
+],
+"asin": [
+"B002C73VZK"
+],
+"barcode": [
+"0602527121956"
+],
+"date": [
+"2009-08-03"
+],
+"musicbrainz_albumid": [
+"9ba03e85-de11-411c-914c-4e956e53e292"
+],
+"producer": [
+"Frankmusik",
+"David Norland"
+],
+"releasecountry": [
+"GB"
+],
+"releasestatus": [
+"official"
+],
+"remixer": [
+"Frankmusik"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release_djmix",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": false,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"Complete Me"
+],
+"asin": [
+"B002C73VZK"
+],
+"barcode": [
+"0602527121956"
+],
+"date": [
+"2009-08-03"
+],
+"musicbrainz_albumid": [
+"9ba03e85-de11-411c-914c-4e956e53e292"
+],
+"releasecountry": [
+"GB"
+],
+"releasestatus": [
+"official"
+],
+"script": [
+"Latn"
+]
+}
+},
+{
+"fixture": "release_multidisc",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"\u30b1\u30a2\u30ec\u30b9"
+],
+"asin": [
+"B09BGHWCW1"
+],
+"barcode": [
+"4547366518764"
+],
+"date": [
+"2021-09-15"
+],
+"musicbrainz_albumid": [
+"6c4f766f-3351-4c10-a53d-b119452c27b2"
+],
+"musicbrainz_releasegroupid": [
+"b89c4dbd-1734-4536-a16d-dde648f735c0"
+],
+"originaldate": [
+"2021-09-15"
+],
+"originalyear": [
+"2021"
+],
+"releasecountry": [
+"JP"
+],
+"releasestatus": [
+"official"
+],
+"releasetype": [
+"single"
+],
+"script": [
+"Jpan"
+]
+}
+},
+{
+"fixture": "release_no_type",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"album": [
+"Eastbound Silhouette"
+],
+"albumartist": [
+"Tim Green"
+],
+"albumartists": [
+"Tim Green"
+],
+"albumartistsort": [
+"Tim Green"
+],
+"date": [
+"2022-10-28"
+],
+"musicbrainz_albumartistid": [
+"5103b22e-514f-46b1-afdf-c99517c791e2"
+],
+"musicbrainz_albumid": [
+"af96cd94-f759-4f9f-8c63-75404d4853dc"
+],
+"musicbrainz_releasegroupid": [
+"275f2ad4-a506-4ab1-8ae2-ff7f203cbf6b"
+],
+"releasecountry": [
+"XW"
+],
+"releasestatus": [
+"official"
+]
+}
+},
+{
+"fixture": "release_null",
+"kind": "release",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {}
+},
+{
+"fixture": "track",
+"kind": "track",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"musicbrainz_recordingid": [
+"bef3fddb-5aca-49f5-b2fd-d56a23268d63"
+],
+"musicbrainz_trackid": [
+"d4156411-b884-368f-a4cb-7c0101a557a2"
+],
+"title": [
+"Speak to Me"
+],
+"tracknumber": [
+"1"
+]
+}
+},
+{
+"fixture": "track_null",
+"kind": "track",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {}
+},
+{
+"fixture": "track_pregap",
+"kind": "track",
+"settings": {
+"always_standardize_multivalue_artist": false,
+"preferred_release_countries": [],
+"release_ars": true,
+"standardize_artist_names": "none",
+"standardize_instruments": true,
+"standardize_vocals": true,
+"translate_album_titles": false,
+"translate_artist_names": false,
+"translate_from_sortname": false,
+"translate_track_titles": false,
+"translation_locales": [
+"en"
+]
+},
+"want": {
+"artist": [
+"Die \u00c4rzte"
+],
+"artists": [
+"Die \u00c4rzte"
+],
+"artistsort": [
+"\u00c4rzte, Die"
+],
+"musicbrainz_artistid": [
+"f2fb0ff0-5679-42ec-a55c-15109ce6e320"
+],
+"musicbrainz_recordingid": [
+"e8484ab3-9274-411d-a72c-e570fa5e02de"
+],
+"musicbrainz_trackid": [
+"fe206927-dd73-49e5-8d60-a5fba2d331a6"
+],
+"title": [
+"Lady"
+],
+"tracknumber": [
+"0"
+]
+}
+}
+]

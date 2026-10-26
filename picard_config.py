@@ -10,6 +10,11 @@ Picard settings that decide what ends up in a file:
                                            plugin's own defaults; a profile's
                                            "discogs_enrichment" entries win over both
   preserved_tags()               -> set    Options > Tags > "Preserve these tags" (lower case)
+  tag_settings(profile_overrides) -> dict  Picard's own settings that decide the tags written
+                                           from MusicBrainz (Options > Metadata, Releases):
+                                           Picard.ini first, else the defaults of the Picard
+                                           version that wrote it; a profile's "picard" entries
+                                           win over both
   source()                       -> str    where the settings came from (for `doctor` and plans)
 
 Picard.ini is found at $TAGMENDER_PICARD_INI, else the Flatpak location, else
@@ -140,6 +145,93 @@ def picard_bool(name: str, default: bool = False, path: Path | None = None) -> b
     if cp is None or not cp.has_option("setting", name):
         return default
     return cp.get("setting", name).strip().lower() == "true"
+
+
+# Picard's settings that change the tags written from MusicBrainz, with Picard 3's defaults
+# (picard/options.py). A Picard 2 Picard.ini without a setting means Picard 2's default.
+TAG_DEFAULTS = {
+    "standardize_artist_names": "variations",     # none | variations | all
+    "always_standardize_multivalue_artist": False,
+    "translate_artist_names": False,
+    "translation_locales": ["en"],
+    "translate_from_sortname": False,
+    "translate_album_titles": False,
+    "translate_track_titles": False,
+    "release_ars": True,
+    "track_ars": False,
+    "standardize_instruments": True,
+    "standardize_vocals": True,
+    "va_name": "Various Artists",
+    "convert_punctuation": False,
+    "preferred_release_countries": [],
+}
+PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
+STANDARDIZE = ("none", "variations", "all")
+_LISTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, list))
+_TAG_BOOLS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, bool))
+
+
+def _qt_list(raw: str) -> list:
+    """A list as Qt writes it to an ini file: "a, b"; "@Invalid()" for an empty one."""
+    raw = str(raw).strip()
+    if not raw or raw.startswith("@"):
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def picard_version(path: Path | None = None) -> tuple:
+    """The version of Picard that last wrote Picard.ini, e.g. (3, 0, 2); () unknown."""
+    import re as _re
+    cp = _read(path if path is not None else ini_path())
+    raw = cp.get("application", "version", fallback="") if cp is not None else ""
+    return tuple(int(x) for x in _re.findall(r"\d+", raw)[:3])
+
+
+def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dict:
+    p = path if path is not None else ini_path()
+    cp = _read(p)
+    s = {k: (list(v) if isinstance(v, list) else v) for k, v in TAG_DEFAULTS.items()}
+    if cp is not None:
+        ver = picard_version(p)
+        if ver and ver[0] < 3:
+            s.update(PICARD2_DEFAULTS)
+        get = (lambda k: cp.get("setting", k)) if cp.has_section("setting") else None
+        if get is not None:
+            if cp.has_option("setting", "standardize_artists"):          # Picard 2
+                s["standardize_artist_names"] = "all" if get("standardize_artists").strip().lower() == "true" \
+                    else "none"
+            for k in TAG_DEFAULTS:
+                if not cp.has_option("setting", k):
+                    continue
+                raw = get(k)
+                if k in _TAG_BOOLS:
+                    s[k] = raw.strip().lower() == "true"
+                elif k in _LISTS:
+                    s[k] = _qt_list(raw)
+                else:
+                    s[k] = raw.strip()
+    for k, v in (overrides or {}).items():
+        if k in TAG_DEFAULTS:
+            s[k] = v
+    if s["standardize_artist_names"] not in STANDARDIZE:
+        s["standardize_artist_names"] = TAG_DEFAULTS["standardize_artist_names"]
+    return s
+
+
+def validate_tag_settings(overrides: dict) -> list[str]:
+    p = []
+    for k, v in (overrides or {}).items():
+        if k not in TAG_DEFAULTS:
+            p.append(f"picard.{k} is not a Picard setting TagMender follows (use {', '.join(TAG_DEFAULTS)})")
+        elif k == "standardize_artist_names" and v not in STANDARDIZE:
+            p.append(f"picard.standardize_artist_names must be one of {', '.join(STANDARDIZE)}")
+        elif k in _TAG_BOOLS and not isinstance(v, bool):
+            p.append(f"picard.{k} must be true or false")
+        elif k in _LISTS and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            p.append(f"picard.{k} must be a list of strings")
+        elif k == "va_name" and not (isinstance(v, str) and v.strip()):
+            p.append("picard.va_name must be a name")
+    return p
 
 
 def source(path: Path | None = None) -> str:

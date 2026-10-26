@@ -137,6 +137,20 @@ def checks() -> list[Check]:
                          "or set TAGMENDER_PICARD_INI"))
     except Exception as exc:
         out.append(Check("Discogs Enrichment settings", "warn", f"could not read: {exc}"))
+    try:
+        import picard_config
+        t = picard_config.tag_settings()
+        where = picard_config.ini_path()
+        ver = ".".join(map(str, picard_config.picard_version())) if where else ""
+        out.append(Check("Picard tagging settings", "ok",
+                         f"artist names {t['standardize_artist_names']}"
+                         f"{', translated (' + ', '.join(t['translation_locales']) + ')' if t['translate_artist_names'] else ''}"
+                         f", release relationships {'on' if t['release_ars'] else 'off'}"
+                         f", track relationships {'on' if t['track_ars'] else 'off'}"
+                         + (f" (from {where}, Picard {ver or '?'})" if where else " (Picard 3's defaults: no Picard.ini)")
+                         + "; a Picard option profile overriding these is not read"))
+    except Exception as exc:
+        out.append(Check("Picard tagging settings", "warn", f"could not read: {exc}"))
     ini = Path(PICARD_INI).expanduser()
     if ini.exists():
         import tag_albums

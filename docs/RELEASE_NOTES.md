@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+**Tags written as Picard 3 writes them, checked against Picard's own code.** Picard's settings
+in Options > Metadata are now followed (read from Picard.ini, or a profile's `"picard"` entries):
+standardized artist names (Picard 3's default writes "The Beatles" for a credit "Beatles",
+keeping credits that are one of the artist's former names; a Picard 2 Picard.ini keeps credited
+names), sort names from the alias matching the credit, translated artist names, album and track
+titles, release relationships (producer, engineer, mixer ... credited on the release: on in
+Picard), track relationships (composer, lyricist, performers and instruments, works and their
+languages), the Various Artists name and `compilation` on Various Artists releases, Unicode
+punctuation as ASCII, and the preferred release countries. `tests/test_picard_parity.py`
+compares the result with what Picard 3.0.2's own code makes of its test data. The text
+representation's language is no longer written as LANGUAGE (Picard writes the works' languages
+there). `tagmender doctor` shows the settings followed.
+
+**File formats, compared frame by frame with files Picard tagged.** Performer credits now go
+where Picard puts them (ID3 TMCL, Vorbis and APEv2 PERFORMER "name (instrument)"; none in MP4
+and WMA) and producer, engineer, arranger, mixer and DJ mixer into ID3 TIPL - before, they were
+custom tags (TXXX:performer:guitar, PERFORMER:GUITAR) that players and Picard did not read as
+credits; such tags are rewritten the right way on the next run. An ID3v2.3 tag now stays valid
+v2.3 when TagMender writes to it: before, its date moved into a v2.4 frame (TDRC) that strictly
+v2.3 readers do not see. Also as Picard: movement number/total (MVIN, MP4 ©mvi/©mvc), license
+(WCOP), website (WOAR), lyrics language, MP4 compilation (cpil), ReplayGain names in upper case
+in ID3, MP4 and APEv2, and the WMA fields Picard knows. WMA files are no longer rewritten on
+every run for a track total they cannot hold, and an M4A with a compilation flag no longer
+fails to read.
+
+**Desktop app**: the results of background work (preview, apply, watched folders ...) are now
+handled on the window's own thread; before, they ran on the worker's thread, which could leave
+the window showing stale numbers or crash it.
+
 **New: the artist's photo at Enthusiast and Audiophile.** artist.jpg in the artist folder (what
 Plex, Jellyfin, Navidrome and LMS show for the artist) and in each track as an "Artist/performer"
 picture beside the cover (at most 800 px: it is in every track). From CoverUp's artist sources

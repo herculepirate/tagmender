@@ -24,7 +24,7 @@ import urllib.parse
 from pathlib import Path
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QObject, QRectF, QSize, QSortFilterProxyModel, Qt,
-                            QThread, QUrl, Signal)
+                            QThread, QUrl, Signal, Slot)
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QKeySequence, QPainter, QPen, QPalette
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
@@ -131,16 +131,37 @@ def _alive(th) -> bool:
         return False
 
 
+class _Relay(QObject):
+    """Calls fn on the thread it lives on (the UI thread): a plain Python function connected
+    to a worker's signal would otherwise run on the worker's thread, where no widget may be
+    touched."""
+    def __init__(self, parent, fn):
+        super().__init__(parent)
+        self.fn = fn
+
+    @Slot(object)
+    def one(self, x):
+        self.fn(x)
+
+    @Slot(int, int, str)
+    def three(self, a, b, c):
+        self.fn(a, b, c)
+
+
 def start(owner, fn, done, progress=None, failed=None):
-    """Run fn(worker) on a thread; done(result) on the UI thread."""
+    """Run fn(worker) on a thread; done(result), failed(message) and progress(...) on the UI
+    thread."""
     th = QThread(owner)
     w = Worker(fn)
     w.moveToThread(th)
     th.started.connect(w.run)
-    w.finished.connect(done)
-    w.failed.connect(failed or (lambda msg: QMessageBox.warning(owner, APP, msg)))
+    relays = [_Relay(owner, done), _Relay(owner, failed or (lambda msg: QMessageBox.warning(owner, APP, msg)))]
+    w.finished.connect(relays[0].one)
+    w.failed.connect(relays[1].one)
     if progress:
-        w.progress.connect(progress)
+        relays.append(_Relay(owner, progress))
+        w.progress.connect(relays[2].three)
+    w._relays = relays                                  # (kept alive with the worker)
     for sig in (w.finished, w.failed):
         sig.connect(th.quit)
     th.finished.connect(th.deleteLater)
@@ -971,8 +992,17 @@ class Watched(QWidget):
                     prows.append((src, to, x["profile"], x))
             self.prow_plans = [r[3] for r in prows]
             _fill(self.pending, [r[:3] for r in prows])
+        except Exception:                                    # the page still shows the folders
+            self.plans, self.prow_plans = [], []
+            self.pending.setRowCount(0)
+        try:
+            import watcher
             _fill(self.recent, [(time.strftime("%Y-%m-%d %H:%M", time.localtime(ts or 0)), f, st, pn)
                                 for f, pn, st, ts, _l in watcher.recent(40)])
+        except Exception:
+            self.recent.setRowCount(0)
+        try:
+            import watcher
             if watcher.service_supported():
                 st = watcher.service_status()
                 self.svc_label.setText(f"Background service: {st}")
@@ -982,9 +1012,8 @@ class Watched(QWidget):
             else:
                 self.svc_label.setText("")
                 self.svc_btn.hide()
-        except Exception:                                    # the page still shows the folders
-            self.prow_plans = []
-            self.pending.setRowCount(0)
+        except Exception:
+            self.svc_label.setText("")
         self.win.set_badge("Watched folders", len(self.plans))
         if getattr(self, "timer", None) is not None and self.timer.isActive():
             ms = self.interval_ms()
@@ -1340,6 +1369,22 @@ class Profiles(QWidget):
         self.art_gen.setToolTip("When nothing is found. The AI service (local Stable Diffusion, Cloudflare, AI "
                                 "Horde, ...) is chosen in CoverUp's options; a generated cover is marked as such "
                                 "and replaced as soon as a real one is found.")
+        # Picard's own tagging settings (Options > Metadata): as Picard is set, or this profile's
+        self.pic_names = QComboBox()
+        for label, v in (("As Picard is set", None), ("As credited on the release", "none"),
+                         ("The artist's name for spelling variations (Picard 3's default)", "variations"),
+                         ("The artist's name, also for former names", "all")):
+            self.pic_names.addItem(label, v)
+        self.pic_names.setToolTip("Picard's \"Standardize artist names\": a credit like \"Beatles\" is written as\n"
+                                  "\"The Beatles\" unless it is one of the artist's former names (variations only)")
+        self.pic_rel = QComboBox()
+        self.pic_trk = QComboBox()
+        for box in (self.pic_rel, self.pic_trk):
+            for label, v in (("As Picard is set", None), ("On", True), ("Off", False)):
+                box.addItem(label, v)
+        self.pic_rel.setToolTip("Producer, engineer, mixer ... credited on the release (Picard's default: on)")
+        self.pic_trk.setToolTip("Composer, lyricist, performers and their instruments, works (Picard's default: "
+                                "off)")
         self.level = QComboBox()
         self.level.addItems(["basic", "enthusiast", "audiophile"])
         self.level.setToolTip("basic: artist, album, title, numbers, date, genre\n"
@@ -1387,6 +1432,9 @@ class Profiles(QWidget):
         form.addRow("Only formats", self.formats)
         form.addRow("Unresolved albums", self.unres)
         form.addRow("Tagging level", self.level)
+        form.addRow("Artist names", self.pic_names)
+        form.addRow("Release relationships", self.pic_rel)
+        form.addRow("Track relationships", self.pic_trk)
         form.addRow("Audiophile", arow)
         form.addRow("", self.art)
         form.addRow("Cover source", self.art_src)
@@ -1493,6 +1541,10 @@ class Profiles(QWidget):
             self.art_artist.setChecked((p["artwork"].get("artist") or {}).get("enabled", True) is not False)
             self.art_gen.setCurrentIndex(max(0, self.art_gen.findData(p["artwork"].get("generate", "off"))))
             self.level.setCurrentText(p["tag_level"])
+            pic = p.data.get("picard") or {} if hasattr(p, "data") else p.get("picard") or {}
+            for box, key in ((self.pic_names, "standardize_artist_names"), (self.pic_rel, "release_ars"),
+                             (self.pic_trk, "track_ars")):
+                box.setCurrentIndex(max(0, box.findData(pic.get(key))))
             for k, c in self.aud.items():
                 c.setChecked(bool(p["audiophile"].get(k, True)))
                 c.setEnabled(p["tag_level"] == "audiophile")
@@ -1648,6 +1700,14 @@ class Profiles(QWidget):
         data["artwork"]["artist"] = dict(data["artwork"].get("artist") or {}, enabled=self.art_artist.isChecked())
         data["artwork"].pop("provider", None)           # (sources says it now)
         data["tag_level"] = self.level.currentText()
+        pic = dict(data.get("picard") or {})
+        for box, key in ((self.pic_names, "standardize_artist_names"), (self.pic_rel, "release_ars"),
+                         (self.pic_trk, "track_ars")):
+            if box.currentData() is None:
+                pic.pop(key, None)
+            else:
+                pic[key] = box.currentData()
+        data["picard"] = pic
         data.setdefault("audiophile", {}).update({k: c.isChecked() for k, c in self.aud.items()})
         try:
             pf.save(pf.from_dict(data))

@@ -6,7 +6,10 @@ Compared against MusicBrainz Picard 3.0.2 (`picard/options.py`, `picard/mbjson.p
 **Full** = equivalent, tested. **Partial** = some of it. **Missing** = not done yet.
 **Excluded** = deliberately not done. **Plugin** = provided by a Picard plugin TagMender runs.
 Picard's default is given where it matters, because TagMender aims to write what a default
-Picard (plus Discogs Enrichment) would.
+Picard (plus Discogs Enrichment) would. Picard's own settings are read from Picard.ini (a
+Picard 2 Picard.ini means Picard 2's defaults); a profile's `"picard"` entries override them.
+`tests/test_picard_parity.py` checks the MusicBrainz mapping and the file formats against
+output recorded from Picard's own code.
 
 ## Finding the release
 
@@ -16,7 +19,7 @@ Picard (plus Discogs Enrichment) would.
 | Guess track number and title from file names | on | Full | in the matcher |
 | Scan (AcoustID fingerprints) | - | Full | needs fpcalc and a key; off in the default profile |
 | Disc ID lookup | - | Full | from EAC/XLD logs, cue sheets and track lengths; no CD drive reading (Excluded) |
-| Preferred release countries | - | Full | Picard's own list is read |
+| Preferred release countries | - | Full | Picard's own list is read; also picks the RELEASECOUNTRY written |
 | Preferred release formats (weights) | - | Partial | formats come from folder names and the files, not Picard's weights |
 | Preferred release types (weights) | - | Missing | Picard ranks album / single / EP / live / compilation ... by sliders |
 | Match thresholds | - | Full | TagMender's own (`thresholds` in profiles) |
@@ -30,17 +33,17 @@ Picard (plus Discogs Enrichment) would.
 |---|---|---|---|
 | Album, title, track/disc numbers and totals, dates, IDs, label, catalogue no., barcode, ASIN, media, disc subtitle, ISRC, script, language, release type/status/country | - | Full | `mb_tags.py`, field names and values as `mbjson.py` |
 | Credited artist names | - | Full | |
-| **Standardize artist names** (none / variations only / variations and name changes) | **variations only** | **Missing** | TagMender always writes the credited name, i.e. Picard's "none" |
-| Always standardize multi-valued artist tags (ARTISTS) | off | Missing | |
-| Sort name from the alias matching the credit | - | Missing | TagMender uses the artist's main sort name |
-| Translate artist names (locales, script exceptions, from sort name) | off | Missing | |
-| Translate album / track titles | off | Missing | new in Picard 3 |
-| Various Artists name (`va_name`) | Various Artists | Missing | the MusicBrainz name is written as is |
-| `compilation=1` on Various Artists releases | - | Missing | not set on MusicBrainz matches |
-| Convert Unicode punctuation to ASCII | off | Missing | |
-| Release relationships (release-level producer, engineer, mixer ...) | **on** | Missing | not fetched; Discogs credits arrive through the plugin |
-| Track relationships (composer, lyricist, writer, arranger, conductor, performer:instrument, work, work ID, movement) | off | Missing | Discogs performers through the plugin |
-| Standardized instrument / vocal credits | on | Missing | needs relationships |
+| Standardize artist names (none / variations only / variations and name changes) | variations only | Full | Picard's own setting; checked against Picard's code on its test data |
+| Always standardize multi-valued artist tags (ARTISTS) | off | Full | |
+| Sort name from the alias matching the credit | - | Full | |
+| Translate artist names (locales, from sort name) | off | Full | script exceptions are not read (Picard keeps them in a form TagMender cannot read) |
+| Translate album / track titles | off | Full | |
+| Various Artists name (`va_name`) | Various Artists | Full | album artist and track artist |
+| `compilation=1` on Various Artists releases | - | Full | an existing compilation flag on other albums is left as it is (Picard removes it) |
+| Convert Unicode punctuation to ASCII | off | Full | Picard's own code (`picard_text.py`) |
+| Release relationships (release-level producer, engineer, mixer ..., license, ASIN) | on | Full | |
+| Track relationships (composer, lyricist, writer, arranger, conductor, performer:instrument, work, work ID, work languages) | off | Full | |
+| Standardized instrument / vocal credits | on | Full | |
 | Genres from MusicBrainz (min usage, max, filter, album artist genres, folksonomy tags, join) | off | Partial | tagging takes Discogs genres/styles (plugin); `enrich` takes release-group genres with a map, allowed list and maximum; no folksonomy, filter syntax or artist fallback |
 | Ratings (POPM / RATING) | off | Missing | |
 | Discogs Enrichment | - | Plugin | its own code and settings, read from Picard.ini |
@@ -52,10 +55,10 @@ Picard (plus Discogs Enrichment) would.
 
 | Picard | Default | TagMender | Notes |
 |---|---|---|---|
-| Tag mapping per format | - | Full | ID3, Vorbis, MP4, APEv2, ASF as in Picard's source |
+| Tag mapping per format | - | Full | ID3, Vorbis, MP4, APEv2, ASF: checked against files Picard's own code writes (credits in TMCL/TIPL and PERFORMER, MVIN, WCOP, WOAR, cpil ...) |
 | Preserve these tags | - | Full | read from Picard.ini |
 | Clear existing tags | off | Excluded | per-field policies instead (preserve, fill, replace, remove, lock) |
-| ID3v2 version | 2.4 | Partial | an existing v2.3 tag stays v2.3, new tags are v2.4; no setting |
+| ID3v2 version | 2.4 | Partial | an existing v2.3 tag stays valid v2.3 (dates in TYER/TDAT, credits in IPLS, as Picard converts them), new tags are v2.4; no setting |
 | ID3v2.3 join character | `/` | Partial | fixed `/` |
 | Write ID3v1 | on | Partial | an existing ID3v1 is kept, none is added |
 | Remove APEv2 from MP3/AAC/AC3, ID3 from FLAC | off | Missing | |

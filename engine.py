@@ -353,9 +353,11 @@ class Engine:
         dgid = best.get("discogs_id") or (best["id"] if best["source"] == "discogs" else "")
         tags_mb = tags_dg = None
         if mbid and self.use_mb:
-            rel = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}?inc={mb_tags.INC}&fmt=json", "mb")
+            ps = self.profile.picard_tags()
+            rel = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}?inc={mb_tags.inc_for(ps)}&fmt=json",
+                                     "mb")
             if rel:
-                tags_mb = mb_tags.release_tags(rel)
+                tags_mb = mb_tags.release_tags(rel, ps)
         es = self.profile.enrichment()
         dparts = None
         if dgid and self.dm is not None and (self.use_discogs or self.token):

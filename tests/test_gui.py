@@ -80,6 +80,20 @@ class Gui(te.Base):
             self.app.processEvents()
             self.win.grab().save(str(Path(SHOTS) / f"{name}.png"))
 
+    def test_background_work_reports_back_on_the_ui_thread(self):
+        """A job's result, failure and progress are handled on the UI thread (a widget touched
+        from the worker's thread leaves the window stale or crashes Qt)."""
+        import threading
+        main = threading.get_ident()
+        seen = {}
+        self.gui.start(self.win, lambda w: (w.progress.emit(1, 2, "x"), 5)[1],
+                  lambda r: seen.__setitem__("done", threading.get_ident() == main),
+                  progress=lambda a, b, c: seen.__setitem__("progress", threading.get_ident() == main))
+        self.gui.start(self.win, lambda w: 1 / 0, lambda r: None,
+                  failed=lambda msg: seen.__setitem__("failed", threading.get_ident() == main))
+        self.assertTrue(wait(lambda: len(seen) == 3, self.app), seen)
+        self.assertEqual(seen, {"done": True, "progress": True, "failed": True})
+
     def test_preview_shows_excluded_as_ignored_then_apply(self):
         ov = self.win.pages["Overview"]
         ov.refresh_profiles()

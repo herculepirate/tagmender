@@ -64,6 +64,11 @@ DEFAULTS = {
     # override single plugin settings for this profile, e.g. {"merge_mode": "fill_gaps"}.
     "follow_picard": True,
     "discogs_enrichment": {},
+    # Picard's own settings for what is written from MusicBrainz (standardize_artist_names,
+    # translate_artist_names, release_ars, track_ars, va_name, ...; see picard_config), read
+    # from Picard.ini; entries here override them for this profile, e.g.
+    # {"standardize_artist_names": "none"}.
+    "picard": {},
     "field_sources": {},                  # per field, providers in order; overrides the merge
     "thresholds": {
         "auto_min_confidence": 90.0,      # identify (match_core's own setting)
@@ -277,6 +282,11 @@ def validate(data: dict) -> list[str]:
     else:
         import picard_config
         p += picard_config.validate(d["discogs_enrichment"])
+    if not isinstance(d.get("picard", {}), dict):
+        p.append("picard must be an object of Picard settings")
+    else:
+        import picard_config
+        p += picard_config.validate_tag_settings(d.get("picard") or {})
     for r in d["exclusions"]:
         try:
             ex.Rule.from_dict(r, d["name"] or "profile")
@@ -350,6 +360,14 @@ class Profile:
         if not self.data.get("follow_picard", True):
             return picard_config.enrichment(over, path=Path("/nonexistent/Picard.ini"))
         return picard_config.enrichment(over)
+
+    def picard_tags(self) -> dict:
+        """Picard's settings for the tags written from MusicBrainz (see picard_config)."""
+        import picard_config
+        over = self.data.get("picard") or {}
+        if not self.data.get("follow_picard", True):
+            return picard_config.tag_settings(over, path=Path("/nonexistent/Picard.ini"))
+        return picard_config.tag_settings(over)
 
     def matcher_cfg(self, base: dict) -> dict:
         """match_core's settings with this profile's identification thresholds."""

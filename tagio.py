@@ -25,7 +25,7 @@ from pathlib import Path
 import mutagen
 from mutagen.apev2 import APEv2File
 from mutagen.asf import ASF
-from mutagen.id3 import COMM, ID3, TXXX, UFID, USLT, Frames
+from mutagen.id3 import COMM, ID3, TXXX, UFID, USLT, WCOP, WOAR, Frames
 from mutagen.mp4 import MP4, MP4FreeForm
 
 UFID_OWNER = "http://musicbrainz.org"
@@ -58,7 +58,13 @@ ID3_FREETEXT = {
     "releasecountry": "MusicBrainz Album Release Country", "acoustid_fingerprint": "Acoustid Fingerprint",
     "acoustid_id": "Acoustid Id", "script": "SCRIPT", "license": "LICENSE", "catalognumber": "CATALOGNUMBER",
     "barcode": "BARCODE", "asin": "ASIN", "artists": "ARTISTS", "albumartists": "ALBUMARTISTS",
-    "director": "DIRECTOR", "work": "WORK", "writer": "Writer",
+    "director": "DIRECTOR", "work": "WORK", "writer": "Writer", "showmovement": "SHOWMOVEMENT",
+    "musicip_puid": "MusicIP PUID",
+    # case kept as found, this case when new (picard/formats/id3.py __rtranslate_freetext_ci)
+    "replaygain_album_gain": "REPLAYGAIN_ALBUM_GAIN", "replaygain_album_peak": "REPLAYGAIN_ALBUM_PEAK",
+    "replaygain_album_range": "REPLAYGAIN_ALBUM_RANGE", "replaygain_track_gain": "REPLAYGAIN_TRACK_GAIN",
+    "replaygain_track_peak": "REPLAYGAIN_TRACK_PEAK", "replaygain_track_range": "REPLAYGAIN_TRACK_RANGE",
+    "replaygain_reference_loudness": "REPLAYGAIN_REFERENCE_LOUDNESS",
     # TagMender's own (upper case, as tag_albums.py has always written them)
     "tagmender": "TAGMENDER", "tagmender_reason": "TAGMENDER_REASON", "tagmender_source": "TAGMENDER_SOURCE",
 }
@@ -95,8 +101,17 @@ MP4_FREE = {
     "subtitle": "SUBTITLE", "discsubtitle": "DISCSUBTITLE", "mood": "MOOD", "script": "SCRIPT",
     "language": "LANGUAGE", "artists": "ARTISTS", "albumartists": "ALBUMARTISTS", "key": "initialkey",
     "tagmender": "TAGMENDER", "tagmender_reason": "TAGMENDER_REASON", "tagmender_source": "TAGMENDER_SOURCE",
+    "musicip_puid": "MusicIP PUID", "replaygain_album_gain": "REPLAYGAIN_ALBUM_GAIN",
+    "replaygain_album_peak": "REPLAYGAIN_ALBUM_PEAK", "replaygain_album_range": "REPLAYGAIN_ALBUM_RANGE",
+    "replaygain_track_gain": "REPLAYGAIN_TRACK_GAIN", "replaygain_track_peak": "REPLAYGAIN_TRACK_PEAK",
+    "replaygain_track_range": "REPLAYGAIN_TRACK_RANGE",
+    "replaygain_reference_loudness": "REPLAYGAIN_REFERENCE_LOUDNESS", "releasedate": "RELEASEDATE",
 }
+MP4_BOOL = {"compilation": "cpil", "podcast": "pcst", "gapless": "pgap"}
+MP4_INT = {"movementnumber": "\xa9mvi", "movementtotal": "\xa9mvc", "showmovement": "shwm"}
 _MP4_TEXT_R = {v: k for k, v in MP4_TEXT.items()}
+_MP4_BOOL_R = {v: k for k, v in MP4_BOOL.items()}
+_MP4_INT_R = {v: k for k, v in MP4_INT.items()}
 _MP4_FREE_R = {v.lower(): k for k, v in MP4_FREE.items()}
 _FF = "----:com.apple.iTunes:"
 
@@ -107,7 +122,11 @@ APE = {"albumartist": "Album Artist", "albumartists": "ALBUMARTISTS", "remixer":
        "movementnumber": "MOVEMENT", "movement": "MOVEMENTNAME", "releasestatus": "MUSICBRAINZ_ALBUMSTATUS",
        "releasetype": "MUSICBRAINZ_ALBUMTYPE", "musicbrainz_recordingid": "musicbrainz_trackid",
        "musicbrainz_trackid": "musicbrainz_releasetrackid", "originalartist": "Original Artist",
-       "date": "Year", "tagmender": "TAGMENDER", "tagmender_reason": "TAGMENDER_REASON",
+       "date": "Year", "movementtotal": "MOVEMENTTOTAL", "showmovement": "SHOWMOVEMENT",
+       "replaygain_album_gain": "REPLAYGAIN_ALBUM_GAIN", "replaygain_album_peak": "REPLAYGAIN_ALBUM_PEAK",
+       "replaygain_album_range": "REPLAYGAIN_ALBUM_RANGE", "replaygain_track_gain": "REPLAYGAIN_TRACK_GAIN",
+       "replaygain_track_peak": "REPLAYGAIN_TRACK_PEAK", "replaygain_track_range": "REPLAYGAIN_TRACK_RANGE",
+       "replaygain_reference_loudness": "REPLAYGAIN_REFERENCE_LOUDNESS", "tagmender": "TAGMENDER", "tagmender_reason": "TAGMENDER_REASON",
        "tagmender_source": "TAGMENDER_SOURCE"}
 _APE_R = {v.lower(): k for k, v in APE.items()}
 
@@ -133,11 +152,60 @@ ASF_MAP = {
     "releasecountry": "MusicBrainz/Album Release Country", "acoustid_id": "Acoustid/Id",
     "compilation": "WM/IsCompilation", "engineer": "WM/Engineer", "asin": "ASIN", "djmixer": "WM/DJMixer",
     "mixer": "WM/Mixer", "artists": "WM/ARTISTS", "albumartists": "WM/ALBUMARTISTS", "director": "WM/Director",
-    "work": "WM/Work", "website": "WM/AuthorURL",
+    "work": "WM/Work", "website": "WM/AuthorURL", "encodersettings": "WM/EncodingSettings",
+    "musicbrainz_composerid": "MusicBrainz/Composer Id", "musicbrainz_originalalbumid": "MusicBrainz/Original Album Id",
+    "musicbrainz_originalartistid": "MusicBrainz/Original Artist Id", "musicip_puid": "MusicIP/PUID",
+    "acoustid_fingerprint": "Acoustid/Fingerprint",
 }
 _ASF_R = {v: k for k, v in ASF_MAP.items()}
 
 NUMBER_PAIRS = (("tracknumber", "totaltracks"), ("discnumber", "totaldiscs"))
+ID3_PAIRS = NUMBER_PAIRS + (("movementnumber", "movementtotal"),)       # MVIN "2/4"
+
+# ---- credits (picard/formats/id3.py, vorbis.py, apev2.py) -------------------
+# performer:<role> ("performer:guitar"; "performer" with no role): ID3 TMCL (IPLS in v2.3)
+# as [role, name]; Vorbis and APEv2 PERFORMER as "name (role)"; MP4 and WMA hold no
+# performer:<role> (a bare "performer" is an MP4 custom tag).
+# Engineer, arranger, producer, DJ mixer and mixer: ID3 TIPL (IPLS in v2.3).
+TIPL_ROLES = {"engineer": "engineer", "arranger": "arranger", "producer": "producer", "DJ-mix": "djmixer",
+              "mix": "mixer"}
+_TIPL_R = {v: k for k, v in TIPL_ROLES.items()}
+_LEGACY = "~legacy:"          # a credit an earlier TagMender stored as a custom tag (rewritten properly)
+
+
+def is_performer(k: str) -> bool:
+    return k == "performer" or k.startswith("performer:")
+
+
+def _role(k: str) -> str:
+    return k.split(":", 1)[1] if ":" in k else ""
+
+
+def _split_performer(value: str) -> tuple[str, str]:
+    """("performer:Piano", "Joe Barr") from "Joe Barr (Piano)" (picard/formats/vorbis.py)."""
+    name = "performer:"
+    if value.endswith(")"):
+        start, count = len(value) - 2, 1
+        while count > 0 and start > 0:
+            if value[start] == ")":
+                count += 1
+            elif value[start] == "(":
+                count -= 1
+            start -= 1
+        if start > 0:
+            return name + value[start + 2:-1], value[:start].rstrip()
+    return "performer", value
+
+
+def holds(path, field: str) -> bool:
+    """Whether a file of this kind has a place for field, as Picard writes it: MP4 and WMA
+    have none for performer:<role> credits; WMA none for custom tags."""
+    ext = Path(str(path)).suffix.lower()
+    if ext in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp"):
+        return not field.startswith("performer:")
+    if ext in (".wma", ".asf"):
+        return field in ASF_MAP or field == "totaldiscs" or field in CI_ONLY     # (no total tracks)
+    return True
 CI_ONLY = {"replaygain_album_gain", "replaygain_album_peak", "replaygain_album_range", "replaygain_track_gain",
            "replaygain_track_peak", "replaygain_track_range", "replaygain_reference_loudness"}
 
@@ -245,7 +313,20 @@ def read(path) -> dict[str, list[str]]:
                 pics += 1
             elif fid == "TXXX":
                 desc = frame.desc
-                _add(out, _ID3_FREE_R.get(desc.lower(), desc.lower()), frame.text)
+                name = _ID3_FREE_R.get(desc.lower(), desc.lower())
+                if desc in ("mood", "RELEASEDATE") and tags.version[:2] == (2, 3):
+                    name = desc.lower()                    # (ID3v2.3's place for TMOO and TDRL)
+                if is_performer(name) or name in _TIPL_R:
+                    name = _LEGACY + name
+                _add(out, name, frame.text)
+            elif fid in ("TMCL", "TIPL", "IPLS"):
+                for role, person in frame.people:
+                    if fid != "TMCL" and role in TIPL_ROLES:
+                        _add(out, TIPL_ROLES[role], [person])
+                    elif role in ("", "performer"):
+                        _add(out, "performer", [person])
+                    else:
+                        _add(out, f"performer:{role}", [person])
             elif fid == "UFID" and frame.owner == UFID_OWNER:
                 _add(out, "musicbrainz_recordingid", [frame.data.decode("ascii", "replace")])
             elif fid == "TRCK":
@@ -262,6 +343,12 @@ def read(path) -> dict[str, list[str]]:
                 _add(out, "lyrics", [frame.text])
             elif fid == "WOAR":
                 _add(out, "website", [frame.url])
+            elif fid == "WCOP":
+                _add(out, "license", [frame.url])
+            elif fid == "MVIN":
+                n, t = _split_pair(frame.text[0])
+                _add(out, "movementnumber", [n])
+                _add(out, "movementtotal", [t])
             elif fid in _ID3_TEXT_R:
                 _add(out, _ID3_TEXT_R[fid], [str(x) for x in frame.text])
         if pics:
@@ -280,6 +367,13 @@ def read(path) -> dict[str, list[str]]:
             name = VORBIS_R.get(k, k)
             if name in ("totaltracks", "totaldiscs") and name in out:
                 continue                                    # TOTALTRACKS and TRACKTOTAL both present
+            if name == "performer":
+                for v in vals:
+                    pk, pv = _split_performer(v)
+                    _add(out, pk, [pv])
+                continue
+            if name.startswith("performer:"):
+                name = _LEGACY + name
             _add(out, name, vals)
         pics = len(getattr(f, "pictures", []) or []) + len(tags.get("metadata_block_picture", []))
         if pics:
@@ -296,11 +390,17 @@ def read(path) -> dict[str, list[str]]:
                 _add(out, "totaldiscs", [vals[0][1] or ""])
             elif key == "tmpo":
                 _add(out, "bpm", vals)
+            elif key in _MP4_BOOL_R:
+                vs = vals if isinstance(vals, (list, tuple)) else [vals]       # (cpil is a bare bool)
+                _add(out, _MP4_BOOL_R[key], ["1" if v else "0" for v in vs])
+            elif key in _MP4_INT_R:
+                _add(out, _MP4_INT_R[key], vals if isinstance(vals, (list, tuple)) else [vals])
             elif key in _MP4_TEXT_R:
                 _add(out, _MP4_TEXT_R[key], vals)
             elif key.startswith(_FF):
                 name = key[len(_FF):]
-                _add(out, _MP4_FREE_R.get(name.lower(), name.lower()),
+                name = _MP4_FREE_R.get(name.lower(), name.lower())
+                _add(out, _LEGACY + name if name.startswith("performer:") else name,
                      [bytes(v).decode("utf-8", "replace") for v in vals])
     elif fam == "apev2":
         for key, val in tags.items():
@@ -314,8 +414,13 @@ def read(path) -> dict[str, list[str]]:
                 n, t = _split_pair(vals[0])
                 _add(out, "tracknumber" if k == "track" else "discnumber", [n])
                 _add(out, "totaltracks" if k == "track" else "totaldiscs", [t])
+            elif k == "performer":
+                for v in vals:
+                    pk, pv = _split_performer(v)
+                    _add(out, pk, [pv])
             else:
-                _add(out, _APE_R.get(k, k), vals)
+                name = _APE_R.get(k, k)
+                _add(out, _LEGACY + name if name.startswith("performer:") else name, vals)
     elif fam == "asf":
         for key, vals in tags.items():
             if key == "WM/Picture":
@@ -373,18 +478,41 @@ def write(path, changes: dict) -> None:
         f.add_tags()
     tags = f.tags
     pairs_done = set()
+    v23 = fam == "id3" and getattr(tags, "version", (2, 4, 0))[:2] == (2, 3)
+    credits = {k: v for k, v in changes.items() if (is_performer(k) and (fam != "mp4" or ":" in k))
+               or (fam == "id3" and k in _TIPL_R)}
+    if credits:
+        if fam == "id3":
+            _set_id3_people(tags, credits, v23)
+        elif fam in ("vorbis", "apev2"):
+            _set_performers(fam, tags, {k: v for k, v in credits.items() if is_performer(k)})
+        elif fam == "mp4":
+            for k in credits:                       # (none in MP4, as in Picard: an old custom one goes)
+                for x in [x for x in tags if x.startswith(_FF) and x[len(_FF):].lower() == k]:
+                    del tags[x]
     for k, vals in changes.items():
-        pair = next((p for p in NUMBER_PAIRS if k in p), None)
+        if k in credits:
+            continue
+        pair = next((p for p in (ID3_PAIRS if fam == "id3" else NUMBER_PAIRS) if k in p), None)
         if pair:
             if pair in pairs_done:
                 continue
             pairs_done.add(pair)
             _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair))
             continue
-        globals()[f"_set_{fam}"](f, tags, k, vals)
+        if fam == "id3" and v23 and k in ("mood", "releasedate"):
+            _set_id3(f, tags, "~v23:" + k, vals)
+        else:
+            globals()[f"_set_{fam}"](f, tags, k, vals)
     if fam == "id3":
-        version = getattr(tags, "version", (2, 4, 0))
-        if version[:2] == (2, 3):
+        if v23:
+            # a v2.3 tag stays one: frames v2.3 does not have are converted (TDRC to TYER and
+            # TDAT, TDOR to TORY, TIPL and TMCL to IPLS ...) as Picard does (compatid3.py),
+            # keeping the sort frames most players read in v2.3 too
+            keep = [fr for key in ("TSOP", "TSOA", "TSOT", "TSST") for fr in tags.getall(key)]
+            tags.update_to_v23()
+            for fr in keep:
+                tags.add(fr)
             f.save(v2_version=3, v23_sep="/")
         else:
             f.save()
@@ -395,7 +523,7 @@ def write(path, changes: dict) -> None:
 def _write_pair(fam, f, tags, pair, n, t):
     num, tot = pair
     if fam == "id3":
-        fid = "TRCK" if num == "tracknumber" else "TPOS"
+        fid = {"tracknumber": "TRCK", "discnumber": "TPOS", "movementnumber": "MVIN"}[num]
         tags.delall(fid)
         if n:
             tags.add(Frames[fid](encoding=3, text=[f"{n}/{t}" if t else n]))
@@ -446,8 +574,33 @@ def _set_id3(f, tags, k, vals):
     if k == "lyrics":
         tags.delall("USLT")
         if vals:
-            tags.add(USLT(encoding=3, lang="eng", desc="", text="\n".join(vals)))
+            tags.add(USLT(encoding=3, lang="xxx", desc="", text="\n".join(vals)))
         return
+    if k.startswith("~v23:"):                       # mood, releasedate in a v2.3 tag (Picard)
+        name = {"mood": "mood", "releasedate": "RELEASEDATE"}[k[5:]]
+        tags.delall(ID3_TEXT[k[5:]])
+        tags.delall("TXXX:" + name)
+        if vals:
+            tags.add(TXXX(encoding=3, desc=name, text=vals))
+        return
+    if k == "license":                              # one URL: WCOP; else TXXX:LICENSE
+        tags.delall("WCOP")
+        tags.delall("TXXX:LICENSE")
+        if vals and len(vals) == 1 and _is_url(vals[0]):
+            tags.add(WCOP(url=vals[0]))
+        elif vals:
+            tags.add(TXXX(encoding=3, desc="LICENSE", text=vals))
+        return
+    if k == "website":                              # WOAR, one per URL
+        if vals and all(_is_url(v) for v in vals):
+            tags.delall("WOAR")
+            for x in [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == "website"]:
+                del tags[x]
+            for v in vals:
+                tags.add(WOAR(url=v))
+            return
+        if not vals:
+            tags.delall("WOAR")
     if k in ID3_TEXT:
         fid = ID3_TEXT[k]
         tags.delall(fid)
@@ -463,6 +616,69 @@ def _set_id3(f, tags, k, vals):
         tags.add(TXXX(encoding=3, desc=keep_case, text=vals))
 
 
+def _set_id3_people(tags, credits, v23=False):
+    """Rebuild TMCL and TIPL with the roles in credits replaced, every other role kept; the
+    custom TXXX an earlier TagMender wrote for one of them goes."""
+    from mutagen.id3 import TIPL, TMCL
+    tmcl, tipl = [], []
+    for key in [x for x in tags if x[:4] in ("TMCL", "TIPL", "IPLS")]:
+        fr = tags[key]
+        (tmcl if key[:4] == "TMCL" else tipl).extend([list(p) for p in fr.people])
+        del tags[key]
+
+    def drop(lists, roles):
+        for lst in lists:
+            lst[:] = [p for p in lst if p[0] not in roles]
+    for k, vals in credits.items():
+        if is_performer(k):
+            role = _role(k)
+            drop((tmcl, tipl), (role,) if role else ("", "performer"))
+            tmcl.extend([[role or "performer", v] for v in vals or []])
+        else:
+            role = _TIPL_R[k]
+            drop((tipl,), (role,))
+            tipl.extend([[role, v] for v in vals or []])
+        for x in [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == k]:
+            del tags[x]
+    if v23:                                         # (one IPLS in v2.3: all in TIPL, as Picard)
+        tipl, tmcl = tipl + tmcl, []
+    if tmcl:
+        tags.add(TMCL(encoding=3, people=tmcl))
+    if tipl:
+        tags.add(TIPL(encoding=3, people=tipl))
+
+
+def _set_performers(fam, tags, credits):
+    """PERFORMER ("Performer" in APEv2) as "name (role)": the roles in credits replaced, the
+    others kept; the custom PERFORMER:ROLE an earlier TagMender wrote goes."""
+    if not credits:
+        return
+    key = "PERFORMER" if fam == "vorbis" else next((x for x in tags.keys() if x.lower() == "performer"), "Performer")
+    old = list(tags[key]) if key in tags else []
+    roles = {_role(k) for k in credits}
+    keep = [v for v in old if (_role(_split_performer(v)[0]) not in roles)]
+    new = list(keep)
+    for k, vals in credits.items():
+        role = _role(k)
+        new += [f"{v} ({role})" if role else v for v in vals or []]
+    if key in tags:
+        del tags[key]
+    if new:
+        tags[key] = new
+    for k in credits:
+        if ":" in k:                      # (PERFORMER:ROLE, as an earlier TagMender wrote it)
+            for x in [x for x in tags.keys() if x.lower() == k]:
+                del tags[x]
+
+
+def _is_url(v) -> bool:
+    from urllib.parse import urlparse
+    try:
+        return all(urlparse(str(v))[:2])
+    except ValueError:
+        return False
+
+
 def _set_vorbis(f, tags, k, vals):
     name = VORBIS_W.get(k, k.upper())
     if name in tags:
@@ -472,6 +688,16 @@ def _set_vorbis(f, tags, k, vals):
 
 
 def _set_mp4(f, tags, k, vals):
+    if k in MP4_BOOL:
+        tags.pop(MP4_BOOL[k], None)
+        if vals:
+            tags[MP4_BOOL[k]] = str(vals[0]).strip().lower() in ("1", "true", "yes")
+        return
+    if k in MP4_INT:
+        tags.pop(MP4_INT[k], None)
+        if vals and str(vals[0]).strip().isdigit():
+            tags[MP4_INT[k]] = [int(str(vals[0]).strip())]
+        return
     if k == "bpm":
         tags.pop("tmpo", None)
         if vals and vals[0].isdigit():

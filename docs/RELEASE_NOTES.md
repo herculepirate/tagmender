@@ -73,6 +73,14 @@ along) - and the tracks' picture follows a corrected one also with "embed only";
 the user's own beside TagMender's is never touched, and a download never replaces a picture
 made from the user's photo.
 
+**Comments and lyrics as Picard 3 names them (nineteenth and twentieth reviews).** A
+comment or lyrics with a description or language (from a tagger script, or already in the
+file) is read and written as Picard 3 does: in ID3 the COMM/USLT frame of that language and
+description ("comment::ripper", "comment:deu", "lyrics:eng:Verse"; iTunes' own comments as
+iTunes writes them), in Vorbis and APEv2 a COMMENT "text (description)" - only that one
+replaced, the others kept. Described lyrics count as lyrics the file has. A job made by an
+earlier version is still undone without --force, though tags are now read this way.
+
 **Undo, byte for byte (seventeenth and eighteenth reviews).** A job's backup now keeps an
 MP3's ID3v2 tag and a FLAC file's whole metadata exactly as they were (a FLAC file's is put
 back whole only when its stream info, seek table and cue sheet are as they were - a cue sheet

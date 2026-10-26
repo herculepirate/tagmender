@@ -21,6 +21,7 @@ What decides what:
 """
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
@@ -372,7 +373,15 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         except OSError:
             return []
     if any(p not in moved for p in audio_in(src_dir)):
-        return [], "folder holds other music too; companion files stay where they are"
+        # a shared folder (singles, a folder split into two albums): its own files stay, but each
+        # moving track still takes its own "01 a.lrc" - else its lyrics are left behind, orphaned
+        own = []
+        for s_, d_ in sorted(moved.items()):
+            for p in sorted(s_.parent.glob(glob.escape(s_.stem) + ".*")):
+                if p != s_ and p.stem == s_.stem and not p.name.startswith(".") and not p.is_symlink() \
+                        and p.is_file() and p.suffix.lower() not in AUDIO_EXT and p.suffix.lower() in exts:
+                    own.append((p, d_.with_name(d_.stem + p.suffix)))
+        return own, "folder holds other music too; only each track's own files (lyrics ...) go with it"
     tree, seen, foreign = [], 0, []
     targets = {os.path.realpath(str(x)) for x in dmap.values()}
 
@@ -517,14 +526,29 @@ def _cue_rewrites(path: Path, renames: dict):
             continue
     if text is None:
         return None
+    def as_sheet(name):
+        """The ways the sheet may spell a file name: as text, and - for a name that is not
+        valid UTF-8 on disk (an old Latin-1 rip: "H\\udce9lls") - its bytes read the way the
+        sheet is read ("Hélls"), which is how a playlist made beside such files names them."""
+        out = [] if any("\udc80" <= ch <= "\udcff" for ch in name) else [name]
+        try:
+            b = os.fsencode(name).decode(enc)
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            b = None
+        if b and b not in out:
+            out.append(b)
+        return out
+
     table, stems = {}, {}
     for old, new in renames.items():
         old_n, new_n = old.replace("\\", "/"), new.replace("\\", "/")
         if old_n != new_n:
-            table[old_n.casefold()] = new_n
-            o, n = os.path.splitext(old_n), os.path.splitext(new_n)
-            if o[1].lower() in AUDIO_EXT:
-                stems.setdefault(o[0].casefold(), set()).add(n[0])
+            new_s = (as_sheet(new_n) or [new_n])[0]
+            for o_s in as_sheet(old_n):
+                table[o_s.casefold()] = new_s
+                o, n = os.path.splitext(o_s), os.path.splitext(new_s)
+                if o[1].lower() in AUDIO_EXT:
+                    stems.setdefault(o[0].casefold(), set()).add(n[0])
     if not table:
         return None
 

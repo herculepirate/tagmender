@@ -324,6 +324,70 @@ def _put_head(path, blob_dir, blob, flac=False):
             fh.write(data)
 
 
+def _ogg_head_pages(fh):
+    """(the header pages of an Ogg file - its one stream's pages before the first that ends
+    an audio packet -, their total size), or None (several streams, no audio, not Ogg)."""
+    from mutagen.ogg import OggPage
+    fh.seek(0)
+    pages, end = [], 0
+    while True:
+        at = fh.tell()
+        try:
+            p = OggPage(fh)
+        except Exception:
+            return None
+        if pages and p.serial != pages[0].serial:
+            return None
+        if pages and p.position not in (0, -1):
+            return pages, at
+        pages.append(p)
+        end = fh.tell()
+        if p.last or len(pages) > 4096 or end > 64 << 20:
+            return None
+
+
+def _ogg_head(path):
+    """An Ogg file's header pages (identification, comments, setup) as they are, or None."""
+    try:
+        with open(path, "rb") as fh:
+            got = _ogg_head_pages(fh)
+            if not got:
+                return None
+            fh.seek(0)
+            return fh.read(got[1])
+    except OSError:
+        return None
+
+
+def _put_ogg_head(path, blob_dir, blob):
+    """The header pages as they were - when they hold the same packets as the file's now
+    (its tags already put back): only how mutagen laid them out across pages differs, and
+    the pages after them are numbered back as they were."""
+    import io
+    from mutagen._util import resize_bytes
+    from mutagen.ogg import OggPage
+    data = _read_blob(blob_dir, blob)
+    with open(path, "r+b") as fh:
+        now = _ogg_head_pages(fh)
+        if not now:
+            return
+        fh.seek(0)
+        if fh.read(now[1]) == data:
+            return
+        pages_old = []
+        bio = io.BytesIO(data)
+        while bio.tell() < len(data):
+            pages_old.append(OggPage(bio))
+        if not pages_old or pages_old[0].serial != now[0][0].serial or \
+                OggPage.to_packets(pages_old) != OggPage.to_packets(now[0]):
+            return                                        # not the same headers: left as mutagen wrote them
+        resize_bytes(fh, now[1], len(data), 0)
+        fh.seek(0)
+        fh.write(data)
+        fh.seek(len(data))
+        OggPage.renumber(fh, pages_old[0].serial, pages_old[-1].sequence + 1)
+
+
 def _moov(fh) -> tuple[int, int]:
     """(offset, size) of an MP4 file's top-level "moov" atom (its tags, chapters and the index
     of its audio)."""
@@ -576,6 +640,9 @@ def _backup_raw(path, f, blob_dir, kind=RECORD_KIND) -> dict:
         rec["tags"] = {"mp4": [[k, _mp4_value(v, blob_dir)] for k, v in f.tags.items()]}
     elif isinstance(f.tags, list):                   # Vorbis comments: in their order, as spelled
         rec["tags"] = {"vorbis_raw": [[k, v] for k, v in list(f.tags)]}
+        h = _ogg_head(path) if kind_ >= 4 and type(f).__name__.startswith("Ogg") else None
+        if h:                                        # (and how its header pages were laid out)
+            rec["ogg_head"] = _blob(h, blob_dir)
     else:
         rec["tags"] = {"vorbis": [[k, v] for k, v in f.tags.items()]}
     pad = getattr(f.tags, "_padding", None)          # (the room the tag had: put back as it was)
@@ -654,6 +721,8 @@ def rec_key(rec, loose=True) -> str:
     exactly (whether there is anything left to put back)."""
     rec = dict(rec or {})
     tags = dict(rec.get("tags") or {})
+    if loose:
+        rec.pop("ogg_head", None)            # (only how the header pages are laid out)
     if not loose:
         pass
     elif tags.get("mp4") == []:
@@ -682,6 +751,8 @@ def same_as_backup(path, rec, loose=True) -> bool:
         now = backup_tags(path, d, kind=RECORD_KIND if newer3 else kind)
         if newer3:
             now["v"] = 3
+        if "ogg_head" not in old:            # (a record made before the layout was kept)
+            now.pop("ogg_head", None)
         return rec_key(now, loose) == rec_key(old, loose)
 
 
@@ -726,6 +797,8 @@ def restore_tags(path, rec, blob_dir):
         del f.tags[:]
         f.tags.extend((k, v) for k, v in tags["vorbis_raw"])
         f.save(**save_kw)
+        if rec.get("ogg_head"):
+            _put_ogg_head(path, blob_dir, rec["ogg_head"])
         return
     if isinstance(f, FLAC):
         f.clear_pictures()

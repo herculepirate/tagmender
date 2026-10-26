@@ -422,6 +422,12 @@ def _sig_is(path, sig, backup=None, blobs=None) -> bool:
         return False
     if not backup or backup.get("kind") != "tags" or blobs is None:
         return True
+    try:                  # in Vorbis and APEv2 a described comment is a plain COMMENT "text (desc)",
+        import mutagen    # which that version wrote and removed as any other: nothing to tell
+        if tagio.family(mutagen.File(str(path))) in ("vorbis", "apev2"):
+            return True
+    except Exception:
+        pass
     import shutil
     import tempfile
     import tag_albums as ta
@@ -981,7 +987,9 @@ class Executor:
         # this album's music (a track added since would stay behind alone)
         planned = {fe["src"] for fe in a["files"]} | {fe["copy_of"] for fe in a["files"] if fe.get("copy_of")} \
             | {s_.get("file") for s_ in a.get("skipped") or []}
-        for d in sorted({str(Path(c["src"]).parent) for c in a["companions"] if c.get("op") != "rewrite"}):
+        own = {(str(Path(s_).parent), Path(s_).stem) for s_ in planned if s_}   # "01 a.lrc" goes with "01 a.mp3",
+        for d in sorted({str(Path(c["src"]).parent) for c in a["companions"]   # whatever else the folder holds
+                         if c.get("op") != "rewrite" and (str(Path(c["src"]).parent), Path(c["src"]).stem) not in own}):
             try:
                 extra = sorted(n for n in os.listdir(d) if Path(n).suffix.lower() in ex.AUDIO_EXT
                                and not n.startswith(".") and os.path.join(d, n) not in planned)

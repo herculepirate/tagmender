@@ -101,8 +101,9 @@ CoverUp - since the tool TagMender writes MP4 tags with cannot keep its fragment
 offsets; it still goes with its album, as it is, and the plan says so. Known limits: an M4A
 whose tag had no room comes back 8 bytes larger (an empty "free" atom), its tags in mutagen's
 order; one with no tags at all and the audio first ("fast start") keeps an empty tag; and an
-Ogg file whose comments span several pages, or hold text that is not UTF-8, is put back with
-the same tags but not byte for byte. A job recorded by an earlier version that kept an M4A's
+Ogg file whose comments hold text that is not UTF-8 is put back with the same tags but not
+byte for byte (an Ogg or Opus file's header pages are otherwise put back as they were laid
+out, even when an embedded cover made its comments span many pages). A job recorded by an earlier version that kept an M4A's
 whole moov is never put back over a file rewritten since (its audio moved): it says so. Mood and release date can be removed or
 changed in every kind of ID3 tag. Tagger scripts see every field of the release at the
 Basic level too, never a field the release deletes, keep the whitespace of the file's own

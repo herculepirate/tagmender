@@ -1764,8 +1764,9 @@ class Profiles(QWidget):
         data["artwork"].update({"sources": list(self.art_src.currentData()), "when": self.art_when.currentData(),
                                 "enlarge": self.art_enlarge.isChecked(), "generate": self.art_gen.currentData(),
                                 "replace": "larger_only" if self.art_replace.isChecked() else "never"})
-        data["artwork"]["artist"] = dict(data["artwork"].get("artist") or {}, enabled=self.art_artist.isChecked(),
-                                         file="artist.jpg" if self.art_artist_file.isChecked() else "")
+        was = dict(data["artwork"].get("artist") or {})
+        data["artwork"]["artist"] = dict(was, enabled=self.art_artist.isChecked(),         # (the profile's own name kept)
+                                         file=(was.get("file") or "artist.jpg") if self.art_artist_file.isChecked() else "")
         data["artwork"].pop("provider", None)           # (sources says it now)
         data["tag_level"] = self.level.currentText()
         pic = dict(data.get("picard") or {})

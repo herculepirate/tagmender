@@ -1645,6 +1645,10 @@ def _write_extras(fe) -> dict:
         out["riff"] = fe["riff"]
     if fe.get("format"):
         out["fmt"] = fe["format"]
+    if fe.get("names"):
+        out["names"] = fe["names"]
+    if fe.get("first"):
+        out["first"] = fe["first"]
     return out
 
 

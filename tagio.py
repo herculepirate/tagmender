@@ -83,7 +83,10 @@ MP4_TEXT = {"title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb", "compos
             "albumartist": "aART", "grouping": "\xa9grp", "date": "\xa9day", "genre": "\xa9gen",
             "lyrics": "\xa9lyr", "comment": "\xa9cmt", "encodedby": "\xa9too", "director": "\xa9dir",
             "copyright": "cprt", "albumsort": "soal", "albumartistsort": "soaa", "artistsort": "soar",
-            "titlesort": "sonm", "composersort": "soco", "movement": "\xa9mvn", "work": "\xa9wrk"}
+            "titlesort": "sonm", "composersort": "soco", "movement": "\xa9mvn", "work": "\xa9wrk",
+            "show": "tvsh", "showsort": "sosn", "podcasturl": "purl"}
+# (written as custom atoms by versions before: the custom one goes when the field is written)
+_MP4_WAS_FREE = {"show", "showsort", "podcasturl"}
 MP4_FREE = {
     "musicbrainz_recordingid": "MusicBrainz Track Id", "musicbrainz_artistid": "MusicBrainz Artist Id",
     "musicbrainz_albumid": "MusicBrainz Album Id", "musicbrainz_albumartistid": "MusicBrainz Album Artist Id",
@@ -129,6 +132,32 @@ APE = {"albumartist": "Album Artist", "albumartists": "ALBUMARTISTS", "remixer":
        "replaygain_reference_loudness": "REPLAYGAIN_REFERENCE_LOUDNESS", "tagmender": "TAGMENDER", "tagmender_reason": "TAGMENDER_REASON",
        "tagmender_source": "TAGMENDER_SOURCE"}
 _APE_R = {v.lower(): k for k, v in APE.items()}
+# what Picard never writes to an APEv2 tag (picard/formats/apev2.py UNSUPPORTED_TAGS)
+APE_UNSUPPORTED = {"gapless", "musicip_fingerprint", "podcast", "podcasturl", "show", "showsort", "syncedlyrics",
+                   "r128_album_gain", "r128_track_gain"}
+
+
+def _ape_merge(out: dict, current) -> dict:
+    """APEv2 changes as Picard saves them: fields it never writes there dropped, and fields
+    that land on one item ("date" and a script's "year" both on "Year") written together under
+    the name the item reads back as - the file's own values of that field first when it is
+    not changing (current: a callable giving the file's tags)."""
+    out = {k: v for k, v in out.items() if k not in APE_UNSUPPORTED}
+    pairs = {x for p in NUMBER_PAIRS for x in p}
+    have = None
+    for k in sorted(k for k in out if ":" not in k and k not in pairs):
+        name = APE.get(k, k.title())
+        canon = _APE_R.get(name.lower(), name.lower())
+        if canon == k:
+            continue
+        v = out.pop(k)
+        if not v:
+            continue
+        if canon not in out:
+            have = current() if have is None else have
+            out[canon] = list(have.get(canon) or [])
+        out[canon] = list(out[canon] or []) + [x for x in v]
+    return out
 
 # ---- ASF (WMA) --------------------------------------------------------------
 ASF_MAP = {
@@ -222,6 +251,8 @@ def holds(path, field: str) -> bool:
     if ext in (".wma", ".asf"):
         return field in ASF_MAP or field == "totaldiscs" or field in CI_ONLY or \
             field.startswith("lyrics:")                                          # (no total tracks)
+    if ext in (".wv", ".ape", ".mpc", ".mp+", ".ofr", ".ofs", ".tak", ".wvc"):  # (APEv2: Picard's UNSUPPORTED_TAGS)
+        return field not in APE_UNSUPPORTED
     return True
 CI_ONLY = {"replaygain_album_gain", "replaygain_album_peak", "replaygain_album_range", "replaygain_track_gain",
            "replaygain_track_peak", "replaygain_track_range", "replaygain_reference_loudness"}
@@ -528,14 +559,16 @@ def _id3v1_file(f) -> bool:
     return type(f).__name__ in ("MP3", "EasyMP3", "TrueAudio")
 
 
-def save_id3(f, tags, keep_original_date=True, keep_date=True, v2=None, v1=None, join="/"):
+def save_id3(f, tags, keep_original_date=True, keep_date=True, v2=None, v1=None, join="/", first=None):
     """Save an ID3 tag in its own version (v2: 3 or 4 to change it, as Picard's "ID3v2 version
     to write"; v1: 2 writes an ID3v1 tag, 0 removes it, None updates one that is there). A
     v2.3 tag stays valid v2.3: frames v2.3 does not have are converted (TDRC to TYER and TDAT,
     TDOR to TORY, TIPL and TMCL to IPLS, ...) as Picard does (compatid3.py), keeping the sort
     frames most players read in v2.3 too; an original date (TDOR) or a date without its day
     (TDRC) that is not being changed is kept as it is (TORY and TYER hold a year only). A
-    v2.4 tag made v2.3 has its other values joined with join, as Picard joins them."""
+    v2.4 tag made v2.3 has its other values joined with join, as Picard joins them. first:
+    {field: its first value} of fields written joined: the ID3v1 tag gets the first value, as
+    Picard's has it (not "Rock/Pop", no ID3v1 genre)."""
     own = _own_version(tags)
     v2 = v2 if v2 in (3, 4) else own
     kw = {"v1": v1} if v1 in (0, 2) and _id3v1_file(f) else {}
@@ -574,6 +607,31 @@ def save_id3(f, tags, keep_original_date=True, keep_date=True, v2=None, v1=None,
             tags.add(fr)
     # (what changes was joined already: the rest of a v2.3 tag as it was)
     f.save(v2_version=3, v23_sep=None if own == 3 else (join or "/"), **kw)
+    if first:
+        _id3v1_first(f.filename, tags, first)
+
+
+def _id3v1_first(path, tags, first):
+    """The file's ID3v1 tag (if it has one) made from the first values of fields written
+    joined into a v2.3 tag."""
+    from mutagen.id3._id3v1 import MakeID3v1
+    frames = {fid: tags.getall(fid)[0] for fid in ("TIT2", "TPE1", "TALB", "TRCK", "TCON", "TDRC", "TYER")
+              if tags.getall(fid)}
+    if "COMM" in tags:
+        frames["COMM"] = tags["COMM"]
+    for k, fid in (("title", "TIT2"), ("artist", "TPE1"), ("album", "TALB"), ("genre", "TCON")):
+        if first.get(k):
+            frames[fid] = Frames[fid](encoding=3, text=[str(first[k][0])])
+    with open(path, "r+b") as fh:
+        fh.seek(0, 2)
+        if fh.tell() < 128:
+            return
+        fh.seek(-128, 2)
+        if fh.read(3) != b"TAG":
+            return
+        data = MakeID3v1(frames)
+        fh.seek(-128, 2)
+        fh.write(data)
 
 
 # Picard's settings for what saving a file does beside its fields (Options > Tags); None:
@@ -762,6 +820,28 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         if fam in ("mp4", "asf"):
             new = new[-1:]                           # (one value there: Picard keeps the last)
         out["lyrics"] = new
+    if fam == "apev2":
+        out = _ape_merge(out, lambda: read(path))
+    if fam == "mp4":
+        # (numbers as MP4 keeps them - integers, as Picard writes them with int(): "01" is 1; one
+        # that is not a number is not written, the file's left as it is; a total that is not, 0)
+        for num, tot in (("tracknumber", "totaltracks"), ("discnumber", "totaldiscs")):
+            if out.get(num):
+                n = _mp4_int(out[num][0])
+                if not n:
+                    out.pop(num)
+                    out.pop(tot, None)
+                    continue
+                out[num] = [str(n)]
+            if out.get(tot):
+                t = _mp4_int(out[tot][0])
+                out[tot] = [str(t)] if t else None
+        for k in [k for k in out if (k in MP4_INT or k == "bpm") and out[k]]:
+            ints = [_mp4_int(x, zero=True) for x in out[k]]
+            if None in ints:
+                out.pop(k)
+            else:
+                out[k] = [str(x) for x in ints]
     if v23:
         for k, v in list(out.items()):
             if not isinstance(v, list) or not v:
@@ -776,6 +856,16 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
             out[k] = vals
     del ext
     return out
+
+
+def _mp4_int(x, zero=False):
+    """x as Picard's int(x) makes it for an MP4 number atom, or None (not a number, or one
+    the atom cannot hold)."""
+    try:
+        n = int(str(x))
+    except ValueError:
+        return None
+    return n if (0 if zero else 1) <= n < 1 << 15 else None
 
 
 def _pair(current, changes, num, tot):
@@ -846,10 +936,15 @@ def fragmented(path) -> bool:
         return False
 
 
-def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None) -> None:
+def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None,
+          names: dict | None = None, first: dict | None = None) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then). fmt: file_options() - what else saving the file does, as
-    Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed)."""
+    Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed). names: {field:
+    its spelling} - a custom tag a tagger script made ("MyTag") is written as it spelled it,
+    as Picard writes it (an ID3 TXXX, an MP4 custom atom). first: {field: [its first value]}
+    of fields an ID3v2.3 tag gets joined, for the ID3v1 tag (see save_id3)."""
+    names = {field_name(k): v for k, v in (names or {}).items()}
     changes = _norm(changes)
     if not changes:
         return
@@ -878,6 +973,8 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
     if fam in ("vorbis", "apev2") and any(is_comment(k) for k in changes):
         _set_performers(fam, tags, {k: v for k, v in changes.items() if is_comment(k)}, "comment")
         changes = {k: v for k, v in changes.items() if not is_comment(k)}
+    if fam == "apev2":
+        changes = _ape_merge(changes, lambda: current)
     credits = {k: v for k, v in changes.items() if (is_performer(k) and (fam != "mp4" or ":" in k))
                or (fam == "id3" and k in _TIPL_R)}
     if credits:
@@ -912,11 +1009,13 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
                 _set_id3(f, tags, "~v23:" + k, vals)
             elif vals:
                 _set_id3(f, tags, k, vals)
+        elif fam in ("id3", "mp4"):
+            globals()[f"_set_{fam}"](f, tags, k, vals, spell=names.get(k))
         else:
             globals()[f"_set_{fam}"](f, tags, k, vals)
     if fam == "id3":
         save_id3(f, tags, keep_original_date="originaldate" not in changes, keep_date="date" not in changes,
-                 v2=fmt.get("v2"), v1=fmt.get("v1"), join=join)
+                 v2=fmt.get("v2"), v1=fmt.get("v1"), join=join, first=first if v23 else None)
         if type(f).__name__ == "WAVE":
             _write_riff_info(path, {**changes, **{k: v for k, v in (riff or {}).items() if v}})
         if fmt.get("strip_ape") and type(f).__name__ in ("MP3", "EasyMP3"):
@@ -954,9 +1053,9 @@ def _write_pair(fam, f, tags, pair, n, t):
                 tags[name] = [t]
     elif fam == "mp4":
         key = "trkn" if num == "tracknumber" else "disk"
-        if n and n.isdigit():
-            tags[key] = [(int(n), int(t) if t.isdigit() else 0)]
-        elif key in tags:
+        if _mp4_int(n):
+            tags[key] = [(_mp4_int(n), _mp4_int(t) or 0)]
+        elif not n and key in tags:
             del tags[key]
     elif fam == "apev2":
         key = "Track" if num == "tracknumber" else "Disc"
@@ -972,7 +1071,7 @@ def _write_pair(fam, f, tags, pair, n, t):
             tags[key] = [n if num == "tracknumber" or not t else f"{n}/{t}"]
 
 
-def _set_id3(f, tags, k, vals):
+def _set_id3(f, tags, k, vals, spell=None):
     if k == "musicbrainz_recordingid":
         for key in [x for x in tags if x.startswith("UFID:") and tags[x].owner == UFID_OWNER]:
             del tags[key]
@@ -1034,7 +1133,7 @@ def _set_id3(f, tags, k, vals):
         if vals:
             tags.add(Frames[fid](encoding=3, text=vals))
         return
-    desc = ID3_FREETEXT.get(k, k)
+    desc = ID3_FREETEXT.get(k) or (spell if spell and spell.lower() == k else k)
     existing = [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == desc.lower()]
     keep_case = tags[existing[0]].desc if existing else desc
     for key in existing:
@@ -1117,29 +1216,31 @@ def _set_vorbis(f, tags, k, vals):
         tags[name] = vals
 
 
-def _set_mp4(f, tags, k, vals):
+def _set_mp4(f, tags, k, vals, spell=None):
     if k in MP4_BOOL:
         tags.pop(MP4_BOOL[k], None)
         if vals:
             tags[MP4_BOOL[k]] = str(vals[0]).strip().lower() in ("1", "true", "yes")
         return
-    if k in MP4_INT:
-        tags.pop(MP4_INT[k], None)
-        if vals and str(vals[0]).strip().isdigit():
-            tags[MP4_INT[k]] = [int(str(vals[0]).strip())]
-        return
-    if k == "bpm":
-        tags.pop("tmpo", None)
-        if vals and vals[0].isdigit():
-            tags["tmpo"] = [int(vals[0])]
+    if k in MP4_INT or k == "bpm":
+        key = "tmpo" if k == "bpm" else MP4_INT[k]
+        ints = [_mp4_int(v, zero=True) for v in vals or []]
+        if None in ints:
+            return                                   # (not a number: left as it is, as Picard does)
+        tags.pop(key, None)
+        if ints:
+            tags[key] = ints
         return
     if k in MP4_TEXT:
         key = MP4_TEXT[k]
         tags.pop(key, None)
+        if k in _MP4_WAS_FREE:
+            for x in [x for x in tags if x.startswith(_FF) and x[len(_FF):].lower() == k]:
+                del tags[x]
         if vals:
             tags[key] = vals
         return
-    name = MP4_FREE.get(k, k)
+    name = MP4_FREE.get(k) or (spell if spell and spell.lower() == k else k)
     existing = [x for x in tags if x.startswith(_FF) and x[len(_FF):].lower() == name.lower()]
     key = existing[0] if existing else _FF + name
     for x in existing:

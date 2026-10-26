@@ -81,8 +81,9 @@ def abbreviate(text: str, abbreviations: dict) -> str:
 
 
 def truncate_words(text: str, limit: int, compat: str) -> str:
-    """The longest whole-word prefix that fits (a cut inside a word only when the first
-    word alone is too long)."""
+    """The longest whole-word prefix that fits - cut inside a word when whole words would
+    keep less than half of what fits (a title with no spaces, as Japanese is written, or one
+    very long word: never "13" for "13 <a long title>"; Picard cuts such a name inside it)."""
     if _fits(text, limit, compat):
         return text
     words = text.split(" ")
@@ -92,7 +93,7 @@ def truncate_words(text: str, limit: int, compat: str) -> str:
         if not _fits(cand, limit, compat):
             break
         out = cand
-    if not out:
+    if len(out) < MIN_KEEP or _units(out, compat) * 2 < limit:
         out = text
         while out and not _fits(out, limit, compat):
             out = out[:-1]

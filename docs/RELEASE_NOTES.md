@@ -77,7 +77,20 @@ made from the user's photo.
 and Audiophile the artist's photo still goes into each track by default, but it is no longer
 saved as artist.jpg in the artist folder unless the profile says so (profile editor: "Also save
 it as artist.jpg in the artist folder"; `artwork.artist.file: "artist.jpg"`). Your own
-artist.jpg is used as before.
+artist.jpg is used as before. Saving a profile in the desktop app keeps the photo's own file
+name (artist.jpeg, folder.jpg ...).
+
+**Tagger scripts and naming, closer to Picard (twenty-third review).** In M4A files numbers
+are written as Picard writes them (a script's "01" is track 1; a track number that is not a
+number, as a vinyl side "A1", is left as the file has it) - such a script no longer fails the
+album; show, show sort and podcast URL go into M4A's own atoms. In WavPack and other APEv2
+files, a script's "year" is written into the Year item beside the date (it used to wipe the
+date and fail the album), and the fields Picard never writes there (gapless, podcast, show ...)
+are not written. A custom tag a script makes keeps its spelling in MP3, WAV and M4A
+(TXXX:MyTag). With ID3v2.3 and ID3v1, the ID3v1 tag takes the first of several artists or
+genres (genre Rock, not none). A naming script that gives no file name ("%albumartist%/%album%/")
+keeps each file's own name in that folder, and a long title with few spaces is shortened inside
+a word, never down to the track number alone.
 
 **Comments and lyrics as Picard 3 names them (nineteenth and twentieth reviews).** A
 comment or lyrics with a description or language (from a tagger script, or already in the

@@ -296,9 +296,11 @@ def template_for(naming: dict) -> str:
     return PRESETS[preset]
 
 
-def render(template: str, tags: dict, settings: dict | None = None, compat: str = "") -> list[str]:
+def render(template: str, tags: dict, settings: dict | None = None, compat: str = "", own: str = "") -> list[str]:
     """The path components (folders..., file name without extension). Empty components
-    are dropped; each is stripped of surrounding spaces. settings: Picard's file naming
+    are dropped; each is stripped of surrounding spaces. own: the file's own name (without
+    its extension), the file name when the script gives none ("%albumartist%/%album%/"), as
+    Picard keeps it. settings: Picard's file naming
     options (picard_config.tag_settings): "/" in a value replaced with replace_dir_separator,
     then ascii_filenames and replace_spaces_with_underscores, as Picard's script_to_filename;
     compat "windows": with Picard's Windows compatibility (else filenames.make_path does it)."""
@@ -319,7 +321,11 @@ def render(template: str, tags: dict, settings: dict | None = None, compat: str 
         text = re.sub(r'[*:<>?|"]', "_", text)
     if st.get("replace_spaces_with_underscores"):
         text = re.sub(r"[\s_]+", "_", text.strip())
-    return [p.strip() for p in text.replace("\x00", "").split("/") if p.strip()]
+    parts = text.replace("\x00", "").split("/")
+    out = [p.strip() for p in parts if p.strip()]
+    if own and not parts[-1].strip():
+        out.append(own)
+    return out
 
 
 def check(template: str) -> list[str]:

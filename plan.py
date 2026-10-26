@@ -507,6 +507,19 @@ def _holds_other_music(folder: Path, entry, group=None) -> bool:
     return _artwork._other_music(Path(folder), sorted(ours))
 
 
+def _spelled_names(raw: dict, changes: dict) -> dict:
+    """{field: its spelling} of the fields written whose name is not in lower case (a custom
+    tag a tagger script made, "MyTag"): Picard writes such a tag as it is spelled."""
+    return {tagio.field_name(k): k for k in raw if tagio.field_name(k) != k and tagio.field_name(k) in changes}
+
+
+def _first_values(raw: dict, changes: dict) -> dict:
+    """{field: [its first value]} of the ID3v1 fields written with several values (an
+    ID3v2.3 tag joins them; its ID3v1 tag takes the first, as Picard's)."""
+    return {k: [str(raw[k][0])] for k in ("title", "artist", "album", "genre")
+            if changes.get(k) and len(raw.get(k) or []) > 1}
+
+
 def _cue_rewrites(path: Path, renames: dict):
     """New text of a cue sheet or playlist whose entries name files being renamed or moved,
     or None. renames: {old path relative to the sheet's folder: new path relative to where
@@ -857,6 +870,11 @@ class Planner:
                 fe["as_is"] = True
             if changes and fmt:
                 fe["format"] = fmt
+            spell = _spelled_names(raw, changes)
+            if spell:
+                fe["names"] = spell
+            if _first_values(raw, changes):
+                fe["first"] = _first_values(raw, changes)
             # the file's tags after the write, as values (not as an ID3v2.3 tag joins them: a
             # field the file already holds as the target says is named "A & B", not "A_B")
             merged = {k: (raw[k] if k in raw and _vals(target.get(k)) == _vals(v) else v) for k, v in before.items()}
@@ -898,7 +916,8 @@ class Planner:
                         if tag_ed and al.endswith(f" [{tag_ed}]"):
                             names["album"] = [al[:-len(f" [{tag_ed}]")]]
                     try:
-                        comps = naming.render(template, names, self._picard(), p["filenames"].get("compat", "windows"))
+                        comps = naming.render(template, names, self._picard(), p["filenames"].get("compat", "windows"),
+                                              own=f.stem)
                     except naming.TemplateError as exc:          # (a custom script that fails here)
                         comps, notes = None, [f"the naming script failed: {exc}"]
                     dst = None
@@ -919,7 +938,7 @@ class Planner:
                         try:
                             legacy, _n = fnm.make_path(
                                 dest_root, naming.render(template, {**hidden, **old_tags, **rel_tags}, self._picard(),
-                                                         p["filenames"].get("compat", "windows")),
+                                                         p["filenames"].get("compat", "windows"), own=f.stem),
                                 f.suffix.lower(), p["filenames"])
                         except naming.TemplateError:
                             legacy = None                 # (the old name cannot be made: no earlier copy by it)
@@ -939,6 +958,12 @@ class Planner:
                     fe.pop("format", None)
                     if changes2 and fmt2:
                         fe["format"] = fmt2
+                    fe.pop("names", None)
+                    if _spelled_names(raw, changes2):
+                        fe["names"] = _spelled_names(raw, changes2)
+                    fe.pop("first", None)
+                    if _first_values(raw, changes2):
+                        fe["first"] = _first_values(raw, changes2)
                     fe.pop("riff", None)
                     if changes2 and dst.suffix.lower() == ".wav":       # (the copy's own INFO, as for any file)
                         now2 = {k: v for k, v in have.items() if not k.startswith("~")}

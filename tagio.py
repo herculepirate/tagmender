@@ -851,6 +851,22 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
                 out.pop(num)                      # (" " or "/12": no number - the file's stays)
             if b_.strip() and not out.get(tot):
                 out[tot] = [b_.strip()]
+    if fam == "id3" and out.get("website") and not all(_is_url(v) for v in out["website"]):
+        out.pop("website")                          # (no WOAR for what is not a URL: left as the file has it)
+    if fam in ("id3", "mp4", "apev2", "asf"):
+        # (a total has no place of its own there - "1/2", trkn (1, 2): with no number the
+        # file holds none, as Picard writes it)
+        have = None
+        for num, tot in (ID3_PAIRS if fam == "id3" else NUMBER_PAIRS):
+            if not out.get(tot):
+                continue
+            if num in out:
+                n_ok = bool(out[num])
+            else:
+                have = read(path) if have is None else have
+                n_ok = bool(have.get(num))
+            if not n_ok:
+                out.pop(tot)
     if fam == "apev2":
         out = _ape_merge(out, lambda: read(path))
     if fam == "mp4":
@@ -1158,6 +1174,8 @@ def _set_id3(f, tags, k, vals, spell=None):
             return
         if not vals:
             tags.delall("WOAR")
+        else:
+            return                                  # (not URLs: Picard writes no frame for them)
     if k in ID3_TEXT:
         fid = ID3_TEXT[k]
         tags.delall(fid)

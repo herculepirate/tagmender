@@ -147,11 +147,11 @@ def win_short_parts(parts: list, ext: str, reserved: int) -> list:
         filename_max = WIN_MAX_FILEPATH_LEN - (reserved + dplen + 1)
         _d, stem = _win_shorten([], stem, ext, filename_max)
         return dirs + [stem]
-    names = list(dirs)
+    names = list(dirs) or [""]
     remaining -= len(names) - 1
     average = float(remaining) / len(names)
     if average < 1:
-        return dirs + [stem]                            # (Picard: "Path too long"; the limits below say so)
+        return None                                     # (Picard: "Path too long")
     short = [dn for dn in names if len(dn) <= average]
     total = sum(map(_u16len, names))
     shortchars = sum(map(_u16len, short))
@@ -184,7 +184,14 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
     if not parts:
         return None, ["the naming template gave an empty path"]
     if limits.get("win_reserved") is not None:          # (Picard's 259-character Windows paths)
-        short = win_short_parts(parts, ext, int(limits["win_reserved"]))
+        # (the names as the script made them are shortened, then made safe - as Picard's
+        # make_short_filename comes before make_save_path: "Con" is cut, then becomes "Con_")
+        short = win_short_parts([str(c) for c in components], ext, int(limits["win_reserved"]))
+        if short is None:
+            return None, notes + ["the destination folder leaves no room for the album's folders within Windows' "
+                                  "259-character path length (as Picard says: move them to a folder nearer "
+                                  "the top, or set picard.windows_long_paths)"]
+        short = [safe_component(c, compat, file_stem=(i == len(short) - 1)) for i, c in enumerate(short)]
         forced = limits.get("win_dirs") or {}
         for i in range(len(parts) - 1, 0, -1):          # (folders shortened alike for an album's tracks)
             k = tuple(parts[:i])
@@ -194,7 +201,7 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
         if short != parts:
             notes.append(f"shortened {'/'.join(parts)!r} -> {'/'.join(short)!r} for Windows' path length "
                          "(as Picard does; Picard's \"Windows long path support\" setting turns it off)")
-            parts = [safe_component(c, compat, file_stem=(i == len(short) - 1)) for i, c in enumerate(short)]
+            parts = short
     reserve = len(ext) + SUFFIX_LEN       # always leave room for a collision suffix
 
     def limit_of(i):

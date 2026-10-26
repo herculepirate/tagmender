@@ -102,7 +102,12 @@ written; ID3v2.3 credits keep their order; a WAV's RIFF INFO leaves out what a s
 When the shortening would cut an album's folders differently for its discs, all its tracks get
 the same (most shortened) folders - one album, one folder; copies made under the longer names
 an earlier version gave are found, not made again; a name an earlier run suffixed (" ~1a2b")
-stays as it is. Jobs an earlier version ran on M4A files numbered 0 are still undone.
+stays as it is. Jobs an earlier version ran on M4A files numbered 0 are still undone. A
+destination too deep for Windows' path length blocks the album and says why (it used to stop
+the whole plan, or move it with longer paths). A script that removes the disc number of a
+single-disc release ($unset(discnumber)) no longer fails the album in MP3, M4A, WavPack or WMA
+(the lone total is not written, as Picard drops it); a website that is not a URL is not
+written into MP3 (as Picard).
 
 **Tagger scripts and naming, closer to Picard (twenty-third review).** In M4A files numbers
 are written as Picard writes them (a script's "01" is track 1; a track number that is not a

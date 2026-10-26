@@ -676,6 +676,12 @@ class Planner:
         out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden, self._log(), strip=False)
         back = {v: k for k, v in spell.items()}
         out = {back.get(k, k): v for k, v in out.items()}
+        # ($set(Title,X), $set(GENRE,Jazz) - a field TagMender writes, spelled otherwise: that
+        # field, the script's value winning; Picard, case-sensitive, would add a TXXX:Title -
+        # docs/PICARD_COVERAGE.md)
+        known = {k for k in list(tags) + list(target) if k == k.lower()}
+        for k in [k for k in out if k != k.lower() and k.lower() in known and k not in tags]:
+            out[k.lower()] = out.pop(k)
         tags = {back.get(k, k): v for k, v in tags.items()}
         # ($delete(custom) is not the file's "CUSTOM": left as it is, as Picard leaves it)
         gone = [back.get(g, g) for g in gone if not (g.lower() in spell and g != spell[g.lower()])]
@@ -908,6 +914,9 @@ class Planner:
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             whole = target                # (the file's fields as Picard has them for naming, held or not)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
+            for num_, tot_ in tagio.ID3_PAIRS:          # (a number removed: its total has no place either)
+                if num_ in removals and raw.get(tot_) and num_ not in raw:
+                    raw[num_] = None
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
             if raw.get("comment") and not target.get("comment") and before.get("comment") and \

@@ -90,6 +90,16 @@ apply the same plan, which a job never runs twice. Turning "Also save it as arti
 your own artist photo there (for a moved album, the one in the folder it came from), not a
 download.
 
+**Watched folders and Picard.ini (twenty-sixth review).** "Process anyway" in the app lets
+the album's own files through, never the folder they lie in (for loose tracks in a watched
+folder, that switched the rules off for everything dropped there later); an album you undid
+stays undone when other music is dropped beside it; loose tracks still being copied into a
+watched folder hold the others back. Picard 3's enabled option profiles are read, as Picard
+applies them over its settings; translation script exceptions apply; "1"/"yes" count as true.
+$delete(discnumber) removes it again (a regression); $unset(totaltracks) writes the number
+alone; a compilation's genres come from the recordings' artists; a license on the release and
+the recording is written twice, as Picard writes it.
+
 **Naming and scripts as Picard 3 (twenty-fourth review).** With Windows compatibility on and
 Picard's "Windows long path support" off (its default off Windows), a path below the
 destination's mount point is shortened to Windows' 259 characters exactly as Picard shortens

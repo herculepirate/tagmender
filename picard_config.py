@@ -130,11 +130,48 @@ def enrichment(overrides: dict | None = None, path: Path | None = None) -> dict:
     return s
 
 
+def profile_settings(cp) -> list:
+    """The settings of Picard 3's enabled option profiles ([profiles] in Picard.ini), in
+    Picard's order: the first that sets an option (not to null) is what Picard uses."""
+    if cp is None or not cp.has_section("profiles"):
+        return []
+    try:
+        profs = []
+        if cp.has_option("profiles", "user_profiles"):
+            for it in _qt_unescape(cp.get("profiles", "user_profiles")):
+                v = _qt_variant(it[9:-1]) if it.startswith("@Variant(") and it.endswith(")") else None
+                if isinstance(v, dict):
+                    profs.append(v)
+                elif isinstance(v, list):
+                    profs += [x for x in v if isinstance(x, dict)]
+        sets = {}
+        if cp.has_option("profiles", "user_profile_settings"):
+            items = _qt_unescape(cp.get("profiles", "user_profile_settings"))
+            v = _qt_variant(items[0][9:-1]) if items and items[0].startswith("@Variant(") and \
+                items[0].endswith(")") else None
+            sets = v if isinstance(v, dict) else {}
+        return [sets.get(p.get("id")) or {} for p in profs if p.get("enabled") and isinstance(sets.get(p.get("id")), dict)]
+    except Exception:
+        return []
+
+
+def _from_profiles(cp, key):
+    """(found, value) of an option in Picard's enabled option profiles."""
+    for ps in profile_settings(cp):
+        if key in ps and ps[key] is not None:
+            return True, ps[key]
+    return False, None
+
+
 def preserved_tags(path: Path | None = None) -> set:
     """Tags Picard keeps as they are on the file, lower case. Empty when Picard.ini is absent."""
     cp = _read(path if path is not None else ini_path())
     if cp is None:
         return set()
+    found, v = _from_profiles(cp, "preserved_tags")
+    if found:
+        vals = v if isinstance(v, list) else str(v).replace("\n", ",").split(",")
+        return {str(x).strip().lower() for x in vals if str(x).strip()}
     raw = cp.get("setting", "preserved_tags", fallback="")
     if raw.strip().startswith("@") or '"' in raw:            # (one tag: Qt's binary form; or quoted)
         return {x.lower() for x in _qt_list(raw)}
@@ -158,6 +195,8 @@ TAG_DEFAULTS = {
     "translation_locales": ["en"],
     "translate_from_sortname": False,
     "translate_album_titles": False,
+    "translate_artist_names_script_exception": False,
+    "script_exceptions": [],                       # [(script, percent)]: names in these not translated
     "translate_track_titles": False,
     "release_ars": True,
     "track_ars": False,
@@ -195,7 +234,7 @@ FILE_DEFAULTS = {
 }
 PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
 STANDARDIZE = ("none", "variations", "all")
-_LISTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, list))
+_LISTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, list) and k != "script_exceptions")
 _TAG_BOOLS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, bool))
 _TAG_INTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool))
 
@@ -273,6 +312,16 @@ def _qt_variant(data: str):
                 return qstring()
             if t in (9, 11):                                   # QVariantList, QStringList
                 return [variant() if t == 9 else qstring() for _ in range(u32())]
+            if t == 8:                                         # QVariantMap (Picard's option profiles)
+                out_ = {}
+                for _ in range(u32()):
+                    k_ = qstring()
+                    out_[k_] = variant()
+                return out_
+            if t == 6:                                         # double
+                v = struct.unpack(">d", b[pos:pos + 8])[0]
+                pos += 8
+                return v
             if t == 1:                                         # bool
                 v = b[pos] != 0
                 pos += 1
@@ -367,6 +416,26 @@ def _scripts(raw: str) -> list:
     return out
 
 
+def _script_exceptions(raw) -> list:
+    """Picard's translation script exceptions: [(script, percent)] (a pickled list of pairs)."""
+    vals = []
+    items = _qt_unescape(raw) if isinstance(raw, str) else []
+    for it in items:
+        v = _qt_variant(it[9:-1]) if it.startswith("@Variant(") and it.endswith(")") else None
+        if isinstance(v, list):
+            vals += v if v and isinstance(v[0], (list, tuple)) else [v]
+    if not isinstance(raw, str):
+        vals = list(raw or [])
+    out = []
+    for x in vals:
+        if isinstance(x, (list, tuple)) and len(x) == 2:
+            try:
+                out.append((str(x[0]), int(x[1])))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def tagger_scripts(settings: dict) -> list:
     """The texts of the tagger scripts that run: enabled and not empty, in their order (none
     unless "Enable tagger scripts" is on). A profile may list plain texts."""
@@ -379,6 +448,12 @@ def tagger_scripts(settings: dict) -> list:
         elif isinstance(x, (list, tuple)) and len(x) == 4 and x[2] and x[3]:
             out.append((x[0] if isinstance(x[0], int) else 0, str(x[3])))
     return [t for _p, t in out if t.strip()]
+
+
+def _qt_bool(raw: str) -> bool:
+    """A true/false setting as Qt reads it from an ini file ("true", "1", "yes", "on")."""
+    v = _qt_value(raw)
+    return str(v[0] if isinstance(v, list) and v else v).strip().lower() in ("true", "1", "yes", "on")
 
 
 def _qt_list(raw: str) -> list:
@@ -415,7 +490,9 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                     else "none"
             if cp.has_option("setting", "artist_locales") and not cp.has_option("setting", "translation_locales"):
                 s["translation_locales"] = _qt_list(get("artist_locales")) or s["translation_locales"]
-            if cp.has_option("setting", "standardize_instruments") and \
+            elif cp.has_option("setting", "artist_locale") and not cp.has_option("setting", "translation_locales"):
+                s["translation_locales"] = _qt_list(get("artist_locale")) or s["translation_locales"]  # (Picard 2.5)
+            if cp.has_option("setting", "standardize_instruments") and ver and ver[0] < 3 and \
                     not cp.has_option("setting", "standardize_vocals"):     # (Picard 2: one setting for both)
                 s["standardize_vocals"] = get("standardize_instruments").strip().lower() == "true"
             for k in TAG_DEFAULTS:
@@ -425,11 +502,14 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                 if k == "list_of_scripts":
                     s[k] = _scripts(raw)
                     continue
+                if k == "script_exceptions":
+                    s[k] = _script_exceptions(raw)
+                    continue
                 if k in _TAG_BOOLS:
-                    s[k] = raw.strip().lower() == "true"
+                    s[k] = _qt_bool(raw)
                 elif k in _TAG_INTS:
                     try:
-                        s[k] = int(raw.strip())
+                        s[k] = max(0, min(100, int(str(_qt_value(raw)).strip())))   # (Picard's 0-100)
                     except ValueError:
                         pass
                 elif k in _LISTS:
@@ -439,9 +519,32 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
             for k in FILE_DEFAULTS:
                 if cp.has_option("setting", k):
                     raw = get(k)
-                    s[k] = _qt_value(raw) if k == "id3v23_join_with" else raw.strip().lower() == "true"
+                    s[k] = _qt_value(raw) if k == "id3v23_join_with" else _qt_bool(raw)
                     if k == "id3v23_join_with" and not (isinstance(s[k], str) and s[k]):
                         s[k] = "/"
+        # Picard 3's option profiles: an enabled one that sets an option wins over [setting]
+        for k in list(TAG_DEFAULTS) + list(FILE_DEFAULTS):
+            found, v = _from_profiles(cp, k)
+            if not found:
+                continue
+            want = TAG_DEFAULTS.get(k, FILE_DEFAULTS.get(k))
+            try:
+                if k == "script_exceptions":
+                    s[k] = _script_exceptions(v)
+                elif k == "list_of_scripts":
+                    vv = v if isinstance(v, list) else []
+                    s[k] = [[int(x[0]) if isinstance(x[0], int) else 0, str(x[1]), bool(x[2]), str(x[3])]
+                            for x in vv if isinstance(x, (list, tuple)) and len(x) == 4]
+                elif isinstance(want, bool) or (want is None and k != "id3v23_join_with"):
+                    s[k] = v if isinstance(v, bool) else _qt_bool(str(v))
+                elif isinstance(want, int):
+                    s[k] = int(v)
+                elif isinstance(want, list):
+                    s[k] = [str(x) for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
+                else:
+                    s[k] = str(v)
+            except (TypeError, ValueError):
+                pass
     for k, v in (overrides or {}).items():
         if k in TAG_DEFAULTS or k in FILE_DEFAULTS:
             s[k] = v

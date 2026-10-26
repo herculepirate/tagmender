@@ -628,13 +628,10 @@ class Overview(QWidget):
             mine = {fe["src"] for fe in a.get("files") or []} | {s.get("file") for s in a.get("skipped") or []} \
                 | set(a.get("excluded_files") or [])
             mine.discard(None)
-            try:                                       # other music in the folder or below it?
-                others = any(p.suffix.lower() in ex.AUDIO_EXT and str(p) not in mine and p.is_file()
-                             for p in folder.rglob("*"))
-            except OSError:
-                others = False
-            if others and mine:                        # a loose track, or one album of a mixed folder:
-                for f in sorted(mine):                 # only its own files, never the whole folder
+            # only the album's own files, never its folder: loose tracks have a watched folder or
+            # a library root for theirs, and the rules would be off for all dropped there later
+            if mine:
+                for f in sorted(mine):
                     ex.State().allow(f)
                 what = Path(sorted(mine)[0]).name if len(mine) == 1 else f"{len(mine)} files in {folder.name}"
             else:

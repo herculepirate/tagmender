@@ -915,6 +915,15 @@ def _mp4_int(x, zero=False):
     return n if (0 if zero else 1) <= n < 1 << 15 else None
 
 
+def separate_totals(path) -> bool:
+    """The format keeps a total in a field of its own (Vorbis: TOTALTRACKS), not in its
+    number's ("5/9" in ID3 and APEv2, trkn (5, 9) in MP4)."""
+    try:
+        return family(open_file(path)) == "vorbis"
+    except Exception:
+        return True
+
+
 def _pair(current, changes, num, tot):
     """(number, total) after applying changes over the current values."""
     n = changes[num] if num in changes else current.get(num)
@@ -1041,7 +1050,7 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
             if pair in pairs_done:
                 continue
             pairs_done.add(pair)
-            _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair))
+            _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair), changed=changes)
             continue
         if fam == "id3" and v23 and vals and len(vals) > 1 and k not in ("website",):
             vals = [join.join(vals)]           # (ID3v2.3: several values joined, as Picard joins them)
@@ -1080,7 +1089,7 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
         f.save()
 
 
-def _write_pair(fam, f, tags, pair, n, t):
+def _write_pair(fam, f, tags, pair, n, t, changed=None):
     num, tot = pair
     if fam == "id3":
         fid = {"tracknumber": "TRCK", "discnumber": "TPOS", "movementnumber": "MVIN"}[num]

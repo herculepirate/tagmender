@@ -132,6 +132,10 @@ def snapshot(folder: Path, files=None, deep=True):
                     # rsync -a, file managers) still changes the folder's time as files arrive
                     if deep and (p.is_file() or p.is_dir()):
                         newest = max(newest, _changed_at(p.stat()))
+                    elif not deep and p.suffix.lower() in ex.AUDIO_EXT and p.is_file():
+                        # (loose tracks at a watched root: one still being copied - its tags not
+                        # readable yet, grouped on its own - holds the others back too)
+                        newest = max(newest, _changed_at(p.stat()))
                 except OSError:
                     pass
         except OSError:
@@ -212,6 +216,13 @@ class Watcher:
         if st.ignored_item(folder) and \
                 st.still_ignored(folder, ex.signature(ex.audio_files(folder)), ex.rules_hash(rules)):
             return False, "ignored (unchanged)"
+        if not row and key != planmod.db_text(folder):
+            # (an album undone while it was the folder's only music is remembered by the folder;
+            # music dropped beside it since makes its key the folder and its files)
+            plain = db.execute("SELECT signature, status, attempts, next_try, ts FROM processed WHERE folder=?",
+                               (planmod.db_text(folder),)).fetchone()
+            if plain and plain[1] == "undone" and shape(folder, files) in (plain[0] or "").split("|"):
+                return False, "undone"
         if not row:
             return True, "new"
         signature, status, attempts, next_try, ts = row

@@ -7,7 +7,8 @@ Compared against MusicBrainz Picard 3.0.2 (`picard/options.py`, `picard/mbjson.p
 **Excluded** = deliberately not done. **Plugin** = provided by a Picard plugin TagMender runs.
 Picard's default is given where it matters, because TagMender aims to write what a default
 Picard (plus Discogs Enrichment) would. Picard's own settings are read from Picard.ini (a
-Picard 2 Picard.ini means Picard 2's defaults); a profile's `"picard"` entries override them.
+Picard 2 Picard.ini means Picard 2's defaults; Picard 3's enabled option profiles override its
+settings as in Picard); a profile's `"picard"` entries override them.
 `tests/test_picard_parity.py` checks the MusicBrainz mapping and the file formats against
 output recorded from Picard's own code.
 
@@ -36,7 +37,7 @@ output recorded from Picard's own code.
 | Standardize artist names (none / variations only / variations and name changes) | variations only | Full | Picard's own setting; checked against Picard's code on its test data |
 | Always standardize multi-valued artist tags (ARTISTS) | off | Full | |
 | Sort name from the alias matching the credit | - | Full | |
-| Translate artist names (locales, from sort name) | off | Full | script exceptions are not read (Picard keeps them in a form TagMender cannot read) |
+| Translate artist names (locales, from sort name) | off | Full | with Picard's translation script exceptions (weighted script detection) |
 | Translate album / track titles | off | Full | |
 | Various Artists name (`va_name`) | Various Artists | Full | album artist and track artist |
 | `compilation=1` on Various Artists releases | - | Full | removed from other releases, as Picard does (unless the profile preserves it) |

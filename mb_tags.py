@@ -24,8 +24,8 @@ are Picard's own, read from Picard.ini (picard_config.tag_settings):
   - the track title (not the recording's), sort names, release type and status in lower
     case, release-group first release date as originaldate, label and catalogue number per
     label, the text representation's script, every MusicBrainz ID.
-Picard's hidden variables (~...) are not written. Translation script exceptions (a setting
-Picard keeps in a form TagMender cannot read) are not applied.
+Picard's hidden variables (~...) are not written. Translation script exceptions are applied
+as Picard applies them (its weighted script detection).
 
 Parts are ports of Picard's code (GPL-2.0-or-later), credited where they are.
 """
@@ -134,10 +134,43 @@ def translate_from_sortname(name: str, sortname: str) -> str:
     return name
 
 
+# Picard's weighted script detection (picard/util/script_detector_weighted.py) and its
+# translation exceptions (picard/mbjson.py _should_skip_translation_due_to_scripts)
+SCRIPT_WEIGHTING_FACTORS = {"LATIN": 1.0, "CYRILLIC": 1.02, "GREEK": 0.92, "ARABIC": 1.08, "HEBREW": 0.85,
+                            "CJK": 2.5, "HANGUL": 0.92, "HIRAGANA": 1.77, "KATAKANA": 1.77, "THAI": 1.69}
+
+
+def detect_script_weighted(text: str) -> dict:
+    import unicodedata as ud
+    scripts, total = {}, 0
+    for ch in text:
+        if ch.isalpha():
+            try:
+                sid = ud.name(ch).split(" ")[0]
+            except ValueError:
+                continue
+            w = SCRIPT_WEIGHTING_FACTORS.get(sid, 1)
+            scripts[sid] = scripts.get(sid, 0) + w
+            total += w
+    return {k: v / total for k, v in scripts.items()} if total else {}
+
+
+def skip_translation(text, s) -> bool:
+    """A name or title written in one of the scripts the user keeps (Picard's "translation
+    script exceptions") is not translated."""
+    if not text or not s.get("translate_artist_names_script_exception"):
+        return False
+    found = detect_script_weighted(str(text))
+    for sid, pct in s.get("script_exceptions") or []:
+        if sid in found and found[sid] >= pct / 100:
+            return True
+    return False
+
+
 def _translate_artist(artist: dict, s) -> tuple[str, str]:
     """(name, sort name) of the artist, translated when that is asked for."""
     name, sort = artist.get("name") or "", artist.get("sort-name") or ""
-    if s["translate_artist_names"]:
+    if s["translate_artist_names"] and not skip_translation(name, s):
         alias = _localized_alias(artist.get("aliases"), s["translation_locales"])
         if alias:
             return alias
@@ -388,7 +421,7 @@ def album_tags(rel, settings=None, per_medium=None) -> dict:
     for x in rg.get("secondary-types") or []:
         _add(t, "~secondaryreleasetype", str(x).lower())
     t["album"] = [rel.get("title", "")]
-    if s["translate_album_titles"]:
+    if s["translate_album_titles"] and not skip_translation(rel.get("title"), s):
         alias = _localized_alias(rel.get("aliases"), s["translation_locales"])
         if alias:
             t["album"] = [alias[0]]
@@ -480,8 +513,9 @@ def recording_tags(rec: dict, settings=None, title=None) -> dict:
     if s["translate_track_titles"]:
         alias = _localized_alias(rec.get("aliases"), s["translation_locales"])
         if alias:
-            rtitle = alias[0]
-            title = alias[0] if title else title
+            if not skip_translation(rtitle, s):
+                rtitle = alias[0]
+            title = alias[0] if title and not skip_translation(title, s) else title
     m["title"] = [title or rtitle or ""]
     if rtitle:
         m["~recordingtitle"] = [rtitle]
@@ -610,6 +644,8 @@ def release_tags(rel, settings=None) -> list[dict]:
             for k, v in tt.items():
                 if k in _TRACK_SETS:
                     d[k] = v
+                elif k == "license":                  # (Picard adds the recording's beside the release's,
+                    d.setdefault(k, []).extend(v)     # the same one twice too)
                 else:
                     for x in v:
                         _add(d, k, x)
@@ -627,7 +663,8 @@ def release_tags(rel, settings=None) -> list[dict]:
             if m.get("pregap"):
                 d["~discpregap"] = ["1"]
             if s["use_genres"]:
-                who = [c["artist"] for c in (t_ac or r_ac or []) if isinstance(c, dict) and c.get("artist")] \
+                # (a compilation: the recording's artists, as Picard takes them - not the track's credit)
+                who = [c["artist"] for c in (r_ac or []) if isinstance(c, dict) and c.get("artist")] \
                     if va else list(release_artists.values())
                 g = genres(rec, rel, s, who)
                 if g:

@@ -150,8 +150,8 @@ def checks() -> list[Check]:
                          f", track relationships {'on' if t['track_ars'] else 'off'}"
                          f", ID3v2 {'as each file has it' if t['write_id3v23'] is None else ('v2.3' if t['write_id3v23'] else 'v2.4')}"
                          f", ID3v1 {'updated if there' if t['write_id3v1'] is None else ('written' if t['write_id3v1'] else 'removed')}"
-                         + (f" (from {where}, Picard {ver or '?'})" if where else " (Picard 3's defaults: no Picard.ini)")
-                         + "; a Picard option profile overriding these is not read"))
+                         + (f" (from {where}, Picard {ver or '?'}, with its enabled option profiles)" if where
+                            else " (Picard 3's defaults: no Picard.ini)")))
     except Exception as exc:
         out.append(Check("Picard tagging settings", "warn", f"could not read: {exc}"))
     ini = Path(PICARD_INI).expanduser()

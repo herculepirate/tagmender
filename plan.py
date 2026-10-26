@@ -681,7 +681,9 @@ class Planner:
         # docs/PICARD_COVERAGE.md)
         known = {k for k in list(tags) + list(target) if k == k.lower()}
         for k in [k for k in out if k != k.lower() and k.lower() in known and k not in tags]:
-            out[k.lower()] = out.pop(k)
+            v_ = out.pop(k)
+            if out.get(k.lower()) == tags.get(k.lower()):      # (the script set "title" itself too: that)
+                out[k.lower()] = v_
         tags = {back.get(k, k): v for k, v in tags.items()}
         # ($delete(custom) is not the file's "CUSTOM": left as it is, as Picard leaves it)
         gone = [back.get(g, g) for g in gone if not (g.lower() in spell and g != spell[g.lower()])]
@@ -730,7 +732,7 @@ class Planner:
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
-        self._win_album = str(prop.source_dir)
+        self._win_album = f"{prop.source_dir}#{sorted(map(str, prop.files))}"   # (one of several albums of a folder)
         p = self.profile
         files = [Path(f) for f in prop.files]
         entry = {"source_dir": str(prop.source_dir), "status": "ready", "label": "", "rule": None,
@@ -914,9 +916,16 @@ class Planner:
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             whole = target                # (the file's fields as Picard has them for naming, held or not)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
-            for num_, tot_ in tagio.ID3_PAIRS:          # (a number removed: its total has no place either)
-                if num_ in removals and raw.get(tot_) and num_ not in raw:
-                    raw[num_] = None
+            if not tagio.separate_totals(f):
+                # (a total lives in its number's frame there - "5/9", trkn (5, 9) - which Picard
+                # makes from the track's fields: a number removed or unset takes no total; a
+                # total unset leaves the number alone in it)
+                unset_ = self.__dict__.get("_unset", {}).get(str(f), set())
+                for num_, tot_ in tagio.ID3_PAIRS:
+                    if (num_ in removals or num_ in unset_) and num_ not in raw:
+                        raw.pop(tot_, None)
+                    elif tot_ in unset_ and tot_ not in raw and tot_ not in removals and before.get(tot_):
+                        removals.append(tot_)
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
             if raw.get("comment") and not target.get("comment") and before.get("comment") and \
@@ -1091,7 +1100,7 @@ class Planner:
             # by its own path's length: discs with names of different lengths): planned again
             # with the most shortened folders for all of them - one album, one folder
             forced = self.__dict__.setdefault("_win_dirs", {})
-            key = str(prop.source_dir)
+            key = self._win_album
             norm = {}                       # (each folder's shortened parent: the one chosen for it)
             for k_ in sorted(win_split, key=len):
                 v_ = tuple(win_split[k_])
@@ -1255,7 +1264,8 @@ class Planner:
         file, the artist folder's artist.jpg (another album of the artist writes it then)."""
         me = f"artwork:{prop.source_dir}:{sorted(_release_ids(prop))}:{sorted(map(str, prop.files))}"
         mine = {str(x) for x in prop.files} | {fe["src"] for fe in entry["files"]} | {me}
-        photos = {fnm.fold(sc["dst"]) for sc in entry.get("sidecars") or [] if sc.get("kind") == "artist"}
+        photos = {fnm.fold(sc["dst"]) for sc in entry.get("sidecars") or [] if sc.get("kind") == "artist"} | \
+            {fnm.fold(c["src"]) for c in entry.get("companions") or [] if (c.get("rewrite") or {}).get("artist")}
         for k in [k for k, v in self.claimed.items() if v in mine or (k in photos and v == "artist-photo")]:
             del self.claimed[k]
         claims = self.__dict__.get("artist_dirs") or {}

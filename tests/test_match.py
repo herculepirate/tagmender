@@ -1297,6 +1297,23 @@ class PressingEvidence(unittest.TestCase):
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
         self.assertFalse(r["best"].get("own_catno_absent"))
 
+    def test_folder_number_without_the_formats_discogs_writes_after_it(self):
+        """Kreator - Enemy Of God Revisited (Steamhammer, SPV 69848 CD+DVD, Germany): Discogs
+        lists the German pressing as "SPV 69848 CD+DVD", the folder's number reads SPV 69848;
+        they were not seen as the same, so no release fit the folder and it went to review."""
+        n = mc.norm_code
+        self.assertTrue(mc.catnos_agree({n("SPV 69848")}, {n("SPV 69848 CD+DVD")}))
+        self.assertTrue(mc.catno_same(n("SPV 69848 CD+DVD"), n("SPV 69848")))
+        self.assertFalse(mc.catno_same(n("SPV 69848"), n("SPV 6984L CD+DVD")))
+        self.assertFalse(mc.catno_same(n("SPV 69848"), n("SPV 69849 CD")))
+        code = {n("SPV 69848")}
+        a = album(title="Enemy Of God Revisited", folder="2006 - Enemy Of God Revisited (Steamhammer, SPV 69848 CD+DVD, Germany)",
+                  catnos=code, catnos_from_folder=code)
+        r = self.pick(a, cand(id="ar", country="Argentina", title="Enemy Of God Revisited", catnos={n("ICARUS 320")}),
+                      cand(id="us", country="US", title="Enemy Of God Revisited", catnos={n("SPV 6984L CD+DVD")}),
+                      cand(id="de", country="Germany", title="Enemy Of God Revisited", catnos={n("SPV 69848 CD+DVD")}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "de"), r["why"])
+
     def test_the_folders_edition_year_rules_out_other_pressings_in_a_tie(self):
         """Sepultura - 2006 - Dante XXI [2021 RM]: disc 4 of BMG's 2021 box (CD and vinyl
         boxes score the same). Your country order picked the 2006 US CD, which scored lower

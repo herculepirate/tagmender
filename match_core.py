@@ -480,8 +480,8 @@ def catno_same(a, b):
     if digits >= 2 and long_.endswith(short) and re.fullmatch(r"[a-z]{1,5}" + fmt + "?", long_[:-len(short)]):
         return True                                  # the label's letters in front
     if (len(short) >= 3 and re.search(r"[a-z]", short) and digits
-            and long_.startswith(short) and re.fullmatch(fmt + r"|[1-9]", long_[len(short):])):
-        return True                                  # a format word or disc digit after
+            and long_.startswith(short) and re.fullmatch(fmt + r"(?:\+" + fmt + r")*|[1-9]", long_[len(short):])):
+        return True                                  # format words ("cd+dvd") or a disc digit after
     if long_.endswith(short) and len(short) >= 3 and re.search(r"[a-z]", short) and digits \
             and re.fullmatch(fmt, long_[:-len(short)]):
         return True

@@ -150,6 +150,7 @@ class CoverUp:
         from coverup.pipeline import Pipeline
         cb = self.cb
         s = self.s
+        self._last = None                 # (a search that fails half way is never reused)
         if files is None:                 # (no file list: the folder's own music and its disc folders')
             files = _own_music(Path(folder))
         shared = _other_music(Path(folder), files)
@@ -173,7 +174,7 @@ class CoverUp:
         pipe = Pipeline(s, self.http, fingerprint=imaging.fingerprint)
         query = cb.make_query(info)
         res = pipe.run(query)
-        self._last = (str(folder), pipe, res, query, info, s)
+        self._last = (str(folder), pipe, res, query, info, s, (artist, ids.get("artist_mbid", "")))
         gen_local = [c for c in res.candidates if c.provider == "local" and cb.R.is_generated(c.data)]
         if gen_local:                     # a cover CoverUp generated earlier never blocks a real one
             res.candidates = [c for c in res.candidates if c not in gen_local]
@@ -218,6 +219,16 @@ class CoverUp:
         path, w, h = self._file_size(path, w, h, q)
         return {"front": str(path), "source": f"coverup:{c.provider}", "width": w, "height": h, "why": front["why"]}
 
+    def _reusable(self, folder, artist, ids):
+        """The front search just made for this very album (same folder, same artist) with an
+        artist photo in it - never one made for another album of the folder, or another artist's."""
+        from coverup.model import ArtType
+        last = getattr(self, "_last", None)
+        if last and last[0] == str(folder) and len(last) > 6 and last[6] == (artist, ids.get("artist_mbid", "")) \
+                and last[2] is not None and last[2].artist.get(ArtType.ARTIST_THUMB):
+            return last
+        return None
+
     def artist_photo(self, folder, ids: dict, artist="", files=None) -> dict | None:
         """The album artist's photo (CoverUp's artist sources: fanart.tv, TheAudioDB, Wikimedia
         Commons, Discogs), staged as a JPEG: {"image", "width", "height", "source"}, or a note.
@@ -226,8 +237,8 @@ class CoverUp:
         from coverup.model import ArtType
         from coverup.pipeline import Pipeline
         cb = self.cb
-        last = getattr(self, "_last", None)
-        if last and last[0] == str(folder) and last[2] is not None and last[2].artist.get(ArtType.ARTIST_THUMB):
+        last = self._reusable(folder, artist, ids)
+        if last is not None:
             pipe, res = last[1], last[2]
         else:
             import match_albums as ma
@@ -525,11 +536,106 @@ def has_artist_picture(path) -> bool:
     return any(t in (7, 8) for t, _d in _pictures(path))       # lead artist, artist/performer
 
 
-def artist_folder_has_photo(folder) -> bool:
+def has_front(path) -> bool:
+    """The track has a front cover (typed so, or untyped): a back cover or an artist photo
+    alone is not one."""
+    return _pick_front(_pictures(path)) is not None
+
+
+ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album folders) both are its photo
+
+
+def artist_folder_photo(folder) -> Path | None:
+    """The artist folder's own photo (artist.jpg, or folder.jpg - Kodi, Jellyfin), if any."""
     try:
-        return any(x.is_file() and x.stem.lower() == "artist" for x in Path(folder).iterdir())
+        for stem in ARTIST_STEMS:
+            for x in sorted(Path(folder).iterdir()):
+                if x.is_file() and not x.is_symlink() and x.stem.lower() == stem and \
+                        x.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    return x
     except OSError:
+        return None
+    return None
+
+
+def artist_folder_has_photo(folder) -> bool:
+    return artist_folder_photo(folder) is not None
+
+
+def artist_dir_for(album_folder, artist: str, roots, compat="windows") -> Path | None:
+    """Where the album artist's photo goes: the album folder's parent, when it lies strictly
+    inside one of roots (never a root itself) and is named after the album artist ("The
+    Beatles" or "Beatles, The"); else None."""
+    from engine import is_disc_dir
+    import filenames as fnm
+    album = Path(album_folder)
+    if is_disc_dir(album):
+        album = album.parent
+    d = album.parent
+    rs = [Path(os.path.realpath(os.path.expanduser(str(r)))) for r in roots]
+    real = Path(os.path.realpath(str(d)))
+    if not any(r in real.parents for r in rs) or real in rs:
+        return None
+    names = {artist}
+    if artist.lower().startswith("the "):
+        names.add(f"{artist[4:]}, {artist[:3]}")
+    if fnm.fold(d.name) not in {fnm.fold(fnm.safe_component(n, compat)) for n in names}:
+        return None
+    return d
+
+
+def is_collaboration(artist_mbids: str, folder_name: str) -> bool:
+    """Several album artists ("A & B"): no one artist's photo stands for them."""
+    if len([x for x in str(artist_mbids or "").split(";") if x.strip()]) > 1:
+        return True
+    try:
+        import coverup_batch as cb
+        import match_core as mc
+        return bool(cb.is_collaboration(artist_mbids, folder_name, mc))
+    except Exception:
         return False
+
+
+def _photo_cache_dir() -> Path:
+    return ex.STATE_DIR / "artist_photos"
+
+
+def cached_artist_photo(key: str):
+    """(True, {"image": ...}) or (True, None) for "none found, asked lately"; (False, None):
+    never asked. Kept across runs, so an artist is looked up once, not once per album and run;
+    "none found" is asked again after 30 days."""
+    import time as _time
+    h = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:20]
+    d = _photo_cache_dir()
+    img, none = d / f"{h}.jpg", d / f"{h}.none"
+    if img.exists():
+        try:
+            with __import__("PIL.Image", fromlist=["Image"]).open(img) as im:
+                w, h2 = im.size
+        except Exception:
+            return False, None
+        src = (d / f"{h}.src").read_text().strip() if (d / f"{h}.src").exists() else "artist photo"
+        return True, {"image": str(img), "width": w, "height": h2, "source": src}
+    if none.exists() and _time.time() - none.stat().st_mtime < 30 * 86400:
+        return True, None
+    return False, None
+
+
+def remember_artist_photo(key: str, got):
+    h = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:20]
+    d = _photo_cache_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        if got and got.get("image"):
+            tmp = d / f".{h}.tmp"
+            tmp.write_bytes(Path(got["image"]).read_bytes())
+            os.replace(tmp, d / f"{h}.jpg")
+            (d / f"{h}.src").write_text(got.get("source", ""))
+            return dict(got, image=str(d / f"{h}.jpg"))
+        (d / f"{h}.none").touch()
+    except OSError:
+        pass
+    return got
 
 
 def needs_art(folder, files, profile, small=None, stays=True) -> str:
@@ -553,11 +659,8 @@ def needs_art(folder, files, profile, small=None, stays=True) -> str:
         for f in files:
             if Path(f).suffix.lower() not in EMBEDDABLE:
                 continue                          # (WavPack, APE, DSF ...: a cover is never embedded there)
-            try:
-                if not tagio.read(f).get("~pictures"):
-                    return f"{Path(f).name} has no cover"
-            except Exception:
-                return f"{Path(f).name} could not be read"
+            if not has_front(f):                  # (an artist photo or a back cover alone is no cover)
+                return f"{Path(f).name} has no cover"
     # a shared folder never gets a cover file - while the album stays there; moved or copied
     # into a folder of its own, it gets one
     if art.get("files", True) and not (small.get("shared") and stays):

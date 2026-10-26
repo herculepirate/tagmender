@@ -672,8 +672,8 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
         new = base64.b64encode(pic.write()).decode("ascii")
-        old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or []) if replace else []
-        if old:
+        old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or [])      # (the other pictures always stay)
+        if old and replace:
             types = []
             for v in old:
                 try:
@@ -1280,7 +1280,10 @@ class Executor:
             raise
         _place_staged(stage, dst)
         st = os.stat(dst)
-        self.journal.write(ev="new_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns)
+        # (kind "artist": the artist folder's photo, shared by every album there - one changed
+        # later never keeps an album from going back)
+        self.journal.write(ev="new_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns,
+                           **({"kind": sc["kind"]} if sc.get("kind") else {}))
         done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
 
     def cleanup_dirs(self, i, a):
@@ -2065,7 +2068,7 @@ def _undo(job, jd, journal, events, force):
             problems.append(f"{cdst} was changed after the job (tagmender undo --force {job} puts the "
                             f"album back anyway, with the file as the job found it)")
     for e in events:
-        if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled and \
+        if e.get("ev") in ("cover_file", "new_file") and e["album"] not in rolled and e.get("kind") != "artist" and \
                 ("created", e["path"]) not in already and Path(e["path"]).exists() and \
                 (os.stat(e["path"]).st_size, os.stat(e["path"]).st_mtime_ns) != (e["size"], e["mtime_ns"]) and \
                 any(f.get("op") in ("move", "relink_move") for (x, _j), f in files.items() if x == e["album"]):

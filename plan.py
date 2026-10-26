@@ -400,6 +400,10 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 q = q.parent
     by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
     ours = {s_.parent for s_ in moved}
+    # a source folder holding another album's music (an artist folder with a loose single and
+    # the artist's albums): its own pictures are no one album's - the artist photo stays
+    import artwork as _artwork
+    src_shared = bool(foreign) and _artwork._other_music(src_dir, list(moved))
 
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus
@@ -410,7 +414,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             if q in ours and q != src_dir:
                 return True
             if q == src_dir:
-                return src_dir in ours
+                return src_dir in ours and not src_shared
             q = q.parent
     out = []
     for d, here in tree:
@@ -790,9 +794,10 @@ class Planner:
         if art and art.get("front") and Path(art["front"]).exists():
             rep = art.get("replace") or {}
             smaller = set(rep.get("embedded") or [])      # tracks whose own cover is too small
+            import artwork as _artwork
             embed = [fe["dst"] for fe in entry["files"]
                      if p["artwork"]["embed_front"] and Path(fe["src"]).suffix.lower() in EMBEDDABLE
-                     and (fe["src"] in smaller or not tagio.read(fe["src"]).get("~pictures"))]
+                     and (fe["src"] in smaller or not _artwork.has_front(fe["src"]))]
             embed_replace = [fe["dst"] for fe in entry["files"] if fe["dst"] in embed and fe["src"] in smaller]
             # the album's own folder: for a disc set in "Disc 01", "Disc 02" ... that is the folder
             # holding the disc folders, not the first disc's
@@ -883,9 +888,13 @@ class Planner:
             return None
         into = []
         if want["embed"]:
+            fronts = set((entry.get("artwork") or {}).get("embed_into") or [])
+            # beside a front cover only (one the track has, or gets now): an artist photo is never
+            # a track's only picture - players would show it as the cover
             into = [fe["dst"] for fe in entry["files"] if Path(fe["src"]).suffix.lower() in EMBEDDABLE
                     and Path(fe["src"]).suffix.lower() not in (".m4a", ".mp4")
-                    and not _artwork.has_artist_picture(fe["src"])]
+                    and not _artwork.has_artist_picture(fe["src"])
+                    and (fe["dst"] in fronts or _artwork.has_front(fe["src"]))]
             for fe in entry["files"]:
                 if fe["dst"] in into and fe["op"] == "none":       # only the artist photo is new
                     fe["op"] = "tag" if fe["dst"] == fe["src"] else op
@@ -895,17 +904,12 @@ class Planner:
         except Exception:
             emb, into = None, []
         if want["file"]:
-            from engine import is_disc_dir
             album = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
-            if is_disc_dir(album):
-                album = album.parent
-            artist_dir = album.parent
-            roots = [Path(r) for r in self.roots()]
-            named = {fnm.fold(fnm.safe_component(ap.get("artist", ""), self.profile["filenames"]["compat"]))}
-            target = artist_dir / want["file"]
-            key = fnm.fold(target)
-            if any(r in artist_dir.parents for r in roots) and artist_dir not in roots and \
-                    fnm.fold(artist_dir.name) in named and not _artwork.artist_folder_has_photo(artist_dir) and \
+            artist_dir = _artwork.artist_dir_for(album, ap.get("artist", ""), self.roots(),
+                                                 self.profile["filenames"]["compat"])
+            target = artist_dir / want["file"] if artist_dir is not None else None
+            key = fnm.fold(target) if target is not None else None
+            if target is not None and not _artwork.artist_folder_has_photo(artist_dir) and \
                     self.claimed.get(key) is None and \
                     not any(sc["dst"] == str(target) for sc in entry["sidecars"]):
                 self.claimed[key] = "artist-photo"

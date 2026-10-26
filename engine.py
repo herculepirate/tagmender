@@ -510,42 +510,66 @@ class Engine:
 
     def _add_artist_photo(self, prop: planmod.Proposal):
         import artwork
+        from plan import EMBEDDABLE
         want = artwork.artist_settings(self.profile)
         if want is None or prop.status != "identified" or not prop.targets:
             return
         t = prop.targets[0]
         who = (t.get("albumartist") or t.get("artist") or [""])[0]
+        mbids = "; ".join(t.get("musicbrainz_albumartistid") or [])
         if not who or who.casefold() in ("various artists", "various", "va") or \
-                (t.get("compilation") or [""])[0] == "1":
-            return                                        # (a compilation has no one artist's photo)
-        mbid = (t.get("musicbrainz_albumartistid") or [""])[0]
-        # looked up only while something lacks it: a track without an artist picture (when
-        # embedding), or - tagged where it is - the artist folder without its photo
-        lacking = want["embed"] and any(Path(f).suffix.lower() not in (".m4a", ".mp4") and
-                                        not artwork.has_artist_picture(f) for f in prop.files)
-        if not lacking and want["file"] and self.profile["operation"] == "in_place":
-            album = Path(prop.source_dir)
-            if is_disc_dir(album):
-                album = album.parent
-            lacking = not artwork.artist_folder_has_photo(album.parent)
+                (t.get("compilation") or [""])[0] == "1" or artwork.is_collaboration(mbids, who):
+            return                        # (a compilation, or "A & B": no one artist's photo stands for it)
+        folder, files, _ours = self._art_view(prop)
+        op = self.profile["operation"]
+        # looked up only while something lacks it: a track (one TagMender can embed into) without
+        # an artist picture, or - where the album stays - an artist folder that can take a photo
+        lacking = want["embed"] and any(Path(f).suffix.lower() in EMBEDDABLE and
+                                        Path(f).suffix.lower() not in (".m4a", ".mp4") and
+                                        not artwork.has_artist_picture(f) for f in files)
+        artist_dir = None
+        stays = op == "in_place" or str(folder) != str(prop.source_dir)
+        if want["file"] and stays:
+            roots = [s_["path"] for s_ in self.profile["sources"]] + \
+                ([self.profile["destination"]] if self.profile["destination"] else [])
+            artist_dir = artwork.artist_dir_for(folder, who, roots, self.profile["filenames"]["compat"])
+            if artist_dir is not None and not artwork.artist_folder_has_photo(artist_dir):
+                lacking = True
+        elif want["file"]:
+            lacking = True                # (moved or copied: where it lands is the plan's; cached below)
         if not lacking:
             return
+        # the artist folder's own photo (artist.jpg, folder.jpg) is the artist's photo: no download
+        if artist_dir is not None and artwork.artist_folder_has_photo(artist_dir):
+            mine = artwork.artist_folder_photo(artist_dir)
+            try:
+                path, w, h = artwork._stage(mine.read_bytes(), ex.STATE_DIR / "staging" / self.job)
+                prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who,
+                                     "source": f"the artist folder's {mine.name}"}
+            except Exception:
+                pass
+            return
+        mbid = mbids.split(";")[0].strip()
         key = mbid or who.casefold()
         cache = self.__dict__.setdefault("_artists", {})
         if key not in cache:
-            cu = next((p for p in (self._art or []) if isinstance(p, artwork.CoverUp)), None)
-            if cu is None:
-                cu = self.__dict__.get("_artist_cu")
+            # (kept across runs only by MusicBrainz ID: two artists may share a name)
+            known, got = artwork.cached_artist_photo(mbid) if mbid else (False, None)
+            if not known:
+                cu = next((p for p in (self._art or []) if isinstance(p, artwork.CoverUp)), None)
                 if cu is None:
-                    cu = artwork.CoverUp(ex.STATE_DIR / "staging" / self.job)
-                    self._artist_cu = cu
-            ids = {"release_mbid": (t.get("musicbrainz_albumid") or [""])[0],
-                   "artist_mbid": "; ".join(t.get("musicbrainz_albumartistid") or []),
-                   "discogs_release_id": (t.get("discogs_release_id") or [""])[0]}
-            got = cu.artist_photo(prop.source_dir, ids, who, files=prop.files)
+                    cu = self.__dict__.get("_artist_cu")
+                    if cu is None:
+                        cu = artwork.CoverUp(ex.STATE_DIR / "staging" / self.job)
+                        self._artist_cu = cu
+                ids = {"release_mbid": (t.get("musicbrainz_albumid") or [""])[0], "artist_mbid": mbids,
+                       "discogs_release_id": (t.get("discogs_release_id") or [""])[0]}
+                got = cu.artist_photo(prop.source_dir, ids, who, files=prop.files)
+                if got and got.get("note"):
+                    prop.why = list(prop.why) + [f"no artist photo: {got['note']}"]
+                if mbid:
+                    got = artwork.remember_artist_photo(mbid, got if got and got.get("image") else None)
             cache[key] = got if got and got.get("image") else None
-            if got and got.get("note"):
-                prop.why = list(prop.why) + [f"no artist photo: {got['note']}"]
         if cache[key]:
             prop.artist_photo = dict(cache[key], artist=who)
 

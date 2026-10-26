@@ -17,7 +17,7 @@ import artwork  # noqa: E402
 import executor  # noqa: E402
 import plan as pl  # noqa: E402
 import tagio  # noqa: E402
-from test_cover_replace import Engine, MBID, _no_network, jpeg, size  # noqa: E402
+from test_cover_replace import Engine, MBID, _no_network, give, jpeg, size  # noqa: E402
 from test_executor import Base, audio, target  # noqa: E402
 
 ARTIST_MBID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -49,6 +49,8 @@ class ArtistPhoto(Base):
                   mock.patch.object(artwork, "CoverUp", FakeCoverUp)):
             p.start()
             self.addCleanup(p.stop)
+        for f in (self.f1, self.f2):                       # (an artist photo goes beside a front cover)
+            give(f, jpeg(600, 600))
 
     def prof(self, level="enthusiast", **art):
         a = {"enabled": True, "embed_front": True, "files": True, "sources": ["caa"]}
@@ -83,7 +85,7 @@ class ArtistPhoto(Base):
         executor.undo(p["job"])
         self.assertFalse(photo.exists())
         for f in (self.f1, self.f2):
-            self.assertNotIn(8, [t for t, _s in pictures(f)])
+            self.assertEqual([t for t, _s in pictures(f)], [3])
 
     def test_basic_level_gets_none(self):
         prof = self.prof(level="basic")
@@ -146,6 +148,15 @@ class ArtistPhoto(Base):
         self.assertEqual(res["counts"], {"done": 1}, res)
         photos = list(self.dest.rglob("artist.jpg"))
         self.assertEqual([x.parent.name for x in photos], ["Some Artist"], list(self.dest.rglob("*")))
+
+    def test_never_a_tracks_only_picture(self):
+        from mutagen.flac import FLAC
+        for f in (self.f1, self.f2):
+            t = FLAC(f)
+            t.clear_pictures()
+            t.save()
+        self.run_one(self.prof(), self.prop())               # (no front found: none in the tracks)
+        self.assertEqual(pictures(self.f1), [])
 
     def test_mp3_artist_picture_beside_the_cover(self):
         f = audio(self.album / "03 c.mp3", 660, album="Some Album", title="c", artist="Some Artist")

@@ -9,6 +9,13 @@ picture beside the cover (at most 800 px: it is in every track). From CoverUp's 
 track or the artist folder lacks it; never over an artist.jpg that is there, never into a folder
 not named after the album artist or a library root, never for a compilation; undo removes it.
 Profile: artwork.artist {"enabled", "file", "embed"}; in the app, "Artist photo" under the covers.
+Reviewed (tests/test_review8_artist.py): never another artist's photo (a front search is reused
+only for its own album and artist); none for a collaboration ("A & B"); only beside a front
+cover, never a track's only picture; an artist folder's folder.jpg or artist.jpg is the artist's
+photo (used, never doubled; "Beatles, The" is The Beatles); looked up once per artist across runs
+(30 days for "none found"), never again for formats or folders that cannot take it, or for a
+copy profile's copies; a loose single moved out of an artist folder leaves its pictures there;
+undo is never held back by an artist.jpg a media server replaced.
 
 **Small covers are replaced** (artwork.replace "larger_only", the default; "Replace an album's
 own cover when it is smaller than the minimum size" in the app). A cover smaller than

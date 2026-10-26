@@ -80,6 +80,16 @@ it as artist.jpg in the artist folder"; `artwork.artist.file: "artist.jpg"`). Yo
 artist.jpg is used as before. Saving a profile in the desktop app keeps the photo's own file
 name (artist.jpeg, folder.jpg ...).
 
+**A first run on a real library (twenty-second and twenty-third reviews).** A playlist or cue
+sheet in Latin-1 naming tracks whose names are Latin-1 bytes is updated when they are renamed;
+in a folder shared with other music (Singles) each moving track takes its own .lrc along; an
+undo cut short just after it put back a rewritten cover or cue sheet finishes when run again;
+a track that is a symbolic link is never moved or written through (the plan says so; a copy
+profile copies it); after `tagmender recover`, applying the same plan again runs it as a new
+job, as recover says. Turning "Also save it as artist.jpg" on after a run without it saves
+your own artist photo there (for a moved album, the one in the folder it came from), not a
+download.
+
 **Tagger scripts and naming, closer to Picard (twenty-third review).** In M4A files numbers
 are written as Picard writes them (a script's "01" is track 1; a track number that is not a
 number, as a vinyl side "A1", is left as the file has it) - such a script no longer fails the

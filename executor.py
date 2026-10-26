@@ -876,6 +876,14 @@ def _put_back(data_from: Path, path: Path, owner_of=None):
 # --------------------------------------------------------------------------
 # executing
 # --------------------------------------------------------------------------
+def _recovered_whole(events) -> bool:
+    """A job's journal says it was cut short and recover put every album it began back as it
+    was: no album of it done."""
+    began = {e["album"] for e in events if e.get("ev") == "album_begin"}
+    back = {e["album"] for e in events if e.get("ev") == "album_rolled_back" and e.get("recovered")}
+    return bool(back) and began <= back and not any(e.get("ev") == "album_done" for e in events)
+
+
 class Executor:
     def __init__(self, plan: dict, log=None, cancel=None, progress=None):
         self.plan = plan
@@ -902,7 +910,16 @@ class Executor:
             busy = busy_jobs(but=self.job)
             raise StepError(f"job {busy[0]} is running in another TagMender process; try again when it ends"
                             if busy else f"job {others[0]} was interrupted; run `tagmender recover` first")
-        if self.journal.read():
+        evs = self.journal.read()
+        if evs and _recovered_whole(evs) and self.job not in pending_jobs():
+            # a job cut short whose albums recover put back, none done: the plan runs again, as
+            # recover says, as a new job (its journal and undo its own)
+            self.job = time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
+            self.plan = dict(self.plan, job=self.job)
+            self.jd = job_dir(self.job)
+            self.journal = Journal(self.jd)
+            evs = self.journal.read()
+        if evs:
             raise StepError(f"job {self.job} has already run (use a new plan, or `tagmender undo {self.job}`)")
         planmod.save(self.plan, self.jd / "plan.json")
         # folders under /mnt or /media that are no mounted share now (a plain folder there):
@@ -2144,6 +2161,11 @@ def _undo(job, jd, journal, events, force):
         if c.get("artist"):
             continue                   # (the artist folder's artist.jpg never holds an album back)
         if cdst.exists() and (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
+            try:                       # (an undo cut short had put the file as it was back already)
+                if payload.file_sha256(cdst) == payload.file_sha256(Path(c["saved"])):
+                    continue
+            except OSError:
+                pass
             staying.add(a)
             problems.append(f"{cdst} was changed after the job (tagmender undo --force {job} puts the "
                             f"album back anyway, with the file as the job found it)")

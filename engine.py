@@ -655,6 +655,16 @@ class Engine:
         photo = artwork.artist_folder_photo(home) if home is not None else None
         if photo is None and home is not None and artwork.artist_folder_has_photo(home, mine):
             return                        # (a folder.jpg of Jellyfin's or Kodi's: the artist has an image)
+        mbid1 = mbids.split(";")[0].strip()
+        if photo is not None and not artwork.written_by_us(photo):
+            artwork.remember_own_photo(mbid1, photo)
+        # artist.jpg asked for where the album now is, and none there: the copies' artist folder
+        # (the source's own photo goes there), or a moved album's (the user's own photo, from
+        # the folder it was moved away from - not a download)
+        needs_file = bool(want["file"]) and artist_dir is not None and \
+            artwork.artist_folder_photo(artist_dir) is None and not artwork.artist_folder_has_photo(artist_dir, mine)
+        if photo is None and needs_file:
+            photo = artwork.own_photo_for(mbid1)
         if photo is not None:
             # the artist folder's own photo (the user's, or one corrected by hand) is the artist's
             # photo: no download; the tracks' picture follows it (TagMender's own, from an older
@@ -665,7 +675,7 @@ class Engine:
             except Exception:
                 return
             stale = want["embed"] and any(m != ident for f in files for m in artwork.our_artist_marks(f))
-            if lacking or stale or not stays:
+            if lacking or stale or not stays or needs_file:
                 prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who,
                                      "artist_sort": names[1:], "own": not artwork.written_by_us(photo),
                                      "source": f"the artist folder's {photo.name}"}

@@ -763,6 +763,49 @@ def remember_written(path, sha256: str):
         pass
 
 
+def remember_own_photo(mbid: str, path):
+    """Where the user's own photo of an artist (by MusicBrainz artist ID) is: a later run that
+    saves artist.jpg for an album moved away from that folder saves that photo, not a download."""
+    if not mbid:
+        return
+    d = _photo_cache_dir()
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / "own.json"
+        try:
+            rec = json.loads(f.read_text())
+        except (OSError, ValueError):
+            rec = {}
+        if rec.get(mbid) == str(path):
+            return
+        rec[mbid] = str(path)
+        tmp = d / f".own.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(rec))
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
+def own_photo_for(mbid: str) -> Path | None:
+    """The user's own photo of the artist remembered by remember_own_photo, if it is still
+    there and still the photo of its artist folder (never one TagMender wrote)."""
+    if not mbid:
+        return None
+    try:
+        path = json.loads((_photo_cache_dir() / "own.json").read_text()).get(mbid)
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not path:
+        return None
+    p = Path(path)
+    try:
+        if p.is_file() and artist_folder_photo(p.parent) == p and not written_by_us(p):
+            return p
+    except OSError:
+        pass
+    return None
+
+
 def holds_other_albums(folder) -> bool:
     """A folder below folder (not one of its disc folders) holds music: folder is an artist
     folder holding albums."""

@@ -988,6 +988,14 @@ class Planner:
                         if op == "copy" and not changes:
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
+        # a track that is a symbolic link (a library of links into a download folder): moving
+        # it leaves a copy where the link was, and TagMender never writes through a link
+        for fe in entry["files"]:
+            s_ = Path(fe.get("copy_of") or fe["src"])
+            if s_.is_symlink() and (fe["op"] == "move" or (fe["op"] == "tag" and fe["src"] == str(s_))):
+                entry["conflicts"].append(f"{s_.name} is a symbolic link (to {os.readlink(s_)}): TagMender "
+                                          "does not move or write through links - replace it with the file, "
+                                          "or use a copy profile")
         if entry["conflicts"]:
             entry["status"] = "blocked"
             return entry

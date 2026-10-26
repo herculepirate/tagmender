@@ -768,9 +768,6 @@ class Planner:
         for f in kept:
             try:
                 before = tagio.read(f)
-                if tagio.fragmented(f):
-                    raise tagio.Unsupported("a fragmented MP4: TagMender does not write to it (mutagen cannot "
-                                            "keep its fragments' offsets; its audio would no longer play)")
             except tagio.Unsupported as exc:
                 entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "unsupported_format",
                                          "matched": str(exc)})
@@ -818,15 +815,23 @@ class Planner:
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
             changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
+            as_is = tagio.fragmented(f)
+            named = changes               # (named as its album's other files are, whatever it holds)
+            if as_is:                     # (moved or copied with its album as it is, never written to)
+                changes, rows = {}, []
+                entry["notes"].append(f"{f.name}: a fragmented MP4 - never written to (its audio would no longer "
+                                      "play); it goes with its album as it is")
             fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
                   "diff": rows, "fingerprint": _fp(f)}
+            if as_is:
+                fe["as_is"] = True
             if changes and fmt:
                 fe["format"] = fmt
             # the file's tags after the write, as values (not as an ID3v2.3 tag joins them: a
             # field the file already holds as the target says is named "A & B", not "A_B")
             merged = {k: (raw[k] if k in raw and _vals(target.get(k)) == _vals(v) else v) for k, v in before.items()}
-            merged.update({k: (raw.get(k) or v) for k, v in changes.items() if v is not None})
-            for k, v in changes.items():
+            merged.update({k: (raw.get(k) or v) for k, v in named.items() if v is not None})
+            for k, v in named.items():
                 if v is None:
                     merged.pop(k, None)
             if changes and f.suffix.lower() == ".wav":
@@ -897,6 +902,8 @@ class Planner:
                     fmt2 = tagio.file_options(dst, self._file_settings())    # (as the copy holds them)
                     changes2, rows2 = diff_tags(have, tagio.stored(dst, raw, fmt2), p,
                                                 conf if identified else 100.0, removals)
+                    if fe.get("as_is") or tagio.fragmented(dst):
+                        changes2, rows2 = {}, []
                     fe.pop("format", None)
                     if changes2 and fmt2:
                         fe["format"] = fmt2
@@ -976,7 +983,7 @@ class Planner:
             import artwork as _artwork
             embed = [fe["dst"] for fe in entry["files"]
                      if p["artwork"]["embed_front"] and Path(fe["src"]).suffix.lower() in EMBEDDABLE
-                     and (fe["src"] in smaller or not _artwork.has_front(fe["src"]))]
+                     and not fe.get("as_is") and (fe["src"] in smaller or not _artwork.has_front(fe["src"]))]
             embed_replace = [fe["dst"] for fe in entry["files"] if fe["dst"] in embed and fe["src"] in smaller]
             # the album's own folder: for a disc set in "Disc 01", "Disc 02" ... that is the folder
             # holding the disc folders, not the first disc's
@@ -1136,7 +1143,7 @@ class Planner:
             fronts = set((entry.get("artwork") or {}).get("embed_into") or [])
             for fe in entry["files"]:
                 ext_ = Path(fe["src"]).suffix.lower()
-                if ext_ not in EMBEDDABLE or ext_ in (".m4a", ".mp4"):
+                if ext_ not in EMBEDDABLE or ext_ in (".m4a", ".mp4") or fe.get("as_is"):
                     continue
                 # beside a front cover only (one the track has, or gets now): an artist photo is
                 # never a track's only picture - players would show it as the cover

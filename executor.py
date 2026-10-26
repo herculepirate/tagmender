@@ -1624,7 +1624,11 @@ def _same_backup(dst: Path, backup) -> bool:
         old = backup["rec"] or {}
         # (a job of an earlier TagMender: its record, as that version made it)
         kind = old.get("v") or (1 if ("trailer" in old or "flac_ends" in old) else 0)
-        now = ta.backup_tags(dst, d, kind=kind)
+        told = old.get("tags") or {}
+        newer3 = kind == 3 and ("flac_raw" in old or "mp4" in told)   # (c8c7cd6's "v": 3: today's shapes)
+        now = ta.backup_tags(dst, d, kind=ta.RECORD_KIND if newer3 else kind)
+        if newer3:
+            now["v"] = 3
         return _rec_key(now) == _rec_key(old)
 
 

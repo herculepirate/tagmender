@@ -14,7 +14,7 @@ FRAGS = ["-c:a", "aac", "-movflags", "frag_keyframe+empty_moov", "-frag_duration
 
 
 class FragmentedM4aRefused(Base):
-    def test_skipped_and_untouched(self):
+    def test_never_written_to(self):
         fs = [encode(self.lib / "A" / "m" / f"0{n} t.m4a", 440 + 100 * n, *FRAGS, duration=3) for n in (1, 2)]
         orig = [f.read_bytes() for f in fs]
         self.assertTrue(all(tagio.fragmented(f) for f in fs))
@@ -22,8 +22,9 @@ class FragmentedM4aRefused(Base):
                              targets=[target(1, "First"), target(2, "Second")])
         p = pl.build([prop], self.profile())
         a = p["albums"][0]
-        self.assertEqual(sorted(s["rule"] for s in a["skipped"]), ["unsupported_format"] * 2, a)
-        self.assertIn("fragmented MP4", a["skipped"][0]["matched"])
+        # (review 19A: never written to, but it goes with its album as it is - never left behind)
+        self.assertTrue(all(fe.get("as_is") and not fe["changes"] for fe in a["files"]), a["files"])
+        self.assertIn("fragmented MP4", a["notes"][0])
         executor.Executor(p).run()
         self.assertEqual([f.read_bytes() for f in fs], orig)
         with self.assertRaises(tagio.Unsupported):

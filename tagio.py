@@ -751,12 +751,11 @@ def _write_riff_info(path, changes, encoding="windows-1252"):
 def fragmented(path) -> bool:
     """A fragmented MP4 (moof boxes, as some streaming downloads are): mutagen cannot keep the
     offsets of its fragments when its tags grow, so TagMender does not write to it."""
-    if Path(str(path)).suffix.lower() not in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp") and \
-            not _STAGE.match(Path(str(path)).name):
-        return False
     import tag_albums
     try:
-        with open(path, "rb") as fh:
+        with open(path, "rb") as fh:                 # (by what it is, whatever its name: .m4a, .alac, .aac)
+            if fh.read(8)[4:8] != b"ftyp":
+                return False
             return tag_albums._fragmented(fh)
     except OSError:
         return False

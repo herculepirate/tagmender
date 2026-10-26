@@ -645,6 +645,9 @@ def write_tags(path, tags):
     from mutagen.id3 import ID3, TXXX, TRCK, TPOS, Frames
     from mutagen.mp4 import MP4, MP4FreeForm
     path = Path(path)
+    import tagio
+    if tagio.fragmented(path):
+        raise ValueError(f"{path.name} is a fragmented MP4: TagMender does not write to it")
     f = mutagen.File(path)
     if f is None:
         raise ValueError("not an audio file mutagen can write")

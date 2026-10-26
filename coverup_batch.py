@@ -457,7 +457,11 @@ def embed_front(files, jpeg, w, h, desc, backup):
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
     done, skipped = 0, []
+    import tagio
     for p in files:
+        if tagio.fragmented(p):
+            skipped.append(f"{p.name}: a fragmented MP4 (not written to: its audio would no longer play)")
+            continue
         try:
             f = mutagen.File(p)
         except Exception as exc:
@@ -507,6 +511,9 @@ def restore_embedded(path, pics):
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
+    import tagio
+    if tagio.fragmented(path):
+        raise ValueError(f"{Path(path).name} is a fragmented MP4: not written to")
     f = mutagen.File(path)
     raw = [(t, m, d, base64.b64decode(b)) for t, m, d, b in pics]
     if isinstance(f, FLAC):

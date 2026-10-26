@@ -84,6 +84,10 @@ def put(path, values):
     """Write {VORBIS_NAME: value or [values]} in the file's own format."""
     from mutagen.id3 import ID3, TXXX, TCON, USLT
     from mutagen.mp4 import MP4, MP4FreeForm
+    import tagio
+    if tagio.fragmented(path):
+        raise tagio.Unsupported(f"{Path(path).name} is a fragmented MP4: TagMender does not write to it "
+                                "(its audio would no longer play)")
     f = mutagen.File(path)
     if f.tags is None:
         f.add_tags()

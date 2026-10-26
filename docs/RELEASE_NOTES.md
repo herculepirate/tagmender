@@ -82,10 +82,14 @@ spelling with their padding: undo gives back the very same file
 empty seek table or comment block moved or added). Jobs recorded by any earlier version are
 still recognised and undone as they were recorded. Backup data is written safely and
 checked before use: damaged data is never written into a file. A fragmented MP4 (as some
-streaming downloads are) is skipped and left untouched: the tool TagMender writes MP4 tags
-with cannot keep its fragments' audio offsets. Known limits: an M4A whose tag had no room
-comes back 8 bytes larger (an empty "free" atom), and an Ogg file whose comments span several
-pages, or hold text that is not UTF-8, is put back with the same tags but not byte for byte. Mood and release date can be removed or
+streaming downloads are) is never written to - by tagging, covers, ReplayGain, lyrics or
+CoverUp - since the tool TagMender writes MP4 tags with cannot keep its fragments' audio
+offsets; it still goes with its album, as it is, and the plan says so. Known limits: an M4A
+whose tag had no room comes back 8 bytes larger (an empty "free" atom), its tags in mutagen's
+order; one with no tags at all and the audio first ("fast start") keeps an empty tag; and an
+Ogg file whose comments span several pages, or hold text that is not UTF-8, is put back with
+the same tags but not byte for byte. A job recorded by an earlier version that kept an M4A's
+whole moov is never put back over a file rewritten since (its audio moved): it says so. Mood and release date can be removed or
 changed in every kind of ID3 tag. Tagger scripts see every field of the release at the
 Basic level too, never a field the release deletes, keep the whitespace of the file's own
 fields, decide the album's edition, and a script that fails on a file stops only that album.

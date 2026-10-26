@@ -86,7 +86,8 @@ From the command line: `tagmender watch --add ~/Music/Inbox --profile Try`, then
 ## If something looks wrong
 
 - **A wrong artist photo** (Enthusiast and Audiophile add the artist's photo as artist.jpg and in
-  the tracks): replace or delete the artist folder's artist.jpg - your own photo there is the one
+  the tracks; a folder.jpg in the artist folder counts as its image and is left alone, but only
+  artist.jpg goes into the tracks): replace or delete the artist folder's artist.jpg - your own photo there is the one
   TagMender uses from then on - and `tagmender artist-photos --forget "Artist name or ID"` so
   the wrong one is not used again. The next run puts the artist folder's photo into the tracks
   in place of the one TagMender embedded before (an artist picture of your own in a track is

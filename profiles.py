@@ -103,7 +103,8 @@ DEFAULTS = {
     # editions: "Separate editions in folder names": off | edition ([Vinyl], [WEB], [Tape])
     #   | edition_year ([2019 Vinyl], [2014 CD]); album_editions: the same, added to the Album tag
     "naming": {"preset": "tagmender", "template": "", "editions": "off", "album_editions": "off"},
-    "companions": [".cue", ".log", ".lrc", ".jpg", ".jpeg", ".png", ".pdf", ".txt", ".m3u", ".m3u8"],
+    "companions": [".cue", ".log", ".lrc", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".pdf", ".txt", ".m3u",
+                   ".m3u8"],
     "remove_empty_dirs": True,
     "filenames": {"compat": "windows", "max_name_bytes": 255, "max_dir_bytes": 255, "max_path_chars": 4096,
                   "max_album_words": 5, "abbreviations": {}},

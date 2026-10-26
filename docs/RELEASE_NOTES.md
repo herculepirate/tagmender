@@ -46,6 +46,17 @@ along) - and the tracks' picture follows a corrected one also with "embed only";
 the user's own beside TagMender's is never touched, and a download never replaces a picture
 made from the user's photo.
 
+**Artist photo: only artist.jpg goes into the tracks (thirteenth review).** A folder.jpg in an
+artist folder can be an album's cover as well as the artist's image (Jellyfin, Kodi), so it is
+never embedded any more: it only means the artist has an image (nothing is looked up or
+written beside it) unless it is the cover of an album lying in that folder (the same picture
+as its cover.jpg, or its only cover), and then it moves with that album. artist.webp/.png/...
+count; "R.E.M." folders are recognised; an artist's only album ripped flat into its folder,
+right below the library, uses the artist.jpg there. An artist.jpg TagMender downloaded is
+never taken for the user's word: a picture made from the user's photo is not replaced by it.
+No lookup for an album that gets no front cover (the photo would never go into it), and
+cover.webp, .gif and .bmp move with their albums.
+
 **Desktop app**: the results of background work (preview, apply, watched folders ...) are now
 handled on the window's own thread; before, they ran on the worker's thread, which could leave
 the window showing stale numbers or crash it.

@@ -931,7 +931,12 @@ class Planner:
         image, source = ap["image"], ap.get("source", "")
         _who, single = _album_artist(prop)
         mine = [Path(fe["src"]) for fe in entry["files"]] if single else ()
-        there = _artwork.artist_folder_photo(artist_dir, single=mine) if artist_dir is not None else None
+        there = _artwork.artist_folder_photo(artist_dir) if artist_dir is not None else None
+        if there is not None and _artwork.written_by_us(there) and ap.get("own"):
+            there = None                  # (a download TagMender wrote: the user's own photo wins)
+        has_image = artist_dir is not None and (there is not None or _artwork.artist_folder_has_photo(artist_dir, mine))
+        if there is None and has_image and not ap.get("own"):
+            return None                   # (the artist folder has its image - a folder.jpg - and this is a download)
         claims = self.__dict__.setdefault("artist_dirs", {})
         dkey = fnm.fold(artist_dir) if artist_dir is not None else None
         if there is not None:
@@ -953,7 +958,7 @@ class Planner:
                 return None
         if dkey is not None:
             claims.setdefault(dkey, (image, source, data))
-        authoritative = there is not None or bool(ap.get("own"))
+        authoritative = (there is not None and not _artwork.written_by_us(there)) or bool(ap.get("own"))
         # the photo's identity - of the artist folder's file, as it is or will be - goes into the
         # description of the picture embedded: a corrected artist.jpg replaces it on a later run
         ident = _artwork.photo_identity(data)
@@ -984,7 +989,7 @@ class Planner:
             emb = str(_artwork.embed_copy(Path(image), staging, _artwork.ARTIST_EMBED_MAX_SIDE))
         except Exception:
             emb, into = None, []
-        if want["file"] and artist_dir is not None and there is None and \
+        if want["file"] and artist_dir is not None and not has_image and \
                 not os.path.lexists(artist_dir / want["file"]):
             target = artist_dir / want["file"]
             key = fnm.fold(target)

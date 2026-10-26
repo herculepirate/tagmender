@@ -576,9 +576,13 @@ class Engine:
         op = self.profile["operation"]
         # looked up only while something lacks it: a track (one TagMender can embed into) without
         # an artist picture, or - where the album stays - an artist folder that can take a photo
+        # (a track that has a front cover or gets one now: an artist photo never goes into a track
+        # without one - the plan's rule)
+        gets_front = bool(getattr(prop, "artwork", None))
         lacking = want["embed"] and any(Path(f).suffix.lower() in EMBEDDABLE and
                                         Path(f).suffix.lower() not in (".m4a", ".mp4") and
-                                        not artwork.has_artist_picture(f) for f in files)
+                                        not artwork.has_artist_picture(f) and
+                                        (gets_front or artwork.has_front(f)) for f in files)
         artist_dir = None
         dest = self.profile["destination"]
         real_src = os.path.realpath(str(prop.source_dir))
@@ -594,7 +598,11 @@ class Engine:
         # the artist folder the album is in now: where it stays, or where a move takes it from
         home = artist_dir if artist_dir is not None else \
             artwork.artist_dir_for(Path(prop.source_dir), who, roots, compat)
+        single = "single" in [x.lower() for x in t.get("releasetype") or []]
+        mine = [Path(f) for f in prop.files] if single else ()
         photo = artwork.artist_folder_photo(home) if home is not None else None
+        if photo is None and home is not None and artwork.artist_folder_has_photo(home, mine):
+            return                        # (a folder.jpg of Jellyfin's or Kodi's: the artist has an image)
         if photo is not None:
             # the artist folder's own photo (the user's, or one corrected by hand) is the artist's
             # photo: no download; the tracks' picture follows it (TagMender's own, from an older
@@ -606,7 +614,8 @@ class Engine:
                 return
             stale = want["embed"] and any(m != ident for f in files for m in artwork.our_artist_marks(f))
             if lacking or stale or not stays:
-                prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who, "own": True,
+                prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who,
+                                     "own": not artwork.written_by_us(photo),
                                      "source": f"the artist folder's {photo.name}"}
             return
         if want["file"] and (artist_dir is not None or not stays):

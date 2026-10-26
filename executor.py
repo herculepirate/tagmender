@@ -393,12 +393,12 @@ def _place(tmp: Path, dst: Path):
     _fsync_dir(dst.parent)
 
 
-def _tags_sig(path, legacy=False) -> str:
+def _tags_sig(path, legacy=0) -> str:
     """A fingerprint of a file's tags: undo leaves files whose tags were edited later alone.
     "v2:" marks how this version reads tags (described comments and lyrics); legacy: as the
     versions before read them, to compare with their jobs' fingerprints."""
     try:
-        t = tagio.read(path, legacy=True) if legacy else tagio.read(path)
+        t = tagio.read(path, legacy=legacy) if legacy else tagio.read(path)
     except Exception:
         return ""
     h = hashlib.sha1(json.dumps(sorted((k, [str(x) for x in v] if isinstance(v, list) else str(v))
@@ -407,11 +407,36 @@ def _tags_sig(path, legacy=False) -> str:
     return h if legacy else "v2:" + h
 
 
-def _sig_is(path, sig) -> bool:
-    """path's tags are as a job's fingerprint says (made by this version or an earlier one)."""
+def _sig_is(path, sig, backup=None, blobs=None) -> bool:
+    """path's tags are as a job's fingerprint says (made by this version or an earlier one:
+    as that version read tags). A fingerprint from before 609b541 never saw described
+    comments and lyrics: with the job's backup at hand, those must be as they were then (that
+    version never wrote them) - else they were edited since."""
     if not sig:
         return False
-    return _tags_sig(path, legacy=not str(sig).startswith("v2:")) == sig
+    if str(sig).startswith("v2:"):
+        return _tags_sig(path) == sig
+    if _tags_sig(path, legacy=2) == sig:
+        return True
+    if _tags_sig(path, legacy=1) != sig:
+        return False
+    if not backup or backup.get("kind") != "tags" or blobs is None:
+        return True
+    import shutil
+    import tempfile
+    import tag_albums as ta
+
+    def described(p):
+        t = tagio.read(p)
+        return {k: v for k, v in t.items() if k.startswith(("comment:", "lyrics:")) or k == "itunes_cddb_1"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            was = Path(d) / ("was" + Path(path).suffix)
+            shutil.copyfile(path, was)
+            ta.restore_tags(was, backup["rec"], blobs)
+            return described(was) == described(path)
+    except Exception:
+        return False
 
 
 def _pics_sig(path) -> str:
@@ -2078,9 +2103,9 @@ def _undo(job, jd, journal, events, force):
             hard.add(a)
         elif op == "copy" and dst.exists() and f.get("size") is not None and not force and (
                 ((os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and
-                 not (f.get("tags_sig") and _sig_is(dst, f["tags_sig"]) and
+                 not (f.get("tags_sig") and _sig_is(dst, f["tags_sig"], f.get("backup"), jd / "blobs") and
                       (not f.get("digest") or payload.digest(dst) == f["digest"]))) or
-                (f.get("tags_sig") and not _sig_is(dst, f["tags_sig"])) or
+                (f.get("tags_sig") and not _sig_is(dst, f["tags_sig"], f.get("backup"), jd / "blobs")) or
                 (f.get("pics_sig") and _pics_sig(dst) != f["pics_sig"])):
             # (a copy whose only change is its time - a later job's undo put its tags back - is
             # still the copy; one with other tags is not, even when the editor kept its time)
@@ -2089,7 +2114,7 @@ def _undo(job, jd, journal, events, force):
             why = f"{check} holds different audio now; left alone"
         elif op in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and \
                 check == (src if op == "tag" else dst) and check.exists() and not force and \
-                (not _sig_is(check, f["tags_sig"]) or
+                (not _sig_is(check, f["tags_sig"], f.get("backup"), jd / "blobs") or
                  (f.get("pics_sig") and _pics_sig(check) != f["pics_sig"])) and \
                 not _matches_backup(check, f.get("backup")):
             # (tags as the backup has them: an undo cut short had put them back already)

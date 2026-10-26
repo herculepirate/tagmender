@@ -381,15 +381,16 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
     # written to: its audio would no longer play)
     frag = {p for p in files if tagio.fragmented(p)}
     planned = {p: {} for p in files}
+    first = next((p for p in files if p not in frag), files[0])     # (what the album has: from a file written to)
     created = []
-    if args.replaygain and (args.overwrite or not get(files[0], "REPLAYGAIN_ALBUM_GAIN")):
+    if args.replaygain and (args.overwrite or not get(first, "REPLAYGAIN_ALBUM_GAIN")):
         if args.apply:
             for p, tags in replaygain(files).items():
                 planned[p].update(tags)
         else:                                       # measuring takes a while: only when writing
             for p in files:
                 planned[p]["REPLAYGAIN_*"] = "measured with --apply"
-    if args.genres and (args.overwrite or not get(files[0], "GENRE")):
+    if args.genres and (args.overwrite or not get(first, "GENRE")):
         g = genres_for(http, files)
         if g:
             for p in files:

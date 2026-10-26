@@ -647,13 +647,16 @@ def _mp4_value(values, blob_dir):
     return out
 
 
-def rec_key(rec) -> str:
+def rec_key(rec, loose=True) -> str:
     """A tag backup record compared without the order of its tags (mutagen lists Vorbis
-    comment keys from a set: the order differs between two reads of one file); an MP4 with an
-    empty tag counts as one with none."""
+    comment keys from a set: the order differs between two reads of one file); loose: an MP4
+    with an empty tag counts as one with none (whether a file was edited since); else
+    exactly (whether there is anything left to put back)."""
     rec = dict(rec or {})
     tags = dict(rec.get("tags") or {})
-    if tags.get("mp4") == []:
+    if not loose:
+        pass
+    elif tags.get("mp4") == []:
         tags = {}
         for k in ("padding", "mp4_udta", "mp4_meta"):
             rec.pop(k, None)
@@ -667,7 +670,7 @@ def rec_key(rec) -> str:
     return json.dumps(rec, sort_keys=True, default=str)
 
 
-def same_as_backup(path, rec) -> bool:
+def same_as_backup(path, rec, loose=True) -> bool:
     """path holds what the backup record says (compared as the version that made it made it)."""
     import tempfile
     old = rec or {}
@@ -679,7 +682,7 @@ def same_as_backup(path, rec) -> bool:
         now = backup_tags(path, d, kind=RECORD_KIND if newer3 else kind)
         if newer3:
             now["v"] = 3
-        return rec_key(now) == rec_key(old)
+        return rec_key(now, loose) == rec_key(old, loose)
 
 
 def restore_tags(path, rec, blob_dir):
@@ -689,7 +692,7 @@ def restore_tags(path, rec, blob_dir):
     from mutagen.mp4 import MP4Cover
     import tagio
     try:
-        if same_as_backup(path, rec):
+        if same_as_backup(path, rec, loose=False):
             return
     except Exception:
         pass

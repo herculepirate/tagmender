@@ -340,8 +340,10 @@ def _split_ape_comment(value: str) -> tuple[str, str]:
 
 def read(path, legacy=False) -> dict[str, list[str]]:
     """{field: [values]} with Picard's names. Pictures are counted in '~pictures'. legacy:
-    as TagMender before 609b541 read a file (no described comments or lyrics), for the
-    signatures earlier jobs recorded."""
+    as an earlier TagMender read a file, for the fingerprints its jobs recorded - 1 (True):
+    before 609b541 (no described comments or lyrics), 2: 609b541 to b1f0b98 (described by
+    their description only)."""
+    legacy = 1 if legacy is True else (legacy or 0)
     f = open_file(path)
     fam = family(f)
     tags = f.tags
@@ -380,6 +382,10 @@ def read(path, legacy=False) -> dict[str, list[str]]:
                 n, t = _split_pair(frame.text[0])
                 _add(out, "discnumber", [n])
                 _add(out, "totaldiscs", [t])
+            elif fid == "COMM" and legacy == 2:     # (609b541 to b1f0b98: by description only)
+                _add(out, "comment" + (":" + frame.desc if frame.desc else ""), frame.text)
+            elif fid == "USLT" and legacy == 2:
+                _add(out, "lyrics" + (":" + frame.desc if frame.desc else ""), [frame.text])
             elif fid == "COMM" and legacy:
                 if frame.desc == "":
                     _add(out, "comment", frame.text)
@@ -415,7 +421,7 @@ def read(path, legacy=False) -> dict[str, list[str]]:
             name = VORBIS_R.get(k, k)
             if name in ("totaltracks", "totaldiscs") and name in out:
                 continue                                    # TOTALTRACKS and TRACKTOTAL both present
-            if name == "performer" or (name == "comment" and not legacy):   # ("Joe Barr (Piano)", "EAC (ripper)")
+            if name == "performer" or (name == "comment" and legacy != 1):  # ("Joe Barr (Piano)", "EAC (ripper)")
                 for v in vals:
                     pk, pv = _split_performer(v, name)
                     _add(out, pk, [pv])
@@ -462,9 +468,9 @@ def read(path, legacy=False) -> dict[str, list[str]]:
                 n, t = _split_pair(vals[0])
                 _add(out, "tracknumber" if k == "track" else "discnumber", [n])
                 _add(out, "totaltracks" if k == "track" else "totaldiscs", [t])
-            elif k == "performer" or (k == "comment" and not legacy):
+            elif k == "performer" or (k == "comment" and legacy != 1):
                 for v in vals:
-                    pk, pv = _split_performer(v, k) if k == "performer" else _split_ape_comment(v)
+                    pk, pv = _split_performer(v, k) if k == "performer" or legacy == 2 else _split_ape_comment(v)
                     _add(out, pk, [pv])
             else:
                 name = _APE_R.get(k, k)

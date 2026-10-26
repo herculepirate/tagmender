@@ -259,7 +259,10 @@ class CoverUp:
             res = pipe.run(cb.make_query(info))
         c = res.artist.get(ArtType.ARTIST_THUMB)
         if c is None:
-            return {"note": "no artist photo found"}
+            failed = [k for k, v in (getattr(res, "provider_status", {}) or {}).items()
+                      if str(v).startswith(("error", "cancelled"))]
+            return {"note": f"the artist photo search failed ({', '.join(failed)})" if failed
+                    else "no artist photo found"}
         if c.data is None:
             pipe.fetch_full(c)
         if c.data is None:
@@ -546,9 +549,13 @@ ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album f
 
 
 def artist_folder_photo(folder) -> Path | None:
-    """The artist folder's own photo (artist.jpg, or folder.jpg - Kodi, Jellyfin), if any."""
+    """The artist folder's own photo (artist.jpg, or folder.jpg - Kodi, Jellyfin), if any. A
+    folder.jpg beside music of the folder's own (a loose album ripped flat there) is that
+    music's cover, not the artist's photo: then only artist.* counts."""
     try:
-        for stem in ARTIST_STEMS:
+        loose = any(x.is_file() and x.suffix.lower() in ex.AUDIO_EXT and not x.name.startswith(".")
+                    for x in Path(folder).iterdir())
+        for stem in (("artist",) if loose else ARTIST_STEMS):
             for x in sorted(Path(folder).iterdir()):
                 if x.is_file() and not x.is_symlink() and x.stem.lower() == stem and \
                         x.suffix.lower() in (".jpg", ".jpeg", ".png"):
@@ -579,8 +586,12 @@ def artist_dir_for(album_folder, artist: str, roots, compat="windows") -> Path |
     names = {artist}
     if artist.lower().startswith("the "):
         names.add(f"{artist[4:]}, {artist[:3]}")
-    if fnm.fold(d.name) not in {fnm.fold(fnm.safe_component(n, compat)) for n in names}:
+    wanted = {fnm.fold(fnm.safe_component(n, compat)) for n in names}
+    if fnm.fold(d.name) not in wanted:
         return None
+    up = Path(os.path.realpath(str(d.parent)))
+    if fnm.fold(d.parent.name) in wanted and any(r in up.parents for r in rs) and up not in rs:
+        return None                       # "Metallica/Metallica/Metallica CD1": d is the album, not the artist
     return d
 
 
@@ -594,6 +605,9 @@ def is_collaboration(artist_mbids: str, folder_name: str) -> bool:
         return bool(cb.is_collaboration(artist_mbids, folder_name, mc))
     except Exception:
         return False
+
+
+CACHE_MAX_SIDE = 1500            # artist photos kept for later runs: as large as an artist.jpg needs
 
 
 def _photo_cache_dir() -> Path:
@@ -627,10 +641,12 @@ def remember_artist_photo(key: str, got):
     d.mkdir(parents=True, exist_ok=True)
     try:
         if got and got.get("image"):
-            tmp = d / f".{h}.tmp"
-            tmp.write_bytes(Path(got["image"]).read_bytes())
+            tmp = d / f".{h}.{os.getpid()}.tmp"            # (two TagMenders at once never share one)
+            small = embed_copy(Path(got["image"]), ex.STATE_DIR / "staging" / "artist-cache", CACHE_MAX_SIDE)
+            tmp.write_bytes(small.read_bytes())
             os.replace(tmp, d / f"{h}.jpg")
-            (d / f"{h}.src").write_text(got.get("source", ""))
+            tmp.write_text(got.get("source", ""))
+            os.replace(tmp, d / f"{h}.src")
             return dict(got, image=str(d / f"{h}.jpg"))
         (d / f"{h}.none").touch()
     except OSError:

@@ -404,9 +404,11 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     # bonus ("Bonus CD", "Extras" ...) - an artist folder with a loose single and the artist's
     # albums: its own pictures are no one album's; the artist photo stays
     import artwork as _artwork
-    src_shared = any(f_ != src_dir and not _DISC_NAME.match(f_.relative_to(src_dir).parts[0])
-                     and not _artwork._BONUS.match(f_.relative_to(src_dir).parts[0])
-                     for f_ in foreign if src_dir in f_.parents)
+    loose = sum(1 for s_ in moved if s_.parent == src_dir) <= 1     # a loose single, not an album's worth
+    src_shared = loose and any(f_ != src_dir and not _DISC_NAME.match(f_.relative_to(src_dir).parts[0])
+                               and not _artwork._BONUS.match(f_.relative_to(src_dir).parts[0])
+                               for f_ in foreign if src_dir in f_.parents)
+    discs_here = any(q.parent == src_dir and _DISC_NAME.match(q.name) for q in ours)
 
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus
@@ -416,8 +418,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         while True:
             if q in ours and q != src_dir:
                 return True
-            if q == src_dir:
-                return src_dir in ours and not src_shared
+            if q == src_dir:              # (the album's own folder: its music in it, or in its disc folders)
+                return (src_dir in ours or discs_here) and not src_shared
             q = q.parent
     out = []
     for d, here in tree:

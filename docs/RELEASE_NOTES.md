@@ -15,7 +15,13 @@ cover, never a track's only picture; an artist folder's folder.jpg or artist.jpg
 photo (used, never doubled; "Beatles, The" is The Beatles); looked up once per artist across runs
 (30 days for "none found"), never again for formats or folders that cannot take it, or for a
 copy profile's copies; a loose single moved out of an artist folder leaves its pictures there;
-undo is never held back by an artist.jpg a media server replaced.
+undo is never held back by an artist.jpg a media server replaced. Ninth review
+(tests/test_review9_*.py): a folder.jpg beside music of the artist folder's own (a loose album)
+is that album's cover, not the artist's photo; a self-titled album ("Metallica/Metallica/...")
+is never taken for the artist folder; an album holding another album ("Live 1995") or a disc
+set holding a bonus album takes its cover and log along; a failed download is asked again,
+only "none found" waits 30 days; artists without a MusicBrainz ID are remembered by their
+folder, and a library a move profile already filed is not looked up again.
 
 **Small covers are replaced** (artwork.replace "larger_only", the default; "Replace an album's
 own cover when it is smaller than the minimum size" in the app). A cover smaller than

@@ -528,7 +528,12 @@ class Engine:
                                         Path(f).suffix.lower() not in (".m4a", ".mp4") and
                                         not artwork.has_artist_picture(f) for f in files)
         artist_dir = None
-        stays = op == "in_place" or str(folder) != str(prop.source_dir)
+        dest = self.profile["destination"]
+        real_src = os.path.realpath(str(prop.source_dir))
+        # the album stays where it is judged: in place, a copy profile's copies, or an album a
+        # move profile already filed (a library organised into itself)
+        stays = op == "in_place" or str(folder) != str(prop.source_dir) or \
+            (op == "move" and bool(dest) and real_src.startswith(os.path.realpath(os.path.expanduser(dest)) + os.sep))
         if want["file"] and stays:
             roots = [s_["path"] for s_ in self.profile["sources"]] + \
                 ([self.profile["destination"]] if self.profile["destination"] else [])
@@ -550,11 +555,13 @@ class Engine:
                 pass
             return
         mbid = mbids.split(";")[0].strip()
-        key = mbid or who.casefold()
+        # kept across runs by MusicBrainz artist ID; without one, by the artist's folder (two
+        # artists may share a name, never a folder) - or for this run only, by name
+        key = mbid or (f"dir:{os.path.realpath(str(artist_dir))}" if artist_dir is not None else who.casefold())
+        lasting = bool(mbid) or artist_dir is not None
         cache = self.__dict__.setdefault("_artists", {})
         if key not in cache:
-            # (kept across runs only by MusicBrainz ID: two artists may share a name)
-            known, got = artwork.cached_artist_photo(mbid) if mbid else (False, None)
+            known, got = artwork.cached_artist_photo(key) if lasting else (False, None)
             if not known:
                 cu = next((p for p in (self._art or []) if isinstance(p, artwork.CoverUp)), None)
                 if cu is None:
@@ -567,8 +574,9 @@ class Engine:
                 got = cu.artist_photo(prop.source_dir, ids, who, files=prop.files)
                 if got and got.get("note"):
                     prop.why = list(prop.why) + [f"no artist photo: {got['note']}"]
-                if mbid:
-                    got = artwork.remember_artist_photo(mbid, got if got and got.get("image") else None)
+                # "none found" is kept (asked again after 30 days); a failed search is not
+                if lasting and ((got and got.get("image")) or (got or {}).get("note") == "no artist photo found"):
+                    got = artwork.remember_artist_photo(key, got if got and got.get("image") else None)
             cache[key] = got if got and got.get("image") else None
         if cache[key]:
             prop.artist_photo = dict(cache[key], artist=who)

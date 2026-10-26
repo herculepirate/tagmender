@@ -575,6 +575,15 @@ class Planner:
         self._planned = set()
         self._resident = []
 
+    def _file_settings(self) -> dict:
+        """Picard's settings for what saving a file does beside its fields (ID3v2 version,
+        ID3v1, ...; see tagio.file_options), once per plan."""
+        if not hasattr(self, "_fileset"):
+            get = getattr(self.profile, "picard_tags", None)
+            s = get() if get else {}
+            self._fileset = {k: s.get(k) for k in tagio.FILE_SETTINGS}
+        return self._fileset
+
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
         p = self.profile
@@ -723,10 +732,13 @@ class Planner:
                          if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
-            target = tagio.stored(f, raw)
+            fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
+            target = tagio.stored(f, raw, fmt)
             changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
             fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
                   "diff": rows, "fingerprint": _fp(f)}
+            if changes and fmt:
+                fe["format"] = fmt
             if changes and f.suffix.lower() == ".wav":       # (RIFF INFO: the values as they are, as Picard)
                 fe["riff"] = {k: raw.get(k) for k in changes if k in tagio.RIFF_INFO and changes[k] is not None}
             if op in ("copy", "move"):
@@ -786,7 +798,12 @@ class Planner:
                     dst = earlier
                     self.claimed[fnm.fold(dst)] = str(f)
                     have = tagio.read(dst)
-                    changes2, rows2 = diff_tags(have, target, p, conf if identified else 100.0, [])
+                    fmt2 = tagio.file_options(dst, self._file_settings())    # (as the copy holds them)
+                    changes2, rows2 = diff_tags(have, tagio.stored(dst, raw, fmt2), p,
+                                                conf if identified else 100.0, [])
+                    fe.pop("format", None)
+                    if changes2 and fmt2:
+                        fe["format"] = fmt2
                     fe.update(src=str(dst), dst=str(dst), op="tag" if changes2 else "none", changes=changes2,
                               diff=rows2, fingerprint=_fp(dst), copy_of=str(f))
                     entry["files"].append(fe)
@@ -1310,6 +1327,24 @@ def _enrichment_summary(profile) -> str:
 # --------------------------------------------------------------------------
 # preview text (the CLI and GUI show the same thing)
 # --------------------------------------------------------------------------
+def format_note(fmt: dict) -> str:
+    """What saving a file does beside its fields (tagio.file_options), in words."""
+    out = []
+    if fmt.get("v2"):
+        out.append(f"as ID3v2.{fmt['v2']}")
+    if fmt.get("join"):
+        out.append(f"several values joined with \"{fmt['join']}\"")
+    if fmt.get("v1") == 2:
+        out.append("an ID3v1 tag added")
+    elif fmt.get("v1") == 0:
+        out.append("its ID3v1 tag removed")
+    if fmt.get("strip_ape"):
+        out.append("its APEv2 tag removed")
+    if fmt.get("strip_id3"):
+        out.append("its ID3 tags removed")
+    return ", ".join(out)
+
+
 def preview(plan: dict, verbose=False) -> str:
     out = [f"Plan {plan['job']}  profile {plan['profile']}  ({plan['operation']})"]
     if plan.get("discogs_settings"):
@@ -1344,6 +1379,8 @@ def preview(plan: dict, verbose=False) -> str:
                 continue
             move = f"  ->  {fe['dst']}" if fe["dst"] != fe["src"] else ""
             out.append(f"    {fe['op']:<5} {Path(fe['src']).name}{move}")
+            if fe.get("format"):
+                out.append(f"           saved    {format_note(fe['format'])} (Picard's Options > Tags)")
             for r in fe["diff"]:
                 if r["action"] in ("added", "changed", "removed") or verbose:
                     b = "; ".join(r["before"]) or "—"

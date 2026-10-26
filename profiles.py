@@ -423,17 +423,17 @@ def default() -> Profile:
 
 def minimal(profile: Profile) -> dict:
     """Only what differs from the defaults (what is written to disk)."""
-    def diff(full, base):
+    def diff(full, base, keep_none=False):
         out = {}
         for k, v in full.items():
             if k in ("name", "version"):
                 continue
             if isinstance(v, dict) and isinstance(base.get(k), dict) and k != "abbreviations":
-                sub = diff(v, base[k])
+                sub = diff(v, base[k], keep_none=k == "picard")
                 if sub:
                     out[k] = sub
-            elif base.get(k) != v:
-                out[k] = v
+            elif base.get(k) != v or (keep_none and k not in base):
+                out[k] = v          # (picard: a setting null says "as each file has it", not "as Picard")
         return out
     return {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, DEFAULTS)}
 

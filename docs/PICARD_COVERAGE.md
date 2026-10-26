@@ -58,12 +58,14 @@ output recorded from Picard's own code.
 | Tag mapping per format | - | Full | ID3, Vorbis, MP4, APEv2, ASF: checked against files Picard's own code writes (credits in TMCL/TIPL and PERFORMER, MVIN, WCOP, WOAR, cpil ...) |
 | Preserve these tags | - | Full | read from Picard.ini |
 | Clear existing tags | off | Excluded | per-field policies instead (preserve, fill, replace, remove, lock) |
-| ID3v2 version | 2.4 | Partial | an existing v2.3 tag stays valid v2.3 (dates in TYER/TDAT, credits in IPLS, as Picard converts them), new tags are v2.4; no setting |
-| ID3v2.3 join character | `/` | Partial | fixed `/` |
-| Write ID3v1 | on | Partial | an existing ID3v1 is kept, none is added |
-| Remove APEv2 from MP3/AAC/AC3, ID3 from FLAC | off | Missing | |
+| ID3v2 version | 2.4 | Full | read from Picard.ini (`write_id3v23`), or the profile's `picard.write_id3v23`; without either, each file keeps its own version (a v2.3 tag stays valid v2.3: dates in TYER/TDAT, credits in IPLS, as Picard converts them; new tags are v2.4). Applied when a file is written |
+| ID3v2.3 join character | `/` | Full | `id3v23_join_with` |
+| Write ID3v1 | on | Full | `write_id3v1`: written or removed when the file is written; without Picard.ini or the profile, an existing ID3v1 is updated and none is added |
+| Remove APEv2 from MP3, ID3 from FLAC | off | Full | `remove_ape_from_mp3`, `remove_id3_from_flac`; undo puts them back |
+| Remove APEv2 from AAC/AC3 | off | Excluded | TagMender does not tag raw AAC/AC3 streams |
+| ID3v2 text encoding | UTF-8 | Partial | always UTF-8 (UTF-16 in v2.3, as mutagen writes it) |
 | Fix missing FLAC seek points | off | Missing | |
-| WAV RIFF INFO | off | Missing | |
+| WAV RIFF INFO | on | Full | written beside the ID3 tag, as Picard |
 | Preserve timestamps | off | Full | follows Picard's setting unless the profile says |
 
 ## Cover art

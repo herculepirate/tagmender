@@ -464,14 +464,30 @@ def _norm(changes):
     return out
 
 
-def save_id3(f, tags, keep_original_date=True, keep_date=True):
-    """Save an ID3 tag in its own version. A v2.3 tag stays valid v2.3: frames v2.3 does not
-    have are converted (TDRC to TYER and TDAT, TDOR to TORY, TIPL and TMCL to IPLS, ...) as
-    Picard does (compatid3.py), keeping the sort frames most players read in v2.3 too; an
-    original date (TDOR) or a date without its day (TDRC) that is not being changed is kept as
-    it is (TORY and TYER hold a year only)."""
-    if getattr(tags, "version", (2, 4, 0))[:2] != (2, 3):
-        f.save()
+def _own_version(tags) -> int:
+    return 3 if getattr(tags, "version", (2, 4, 0))[:2] == (2, 3) else 4
+
+
+def _id3v1_file(f) -> bool:
+    """MP3 and TrueAudio carry an ID3v1 tag at the end (Picard's ID3File); WAV, AIFF, DSF not."""
+    return type(f).__name__ in ("MP3", "EasyMP3", "TrueAudio")
+
+
+def save_id3(f, tags, keep_original_date=True, keep_date=True, v2=None, v1=None, join="/"):
+    """Save an ID3 tag in its own version (v2: 3 or 4 to change it, as Picard's "ID3v2 version
+    to write"; v1: 2 writes an ID3v1 tag, 0 removes it, None updates one that is there). A
+    v2.3 tag stays valid v2.3: frames v2.3 does not have are converted (TDRC to TYER and TDAT,
+    TDOR to TORY, TIPL and TMCL to IPLS, ...) as Picard does (compatid3.py), keeping the sort
+    frames most players read in v2.3 too; an original date (TDOR) or a date without its day
+    (TDRC) that is not being changed is kept as it is (TORY and TYER hold a year only). A
+    v2.4 tag made v2.3 has its other values joined with join, as Picard joins them."""
+    own = _own_version(tags)
+    v2 = v2 if v2 in (3, 4) else own
+    kw = {"v1": v1} if v1 in (0, 2) and _id3v1_file(f) else {}
+    if v2 == 4:
+        if own == 3:
+            tags.update_to_v24()
+        f.save(v2_version=4, **kw)
         return
     keep = [fr for key in ("TSOP", "TSOA", "TSOT", "TSST") for fr in tags.getall(key)]
     tdor = [fr for fr in tags.getall("TDOR") if any(len(str(x)) > 4 for x in fr.text)] if keep_original_date else []
@@ -489,23 +505,80 @@ def save_id3(f, tags, keep_original_date=True, keep_date=True):
             tags.delall(x)
         for fr in tdrc:
             tags.add(fr)
-    f.save(v2_version=3, v23_sep=None)     # (what changes was joined with "/" already: the rest as it was)
+    # (what changes was joined already: the rest of a v2.3 tag as it was)
+    f.save(v2_version=3, v23_sep=None if own == 3 else (join or "/"), **kw)
 
 
-def stored(path, target: dict) -> dict:
+# Picard's settings for what saving a file does beside its fields (Options > Tags); None:
+# as the file has it (picard_config.FILE_DEFAULTS)
+FILE_SETTINGS = ("write_id3v23", "id3v23_join_with", "write_id3v1", "remove_ape_from_mp3", "remove_id3_from_flac")
+
+
+def file_options(path, settings: dict | None) -> dict:
+    """What writing this file does beside its fields, from Picard's settings: {"v2": 3 | 4}
+    the ID3v2 version written, {"join": sep} what joins several values in an ID3v2.3 tag,
+    {"v1": 2 | 0} an ID3v1 tag written or removed (MP3), {"strip_ape": True} an APEv2 tag
+    removed from an MP3, {"strip_id3": True} ID3 tags removed from a FLAC file - each only when
+    it changes the file. {}: the file keeps all of that as it is."""
+    s = settings or {}
+    try:
+        f = open_file(path)
+        fam = family(f)
+    except Unsupported:
+        return {}
+    out = {}
+
+    def end(n):
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(-n, 2)
+                return fh.read(3)
+        except OSError:
+            return b""
+    if fam == "id3":
+        own = _own_version(f.tags) if f.tags is not None and getattr(f.tags, "version", (2,))[0] >= 2 else 4
+        if s.get("write_id3v23") is not None and (3 if s["write_id3v23"] else 4) != own:
+            out["v2"] = 3 if s["write_id3v23"] else 4
+        sep = s.get("id3v23_join_with")
+        if isinstance(sep, str) and sep and sep != "/" and out.get("v2", own) == 3:
+            out["join"] = sep
+        if _id3v1_file(f) and s.get("write_id3v1") is not None and bool(s["write_id3v1"]) != (end(128) == b"TAG"):
+            out["v1"] = 2 if s["write_id3v1"] else 0
+        if type(f).__name__ in ("MP3", "EasyMP3") and s.get("remove_ape_from_mp3"):
+            from mutagen.apev2 import APEv2
+            try:
+                APEv2(str(path))
+                out["strip_ape"] = True
+            except Exception:
+                pass
+    elif type(f).__name__ == "FLAC" and s.get("remove_id3_from_flac"):
+        try:
+            with open(path, "rb") as fh:
+                head = fh.read(3)
+        except OSError:
+            head = b""
+        if head == b"ID3" or end(128) == b"TAG":
+            out["strip_id3"] = True
+    return out
+
+
+def stored(path, target: dict, fmt: dict | None = None) -> dict:
     """target as the file will hold it, and as read() will give it back: what an ID3v2.3 tag
     makes of it (several values joined with "/", the original date a year, a date without
     its day a year), and a performer without a role whose name ends in "(...)" read as that
     role (Vorbis, APEv2, as Picard reads it). The planner compares and writes this, so a plan
-    settles and every write reads back as written."""
+    settles and every write reads back as written. fmt: file_options(), when the write
+    changes the ID3v2 version or what joins the values."""
     ext = Path(str(path)).suffix.lower()
     out = {field_name(k): v for k, v in target.items()}
     fam = None
     v23 = False
+    fmt = fmt or {}
+    join = fmt.get("join") or "/"
     try:
         f = open_file(path)
         fam = family(f)
-        v23 = fam == "id3" and getattr(f.tags, "version", (2, 4, 0))[:2] == (2, 3)
+        v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(f.tags) == 3)
     except Unsupported:
         return out
     if fam in ("vorbis", "apev2") and out.get("performer"):
@@ -529,7 +602,7 @@ def stored(path, target: dict) -> dict:
             elif k == "date":
                 vals = [x[:4] if len(x) < 10 else x for x in vals]
             if len(vals) > 1 and not (is_performer(k) or k in _TIPL_R or k == "website"):
-                vals = ["/".join(vals)]
+                vals = [join.join(vals)]
             out[k] = vals
     del ext
     return out
@@ -579,12 +652,15 @@ def _write_riff_info(path, changes, encoding="windows-1252"):
                 info.insert_chunk(cid, data)
 
 
-def write(path, changes: dict, riff: dict | None = None) -> None:
+def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
-    hold (nothing is written then)."""
+    hold (nothing is written then). fmt: file_options() - what else saving the file does, as
+    Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed)."""
     changes = _norm(changes)
     if not changes:
         return
+    fmt = fmt or {}
+    join = fmt.get("join") or "/"
     f = open_file(path)
     fam = family(f)
     current = read(path)
@@ -596,7 +672,7 @@ def write(path, changes: dict, riff: dict | None = None) -> None:
         f.add_tags()
     tags = f.tags
     pairs_done = set()
-    v23 = fam == "id3" and getattr(tags, "version", (2, 4, 0))[:2] == (2, 3)
+    v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(tags) == 3)
     credits = {k: v for k, v in changes.items() if (is_performer(k) and (fam != "mp4" or ":" in k))
                or (fam == "id3" and k in _TIPL_R)}
     if credits:
@@ -619,15 +695,24 @@ def write(path, changes: dict, riff: dict | None = None) -> None:
             _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair))
             continue
         if fam == "id3" and v23 and vals and len(vals) > 1 and k not in ("website",):
-            vals = ["/".join(vals)]            # (ID3v2.3: several values joined, as Picard joins them)
+            vals = [join.join(vals)]           # (ID3v2.3: several values joined, as Picard joins them)
         if fam == "id3" and v23 and k in ("mood", "releasedate"):
             _set_id3(f, tags, "~v23:" + k, vals)
         else:
             globals()[f"_set_{fam}"](f, tags, k, vals)
     if fam == "id3":
-        save_id3(f, tags, keep_original_date="originaldate" not in changes, keep_date="date" not in changes)
+        save_id3(f, tags, keep_original_date="originaldate" not in changes, keep_date="date" not in changes,
+                 v2=fmt.get("v2"), v1=fmt.get("v1"), join=join)
         if type(f).__name__ == "WAVE":
             _write_riff_info(path, {**changes, **{k: v for k, v in (riff or {}).items() if v}})
+        if fmt.get("strip_ape") and type(f).__name__ in ("MP3", "EasyMP3"):
+            import mutagen.apev2
+            try:
+                mutagen.apev2.delete(str(path))
+            except mutagen.apev2.error:
+                pass
+    elif fmt.get("strip_id3") and type(f).__name__ == "FLAC":
+        f.save(deleteid3=True)
     else:
         f.save()
 

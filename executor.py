@@ -1050,7 +1050,7 @@ class Executor:
                 src_st = os.stat(src)
                 _keep_owner(stage, src_st)
                 if changes:
-                    tagio.write(stage, changes, **({"riff": fe["riff"]} if fe.get("riff") else {}))
+                    tagio.write(stage, changes, **_write_extras(fe))
                 if embed:
                     _embed_all(stage, a, fe["dst"])
                 if self.preserve_times:
@@ -1109,8 +1109,7 @@ class Executor:
                 _copy_fsync(src, stage)
                 _keep_owner(stage, os.stat(src))
                 if changes:
-                    riff = (a["files"][j] if j < len(a.get("files") or []) else {}).get("riff")
-                    tagio.write(stage, changes, **({"riff": riff} if riff else {}))
+                    tagio.write(stage, changes, **_write_extras(a["files"][j] if j < len(a.get("files") or []) else {}))
                 if embed:
                     _embed_all(stage, a, str(dst))
                 if self.preserve_times:
@@ -1592,6 +1591,17 @@ def _tags_sig_backup_free(dst: Path, backup) -> bool:
         return False
 
 
+def _write_extras(fe) -> dict:
+    """tagio.write's keywords from a plan entry: the WAV file's RIFF INFO values, and what
+    else saving the file does (Picard's ID3v2 version, ID3v1, tags removed)."""
+    out = {}
+    if fe.get("riff"):
+        out["riff"] = fe["riff"]
+    if fe.get("format"):
+        out["fmt"] = fe["format"]
+    return out
+
+
 def _rec_key(rec):
     """A tag backup record compared without the order of its tags (mutagen lists Vorbis
     comment keys from a set: the order differs between two reads of one file)."""
@@ -1608,7 +1618,12 @@ def _same_backup(dst: Path, backup) -> bool:
     import tempfile
     import tag_albums as ta
     with tempfile.TemporaryDirectory() as d:
-        return _rec_key(ta.backup_tags(dst, d)) == _rec_key(backup["rec"])
+        now = ta.backup_tags(dst, d)
+        old = backup["rec"] or {}
+        for k in ("trailer", "flac_ends"):          # (a job from before TagMender kept these)
+            if k not in old:
+                now.pop(k, None)
+        return _rec_key(now) == _rec_key(old)
 
 
 # --------------------------------------------------------------------------

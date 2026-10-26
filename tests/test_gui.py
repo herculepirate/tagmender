@@ -226,6 +226,30 @@ class Gui(te.Base):
         self.app.processEvents()
         self.assertEqual((pr.editions.currentData(), pr.album_editions.currentData()), ("edition_year", "edition"))
 
+    def test_profile_id3_settings_are_saved(self):
+        import profiles as pf
+        pf.save(pf.from_dict({"name": "Id3"}))
+        pr = self.win.pages["Profiles"]
+
+        def pick():
+            pr.reload()
+            self.app.processEvents()
+            pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Id3"))
+            self.app.processEvents()
+        pick()
+        self.assertEqual((pr.pic_v2.currentData(), pr.pic_v1.currentData()), (None, None))
+        for v2, v1, want in (("keep", True, {"write_id3v23": None, "write_id3v1": True}),
+                             (True, False, {"write_id3v23": True, "write_id3v1": False}),
+                             (False, "keep", {"write_id3v23": False, "write_id3v1": None}),
+                             (None, None, {})):
+            pr.pic_v2.setCurrentIndex(pr.pic_v2.findData(v2))
+            pr.pic_v1.setCurrentIndex(pr.pic_v1.findData(v1))
+            pr.save()
+            got = pf.load("Id3").data.get("picard") or {}
+            self.assertEqual({k: got[k] for k in got if k in ("write_id3v23", "write_id3v1")}, want)
+            pick()
+            self.assertEqual((pr.pic_v2.currentData(), pr.pic_v1.currentData()), (v2, v1))
+
     def test_profile_artwork_settings_are_saved(self):
         import profiles as pf
         pf.save(pf.from_dict({"name": "Art"}))

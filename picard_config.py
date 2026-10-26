@@ -177,6 +177,17 @@ TAG_DEFAULTS = {
     "enable_tagger_scripts": False,               # Options > Scripting
     "list_of_scripts": [],                        # [(position, name, enabled, script text)]
 }
+# Picard's settings for what saving a file does beside its fields (Options > Tags; used by
+# tagio.file_options). Read from Picard.ini when it holds them; without them TagMender keeps
+# each file as it is (its ID3v2 version, an ID3v1 tag if it has one), where Picard 3 would
+# write ID3v2.4 and ID3v1.
+FILE_DEFAULTS = {
+    "write_id3v23": None,                         # True: ID3v2.3, False: ID3v2.4, None: as the file has it
+    "id3v23_join_with": "/",
+    "write_id3v1": None,                          # True: write, False: remove, None: update one that is there
+    "remove_ape_from_mp3": False,
+    "remove_id3_from_flac": False,
+}
 PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
 STANDARDIZE = ("none", "variations", "all")
 _LISTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, list))
@@ -387,6 +398,7 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
     p = path if path is not None else ini_path()
     cp = _read(p)
     s = {k: (list(v) if isinstance(v, list) else v) for k, v in TAG_DEFAULTS.items()}
+    s.update(FILE_DEFAULTS)
     if cp is not None:
         ver = picard_version(p)
         if ver and ver[0] < 3:
@@ -419,8 +431,14 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                     s[k] = _qt_list(raw)
                 else:
                     s[k] = _qt_text(raw)
+            for k in FILE_DEFAULTS:
+                if cp.has_option("setting", k):
+                    raw = get(k)
+                    s[k] = _qt_value(raw) if k == "id3v23_join_with" else raw.strip().lower() == "true"
+                    if k == "id3v23_join_with" and not (isinstance(s[k], str) and s[k]):
+                        s[k] = "/"
     for k, v in (overrides or {}).items():
-        if k in TAG_DEFAULTS:
+        if k in TAG_DEFAULTS or k in FILE_DEFAULTS:
             s[k] = v
     if s["standardize_artist_names"] not in STANDARDIZE:
         s["standardize_artist_names"] = TAG_DEFAULTS["standardize_artist_names"]
@@ -430,8 +448,19 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
 def validate_tag_settings(overrides: dict) -> list[str]:
     p = []
     for k, v in (overrides or {}).items():
+        if k in FILE_DEFAULTS:
+            if k == "id3v23_join_with":
+                if not (isinstance(v, str) and v):
+                    p.append("picard.id3v23_join_with must be the text that joins values (Picard: \"/\" or \"; \")")
+            elif k in ("write_id3v23", "write_id3v1"):
+                if v is not None and not isinstance(v, bool):
+                    p.append(f"picard.{k} must be true, false or null (as each file has it)")
+            elif not isinstance(v, bool):
+                p.append(f"picard.{k} must be true or false")
+            continue
         if k not in TAG_DEFAULTS:
-            p.append(f"picard.{k} is not a Picard setting TagMender follows (use {', '.join(TAG_DEFAULTS)})")
+            p.append(f"picard.{k} is not a Picard setting TagMender follows "
+                     f"(use {', '.join(list(TAG_DEFAULTS) + list(FILE_DEFAULTS))})")
         elif k == "standardize_artist_names" and v not in STANDARDIZE:
             p.append(f"picard.standardize_artist_names must be one of {', '.join(STANDARDIZE)}")
         elif k in _TAG_BOOLS and not isinstance(v, bool):

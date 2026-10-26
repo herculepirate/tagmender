@@ -147,6 +147,8 @@ def checks() -> list[Check]:
                          f"{', translated (' + ', '.join(t['translation_locales']) + ')' if t['translate_artist_names'] else ''}"
                          f", release relationships {'on' if t['release_ars'] else 'off'}"
                          f", track relationships {'on' if t['track_ars'] else 'off'}"
+                         f", ID3v2 {'as each file has it' if t['write_id3v23'] is None else ('v2.3' if t['write_id3v23'] else 'v2.4')}"
+                         f", ID3v1 {'updated if there' if t['write_id3v1'] is None else ('written' if t['write_id3v1'] else 'removed')}"
                          + (f" (from {where}, Picard {ver or '?'})" if where else " (Picard 3's defaults: no Picard.ini)")
                          + "; a Picard option profile overriding these is not read"))
     except Exception as exc:

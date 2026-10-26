@@ -1422,6 +1422,19 @@ class Profiles(QWidget):
                                 "off)")
         self.pic_gen.setToolTip("MusicBrainz genres, filtered as Picard's Options > Metadata > Genres says "
                                 "(Picard's default: off; Discogs genres and styles come with Discogs Enrichment)")
+        self.pic_v2 = QComboBox()
+        for label, v in (("As Picard is set", None), ("As each file has it", "keep"), ("ID3v2.4", False),
+                         ("ID3v2.3", True)):
+            self.pic_v2.addItem(label, v)
+        self.pic_v2.setToolTip("Picard's \"ID3v2 version to write\" for MP3, WAV and AIFF files (Picard 3's\n"
+                               "default: v2.4; without Picard.ini each file keeps its own version). In v2.3\n"
+                               "several values are joined with Picard's join character, \"/\" by default.")
+        self.pic_v1 = QComboBox()
+        for label, v in (("As Picard is set", None), ("Update one that is there", "keep"), ("Write", True),
+                         ("Remove", False)):
+            self.pic_v1.addItem(label, v)
+        self.pic_v1.setToolTip("Picard's \"Write ID3v1 tags\" for MP3 files (Picard 3's default: write; without\n"
+                               "Picard.ini an ID3v1 tag a file has is updated, none is added)")
         self.level = QComboBox()
         self.level.addItems(["basic", "enthusiast", "audiophile"])
         self.level.setToolTip("basic: artist, album, title, numbers, date, genre\n"
@@ -1473,6 +1486,8 @@ class Profiles(QWidget):
         form.addRow("Release relationships", self.pic_rel)
         form.addRow("Track relationships", self.pic_trk)
         form.addRow("Genres from MusicBrainz", self.pic_gen)
+        form.addRow("ID3v2 version (MP3)", self.pic_v2)
+        form.addRow("ID3v1 tag (MP3)", self.pic_v1)
         form.addRow("Audiophile", arow)
         form.addRow("", self.art)
         form.addRow("Cover source", self.art_src)
@@ -1583,6 +1598,9 @@ class Profiles(QWidget):
             for box, key in ((self.pic_names, "standardize_artist_names"), (self.pic_rel, "release_ars"),
                              (self.pic_trk, "track_ars"), (self.pic_gen, "use_genres")):
                 box.setCurrentIndex(max(0, box.findData(pic.get(key))))
+            for box, key in ((self.pic_v2, "write_id3v23"), (self.pic_v1, "write_id3v1")):
+                v = pic.get(key, "unset")
+                box.setCurrentIndex(max(0, box.findData("keep" if v is None else (None if v == "unset" else v))))
             for k, c in self.aud.items():
                 c.setChecked(bool(p["audiophile"].get(k, True)))
                 c.setEnabled(p["tag_level"] == "audiophile")
@@ -1745,6 +1763,12 @@ class Profiles(QWidget):
                 pic.pop(key, None)
             else:
                 pic[key] = box.currentData()
+        for box, key in ((self.pic_v2, "write_id3v23"), (self.pic_v1, "write_id3v1")):
+            v = box.currentData()
+            if v is None:
+                pic.pop(key, None)
+            else:
+                pic[key] = None if v == "keep" else v
         data["picard"] = pic
         data.setdefault("audiophile", {}).update({k: c.isChecked() for k, c in self.aud.items()})
         try:

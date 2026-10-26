@@ -232,24 +232,76 @@ def _open(path):
     return tagio.mutagen_file(path)
 
 
+def _trailer(path) -> bytes:
+    """The APEv2 / Lyrics3 / ID3v1 tags at the end of the file, as they are."""
+    import payload
+    with open(path, "rb") as fh:
+        start = payload._trailer_start(fh, os.fstat(fh.fileno()).st_size)
+        fh.seek(start)
+        return fh.read()
+
+
+def _flac_head(path) -> bytes:
+    """The ID3 tags in front of a FLAC file's "fLaC", as they are."""
+    import payload
+    with open(path, "rb") as fh:
+        end = payload._id3v2_end(fh)
+        fh.seek(0)
+        return fh.read(end)
+
+
+def _put_ends(path, blob_dir, trailer=None, head=None):
+    """The trailers (and a FLAC file's ID3 head) back as backed up: "" for none."""
+    import payload
+    from mutagen._util import resize_bytes
+    if trailer is not None:
+        data = (Path(blob_dir) / trailer).read_bytes() if trailer else b""
+        with open(path, "r+b") as fh:
+            start = payload._trailer_start(fh, os.fstat(fh.fileno()).st_size)
+            fh.seek(start)
+            if fh.read() != data:
+                fh.seek(start)
+                fh.truncate()
+                fh.write(data)
+    if head is not None:
+        data = (Path(blob_dir) / head).read_bytes() if head else b""
+        with open(path, "r+b") as fh:
+            end = payload._id3v2_end(fh)
+            fh.seek(0)
+            if fh.read(end) != data:
+                resize_bytes(fh, end, len(data), 0)
+                fh.seek(0)
+                fh.write(data)
+
+
 def backup_tags(path, blob_dir):
-    """Every tag of the file as stored, pictures written to blob_dir by checksum."""
+    """Every tag of the file as stored, pictures written to blob_dir by checksum; the tags at
+    the end of an MP3 or FLAC file (ID3v1, APEv2) and in front of a FLAC file (ID3) as they are."""
     f = _open(path)
     rec = {"format": type(f).__name__ if f else "", "tags": None, "pictures": []}
     if f is None:
         return rec
+    if type(f).__name__ in ("MP3", "EasyMP3", "TrueAudio"):
+        t = _trailer(path)
+        rec["trailer"] = _blob(t, blob_dir) if t else ""
     if isinstance(f, FLAC):
+        t, h = _trailer(path), _flac_head(path)
+        rec["flac_ends"] = {"trailer": _blob(t, blob_dir) if t else "", "head": _blob(h, blob_dir) if h else ""}
         for p in f.pictures:
             rec["pictures"].append(_blob(p.write(), blob_dir))
     if f.tags is None:
         return rec
+    if isinstance(f.tags, ID3) and f.tags.version[0] < 2:
+        rec["tags"] = {"id3v1_only": True}          # (the trailer has it)
+        return rec
     if isinstance(f.tags, ID3):
         tmp = Path(blob_dir) / f"backup-{os.getpid()}.id3"
         tmp.write_bytes(b"")
+        v1 = "trailer" in rec                 # (an MP3's ID3v1 is kept as it is, not merged into the ID3v2)
         if f.tags.version[1] >= 4:
-            f.tags.save(str(tmp), v2_version=4)
+            (ID3(str(path), load_v1=False) if v1 else f.tags).save(str(tmp), v2_version=4)
         else:                                 # (as the file has it: v2.3 frames, never mutagen's v2.4 view)
-            ID3(str(path), translate=False).save(str(tmp), v2_version=3, v23_sep=None)
+            ID3(str(path), translate=False, load_v1=not v1).save(str(tmp), v2_version=3, v23_sep=None)
         rec["tags"] = {"id3": _blob(tmp.read_bytes(), blob_dir), "id3_version": f.tags.version[1]}
         tmp.unlink()
     elif isinstance(f, MP4):
@@ -291,6 +343,7 @@ def restore_tags(path, rec, blob_dir):
         f.clear_pictures()
         for h in rec.get("pictures", []):
             f.add_picture(Picture((Path(blob_dir) / h).read_bytes()))
+    trailer = rec.get("trailer")
     if tags and "id3" in tags:
         tmp = Path(blob_dir) / f"restore-{os.getpid()}.id3"
         tmp.write_bytes((Path(blob_dir) / tags["id3"]).read_bytes())
@@ -298,12 +351,16 @@ def restore_tags(path, rec, blob_dir):
         id3 = ID3(str(tmp), translate=not v23)
         tmp.unlink()
         id3.save(str(path), v2_version=3 if v23 else 4, v23_sep=None)        # (several values as stored)
+        if trailer is not None:
+            _put_ends(path, blob_dir, trailer=trailer)
         return
-    if rec.get("format") == "MP3" or str(path).lower().endswith(".mp3"):
-        try:
-            ID3(str(path)).delete(str(path))             # it had no tags before
+    if rec.get("format") in ("MP3", "EasyMP3", "TrueAudio") or str(path).lower().endswith(".mp3"):
+        try:                                             # it had no ID3v2 tag before
+            ID3(str(path)).delete(str(path), delete_v1=trailer is None)
         except Exception:
             pass
+        if trailer is not None:
+            _put_ends(path, blob_dir, trailer=trailer)
         return
     if f.tags is None:
         f.add_tags()
@@ -325,6 +382,9 @@ def restore_tags(path, rec, blob_dir):
                     out.append(v["value"])
             f.tags[k] = out
     f.save()
+    ends = rec.get("flac_ends")
+    if isinstance(f, FLAC) and ends:
+        _put_ends(path, blob_dir, trailer=ends.get("trailer", ""), head=ends.get("head", ""))
 
 
 # --------------------------------------------------------------------------

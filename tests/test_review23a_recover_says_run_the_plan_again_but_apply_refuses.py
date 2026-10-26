@@ -1,8 +1,8 @@
 # Twenty-third independent review (A): a job cut short (the machine lost power while TagMender
-# was moving an album). `tagmender recover` puts the album back and says "put back as it was
-# before the job; run the plan again to do it". Doing just that - `tagmender apply PLAN` with the
-# plan the job ran from - is refused: "job ... has already run (use a new plan ...)". The
-# message tells the user to do something TagMender will not do.
+# was moving an album). `tagmender recover` put the album back and said "run the plan again to
+# do it" - but `tagmender apply PLAN` with the plan the job ran from is refused (a job runs
+# once). (Review 24A: running it as a new job raced recover and undo.) Recover now says to plan
+# the album again, naming it; the same plan is still refused; a new plan of it runs.
 import io
 import contextlib
 import os
@@ -46,9 +46,13 @@ class RecoverThenRunAgain(Case):
         _, status = os.waitpid(pid, 0)
         self.assertEqual(os.waitstatus_to_exitcode(status), 9)
         rc, out, err = cli("recover")
-        self.assertIn("run the plan again to do it", out)
+        self.assertIn("plan it again to do it (tagmender run", out)
+        self.assertIn(str(self.lib / "Artist A" / "2001 - First"), out)
         rc, out, err = cli("apply", str(saved), "--yes")
-        self.assertEqual(rc, 0, f"recover said to run the plan again; apply says: {err.strip()}")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("plan again", err)
+        res = executor.Executor(self.plan(self.profile("move"))).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
 
 
 if __name__ == "__main__":

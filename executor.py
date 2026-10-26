@@ -876,14 +876,6 @@ def _put_back(data_from: Path, path: Path, owner_of=None):
 # --------------------------------------------------------------------------
 # executing
 # --------------------------------------------------------------------------
-def _recovered_whole(events) -> bool:
-    """A job's journal says it was cut short and recover put every album it began back as it
-    was: no album of it done."""
-    began = {e["album"] for e in events if e.get("ev") == "album_begin"}
-    back = {e["album"] for e in events if e.get("ev") == "album_rolled_back" and e.get("recovered")}
-    return bool(back) and began <= back and not any(e.get("ev") == "album_done" for e in events)
-
-
 class Executor:
     def __init__(self, plan: dict, log=None, cancel=None, progress=None):
         self.plan = plan
@@ -910,17 +902,9 @@ class Executor:
             busy = busy_jobs(but=self.job)
             raise StepError(f"job {busy[0]} is running in another TagMender process; try again when it ends"
                             if busy else f"job {others[0]} was interrupted; run `tagmender recover` first")
-        evs = self.journal.read()
-        if evs and _recovered_whole(evs) and self.job not in pending_jobs():
-            # a job cut short whose albums recover put back, none done: the plan runs again, as
-            # recover says, as a new job (its journal and undo its own)
-            self.job = time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
-            self.plan = dict(self.plan, job=self.job)
-            self.jd = job_dir(self.job)
-            self.journal = Journal(self.jd)
-            evs = self.journal.read()
-        if evs:
-            raise StepError(f"job {self.job} has already run (use a new plan, or `tagmender undo {self.job}`)")
+        if self.journal.read():
+            raise StepError(f"job {self.job} has already run (plan again for a new job, or "
+                            f"`tagmender undo {self.job}`)")
         planmod.save(self.plan, self.jd / "plan.json")
         # folders under /mnt or /media that are no mounted share now (a plain folder there):
         # undo and recover must not take them for a share that went away
@@ -1004,9 +988,9 @@ class Executor:
         # this album's music (a track added since would stay behind alone)
         planned = {fe["src"] for fe in a["files"]} | {fe["copy_of"] for fe in a["files"] if fe.get("copy_of")} \
             | {s_.get("file") for s_ in a.get("skipped") or []}
-        own = {(str(Path(s_).parent), Path(s_).stem) for s_ in planned if s_}   # "01 a.lrc" goes with "01 a.mp3",
-        for d in sorted({str(Path(c["src"]).parent) for c in a["companions"]   # whatever else the folder holds
-                         if c.get("op") != "rewrite" and (str(Path(c["src"]).parent), Path(c["src"]).stem) not in own}):
+        # (a track's own "01 a.lrc" from a folder shared with other music goes whatever else it holds)
+        for d in sorted({str(Path(c["src"]).parent) for c in a["companions"]
+                         if c.get("op") != "rewrite" and not c.get("own")}):
             try:
                 extra = sorted(n for n in os.listdir(d) if Path(n).suffix.lower() in ex.AUDIO_EXT
                                and not n.startswith(".") and os.path.join(d, n) not in planned)
@@ -1905,7 +1889,8 @@ def _recover(job, jd, journal, events):
                 pass
         journal.write(ev="album_rolled_back", album=a, problems=problems, recovered=True)
         done.append(f"album {a} ({_album_name(jd, a)}): put back as it was before the job" +
-                    (f" (problems: {problems})" if problems else "") + "; run the plan again to do it")
+                    (f" (problems: {problems})" if problems else "") +
+                    f"; plan it again to do it (tagmender run \"{_album_name(jd, a)}\", or Preview in the app)")
 
     # 4. folders whose creation was cut short
     made = {x["path"] for x in events if x.get("ev") == "dir_created"}

@@ -332,6 +332,9 @@ _DISC_NAME = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|[a-h])\b"
 MAX_TREE = 5000                           # entries looked at below one album folder
 
 
+SHARED_FOLDER_NOTE = "folder holds other music too; only each track's own files (lyrics ...) go with it"
+
+
 def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist="",
                 single=False):
     """([(companion, destination)], why not): the non-audio files that go with an album
@@ -381,7 +384,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 if p != s_ and p.stem == s_.stem and not p.name.startswith(".") and not p.is_symlink() \
                         and p.is_file() and p.suffix.lower() not in AUDIO_EXT and p.suffix.lower() in exts:
                     own.append((p, d_.with_name(d_.stem + p.suffix)))
-        return own, "folder holds other music too; only each track's own files (lyrics ...) go with it"
+        return own, SHARED_FOLDER_NOTE
     tree, seen, foreign = [], 0, []
     targets = {os.path.realpath(str(x)) for x in dmap.values()}
 
@@ -513,6 +516,19 @@ def _spelled_names(raw: dict, changes: dict) -> dict:
     return {tagio.field_name(k): k for k in raw if tagio.field_name(k) != k and tagio.field_name(k) in changes}
 
 
+def _linked_tracks(entry) -> list:
+    """Conflicts for the album's tracks that are symbolic links (a library of links into a
+    download folder) and would be moved or written: moving one leaves a copy where the link
+    was, and TagMender never writes through a link."""
+    out = []
+    for fe in entry["files"]:
+        s_ = Path(fe.get("copy_of") or fe["src"])
+        if s_.is_symlink() and (fe["op"] == "move" or (fe["op"] == "tag" and fe["src"] == str(s_))):
+            out.append(f"{s_.name} is a symbolic link (to {os.readlink(s_)}): TagMender does not move or "
+                       "write through links - replace it with the file, or use a copy profile")
+    return out
+
+
 def _first_values(raw: dict, changes: dict) -> dict:
     """{field: [its first value]} of the ID3v1 fields written with several values (an
     ID3v2.3 tag joins them; its ID3v1 tag takes the first, as Picard's)."""
@@ -552,13 +568,15 @@ def _cue_rewrites(path: Path, renames: dict):
             out.append(b)
         return out
 
-    table, stems = {}, {}
+    table, stems, by_bytes = {}, {}, set()
     for old, new in renames.items():
         old_n, new_n = old.replace("\\", "/"), new.replace("\\", "/")
         if old_n != new_n:
             new_s = (as_sheet(new_n) or [new_n])[0]
             for o_s in as_sheet(old_n):
                 table[o_s.casefold()] = new_s
+                if o_s != old_n:
+                    by_bytes.add(o_s.casefold())      # (named by the bytes on disk)
                 o, n = os.path.splitext(o_s), os.path.splitext(new_s)
                 if o[1].lower() in AUDIO_EXT:
                     stems.setdefault(o[0].casefold(), set()).add(n[0])
@@ -570,6 +588,8 @@ def _cue_rewrites(path: Path, renames: dict):
         while key.startswith("./"):
             key = key[2:]
         hit = table.get(key.casefold())
+        if hit is not None:
+            swapped.append((key.casefold() in by_bytes, hit))
         if hit is None:          # EAC's cue names the rip's WAV files: "01 a.wav" for "01 a.flac"
             stem, ext = os.path.splitext(key)
             got = stems.get(stem.casefold()) if ext.lower() in AUDIO_EXT else None
@@ -577,6 +597,7 @@ def _cue_rewrites(path: Path, renames: dict):
                 hit = next(iter(got)) + ext              # the cue's own extension, as it had it
         return hit
 
+    swapped = []
     bom = text.startswith("\ufeff")
     if bom:
         text = text[1:]
@@ -594,6 +615,11 @@ def _cue_rewrites(path: Path, renames: dict):
         return None
     if bom:
         new = "\ufeff" + new
+    if enc not in ("utf-8", "utf-16") and any(b for b, _h in swapped) and \
+            any(not h.isascii() for _b, h in swapped):
+        # (a sheet that named its files by their Latin-1 bytes on disk: the new names are
+        # UTF-8 on disk, so the sheet is written in UTF-8 - its entries name them byte for byte)
+        enc = "utf-8"
     try:
         new.encode(enc)
     except UnicodeEncodeError:
@@ -988,14 +1014,7 @@ class Planner:
                         if op == "copy" and not changes:
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
-        # a track that is a symbolic link (a library of links into a download folder): moving
-        # it leaves a copy where the link was, and TagMender never writes through a link
-        for fe in entry["files"]:
-            s_ = Path(fe.get("copy_of") or fe["src"])
-            if s_.is_symlink() and (fe["op"] == "move" or (fe["op"] == "tag" and fe["src"] == str(s_))):
-                entry["conflicts"].append(f"{s_.name} is a symbolic link (to {os.readlink(s_)}): TagMender "
-                                          "does not move or write through links - replace it with the file, "
-                                          "or use a copy profile")
+        entry["conflicts"] += _linked_tracks(entry)
         if entry["conflicts"]:
             entry["status"] = "blocked"
             return entry
@@ -1027,6 +1046,8 @@ class Planner:
                     continue
                 ce = {"src": str(c), "dst": str(dst), "op": moved[0]["op"] if dst != c else "rewrite",
                       "fingerprint": _fp(c)}
+                if why_not == SHARED_FOLDER_NOTE:
+                    ce["own"] = True          # (a track's own file, from a folder shared with other music)
                 if c.suffix.lower() in CUE_LIKE:
                     rel = {os.path.relpath(s_, c.parent): os.path.relpath(d_, dst.parent)
                            for s_, d_ in pairs.items()}
@@ -1125,6 +1146,11 @@ class Planner:
         # - the album folder's parent, when that folder is named after the album artist and lies
         # inside one of the profile's folders (never a library root, never over a file there)
         entry["artist_photo"] = self._artist_photo(prop, entry, op) if identified else None
+        linked = _linked_tracks(entry)                 # (a linked track that gets only a cover or photo)
+        if linked:
+            entry["conflicts"] += linked
+            entry["status"] = "blocked"
+            return entry
         if all(fe["op"] == "none" for fe in entry["files"]) and not entry["companions"] and \
                 not entry["sidecars"] and \
                 not (entry["artwork"] and (entry["artwork"]["embed_into"] or entry["artwork"]["file"])):

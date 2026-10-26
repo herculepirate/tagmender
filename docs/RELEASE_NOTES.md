@@ -81,12 +81,12 @@ artist.jpg is used as before. Saving a profile in the desktop app keeps the phot
 name (artist.jpeg, folder.jpg ...).
 
 **A first run on a real library (twenty-second and twenty-third reviews).** A playlist or cue
-sheet in Latin-1 naming tracks whose names are Latin-1 bytes is updated when they are renamed;
-in a folder shared with other music (Singles) each moving track takes its own .lrc along; an
+sheet in Latin-1 naming tracks whose names are Latin-1 bytes is updated when they are renamed
+(in UTF-8 when the new names need it, as they are on disk); in a folder shared with other music (Singles) each moving track takes its own .lrc along; an
 undo cut short just after it put back a rewritten cover or cue sheet finishes when run again;
 a track that is a symbolic link is never moved or written through (the plan says so; a copy
-profile copies it); after `tagmender recover`, applying the same plan again runs it as a new
-job, as recover says. Turning "Also save it as artist.jpg" on after a run without it saves
+profile copies it); `tagmender recover` now says to plan the album again (naming it), not to
+apply the same plan, which a job never runs twice. Turning "Also save it as artist.jpg" on after a run without it saves
 your own artist photo there (for a moved album, the one in the folder it came from), not a
 download.
 
@@ -319,7 +319,7 @@ Picard's.
 
 **File operations reviewed** in seventeen independent rounds (tests/test_fileops*.py, and four
 crash/error fuzzers in tests/fuzz/)
-- An interrupted album is put back as it was by `tagmender recover`; run the plan again.
+- An interrupted album is put back as it was by `tagmender recover`; plan it again to do it.
 - A new job waits for an interrupted one to be recovered, or for one running elsewhere.
 - A loose track in a library root, or one file named on the command line, is planned on
   its own (it had taken every file below its folder with it); nested albums stay separate.

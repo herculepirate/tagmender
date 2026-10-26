@@ -287,6 +287,8 @@ def backup_tags(path, blob_dir):
     if isinstance(f, FLAC):
         t, h = _trailer(path), _flac_head(path)
         rec["flac_ends"] = {"trailer": _blob(t, blob_dir) if t else "", "head": _blob(h, blob_dir) if h else ""}
+        if f.seektable is not None and not f.seektable.seekpoints:
+            rec["flac_ends"]["empty_seektable"] = True
         for p in f.pictures:
             rec["pictures"].append(_blob(p.write(), blob_dir))
     if f.tags is None:
@@ -343,6 +345,11 @@ def restore_tags(path, rec, blob_dir):
         f.clear_pictures()
         for h in rec.get("pictures", []):
             f.add_picture(Picture((Path(blob_dir) / h).read_bytes()))
+        ends_ = rec.get("flac_ends") or {}
+        if ends_.get("empty_seektable") and f.seektable is None:          # (Picard's seek point fix undone)
+            from mutagen.flac import SeekTable
+            f.seektable = SeekTable(b"")
+            f.metadata_blocks.insert(1, f.seektable)
     trailer = rec.get("trailer")
     if tags and "id3" in tags:
         tmp = Path(blob_dir) / f"restore-{os.getpid()}.id3"

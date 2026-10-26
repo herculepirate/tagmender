@@ -511,15 +511,17 @@ def save_id3(f, tags, keep_original_date=True, keep_date=True, v2=None, v1=None,
 
 # Picard's settings for what saving a file does beside its fields (Options > Tags); None:
 # as the file has it (picard_config.FILE_DEFAULTS)
-FILE_SETTINGS = ("write_id3v23", "id3v23_join_with", "write_id3v1", "remove_ape_from_mp3", "remove_id3_from_flac")
+FILE_SETTINGS = ("write_id3v23", "id3v23_join_with", "write_id3v1", "remove_ape_from_mp3", "remove_id3_from_flac",
+                 "fix_missing_seekpoints_flac")
 
 
 def file_options(path, settings: dict | None) -> dict:
     """What writing this file does beside its fields, from Picard's settings: {"v2": 3 | 4}
     the ID3v2 version written, {"join": sep} what joins several values in an ID3v2.3 tag,
     {"v1": 2 | 0} an ID3v1 tag written or removed (MP3), {"strip_ape": True} an APEv2 tag
-    removed from an MP3, {"strip_id3": True} ID3 tags removed from a FLAC file - each only when
-    it changes the file. {}: the file keeps all of that as it is."""
+    removed from an MP3, {"strip_id3": True} ID3 tags removed from a FLAC file,
+    {"fix_seektable": True} an empty FLAC seek table removed - each only when it changes the
+    file. {}: the file keeps all of that as it is."""
     s = settings or {}
     try:
         f = open_file(path)
@@ -551,14 +553,17 @@ def file_options(path, settings: dict | None) -> dict:
                 out["strip_ape"] = True
             except Exception:
                 pass
-    elif type(f).__name__ == "FLAC" and s.get("remove_id3_from_flac"):
-        try:
-            with open(path, "rb") as fh:
-                head = fh.read(3)
-        except OSError:
-            head = b""
-        if head == b"ID3" or end(128) == b"TAG":
-            out["strip_id3"] = True
+    elif type(f).__name__ == "FLAC":
+        if s.get("remove_id3_from_flac"):
+            try:
+                with open(path, "rb") as fh:
+                    head = fh.read(3)
+            except OSError:
+                head = b""
+            if head == b"ID3" or end(128) == b"TAG":
+                out["strip_id3"] = True
+        if s.get("fix_missing_seekpoints_flac") and f.seektable is not None and not f.seektable.seekpoints:
+            out["fix_seektable"] = True               # (some players choke on an empty seek table)
     return out
 
 
@@ -711,8 +716,11 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
                 mutagen.apev2.delete(str(path))
             except mutagen.apev2.error:
                 pass
-    elif fmt.get("strip_id3") and type(f).__name__ == "FLAC":
-        f.save(deleteid3=True)
+    elif type(f).__name__ == "FLAC" and (fmt.get("strip_id3") or fmt.get("fix_seektable")):
+        if fmt.get("fix_seektable") and f.seektable is not None and not f.seektable.seekpoints:
+            f.metadata_blocks = [b for b in f.metadata_blocks if b is not f.seektable]
+            f.seektable = None
+        f.save(deleteid3=bool(fmt.get("strip_id3")))
     else:
         f.save()
 

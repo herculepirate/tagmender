@@ -166,6 +166,22 @@ class Options(Base):
         self.assertEqual(tagio.read(self.fs[0])["title"], ["First"])
         self.undo(res, before)
 
+    def test_empty_seek_table_removed_and_undone(self):
+        from mutagen.flac import FLAC, SeekTable
+        self.files(".flac")
+        for f in self.fs:
+            x = FLAC(str(f))
+            x.metadata_blocks = [b for b in x.metadata_blocks if not isinstance(b, SeekTable)]
+            x.seektable = SeekTable(b"")
+            x.metadata_blocks.insert(1, x.seektable)
+            x.save()
+        self.assertEqual(FLAC(str(self.fs[0])).seektable.seekpoints, [])
+        p, res, before = self.run_plan({"fix_missing_seekpoints_flac": True})
+        self.assertEqual(p["albums"][0]["files"][0]["format"], {"fix_seektable": True})
+        self.assertIsNone(FLAC(str(self.fs[0])).seektable)
+        self.undo(res, before)
+        self.assertEqual(FLAC(str(self.fs[0])).seektable.seekpoints, [])
+
     def test_flac_id3_kept_without_the_setting(self):
         self.files(".flac", id3_on_flac=True)
         p, res, before = self.run_plan({})

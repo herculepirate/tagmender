@@ -190,6 +190,7 @@ FILE_DEFAULTS = {
     "write_id3v1": None,                          # True: write, False: remove, None: update one that is there
     "remove_ape_from_mp3": False,
     "remove_id3_from_flac": False,
+    "fix_missing_seekpoints_flac": False,
 }
 PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
 STANDARDIZE = ("none", "variations", "all")

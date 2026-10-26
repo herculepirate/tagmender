@@ -45,7 +45,7 @@ that album a conflict; one that does not parse is refused when the profile is sa
 
 **Picard's Options > Tags settings for saving files**: the ID3v2 version (v2.3 or v2.4), the
 ID3v2.3 join character, ID3v1 tags written or removed, APEv2 tags removed from MP3 and ID3 tags
-from FLAC - read from Picard.ini or set in the profile (`picard.write_id3v23` ...; the profile
+from FLAC, an empty FLAC seek table removed - read from Picard.ini or set in the profile (`picard.write_id3v23` ...; the profile
 editor has the ID3 choices). Without them each file keeps its ID3 version and ID3v1 tag, as
 before. They apply when a file is written, and the preview says so. Undo now puts back an
 MP3's own ID3v1 and APEv2 tags and a FLAC file's ID3 tags exactly; before, undo rebuilt an

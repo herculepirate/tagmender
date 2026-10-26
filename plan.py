@@ -1385,6 +1385,8 @@ def format_note(fmt: dict) -> str:
         out.append("its APEv2 tag removed")
     if fmt.get("strip_id3"):
         out.append("its ID3 tags removed")
+    if fmt.get("fix_seektable"):
+        out.append("its empty seek table removed")
     return ", ".join(out)
 
 

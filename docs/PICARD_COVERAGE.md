@@ -45,7 +45,7 @@ output recorded from Picard's own code.
 | Track relationships (composer, lyricist, writer, arranger, conductor, performer:instrument, work, work ID, work languages) | off | Full | |
 | Standardized instrument / vocal credits | on | Full | |
 | Genres from MusicBrainz (min usage, max, filter, album artist genres, folksonomy tags, join) | off | Full | Picard's own filter code (`picard_util.py`); "only my genres" needs a MusicBrainz login and writes none |
-| Ratings (POPM / RATING) | off | Missing | |
+| Ratings (POPM / RATING) | off | Excluded | Picard writes the ratings you give in Picard or on MusicBrainz (with your login); TagMender has neither, and keeps a rating a file has |
 | Discogs Enrichment | - | Plugin | its own code and settings, read from Picard.ini |
 | ReplayGain | plugin | Full | Audiophile level, EBU R128 |
 | Lyrics | plugin | Full | Audiophile level, LRCLIB, synced `.lrc` and embedded plain |
@@ -64,7 +64,7 @@ output recorded from Picard's own code.
 | Remove APEv2 from MP3, ID3 from FLAC | off | Full | `remove_ape_from_mp3`, `remove_id3_from_flac`; undo puts them back |
 | Remove APEv2 from AAC/AC3 | off | Excluded | TagMender does not tag raw AAC/AC3 streams |
 | ID3v2 text encoding | UTF-8 | Partial | always UTF-8 (UTF-16 in v2.3, as mutagen writes it) |
-| Fix missing FLAC seek points | off | Missing | |
+| Fix missing FLAC seek points | off | Full | `fix_missing_seekpoints_flac`: an empty seek table removed; undo puts it back |
 | WAV RIFF INFO | on | Full | written beside the ID3 tag, as Picard |
 | Preserve timestamps | off | Full | follows Picard's setting unless the profile says |
 

@@ -274,13 +274,93 @@ def _put_ends(path, blob_dir, trailer=None, head=None):
                 fh.write(data)
 
 
-def backup_tags(path, blob_dir, legacy=False):
-    """Every tag of the file as stored, pictures written to blob_dir by checksum; the tags at
-    the end of an MP3 or FLAC file (ID3v1, APEv2) and in front of a FLAC file (ID3) as they are.
-    legacy: the record as TagMender kept it before it kept those (to compare with a job's)."""
+RECORD_KIND = 3
+
+
+def _flac_meta_end(fh) -> int:
+    """Where a FLAC file's audio begins: after its ID3 head, "fLaC" and its metadata blocks."""
+    import payload
+    pos = payload._id3v2_end(fh)
+    fh.seek(pos)
+    if fh.read(4) != b"fLaC":
+        raise ValueError("not a FLAC file")
+    pos += 4
+    while True:
+        fh.seek(pos)
+        hdr = fh.read(4)
+        if len(hdr) < 4:
+            raise ValueError("truncated FLAC metadata")
+        pos += 4 + int.from_bytes(hdr[1:4], "big")
+        if hdr[0] & 0x80:
+            return pos
+
+
+def _head(path, flac=False) -> bytes:
+    with open(path, "rb") as fh:
+        end = _flac_meta_end(fh) if flac else __import__("payload")._id3v2_end(fh)
+        fh.seek(0)
+        return fh.read(end)
+
+
+def _put_head(path, blob_dir, blob, flac=False):
+    """The file's head - its ID3v2 tags, or a FLAC file's whole metadata - back as it was."""
+    from mutagen._util import resize_bytes
+    data = (Path(blob_dir) / blob).read_bytes() if blob else b""
+    with open(path, "r+b") as fh:
+        end = _flac_meta_end(fh) if flac else __import__("payload")._id3v2_end(fh)
+        fh.seek(0)
+        if fh.read(end) != data:
+            resize_bytes(fh, end, len(data), 0)
+            fh.seek(0)
+            fh.write(data)
+
+
+def _moov(fh) -> tuple[int, int]:
+    """(offset, size) of an MP4 file's top-level "moov" atom (its tags, chapters and the index
+    of its audio)."""
+    import struct
+    size_ = os.fstat(fh.fileno()).st_size
+    pos = 0
+    while pos + 8 <= size_:
+        fh.seek(pos)
+        n, kind = struct.unpack(">I4s", fh.read(8))
+        if n == 1:
+            n = struct.unpack(">Q", fh.read(8))[0]
+        elif n == 0:
+            n = size_ - pos
+        if n < 8:
+            break
+        if kind == b"moov":
+            return pos, n
+        pos += n
+    raise ValueError("no moov atom")
+
+
+def _put_moov(path, blob_dir, blob):
+    from mutagen._util import resize_bytes
+    data = (Path(blob_dir) / blob).read_bytes()
+    with open(path, "r+b") as fh:
+        at, n = _moov(fh)
+        fh.seek(at)
+        if fh.read(n) != data:
+            resize_bytes(fh, n, len(data), at)
+            fh.seek(at)
+            fh.write(data)
+
+
+def backup_tags(path, blob_dir, legacy=False, kind=None):
+    """Every tag of the file as stored, pictures written to blob_dir by checksum. An MP3's
+    ID3v2 tag and a FLAC file's whole metadata are kept as they are, byte for byte, with the
+    tags at the end of the file (ID3v1, APEv2, Lyrics3); Vorbis comments in their order and
+    case. kind: the record as a TagMender version kept it, to compare with a job's - 0 (legacy)
+    before the trailers were kept, 1 and 2 with them, RECORD_KIND now."""
+    kind = 0 if legacy else (RECORD_KIND if kind is None else kind)
     f = _open(path)
-    rec = {"format": type(f).__name__ if (f if legacy else f is not None) else "", "tags": None, "pictures": []}
-    if not legacy:
+    if kind >= 3:
+        return _backup_raw(path, f, blob_dir)
+    legacy = kind == 0
+    rec = {"format": type(f).__name__ if (f if kind < 2 else f is not None) else "", "tags": None, "pictures": []}
+    if kind == 2:
         rec["v"] = 2                                 # (the record's kind: trailers and ID3 heads kept)
     if f is None:
         return rec
@@ -293,7 +373,7 @@ def backup_tags(path, blob_dir, legacy=False):
     elif isinstance(f, FLAC):
         t, h = _trailer(path), _id3_head(path)
         rec["flac_ends"] = {"trailer": _blob(t, blob_dir) if t else "", "head": _blob(h, blob_dir) if h else ""}
-        if f.seektable is not None and not f.seektable.seekpoints:
+        if f.seektable is not None and not f.seektable.seekpoints and kind >= 2:
             rec["flac_ends"]["empty_seektable"] = True
         for p in f.pictures:
             rec["pictures"].append(_blob(p.write(), blob_dir))
@@ -302,7 +382,7 @@ def backup_tags(path, blob_dir, legacy=False):
     if isinstance(f.tags, ID3) and f.tags.version[0] < 2 and not legacy:
         rec["tags"] = {"id3v1_only": True}          # (the trailer has it)
         return rec
-    if isinstance(f.tags, ID3) and f.tags.version[:2] == (2, 2) and "trailer" in rec:
+    if isinstance(f.tags, ID3) and f.tags.version[:2] == (2, 2) and "trailer" in rec and kind >= 2:
         h = _id3_head(path)                         # (mutagen cannot write v2.2: the tag as it is)
         rec["tags"] = {"id3_raw": _blob(h, blob_dir) if h else "", "id3_version": 2}
         return rec
@@ -320,6 +400,47 @@ def backup_tags(path, blob_dir, legacy=False):
         rec["tags"] = {"mp4": [[k, _mp4_value(v, blob_dir)] for k, v in f.tags.items()]}
     else:
         rec["tags"] = {"vorbis": [[k, v] for k, v in f.tags.items()]}
+    return rec
+
+
+def _backup_raw(path, f, blob_dir) -> dict:
+    """The record of today's kind (see backup_tags)."""
+    rec = {"format": type(f).__name__ if f is not None else "", "v": RECORD_KIND, "tags": None, "pictures": []}
+    if f is None:
+        return rec
+    kind = type(f).__name__
+    if kind in ("MP3", "EasyMP3", "TrueAudio") or isinstance(f, FLAC):
+        flac = isinstance(f, FLAC)
+        h, t = _head(path, flac), _trailer(path)
+        rec["tags"] = {("flac_raw" if flac else "id3_raw"): _blob(h, blob_dir) if h else ""}
+        rec["trailer"] = _blob(t, blob_dir) if t else ""
+        return rec
+    if isinstance(f, MP4):                           # (the moov atom as it is: its tags, their room)
+        with open(path, "rb") as fh:
+            at, n = _moov(fh)
+            fh.seek(at)
+            rec["tags"] = {"mp4_moov": _blob(fh.read(n), blob_dir)}
+        return rec
+    if f.tags is None:
+        return rec
+    if isinstance(f.tags, ID3):                      # (WAV, AIFF, DSF: as before)
+        tmp = Path(blob_dir) / f"backup-{os.getpid()}.id3"
+        tmp.write_bytes(b"")
+        if f.tags.version[1] >= 4:
+            f.tags.save(str(tmp), v2_version=4)
+        else:
+            ID3(str(path), translate=False).save(str(tmp), v2_version=3, v23_sep=None)
+        rec["tags"] = {"id3": _blob(tmp.read_bytes(), blob_dir), "id3_version": f.tags.version[1]}
+        tmp.unlink()
+    elif isinstance(f, MP4):
+        rec["tags"] = {"mp4": [[k, _mp4_value(v, blob_dir)] for k, v in f.tags.items()]}
+    elif isinstance(f.tags, list):                   # Vorbis comments: in their order, as spelled
+        rec["tags"] = {"vorbis_raw": [[k, v] for k, v in list(f.tags)]}
+    else:
+        rec["tags"] = {"vorbis": [[k, v] for k, v in f.tags.items()]}
+    pad = getattr(f.tags, "_padding", None)          # (the room the tag had: put back as it was)
+    if isinstance(pad, int) and pad >= 0 and "vorbis_raw" in rec["tags"]:
+        rec["padding"] = pad
     return rec
 
 
@@ -351,6 +472,23 @@ def restore_tags(path, rec, blob_dir):
     if f is None:
         raise ValueError("cannot open")
     tags = rec.get("tags")
+    trailer = rec.get("trailer")
+    if tags and ("id3_raw" in tags or "flac_raw" in tags):     # (the head as it was, byte for byte)
+        flac = "flac_raw" in tags
+        _put_head(path, blob_dir, tags["flac_raw" if flac else "id3_raw"], flac=flac)
+        if trailer is not None:
+            _put_ends(path, blob_dir, trailer=trailer)
+        return
+    if tags and "mp4_moov" in tags:
+        _put_moov(path, blob_dir, tags["mp4_moov"])
+        return
+    pad = rec.get("padding")
+    save_kw = {"padding": (lambda info: pad)} if isinstance(pad, int) else {}
+    if tags and "vorbis_raw" in tags:
+        del f.tags[:]
+        f.tags.extend((k, v) for k, v in tags["vorbis_raw"])
+        f.save(**save_kw)
+        return
     if isinstance(f, FLAC):
         f.clear_pictures()
         for h in rec.get("pictures", []):
@@ -360,10 +498,6 @@ def restore_tags(path, rec, blob_dir):
             from mutagen.flac import SeekTable
             f.seektable = SeekTable(b"")
             f.metadata_blocks.insert(1, f.seektable)
-    trailer = rec.get("trailer")
-    if tags and "id3_raw" in tags:                  # an ID3v2.2 tag, as it was
-        _put_ends(path, blob_dir, trailer=trailer, head=tags["id3_raw"])
-        return
     if tags and "id3" in tags:
         tmp = Path(blob_dir) / f"restore-{os.getpid()}.id3"
         tmp.write_bytes((Path(blob_dir) / tags["id3"]).read_bytes())
@@ -382,6 +516,14 @@ def restore_tags(path, rec, blob_dir):
             pass
         if trailer is not None:
             _put_ends(path, blob_dir, trailer=trailer)
+        return
+    if isinstance(f, FLAC) and not tags and f.tags is not None:     # (it had no comment block)
+        f.metadata_blocks = [b for b in f.metadata_blocks if b is not f.tags]
+        f.tags = None
+        f.save()
+        ends = rec.get("flac_ends")
+        if ends:
+            _put_ends(path, blob_dir, trailer=ends.get("trailer", ""), head=ends.get("head", ""))
         return
     if f.tags is None:
         f.add_tags()

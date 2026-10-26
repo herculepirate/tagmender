@@ -1620,9 +1620,9 @@ def _same_backup(dst: Path, backup) -> bool:
     import tag_albums as ta
     with tempfile.TemporaryDirectory() as d:
         old = backup["rec"] or {}
-        # (a job from before TagMender kept the trailers: its record, as it made them)
-        legacy = "v" not in old
-        now = ta.backup_tags(dst, d, legacy=legacy)
+        # (a job of an earlier TagMender: its record, as that version made it)
+        kind = old.get("v") or (1 if ("trailer" in old or "flac_ends" in old) else 0)
+        now = ta.backup_tags(dst, d, kind=kind)
         return _rec_key(now) == _rec_key(old)
 
 

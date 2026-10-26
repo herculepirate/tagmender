@@ -296,6 +296,10 @@ class Engine:
     def identify(self, g: Group) -> planmod.Proposal:
         ref = self.forced_for(g, getattr(self, "_alone", True))
         prop = self._forced(g, ref) if ref else self._identify(g)
+        if prop.status == "identified" and prop.targets and \
+                len({str((t.get("artist") or [""])[0]) for t in prop.targets}) > 1:
+            for t in prop.targets:        # (Picard's %_multiartist%: the tracks are by more than one artist)
+                t.setdefault("~multiartist", ["1"])
         # every audio file of the album as found (its second copies too: "01 a.flac" and
         # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)
         prop.group_files = [str(f) for f in g.files]
@@ -485,9 +489,7 @@ class Engine:
                     merged[k] = v
             targets.append({k: (v if isinstance(v, list) else [v]) for k, v in merged.items()})
             prov.update(where)
-        if not tags_mb and len({str((t.get("artist") or [""])[0]) for t in targets}) > 1:
-            for t in targets:             # (Picard's %_multiartist%: tracks by more than one artist)
-                t["~multiartist"] = ["1"]
+
         provider = "musicbrainz" if order[0] == "musicbrainz" else "discogs"
         return planmod.Proposal(
             **base, targets=targets, status="identified", provider=provider + (
@@ -779,6 +781,9 @@ class Engine:
             except Exception as exc:                          # measurements never block tagging
                 self.log.warning("audiophile measurements for %s failed: %s", prop.source_dir, exc)
                 prop.why = list(prop.why or []) + [f"audiophile measurements failed: {exc}"]
+        # (the release's every field, for the tagger scripts the plan runs: Picard's scripts see
+        # them all, whatever the level then writes)
+        prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile) for t in prop.targets or []]
 
     def proposals(self, path, progress=None, cancel=None):
@@ -821,12 +826,18 @@ ALBUM_ONLY_HIDDEN = {"~remove", "~multiartist", "~absolutetracknumber", "~totala
                      "~performance_attributes"}
 
 
-def run_tagger_scripts(scripts, tags: dict, hidden: dict, log=None):
-    """(tags, removed): the track's tags after Picard's tagger scripts, run as Picard runs them
-    on a track (picard/album.py: each script in turn, whitespace stripped after each), with
-    Picard's hidden variables (%_releasecomment%, %_totalalbumtracks% ...) to read. hidden is
-    updated with the hidden variables as the scripts leave them ($set(_shelf,...)), which
-    the file naming script reads in Picard."""
+class TaggerScriptError(Exception):
+    """A tagger script that fails on a file (a function given the wrong arguments ...)."""
+
+
+def run_tagger_scripts(scripts, tags: dict, hidden: dict, log=None, strip=True):
+    """(tags, removed): the tags after Picard's tagger scripts, each in turn, with Picard's
+    hidden variables (%_releasecomment%, %_totalalbumtracks% ...) to read. strip: whitespace
+    stripped after each script, as Picard does on a track (picard/album.py) - not on a file
+    (Track.update_file_metadata). hidden is updated with the hidden variables as the scripts
+    leave them ($set(_shelf,...)), which the file naming script reads in Picard. A script
+    that does not parse is skipped, as Picard skips it; one that fails while it runs raises
+    TaggerScriptError."""
     import picard_script as ps
     m = ps.Metadata()
     for k, v in list(hidden.items()) + list(tags.items()):
@@ -837,8 +848,12 @@ def run_tagger_scripts(scripts, tags: dict, hidden: dict, log=None):
         except ps.ScriptError as exc:
             if log is not None:
                 log.warning("tagger script failed: %s", exc)
-        for k, vals in list(m.rawitems()):
-            m[k] = [str(x).strip() for x in vals]
+        except (TypeError, ValueError, OverflowError, MemoryError, RecursionError, IndexError, KeyError,
+                ZeroDivisionError, AttributeError) as exc:
+            raise TaggerScriptError(f"{type(exc).__name__}: {exc}") from None
+        if strip:
+            for k, vals in list(m.rawitems()):
+                m[k] = [str(x).strip() for x in vals]
     out = {k: list(v) for k, v in m.rawitems() if not k.startswith("~")}
     gone = sorted(k for k in m.deleted_tags if not k.startswith("~") and k not in out)
     hidden.clear()

@@ -613,7 +613,24 @@ def file_vars(path) -> dict:
         v = getattr(info, attr, None)
         if v:
             out[key] = [str(v / 1000.0) if attr == "bitrate" else str(v)]
-    out["~format"] = [FORMAT_NAMES.get(type(f).__name__, type(f).__name__.replace("File", ""))]
+    kind = type(f).__name__
+    name = FORMAT_NAMES.get(kind, kind.replace("File", ""))
+    tags = getattr(f, "tags", None)
+    if kind in ("MP3", "EasyMP3") and getattr(info, "layer", None):        # (Picard's MP3File._info ...)
+        v = getattr(tags, "version", None) if tags is not None else None
+        name = "MPEG-1 Layer %d%s" % (info.layer, " - ID3v%d.%d" % (v[0], v[1]) if v and info.layer == 3 else "")
+    elif kind == "MP4" and getattr(info, "codec_description", None):
+        name = f"{name} ({info.codec_description})"
+    elif kind == "Musepack" and getattr(info, "version", None) is not None:
+        name = "Musepack, SV%d" % info.version
+    elif kind == "OptimFROG":
+        name = "OptimFROG DualStream Audio" if ext.lower() == ".ofs" else "OptimFROG Lossless Audio"
+    elif kind == "AC3":
+        name = "Enhanced AC-3" if getattr(info, "codec", None) == "ec-3" else name
+        name = f"{name} (APEv2)" if tags else name
+    elif kind == "AAC" and tags:
+        name = "AAC (APEv2)"
+    out["~format"] = [name]
     return out
 
 
@@ -751,8 +768,17 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
             continue
         if fam == "id3" and v23 and vals and len(vals) > 1 and k not in ("website",):
             vals = [join.join(vals)]           # (ID3v2.3: several values joined, as Picard joins them)
-        if fam == "id3" and v23 and k in ("mood", "releasedate"):
-            _set_id3(f, tags, "~v23:" + k, vals)
+        if fam == "id3" and k in ("mood", "releasedate"):
+            # (every place a tag may hold it - TMOO/TDRL, TXXX:mood/MOOD/RELEASEDATE - cleared,
+            # then written where this version keeps it)
+            name = "mood" if k == "mood" else "releasedate"
+            tags.delall(ID3_TEXT[k])
+            for key in [x for x in tags if x.startswith("TXXX:") and str(tags[x].desc).lower() == name]:
+                del tags[key]
+            if v23:
+                _set_id3(f, tags, "~v23:" + k, vals)
+            elif vals:
+                _set_id3(f, tags, k, vals)
         else:
             globals()[f"_set_{fam}"](f, tags, k, vals)
     if fam == "id3":

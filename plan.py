@@ -587,6 +587,10 @@ class Planner:
             self._picard_set = get() if get else {}
         return self._picard_set
 
+    def _log(self):
+        import logging
+        return logging.getLogger("tagmender")
+
     def _scripts(self) -> list:
         import picard_config
         return picard_config.tagger_scripts(self._picard())
@@ -601,9 +605,10 @@ class Planner:
         import levels as _levels
         hidden = {k: list(v) for k, v in target.items() if k.startswith("~") and k != "~remove"}
         hidden = {**tagio.file_vars(f), **hidden}
-        tags = {**{k: list(v) for k, v in before.items() if not k.startswith("~")},
+        gone_ = set(target.get("~remove") or [])        # (what the release deletes: no script sees it)
+        tags = {**{k: list(v) for k, v in before.items() if not k.startswith("~") and k not in gone_},
                 **{k: list(v) if isinstance(v, list) else [v] for k, v in target.items() if not k.startswith("~")}}
-        out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden)
+        out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden, self._log(), strip=False)
         # (the release's fields, and what a script changed: never the file's other fields as
         # they are - a copy's own edits stay the copy's)
         new = {k: v for k, v in out.items() if v and (k in target or tags.get(k) != v)}
@@ -671,6 +676,23 @@ class Planner:
             return entry
         targets = {Path(f): t for f, t in zip(files, prop.targets or [{}] * len(files))}
         identified = prop.status == "identified"
+        if identified and self._scripts():
+            # Picard's tagger scripts, on each file (its own tags overlaid with the release's
+            # every field, whatever the level then writes); before anything is planned from them
+            full = getattr(prop, "full_targets", None)
+            full = {Path(f): t for f, t in zip(files, full)} if full and len(full) == len(files) else targets
+            import engine as _engine
+            try:
+                for f in kept:
+                    try:
+                        before_s = tagio.read(f)
+                    except tagio.Unsupported:
+                        continue
+                    targets[f] = self._scripted(f, before_s, dict(full.get(f) or targets.get(f) or {}))
+            except _engine.TaggerScriptError as exc:
+                entry["conflicts"].append(f"a tagger script failed on {f.name}: {exc}")
+                entry["status"] = "blocked"
+                return entry
         conf = float(prop.confidence or 0)
         organize_ok = identified and conf >= float(p["thresholds"]["organize_min_confidence"])
         op = p["operation"]
@@ -759,8 +781,6 @@ class Planner:
             if ino:
                 self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
-            if identified and self._scripts():
-                target = self._scripted(f, before, target)
             tag_ed = naming.edition({**before, **target, **rel_tags}, album_mode) if album_mode != "off" else ""
             if identified and tag_ed and (target.get("album") or [""])[0]:
                 album = str(target["album"][0])

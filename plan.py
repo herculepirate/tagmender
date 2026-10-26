@@ -707,6 +707,10 @@ class Planner:
                 target = {"tagmender": ["Unresolved"], "tagmender_reason": [entry["identification"]["reason"]]}
             removals = ["tagmender_reason"] if identified and before.get("tagmender_reason") and \
                 str((before.get("tagmender") or [""])[0]).lower() == "unresolved" else []
+            # what Picard would delete (compilation on a release not by Various Artists, what a
+            # tagger script $delete-s) - never a field the profile preserves or locks
+            removals += [x for x in (target.pop("~remove", None) or [])
+                         if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             target = tagio.stored(f, {k: v for k, v in target.items() if tagio.holds(f, k)})
             changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)

@@ -41,6 +41,7 @@ import logsetup
 import match_albums as ma
 import match_core as mc
 import mb_tags
+import picard_config
 import plan as planmod
 import reasons
 
@@ -408,6 +409,9 @@ class Engine:
                                      "mb")
             if rel:
                 tags_mb = mb_tags.release_tags(rel, ps)
+        if not (mbid and self.use_mb):
+            ps = self.profile.picard_tags()
+        scripts = picard_config.tagger_scripts(ps)
         es = self.profile.enrichment()
         dparts = None
         if dgid and self.dm is not None and (self.use_discogs or self.token):
@@ -450,6 +454,13 @@ class Engine:
                         break
             if not self.profile["mark_resolved"]:
                 merged.pop("tagmender", None)
+            hidden = {k: v for k, v in (tags_mb[i] if tags_mb else {}).items() if k.startswith("~")}
+            remove = list(hidden.pop("~remove", []))
+            if scripts:                   # Picard's tagger scripts (Options > Scripting), after the plugins
+                merged, gone = run_tagger_scripts(scripts, merged, hidden, self.log)
+                remove += [g for g in gone if g not in merged]
+            if remove:
+                merged["~remove"] = list(dict.fromkeys(remove))
             targets.append({k: (v if isinstance(v, list) else [v]) for k, v in merged.items()})
             prov.update(where)
         provider = "musicbrainz" if order[0] == "musicbrainz" else "discogs"
@@ -757,6 +768,27 @@ class Engine:
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))])
         p["provider_notes"] = self.notes
         return p
+
+
+def run_tagger_scripts(scripts, tags: dict, hidden: dict, log=None):
+    """(tags, removed): the track's tags after Picard's tagger scripts, run as Picard runs them
+    on a track (picard/album.py: each script in turn, whitespace stripped after each), with
+    Picard's hidden variables (%_releasecomment%, %_totalalbumtracks% ...) to read."""
+    import picard_script as ps
+    m = ps.Metadata()
+    for k, v in list(hidden.items()) + list(tags.items()):
+        m[k] = v if isinstance(v, list) else [v]
+    for text in scripts:
+        try:
+            ps.ScriptParser().eval(text, m)
+        except ps.ScriptError as exc:
+            if log is not None:
+                log.warning("tagger script failed: %s", exc)
+        for k, vals in list(m.rawitems()):
+            m[k] = [str(x).strip() for x in vals]
+    out = {k: list(v) for k, v in m.rawitems() if not k.startswith("~")}
+    gone = sorted(k for k in m.deleted_tags if not k.startswith("~") and k not in out)
+    return out, gone
 
 
 _MBID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.IGNORECASE)

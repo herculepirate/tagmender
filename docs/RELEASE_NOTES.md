@@ -29,6 +29,15 @@ in ID3, MP4 and APEv2, and the WMA fields Picard knows. WMA files are no longer 
 every run for a track total they cannot hold, and an M4A with a compilation flag no longer
 fails to read.
 
+**Naming and tagger scripts run on Picard's own script engine** (copied from Picard 3.0.2):
+every one of its 82 functions, with Picard's semantics, so a script works here exactly as in
+Picard. Picard's tagger scripts (Options > Scripting) run on each track after Discogs
+Enrichment, as Picard runs them, with Picard's hidden variables (%_releasecomment%,
+%_absolutetracknumber%, %_primaryreleasetype%, %_artists_sort% ...); a tag a script
+`$delete`s is removed, and so is a compilation flag on a release not by Various Artists, as
+Picard does (never a field the profile preserves). A profile can list its own scripts
+(`picard.enable_tagger_scripts`, `picard.list_of_scripts`).
+
 **Choose the release yourself**, as Picard's "Other versions": `tagmender plan ALBUM --release
 LINK` (or `run`), or "Use another release…" in the app's preview, with a MusicBrainz or Discogs
 release link or ID. No search is made; the preview says how the matcher scores the release, and

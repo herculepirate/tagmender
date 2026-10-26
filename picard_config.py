@@ -174,6 +174,8 @@ TAG_DEFAULTS = {
     "min_genre_usage": 90,
     "genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
     "join_genres": "",
+    "enable_tagger_scripts": False,               # Options > Scripting
+    "list_of_scripts": [],                        # [(position, name, enabled, script text)]
 }
 PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
 STANDARDIZE = ("none", "variations", "all")
@@ -255,6 +257,28 @@ def _qt_variant(data: str):
                 return qstring()
             if t in (9, 11):                                   # QVariantList, QStringList
                 return [variant() if t == 9 else qstring() for _ in range(u32())]
+            if t == 1:                                         # bool
+                v = b[pos] != 0
+                pos += 1
+                return v
+            if t in (2, 3):                                    # int, uint
+                v = struct.unpack(">i" if t == 2 else ">I", b[pos:pos + 4])[0]
+                pos += 4
+                return v
+            if t in (4, 5):                                    # qlonglong, qulonglong
+                v = struct.unpack(">q" if t == 4 else ">Q", b[pos:pos + 8])[0]
+                pos += 8
+                return v
+            if t == 127:                                       # a user type: PyQt's Python object
+                ln = u32()
+                name = b[pos:pos + ln]
+                pos += ln
+                if not name.startswith(b"PyQt_PyObject"):
+                    raise ValueError(name)
+                ln = u32()
+                v = _plain_unpickle(b[pos:pos + ln])
+                pos += ln
+                return list(v) if isinstance(v, tuple) else v
             raise ValueError(t)
         v = variant()
         if pos != len(b):
@@ -266,6 +290,32 @@ def _qt_variant(data: str):
         except (ValueError, struct.error, UnicodeDecodeError):
             continue
     return None
+
+
+def _plain_unpickle(data: bytes):
+    """Plain data (tuples, lists, strings, numbers, booleans) from a pickle, as PyQt stores a
+    Python value in an ini file - never any object: no class or function is ever looked up,
+    so nothing in the file can run."""
+    import io
+    import pickle
+
+    class Plain(pickle.Unpickler):
+        def find_class(self, module, name):
+            raise pickle.UnpicklingError(f"not plain data: {module}.{name}")
+    try:
+        v = Plain(io.BytesIO(data)).load()
+    except Exception as exc:
+        raise ValueError(str(exc)) from None
+
+    def plain(x):
+        if isinstance(x, (str, int, float, bool)) or x is None:
+            return True
+        if isinstance(x, (list, tuple)):
+            return all(plain(y) for y in x)
+        return False
+    if not plain(v):
+        raise ValueError("not plain data")
+    return v
 
 
 def _qt_value(raw: str):
@@ -286,6 +336,33 @@ def _qt_value(raw: str):
             continue
         vals.append(it)
     return vals if len(items) > 1 or (items and items[0].startswith("@Variant(")) else (vals[0] if vals else "")
+
+
+def _scripts(raw: str) -> list:
+    """Picard's tagger scripts as it keeps them: [(position, name, enabled, text)]."""
+    items = _qt_unescape(raw)
+    out = []
+    for it in items:
+        v = _qt_variant(it[9:-1]) if it.startswith("@Variant(") and it.endswith(")") else None
+        if isinstance(v, list):
+            for x in v if v and isinstance(v[0], list) else [v]:
+                if isinstance(x, list) and len(x) == 4:
+                    out.append([int(x[0]) if isinstance(x[0], int) else 0, str(x[1]), bool(x[2]), str(x[3])])
+    return out
+
+
+def tagger_scripts(settings: dict) -> list:
+    """The texts of the tagger scripts that run: enabled and not empty, in their order (none
+    unless "Enable tagger scripts" is on). A profile may list plain texts."""
+    if not settings.get("enable_tagger_scripts"):
+        return []
+    out = []
+    for x in settings.get("list_of_scripts") or []:
+        if isinstance(x, str):
+            out.append((0, x))
+        elif isinstance(x, (list, tuple)) and len(x) == 4 and x[2] and x[3]:
+            out.append((x[0] if isinstance(x[0], int) else 0, str(x[3])))
+    return [t for _p, t in out if t.strip()]
 
 
 def _qt_list(raw: str) -> list:
@@ -328,6 +405,9 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                 if not cp.has_option("setting", k):
                     continue
                 raw = get(k)
+                if k == "list_of_scripts":
+                    s[k] = _scripts(raw)
+                    continue
                 if k in _TAG_BOOLS:
                     s[k] = raw.strip().lower() == "true"
                 elif k in _TAG_INTS:
@@ -356,7 +436,10 @@ def validate_tag_settings(overrides: dict) -> list[str]:
             p.append(f"picard.standardize_artist_names must be one of {', '.join(STANDARDIZE)}")
         elif k in _TAG_BOOLS and not isinstance(v, bool):
             p.append(f"picard.{k} must be true or false")
-        elif k in _LISTS and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+        elif k == "list_of_scripts" and not (isinstance(v, list) and all(
+                isinstance(x, str) or (isinstance(x, list) and len(x) == 4 and isinstance(x[3], str)) for x in v)):
+            p.append("picard.list_of_scripts must be a list of scripts: texts, or [position, name, enabled, text]")
+        elif k in _LISTS and k != "list_of_scripts" and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
             p.append(f"picard.{k} must be a list of strings")
         elif k == "va_name" and not (isinstance(v, str) and v.strip()):
             p.append("picard.va_name must be a name")

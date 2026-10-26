@@ -176,8 +176,15 @@ def _sort_from_aliases(artist: dict, name: str, s) -> str:
 def credit(ac, settings=None) -> tuple[str, str, list, list]:
     """(artist phrase, sort phrase, names, ids) of an artist-credit list, as Picard builds
     them (artist_credit_from_node)."""
+    c = credit_info(ac, settings)
+    return c["name"], c["sort"], c["names"], c["ids"]
+
+
+def credit_info(ac, settings=None) -> dict:
+    """Picard's ArtistCreditInfo of an artist-credit list: name, sort, names, sort_names,
+    countries ("XX" unknown), comments (disambiguations) - and the IDs."""
     s = _settings(settings)
-    phrase, sort, names, ids = [], [], [], []
+    phrase, sort, names, ids, sorts, countries, comments = [], [], [], [], [], [], []
     for c in ac or []:
         if not isinstance(c, dict):
             continue
@@ -194,10 +201,30 @@ def credit(ac, settings=None) -> tuple[str, str, list, list]:
         jp = c.get("joinphrase") or ""
         phrase.append(name + jp)
         sort.append((sname or "") + jp)
-        names.append(tname if s["always_standardize_multivalue_artist"] and a.get("name") else name)
+        multi = s["always_standardize_multivalue_artist"] and a.get("name")
+        names.append(tname if multi else name)
+        sorts.append((tsort if multi else sname) or "")
         if a.get("id"):
             ids.append(a["id"])
-    return "".join(phrase), "".join(sort), names, ids
+            countries.append(a.get("country") or "XX")
+            comments.append(a.get("disambiguation", ""))
+    return {"name": "".join(phrase), "sort": "".join(sort), "names": names, "sort_names": sorts, "ids": ids,
+            "countries": countries, "comments": comments}
+
+
+def _credit_tags(ac, s, release: bool) -> dict:
+    """artist_credit_to_metadata: the tags (and Picard's hidden variables) of a credit."""
+    c = credit_info(ac, s)
+    p = "~albumartists" if release else "~artists"
+    one = c["comments"][0] if len(c["comments"]) == 1 else ""
+    if release:
+        out = {"musicbrainz_albumartistid": c["ids"], "albumartist": [c["name"]], "albumartists": c["names"],
+               "albumartistsort": [c["sort"]], "~albumartists": c["names"], "~albumartistcomment": [one]}
+    else:
+        out = {"musicbrainz_artistid": c["ids"], "artist": [c["name"]], "artistsort": [c["sort"]],
+               "artists": c["names"], "~artistcomment": [one]}
+    out.update({p + "_sort": c["sort_names"], p + "_countries": c["countries"], p + "_comments": c["comments"]})
+    return out
 
 
 # ---- relationships (picard/mbjson.py _relations_to_metadata) --------------------------
@@ -270,6 +297,10 @@ def _rel_artist(rel, m, s, instrumental, per_medium):
     if key == "composer":
         _add(m, "composersort", sort)
         _add(m, "musicbrainz_composerid", artist.get("id"))
+    elif key == "lyricist":
+        _add(m, "~lyricistsort", sort)
+    elif key == "writer":
+        _add(m, "~writersort", sort)
 
 
 def _work(work, m, s, instrumental, per_medium):
@@ -283,24 +314,47 @@ def _work(work, m, s, instrumental, per_medium):
         _add(m, "language", work["language"])
     if work.get("title"):
         _add(m, "work", work["title"])
+    if "disambiguation" in work:
+        _add(m, "~workcomment", work["disambiguation"])
     if work.get("relations"):
-        relations(work["relations"], m, s, instrumental, per_medium)
+        relations(work["relations"], m, s, instrumental, per_medium, entity="work")
+    for iswc in work.get("iswcs") or []:
+        if iswc:
+            m.setdefault("~iswc", []).append(iswc)
 
 
 _AMAZON = re.compile(r"^https?://(?:www.)?(?P<host>.*?)(?::[0-9]+)?/.*/(?P<asin>[0-9B][0-9A-Z]{9})(?:[^0-9A-Z]|$)")
 
 
-def relations(rels, m: dict, settings=None, instrumental=False, per_medium=None) -> dict:
+def relations(rels, m: dict, settings=None, instrumental=False, per_medium=None, entity=None) -> dict:
     """Add the tags of a relationship list to m. Returns {medium number: tags} for credits
     on one medium only (a DJ mix of disc 2)."""
     s = _settings(settings)
     per_medium = {} if per_medium is None else per_medium
+    series_cleared = False
     for rel in rels or []:
         target = rel.get("target-type")
         if target == "artist":
             _rel_artist(rel, m, s, instrumental, per_medium)
         elif target == "work" and rel.get("type") == "performance" and rel.get("work"):
-            _work(rel["work"], m, s, "instrumental" in (rel.get("attributes") or ()), per_medium)
+            attrs = tuple(rel.get("attributes") or ())
+            for a in attrs:
+                _add(m, "~performance_attributes", a)
+            _work(rel["work"], m, s, "instrumental" in attrs, per_medium)
+        elif target == "series" and rel.get("type") == "part of" and rel.get("series"):
+            pre = f"~{entity}_" if entity else "~"
+            if not series_cleared:            # (once per list: picard's metadata_was_cleared)
+                for x in ("series", "seriesid", "seriescomment", "seriesnumber"):
+                    m.pop(pre + x, None)
+                series_cleared = True
+            sr = rel["series"]
+            for x, v in (("series", sr.get("name")), ("seriesid", sr.get("id")),
+                         ("seriescomment", sr.get("disambiguation")),
+                         ("seriesnumber", (rel.get("attribute-values") or {}).get("number", ""))):
+                if v or v == 0:
+                    m.setdefault(pre + x, []).append(str(v))
+        elif target == "label" and rel.get("type") == "broadcast" and "begin" in rel:
+            m["~broadcast_date"] = [rel["begin"]]
         elif target == "url":
             res = (rel.get("url") or {}).get("resource") or ""
             if rel.get("type") == "amazon asin" and "asin" not in m:
@@ -321,20 +375,32 @@ def _asciipunct(v: str) -> str:
 def album_tags(rel, settings=None, per_medium=None) -> dict:
     s = _settings(settings)
     t = {}
-    phrase, sort, names, ids = credit(rel.get("artist-credit"), s)
     rg = rel.get("release-group") or {}
+    # (release_group_to_metadata, then release_to_metadata: picard/album.py's order)
+    if rg.get("id"):
+        t["musicbrainz_releasegroupid"] = [rg["id"]]
+    for k, name in (("disambiguation", "~releasegroupcomment"), ("first-release-date", "~releasegroup_firstreleasedate"),
+                    ("title", "~releasegroup")):
+        if rg.get(k):
+            t[name] = [rg[k]]
+    if rg.get("primary-type"):
+        t["~primaryreleasetype"] = [str(rg["primary-type"]).lower()]
+    for x in rg.get("secondary-types") or []:
+        _add(t, "~secondaryreleasetype", str(x).lower())
     t["album"] = [rel.get("title", "")]
     if s["translate_album_titles"]:
         alias = _localized_alias(rel.get("aliases"), s["translation_locales"])
         if alias:
             t["album"] = [alias[0]]
-    t["albumartist"] = [phrase]
-    t["albumartistsort"] = [sort]
-    t["albumartists"] = names
-    t["musicbrainz_albumartistid"] = ids
+    ids = []
+    if rel.get("artist-credit"):
+        ct = _credit_tags(rel["artist-credit"], s, release=True)
+        ids = ct["musicbrainz_albumartistid"]
+        t.update(ct)
     t["musicbrainz_albumid"] = [rel["id"]]
-    if rg.get("id"):
-        t["musicbrainz_releasegroupid"] = [rg["id"]]
+    for k, name in (("annotation", "~releaseannotation"), ("disambiguation", "~releasecomment")):
+        if rel.get(k):
+            t[name] = [rel[k]]
     if rel.get("date"):
         t["date"] = [rel["date"]]
     if rg.get("first-release-date"):
@@ -342,6 +408,7 @@ def album_tags(rel, settings=None, per_medium=None) -> dict:
         t["originalyear"] = [rg["first-release-date"][:4]]
     countries = sorted(c for c in ((((ev.get("area") or {}).get("iso-3166-1-codes") or [None])[0])
                                    for ev in rel.get("release-events") or [] if isinstance(ev, dict)) if c)
+    t["~releasecountries"] = countries
     pick = next((c for c in s["preferred_release_countries"] if c in countries), None)
     if pick or rel.get("country"):
         t["releasecountry"] = [pick or rel["country"]]
@@ -362,17 +429,33 @@ def album_tags(rel, settings=None, per_medium=None) -> dict:
     if catnos:
         t["catalognumber"] = catnos
     tr = rel.get("text-representation") or {}
+    if tr.get("language"):
+        t["~releaselanguage"] = [tr["language"]]
     if tr.get("script"):
         t["script"] = [tr["script"]]
     if s["release_ars"]:
         # the release group's first, then the release's (picard/album.py reads the release group
         # first); credits on one medium only (a DJ mix of disc 2) come from the release
         per_medium = {} if per_medium is None else per_medium
-        relations(rg.get("relations"), t, s, per_medium={})
-        relations(rel.get("relations"), t, s, per_medium=per_medium)
+        relations(rg.get("relations"), t, s, per_medium={}, entity="releasegroup")
+        relations(rel.get("relations"), t, s, per_medium=per_medium, entity="release")
     if VARIOUS_ARTISTS_ID in ids[:1] and len(ids) == 1:
         t["albumartist"] = t["albumartistsort"] = [s["va_name"]]
-    return {k: v for k, v in t.items() if v and any(v)}
+    return _kept(t)
+
+
+def _kept(m: dict) -> dict:
+    """As Picard's Metadata keeps values: a single empty value is no value; several are kept."""
+    return {k: v for k, v in m.items() if v and (len(v) > 1 or v[0] not in ("", None))}
+
+
+def format_time(ms) -> str:
+    """picard/util format_time: "m:ss", or "h:mm:ss" from an hour."""
+    secs = round(float(ms) / 1000)
+    if secs < 3600:
+        return "%d:%02d" % divmod(secs, 60)
+    h, rest = divmod(secs, 3600)
+    return "%d:%02d:%02d" % ((h,) + divmod(rest, 60))
 
 
 def recording_tags(rec: dict, settings=None, title=None) -> dict:
@@ -382,13 +465,17 @@ def recording_tags(rec: dict, settings=None, title=None) -> dict:
     m = {}
     if rec.get("id"):
         m["musicbrainz_recordingid"] = [rec["id"]]
+    for k, name in (("disambiguation", "~recordingcomment"), ("first-release-date", "~recording_firstreleasedate")):
+        if rec.get(k):
+            m[name] = [rec[k]]
     if rec.get("artist-credit"):
-        phrase, sort, names, ids = credit(rec["artist-credit"], s)
-        m.update({"artist": [phrase], "artistsort": [sort], "artists": names, "musicbrainz_artistid": ids})
+        m.update(_credit_tags(rec["artist-credit"], s, release=False))
     if rec.get("relations"):
-        relations(rec["relations"], m, s)
+        relations(rec["relations"], m, s, entity="recording")
     if rec.get("isrcs"):
         m["isrc"] = list(rec["isrcs"])
+    if rec.get("video"):
+        m["~video"] = ["1"]
     rtitle = rec.get("title")
     if s["translate_track_titles"]:
         alias = _localized_alias(rec.get("aliases"), s["translation_locales"])
@@ -396,7 +483,11 @@ def recording_tags(rec: dict, settings=None, title=None) -> dict:
             rtitle = alias[0]
             title = alias[0] if title else title
     m["title"] = [title or rtitle or ""]
-    return {k: v for k, v in m.items() if v and any(v)}
+    if rtitle:
+        m["~recordingtitle"] = [rtitle]
+    if rec.get("length"):
+        m["~length"] = [format_time(rec["length"])]
+    return _kept(m)
 
 
 def track_tags(t: dict, settings=None) -> dict:
@@ -406,12 +497,15 @@ def track_tags(t: dict, settings=None) -> dict:
     m = recording_tags(t.get("recording") or {}, s, t.get("title"))
     if t.get("id"):
         m["musicbrainz_trackid"] = [t["id"]]
+    if t.get("number") or t.get("number") == 0:
+        m["~musicbrainz_tracknumber"] = [str(t["number"])]
     if t.get("position") is not None and t.get("position") != "":
         m["tracknumber"] = [str(t["position"])]
+    if t.get("length"):
+        m["~length"] = [format_time(t["length"])]
     if t.get("artist-credit"):
-        phrase, sort, names, ids = credit(t["artist-credit"], s)
-        m.update({"artist": [phrase], "artistsort": [sort], "artists": names, "musicbrainz_artistid": ids})
-    return {k: v for k, v in m.items() if v and any(v)}
+        m.update(_credit_tags(t["artist-credit"], s, release=False))
+    return _kept(m)
 
 
 def _artist_nodes(ac) -> dict:
@@ -469,6 +563,13 @@ def audio_media(rel):
     return [m for m in rel.get("media") or [] if str(m.get("format") or "").lower() not in VIDEO_FORMATS]
 
 
+_TRACK_SETS = {"title", "artist", "artistsort", "artists", "musicbrainz_artistid", "tracknumber",
+               "musicbrainz_recordingid", "musicbrainz_trackid", "isrc", "~artists_sort", "~artists_countries",
+               "~artists_comments", "~artistcomment", "~recordingcomment", "~recording_firstreleasedate",
+               "~recordingtitle", "~video", "~length", "~musicbrainz_tracknumber"}
+DATA_TRACK_TITLE, SILENCE_TRACK_TITLE = "[data track]", "[silence]"
+
+
 def release_tags(rel, settings=None) -> list[dict]:
     s = _settings(settings)
     per_medium = {}
@@ -477,26 +578,32 @@ def release_tags(rel, settings=None) -> list[dict]:
     # the release's artist nodes carry what the tracks' may not (their aliases): copied to
     # wherever the artist IDs match, as Picard does (album.py _copy_artist_nodes)
     release_artists = _artist_nodes(rel.get("artist-credit"))
-    media = audio_media(rel)
     # numbered as Picard numbers them: the medium's own position among all media (a CD + DVD +
-    # CD release's second CD is disc 3 of 3) and its own track count - only the audio tracks
-    # are written (the n-th entry is the album's n-th audio file)
-    total_discs = len(rel.get("media") or []) or 1
-    out = []
-    for disc, m in enumerate(media, 1):
-        tracks = [t for t in m.get("tracks") or [] if not (t.get("recording") or {}).get("video")]
-        for t in tracks:
+    # CD release's second CD is disc 3 of 3), its own track count, every track counted in
+    # %_absolutetracknumber% - only the audio tracks are written (the n-th entry is the
+    # album's n-th audio file)
+    all_media = rel.get("media") or []
+    total_discs = len(all_media) or 1
+    audio = {id(m) for m in audio_media(rel)}
+    absolute, out, artists = 0, [], set()
+    for disc, m in enumerate(all_media, 1):
+        loaded = ([("pregap", m["pregap"])] if m.get("pregap") else []) + \
+            [("track", t) for t in m.get("tracks") or []] + [("data", t) for t in m.get("data-tracks") or []]
+        for kind, t in loaded:
+            absolute += 1
             rec = t.get("recording") or {}
             t_ac = _with_nodes(t.get("artist-credit"), release_artists)
             r_ac = _with_nodes(_with_nodes(rec.get("artist-credit"), release_artists), _artist_nodes(t_ac))
+            tt = track_tags(dict(t, **{"artist-credit": t_ac, "recording": dict(rec, **{"artist-credit": r_ac})}), s)
+            artists.add((tt.get("artist") or common.get("albumartist") or [""])[0])
+            if kind != "track" or id(m) not in audio or rec.get("video"):
+                continue                      # (a pregap, data or video track: no audio file of the album's)
             d = {k: list(v) for k, v in common.items()}
             for k, v in (per_medium.get(m.get("position") or disc) or {}).items():
                 for x in v:
                     _add(d, k, x)
-            for k, v in track_tags(dict(t, **{"artist-credit": t_ac, "recording": dict(rec, **{"artist-credit": r_ac})}),
-                                   s).items():
-                if k in ("title", "artist", "artistsort", "artists", "musicbrainz_artistid", "tracknumber",
-                         "musicbrainz_recordingid", "musicbrainz_trackid", "isrc"):
+            for k, v in tt.items():
+                if k in _TRACK_SETS:
                     d[k] = v
                 else:
                     for x in v:
@@ -511,24 +618,35 @@ def release_tags(rel, settings=None) -> list[dict]:
             count = (int(count) + (1 if m.get("pregap") else 0)) if isinstance(count, int) else \
                 len(m.get("tracks") or [])
             d.update({"totaltracks": [str(count)], "discnumber": [str(m.get("position") or disc)],
-                      "totaldiscs": [str(total_discs)]})
+                      "totaldiscs": [str(total_discs)], "~absolutetracknumber": [str(absolute)]})
+            if m.get("pregap"):
+                d["~discpregap"] = ["1"]
             if s["use_genres"]:
-                va_rel = common.get("musicbrainz_albumartistid") == [VARIOUS_ARTISTS_ID]
                 who = [c["artist"] for c in (t_ac or r_ac or []) if isinstance(c, dict) and c.get("artist")] \
-                    if va_rel else list(release_artists.values())
+                    if va else list(release_artists.values())
                 g = genres(rec, rel, s, who)
                 if g:
                     d["genre"] = g
             if d["musicbrainz_artistid"] == [VARIOUS_ARTISTS_ID]:
                 d["artist"] = d["artistsort"] = [s["va_name"]]
+            if (d.get("title") or [""])[0] == DATA_TRACK_TITLE:
+                d["~datatrack"] = ["1"]
+            if (d.get("title") or [""])[0] == SILENCE_TRACK_TITLE:
+                d["~silence"] = ["1"]
             if va:
                 d["compilation"] = ["1"]
+            else:
+                d["~remove"] = ["compilation"]          # (Picard deletes it on any other release)
             if m.get("format"):
                 d["media"] = [m["format"]]
             if m.get("title"):
                 d["discsubtitle"] = [m["title"]]
-            if s["convert_punctuation"]:
-                d = {k: [_asciipunct(x) if isinstance(x, str) and not k.startswith("musicbrainz_") else x
-                         for x in v] for k, v in d.items()}
-            out.append({k: v for k, v in d.items() if v and any(v)})
-    return out
+            out.append(d)
+    for d in out:
+        d["~totalalbumtracks"] = [str(absolute)]
+        if len(artists) > 1:
+            d["~multiartist"] = ["1"]
+    if s["convert_punctuation"]:
+        out = [{k: [_asciipunct(x) if isinstance(x, str) and not k.startswith(("musicbrainz_", "~remove")) else x
+                    for x in v] for k, v in d.items()} for d in out]
+    return [_kept(d) for d in out]

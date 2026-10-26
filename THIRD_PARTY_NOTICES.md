@@ -8,6 +8,7 @@ TagMender is licensed GPL-2.0-or-later (see LICENSE).
 |---|---|---|
 | MusicBrainz Picard 3.0.2, `picard/util/textencoding.py` | GPL-2.0-or-later | `picard_text.py`, unchanged but for one import |
 | MusicBrainz Picard 3.0.2, `picard/util/__init__.py` and `picard/track.py` (genre filter, title case) | GPL-2.0-or-later | `picard_util.py`, unchanged but for logging |
+| MusicBrainz Picard 3.0.2, `picard/script/parser.py`, `picard/script/functions.py`, `picard/const/countries.py` | GPL-2.0-or-later | `picard_script/`, unchanged but for imports; `_shim.py` re-implements the few Picard pieces they use |
 | MusicBrainz Picard 3.0.2, `picard/mbjson.py` (ported) | GPL-2.0-or-later | the artist-credit, alias, translation and relationship logic in `mb_tags.py` |
 | MusicBrainz Picard 3.0.2, `test/data/ws_data/*.json` | GPL-2.0-or-later | `tests/data/picard_parity/ws_data` (test data only) |
 

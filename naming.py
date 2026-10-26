@@ -182,77 +182,36 @@ class TemplateError(ValueError):
 
 
 # --------------------------------------------------------------------------
-# parsing: text, %var%, $func(args) -> a small tree
+# the script language: Picard's own engine (picard_script, from Picard 3.0.2), so a naming
+# script means here exactly what it means in Picard - every one of its functions
 # --------------------------------------------------------------------------
-def _parse(src: str, pos=0, stop=""):
-    """Returns (nodes, pos). Node: ("text", s) | ("var", name) | ("func", name, [args])."""
-    nodes, buf = [], []
-
-    def flush():
-        if buf:
-            nodes.append(("text", "".join(buf)))
-            buf.clear()
-    while pos < len(src):
-        c = src[pos]
-        if c in stop:
-            break
-        if c == "\\" and pos + 1 < len(src):
-            buf.append(src[pos + 1])
-            pos += 2
-            continue
-        if c == "%":
-            end = src.find("%", pos + 1)
-            if end < 0:
-                raise TemplateError(f"unclosed %variable% at {pos}")
-            name = src[pos + 1:end]
-            if not re.fullmatch(r"[A-Za-z0-9_~:.\-]+", name):
-                raise TemplateError(f"bad variable name {name!r}")
-            flush()
-            nodes.append(("var", name.lower()))
-            pos = end + 1
-            continue
-        if c == "$":
-            m = re.match(r"\$([a-z_0-9]+)\(", src[pos:])
-            if m:
-                flush()
-                name = m.group(1)
-                pos += m.end()
-                args = []
-                while True:
-                    arg, pos = _parse(src, pos, ",)")
-                    args.append(arg)
-                    if pos >= len(src):
-                        raise TemplateError(f"${name}( is not closed")
-                    if src[pos] == ")":
-                        pos += 1
-                        break
-                    pos += 1                           # ","
-                if name not in FUNCS:
-                    raise TemplateError(f"unknown function ${name}")
-                nodes.append(("func", name, args))
-                continue
-        buf.append(c)
-        pos += 1
-    flush()
-    return nodes, pos
+def _prep(src: str) -> str:
+    """As Picard prepares a file naming script: tabs and line breaks dropped."""
+    return src.replace("\t", "").replace("\n", "")
 
 
 def compile_template(src: str):
-    src = re.sub(r"\n\s*", "", src)                    # templates may be written on several lines
-    nodes, pos = _parse(src)
-    if pos != len(src):
-        raise TemplateError(f"unexpected {src[pos]!r} at {pos}")
-    return nodes
+    """The parsed script (raises TemplateError)."""
+    import picard_script as ps
+    try:
+        return ps.ScriptParser().parse(_prep(src))
+    except ps.ScriptError as exc:
+        raise TemplateError(str(exc)) from None
 
 
-# --------------------------------------------------------------------------
-# evaluation
-# --------------------------------------------------------------------------
 class Ctx:
+    """The variables a naming script sees: the tags (a "/" in a value made "_", as Picard
+    does for file names), and TagMender's own: %_year%, %_albumartists_sorted%,
+    %_multiartist%, %_edition%, %_edition_kind% (Picard's %_name% is the hidden ~name)."""
     def __init__(self, tags: dict):
+        import picard_script as ps
         self.tags = {k.lower(): (v if isinstance(v, list) else [v]) for k, v in tags.items() if v not in (None, "")}
-        self.local = {}                                   # $set variables (never tags)
         self._derive()
+        self.metadata = ps.Metadata()
+        for k, v in self.tags.items():
+            name = "~" + k[1:] if k.startswith("_") else k
+            self.metadata[name] = [str(x).replace("/", "_") for x in v]
+        self._start = {k: self.metadata.getall(k) for k in self.metadata}
 
     def _derive(self):
         t = self.tags
@@ -277,295 +236,55 @@ class Ctx:
             if ed and not album.endswith(f"[{ed}]"):       # (the album tag may carry it already)
                 t[var] = [ed]
 
+    @property
+    def local(self) -> dict:
+        """What the script set ($set, $copy ...): {name: value}, "" for what it removed."""
+        out = {}
+        for k in set(self._start) | set(self.metadata):
+            now = self.metadata.getall(k)
+            if now != self._start.get(k, []):
+                out[k.replace("~", "_", 1) if k.startswith("~") else k] = "; ".join(now)
+        return out
+
     def var(self, name, joined=True):
-        if name.lower() in self.local:                # set by $set in this name
-            v = self.local[name.lower()]
-            return v if joined else [x for x in v.split(MULTI_SEP) if x]
-        vals = self.tags.get(name.lower())
-        if not vals:
-            return "" if joined else []
-        vals = [str(v).replace("/", "_") for v in vals]
-        return MULTI_SEP.join(vals) if joined else vals
+        name = name.lower()
+        key = "~" + name[1:] if name.startswith("_") else name
+        vals = self.metadata.getall(key)
+        return "; ".join(vals) if joined else list(vals)
 
 
-def _num(s):
-    try:
-        return float(str(s).strip())
-    except ValueError:
-        return None
+def _ev(expr, ctx):
+    import picard_script as ps
+    parser = ps.ScriptParser()
+    parser.context = ctx.metadata
+    parser.file = None
+    parser.load_functions()
+    return expr.eval(parser)
 
 
-def _cmp(a, b, op):
-    na, nb = _num(a), _num(b)
-    if na is not None and nb is not None:
-        return op(na, nb)
-    return op(str(a), str(b))
-
-
-def _var_name(arg):
-    """The variable named by an argument: %name% or a bare name."""
-    if len(arg) == 1 and arg[0][0] == "var":
-        return arg[0][1]
-    if len(arg) == 1 and arg[0][0] == "text":
-        return arg[0][1].strip().strip("%").lower()
-    return None
-
-
-def _words(t, n):
-    words = str(t).split()
+def _words_fn(parser, text, n):
+    """$words(text,n): the first n words of text (TagMender's; Picard has $firstwords, by
+    length)."""
+    words = str(text).split()
     try:
         n = int(n)
     except ValueError:
-        return t
+        return text
     return " ".join(words[:n])
 
 
-def _initials(t):
-    """Picard's $initials: the first character of each word (split at spaces) that is a letter."""
-    return "".join(w[:1] for w in str(t).split(" ") if w[:1].isalpha())
+def _register_own():
+    import picard_script as ps  # noqa: F401
+    from picard_script._shim import register_script_function
+    register_script_function(_words_fn, name="words")
 
 
-def _ev(nodes, ctx):
-    out = []
-    for n in nodes:
-        if n[0] == "text":
-            out.append(n[1])
-        elif n[0] == "var":
-            out.append(ctx.var(n[1]))
-        else:
-            out.append(FUNCS[n[1]](ctx, n[2]))
-    return "".join(out)
-
-
-def _a(ctx, args, i, default=""):
-    return _ev(args[i], ctx) if i < len(args) else default
-
-
-def _f_if(ctx, args):
-    return _a(ctx, args, 1) if _a(ctx, args, 0) else _a(ctx, args, 2)
-
-
-def _f_if2(ctx, args):
-    for i in range(len(args)):
-        v = _a(ctx, args, i)
-        if v:
-            return v
-    return ""
-
-
-def _f_num(ctx, args):
-    try:
-        width = max(0, min(int(_a(ctx, args, 1)), 20))
-    except ValueError:
-        return ""
-    try:
-        value = int(_a(ctx, args, 0))
-    except ValueError:
-        value = 0                                   # (Picard: not a number counts as 0)
-    return f"{value:0{width}d}"
-
-
-def _int_or_none(s):
-    try:
-        return int(s)
-    except ValueError:
-        return None
-
-
-def _slice(text, n, side):
-    try:
-        n = int(n)
-    except ValueError:
-        return ""
-    return text[:n] if side == "left" else text[-n:]
-
-
-def _pcmp(op, ctx, args):
-    """Picard's _cmp: as int, else float, else text (or the type named: int, float, text, nocase)."""
-    x, y = _a(ctx, args, 0), _a(ctx, args, 1)
-    kind = _a(ctx, args, 2) or "auto"
-    if kind == "auto":
-        kind = "text"
-        for t in (int, float):
-            try:
-                t(x), t(y)
-                kind = t.__name__
-                break
-            except ValueError:
-                pass
-    if kind == "text":
-        return "1" if op(x, y) else ""
-    if kind == "nocase":
-        return "1" if op(x.lower(), y.lower()) else ""
-    t = {"int": int, "float": float}.get(kind)
-    try:
-        return "1" if t and op(t(x), t(y)) else ""
-    except ValueError:
-        return ""
-
-
-def _f_join(ctx, args):
-    return _a(ctx, args, 1).join(_multi(ctx, args[0]))
-
-
-def _f_getmulti(ctx, args):
-    name = _var_name(args[0])
-    vals = ctx.var(name, joined=False) if name else []
-    try:
-        return vals[int(_a(ctx, args, 1))]
-    except (ValueError, IndexError):
-        return ""
-
-
-def _multi(ctx, arg):
-    """A multi-value argument: a variable's values, or a text split at "; " (as Picard)."""
-    name = _var_name(arg)
-    if name and arg[0][0] == "var":
-        return ctx.var(name, joined=False)
-    text = _ev(arg, ctx)
-    return [x for x in text.split(MULTI_SEP) if x] if text else []
-
-
-def _f_lenmulti(ctx, args):
-    return str(len(_multi(ctx, args[0])))
-
-
-def _f_set(ctx, args):
-    name = _var_name(args[0]) or _ev(args[0], ctx).strip().lower()
-    value = _a(ctx, args, 1)
-    if name:
-        ctx.local[name] = value
-    return ""
-
-
-def _f_unset(ctx, args):
-    name = _var_name(args[0]) or _ev(args[0], ctx).strip().lower()
-    ctx.local[name] = ""
-    return ""
-
-
-def _f_rreplace(ctx, args):
-    """$rreplace(text,pattern,replacement): every match replaced, as in Picard."""
-    try:
-        return re.sub(_a(ctx, args, 1), _a(ctx, args, 2) if len(args) > 2 else "", _a(ctx, args, 0))
-    except re.error as exc:
-        raise TemplateError(f"$rreplace: bad pattern: {exc}") from None
-
-
-def _f_rsearch(ctx, args):
-    """Picard's $rsearch(text,pattern[,group]): the group, else the first group that matched,
-    else the whole match; "" for no match or a bad pattern."""
-    try:
-        m = re.search(_a(ctx, args, 1), _a(ctx, args, 0))
-    except re.error:
-        return ""
-    if not m:
-        return ""
-    if len(args) > 2 and _a(ctx, args, 2):
-        g = _a(ctx, args, 2)
-        try:
-            g = int(g)
-        except ValueError:
-            g = g.strip()
-        try:
-            return m.group(g) or ""
-        except (IndexError, KeyError):
-            return ""
-    for v in m.groups():
-        if v is not None:
-            return v
-    return m.group(0)
-
-
-def _int(s):
-    try:
-        return int(float(str(s).strip()))
-    except ValueError:
-        return None
-
-
-def _arith(op):
-    def f(ctx, args):
-        vals = [_int(_a(ctx, args, i)) for i in range(len(args))]
-        if not vals or any(v is None for v in vals):
-            return ""
-        out = vals[0]
-        for v in vals[1:]:
-            if op == "div" and v == 0:
-                return ""
-            out = out + v if op == "add" else out - v if op == "sub" else out * v if op == "mul" else out // v
-        return str(out)
-    return f
-
-
-def _f_firstalphachar(ctx, args):
-    t = _a(ctx, args, 0)
-    return t[0].upper() if t[:1].isalpha() else _a(ctx, args, 1, "#")
-
-
-def _iswbound(ch: str) -> bool:
-    import unicodedata
-    cat = unicodedata.category(ch)
-    return cat in ("Zs", "Sk") or cat[0] == "P"
-
-
-def _f_title(ctx, args):
-    """Picard's titlecase: each word's first letter capitalised, a word starting after a
-    space or punctuation ("Jean-Michel", "O.K."), not after an apostrophe in a word."""
-    text = _a(ctx, args, 0)
-    if not text:
-        return text
-    out, cap = text[0].capitalize(), False
-    for i in range(1, len(text)):
-        t = text[i]
-        if t in "\u2019'" and text[i - 1].isalpha():
-            cap = False
-        elif _iswbound(t):
-            cap = True
-        elif cap and t.isalpha():
-            cap = False
-            t = t.capitalize()
-        else:
-            cap = False
-        out += t
-    return out
-
-
-def _f_year(ctx, args):
-    m = re.match(r"\s*(\d{4})", _a(ctx, args, 0))
-    return m.group(1) if m else ""
-
-
-FUNCS = {
-    "if": _f_if, "if2": _f_if2, "num": _f_num, "join": _f_join, "getmulti": _f_getmulti,
-    "lenmulti": _f_lenmulti, "firstalphachar": _f_firstalphachar, "title": _f_title, "year": _f_year,
-    # (the comparisons, tests and text functions behave as Picard's picard/script/functions.py)
-    "not": lambda c, a: "" if _a(c, a, 0) else "1",
-    "and": lambda c, a: "1" if all(_a(c, a, i) for i in range(len(a))) else "",
-    "or": lambda c, a: "1" if any(_a(c, a, i) for i in range(len(a))) else "",
-    "eq": lambda c, a: "1" if _a(c, a, 0) == _a(c, a, 1) else "",
-    "ne": lambda c, a: "1" if _a(c, a, 0) != _a(c, a, 1) else "",
-    "gt": lambda c, a: _pcmp(lambda x, y: x > y, c, a),
-    "lt": lambda c, a: _pcmp(lambda x, y: x < y, c, a),
-    "gte": lambda c, a: _pcmp(lambda x, y: x >= y, c, a),
-    "lte": lambda c, a: _pcmp(lambda x, y: x <= y, c, a),
-    "left": lambda c, a: _slice(_a(c, a, 0), _a(c, a, 1), "left"),
-    "right": lambda c, a: _slice(_a(c, a, 0), _a(c, a, 1), "right"),
-    "truncate": lambda c, a: _a(c, a, 0)[:_int_or_none(_a(c, a, 1))].rstrip(),
-    "lower": lambda c, a: _a(c, a, 0).lower(),
-    "upper": lambda c, a: _a(c, a, 0).upper(),
-    "trim": lambda c, a: _a(c, a, 0).strip(_a(c, a, 1)) if _a(c, a, 1) else _a(c, a, 0).strip(),
-    "replace": lambda c, a: _a(c, a, 0).replace(_a(c, a, 1), _a(c, a, 2)),
-    "noop": lambda c, a: "",
-    "set": _f_set, "unset": _f_unset, "get": lambda c, a: c.var(_var_name(a[0]) or _a(c, a, 0).strip()),
-    "rsearch": _f_rsearch,
-    "rreplace": _f_rreplace,
-    "add": _arith("add"), "sub": _arith("sub"), "mul": _arith("mul"), "div": _arith("div"),
-    "in": lambda c, a: "1" if _a(c, a, 1) in _a(c, a, 0) else "",
-    "sortmulti": lambda c, a: MULTI_SEP.join(sorted(_multi(c, a[0]))),
-    "words": lambda c, a: _words(_a(c, a, 0), _a(c, a, 1)),
-    "initials": lambda c, a: _initials(_a(c, a, 0)),
-}
+def functions() -> list[str]:
+    """The names of the script functions (Picard's, and TagMender's $words)."""
+    import picard_script as ps  # noqa: F401
+    from picard_script._shim import script_functions
+    _register_own()
+    return sorted(dict(script_functions.ext_point_script_functions))
 
 
 def template_for(naming: dict) -> str:
@@ -581,11 +300,18 @@ def template_for(naming: dict) -> str:
 def render(template: str, tags: dict) -> list[str]:
     """The path components (folders..., file name without extension). Empty components
     are dropped; each is stripped of surrounding spaces."""
-    text = _ev(compile_template(template), Ctx(tags))
-    return [p.strip() for p in text.split("/") if p.strip()]
+    import picard_script as ps
+    _register_own()
+    ctx = Ctx(tags)
+    try:
+        text = _ev(compile_template(template), ctx)
+    except ps.ScriptError as exc:
+        raise TemplateError(str(exc)) from None
+    return [p.strip() for p in text.replace("\x00", "").split("/") if p.strip()]
 
 
 def check(template: str) -> list[str]:
+    _register_own()
     try:
         compile_template(template)
         return []

@@ -38,8 +38,11 @@ GRID = {
 }
 
 
+SKIP = {"~genres", "~folksonomy_tags", "~rating"}
+
+
 def visible(m):
-    return {k: [str(x) for x in m.getall(k)] for k in m.keys() if not k.startswith("~")}
+    return {k: [str(x) for x in m.getall(k)] for k in m.keys() if k not in SKIP}
 
 
 def picard_set(s):
@@ -86,7 +89,7 @@ def norm(d):
     if "names" in d:
         return d
     # Picard keeps empty values out too; totals/lengths are album.py's (not compared here)
-    return {k: v for k, v in d.items() if v and any(v) and k not in ("totaltracks",)}
+    return {k: v for k, v in d.items() if v and (len(v) > 1 or v[0]) and k not in ("totaltracks",) and k not in SKIP}
 
 
 cases, diffs = [], []

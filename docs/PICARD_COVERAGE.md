@@ -39,7 +39,7 @@ output recorded from Picard's own code.
 | Translate artist names (locales, from sort name) | off | Full | script exceptions are not read (Picard keeps them in a form TagMender cannot read) |
 | Translate album / track titles | off | Full | |
 | Various Artists name (`va_name`) | Various Artists | Full | album artist and track artist |
-| `compilation=1` on Various Artists releases | - | Full | an existing compilation flag on other albums is left as it is (Picard removes it) |
+| `compilation=1` on Various Artists releases | - | Full | removed from other releases, as Picard does (unless the profile preserves it) |
 | Convert Unicode punctuation to ASCII | off | Full | Picard's own code (`picard_text.py`) |
 | Release relationships (release-level producer, engineer, mixer ..., license, ASIN) | on | Full | |
 | Track relationships (composer, lyricist, writer, arranger, conductor, performer:instrument, work, work ID, work languages) | off | Full | |
@@ -90,8 +90,8 @@ output recorded from Picard's own code.
 | Windows compatibility | on | Full | plus byte, UTF-16 and path limits, shortening |
 | Replace non-ASCII characters | off | Missing | |
 | Overwrite existing files | off | Excluded | never overwrites |
-| Naming script language | - | Partial | 39 of Picard's 82 functions, incl. `$set`/`$unset`; missing: `$cleanmulti $copy $copymerge $countryname $dateformat $datetime $day $delete $delprefix $endswith $eq_all $eq_any $find $firstwords $foreach $get_new $get_original $inmulti $is_audio $is_complete $is_multi $is_video $len $map $matchedtracks $max $min $mod $month $ne_all $ne_any $pad $performer $replacemulti $reverse $reversemulti $setmulti $slice $startswith $strip $substr $swapprefix $unique $while` |
-| Tagger scripts (change tags with a script) | - | Missing | |
+| Naming script language | - | Full | Picard's own script engine (`picard_script/`): all 82 functions, plus `$words` |
+| Tagger scripts (change tags with a script) | - | Full | Picard's own, from Picard.ini (or a profile's `picard.list_of_scripts`), run on each track after Discogs Enrichment, with Picard's hidden variables; `$delete` removes the tag |
 | Plugins in general | - | Excluded | only Discogs Enrichment and CoverUp |
 
 ## MusicBrainz account features

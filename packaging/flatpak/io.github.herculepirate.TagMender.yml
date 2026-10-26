@@ -40,7 +40,7 @@ modules:
     buildsystem: simple
     build-commands:
       - mkdir -p ${FLATPAK_DEST}/lib/tagmender/vendor
-      - for f in *.py; do install -Dm644 "$f" "${FLATPAK_DEST}/lib/tagmender/$f"; done
+      - for f in *.py picard_script/*.py; do install -Dm644 "$f" "${FLATPAK_DEST}/lib/tagmender/$f"; done
       - cp -r coverup_fonts ${FLATPAK_DEST}/lib/tagmender/
       - echo 3dc00512d1fe1d4167107da8b578268cf6d08770 > vendor/picard-discogs-enrichment/VENDORED_COMMIT
       - echo f8f4199b5471eddb934d874bcb67f342c67e6490 > vendor/picard-coverup/VENDORED_COMMIT

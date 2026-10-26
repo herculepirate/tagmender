@@ -80,7 +80,9 @@ class MusicBrainzMapping(unittest.TestCase):
                 n, so, names, _ids = mb_tags.credit(node["artist-credit"], s)
                 got = {"name": n, "sort": so, "names": names}
             if c["kind"] != "credit":
-                got = {k: [str(x) for x in v] for k, v in got.items() if v and any(v) and k != "totaltracks"}
+                got = {k: [str(x) for x in v] for k, v in got.items()
+                       if v and (len(v) > 1 or v[0]) and k not in ("totaltracks", "~genres", "~folksonomy_tags",
+                                                                     "~rating")}
             with self.subTest(fixture=c["fixture"], kind=c["kind"], settings=s):
                 self.assertEqual(got, c["want"])
 

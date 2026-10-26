@@ -94,7 +94,7 @@ DEFAULTS = {
                 "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000,
                 # the album artist's photo, at Enthusiast and Audiophile: artist.jpg in the artist
                 # folder (file; "" for none) and in each track as an "Artist/performer" picture
-                "artist": {"enabled": True, "file": "artist.jpg", "embed": True}},
+                "artist": {"enabled": True, "file": "", "embed": True}},
     "lyrics": {"enabled": False, "synced": True, "embed": False, "sidecar": True},
     "mark_resolved": True,                # TAGMENDER=Resolved on what was identified
     # where it goes

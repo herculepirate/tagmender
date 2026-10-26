@@ -73,6 +73,12 @@ along) - and the tracks' picture follows a corrected one also with "embed only";
 the user's own beside TagMender's is never touched, and a download never replaces a picture
 made from the user's photo.
 
+**The artist photo: into the tracks by default; artist.jpg only when asked.** At Enthusiast
+and Audiophile the artist's photo still goes into each track by default, but it is no longer
+saved as artist.jpg in the artist folder unless the profile says so (profile editor: "Also save
+it as artist.jpg in the artist folder"; `artwork.artist.file: "artist.jpg"`). Your own
+artist.jpg is used as before.
+
 **Comments and lyrics as Picard 3 names them (nineteenth and twentieth reviews).** A
 comment or lyrics with a description or language (from a tagger script, or already in the
 file) is read and written as Picard 3 does: in ID3 the COMM/USLT frame of that language and

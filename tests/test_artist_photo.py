@@ -53,7 +53,9 @@ class ArtistPhoto(Base):
             give(f, jpeg(600, 600))
 
     def prof(self, level="enthusiast", **art):
-        a = {"enabled": True, "embed_front": True, "files": True, "sources": ["caa"]}
+        # (artist.jpg in the artist folder: off by default since 0.3.0 - these tests turn it on)
+        a = {"enabled": True, "embed_front": True, "files": True, "sources": ["caa"],
+             "artist": {"enabled": True, "file": "artist.jpg", "embed": True}}
         a.update(art)
         return self.profile(artwork=a, tag_level=level)
 
@@ -84,6 +86,21 @@ class ArtistPhoto(Base):
         self.assertIn("artist photo of Some Artist", pl.preview(p))
         executor.undo(p["job"])
         self.assertFalse(photo.exists())
+        for f in (self.f1, self.f2):
+            self.assertEqual([t for t, _s in pictures(f)], [3])
+
+    def test_by_default_in_the_tracks_but_no_artist_jpg(self):
+        """0.3.0's default: the artist photo goes into the tracks; artist.jpg is not written into
+        the artist folder unless the profile asks (artwork.artist.file)."""
+        import profiles as pf
+        self.assertEqual(pf.DEFAULTS["artwork"]["artist"], {"enabled": True, "file": "", "embed": True})
+        prof = self.prof(artist={"enabled": True})
+        p, res = self.run_one(prof, self.prop())
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertFalse((self.album.parent / "artist.jpg").exists())
+        for f in (self.f1, self.f2):
+            self.assertIn((8, (800, 800)), pictures(f))
+        executor.undo(p["job"])
         for f in (self.f1, self.f2):
             self.assertEqual([t for t, _s in pictures(f)], [3])
 

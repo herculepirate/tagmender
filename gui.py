@@ -1392,11 +1392,14 @@ class Profiles(QWidget):
         self.art_when.addItem("Only for albums missing a cover", "needed")
         self.art_when.addItem("For every album", "always")
         self.art_enlarge = QCheckBox("Enlarge a small cover (down to 250 px) to the minimum size")
-        self.art_artist = QCheckBox("Artist photo: artist.jpg in the artist folder and in each track "
-                                    "(Enthusiast and Audiophile)")
+        self.art_artist = QCheckBox("Artist photo in each track (Enthusiast and Audiophile)")
         self.art_artist.setToolTip("From fanart.tv, TheAudioDB, Wikimedia Commons or Discogs (CoverUp's artist "
-                                   "sources), once per artist.\nNever over an artist.jpg that is there; in the tracks "
-                                   "as an 'Artist/performer' picture, beside the cover.")
+                                   "sources), once per artist - or your own artist.jpg.\nIn the tracks as an "
+                                   "'Artist/performer' picture, beside the cover.")
+        self.art_artist_file = QCheckBox("Also save it as artist.jpg in the artist folder")
+        self.art_artist_file.setToolTip("What Plex, Jellyfin, Navidrome and LMS show for the artist. Never over an "
+                                        "artist.jpg that is there.")
+        self.art_artist.toggled.connect(self.art_artist_file.setEnabled)
         self.art_replace = QCheckBox("Replace an album's own cover when it is smaller than the minimum size")
         self.art_replace.setToolTip("By a larger cover found, or - when there is none - the album's own cover "
                                     "enlarged.\nThe old pictures and cover file are kept by the job: undo puts "
@@ -1500,6 +1503,7 @@ class Profiles(QWidget):
         form.addRow("", self.art_enlarge)
         form.addRow("", self.art_replace)
         form.addRow("", self.art_artist)
+        form.addRow("", self.art_artist_file)
         form.addRow("Create a cover when none is found", self.art_gen)
         form.addRow("", self.unattended)
         save = QPushButton("Save profile")
@@ -1597,6 +1601,8 @@ class Profiles(QWidget):
             self.art_enlarge.setChecked(bool(p["artwork"].get("enlarge", True)))
             self.art_replace.setChecked(p["artwork"].get("replace", "larger_only") == "larger_only")
             self.art_artist.setChecked((p["artwork"].get("artist") or {}).get("enabled", True) is not False)
+            self.art_artist_file.setChecked(bool((p["artwork"].get("artist") or {}).get("file")))
+            self.art_artist_file.setEnabled(self.art_artist.isChecked())
             self.art_gen.setCurrentIndex(max(0, self.art_gen.findData(p["artwork"].get("generate", "off"))))
             self.level.setCurrentText(p["tag_level"])
             pic = p.data.get("picard") or {} if hasattr(p, "data") else p.get("picard") or {}
@@ -1758,7 +1764,8 @@ class Profiles(QWidget):
         data["artwork"].update({"sources": list(self.art_src.currentData()), "when": self.art_when.currentData(),
                                 "enlarge": self.art_enlarge.isChecked(), "generate": self.art_gen.currentData(),
                                 "replace": "larger_only" if self.art_replace.isChecked() else "never"})
-        data["artwork"]["artist"] = dict(data["artwork"].get("artist") or {}, enabled=self.art_artist.isChecked())
+        data["artwork"]["artist"] = dict(data["artwork"].get("artist") or {}, enabled=self.art_artist.isChecked(),
+                                         file="artist.jpg" if self.art_artist_file.isChecked() else "")
         data["artwork"].pop("provider", None)           # (sources says it now)
         data["tag_level"] = self.level.currentText()
         pic = dict(data.get("picard") or {})

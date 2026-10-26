@@ -527,13 +527,15 @@ ARTIST_EMBED_MAX_SIDE = 800     # the artist photo in every track: small (it is 
 
 def artist_settings(profile) -> dict | None:
     """{"file": name or "", "embed": bool} when the profile gets artist photos: artwork on,
-    tag level Enthusiast or Audiophile, artwork.artist.enabled (on unless set off)."""
+    tag level Enthusiast or Audiophile, artwork.artist.enabled (on unless set off). The photo
+    goes into the tracks (embed, on by default); it is saved in the artist folder only when
+    artwork.artist.file names the file (off by default; "artist.jpg" for Plex, Jellyfin ...)."""
     import levels
     art = profile["artwork"]
     a = art.get("artist") or {}
     if not art.get("enabled") or levels.level(profile) == "basic" or a.get("enabled", True) is False:
         return None
-    return {"file": a.get("file", ARTIST_FILE) or "", "embed": bool(a.get("embed", True))}
+    return {"file": a.get("file", "") or "", "embed": bool(a.get("embed", True))}
 
 
 def has_artist_picture(path) -> bool:

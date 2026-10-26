@@ -44,7 +44,7 @@ output recorded from Picard's own code.
 | Release relationships (release-level producer, engineer, mixer ..., license, ASIN) | on | Full | |
 | Track relationships (composer, lyricist, writer, arranger, conductor, performer:instrument, work, work ID, work languages) | off | Full | |
 | Standardized instrument / vocal credits | on | Full | |
-| Genres from MusicBrainz (min usage, max, filter, album artist genres, folksonomy tags, join) | off | Partial | tagging takes Discogs genres/styles (plugin); `enrich` takes release-group genres with a map, allowed list and maximum; no folksonomy, filter syntax or artist fallback |
+| Genres from MusicBrainz (min usage, max, filter, album artist genres, folksonomy tags, join) | off | Full | Picard's own filter code (`picard_util.py`); "only my genres" needs a MusicBrainz login and writes none |
 | Ratings (POPM / RATING) | off | Missing | |
 | Discogs Enrichment | - | Plugin | its own code and settings, read from Picard.ini |
 | ReplayGain | plugin | Full | Audiophile level, EBU R128 |

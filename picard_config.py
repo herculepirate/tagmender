@@ -164,11 +164,20 @@ TAG_DEFAULTS = {
     "va_name": "Various Artists",
     "convert_punctuation": False,
     "preferred_release_countries": [],
+    "use_genres": False,                          # Options > Metadata > Genres
+    "only_my_genres": False,
+    "artists_genres": False,
+    "folksonomy_tags": False,
+    "max_genres": 5,
+    "min_genre_usage": 90,
+    "genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+    "join_genres": "",
 }
 PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
 STANDARDIZE = ("none", "variations", "all")
 _LISTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, list))
 _TAG_BOOLS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, bool))
+_TAG_INTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool))
 
 
 def _qt_list(raw: str) -> list:
@@ -177,6 +186,14 @@ def _qt_list(raw: str) -> list:
     if not raw or raw.startswith("@"):
         return []
     return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def _qt_text(raw: str) -> str:
+    """A text Qt wrote to an ini file: quoted, with \\n for line breaks."""
+    raw = str(raw).strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+        raw = raw[1:-1]
+    return raw.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
 
 
 def picard_version(path: Path | None = None) -> tuple:
@@ -206,6 +223,13 @@ def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dic
                 raw = get(k)
                 if k in _TAG_BOOLS:
                     s[k] = raw.strip().lower() == "true"
+                elif k in _TAG_INTS:
+                    try:
+                        s[k] = int(raw.strip())
+                    except ValueError:
+                        pass
+                elif k == "genres_filter":
+                    s[k] = _qt_text(raw)
                 elif k in _LISTS:
                     s[k] = _qt_list(raw)
                 else:
@@ -231,6 +255,10 @@ def validate_tag_settings(overrides: dict) -> list[str]:
             p.append(f"picard.{k} must be a list of strings")
         elif k == "va_name" and not (isinstance(v, str) and v.strip()):
             p.append("picard.va_name must be a name")
+        elif k in _TAG_INTS and not (isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100):
+            p.append(f"picard.{k} must be a number from 0 to 100")
+        elif k in ("genres_filter", "join_genres") and not isinstance(v, str):
+            p.append(f"picard.{k} must be text")
     return p
 
 

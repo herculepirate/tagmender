@@ -52,6 +52,8 @@ def inc_for(settings: dict | None = None) -> str:
     """The release's includes, as Picard asks for them with these settings."""
     s = _settings(settings)
     inc = list(BASE_INC)
+    if s["use_genres"] and not s["only_my_genres"]:
+        inc += ["tags", "genres"]           # (your own genres need a MusicBrainz login: not asked for)
     if s["release_ars"] or s["track_ars"]:
         inc += [x for x in RELEASE_INC if x not in inc]
         if s["track_ars"]:
@@ -427,6 +429,40 @@ def _with_nodes(ac, nodes: dict):
     return out
 
 
+# ---- genres (picard/track.py _convert_folksonomy_tags_to_genre) -----------------------
+def _counts(node, s):
+    from collections import Counter
+    c = Counter()
+    for g in (node or {}).get("tags" if s["folksonomy_tags"] else "genres") or []:
+        if isinstance(g, dict) and g.get("name"):
+            c[g["name"]] += int(g.get("count") or 0)
+    return c
+
+
+def genres(track_nodes, rel, s, artist_nodes=()) -> list:
+    """The GENRE values Picard writes for one track: the recording's, the release's and the
+    release group's genres (or folksonomy tags) together - else, with "use album artist
+    genres", the artists' - filtered, at least min_genre_usage % of the top one, the
+    max_genres most used, title-cased and sorted (joined when asked)."""
+    import picard_util
+    if not s["use_genres"] or s["only_my_genres"]:
+        return []
+    c = _counts(track_nodes, s) + _counts(rel, s) + _counts(rel.get("release-group"), s)
+    if not c and s["artists_genres"]:
+        for a in artist_nodes:
+            c += _counts(a, s)
+    limit = s["max_genres"]
+    if limit is not None and limit < 1:
+        return []
+    c = +c
+    if not c:
+        return []
+    c = picard_util.TagGenreFilter(s["genres_filter"] or "").filter(c, minusage=s["min_genre_usage"])
+    top = sorted(c.items(), key=lambda x: (-x[1], x[0]))[:limit]
+    out = sorted(picard_util.titlecase(name) for name, _n in top)
+    return [s["join_genres"].join(out)] if s["join_genres"] and out else out
+
+
 def audio_media(rel):
     return [m for m in rel.get("media") or [] if str(m.get("format") or "").lower() not in VIDEO_FORMATS]
 
@@ -468,6 +504,13 @@ def release_tags(rel, settings=None) -> list[dict]:
                 d["tracknumber"] = [str(len([x for x in out if x["discnumber"] == [str(disc)]]) + 1)]
             d.update({"totaltracks": [str(len(tracks))], "discnumber": [str(disc)],
                       "totaldiscs": [str(total_discs)]})
+            if s["use_genres"]:
+                va_rel = common.get("musicbrainz_albumartistid") == [VARIOUS_ARTISTS_ID]
+                who = [c["artist"] for c in (t_ac or r_ac or []) if isinstance(c, dict) and c.get("artist")] \
+                    if va_rel else list(release_artists.values())
+                g = genres(rec, rel, s, who)
+                if g:
+                    d["genre"] = g
             if d["musicbrainz_artistid"] == [VARIOUS_ARTISTS_ID]:
                 d["artist"] = d["artistsort"] = [s["va_name"]]
             if va:

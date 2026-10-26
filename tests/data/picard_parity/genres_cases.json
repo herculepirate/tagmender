@@ -1,0 +1,4875 @@
+[
+{
+"counts": {
+"seen live": 16,
+"drum and bass": 2,
+"k-pop": 10,
+"rock": 17,
+"indie rock": 0
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"K-Pop",
+"Rock",
+"Seen Live"
+]
+},
+{
+"counts": {
+"drum and bass": 0,
+"indie rock": 17,
+"pop": 2,
+"rock 'n' roll": 6,
+"post-rock": 19,
+"a cappella": 19
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Indie Rock / Pop / Post-Rock / Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"rock": 12,
+"pop": 3,
+"a cappella": 16,
+"post-rock": 2,
+"seen live": 17,
+"hip hop": 8
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Rock / Seen Live"
+]
+},
+{
+"counts": {
+"children's music": 1,
+"indie rock": 17,
+"post-rock": 0
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"drum and bass": 6,
+"rock 'n' roll": 4,
+"children's music": 6,
+"lo-fi": 1,
+"électronique": 17,
+"k-pop": 8,
+"favorites": 15,
+"seen live": 14
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"indie rock": 15
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"drum and bass": 10,
+"rock": 18,
+"k-pop": 14,
+"indie rock": 17,
+"post-rock": 13,
+"children's music": 1,
+"électronique": 1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"k-pop": 8,
+"électronique": 11,
+"a cappella": 20,
+"lo-fi": 10
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"lo-fi": 0
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"drum and bass": 1,
+"a cappella": 4,
+"lo-fi": 13
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"hip hop": 4,
+"favorites": 3,
+"drum and bass": 6,
+"children's music": 20,
+"rock 'n' roll": 6,
+"pop": -1,
+"seen live": 14,
+"rock": 17
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Children's Music"
+]
+},
+{
+"counts": {
+"drum and bass": 10,
+"post-rock": 18
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"électronique": 11,
+"k-pop": 11,
+"rock 'n' roll": 2,
+"rock": 14,
+"lo-fi": 19,
+"post-rock": 11,
+"drum and bass": 0,
+"pop": 5
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 18
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 10,
+"indie rock": 18
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 14,
+"k-pop": 2,
+"hip hop": 2,
+"children's music": 14,
+"électronique": 13,
+"rock 'n' roll": 14
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Children's Music",
+"Rock 'N' Roll",
+"Seen Live",
+"Électronique"
+]
+},
+{
+"counts": {
+"favorites": 9
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"rock": 10,
+"rock 'n' roll": 6,
+"post-rock": 16,
+"hip hop": 16,
+"indie rock": 15,
+"k-pop": 9,
+"children's music": 19,
+"électronique": 6
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Children's Music; Hip Hop; Indie Rock; Post-Rock; Rock"
+]
+},
+{
+"counts": {
+"pop": 10,
+"post-rock": -1,
+"lo-fi": -1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"lo-fi": 1,
+"rock 'n' roll": 6,
+"favorites": 2,
+"children's music": 6,
+"k-pop": 14
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"drum and bass": 5
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"indie rock": 11,
+"rock 'n' roll": 1,
+"favorites": 4,
+"drum and bass": 4,
+"lo-fi": 3
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 14,
+"a cappella": 20
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Électronique"
+]
+},
+{
+"counts": {
+"rock": 19,
+"a cappella": 2
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"rock": 8,
+"hip hop": 15,
+"pop": 6
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"a cappella": 12,
+"seen live": 15,
+"rock": 3,
+"children's music": 16,
+"lo-fi": 3,
+"post-rock": 15
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Children's Music",
+"Lo-Fi",
+"Rock",
+"Seen Live"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 13
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"électronique": 7,
+"post-rock": 13,
+"a cappella": 15,
+"rock 'n' roll": 16,
+"pop": 14
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Pop; Post-Rock; Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"pop": 1,
+"lo-fi": 20,
+"seen live": 6,
+"drum and bass": 12,
+"indie rock": 1,
+"k-pop": 5,
+"rock 'n' roll": 20,
+"favorites": 8
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 11,
+"lo-fi": 14,
+"pop": 4,
+"indie rock": 20
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"children's music": 10,
+"drum and bass": -1,
+"pop": 9,
+"a cappella": 16,
+"k-pop": 13,
+"indie rock": 13
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 2,
+"indie rock": 1,
+"rock 'n' roll": 7,
+"pop": 7
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 15,
+"k-pop": 17,
+"hip hop": 14,
+"drum and bass": 9,
+"seen live": 1,
+"post-rock": 7
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock": 1,
+"k-pop": 18,
+"indie rock": 6,
+"hip hop": 1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Hip Hop",
+"Indie Rock",
+"K-Pop"
+]
+},
+{
+"counts": {
+"post-rock": 0,
+"drum and bass": 15,
+"hip hop": 6,
+"électronique": 2,
+"seen live": 4
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Drum And Bass",
+"Hip Hop",
+"Électronique"
+]
+},
+{
+"counts": {
+"k-pop": 8,
+"hip hop": 13,
+"post-rock": 15,
+"pop": 20
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"rock": 16,
+"a cappella": 5,
+"rock 'n' roll": 15,
+"post-rock": 14
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"k-pop": 5,
+"lo-fi": 6,
+"post-rock": 9,
+"drum and bass": 5,
+"favorites": 19,
+"hip hop": 3
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 0,
+"pop": 13,
+"favorites": 4,
+"hip hop": 4
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"children's music": 8,
+"post-rock": 5,
+"a cappella": 10,
+"pop": 4,
+"rock": -1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"post-rock": 15,
+"k-pop": -1,
+"pop": 1,
+"favorites": 7
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"indie rock": 3,
+"électronique": 20,
+"post-rock": 18
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"favorites": 0,
+"électronique": 15,
+"k-pop": 19,
+"seen live": 12
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"K-Pop / Seen Live / Électronique"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 7,
+"rock": -1,
+"k-pop": 13,
+"rock 'n' roll": 1,
+"a cappella": 15,
+"pop": 16,
+"lo-fi": 1
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; K-Pop; Lo-Fi; Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"a cappella": 7
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"lo-fi": 1,
+"drum and bass": 18,
+"indie rock": 3,
+"a cappella": 9,
+"hip hop": 7,
+"rock": 19,
+"pop": 8
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Drum And Bass; Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"k-pop": 15,
+"lo-fi": 8,
+"hip hop": 13
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"hip hop": -1,
+"indie rock": 8,
+"lo-fi": 13
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"pop": 1,
+"indie rock": 3,
+"électronique": 15
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"hip hop": -1,
+"indie rock": 4,
+"favorites": -1,
+"children's music": 14,
+"pop": 20,
+"lo-fi": 13,
+"post-rock": 11,
+"électronique": 8
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"indie rock": 11,
+"children's music": 2,
+"rock": 5,
+"rock 'n' roll": -1,
+"k-pop": 8
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"a cappella": 0,
+"électronique": 7,
+"indie rock": 2,
+"children's music": 0,
+"drum and bass": 20,
+"hip hop": 8
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"children's music": 1,
+"pop": 0,
+"a cappella": 12,
+"drum and bass": 13,
+"rock": 18,
+"k-pop": 3,
+"rock 'n' roll": 19,
+"favorites": 8
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Drum And Bass",
+"Favorites",
+"Rock",
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"lo-fi": 9,
+"drum and bass": 8
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"hip hop": 20,
+"lo-fi": 11,
+"post-rock": 2
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 3,
+"lo-fi": 16,
+"post-rock": 5,
+"pop": 6,
+"a cappella": 1,
+"children's music": 4,
+"électronique": 9,
+"k-pop": 16
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 12,
+"électronique": 11,
+"pop": 12,
+"rock": 15
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"k-pop": 15,
+"post-rock": 19
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"drum and bass": 3,
+"k-pop": 0,
+"lo-fi": 12,
+"a cappella": 14,
+"hip hop": 17,
+"rock": 14
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"lo-fi": 19,
+"pop": 13,
+"indie rock": 1,
+"rock 'n' roll": 16,
+"seen live": 0,
+"électronique": -1,
+"favorites": 3
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"post-rock": 2,
+"k-pop": 1,
+"drum and bass": 8,
+"indie rock": 15
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Drum And Bass; Indie Rock"
+]
+},
+{
+"counts": {
+"rock 'n' roll": -1,
+"électronique": 16,
+"rock": 8
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"lo-fi": 16,
+"post-rock": 6,
+"pop": -1
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"lo-fi": 12,
+"k-pop": 1,
+"rock 'n' roll": 7
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"rock": -1,
+"favorites": 8,
+"children's music": 15,
+"drum and bass": 1,
+"rock 'n' roll": 5,
+"k-pop": 14,
+"pop": 5
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Children's Music; K-Pop"
+]
+},
+{
+"counts": {
+"hip hop": 2,
+"rock 'n' roll": 18,
+"a cappella": 14
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"k-pop": 5,
+"rock": -1,
+"électronique": 18,
+"seen live": 3,
+"drum and bass": 12,
+"rock 'n' roll": 0
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"favorites": 5,
+"indie rock": 4,
+"rock 'n' roll": 19,
+"seen live": 15,
+"children's music": 13
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"lo-fi": 7,
+"seen live": 1,
+"indie rock": 10,
+"rock": 12,
+"favorites": 2
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Indie Rock; Lo-Fi; Rock"
+]
+},
+{
+"counts": {
+"a cappella": 0,
+"rock 'n' roll": 14,
+"drum and bass": 5,
+"indie rock": 10
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"favorites": 6,
+"lo-fi": 19,
+"rock": 11,
+"k-pop": 0,
+"drum and bass": 11
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"pop": 9,
+"favorites": 10,
+"indie rock": 7,
+"électronique": 9
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Favorites / Pop / Électronique"
+]
+},
+{
+"counts": {
+"hip hop": -1,
+"a cappella": 6,
+"rock": 2,
+"électronique": 14,
+"indie rock": 13
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Indie Rock; Électronique"
+]
+},
+{
+"counts": {
+"lo-fi": -1,
+"seen live": 8
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Seen Live"
+]
+},
+{
+"counts": {
+"children's music": 4,
+"rock 'n' roll": 6,
+"électronique": 12,
+"indie rock": 1,
+"post-rock": 19,
+"pop": 0,
+"drum and bass": 14
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"indie rock": 7
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"lo-fi": 12,
+"favorites": 13,
+"a cappella": 18,
+"seen live": 20,
+"pop": 6,
+"k-pop": 16
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 5,
+"hip hop": 13,
+"favorites": 6,
+"rock 'n' roll": 4
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"children's music": 7,
+"indie rock": 6,
+"drum and bass": 15
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"rock": 0,
+"indie rock": 8,
+"a cappella": 6,
+"lo-fi": 2,
+"pop": 0,
+"k-pop": 5,
+"children's music": 18
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Children's Music"
+]
+},
+{
+"counts": {
+"a cappella": 18,
+"seen live": 18,
+"lo-fi": 10,
+"électronique": 5,
+"hip hop": 0,
+"rock": 10,
+"indie rock": 9,
+"children's music": 3
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 12,
+"rock": 20,
+"children's music": 10
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 11
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"drum and bass": 7,
+"favorites": 12
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"favorites": 12,
+"électronique": -1,
+"children's music": 10,
+"drum and bass": 19
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"drum and bass": 17
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"favorites": 8,
+"post-rock": 4,
+"seen live": 15,
+"a cappella": 4,
+"children's music": 1
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 0,
+"rock": 18,
+"lo-fi": 19,
+"children's music": 11
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 0,
+"pop": 11,
+"lo-fi": 15,
+"seen live": 4,
+"a cappella": 11,
+"rock 'n' roll": 10
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"rock": 0,
+"post-rock": 20,
+"k-pop": 9
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 11,
+"k-pop": 20,
+"hip hop": 10,
+"rock 'n' roll": 13,
+"drum and bass": 15,
+"favorites": 13,
+"pop": 4,
+"lo-fi": -1
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 1,
+"électronique": 3,
+"lo-fi": 10,
+"seen live": 12,
+"favorites": 10,
+"drum and bass": 1,
+"indie rock": 13
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass / Favorites / Indie Rock / Lo-Fi / Rock 'N' Roll / Seen Live / Électronique"
+]
+},
+{
+"counts": {
+"indie rock": 9,
+"favorites": 15
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock": 18,
+"indie rock": 2
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"k-pop": 6,
+"rock 'n' roll": 1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"a cappella": 15,
+"lo-fi": 14,
+"seen live": 5,
+"hip hop": 17
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Hip Hop; Lo-Fi"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"k-pop": 7,
+"children's music": 2,
+"drum and bass": 15,
+"seen live": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"hip hop": 16
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"électronique": 13,
+"seen live": 6,
+"children's music": 4,
+"favorites": 18,
+"indie rock": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"favorites": 3,
+"rock": 8,
+"a cappella": 18,
+"rock 'n' roll": 19,
+"pop": 12
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"pop": 17,
+"électronique": 10,
+"k-pop": 8,
+"rock": 2,
+"favorites": 15,
+"rock 'n' roll": 10,
+"post-rock": 16
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"pop": 18,
+"children's music": 14
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"lo-fi": 1,
+"indie rock": 19
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 0,
+"post-rock": 0,
+"favorites": 16,
+"lo-fi": -1,
+"pop": 11,
+"seen live": 4,
+"rock": 6
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"k-pop": 18,
+"pop": 4,
+"seen live": 15,
+"drum and bass": 8,
+"rock 'n' roll": 1,
+"post-rock": 8,
+"a cappella": 19,
+"lo-fi": 0
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Drum And Bass; K-Pop; Rock 'N' Roll; Seen Live"
+]
+},
+{
+"counts": {
+"indie rock": 7,
+"favorites": 6,
+"k-pop": 19,
+"lo-fi": 0,
+"seen live": 2,
+"pop": 9,
+"a cappella": 7
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"k-pop": 1,
+"rock 'n' roll": 15,
+"post-rock": -1,
+"hip hop": 4,
+"a cappella": 7,
+"pop": 6
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"children's music": 14,
+"électronique": 15,
+"pop": -1,
+"drum and bass": -1,
+"post-rock": 12,
+"lo-fi": 6
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Children's Music; Électronique"
+]
+},
+{
+"counts": {
+"électronique": 4
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"électronique": 4
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 11
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock": 0
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"indie rock": 19,
+"rock 'n' roll": 5
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock": 0,
+"children's music": 10,
+"hip hop": 9,
+"favorites": 18
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 14
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 5,
+"drum and bass": 8,
+"rock": 0,
+"post-rock": -1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"lo-fi": 10,
+"électronique": 15
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Lo-Fi",
+"Électronique"
+]
+},
+{
+"counts": {
+"lo-fi": 19,
+"seen live": 1,
+"indie rock": 14
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Lo-Fi; Seen Live"
+]
+},
+{
+"counts": {
+"drum and bass": 11
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"hip hop": 16,
+"a cappella": 15,
+"drum and bass": 4
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Hip Hop"
+]
+},
+{
+"counts": {
+"électronique": 3,
+"rock 'n' roll": 13,
+"favorites": 20,
+"a cappella": 16,
+"rock": 9,
+"children's music": 4,
+"post-rock": 13,
+"hip hop": 13
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Hip Hop; Post-Rock"
+]
+},
+{
+"counts": {
+"k-pop": 18,
+"favorites": 3,
+"pop": 3,
+"post-rock": 6,
+"rock 'n' roll": 9,
+"hip hop": 18,
+"a cappella": 15
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Hip Hop; K-Pop"
+]
+},
+{
+"counts": {
+"hip hop": 4,
+"favorites": 20,
+"indie rock": 2
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"favorites": 5,
+"hip hop": 2,
+"drum and bass": 19,
+"rock 'n' roll": 2
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 13,
+"k-pop": -1,
+"hip hop": 3
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"a cappella": 17,
+"drum and bass": 17,
+"favorites": 19
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Drum And Bass",
+"Favorites"
+]
+},
+{
+"counts": {
+"k-pop": 13,
+"indie rock": 12
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Indie Rock; K-Pop"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 19,
+"drum and bass": 4,
+"favorites": 7
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"post-rock": 11,
+"k-pop": 14,
+"rock 'n' roll": 2,
+"seen live": 0,
+"children's music": 7,
+"rock": 16
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"indie rock": 14,
+"électronique": 15,
+"lo-fi": -1,
+"post-rock": 19,
+"pop": 10
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Indie Rock / Électronique"
+]
+},
+{
+"counts": {
+"pop": 19,
+"k-pop": 0,
+"seen live": 7,
+"drum and bass": 7,
+"post-rock": 11,
+"indie rock": 11,
+"children's music": 0
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 11,
+"hip hop": 15,
+"indie rock": 6,
+"pop": 11,
+"rock 'n' roll": 13
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"lo-fi": 6,
+"k-pop": 3,
+"post-rock": 10
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 10,
+"lo-fi": 6
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {
+"lo-fi": 7,
+"rock": 10
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"drum and bass": 11,
+"électronique": 0,
+"k-pop": 1,
+"indie rock": 17,
+"children's music": 9,
+"seen live": 3,
+"hip hop": 15
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Drum And Bass",
+"Hip Hop",
+"Indie Rock"
+]
+},
+{
+"counts": {
+"k-pop": 8
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"seen live": 10,
+"rock 'n' roll": 3,
+"lo-fi": 5
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Lo-Fi / Seen Live"
+]
+},
+{
+"counts": {
+"k-pop": 16
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"post-rock": 13,
+"indie rock": 20,
+"favorites": 2
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"a cappella": 14,
+"seen live": 16,
+"lo-fi": 0
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"pop": 9,
+"lo-fi": 13,
+"seen live": 17,
+"post-rock": 14,
+"électronique": 20,
+"rock": 8,
+"favorites": 13
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"seen live": 19
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Seen Live"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 2,
+"seen live": 20,
+"rock": 10,
+"pop": 9,
+"drum and bass": 14,
+"a cappella": 15,
+"children's music": 16
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Seen Live"
+]
+},
+{
+"counts": {
+"hip hop": 14,
+"post-rock": 11,
+"rock": 9,
+"a cappella": 15,
+"k-pop": 7,
+"children's music": 15
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Children's Music",
+"Hip Hop"
+]
+},
+{
+"counts": {
+"pop": 17,
+"children's music": 19,
+"favorites": 1,
+"hip hop": 0,
+"seen live": 11
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Children's Music"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"pop": 0
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 12,
+"rock": 2
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"favorites": 12,
+"hip hop": 17,
+"rock 'n' roll": 19,
+"seen live": 17,
+"drum and bass": 0,
+"rock": 14,
+"children's music": 17,
+"post-rock": 15
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"lo-fi": 14,
+"indie rock": 12,
+"rock": 16,
+"k-pop": 2,
+"drum and bass": 1,
+"seen live": 19
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Indie Rock / Lo-Fi / Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 1
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"rock": 3,
+"children's music": 1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"rock": 0,
+"favorites": -1,
+"a cappella": 19,
+"rock 'n' roll": 20
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"favorites": 18,
+"électronique": 0,
+"seen live": 9,
+"lo-fi": 10
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"seen live": 2,
+"rock 'n' roll": 10
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"hip hop": 18,
+"rock 'n' roll": 19,
+"électronique": 18,
+"children's music": 9,
+"a cappella": 18,
+"favorites": -1,
+"rock": 3
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Hip Hop; Rock 'N' Roll; Électronique"
+]
+},
+{
+"counts": {
+"drum and bass": 11,
+"a cappella": 18,
+"k-pop": 6
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"hip hop": 0,
+"drum and bass": 8,
+"seen live": 3,
+"électronique": 17
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"children's music": 5,
+"post-rock": 6,
+"indie rock": 8,
+"rock 'n' roll": 18,
+"k-pop": 0,
+"lo-fi": 20,
+"drum and bass": 11
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass / Lo-Fi"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 15,
+"children's music": 9,
+"indie rock": 14,
+"pop": 15,
+"drum and bass": 17,
+"post-rock": 5,
+"hip hop": 5,
+"électronique": 5
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"children's music": 11,
+"électronique": 15,
+"rock 'n' roll": 3,
+"a cappella": 6
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"k-pop": 18,
+"lo-fi": -1,
+"indie rock": 10,
+"seen live": 7,
+"children's music": 15
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Children's Music",
+"Indie Rock",
+"K-Pop",
+"Seen Live"
+]
+},
+{
+"counts": {
+"a cappella": 17,
+"électronique": 17,
+"lo-fi": 5
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Électronique"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 5,
+"électronique": 4,
+"a cappella": 11,
+"seen live": 1,
+"hip hop": -1,
+"rock": 0,
+"children's music": 0
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"a cappella": 18
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"électronique": 11,
+"pop": 4,
+"k-pop": 13,
+"indie rock": 4,
+"post-rock": 10
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"children's music": 0,
+"rock": 7,
+"post-rock": 15,
+"rock 'n' roll": 19
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Post-Rock",
+"Rock",
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 17,
+"rock": 17,
+"pop": 13,
+"k-pop": 19,
+"hip hop": 2
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"indie rock": 6,
+"children's music": 3,
+"lo-fi": 20,
+"drum and bass": -1,
+"seen live": 13,
+"favorites": 5
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"favorites": -1,
+"seen live": 19,
+"lo-fi": 1,
+"indie rock": 13,
+"drum and bass": 9
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Indie Rock",
+"Seen Live"
+]
+},
+{
+"counts": {
+"seen live": 13,
+"children's music": 16,
+"pop": 3,
+"rock": 13,
+"a cappella": 3
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Children's Music"
+]
+},
+{
+"counts": {
+"rock": 17,
+"hip hop": 8
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"children's music": 13
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Children's Music"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 7,
+"pop": 6,
+"children's music": 6,
+"drum and bass": 2
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 10,
+"post-rock": 12,
+"seen live": 0,
+"lo-fi": 12,
+"rock": 5,
+"rock 'n' roll": 7,
+"hip hop": 17,
+"indie rock": 4
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"pop": 1,
+"électronique": 1
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Pop",
+"Électronique"
+]
+},
+{
+"counts": {
+"seen live": 19,
+"électronique": 5,
+"k-pop": 17
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"K-Pop",
+"Seen Live"
+]
+},
+{
+"counts": {
+"drum and bass": 19,
+"favorites": 14,
+"rock": 1,
+"post-rock": -1,
+"children's music": 12,
+"électronique": 14,
+"hip hop": 3,
+"a cappella": 20
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Drum And Bass / Électronique"
+]
+},
+{
+"counts": {
+"rock": 18,
+"seen live": -1,
+"favorites": 10,
+"children's music": 15,
+"électronique": 13
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Children's Music; Favorites; Rock; Électronique"
+]
+},
+{
+"counts": {
+"a cappella": 11,
+"children's music": 17,
+"favorites": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Children's Music"
+]
+},
+{
+"counts": {
+"rock": 18,
+"post-rock": 4,
+"rock 'n' roll": 4,
+"seen live": 2,
+"a cappella": 8,
+"pop": 7,
+"indie rock": 16,
+"lo-fi": -1
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"indie rock": 13,
+"children's music": 14,
+"a cappella": 17,
+"seen live": 15,
+"rock": 7,
+"hip hop": 2,
+"favorites": 2
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 20,
+"pop": 17,
+"seen live": 13
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Pop / Seen Live"
+]
+},
+{
+"counts": {
+"favorites": 11,
+"drum and bass": 0,
+"électronique": 10,
+"a cappella": 9,
+"post-rock": 11,
+"rock": 6
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"Favorites; Post-Rock"
+]
+},
+{
+"counts": {
+"a cappella": 20,
+"post-rock": 10,
+"rock": 6,
+"children's music": 12,
+"rock 'n' roll": 20,
+"seen live": 19
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"indie rock": 12,
+"children's music": 5
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Children's Music",
+"Indie Rock"
+]
+},
+{
+"counts": {
+"drum and bass": 0,
+"rock 'n' roll": 19,
+"lo-fi": 18,
+"k-pop": 7,
+"rock": 20,
+"électronique": 18
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"Lo-Fi",
+"Rock",
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"indie rock": 6,
+"post-rock": 0,
+"rock": 8,
+"drum and bass": 2
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 8,
+"lo-fi": 7,
+"indie rock": 6,
+"post-rock": 1,
+"a cappella": 16,
+"hip hop": 8,
+"drum and bass": 13,
+"k-pop": 18
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Drum And Bass",
+"K-Pop"
+]
+},
+{
+"counts": {
+"favorites": 8,
+"children's music": -1,
+"lo-fi": 6,
+"post-rock": 9,
+"hip hop": 6,
+"a cappella": 5,
+"k-pop": 15,
+"drum and bass": 16
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Drum And Bass"
+]
+},
+{
+"counts": {
+"a cappella": 9,
+"pop": 16
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"hip hop": 4,
+"rock": 16,
+"rock 'n' roll": 1
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"post-rock": 6
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 7,
+"k-pop": 15,
+"pop": 2,
+"électronique": 14,
+"rock 'n' roll": 7
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 17,
+"post-rock": 3,
+"électronique": 12,
+"indie rock": 7,
+"lo-fi": 18,
+"drum and bass": 18
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"hip hop": 19,
+"favorites": 9,
+"children's music": -1,
+"a cappella": 14,
+"rock 'n' roll": 11,
+"drum and bass": 13,
+"post-rock": 8
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"électronique": 9,
+"pop": 5,
+"indie rock": 12,
+"children's music": -1,
+"k-pop": -1,
+"rock 'n' roll": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"post-rock": 15,
+"électronique": 20,
+"drum and bass": 12,
+"a cappella": 11
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"lo-fi": 6,
+"rock": 2,
+"k-pop": 12,
+"indie rock": 10,
+"post-rock": 15
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Indie Rock; K-Pop; Post-Rock"
+]
+},
+{
+"counts": {
+"drum and bass": 4,
+"lo-fi": 10,
+"électronique": 9,
+"favorites": 10,
+"children's music": 1,
+"post-rock": 8,
+"indie rock": 15
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"a cappella": 15,
+"post-rock": 8,
+"drum and bass": 15,
+"k-pop": 5,
+"seen live": 15
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"children's music": 17
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"favorites": 8,
+"a cappella": 11,
+"post-rock": 2,
+"rock": 17
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 17,
+"post-rock": 5,
+"électronique": 12,
+"hip hop": 18,
+"a cappella": 2,
+"favorites": 3,
+"seen live": 4
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"A Cappella",
+"Favorites",
+"Hip Hop",
+"Post-Rock",
+"Rock 'N' Roll",
+"Seen Live",
+"Électronique"
+]
+},
+{
+"counts": {
+"seen live": 15
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"Seen Live"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 0,
+"hip hop": 7,
+"seen live": 19
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 13,
+"drum and bass": 0,
+"rock": 18,
+"favorites": 6,
+"pop": 6,
+"rock 'n' roll": 6,
+"k-pop": 0
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"hip hop": 20,
+"drum and bass": 11,
+"électronique": 20,
+"a cappella": 17,
+"lo-fi": 6,
+"indie rock": 12,
+"pop": 8
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": [
+"Hip Hop",
+"Électronique"
+]
+},
+{
+"counts": {
+"seen live": 4
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"drum and bass": 9,
+"post-rock": 16,
+"children's music": 11,
+"indie rock": 9
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Children's Music; Drum And Bass; Indie Rock; Post-Rock"
+]
+},
+{
+"counts": {
+"post-rock": 8,
+"pop": 10,
+"drum and bass": 6,
+"rock 'n' roll": 12,
+"lo-fi": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"Drum And Bass",
+"Pop"
+]
+},
+{
+"counts": {
+"favorites": 5,
+"seen live": 7,
+"indie rock": 16
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"children's music": 5,
+"a cappella": 11
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"pop": 10,
+"a cappella": 16,
+"lo-fi": 6,
+"k-pop": 11,
+"seen live": 18,
+"hip hop": 15,
+"favorites": 5,
+"post-rock": 3
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock": -1,
+"k-pop": 11,
+"favorites": 1,
+"électronique": 4,
+"seen live": 6,
+"hip hop": 9
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"K-Pop"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 8,
+"post-rock": 1,
+"hip hop": 6,
+"pop": 8,
+"indie rock": 3
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 10,
+"k-pop": 20,
+"a cappella": 20,
+"seen live": 10,
+"hip hop": 12,
+"favorites": -1,
+"rock": 20
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"A Cappella; Hip Hop; K-Pop; Rock; Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"seen live": 8
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"favorites": 11,
+"k-pop": 0,
+"rock": 18
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"drum and bass": 0,
+"favorites": 16
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"Favorites"
+]
+},
+{
+"counts": {
+"favorites": 2,
+"post-rock": 19,
+"hip hop": 8,
+"drum and bass": 0,
+"électronique": 17,
+"children's music": 18,
+"rock": 0
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 1,
+"children's music": 12,
+"favorites": 11
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Children's Music / Favorites"
+]
+},
+{
+"counts": {
+"children's music": 12
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Children's Music"
+]
+},
+{
+"counts": {
+"post-rock": 14,
+"rock": 5,
+"k-pop": 0,
+"pop": 16,
+"drum and bass": 7,
+"a cappella": 4,
+"seen live": 16
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"Pop"
+]
+},
+{
+"counts": {
+"rock": 10,
+"seen live": 12,
+"children's music": 1
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"k-pop": 3,
+"lo-fi": 19,
+"pop": 10,
+"favorites": 8,
+"rock": 3,
+"post-rock": 3,
+"rock 'n' roll": 17
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Lo-Fi / Pop"
+]
+},
+{
+"counts": {
+"post-rock": 12
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"a cappella": 14,
+"pop": 5,
+"indie rock": 0,
+"hip hop": 0,
+"rock": 7,
+"children's music": 8
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"seen live": 9
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"Seen Live"
+]
+},
+{
+"counts": {
+"seen live": -1,
+"post-rock": 13,
+"indie rock": 14,
+"rock": 1
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": " / "
+},
+"want": [
+"Indie Rock / Post-Rock"
+]
+},
+{
+"counts": {
+"drum and bass": 1,
+"lo-fi": 19,
+"pop": 8,
+"post-rock": 19,
+"children's music": 18,
+"rock": 19,
+"électronique": 7
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Lo-Fi"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"seen live": 2,
+"k-pop": 8,
+"post-rock": 18,
+"rock 'n' roll": 9,
+"a cappella": 11
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": ""
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"seen live": 0,
+"post-rock": 0,
+"children's music": 2,
+"hip hop": 17,
+"pop": 19
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": "; "
+},
+"want": [
+"Children's Music; Hip Hop; Pop"
+]
+},
+{
+"counts": {
+"lo-fi": 3,
+"favorites": 6,
+"seen live": 4,
+"hip hop": 3,
+"électronique": 13,
+"indie rock": 19
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": "; "
+},
+"want": [
+"Favorites; Hip Hop; Indie Rock; Seen Live; Électronique"
+]
+},
+{
+"counts": {
+"pop": 3,
+"a cappella": 8,
+"favorites": 1,
+"children's music": 20,
+"rock": 0,
+"électronique": 15,
+"drum and bass": 12
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Children's Music",
+"Drum And Bass",
+"Électronique"
+]
+},
+{
+"counts": {
+"favorites": 11,
+"seen live": 8
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 9,
+"pop": 15,
+"lo-fi": 13,
+"indie rock": 12,
+"post-rock": 16
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Post-Rock"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 0
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 9,
+"lo-fi": 15,
+"k-pop": 19,
+"favorites": -1,
+"seen live": 5,
+"hip hop": 6
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"Children's Music / Hip Hop / K-Pop / Lo-Fi"
+]
+},
+{
+"counts": {
+"post-rock": 6,
+"électronique": 17,
+"drum and bass": 13,
+"children's music": 11,
+"a cappella": 7
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 50,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"favorites": 14,
+"indie rock": 6,
+"pop": 16,
+"hip hop": 13,
+"rock 'n' roll": 6,
+"a cappella": 16,
+"k-pop": 17,
+"children's music": 2
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Children's Music / Favorites / Hip Hop / Indie Rock / K-Pop / Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 13
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"a cappella": 1,
+"k-pop": 3,
+"drum and bass": 10,
+"post-rock": 18,
+"seen live": 0,
+"pop": 11,
+"lo-fi": 6
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"lo-fi": 3,
+"hip hop": 12,
+"indie rock": 1
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 50,
+"genres_filter": "+*\n-pop",
+"join_genres": ""
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"seen live": 7,
+"children's music": 2,
+"favorites": 6,
+"rock 'n' roll": 10,
+"rock": 15
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"indie rock": 2,
+"children's music": 0,
+"post-rock": 20,
+"rock 'n' roll": 6,
+"électronique": 7
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Rock 'N' Roll",
+"Électronique"
+]
+},
+{
+"counts": {
+"indie rock": 4,
+"rock 'n' roll": 3,
+"rock": 16,
+"lo-fi": 8,
+"a cappella": 20,
+"électronique": 20,
+"hip hop": 11
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"lo-fi": 3,
+"rock": 14,
+"rock 'n' roll": 15,
+"children's music": 14
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"a cappella": 18,
+"lo-fi": 15,
+"seen live": 1,
+"rock 'n' roll": 10,
+"drum and bass": 9,
+"pop": 15
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 90,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 9,
+"électronique": 17,
+"lo-fi": 14,
+"drum and bass": 9,
+"a cappella": 6,
+"rock 'n' roll": -1,
+"rock": 6
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Children's Music / Drum And Bass / Lo-Fi / Électronique"
+]
+},
+{
+"counts": {
+"hip hop": 7,
+"drum and bass": 1
+},
+"settings": {
+"max_genres": 100,
+"min_genre_usage": 90,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": " / "
+},
+"want": [
+"Hip Hop"
+]
+},
+{
+"counts": {
+"électronique": 12,
+"seen live": 19,
+"favorites": 17,
+"rock": 19,
+"post-rock": 2,
+"indie rock": 10,
+"pop": 8,
+"drum and bass": 6
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "+rock\n-*rock*",
+"join_genres": "; "
+},
+"want": [
+"Rock"
+]
+},
+{
+"counts": {
+"post-rock": 11,
+"k-pop": 9,
+"pop": 0,
+"children's music": 9,
+"a cappella": 20
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 100,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": [
+"A Cappella"
+]
+},
+{
+"counts": {
+"rock 'n' roll": 3,
+"pop": 3,
+"children's music": 5
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"électronique": 3,
+"rock 'n' roll": 8,
+"hip hop": 8,
+"seen live": 7,
+"a cappella": 17,
+"indie rock": 16
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": " / "
+},
+"want": [
+"A Cappella / Hip Hop / Indie Rock"
+]
+},
+{
+"counts": {
+"électronique": 4
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "-/^p/",
+"join_genres": "; "
+},
+"want": [
+"Électronique"
+]
+},
+{
+"counts": {
+"favorites": 7,
+"indie rock": 16,
+"lo-fi": -1,
+"children's music": 4,
+"seen live": 19,
+"hip hop": 7
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 0,
+"genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+"join_genres": ""
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"lo-fi": 5,
+"pop": 6,
+"électronique": 0,
+"hip hop": 3,
+"post-rock": 18,
+"indie rock": 0
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 0,
+"genres_filter": "+*\n-pop",
+"join_genres": "; "
+},
+"want": []
+},
+{
+"counts": {
+"rock": 7,
+"pop": 16
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 90,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"children's music": 11,
+"favorites": 18,
+"rock": 20,
+"k-pop": 9,
+"lo-fi": 4
+},
+"settings": {
+"max_genres": 0,
+"min_genre_usage": 100,
+"genres_filter": "",
+"join_genres": ""
+},
+"want": []
+},
+{
+"counts": {
+"rock 'n' roll": 13,
+"lo-fi": -1,
+"électronique": -1,
+"drum and bass": 9,
+"hip hop": 17
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 0,
+"genres_filter": "-/^p/",
+"join_genres": " / "
+},
+"want": [
+"Drum And Bass / Hip Hop / Rock 'N' Roll"
+]
+},
+{
+"counts": {
+"seen live": 3,
+"indie rock": 15,
+"rock": 1,
+"a cappella": 10,
+"pop": 10
+},
+"settings": {
+"max_genres": 5,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Indie Rock"
+]
+},
+{
+"counts": {
+"seen live": 14,
+"k-pop": 0,
+"électronique": 19,
+"favorites": 8,
+"children's music": 19,
+"pop": 16,
+"hip hop": 13,
+"drum and bass": 16
+},
+"settings": {
+"max_genres": 3,
+"min_genre_usage": 90,
+"genres_filter": "+*\n-pop",
+"join_genres": " / "
+},
+"want": [
+"Children's Music / Électronique"
+]
+},
+{
+"counts": {
+"seen live": 14,
+"hip hop": 2,
+"rock": 19,
+"post-rock": 10
+},
+"settings": {
+"max_genres": 1,
+"min_genre_usage": 50,
+"genres_filter": "-/^p/",
+"join_genres": ""
+},
+"want": [
+"Rock"
+]
+}
+]

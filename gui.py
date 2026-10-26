@@ -1407,12 +1407,15 @@ class Profiles(QWidget):
                                   "\"The Beatles\" unless it is one of the artist's former names (variations only)")
         self.pic_rel = QComboBox()
         self.pic_trk = QComboBox()
-        for box in (self.pic_rel, self.pic_trk):
+        self.pic_gen = QComboBox()
+        for box in (self.pic_rel, self.pic_trk, self.pic_gen):
             for label, v in (("As Picard is set", None), ("On", True), ("Off", False)):
                 box.addItem(label, v)
         self.pic_rel.setToolTip("Producer, engineer, mixer ... credited on the release (Picard's default: on)")
         self.pic_trk.setToolTip("Composer, lyricist, performers and their instruments, works (Picard's default: "
                                 "off)")
+        self.pic_gen.setToolTip("MusicBrainz genres, filtered as Picard's Options > Metadata > Genres says "
+                                "(Picard's default: off; Discogs genres and styles come with Discogs Enrichment)")
         self.level = QComboBox()
         self.level.addItems(["basic", "enthusiast", "audiophile"])
         self.level.setToolTip("basic: artist, album, title, numbers, date, genre\n"
@@ -1463,6 +1466,7 @@ class Profiles(QWidget):
         form.addRow("Artist names", self.pic_names)
         form.addRow("Release relationships", self.pic_rel)
         form.addRow("Track relationships", self.pic_trk)
+        form.addRow("Genres from MusicBrainz", self.pic_gen)
         form.addRow("Audiophile", arow)
         form.addRow("", self.art)
         form.addRow("Cover source", self.art_src)
@@ -1571,7 +1575,7 @@ class Profiles(QWidget):
             self.level.setCurrentText(p["tag_level"])
             pic = p.data.get("picard") or {} if hasattr(p, "data") else p.get("picard") or {}
             for box, key in ((self.pic_names, "standardize_artist_names"), (self.pic_rel, "release_ars"),
-                             (self.pic_trk, "track_ars")):
+                             (self.pic_trk, "track_ars"), (self.pic_gen, "use_genres")):
                 box.setCurrentIndex(max(0, box.findData(pic.get(key))))
             for k, c in self.aud.items():
                 c.setChecked(bool(p["audiophile"].get(k, True)))
@@ -1730,7 +1734,7 @@ class Profiles(QWidget):
         data["tag_level"] = self.level.currentText()
         pic = dict(data.get("picard") or {})
         for box, key in ((self.pic_names, "standardize_artist_names"), (self.pic_rel, "release_ars"),
-                         (self.pic_trk, "track_ars")):
+                         (self.pic_trk, "track_ars"), (self.pic_gen, "use_genres")):
             if box.currentData() is None:
                 pic.pop(key, None)
             else:

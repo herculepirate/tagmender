@@ -10,7 +10,9 @@ names), sort names from the alias matching the credit, translated artist names, 
 titles, release relationships (producer, engineer, mixer ... credited on the release: on in
 Picard), track relationships (composer, lyricist, performers and instruments, works and their
 languages), the Various Artists name and `compilation` on Various Artists releases, Unicode
-punctuation as ASCII, and the preferred release countries. `tests/test_picard_parity.py`
+punctuation as ASCII, the preferred release countries, and MusicBrainz genres (when Picard's
+"Use genres from MusicBrainz" is on: its filter, minimum usage, maximum, album artist genres,
+folksonomy tags and join character). `tests/test_picard_parity.py`
 compares the result with what Picard 3.0.2's own code makes of its test data. The text
 representation's language is no longer written as LANGUAGE (Picard writes the works' languages
 there). `tagmender doctor` shows the settings followed.

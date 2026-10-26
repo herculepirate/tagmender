@@ -85,6 +85,34 @@ class MusicBrainzMapping(unittest.TestCase):
                 self.assertEqual(got, c["want"])
 
 
+class Genres(unittest.TestCase):
+    def test_genres_as_picard_filters_them(self):
+        import picard_config
+        cases = json.loads((DATA / "genres_cases.json").read_text())
+        self.assertGreater(len(cases), 100)
+        for c in cases:
+            s = dict(picard_config.TAG_DEFAULTS, use_genres=True, **c["settings"])
+            rel = {"genres": [{"name": k, "count": v} for k, v in c["counts"].items()]}
+            with self.subTest(case=c):
+                self.assertEqual(mb_tags.genres({}, rel, s), c["want"])
+
+    def test_sources_and_fallback(self):
+        import picard_config
+        s = dict(picard_config.TAG_DEFAULTS, use_genres=True, min_genre_usage=0)
+        rec = {"genres": [{"name": "rock", "count": 2}]}
+        rel = {"genres": [{"name": "rock", "count": 1}], "release-group": {"genres": [{"name": "pop", "count": 2}]}}
+        self.assertEqual(mb_tags.genres(rec, rel, s), ["Pop", "Rock"])
+        art = [{"genres": [{"name": "jazz", "count": 3}]}]
+        self.assertEqual(mb_tags.genres({}, {}, s, art), [])
+        self.assertEqual(mb_tags.genres({}, {}, dict(s, artists_genres=True), art), ["Jazz"])
+        self.assertEqual(mb_tags.genres(rec, rel, dict(s, use_genres=False)), [])
+        self.assertEqual(mb_tags.genres(rec, rel, dict(s, only_my_genres=True)), [])
+        self.assertEqual(mb_tags.genres({"tags": [{"name": "noise", "count": 1}]}, {}, dict(s, folksonomy_tags=True)),
+                         ["Noise"])
+        self.assertIn("genres", mb_tags.inc_for(dict(s)))
+        self.assertNotIn("genres", mb_tags.inc_for(dict(s, use_genres=False)))
+
+
 class FileFormats(unittest.TestCase):
     def test_tags_written_as_picard_writes_them(self):
         ref = json.loads((DATA / "formats_picard.json").read_text())

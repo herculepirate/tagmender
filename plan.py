@@ -427,7 +427,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     if sure:
         keep = _artwork.artist_folder_keeps(src_dir, single=loose if single else ())
     elif others or named:
-        keep = {x for x in _artwork.artist_folder_keeps(src_dir) if x.stem.lower() != "folder"}
+        keep = {x for x in _artwork.artist_folder_keeps(src_dir) if x.stem.lower() not in _artwork.SHARED_STEMS}
     artist_folder = sure or bool(others) or named              # (its extrafanart/ ... stay too)
 
     def shared_ok(d):
@@ -834,7 +834,9 @@ class Planner:
             real_src = os.path.realpath(src_root)
             at_root = real_src in self.library_roots() or (real_src in self.roots() and len(pairs) == 1)
             who, single = _album_artist(prop)
-            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root, artist=who,
+            sort = [x for x in ((prop.targets[0] if prop.targets else {}).get("albumartistsort") or []) if x != who]
+            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
+                                         artist=[who] + sort,
                                          single=single)
             if why_not:
                 entry["notes"].append(why_not)
@@ -963,16 +965,19 @@ class Planner:
             return None
         album = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
         title = ((prop.targets[0].get("album") or [""])[0]) if prop.targets else ""
-        artist_dir = _artwork.artist_dir_for(album, ap.get("artist", ""), self.roots(),
+        artist_dir = _artwork.artist_dir_for(album, [ap.get("artist", "")] + list(ap.get("artist_sort") or []),
+                                             self.roots(),
                                              self.profile["filenames"]["compat"], title)
         staging = ex.STATE_DIR / "staging" / self.job
         image, source = ap["image"], ap.get("source", "")
         _who, single = _album_artist(prop)
         mine = [Path(fe["src"]) for fe in entry["files"]] if single else ()
         there = _artwork.artist_folder_photo(artist_dir) if artist_dir is not None else None
+        download = None                   # (TagMender's download there, which the user's own photo replaces)
         if there is not None and _artwork.written_by_us(there) and ap.get("own"):
-            there = None                  # (a download TagMender wrote: the user's own photo wins)
-        has_image = artist_dir is not None and (there is not None or _artwork.artist_folder_has_photo(artist_dir, mine))
+            download, there = there, None # (a download TagMender wrote: the user's own photo wins)
+        has_image = artist_dir is not None and (there is not None or download is not None or
+                                                _artwork.artist_folder_has_photo(artist_dir, mine))
         if there is None and has_image and not ap.get("own"):
             return None                   # (the artist folder has its image - a folder.jpg - and this is a download)
         claims = self.__dict__.setdefault("artist_dirs", {})
@@ -1064,7 +1069,23 @@ class Planner:
                 entry["sidecars"].append(sc_)
                 if dkey is not None and claims.get(dkey) is not None and claims[dkey]["sidecar"] is None:
                     claims[dkey]["sidecar"] = sc_
-        if not into and not any(sc.get("kind") == "artist" for sc in entry["sidecars"]):
+        if download is not None and own_here and want["file"]:
+            # the artist folder's artist.jpg is TagMender's download: the user's own photo, which
+            # this album brings, takes its place (the download is kept for undo)
+            key = fnm.fold(download)
+            if self.claimed.get(key) is None and not any(c["src"] == str(download) for c in entry["companions"]):
+                self.claimed[key] = "artist-photo"
+                try:
+                    new = Path(image) if download.suffix.lower() in (".jpg", ".jpeg") else \
+                        _artwork.as_format(Path(image), download.suffix, staging)
+                    entry["companions"].append(
+                        {"src": str(download), "dst": str(download), "op": "rewrite", "fingerprint": _fp(download),
+                         "rewrite": {"from": str(new), "sha256": hashlib.sha256(new.read_bytes()).hexdigest(),
+                                     "artist": True}})
+                except Exception as exc:
+                    entry["notes"].append(f"{download.name}: not replaced by your artist photo ({exc})")
+        if not into and not any(sc.get("kind") == "artist" for sc in entry["sidecars"]) and \
+                not any((c.get("rewrite") or {}).get("artist") for c in entry["companions"]):
             return None
         return {"image": image, "embed": emb, "embed_into": into, "source": source,
                 "artist": ap.get("artist", ""), "mark": _artwork.artist_mark(ident),
@@ -1389,7 +1410,8 @@ def preview(plan: dict, verbose=False) -> str:
         for c in a["companions"]:
             note = "" if not c.get("rewrite") else \
                 "  (replaced by the larger cover; the old one is kept for undo)" if c["rewrite"].get("cover") \
-                else "  (file references updated)"
+                else "  (TagMender's downloaded artist photo replaced by yours; kept for undo)" \
+                if c["rewrite"].get("artist") else "  (file references updated)"
             out.append(f"    {c['op']:<5} {Path(c['src']).name}  ->  {c['dst']}{note}")
         if a.get("artwork"):
             art = a["artwork"]

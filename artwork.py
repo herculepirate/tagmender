@@ -546,6 +546,9 @@ def has_front(path) -> bool:
     return _pick_front(_pictures(path)) is not None
 
 
+# pictures that are an album's cover in an album folder and the artist's image in an artist
+# folder (Plex, Jellyfin, Kodi: folder.jpg, poster.jpg; Plex's background art.jpg, thumb.jpg)
+SHARED_STEMS = ("folder", "poster", "art", "thumb")
 ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album folders) both are its photo
 # the artist folder's own art for Kodi, Jellyfin, Plex - never any one album's: artist.jpg,
 # fanart.jpg, fanart1.jpg, backdrop2.jpg, logo.png ..., and the extrafanart folders
@@ -644,8 +647,9 @@ def _look(path):
 
 def artist_folder_keeps(folder, single=()) -> set:
     """The files of an artist folder that stay when an album moves out of it: the artist's
-    photo and art (artist.jpg, fanart, logo, banner, backdrop2 ...) and its folder.jpg - which
-    may be the artist's image (Jellyfin, Kodi) as well as an album's cover: never carried off.
+    photo and art (artist.jpg, fanart, logo, banner, backdrop2 ...) and its folder.jpg,
+    poster.jpg, art.jpg, thumb.jpg - which may be the artist's image (Jellyfin, Kodi, Plex) as
+    well as an album's cover: never carried off.
     (The album gets its cover where it lands: its own cover.jpg, or the artwork step's.)"""
     keep = set()
     try:
@@ -656,7 +660,8 @@ def artist_folder_keeps(folder, single=()) -> set:
         st, ext = os.path.splitext(n)
         if ARTIST_ART.match(st) and ext.lower() in IMAGE_EXT:
             keep.add(Path(folder) / n)
-    keep.update(_images(folder, "folder"))
+    for stem in SHARED_STEMS:
+        keep.update(_images(folder, stem))
     return keep
 
 
@@ -715,8 +720,11 @@ def album_here(folder: Path, names=None, single=()) -> bool:
 def artist_folder_photo(folder, single=()) -> Path | None:
     """The artist folder's own photo, the one put into the tracks: artist.jpg (any image
     type; a symbolic link to one counts). A folder.jpg is never put into the tracks - it may
-    be an album's cover as well as the artist's image (see artist_folder_has_photo)."""
+    be an album's cover as well as the artist's image (see artist_folder_has_photo). Of
+    several (artist.jpg, artist.png), the user's own before one TagMender downloaded."""
     got = _images(folder, "artist")
+    if len(got) > 1:
+        got = [x for x in got if not written_by_us(x)] + [x for x in got if written_by_us(x)]
     return got[0] if got else None
 
 
@@ -780,13 +788,19 @@ def holds_other_albums(folder) -> bool:
     return False
 
 
-def _artist_names(artist: str, compat: str) -> set:
+def _artist_names(artist, compat: str) -> set:
     """Folder names an artist's folder may have: as named, Windows- or Linux-safe ("R.E.M."
-    or "R.E.M_"), and "Beatles, The" for "The Beatles"."""
+    or "R.E.M_"), and "Beatles, The" for "The Beatles". artist: a name, or several (the
+    album artist and its sort name, "Bowie, David": what %albumartistsort% names folders)."""
     import filenames as fnm
-    names = {artist}
-    if artist.lower().startswith("the "):
-        names.add(f"{artist[4:]}, {artist[:3]}")
+    names = set()
+    for a in ([artist] if isinstance(artist, str) else list(artist or [])):
+        a = str(a or "").strip()
+        if not a:
+            continue
+        names.add(a)
+        if a.lower().startswith("the "):
+            names.add(f"{a[4:]}, {a[:3]}")
     out = set()
     for n in names:
         out |= {fnm.fold(n), fnm.fold(fnm.safe_component(n, compat)), fnm.fold(fnm.safe_component(n, "linux")),
@@ -794,15 +808,15 @@ def _artist_names(artist: str, compat: str) -> set:
     return out
 
 
-def named_after(folder, artist: str, compat="windows") -> bool:
-    """folder is named after artist ("The Beatles", "Beatles, The", "R.E.M." / "R.E.M_")."""
+def named_after(folder, artist, compat="windows") -> bool:
+    """folder is named after artist ("The Beatles", "Beatles, The", "R.E.M." / "R.E.M_"); artist:
+    a name, or the names it goes by (its sort name)."""
     import filenames as fnm
-    if not artist:
-        return False
-    return fnm.fold(Path(folder).name) in _artist_names(artist, compat)
+    names = _artist_names(artist, compat)
+    return bool(names) and fnm.fold(Path(folder).name) in names
 
 
-def artist_dir_for(album_folder, artist: str, roots, compat="windows", album_name: str = "") -> Path | None:
+def artist_dir_for(album_folder, artist, roots, compat="windows", album_name: str = "") -> Path | None:
     """The album artist's folder, where the artist's photo is: the album folder's parent - or
     the album folder itself when the album lies ripped flat in its artist folder (beside the
     artist's other albums, or, album_name given, named after the artist and not after the
@@ -904,9 +918,9 @@ def stale_artist_photo(key: str) -> dict | None:
 
 
 def forget_artist_photos(match: str = "") -> int:
-    """Forget the artist photos kept for later runs (all - every file in the cache folder -
-    or those whose key, a MusicBrainz artist ID or an artist folder, contains match).
-    Returns how many."""
+    """Forget the artist photos kept for later runs: all (every photo in the cache folder -
+    never the record of the downloads TagMender wrote as artist.jpg), or those whose key, a
+    MusicBrainz artist ID or an artist folder, contains match. Returns how many."""
     d = _photo_cache_dir()
     n = 0
     if not d.is_dir():
@@ -921,6 +935,8 @@ def forget_artist_photos(match: str = "") -> int:
         hashes = {f.name.split(".")[0] for f in d.iterdir() if not f.name.startswith(".")
                   and f.suffix in (".jpg", ".none")}          # (what `artist-photos` lists)
         for f in d.iterdir():
+            if f.name == "written.json" or not f.is_file():
+                continue                  # (the record of the artist.jpg files TagMender downloaded stays)
             try:
                 f.unlink()
             except OSError:
@@ -994,11 +1010,15 @@ def needs_art(folder, files, profile, small=None, stays=True) -> str:
                 return f"{Path(f).name} has no cover"
     # a shared folder never gets a cover file - while the album stays there; moved or copied
     # into a folder of its own, it gets one
+    # (moved or copied: the artist's pictures - artist.jpg, fanart, an artist folder's folder.jpg
+    # - stay behind, so they are no cover where the album lands; the plan sees whether a
+    # folder.jpg does go with it)
     if art.get("files", True) and not (small.get("shared") and stays):
         try:
             if not any(x.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp")
+                       and (stays or not (ARTIST_ART.match(x.stem) or x.stem.lower() in SHARED_STEMS))
                        for d in _album_dirs(folder) for x in d.iterdir() if x.is_file()):
-                return "no picture in the folder"
+                return "no picture in the folder" if stays else "no picture that goes with the album"
         except OSError:
             return ""
     return ""

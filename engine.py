@@ -615,15 +615,19 @@ class Engine:
             ([self.profile["destination"]] if self.profile["destination"] else [])
         compat = self.profile["filenames"]["compat"]
         title = (t.get("album") or [""])[0]
+        names = [who] + [x for x in t.get("albumartistsort") or [] if x and x != who]   # ("Bowie, David/")
         if stays:
-            artist_dir = artwork.artist_dir_for(folder, who, roots, compat, title)
+            artist_dir = artwork.artist_dir_for(folder, names, roots, compat, title)
         # the artist folder the album is in now: where it stays (its copies' for a copy
         # profile), or where a move takes it from; with no artist.jpg there, the source's own
-        src_dir = artwork.artist_dir_for(Path(prop.source_dir), who, roots, compat, title)
+        src_dir = artwork.artist_dir_for(Path(prop.source_dir), names, roots, compat, title)
         home = artist_dir if artist_dir is not None else src_dir
-        if home is not None and src_dir is not None and home != src_dir and \
-                artwork.artist_folder_photo(home) is None and artwork.artist_folder_photo(src_dir) is not None:
-            home = src_dir
+        if home is not None and src_dir is not None and home != src_dir:
+            here, there = artwork.artist_folder_photo(home), artwork.artist_folder_photo(src_dir)
+            # (the copies' artist folder has none, or only TagMender's download: the user's own
+            # photo in the source's artist folder is the one)
+            if there is not None and (here is None or (artwork.written_by_us(here) and not artwork.written_by_us(there))):
+                home = src_dir
         single = "single" in [x.lower() for x in t.get("releasetype") or []]
         mine = [Path(f) for f in prop.files] if single else ()
         photo = artwork.artist_folder_photo(home) if home is not None else None
@@ -683,7 +687,7 @@ class Engine:
             if real_dir is not None and cache[key]:
                 by_dir.setdefault(real_dir, cache[key])
         if cache[key]:
-            prop.artist_photo = dict(cache[key], artist=who)
+            prop.artist_photo = dict(cache[key], artist=who, artist_sort=names[1:])
 
     def _add_front(self, prop: planmod.Proposal):
         if not self.profile["artwork"]["enabled"] or prop.status != "identified" or not prop.targets:

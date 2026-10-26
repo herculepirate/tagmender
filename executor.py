@@ -1156,7 +1156,8 @@ class Executor:
             ce = dict(ce, rewrite=None)                 # moved with the album as it is
         if op == "rewrite":                       # a cue sheet that stays, naming renamed files
             stage = _stage_name(src, self.job)
-            self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin")
+            self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
+                               **({"artist": True} if rw.get("artist") else {}))
             try:
                 saved = self._stage_companion(i, j, ce, src, dst, stage)
                 _keep_owner(stage, os.stat(src))
@@ -1618,11 +1619,10 @@ def _same_backup(dst: Path, backup) -> bool:
     import tempfile
     import tag_albums as ta
     with tempfile.TemporaryDirectory() as d:
-        now = ta.backup_tags(dst, d)
         old = backup["rec"] or {}
-        for k in ("trailer", "flac_ends"):          # (a job from before TagMender kept these)
-            if k not in old:
-                now.pop(k, None)
+        # (a job from before TagMender kept the trailers: its record, as it made them)
+        legacy = "v" not in old
+        now = ta.backup_tags(dst, d, legacy=legacy)
         return _rec_key(now) == _rec_key(old)
 
 
@@ -2105,6 +2105,8 @@ def _undo(job, jd, journal, events, force):
                 or not c.get("saved") or c.get("size") is None:
             continue
         cdst = Path(c["dst"])
+        if c.get("artist"):
+            continue                   # (the artist folder's artist.jpg never holds an album back)
         if cdst.exists() and (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
             staying.add(a)
             problems.append(f"{cdst} was changed after the job (tagmender undo --force {job} puts the "
@@ -2147,6 +2149,12 @@ def _undo(job, jd, journal, events, force):
                 or ("companion", a, j) in rolled_steps:
             continue
         cdst = Path(c["dst"])
+        if c.get("artist") and c.get("size") is not None and cdst.exists() and \
+                (os.stat(cdst).st_size, os.stat(cdst).st_mtime_ns) != (c["size"], c["mtime_ns"]):
+            # (the user's photo the job put in place of TagMender's download, changed since: theirs)
+            out.append(f"{cdst} was changed after the job; kept as it is")
+            did("companion", a, j)
+            continue
         if a in staying:
             problems.append(f"{cdst} stays with the album's music, which stays where the job put it")
             continue

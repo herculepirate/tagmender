@@ -275,7 +275,8 @@ def cmd_profiles(args):
         bad = 0
         for n in ([args.name] if args.name else pf.names()):
             try:
-                problems = pf.validate(pf.upgrade(pf.raw(n)))
+                up = pf.upgrade(pf.raw(n))
+                problems = pf.validate(up) + pf.check_template(up)
             except pf.ProfileError as exc:
                 problems = [str(exc)]
             bad += bool(problems)

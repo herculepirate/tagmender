@@ -220,9 +220,10 @@ class Undo(unittest.TestCase):
     def test_a_backup_from_an_older_job_still_matches(self):
         d = Path(tempfile.mkdtemp())
         p = tagged(d / "t.mp3")
-        rec = ta.backup_tags(p, d)
-        rec.pop("trailer")                                     # (as jobs before this kept it)
+        rec = ta.backup_tags(p, d, legacy=True)                # (as jobs before this kept it)
+        self.assertNotIn("trailer", rec)
         self.assertTrue(executor._same_backup(p, {"rec": rec}))
+        self.assertTrue(executor._same_backup(p, {"rec": ta.backup_tags(p, d)}))
 
 
 class Settings(unittest.TestCase):

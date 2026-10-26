@@ -104,7 +104,8 @@ def checks() -> list[Check]:
         out.append(Check("rules", "fail", str(exc), "tagmender rules list"))
     for n in pf.names():
         try:
-            problems = pf.validate(pf.upgrade(pf.raw(n)))
+            up = pf.upgrade(pf.raw(n))
+            problems = pf.validate(up) + pf.check_template(up)
         except pf.ProfileError as exc:
             problems = [str(exc)]
         out.append(Check(f"profile {n}", "fail" if problems else "ok", "; ".join(problems) or "valid",

@@ -484,6 +484,18 @@ def save_id3(f, tags, keep_original_date=True, keep_date=True, v2=None, v1=None,
     own = _own_version(tags)
     v2 = v2 if v2 in (3, 4) else own
     kw = {"v1": v1} if v1 in (0, 2) and _id3v1_file(f) else {}
+    # mood and release date: TMOO and TDRL in v2.4, TXXX:mood and TXXX:RELEASEDATE in v2.3 (Picard)
+    for fid, name in (("TMOO", "mood"), ("TDRL", "RELEASEDATE")):
+        txxx = [fr for fr in tags.getall("TXXX") if str(fr.desc).lower() == name.lower()]
+        if v2 == 3 and tags.getall(fid):
+            if not txxx:
+                tags.add(TXXX(encoding=3, desc=name, text=list(tags.getall(fid)[0].text)))
+            tags.delall(fid)
+        elif v2 == 4 and own == 3 and txxx:
+            if not tags.getall(fid):
+                tags.add(Frames[fid](encoding=3, text=list(txxx[0].text)))
+            for fr in txxx:
+                tags.delall(fr.HashKey)
     if v2 == 4:
         if own == 3:
             tags.update_to_v24()
@@ -564,6 +576,44 @@ def file_options(path, settings: dict | None) -> dict:
                 out["strip_id3"] = True
         if s.get("fix_missing_seekpoints_flac") and f.seektable is not None and not f.seektable.seekpoints:
             out["fix_seektable"] = True               # (some players choke on an empty seek table)
+    return out
+
+
+# Picard's names for the file formats (%_format%: picard/formats/*.py NAME)
+FORMAT_NAMES = {"MP3": "MPEG-1 Audio", "EasyMP3": "MPEG-1 Audio", "TrueAudio": "The True Audio", "DSF": "DSF",
+                "AIFF": "Audio Interchange File Format (AIFF)", "DSDIFF": "DSDIFF", "MP4": "MPEG-4 Audio",
+                "FLAC": "FLAC", "OggFLAC": "Ogg FLAC", "OggSpeex": "Speex", "OggTheora": "Ogg Theora",
+                "OggVorbis": "Ogg Vorbis", "OggOpus": "Ogg Opus", "WAVE": "Microsoft WAVE", "ASF": "Windows Media Audio",
+                "Musepack": "Musepack", "WavPack": "WavPack", "OptimFROG": "OptimFROG", "MonkeysAudio": "Monkey's Audio",
+                "TAK": "Tom's lossless Audio Kompressor", "AAC": "AAC", "AC3": "AC-3"}
+
+
+def file_vars(path) -> dict:
+    """Picard's file variables for scripts: ~filepath, ~dirname, ~filename, ~extension,
+    ~filesize, ~format, ~bitrate (kbit/s), ~sample_rate, ~channels, ~bits_per_sample
+    (picard/file.py _info and _update_filesystem_metadata)."""
+    import os as _os
+    p = str(path)
+    stem, ext = _os.path.splitext(_os.path.basename(p))
+    m = _STAGE.match(_os.path.basename(p))
+    if m:                                           # (a staging copy: the name it stands for)
+        ext = m.group(1)
+    out = {"~filepath": [p], "~dirname": [_os.path.dirname(p)], "~filename": [stem], "~extension": [ext.lower()[1:]]}
+    try:
+        out["~filesize"] = [str(_os.path.getsize(p))]
+    except OSError:
+        pass
+    try:
+        f = open_file(path)
+    except Unsupported:
+        return out
+    info = getattr(f, "info", None)
+    for attr, key in (("bitrate", "~bitrate"), ("sample_rate", "~sample_rate"), ("channels", "~channels"),
+                      ("bits_per_sample", "~bits_per_sample")):
+        v = getattr(info, attr, None)
+        if v:
+            out[key] = [str(v / 1000.0) if attr == "bitrate" else str(v)]
+    out["~format"] = [FORMAT_NAMES.get(type(f).__name__, type(f).__name__.replace("File", ""))]
     return out
 
 

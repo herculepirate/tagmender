@@ -11,7 +11,7 @@ Supported (same meaning as in Picard unless noted):
   %name%                     the tag's value; several values are joined with "; "
   %_year%                    year of originaldate, else of date        (TagMender)
   %_albumartists_sorted%     the album artists (ALBUMARTISTS tag), A to Z; else the album artist as written (TagMender)
-  %_multiartist%             "1" when a track artist differs from the album artist
+  %_multiartist%             "1" when the release's tracks are by more than one artist (Picard's)
   %_edition%                 the edition: "<reissue year> <kind>" ("2019 Vinyl", "Vinyl", "2015 WEB",
                              "2014 CD"); empty for an original CD and when the media is unknown (TagMender)
   %_edition_kind%            the kind alone ("Vinyl", "WEB", "Tape"); empty for a CD (TagMender)
@@ -229,9 +229,6 @@ class Ctx:
             t["_albumartists_sorted"] = sorted(dict.fromkeys(names), key=str.casefold)
         if t.get("albumartists") and "_albumartists" not in t:     # Picard's %_albumartists%
             t["_albumartists"] = list(t["albumartists"])
-        a, aa = (t.get("artist") or [""])[0], (t.get("albumartist") or [""])[0]
-        if a and aa and a != aa:
-            t["_multiartist"] = ["1"]
         album = str((t.get("album") or [""])[0])
         for var, mode in (("_edition", "edition_year"), ("_edition_kind", "edition")):
             ed = edition(t, mode)

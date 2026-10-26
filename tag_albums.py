@@ -241,8 +241,8 @@ def _trailer(path) -> bytes:
         return fh.read()
 
 
-def _flac_head(path) -> bytes:
-    """The ID3 tags in front of a FLAC file's "fLaC", as they are."""
+def _id3_head(path) -> bytes:
+    """The ID3v2 tags at the start of the file (in front of a FLAC file's "fLaC"), as they are."""
     import payload
     with open(path, "rb") as fh:
         end = payload._id3v2_end(fh)
@@ -274,18 +274,24 @@ def _put_ends(path, blob_dir, trailer=None, head=None):
                 fh.write(data)
 
 
-def backup_tags(path, blob_dir):
+def backup_tags(path, blob_dir, legacy=False):
     """Every tag of the file as stored, pictures written to blob_dir by checksum; the tags at
-    the end of an MP3 or FLAC file (ID3v1, APEv2) and in front of a FLAC file (ID3) as they are."""
+    the end of an MP3 or FLAC file (ID3v1, APEv2) and in front of a FLAC file (ID3) as they are.
+    legacy: the record as TagMender kept it before it kept those (to compare with a job's)."""
     f = _open(path)
-    rec = {"format": type(f).__name__ if f else "", "tags": None, "pictures": []}
+    rec = {"format": type(f).__name__ if (f if legacy else f is not None) else "", "tags": None, "pictures": []}
+    if not legacy:
+        rec["v"] = 2                                 # (the record's kind: trailers and ID3 heads kept)
     if f is None:
         return rec
-    if type(f).__name__ in ("MP3", "EasyMP3", "TrueAudio"):
+    if type(f).__name__ in ("MP3", "EasyMP3", "TrueAudio") and not legacy:
         t = _trailer(path)
         rec["trailer"] = _blob(t, blob_dir) if t else ""
-    if isinstance(f, FLAC):
-        t, h = _trailer(path), _flac_head(path)
+    if isinstance(f, FLAC) and legacy:
+        for p in f.pictures:
+            rec["pictures"].append(_blob(p.write(), blob_dir))
+    elif isinstance(f, FLAC):
+        t, h = _trailer(path), _id3_head(path)
         rec["flac_ends"] = {"trailer": _blob(t, blob_dir) if t else "", "head": _blob(h, blob_dir) if h else ""}
         if f.seektable is not None and not f.seektable.seekpoints:
             rec["flac_ends"]["empty_seektable"] = True
@@ -293,8 +299,12 @@ def backup_tags(path, blob_dir):
             rec["pictures"].append(_blob(p.write(), blob_dir))
     if f.tags is None:
         return rec
-    if isinstance(f.tags, ID3) and f.tags.version[0] < 2:
+    if isinstance(f.tags, ID3) and f.tags.version[0] < 2 and not legacy:
         rec["tags"] = {"id3v1_only": True}          # (the trailer has it)
+        return rec
+    if isinstance(f.tags, ID3) and f.tags.version[:2] == (2, 2) and "trailer" in rec:
+        h = _id3_head(path)                         # (mutagen cannot write v2.2: the tag as it is)
+        rec["tags"] = {"id3_raw": _blob(h, blob_dir) if h else "", "id3_version": 2}
         return rec
     if isinstance(f.tags, ID3):
         tmp = Path(blob_dir) / f"backup-{os.getpid()}.id3"
@@ -351,6 +361,9 @@ def restore_tags(path, rec, blob_dir):
             f.seektable = SeekTable(b"")
             f.metadata_blocks.insert(1, f.seektable)
     trailer = rec.get("trailer")
+    if tags and "id3_raw" in tags:                  # an ID3v2.2 tag, as it was
+        _put_ends(path, blob_dir, trailer=trailer, head=tags["id3_raw"])
+        return
     if tags and "id3" in tags:
         tmp = Path(blob_dir) / f"restore-{os.getpid()}.id3"
         tmp.write_bytes((Path(blob_dir) / tags["id3"]).read_bytes())
@@ -361,7 +374,8 @@ def restore_tags(path, rec, blob_dir):
         if trailer is not None:
             _put_ends(path, blob_dir, trailer=trailer)
         return
-    if rec.get("format") in ("MP3", "EasyMP3", "TrueAudio") or str(path).lower().endswith(".mp3"):
+    if rec.get("format") in ("MP3", "EasyMP3", "TrueAudio") or str(path).lower().endswith(".mp3") or \
+            type(f).__name__ in ("MP3", "EasyMP3", "TrueAudio"):
         try:                                             # it had no ID3v2 tag before
             ID3(str(path)).delete(str(path), delete_v1=trailer is None)
         except Exception:

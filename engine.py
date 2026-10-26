@@ -430,7 +430,6 @@ class Engine:
                 tags_mb = mb_tags.release_tags(rel, ps)
         if not (mbid and self.use_mb):
             ps = self.profile.picard_tags()
-        scripts = picard_config.tagger_scripts(ps)
         es = self.profile.enrichment()
         dparts = None
         if dgid and self.dm is not None and (self.use_discogs or self.token):
@@ -475,18 +474,20 @@ class Engine:
                 merged.pop("tagmender", None)
             hidden = {k: v for k, v in (tags_mb[i] if tags_mb else {}).items() if k.startswith("~")}
             remove = list(hidden.pop("~remove", []))
-            if scripts:                   # Picard's tagger scripts (Options > Scripting), after the plugins
-                merged, gone = run_tagger_scripts(scripts, merged, hidden, self.log)
-                remove += [g for g in gone if g not in merged]
             if remove:
                 merged["~remove"] = list(dict.fromkeys(remove))
-            # Picard's hidden variables (%_multiartist%, %_releasecomment%, what a tagger script
-            # $set): for the file naming script only - never written (every "~" field is skipped)
+            # Picard's hidden variables (%_multiartist%, %_releasecomment% ...): for the tagger
+            # scripts and the file naming script only - never written (every "~" field is
+            # skipped). The tagger scripts run in the plan, on each file's own tags with these
+            # (as Picard's Track.update_file_metadata)
             for k, v in hidden.items():
                 if k not in merged and v not in (None, "", []):
                     merged[k] = v
             targets.append({k: (v if isinstance(v, list) else [v]) for k, v in merged.items()})
             prov.update(where)
+        if not tags_mb and len({str((t.get("artist") or [""])[0]) for t in targets}) > 1:
+            for t in targets:             # (Picard's %_multiartist%: tracks by more than one artist)
+                t["~multiartist"] = ["1"]
         provider = "musicbrainz" if order[0] == "musicbrainz" else "discogs"
         return planmod.Proposal(
             **base, targets=targets, status="identified", provider=provider + (
@@ -662,7 +663,7 @@ class Engine:
             stale = want["embed"] and any(m != ident for f in files for m in artwork.our_artist_marks(f))
             if lacking or stale or not stays:
                 prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who,
-                                     "own": not artwork.written_by_us(photo),
+                                     "artist_sort": names[1:], "own": not artwork.written_by_us(photo),
                                      "source": f"the artist folder's {photo.name}"}
             return
         if want["file"] and (artist_dir is not None or not stays):
@@ -852,7 +853,8 @@ def plan_entry_files(a: dict) -> list:
     """The album's own files, from its plan entry (for a release the user chooses for it): a
     copy profile's earlier copy names the file it was copied from."""
     return sorted({fe.get("copy_of") or fe["src"] for fe in a.get("files") or []} |
-                  {x.get("file") for x in a.get("skipped") or [] if x.get("file")})
+                  {x.get("file") for x in a.get("skipped") or [] if x.get("file")} |
+                  set(a.get("album_files") or []) | set(a.get("excluded_files") or []))
 
 
 def parse_release_ref(ref: str):

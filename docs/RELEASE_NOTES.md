@@ -31,8 +31,10 @@ fails to read.
 
 **Naming and tagger scripts run on Picard's own script engine** (copied from Picard 3.0.2):
 every one of its 82 functions, with Picard's semantics, so a script works here exactly as in
-Picard. Picard's tagger scripts (Options > Scripting) run on each track after Discogs
-Enrichment, as Picard runs them, with Picard's hidden variables (%_releasecomment%,
+Picard. Picard's tagger scripts (Options > Scripting) run on each file after Discogs
+Enrichment, as Picard runs them - on the file's own tags overlaid with the release's, so a
+script reading %genre% sees the file's genre, and with the file's variables (%_extension%,
+%_format%, %_bitrate% ...) - with Picard's hidden variables (%_releasecomment%,
 %_absolutetracknumber%, %_primaryreleasetype%, %_artists_sort% ...); a tag a script
 `$delete`s is removed, and so is a compilation flag on a release not by Various Artists, as
 Picard does (never a field the profile preserves, a field the tagging level leaves alone, or
@@ -70,6 +72,13 @@ the album is - flat in the artist folder, or being moved out of it (a moved albu
 along) - and the tracks' picture follows a corrected one also with "embed only"; a picture of
 the user's own beside TagMender's is never touched, and a download never replaces a picture
 made from the user's photo.
+
+**Undo, exactly (sixteenth review).** An MP3 with no tags, or only an APEv2 tag, is put back
+as it was (before, undo added an empty ID3v2 tag, kept an ID3v1 tag the job added, or lost the
+APEv2 tag); an ID3v2.2 tag comes back as v2.2; jobs recorded by earlier versions are still
+undone exactly. A mood or release date survives a change of ID3 version. Your own artist
+photo, changed after the job that put it in place of a download, is kept by undo and never
+holds the album back.
 
 **Artist photos and covers when albums move (fifteenth review).** Your own artist photo now
 replaces an artist.jpg TagMender downloaded earlier (the download is kept for undo) - also

@@ -55,8 +55,10 @@ class Hidden(Base):
         self.assertTrue(any("naming script failed" in c for c in a["conflicts"]), a["conflicts"])
 
     def test_an_invalid_naming_script_is_refused_in_the_profile(self):
+        bad = pf.from_dict({"name": "x", "naming": {"template": "$if(%album%"}})    # (it loads, to be fixed)
         with self.assertRaises(pf.ProfileError):
-            pf.from_dict({"name": "x", "naming": {"template": "$if(%album%"}})
+            pf.save(bad)
+        self.assertTrue(pf.check_template(bad.data))
         self.assertEqual(naming.check("$if(%album%,%album%)"), [])
 
 

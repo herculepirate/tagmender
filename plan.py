@@ -100,7 +100,7 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
         b, a = _vals(before.get(f)), _vals(target.get(f))
         pol = profile.policy(f)
         if f in extra_removals and f not in target:
-            if not (replace_ok or f.startswith("tagmender")):
+            if not (replace_ok or f.startswith("tagmender") or pol == "remove"):
                 if b:                             # (a match too uncertain to replace a tag deletes none either)
                     rows.append({"field": f, "before": b, "after": b,
                                  "action": "kept (confidence below replace threshold)"})
@@ -587,6 +587,42 @@ class Planner:
             self._picard_set = get() if get else {}
         return self._picard_set
 
+    def _scripts(self) -> list:
+        import picard_config
+        return picard_config.tagger_scripts(self._picard())
+
+    def _scripted(self, f: Path, before: dict, target: dict) -> dict:
+        """The file's target after Picard's tagger scripts, run as Picard runs them on a file
+        (Track.update_file_metadata, "clear existing tags" off): on the file's own tags
+        overlaid with the release's, with Picard's hidden variables and the file's (%_extension%,
+        %_format% ...). What a script $delete-s goes to "~remove"; the variables it $set-s
+        stay for the naming script. Fields the profile's level leaves alone stay as they are."""
+        import engine as _engine
+        import levels as _levels
+        hidden = {k: list(v) for k, v in target.items() if k.startswith("~") and k != "~remove"}
+        hidden = {**tagio.file_vars(f), **hidden}
+        tags = {**{k: list(v) for k, v in before.items() if not k.startswith("~")},
+                **{k: list(v) if isinstance(v, list) else [v] for k, v in target.items() if not k.startswith("~")}}
+        out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden)
+        # (the release's fields, and what a script changed: never the file's other fields as
+        # they are - a copy's own edits stay the copy's)
+        new = {k: v for k, v in out.items() if v and (k in target or tags.get(k) != v)}
+        new.update({k: v for k, v in hidden.items() if v})
+        remove = list(target.get("~remove") or []) + [g for g in gone if g not in new]
+        if remove:
+            new["~remove"] = list(dict.fromkeys(remove))
+        # (a field the level does not write: as the file has it, whatever a script made of it)
+        kept = _levels.restrict(new, self.profile)
+        for k in list(new):
+            if k not in kept and not k.startswith("~"):
+                if k in before:
+                    new[k] = list(before[k])
+                else:
+                    del new[k]
+        if new.get("~remove"):
+            new["~remove"] = list(kept.get("~remove") or [])
+        return new
+
     def _file_settings(self) -> dict:
         """Picard's settings for what saving a file does beside its fields (ID3v2 version,
         ID3v1, ...; see tagio.file_options)."""
@@ -601,7 +637,9 @@ class Planner:
                                     ("status", "provider", "release_id", "url", "confidence", "margin", "why",
                                      "evidence", "reason_codes", "provenance", "provider_errors")},
                  "release": prop.release, "files": [], "companions": [], "artwork": None,
-                 "conflicts": [], "skipped": [], "notes": []}
+                 "conflicts": [], "skipped": [], "notes": [],
+                 # (every file of the album as found: for a release the user chooses for it)
+                 "album_files": sorted({str(x) for x in (getattr(prop, "group_files", None) or prop.files or [])})}
         if prop.status == "unresolved":
             entry["identification"]["reason"] = reasons.encode(prop.reason, prop.reason_codes or None)
         # 1. rules, with what the files say and what identification found
@@ -721,6 +759,8 @@ class Planner:
             if ino:
                 self._inodes[ino] = str(f)
             target = dict(targets.get(f) or {})
+            if identified and self._scripts():
+                target = self._scripted(f, before, target)
             tag_ed = naming.edition({**before, **target, **rel_tags}, album_mode) if album_mode != "off" else ""
             if identified and tag_ed and (target.get("album") or [""])[0]:
                 album = str(target["album"][0])
@@ -740,7 +780,8 @@ class Planner:
                          if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
             # Picard's hidden variables (%_multiartist%, what a tagger script $set): for the file
             # naming script only, never written
-            hidden = {"_" + k[1:]: v for k, v in target.items() if k.startswith("~") and len(k) > 1}
+            hidden = {"_" + k[1:]: v for k, v in {**tagio.file_vars(f), **target}.items()
+                      if k.startswith("~") and len(k) > 1 and k != "~remove"}
             target = {k: v for k, v in target.items() if not k.startswith("~")}
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
@@ -810,10 +851,13 @@ class Planner:
                     legacy = None
                     old_tags = _legacy_names(merged) if identified else None
                     if old_tags is not None:
-                        legacy, _n = fnm.make_path(dest_root, naming.render(template, old_tags, self._picard(),
-                                                                            p["filenames"].get("compat", "windows")),
-                                                   f.suffix.lower(),
-                                                   p["filenames"])
+                        try:
+                            legacy, _n = fnm.make_path(
+                                dest_root, naming.render(template, {**hidden, **old_tags, **rel_tags}, self._picard(),
+                                                         p["filenames"].get("compat", "windows")),
+                                f.suffix.lower(), p["filenames"])
+                        except naming.TemplateError:
+                            legacy = None                 # (the old name cannot be made: no earlier copy by it)
                     earlier = self._earlier_copy(dst, f, dest_root, legacy)
                 if earlier is not None:
                     # copied by an earlier run: bring the copy's tags up to date, nothing else
@@ -826,6 +870,12 @@ class Planner:
                     fe.pop("format", None)
                     if changes2 and fmt2:
                         fe["format"] = fmt2
+                    fe.pop("riff", None)
+                    if changes2 and dst.suffix.lower() == ".wav":       # (the copy's own INFO, as for any file)
+                        now2 = {k: v for k, v in have.items() if not k.startswith("~")}
+                        now2.update({k: (raw.get(k) or v) for k, v in changes2.items() if v is not None})
+                        fe["riff"] = {k: list(now2[k]) for k in tagio.RIFF_INFO
+                                      if now2.get(k) and changes2.get(k, "") is not None}
                     fe.update(src=str(dst), dst=str(dst), op="tag" if changes2 else "none", changes=changes2,
                               diff=rows2, fingerprint=_fp(dst), copy_of=str(f))
                     entry["files"].append(fe)

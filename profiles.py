@@ -264,11 +264,8 @@ def validate(data: dict) -> list[str]:
     if art.get("generate", "off") not in ARTWORK_GENERATE:
         p.append(f"artwork.generate must be one of {', '.join(ARTWORK_GENERATE)}")
     import naming as _naming
-    tpl = (d["naming"] or {}).get("template") or ""
-    if not isinstance(tpl, str):
+    if not isinstance((d["naming"] or {}).get("template") or "", str):
         p.append("naming.template must be a naming script (text)")
-    elif tpl.strip():
-        p += [f"naming.template: {x}" for x in _naming.check(tpl)]
     for k in ("editions", "album_editions"):
         if (d["naming"] or {}).get(k, "off") not in _naming.EDITIONS:
             p.append(f"naming.{k} must be one of {', '.join(_naming.EDITIONS)}")
@@ -443,8 +440,18 @@ def minimal(profile: Profile) -> dict:
     return {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, DEFAULTS)}
 
 
+def check_template(d: dict) -> list[str]:
+    """A naming script that does not parse (checked when a profile is saved, and by `profiles
+    check`; a profile holding one still loads - a plan names its albums' conflicts)."""
+    import naming as _naming
+    tpl = ((d.get("naming") or {}).get("template") or "") if isinstance(d.get("naming"), dict) else ""
+    if not isinstance(tpl, str) or not tpl.strip():
+        return []
+    return [f"naming.template: {x}" for x in _naming.check(tpl)]
+
+
 def save(profile: Profile, *, full=False):
-    problems = validate(profile.data)
+    problems = validate(profile.data) + check_template(profile.data)
     if problems:
         raise ProfileError("; ".join(problems))
     path = path_of(profile.name)

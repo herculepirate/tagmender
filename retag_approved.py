@@ -86,6 +86,17 @@ def approved_releases(fixes_db: Path, sure_only=False) -> dict:
     return out
 
 
+def skipped_in_plan(plan_csv: Path, wanted: dict) -> dict:
+    """{reason: [album, ...]} for the wanted albums the Picard plan skipped."""
+    out = {}
+    with open(plan_csv, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            if row["Album folder"] in wanted and not row["MusicBrainz release"]:
+                reason = row["Matched as"].removeprefix("SKIPPED: ").split(";")[0].strip() or "skipped"
+                out.setdefault(reason, []).append(row["Album folder"])
+    return out
+
+
 def check_tag_plan(plan_csv: Path, wanted: dict) -> tuple[list, list]:
     """(albums planned, problems): every planned album approved, to the approved release."""
     planned, problems = [], []
@@ -178,8 +189,14 @@ def main(argv=None):
         if problems:
             raise Stop("the Picard plan does not match the approved list:\n  " + "\n  ".join(problems))
         r.say(f"2. Picard plan checked: {len(planned)} album(s), each to its approved release")
+        for reason, albums in sorted(skipped_in_plan(Path.home() / "Downloads" / "tagging" / "tag_plan.csv",
+                                                     wanted).items()):
+            # say it, never just "Done": a whole run once skipped 201 albums matched by an older matcher
+            r.say(f"   NOT tagged by Picard ({reason}): {len(albums)} album(s)")
+            r.log.write(f"\nNot tagged by Picard ({reason}):\n" + "\n".join(sorted(albums)) + "\n")
 
-        out = r.run("web_tag.py", "--matches-db", fixes, "--library", lib)
+        only_new = ["--untagged-only"] if args.new else []      # --new never touches a tagged album
+        out = r.run("web_tag.py", "--matches-db", fixes, "--library", lib, *only_new)
         m = re.search(r"Report: (.+\.csv)$", out, re.M)
         found, problems = check_web_plan(Path(m.group(1)), wanted) if m else ([], ["no web_tag report"])
         if problems:
@@ -212,7 +229,7 @@ def main(argv=None):
                 if not s.startswith("tagged"):
                     r.say(f"     NOT DONE ({s}): {a}")
         if found or album_only:
-            out = r.run("web_tag.py", "--matches-db", fixes, "--library", lib, "--apply", check=False)
+            out = r.run("web_tag.py", "--matches-db", fixes, "--library", lib, *only_new, "--apply", check=False)
             m = re.search(r"(\d+) of (\d+) found on the web", out)
             r.say(f"5. Discogs-only and album-only: {m.group(1) if m else '?'} of {m.group(2) if m else '?'} tagged")
         r.say("Done.")

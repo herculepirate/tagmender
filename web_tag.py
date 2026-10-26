@@ -700,14 +700,41 @@ def _five_words(title):
 
 
 def target_folder(base, cand, library=None):
-    """Where Picard's naming script would file the album: <library>/<album
-    artists A to Z, joined by &>/<year> - <album, at most 5 words>."""
+    """Where Picard's naming script would file the album: <library>/<album artists A to Z,
+    joined by &>/<original year> - <album, at most 5 words>[ [<reissue year> <media>]].
+
+    The artist folder already in the library is used when it is the same name written
+    another way (your Picard standardises "Voïvod" to Voivod; Discogs credits Voïvod), and
+    the year is the album's original (the folder's own year) with a later pressing's year
+    as the edition, like your script's "[2019 Vinyl]"."""
     library = Path(library) if library else Path(base).parent.parent
     artists = sorted({a.strip() for a in re.split(r"\s*(?:,|&| and )\s*", cand["artist"]) if a.strip()},
                      key=str.casefold) or [cand["artist"]]
-    year = str(cand.get("date") or cand.get("year") or "")[:4]
+    artist_dir = _safe(" & ".join(artists))
+    try:
+        same = [d.name for d in library.iterdir() if d.is_dir() and mc.fold(d.name) == mc.fold(artist_dir)]
+    except OSError:
+        same = []
+    if same:
+        # several spellings in the library (Voïvod and Voivod): the one most albums are in,
+        # which is where Picard files this artist
+        def albums_in(name):
+            try:
+                return sum(1 for d in (library / name).iterdir() if d.is_dir())
+            except OSError:
+                return 0
+        artist_dir = max(same, key=lambda n: (albums_in(n), n == Path(base).parent.name))
+    pressing = str(cand.get("date") or cand.get("year") or "")[:4]
+    m = re.match(r"(\d{4})\b", Path(base).name)
+    original = m.group(1) if m and (not pressing.isdigit() or m.group(1) <= pressing) else pressing
     album = _five_words(cand["title"])
-    dest = library / _safe(" & ".join(artists)) / _safe(f"{year} - {album}" if year else album)
+    name = f"{original} - {album}" if original else album
+    if original and pressing.isdigit() and pressing > original:
+        media = str(cand.get("media") or "")
+        kind = ("Vinyl" if "vinyl" in media.lower() else "WEB" if media in ("Digital Media", "File") or not media
+                else "CD" if "cd" in media.lower() else media.split()[-1])
+        name += f" [{pressing} {kind}]"
+    dest = library / artist_dir / _safe(name)
     if dest.exists() and dest.resolve() != Path(base).resolve():
         return Path(base)                      # never merge into another album's folder
     return dest
@@ -750,6 +777,18 @@ def undo(out_dir, run_id):
     return ta.undo(out_dir, run_id)
 
 
+def carries_release(album_dir):
+    """True when any audio file in the folder already names a release (a MusicBrainz or
+    Discogs release ID): such an album keeps its tags; only a re-tag you approved replaces them."""
+    import audit_untagged
+    for p in sorted(Path(album_dir).rglob("*")):
+        if p.is_file() and p.suffix.lower() in ma.AUDIO_EXT:
+            t, _len = audit_untagged.read_tags(p)
+            if t.get("mb") or t.get("dg"):
+                return True
+    return False
+
+
 def unresolved(matches_db, only=None, include_review=False, include_discogs=True, include_album_only=True):
     """Albums Picard cannot tag: no match, review (if asked), and confident
     matches found on Discogs only (MusicBrainz has no release for Picard to use)."""
@@ -784,6 +823,8 @@ def main(argv=None):
     ap.add_argument("--library", help="library folder to file albums into (default: the one they are in)")
     ap.add_argument("--no-discogs", action="store_true",
                     help="skip albums matched on Discogs only (by default they are tagged from that release)")
+    ap.add_argument("--untagged-only", action="store_true",
+                    help="only albums whose files carry no release ID yet (retag_approved --new)")
     ap.add_argument("--keep-folders", action="store_true",
                     help="tag in place; do not file albums under their artist like Picard does")
     args = ap.parse_args(argv)
@@ -817,6 +858,14 @@ def main(argv=None):
             print(f"  ×   {base.parent.name} | {base.name}: {pre.summary().reason()}")
             report.append({"album": o["path"], "source": "", "page": "", "matched": "", "confidence": "",
                            "result": pre.summary().reason()})
+            continue
+        album_only_pick = bool(o.get("album_only")) and o.get("status") != "auto"
+        if (args.untagged_only or album_only_pick) and carries_release(base):
+            # already tagged with a release: kept (Cynic, Nile, Ulcerate... were overwritten
+            # with album-only tags on top of their release IDs)
+            print(f"  =   {base.parent.name} | {base.name}: already tagged with a release; kept")
+            report.append({"album": o["path"], "source": "", "page": "", "matched": "", "confidence": "",
+                           "result": "already tagged with a release; kept"})
             continue
         chosen = o.get("status") == "auto" and (o.get("best") or {}).get("source") == "discogs"
         # a chosen Discogs pressing replaces the tags: read the album as the matcher did, blind to

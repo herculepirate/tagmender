@@ -362,6 +362,61 @@ class WebTag(Base):
         import io
         self.assertEqual(audit_untagged.audit_album(self.album, io.StringIO())["Status"], "album_only")
 
+    def test_an_album_already_tagged_with_a_release_is_kept(self):
+        """Cynic, Nile, Ulcerate, Theory In Practice...: retag_approved --new wrote album-only
+        and Discogs tags over albums that already carried their release IDs."""
+        f = mutagen.File(self.album / "01.flac")
+        f["MUSICBRAINZ_ALBUMID"] = ["520aefc8"]
+        f["ALBUM"] = ["Mine"]
+        f.save()
+        db = sqlite3.connect(self.db)
+        db.execute("UPDATE results SET result=?", (json.dumps({
+            "path": str(self.album), "status": "review", "artist_folder": "Mournful Congregation",
+            "album_folder": self.album.name, "best": {"source": "mb", "id": "m1", "mb_id": "m1"},
+            "why": ["runner-up m2 within 0.0 points (likely another pressing)"],
+            "album_only": {"source": "cd", "tied": [{"source": "mb", "id": "m1", "formats": ["cd"]},
+                                                    {"source": "mb", "id": "m2", "formats": ["cd"]}]}}),))
+        db.commit()
+        rel = {"id": "m1", "title": "The Exuviae of Gods, Pt. 2", "date": "2018", "country": "US",
+               "label-info": [], "artist-credit": [{"name": "Mournful Congregation", "joinphrase": "",
+                                                    "artist": {"id": "mc-id", "name": "Mournful Congregation"}}],
+               "media": [{"format": "CD", "tracks": [{"title": f"Part {i + 1}", "length": s * 1000, "recording": {}}
+                                                     for i, s in enumerate(LENS)]}]}
+
+        class M(FakeWeb):
+            def get_json(self, url, host):
+                return rel if "/ws/2/release/m1" in url else super().get_json(url, host)
+        web = M()
+        self.run_main(web, "--apply", "--keep-folders")
+        f = mutagen.File(self.album / "01.flac")
+        self.assertEqual((f["ALBUM"], f.get("TAGMENDER")), (["Mine"], None))
+        self.assertFalse(any("/ws/2/release/m1" in u for u in web.urls))
+        self.assertTrue(wt.carries_release(self.album))
+        # a Discogs-only match of a tagged album: kept with --untagged-only (retag_approved --new)
+        db.execute("UPDATE results SET result=?", (json.dumps({
+            "path": str(self.album), "status": "auto", "artist_folder": "Mournful Congregation",
+            "album_folder": self.album.name, "best": {"source": "discogs", "id": "555"}}),))
+        db.commit()
+        self.run_main(web, "--apply", "--untagged-only", "--keep-folders")
+        self.assertEqual(mutagen.File(self.album / "01.flac")["ALBUM"], ["Mine"])
+        self.assertFalse(any("/releases/555" in u for u in web.urls))
+
+    def test_filed_like_picard_files_it(self):
+        """Voïvod - 1995 - Negatron (Reissue), tagged from the 2004 Discogs reissue, was moved
+        to a new "Voïvod/2004 - Negatron" beside your Voivod folder: the artist folder most
+        albums are in and the original year, with the reissue as the edition."""
+        lib = self.tmp / "lib"
+        for d in ("Voivod/1986 - Rrröööaaarrr", "Voivod/1987 - Killing Technology", "Voïvod/1995 - Negatron (Reissue)"):
+            (lib / d).mkdir(parents=True)
+        base = lib / "Voïvod" / "1995 - Negatron (Reissue)"
+        self.assertEqual(wt.target_folder(base, {"artist": "Voïvod", "title": "Negatron", "date": "2004",
+                                                 "media": "CD"}, lib), lib / "Voivod" / "1995 - Negatron [2004 CD]")
+        self.assertEqual(wt.target_folder(base, {"artist": "Voïvod", "title": "Negatron", "date": "1995"}, lib),
+                         lib / "Voivod" / "1995 - Negatron")
+        self.assertEqual(wt.target_folder(lib / "Pentemple" / "x", {"artist": "Pentemple", "title": "O))) Presents",
+                                                                    "date": "2008"}, lib),
+                         lib / "Pentemple" / "2008 - O))) Presents")
+
     def test_album_only_never_names_media_the_copy_is_not(self):
         """Between The Buried And Me - Automata I & II: a CD rip tied between vinyl pressings
         only: their shared tags would say Vinyl, so it is left for a person."""

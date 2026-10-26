@@ -54,6 +54,18 @@ class Checks(unittest.TestCase):
         bad = self.plan([("/l/AVKRVST/The Approbation", "56af"), ("/l/Other/Album", "aaaa")])
         self.assertEqual(len(ra.check_tag_plan(bad, self.wanted)[1]), 2)
 
+    def test_albums_picard_skipped_are_reported(self):
+        p = self.tmp / "tag_plan.csv"
+        with open(p, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["Album folder", "Files", "MusicBrainz release", "Matched as", "Confidence"])
+            w.writerow(["/l/AVKRVST/The Approbation", "", "", "SKIPPED: matched by an older version of the "
+                        "matcher; let match_albums.py check it again first (or --allow-old-matches)", ""])
+            w.writerow(["/l/Jesu/Terminus", 3, "https://musicbrainz.org/release/52c3", "x", 100])
+            w.writerow(["/l/Not/Wanted", "", "", "SKIPPED: no vox", ""])
+        self.assertEqual(ra.skipped_in_plan(p, self.wanted),
+                         {"matched by an older version of the matcher": ["/l/AVKRVST/The Approbation"]})
+
     def test_new_albums_only_the_sure_ones(self):
         db = sqlite3.connect(self.tmp / "fixes.db")
         db.execute("INSERT INTO results VALUES (?,?)", ("/l/Sepultura/The Mediator", json.dumps(

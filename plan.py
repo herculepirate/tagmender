@@ -712,6 +712,9 @@ class Planner:
             mount = mount or os.sep
             rel_to = os.path.dirname(base) if mount == os.sep else mount
             lim["win_reserved"] = len(base) - len(rel_to) + 3 + 1
+            forced = (self.__dict__.get("_win_dirs") or {}).get(self.__dict__.get("_win_album", ""))
+            if forced:
+                lim["win_dirs"] = forced
         return lim
 
     def _file_settings(self) -> dict:
@@ -721,6 +724,7 @@ class Planner:
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
+        self._win_album = str(prop.source_dir)
         p = self.profile
         files = [Path(f) for f in prop.files]
         entry = {"source_dir": str(prop.source_dir), "status": "ready", "label": "", "rule": None,
@@ -854,6 +858,7 @@ class Planner:
             except Exception:
                 rel = {}
         rel_tags = {f"~edition_{k}": v for k, v in rel.items()}
+        win_split, split = {}, False
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -963,6 +968,9 @@ class Planner:
                     unheld = {k: v for k, v in whole.items() if v and (not tagio.holds(f, k) or
                                                                         (k in raw and k not in target))}
                     names = {**hidden, **merged, **unheld, **rel_tags}
+                    for k_, sp_ in tagio.spellings(f).items():     # (the file's own TXXX:EDITION as %EDITION%)
+                        if k_ in names and k_ not in whole:
+                            names[sp_] = names.pop(k_)
                     if folder_mode != "off":
                         # (for the name only: a Picard script working the edition out itself
                         # from %media% and %date% gets the release's first-disc values for every
@@ -981,9 +989,27 @@ class Planner:
                     dst = None
                     if comps is not None:
                         dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), self._name_limits(dest_root))
+                    made = dst
                     if dst is not None:
                         dst = self._spelled(dst, dest_root)
                         dst = self._own_album_dir(dst, prop, kept, album_dirs)
+                        # (Windows path shortening cuts each track's folders by its own path's
+                        # length: one folder of the album must never become two)
+                        try:
+                            got = made.parent.relative_to(dest_root).parts
+                        except ValueError:
+                            got = None
+                        if got is not None and len(got) == len(comps) - 1 and \
+                                "win_reserved" in self._name_limits(dest_root):
+                            compat_ = p["filenames"].get("compat", "windows")
+                            keys = [fnm.safe_component(c, compat_) for c in comps[:-1]]
+                            for i in range(len(got)):
+                                k = tuple(keys[:i + 1])
+                                was = win_split.setdefault(k, got[:i + 1])
+                                if was != got[:i + 1]:
+                                    split = True        # (the most shortened wins, for every track)
+                                    if sum(map(len, got[:i + 1])) < sum(map(len, was)):
+                                        win_split[k] = got[:i + 1]
                 entry["notes"] += notes
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
@@ -1000,7 +1026,10 @@ class Planner:
                                 f.suffix.lower(), self._name_limits(dest_root))
                         except naming.TemplateError:
                             legacy = None                 # (the old name cannot be made: no earlier copy by it)
-                    earlier = self._earlier_copy(dst, f, dest_root, legacy)
+                    # (and the name a version before Picard's Windows path shortening gave it)
+                    plain = fnm.make_path(dest_root, comps, f.suffix.lower(), p["filenames"])[0] \
+                        if comps is not None and "win_reserved" in self._name_limits(dest_root) else None
+                    earlier = self._earlier_copy(dst, f, dest_root, [legacy, plain])
                 if earlier is not None:
                     # copied by an earlier run: bring the copy's tags up to date, nothing else
                     dst = earlier
@@ -1047,6 +1076,28 @@ class Planner:
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
         entry["conflicts"] += _linked_tracks(entry)
+        entry["conflicts"] = list(dict.fromkeys(entry["conflicts"]))
+        if split:
+            # Windows path shortening cut the album's folders differently for its tracks (each
+            # by its own path's length: discs with names of different lengths): planned again
+            # with the most shortened folders for all of them - one album, one folder
+            forced = self.__dict__.setdefault("_win_dirs", {})
+            key = str(prop.source_dir)
+            norm = {}                       # (each folder's shortened parent: the one chosen for it)
+            for k_ in sorted(win_split, key=len):
+                v_ = tuple(win_split[k_])
+                norm[k_] = (norm[k_[:-1]] + v_[-1:]) if k_[:-1] in norm else v_
+            tries = self.__dict__.setdefault("_win_tries", {})
+            if tries.get(key, 0) < 2 and forced.get(key) != norm:
+                tries[key] = tries.get(key, 0) + 1
+                forced[key] = norm
+                mine = {str(x) for x in files}
+                for k_ in [k_ for k_, v_ in self.claimed.items() if v_ in mine]:
+                    del self.claimed[k_]
+                return self.album(prop)
+            entry["conflicts"].append("the album's folders are too long for Windows' path length and could not be "
+                                      "shortened alike for all its tracks; shorten the names (profile "
+                                      "abbreviations) or set picard.windows_long_paths")
         if entry["conflicts"]:
             entry["status"] = "blocked"
             return entry
@@ -1182,12 +1233,30 @@ class Planner:
         if linked:
             entry["conflicts"] += linked
             entry["status"] = "blocked"
+            self._release(entry, prop)                 # (its cover and artist.jpg: another album's to take)
             return entry
         if all(fe["op"] == "none" for fe in entry["files"]) and not entry["companions"] and \
                 not entry["sidecars"] and \
                 not (entry["artwork"] and (entry["artwork"]["embed_into"] or entry["artwork"]["file"])):
             entry["status"] = "unchanged" if entry["status"] == "ready" else entry["status"]
         return entry
+
+    def _release(self, entry, prop):
+        """A blocked album gives up what it claimed in this plan: its files' names, its cover
+        file, the artist folder's artist.jpg (another album of the artist writes it then)."""
+        me = f"artwork:{prop.source_dir}:{sorted(_release_ids(prop))}:{sorted(map(str, prop.files))}"
+        mine = {str(x) for x in prop.files} | {fe["src"] for fe in entry["files"]} | {me}
+        photos = {fnm.fold(sc["dst"]) for sc in entry.get("sidecars") or [] if sc.get("kind") == "artist"}
+        for k in [k for k, v in self.claimed.items() if v in mine or (k in photos and v == "artist-photo")]:
+            del self.claimed[k]
+        claims = self.__dict__.get("artist_dirs") or {}
+        for dk in list(claims):
+            c = claims[dk]
+            c["entries"] = [e for e in c["entries"] if e is not entry]
+            if not c["entries"]:
+                del claims[dk]
+            elif c["sidecar"] is not None and c["sidecar"] in (entry.get("sidecars") or []):
+                c["sidecar"] = None
 
     def _artist_photo(self, prop, entry, op):
         import artwork as _artwork
@@ -1332,7 +1401,7 @@ class Planner:
         if want is None:
             return None
         cands = [Path(p) for p in copies_of(src, dest_root)]
-        for d in (dst, legacy):
+        for d in [dst] + (list(legacy) if isinstance(legacy, (list, tuple)) else [legacy]):
             if d is not None:
                 cands += [d, d.with_name(d.stem + fnm.collision_suffix(str(src)) + d.suffix)]
         for cand in cands:
@@ -1482,9 +1551,13 @@ class Planner:
     def _unique(self, dst: Path, src: Path, entry):
         """dst, or dst with a stable suffix when another file has (or will have) that name;
         None (with a conflict noted) when even that is taken."""
+        # (the suffixed name an earlier run gave this very file, when it was moved: kept - its
+        # suffix came from where it was then, and another would rename it on every run)
+        own = src if src.parent == dst.parent and src.suffix == dst.suffix and \
+            re.fullmatch(re.escape(dst.stem) + r" ~[0-9a-f]{4}", src.stem) else None
         for attempt in range(2):
-            cand = dst if attempt == 0 else dst.with_name(
-                dst.stem + fnm.collision_suffix(str(src)) + dst.suffix)
+            cand = dst if attempt == 0 else (own or dst.with_name(
+                dst.stem + fnm.collision_suffix(str(src)) + dst.suffix))
             key = fnm.fold(cand)
             other = self.claimed.get(key)
             same_file = src.exists() and cand.exists() and os.path.samefile(cand, src)

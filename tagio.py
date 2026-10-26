@@ -388,7 +388,7 @@ def spellings(path) -> dict:
     return out
 
 
-def read(path, legacy=False) -> dict[str, list[str]]:
+def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
     """{field: [values]} with Picard's names. Pictures are counted in '~pictures'. legacy:
     as an earlier TagMender read a file, for the fingerprints its jobs recorded - 1 (True):
     before 609b541 (no described comments or lyrics), 2: 609b541 to b1f0b98 (described by
@@ -487,10 +487,10 @@ def read(path, legacy=False) -> dict[str, list[str]]:
             if key == "covr":
                 out["~pictures"] = [str(len(vals))]
             elif key == "trkn" and vals:            # (track 0 is "0", as Picard reads it)
-                _add(out, "tracknumber", [vals[0][0] if (vals[0][0] or not legacy) else ""])
+                _add(out, "tracknumber", [vals[0][0] if (vals[0][0] or (mp4_zero and not legacy)) else ""])
                 _add(out, "totaltracks", [vals[0][1] or ""])
             elif key == "disk" and vals:
-                _add(out, "discnumber", [vals[0][0] if (vals[0][0] or not legacy) else ""])
+                _add(out, "discnumber", [vals[0][0] if (vals[0][0] or (mp4_zero and not legacy)) else ""])
                 _add(out, "totaldiscs", [vals[0][1] or ""])
             elif key == "tmpo":
                 _add(out, "bpm", vals)
@@ -845,7 +845,10 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         v = out.get(num)
         if isinstance(v, list) and v and (str(v[0]) != str(v[0]).strip() or "/" in str(v[0])):
             a_, _sl, b_ = str(v[0]).strip().partition("/")
-            out[num] = [a_.strip()] if a_.strip() else None
+            if a_.strip():
+                out[num] = [a_.strip()]
+            else:
+                out.pop(num)                      # (" " or "/12": no number - the file's stays)
             if b_.strip() and not out.get(tot):
                 out[tot] = [b_.strip()]
     if fam == "apev2":

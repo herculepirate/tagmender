@@ -185,6 +185,12 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
         return None, ["the naming template gave an empty path"]
     if limits.get("win_reserved") is not None:          # (Picard's 259-character Windows paths)
         short = win_short_parts(parts, ext, int(limits["win_reserved"]))
+        forced = limits.get("win_dirs") or {}
+        for i in range(len(parts) - 1, 0, -1):          # (folders shortened alike for an album's tracks)
+            k = tuple(parts[:i])
+            if k in forced and len(forced[k]) == i:
+                short = list(forced[k]) + short[i:]
+                break
         if short != parts:
             notes.append(f"shortened {'/'.join(parts)!r} -> {'/'.join(short)!r} for Windows' path length "
                          "(as Picard does; Picard's \"Windows long path support\" setting turns it off)")

@@ -393,12 +393,14 @@ def _place(tmp: Path, dst: Path):
     _fsync_dir(dst.parent)
 
 
-def _tags_sig(path, legacy=0) -> str:
+def _tags_sig(path, legacy=0, mp4_zero=True) -> str:
     """A fingerprint of a file's tags: undo leaves files whose tags were edited later alone.
     "v2:" marks how this version reads tags (described comments and lyrics); legacy: as the
-    versions before read them, to compare with their jobs' fingerprints."""
+    versions before read them, to compare with their jobs' fingerprints. mp4_zero False: an
+    M4A's track or disc number 0 read as none, as versions before d25358a read it."""
     try:
-        t = tagio.read(path, legacy=legacy) if legacy else tagio.read(path)
+        t = tagio.read(path, legacy=legacy) if legacy else \
+            (tagio.read(path) if mp4_zero else tagio.read(path, mp4_zero=False))
     except Exception:
         return ""
     h = hashlib.sha1(json.dumps(sorted((k, [str(x) for x in v] if isinstance(v, list) else str(v))
@@ -415,7 +417,7 @@ def _sig_is(path, sig, backup=None, blobs=None) -> bool:
     if not sig:
         return False
     if str(sig).startswith("v2:"):
-        return _tags_sig(path) == sig
+        return _tags_sig(path) == sig or _tags_sig(path, mp4_zero=False) == sig
     if _tags_sig(path, legacy=2) == sig:
         return True
     if _tags_sig(path, legacy=1) != sig:
@@ -988,9 +990,13 @@ class Executor:
         # this album's music (a track added since would stay behind alone)
         planned = {fe["src"] for fe in a["files"]} | {fe["copy_of"] for fe in a["files"] if fe.get("copy_of")} \
             | {s_.get("file") for s_ in a.get("skipped") or []}
-        # (a track's own "01 a.lrc" from a folder shared with other music goes whatever else it holds)
+        # (a track's own "01 a.lrc" from a folder shared with other music goes whatever else it holds;
+        # a plan saved before the companions said so: by its note, and the file named after a track)
+        shared = any(n == planmod.SHARED_FOLDER_NOTE for n in a.get("notes") or [])
+        stems = {(str(Path(s_).parent), Path(s_).stem) for s_ in planned if s_}
         for d in sorted({str(Path(c["src"]).parent) for c in a["companions"]
-                         if c.get("op") != "rewrite" and not c.get("own")}):
+                         if c.get("op") != "rewrite" and not c.get("own") and
+                         not (shared and (str(Path(c["src"]).parent), Path(c["src"]).stem) in stems)}):
             try:
                 extra = sorted(n for n in os.listdir(d) if Path(n).suffix.lower() in ex.AUDIO_EXT
                                and not n.startswith(".") and os.path.join(d, n) not in planned)
@@ -1890,7 +1896,8 @@ def _recover(job, jd, journal, events):
         journal.write(ev="album_rolled_back", album=a, problems=problems, recovered=True)
         done.append(f"album {a} ({_album_name(jd, a)}): put back as it was before the job" +
                     (f" (problems: {problems})" if problems else "") +
-                    f"; plan it again to do it (tagmender run \"{_album_name(jd, a)}\", or Preview in the app)")
+                    f"; plan it again to do it (tagmender run \"{_album_name(jd, a)}\"{_profile_arg(jd)}, or "
+                    "Preview in the app)")
 
     # 4. folders whose creation was cut short
     made = {x["path"] for x in events if x.get("ev") == "dir_created"}
@@ -1903,6 +1910,15 @@ def _recover(job, jd, journal, events):
     journal.write(ev="recovered", actions=done)
     _record_job(job, ended=time.time(), status="recovered")
     return done or ["nothing was half-done"]
+
+
+def _profile_arg(jd: Path) -> str:
+    """ --profile NAME of the job's plan (none for the default profile)."""
+    try:
+        name = json.loads((jd / "plan.json").read_text(encoding="utf-8")).get("profile") or ""
+    except Exception:
+        return ""
+    return f' --profile "{name}"' if name and name != "default" else ""
 
 
 def _album_name(jd: Path, i: int) -> str:

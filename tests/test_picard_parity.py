@@ -266,5 +266,24 @@ class WholeRelease(unittest.TestCase):
         self.assertEqual(t[0]["artist"], ["The Band"])
 
 
+class FileNaming(unittest.TestCase):
+    """Options > File Naming: "/" in a value replaced (replace_dir_separator), non-ASCII
+    characters replaced, spaces made underscores - against Picard's script_to_filename
+    (tests/data/picard_parity/make_filenames.py), as the names come out of make_path."""
+    def test_as_picard(self):
+        import json
+        import filenames as fnm
+        import naming
+        cases = json.loads((Path(__file__).resolve().parent / "data" / "picard_parity" /
+                            "filenames_cases.json").read_text(encoding="utf-8"))
+        self.assertGreater(len(cases), 300)
+        for c in cases:
+            ours = naming.render(c["template"], c["tags"], c["settings"], "windows")
+            theirs = [x.strip() for x in c["picard"].split("/") if x.strip()]
+            safe = lambda comps: [fnm.safe_component(x, "windows", i == len(comps) - 1)  # noqa: E731
+                                  for i, x in enumerate(comps)]
+            self.assertEqual(safe(ours), safe(theirs), c)
+
+
 if __name__ == "__main__":
     unittest.main()

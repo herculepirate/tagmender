@@ -580,14 +580,17 @@ class Planner:
         self._planned = set()
         self._resident = []
 
+    def _picard(self) -> dict:
+        """Picard's settings this profile follows (picard_config.tag_settings), once per plan."""
+        if not hasattr(self, "_picard_set"):
+            get = getattr(self.profile, "picard_tags", None)
+            self._picard_set = get() if get else {}
+        return self._picard_set
+
     def _file_settings(self) -> dict:
         """Picard's settings for what saving a file does beside its fields (ID3v2 version,
-        ID3v1, ...; see tagio.file_options), once per plan."""
-        if not hasattr(self, "_fileset"):
-            get = getattr(self.profile, "picard_tags", None)
-            s = get() if get else {}
-            self._fileset = {k: s.get(k) for k in tagio.FILE_SETTINGS}
-        return self._fileset
+        ID3v1, ...; see tagio.file_options)."""
+        return {k: self._picard().get(k) for k in tagio.FILE_SETTINGS}
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
@@ -789,7 +792,7 @@ class Planner:
                         if tag_ed and al.endswith(f" [{tag_ed}]"):
                             names["album"] = [al[:-len(f" [{tag_ed}]")]]
                     try:
-                        comps = naming.render(template, names)
+                        comps = naming.render(template, names, self._picard(), p["filenames"].get("compat", "windows"))
                     except naming.TemplateError as exc:          # (a custom script that fails here)
                         comps, notes = None, [f"the naming script failed: {exc}"]
                     dst = None
@@ -807,7 +810,9 @@ class Planner:
                     legacy = None
                     old_tags = _legacy_names(merged) if identified else None
                     if old_tags is not None:
-                        legacy, _n = fnm.make_path(dest_root, naming.render(template, old_tags), f.suffix.lower(),
+                        legacy, _n = fnm.make_path(dest_root, naming.render(template, old_tags, self._picard(),
+                                                                            p["filenames"].get("compat", "windows")),
+                                                   f.suffix.lower(),
                                                    p["filenames"])
                     earlier = self._earlier_copy(dst, f, dest_root, legacy)
                 if earlier is not None:

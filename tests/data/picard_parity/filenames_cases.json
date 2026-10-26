@@ -1,0 +1,5602 @@
+[
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "’ ",
+"album": "ﬁX”/cZ",
+"title": "æY:Z…ÅX"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'_/fiX_cZ/00_aeY_Z...AX"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "™ﬁX‐ﬁßX\\c…1",
+"album": "æ9’0‐",
+"title": "…日- ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "™ﬁX‐ﬁßX-c…1/æ9’0‐/00_…日-_ﬁ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "語Y‐X½/“日’",
+"album": " >–ﬁ–é<",
+"title": " -本 "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語Y‐X½_“日’/_–ﬁ–é_/00_-本"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "한ñ\"①Y0",
+"album": "æ_🎵|9“æcж",
+"title": "🎵…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "___n_1Y0/ae___9_aec_/00 _..."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "本'①“ﬁ–",
+"album": "Z?",
+"title": "本жYX한本<Ω"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "本'①“ﬁ–/Z_/00 本жYX한本_Ω"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "語øж'b",
+"album": "'_½0“X/ ",
+"title": "1글:ßß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語øж'b/'_½0“X＿ /00 1글_ßß"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ß…?1Å…?語",
+"album": "'日ø\\9Z-",
+"title": "\\ж\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ß…_1Å…_語/'日ø-9Z-/00 -ж-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "\"a9æ’",
+"album": "½‐>1本”",
+"title": "Ω日글X– 日…ßß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_a9ae'/ 1_2-_1__/00 _____X- _...ssss"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": ".",
+"album": "/ñ",
+"title": "0|①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "./_n/00_0_1"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " é½bY/½ø9",
+"album": "*'①é—00“–——",
+"title": "Z9 글|"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "e_1_2bY-_1_2oe9/_'1e-00_---/00_Z9_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "b/‘é9本’b🎵",
+"album": "<ΩZ本*‘é_'",
+"title": "\\’’ ”|™\\½ 🎵.:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "b-‘é9本’b🎵/_ΩZ本_‘é_'/00 -’’ ”_™-½ 🎵._"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "‘“'한",
+"album": "b",
+"title": "?—*.本①'ñ한'éZ\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘“'한/b/00 _—_.本①'ñ한'éZ-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "—½½a",
+"album": "Ω'ΩZж0ø ",
+"title": "🎵.—-Å ™|Z한ß–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "- 1_2 1_2a/_'_Z_0oe /00 _.--A TM_Z___ss-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "1b9",
+"album": "–Ω9½①—ж'9…",
+"title": "1ba한Ω ‘글1"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1b9/-_9 1_21-_'9.../00 1ba____ '___1"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "*",
+"album": "\"”:🎵",
+"title": ">*’æ1X글'–ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/____/00 __'ae1X___'-_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "”1’9‘”bñ -①a 9",
+"album": "9—½",
+"title": "0…X>日‘‘…—   "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "”1’9‘”bñ -①a 9/9—½/00 0…X_日‘‘…—   "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "c  ”ñ",
+"album": "b🎵Yñ>½”①”",
+"title": "本?ñ”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "c_”ñ/b🎵Yñ_½”①”/00_本_ñ”"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "‘*….ñ1æ0ßñ>Y",
+"album": ":ÅY/ж< 0 9語",
+"title": "жé9*1–\\글 ß“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘_….ñ1æ0ßñ_Y/_ÅY-ж_ 0 9語/00 жé9_1–-글 ß“"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "語Å”",
+"album": "|æ.'>Z한",
+"title": "b|…–ñ語"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_A_/_ae.'_Z___/00 b_...-n_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Y0 \\ Z*?c",
+"album": "-?🎵1Å日*ß9’”‐“",
+"title": ">Z?X本-ÅY?b™Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y0_Z_c/-_1A_ss9'_-_/00_Z_X_-AY_bTMZ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "*0",
+"album": "a|…æ?½1c",
+"title": "語:0_*X-.<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_0/a_…æ_½1c/00_語_0_X-._"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ñ”日-?",
+"album": "b*cab한",
+"title": "….”—:ñ жΩ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ñ”日-_/b_cab한/00 ….”—_ñ жΩ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "<本/\\|.語한™",
+"album": "ß'X",
+"title": "1aY™글*Å_XZжø”ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_____.____TM/ss'X/00 1aYTM____A_XZ_oe__"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "–",
+"album": "_?ñ",
+"title": "*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "–/__ñ/00 _"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "c</'",
+"album": "a|ø",
+"title": "—?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "c_'/a_oe/00_-_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "*Z",
+"album": "ßﬁc",
+"title": "b<<™\\Zﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Z/ßﬁc/00_b_™_Zﬁ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "語 ①ø🎵>한“9\"한",
+"album": "Ω9c語”™Å한本”",
+"title": "‘🎵”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語 ①ø🎵_한“9_한/Ω9c語”™Å한本”/00 ‘🎵”"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "日ﬁ語日本Ω\\Zbc1™é ",
+"album": "ñ…X™b™’",
+"title": ":“*a–Y글”’Zж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "日ﬁ語日本Ω_Zbc1™é /ñ…X™b™’/00 _“_a–Y글”’Zж"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Y*:한🎵",
+"album": "\\글Ω–",
+"title": "øY—日\" c½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y__한🎵/＿글Ω–/00 øY—日_ c½"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "*Ω글本<½",
+"album": "1a—X“?日 本/",
+"title": "“\"語‘\"––– 0…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Ω글本_½/1a—X“_日_本-/00_“_語‘_–––_0…"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "\"",
+"album": "Y”ñ?ø//Y",
+"title": "Z9글‘*é1①™”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/Y_n_oe__Y/00 Z9___'_e11TM_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "““ßb",
+"album": "a“日",
+"title": "ß<한9æ'ø>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ssb/a_/00_ss_9ae'oe_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "|ß0.語a글\"*éYßø",
+"album": "ﬁYéÅ🎵?X? Xж\"™9",
+"title": "?Å”>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ss0._a_eYssoe/fiYeA_X_X_TM9/00_A_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "🎵",
+"album": "ß……/한ZX한æñ½",
+"title": "1Ω\"“X…1_—æ|\"<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/ss......_ZX_aen_1_2/00_1_X...1_-ae_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Ω:<—…жß",
+"album": "_Ω",
+"title": "Y/”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "___-..._ss/__/00 Y _"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "|🎵ñÅ1….:",
+"album": "-|",
+"title": "Z>:é*‐.b글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_🎵ñÅ1…._/-_/00 Z__é_‐.b글"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "?|🎵X“?‐",
+"album": "1日”‘™ ",
+"title": "/Z?:øßΩñÅ<b1cÅ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_🎵X“_‐/1日”‘™_/00_-Z_øßΩñÅ_b1cÅ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "“aYß‘–ñ:  ",
+"album": "99‘日",
+"title": "한本"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "“aYß‘–ñ_  /99‘日/00 한本"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "… ",
+"album": "a",
+"title": "1\\‐cΩ語<1™*‘™Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "… /a/00 1＿‐cΩ語_1™_‘™Å"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‘ﬁ.ø*",
+"album": " ①aa",
+"title": "<–?>Ω:—‘:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘ﬁ.ø_/_①aa/00_–_Ω_—‘_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Ω<Xb.“日ΩæZ*\\",
+"album": "Åé\\“c本|語æé日",
+"title": ".a\"글”Y/"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Ω_Xb.“日ΩæZ_＿/Åé＿“c本_語æé日/00_.a_글”Y＿"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "–\\*🎵",
+"album": " ½“½-",
+"title": "“æжX"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "--_/_1_2_1_2-/00_ae_X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "/",
+"album": "①",
+"title": "æX語"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "＿/①/00_æX語"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "0Z_|.-Ω‘글–c<",
+"album": "한øé|ñ_ aZ?Z",
+"title": "æ0…🎵/ø"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0Z_.-_'_-c_/_oee_n_aZ_Z/00_ae0..._oe"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "X語",
+"album": ".é’ñ.>é글",
+"title": "b™æ:™ ßc"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X_/.e'n._e___/00 bTMae_TM ssc"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ".글Y①|",
+"album": "?|½c*글",
+"title": "本>?<a한🎵①™Yb\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": ".___Y1_/__ 1_2c____/00 ____a____1TMYb_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ø *Å“1“-a글<本 ",
+"album": "①:>",
+"title": ">–é  ①Z”.ß🎵_:æ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "oe _A_1_-a_____ /1__/00 _-e  1Z_.ss___ae"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Å Y",
+"album": "½Z/ æ",
+"title": "語ñ-\\1æ–½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "A_Y/_1_2Z_ae/00_n-_1ae-_1_2"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "\"\"?‐?é*글*.ñ:-",
+"album": ":9\"ﬁ",
+"title": ">Yß*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_‐_é_글_.ñ_-/_9_ﬁ/00_Yß_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " Ω–c a—\\ñéc",
+"album": "\\0X.①",
+"title": "ﬁ.Yé”-ñ①*  жa "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " Ω–c a—-ñéc/-0X.①/00 ﬁ.Yé”-ñ①_  жa "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "cé|9",
+"album": "/",
+"title": "c①한Ω/"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "cé_9/ /00 c①한Ω "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "é-½<Y/c “…—",
+"album": "æ ",
+"title": "ßж…9™’ZΩ_ß本?æ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é-½_Y＿c “…—/æ /00 ßж…9™’ZΩ_ß本_æ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "<",
+"album": "‐'ææb éΩ.ß한ß",
+"title": "aÅ_Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/‐'ææb éΩ.ß한ß/00 aÅ_Å"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " _1aX…9Ω",
+"album": "ßZ‐½é글”_9'\"_‘",
+"title": "Y ø"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_1aX...9_/ssZ-_1_2e_9'_'/00_Y_oe"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "1c—>X",
+"album": "™øZ語½本_™ \\",
+"title": "ß½.—-‐/cß‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1c-_X/TMoeZ_ 1_2__TM -/00 ss 1_2.----css'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "한.c…",
+"album": "🎵日cж>0ø①–…™ <Ω",
+"title": "<ﬁ:Åøжé"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_.c.../_c_0oe1-...TM_/00_fi_Aoe_e"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "½",
+"album": "–:ñ🎵½ –-",
+"title": "—ß Y1'ÅéZñ””ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " 1_2/-_n_ 1_2 --/00 -ss Y1'AeZn___"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "> 한”ZX🎵”øΩ 1",
+"album": "Y",
+"title": "한本0.1“\" _日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ ____ZX__oe_ 1/Y/00 ____0.1__ __"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "'½🎵*_>½?–9*”—/",
+"album": "*½”:>éc.-ß",
+"title": "™?日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'½🎵___½_–9_”—_/_½”__éc.-ß/00 ™_日"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " ‘",
+"album": "™",
+"title": "éñ…‘ﬁ本 *’™ß글é*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'/TM/00_en...'fi_'TMss_e_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "|🎵Zñ\\-",
+"album": "글X\"‘*<™ﬁж>",
+"title": "a글c\\9\"½™Åæ”é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Zn--/_X_'_TMfi_/00_a_c-9_1_2TMAae_e"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ΩcbXa‐'< ‘",
+"album": "’\\æﬁ<ﬁ",
+"title": "/é½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ΩcbXa‐'_‘/’-æﬁ_ﬁ/00_-é½"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ":語9ñ Y™9ж ?ß*",
+"album": "X",
+"title": "…'①Ωﬁñ①‘한“:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_語9ñ_Y™9ж_ß_/X/00_…'①Ωﬁñ①‘한“_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "bß-:_X  a",
+"album": "…ж.9æ.‘①Ω”",
+"title": "Ωæ½-”<Y<™X한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "bss-_X_a/..._.9ae.'1_/00_ae_1_2-_Y_TMX_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "Å글–Z글Ωñ",
+"album": "\\ *",
+"title": "Ωc0|"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Å글–Z글Ωñ/_ _/00 Ωc0_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "X?™…日Å日 ‘*\"Ω",
+"album": "Z”a_",
+"title": ":글._글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X_™…日Å日 ‘__Ω/Z”a_/00 _글._글"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "①:ø™本ж",
+"album": "’——‘本abÅ한\\‐< /",
+"title": "½ﬁY‐_9c"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "①_ø™本ж/’——‘本abÅ한＿‐_＿/00_½ﬁY‐_9c"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "9本bbc1",
+"album": "Ω™c本Y글cYﬁ🎵é.",
+"title": "’жY🎵語ø ://0cc🎵"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9_bbc1/_TMc_Y_cYfi_e./00_'_Y_oe_--0cc_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " 1  🎵Ω/\"",
+"album": "|Å*b'*",
+"title": "X語🎵é>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " 1  🎵Ω _/_Å_b'_/00 X語🎵é_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "\"½글b æbÅ‘  '—語",
+"album": "’",
+"title": "/語Z‐\"_Åa‘."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_½글b æbÅ‘  '—語/’/00 ＿語Z‐__Åa‘."
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "'",
+"album": " “本 -“ﬁ'",
+"title": "”*‐_\"/本\\“_0™ Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'/ __ -_fi'/00 __-_______0TM Z"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ">' ßß글ZÅΩbé",
+"album": "<*Å’",
+"title": "_ø™\\–1’①🎵"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_' ssss___ZA_be/__A'/00 _oeTM_-1'1_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ﬁ>‘9ñж",
+"album": "글>_–ñ本 *ﬁ",
+"title": "1|–Ω"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ﬁ_‘9ñж/글__–ñ本 _ﬁ/00 1_–Ω"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "<🎵語½9",
+"album": "9:한>①‘'_:>.*",
+"title": " _ж .ø99 <한<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_🎵語½9/9_한_①‘'_._/00_ж_.ø99_한_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "/ø–ca",
+"album": " Å本\\”™\"",
+"title": "b9*①글ßa글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_oe-ca/_A_TM_/00_b9_1_ssa_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "\\ж한Ω Ω本ﬁ\\日-Ω0–",
+"album": ">*™本 æ:",
+"title": "ß語語™_*Å—–b½æ‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "______ __fi__-_0-/__TM_ ae_/00 ss__TM__A--b 1_2ae'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "> aø“ c*’/_",
+"album": " .‘' ‐–’/語—”",
+"title": "™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ aø“ c_’-_/ .‘' ‐–’-語—”/00 ™"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "글–/日-ß”",
+"album": "0한½'™X*?øßXaY",
+"title": "æ™本日'ﬁ*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "글–_日-ß”/0한½'™X_øßXaY/00_æ™本日'ﬁ_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "\\ß–/_1 Y™",
+"album": "—Ω…한",
+"title": "9'ж™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ss-_1_YTM/-_..._/00_9'_TM"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "\"🎵…Ω1 —'",
+"album": "\\?語ø日*Å日-—a한?",
+"title": ":Ω<>—“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_🎵…Ω1 —'/＿_語ø日_Å日-—a한_/00 _Ω__—“"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "<øX",
+"album": "‐>",
+"title": "1‘'™ﬁaжa/YΩ\"*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_oeX/-_/00 1''TMfia_a Y___"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " ñ'",
+"album": "9/ß ’_½本① Zж…",
+"title": "™<.“本/‘Z글ñж0…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " ñ'/9-ß ’_½本① Zж…/00 ™_.“本-‘Z글ñж0…"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "“…X—–9本“",
+"album": "“_’①",
+"title": "글a_>–本‐“ж\"–éÅæ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_...X--9__/__'1/00 ___a__-_-___-eAae"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "é™Ωbb½c日글| ",
+"album": "—“🎵9c/語æ™",
+"title": "| ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é™Ωbb½c日글_ /—“🎵9c-語æ™/00 _ ж"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Å|Å*…",
+"album": "\"",
+"title": "'“ß|”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "A_A_.../_/00 '_ss__"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Ω“ 0",
+"album": ".>語<1ﬁ",
+"title": "Z cß한…ß’‐Xß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Ω“ 0/._語_1ﬁ/00 Z cß한…ß’‐Xß"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "—① жX ”’½ø½9™日",
+"album": "本①日Z/cж™–™🎵-",
+"title": "ж-"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-1_X_'_1_2oe_1_29TM_/_1_Z-c_TM-TM_-/00_-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "aé1 <…語*<-æ",
+"album": ">",
+"title": "Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "aé1 _…語__-æ/_/00 Å"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‐‘c0 æ‐本",
+"album": "ñYa日ø①ﬁ",
+"title": "9— æ… ZΩ—/9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‐‘c0 æ‐本/ñYa日ø①ﬁ/00 9— æ… ZΩ—_9"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ж0Z/01—b?한‐",
+"album": "ñ한글-",
+"title": "é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ж0Z_01—b_한‐/ñ한글-/00 é"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "🎵Z\"™…語“–ж*X語",
+"album": "a",
+"title": "a"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "🎵Z_™…語“–ж_X語/a/00 a"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "<<한①_“①",
+"album": ">",
+"title": "‐한ñ—日_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "__한①_“①/_/00 ‐한ñ—日_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "_™æ—ø  ñ? 🎵",
+"album": "|\"?X½Ω語①|①",
+"title": "a9①<ﬁÅ:øø日ø①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_TMae-oe  n_ _/___X 1_2__1_1/00 a91_fiA_oeoe_oe1"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "本a>*?",
+"album": "_ﬁ🎵 c\"9",
+"title": "‐9?…日 “'’Z’…“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "本a_/_ﬁ🎵_c_9/00_‐9_…日_“'’Z’…“"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "①X日ß–",
+"album": "/*ﬁ🎵a ø–’Z’'",
+"title": "Y\\ßﬁ‘*‘>—”ﬁ.."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "①X日ß–/-_ﬁ🎵a_ø–’Z’'/00_Y-ßﬁ‘_‘_—”ﬁ.."
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "‐‐'ß ‘",
+"album": "9:c“é é™– Z9>①",
+"title": "'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "--'ss_'/9_c_e_eTM-_Z9_1/00_'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "/",
+"album": "‐“ﬁ‐/* ?Å ñ ﬁ①",
+"title": "*c|"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/-_fi-__ _A n fi1/00 _c_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "X",
+"album": "…",
+"title": "語–“Y①™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X/.../00_-_Y1TM"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ">‐\\ΩZ",
+"album": "”ß-ñ_é:한\\-c",
+"title": "'X…bX"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-_Z/_ss-n_e_-c/00_'X...bX"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " ",
+"album": ">🎵a",
+"title": "日글<ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " /__a/00 _____fi"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ">é*ø0é—ø",
+"album": "ñ:9",
+"title": "a–語.c_\\Y½é글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_é_ø0é—ø/ñ_9/00 a–語.c__Y½é글"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "b™Yñ|>\\",
+"album": "0™é9|\\글X",
+"title": "語ñ…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "bTMYn___/0TMe9_____X/00 _n..."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ææ:9b",
+"album": "‐\"|_*",
+"title": " >–—09”X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ææ_9b/‐____/00  _–—09”X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "—\"0*🎵.éÅ*",
+"album": ": ø\"",
+"title": "_X한\"9™b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "—_0_🎵.éÅ_/_ ø_/00 _X한_9™b"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "a ‘\"-éÅc",
+"album": "/?‐-1-‘",
+"title": "\\語-.①ZZ①한“🎵?-"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a '_-eAc/-_--1-'/00 -_-.1ZZ1______-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "<.aY本한‘æ한X",
+"album": "'|\"™“Zaæ🎵",
+"title": "1ж?:-‐éc"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_.aY____'ae___X/'__TM_Zaae_/00 1___--ec"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‘ñ‘Y0'",
+"album": ":> 語ø‐🎵X\" 한“",
+"title": "”b‘’1b:Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'n'Y0'/_oe-_X_/00_b''1b_Z"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "*…bb ",
+"album": "글.*b①™‐–‘:本ñ",
+"title": "' "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_...bb_/_._b1TM--'_n/00_'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "“ﬁ”🎵?000",
+"album": "1’ﬁ\\\\9ж",
+"title": "–글ß_b™ø本æ①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "“ﬁ”🎵_000/1’ﬁ_9ж/00_–글ß_b™ø本æ①"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " ",
+"album": "|ß:|語Å",
+"title": "‐>ß…X>‘9日':Åж™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " /_ß__語Å/00 ‐_ß…X_‘9日'_Åж™"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": ">Å",
+"album": "”жb\\",
+"title": "æß "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_A/_b-/00_aess"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ccΩ½?日½?™’c½ ",
+"album": "0‘aÅ:",
+"title": "\""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ccΩ½_日½_™’c½ /0‘aÅ_/00 _"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "X①",
+"album": "?Z–ﬁ’9ñ0”",
+"title": "\"æ‐"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X1/_Z-fi'9n0_/00_ae-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "’\"–½本‐\\Ωø.…語",
+"album": "–…<½——",
+"title": "<b:|\\.”’øﬁßa'_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'_-_1_2_-_oe...._/-..._1_2--/00_b_._'oefissa'_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "?\"/\"X b_",
+"album": "Y①'ñжX‘øñ",
+"title": "글🎵 ‘\\日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_X_b_/Y①'ñжX‘øñ/00_글🎵_‘_日"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "'1日.½½?‘ 글글",
+"album": "—? ™語™語1æ aæ ",
+"title": "ﬁ0“ß‐9æ ?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'1日.½½_‘_글글/—_™語™語1æ_aæ_/00_ﬁ0“ß‐9æ_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ñ本–\"한'\"'ß‘…①øΩ",
+"album": "a 글“øñ",
+"title": "-’<9Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ñ本–_한'_'ß‘…①øΩ/a 글“øñ/00 -’_9Å"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "|>①:>/ÅabX*‐“<",
+"album": " <’½Å‘‘한日",
+"title": "ø–'c①日'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "__①___ÅabX_‐“_/ _’½Å‘‘한日/00 ø–'c①日'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "\\ æé”ßΩ…‐",
+"album": ".æ“",
+"title": "ñ ½ﬁ|本‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_aee_ss_...-/.ae_/00_n_1_2fi_'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "éY<”-0",
+"album": "\"本|”æ™_‘\"”/",
+"title": ".æ-X™‐① '"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "éY_”-0/_本_”æ™_‘_”_/00_.æ-X™‐①_'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "æa a<語本…a<ß ",
+"album": "aжb.-“ …‐?",
+"title": "Ω’”9‐.æ①09_‘🎵”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "æa a_語本…a_ß /aжb.-“ …‐_/00 Ω’”9‐.æ①09_‘🎵”"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "“–½ÅXΩa日 ",
+"album": ">9語:'?_c?™",
+"title": "ﬁY"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-_1_2AX_a_/_9_'_c_TM/00_fiY"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "X",
+"album": "ßﬁ🎵c",
+"title": "X½::\\c_ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X/ssfi_c/00 X 1_2___c_fi"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "æ①*“Y",
+"album": "日ø日語",
+"title": "\\æ<ß語“b :Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "æ①_“Y/日ø日語/00_＿æ_ß語“b_Z"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "\"",
+"album": "…é0|’ø|",
+"title": "ΩY0Å'…:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/...e0_'oe_/00_Y0A'..._"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Åc?ж",
+"album": "|",
+"title": "9:語1Z.?’ 1…ñ–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Ac__/_/00 9__1Z._' 1...n-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "'/한ßø™",
+"album": "/<—”/\\ñ日1語",
+"title": "①ñﬁé’"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'-한ßø™/-_—”--ñ日1語/00 ①ñﬁé’"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "🎵0日",
+"album": "Z’?글 🎵øbж",
+"title": "‐9<aø語Z本- \\>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_0_/Z'____ _oeb_/00 -9_aoe_Z_- -_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "é”🎵<.Y語<Z",
+"album": "\"1語ß",
+"title": "'ß– ™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "e___.Y__Z/_1_ss/00 'ss- TM"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "-bé日ж",
+"album": "'æbж語本–:ß'™ ",
+"title": "\"0?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-bé日ж/'æbж語本–_ß'™ /00 _0_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "c①_Å.🎵<",
+"album": "ø글c",
+"title": "<™™-‐\\‐“語"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "c①_Å.🎵_/ø글c/00 _™™-‐_‐“語"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "0",
+"album": "🎵 Ω\"cﬁ①本X:日0c ",
+"title": "/ '글Zæ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0/🎵 Ω_cﬁ①本X_日0c /00   '글Zæ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "‘Z'Åñ",
+"album": "本”글本™™",
+"title": "”X日本/Å日”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘Z'Åñ/本”글本™™/00_”X日本-Å日”"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": ".c本…*-’_ ™:’*",
+"album": "X_''",
+"title": "Z.™<11日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": ".c本…_-’_ ™_’_/X_''/00 Z.™_11日"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": ":a”本ñ1Ω'本<1語",
+"album": "ﬁ‐:",
+"title": "™0…Å🎵_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_a”本ñ1Ω'本_1語/ﬁ‐_/00 ™0…Å🎵_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " ß/0本\"aé“/cX?<",
+"album": "0本<ñ",
+"title": "_>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ß＿0本_aé“＿cX_/0本_ñ/00_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "…Yc",
+"album": "–",
+"title": "“Z글語|글‐* Ω“Å“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "...Yc/-/00 _Z________-_ __A_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ZΩ\"™½한",
+"album": "本*Ω:Z1글bb ß",
+"title": "9\"é-™‘日_  한<글½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Z__TM 1_2___/____Z1___bb ss/00 9_e-TM'__  _______ 1_2"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "\\é1…é*",
+"album": "Xc ‐",
+"title": "™語ßX/“Å“한_<①ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "e1...e_/Xc_-/00_TM_ssX_A_1fi"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "1ñ™",
+"album": "Zcñ—./한",
+"title": "ac½ ”Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1ñ™/Zcñ—.-한/00_ac½_”Å"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "語æ|Yñaж-한",
+"album": "ø\"a",
+"title": "‐日'‐.—Z’"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ae_Yna_-_/oe_a/00_-_'-.-Z'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "①½ZX한日|",
+"album": "ж<‐‐æé—жΩ1",
+"title": "|‘™b."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1 1_2ZX_____/__--aee-__1/00 _'TMb."
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "жﬁé",
+"album": "ﬁæé‘:‐ñß*",
+"title": "\\-"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_fie/fiaee'_-nss_/00 _-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "*Ω .",
+"album": "ж*語“\\…–\\’",
+"title": "本0글”ﬁ‐Zæ日Y"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Ω_./ж_語“_…–_’/00_本0글”ﬁ‐Zæ日Y"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "한” –日ß’_.‐—",
+"album": "Z1é ½Xß:Xéca本",
+"title": "/–<0語1ÅZ½."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "한”_–日ß’_.‐—/Z1é_½Xß_Xéca本/00_–_0語1ÅZ½."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "é글|",
+"album": "🎵글日a*0:é”글‘'한",
+"title": "c①' '…>①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é글_/🎵글日a_0_é”글‘'한/00 c①' '…_①"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "'.本ñb",
+"album": "ﬁñ0 b“0Y*-9…\"日",
+"title": "ø9ﬁ*’本🎵?ñab"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'._nb/fin0 b_0Y_-9...__/00 oe9fi_'___nab"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ccY-½Ω日①ß—_本ñß",
+"album": "½‘Yé",
+"title": "‘/<1ﬁ½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ccY-_1_2_1ss-_nss/_1_2'Ye/00_'_1fi_1_2"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "–|‐–ø'>a|ﬁ—|",
+"album": "b:–①",
+"title": "™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-_--oe'_a_fi-_/b_-1/00_TM"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "?Y”*'‐‐",
+"album": "ﬁ1本c…  . ",
+"title": "™‐™ é \""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Y__'--/fi1_c...  . /00 TM-TM e _"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Y<🎵|글é”™:'…",
+"album": "ß|X語|ж> —”é:",
+"title": ":'91/aж–ßñß‐ "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y_🎵_글é”™_'…/ß_X語_ж_—”é_/00_'91-aж–ßñß‐"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "<한<",
+"album": "한‐…ж|",
+"title": ".ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/_-..._/00_.fi"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "'–' 本Å한Y“>",
+"album": "?*’",
+"title": "🎵"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'–' 本Å한Y“_/__’/00 🎵"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "Xßñ.",
+"album": "\"”Ω .:한X1①",
+"title": "Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Xssn./_._X11/00_Z"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "1a.?’Ωa™>b/>",
+"album": "글bΩ“ß½",
+"title": "|-Xæ cZ™½| "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1a._'_aTM_b _/___b__ss 1_2/00 _-Xae cZTM 1_2_ "
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "ab>‐Ω>Xæ",
+"album": "語한|_Zb9/9‘",
+"title": "Z'éÅ'’日ﬁ…9ж①‐"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ab_-__Xae/______Zb9 9'/00 Z'eA''_fi...9_1-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "語—🎵c Ω<Ω …語–…?",
+"album": "‘‘?1*a",
+"title": "— Ω é9™\\ß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-_c ___ ..._-..._/''_1_a/00 - _ e9TM ss"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "10X’”/… -*",
+"album": "é글9-글 _‘b'",
+"title": "語:ñ“/™'ø–/> b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "10X’”_…_-_/é글9-글_‘b'/00_語_ñ“_™'ø–_b"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "Ωß日'X\\‐øæøж™\\",
+"album": "*",
+"title": "*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ss_'X_-oeaeoe_TM_/_/00 _"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": ">🎵ÅΩ",
+"album": "<“/‐ ",
+"title": "— ?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_🎵ÅΩ/_“_‐_/00_—_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Z|a“:",
+"album": ">日½",
+"title": "ñ/ﬁX /글éc "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Z_a“_/_日½/00_ñ_ﬁX_글éc"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "1<日b09a1<9”글' ",
+"album": "_–日ßZæ|Ωж語ß|c",
+"title": ":. ™本ac1”①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1_日b09a1_9”글' /_–日ßZæ_Ωж語ß_c/00 _. ™本ac1”①"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "bX>Y00“1‘Åa-",
+"album": "日’9™",
+"title": "’”0‘'“Y'/\\한Y"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "bX_Y00_1'Aa-/_'9TM/00 '_0''_Y'_____Y"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Yc.”X",
+"album": " …é?a>本",
+"title": "Ω"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Yc._X/_...e_a_/00_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "æ글語?ßÅ>’æø9ø",
+"album": "øæ9™a:①”*本½한ø",
+"title": ".ж0Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ae_ssA_'aeoe9oe/oeae9TMa_1_1_2_oe/00_._0Z"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "本…>日Ωñ…",
+"album": ">–‐a—글Ω—”|ﬁ",
+"title": "ø:™ 글ø'語Y"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "本…_日Ωñ…/_–‐a—글Ω—”_ﬁ/00 ø_™ 글ø'語Y"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "™’",
+"album": "\\½🎵**—한'‘ﬁ—",
+"title": "\\9Y🎵‘é‘/‘_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "TM'/  1_2___-___''fi-/00  9Y_'e' '_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ж–-",
+"album": "Ωc>øéÅ0æ9本*",
+"title": " é'ж‘‘<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ж–-/Ωc_øéÅ0æ9本_/00_é'ж‘‘_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ñ本0ñ™",
+"album": "한-🎵‘9a日1",
+"title": "“‘ж:½é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "n_0nTM/_-_'9a_1/00_'_1_2e"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "…",
+"album": "a‐*X",
+"title": "-<語’?>*:*ñ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "…/a‐_X/00 -_語’_____ñ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "1Å \"",
+"album": " éc語ñøéc語🎵",
+"title": "æÅΩ①*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1A _/ ec_noeec__/00 aeA_1_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": ".語ﬁéYж/|YZ",
+"album": "ñøß‘æ“Ω🎵 b ﬁ‐",
+"title": "–本Åæ—-Yñ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "._fieY_-_YZ/noess'ae_b_fi-/00_-_Aae--Yn"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "\\글.ß’c日\"…| ",
+"album": " –0Z\\Y‐",
+"title": "a “Z🎵/‐–X日.語|—"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_.ss'c_..._/_-0Z_Y-/00_a_Z_--X_._-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ﬁ1æX™9>|.‘a-’?",
+"album": "*Z>ø*ж<…ß",
+"title": "æ日X<<:øÅ’"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ﬁ1æX™9__.‘a-’_/_Z_ø_ж_…ß/00 æ日X___øÅ’"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "’Ωé–",
+"album": "“語ﬁ9é|.–語…ж",
+"title": "한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'_e-/_fi9e_.-_..._/00_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": ">c?\\ ñ\".語/",
+"album": "ﬁ½–ß한ñ//X-Å™0",
+"title": "1"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_c__ n_.__/fi 1_2-ss___n__X-ATM0/00 1"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "a한…",
+"album": "_“\\日한日글\"/’_9",
+"title": "語/‘ – . ZXæ\\ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a한…/_“＿日한日글_＿’_9/00_語＿‘_–_._ZXæ＿ж"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Å9X本1c_ñ\"🎵\\",
+"album": "ﬁ>語…한9<*>…/9ж\\",
+"title": "c>ø9Ω\"\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Å9X本1c_ñ_🎵＿/ﬁ_語…한9___…＿9ж＿/00 c_ø9Ω_＿"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "9한-Å|日ß0",
+"album": "'",
+"title": "ж/"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9한-Å_日ß0/'/00 ж-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "“'b🎵 ",
+"album": "Z.“?<①ﬁ’",
+"title": "Z.1—? 🎵\\ﬁ<cﬁ①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "“'b🎵 /Z.“__①ﬁ’/00 Z.1—_ 🎵_ﬁ_cﬁ①"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ж<X",
+"album": "|'ñ",
+"title": ":|글é-0 <"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_X/_'n/00_e-0_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "글…",
+"album": " _",
+"title": "ß–ccc”ﬁ æΩ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "글…/ _/00 ß–ccc”ﬁ æΩ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "é한",
+"album": "한_é_жZ|aΩ—<",
+"title": "*  "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é한/한_é_жZ_aΩ—_/00 _  "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "’’0>–",
+"album": "_‐’c",
+"title": "*é.\"ß…/1:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "’’0_–/_‐’c/00_é._ß…＿1_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "a ",
+"album": "“",
+"title": " 本‐/本글\\Z🎵_9*b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a /“/00  本‐-本글-Z🎵_9_b"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‐0Zжﬁ",
+"album": "\\:① ",
+"title": "”語X:Y①| c/½ 本"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-0Z_fi/__1 /00 __X_Y1_ c_ 1_2 _"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "🎵–ﬁ-a>æ æcZ :",
+"album": "한”日",
+"title": "9' "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-fi-a_ae_aecZ_/_/00_9'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "|語Ya —c“‘ |",
+"album": "🎵①",
+"title": "Y.™Xé æZΩ語'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Ya_-c_'_/_1/00_Y.TMXe_aeZ_'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " 글“1*本<X글– ",
+"album": "日ﬁ_Åø™ ”<글ﬁ’Ω",
+"title": "0Y  *🎵\\:.ﬁ–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " 글“1_本_X글– /日ﬁ_Åø™ ”_글ﬁ’Ω/00 0Y  _🎵＿_.ﬁ–"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ж ß ™日 ",
+"album": "øßZ\\Ω日",
+"title": " |ж①Å <a<“①b0—"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ж ß ™日 /øßZ_Ω日/00  _ж①Å _a_“①b0—"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "|’/",
+"album": "'ß",
+"title": "–½c\"|Z?-本ñæж’:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'_/'ss/00 - 1_2c__Z_-_nae_'_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "-ø?|9é_",
+"album": "'½ß<",
+"title": ">” ①._ß‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-oe__9e_/' 1_2ss_/00 __ 1._ss'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "–‐ж*",
+"album": "'日 …글🎵”жø1🎵*",
+"title": "æY”½|ñ?\"é<ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "--__/'_ ...______oe1__/00 aeY_ 1_2_n__e__"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "““é本bX日0…øñ",
+"album": "🎵”9한①",
+"title": "–c>—1a?9.ﬁ‐”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "““é本bX日0…øñ/🎵”9한①/00 –c_—1a_9.ﬁ‐”"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "🎵:\" ’bæ…æΩZ",
+"album": "日™ø“語é本?>_‐“X",
+"title": "’'1.‘X_<글‘_日<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'bae...ae_Z/_TMoe_e_-_X/00_''1.'X_'_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "é本-?<—.½>ñß 日",
+"album": "éß>ø ",
+"title": "?0/½ñ”æ™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é本-__—.½_ñß 日/éß_ø /00 _0＿½ñ”æ™"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "?🎵’",
+"album": "ж…жæ🎵Y?ß",
+"title": "語ß‘\"™0"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "__'/_..._ae_Y_ss/00 _ss'_TM0"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "本‐<'①é*:Y",
+"album": " 🎵①日æ語0<_",
+"title": "-한™글本0 ßß 글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-_'1e__Y/ _1_ae_0__/00 -___TM____0 ssss ___"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "|'-語9’글‘æж\"1/",
+"album": "日YæY”a",
+"title": "‐ж:‐Åß/‐한? 日 1"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'-語9’글‘æж_1＿/日YæY”a/00_‐ж_‐Åß＿‐한_日_1"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "0\"c글Ωø\"1Ω",
+"album": "語ø½?語Y ①①”?①",
+"title": "\\< é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0_c____oe_1_/_oe 1_2__Y 11__1/00 -_ e"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "b本‘Y0>",
+"album": "a–™🎵",
+"title": "ñ?”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "b本‘Y0_/a–™🎵/00 ñ_”"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "’",
+"album": "–0—\\\"™||‘‐\\/… ",
+"title": "/\"‐’語b\\ -b”?Åé"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'/-0-__TM__'-__... /00 __-'_b_ -b__Ae"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "0ßø”ﬁæ\\жXé",
+"album": "|ж*YΩ—‐1Å",
+"title": "日語½–.|½."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0ssoe_fiae__Xe/___Y_--1A/00 __ 1_2-._ 1_2."
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "글‘",
+"album": "ñ",
+"title": ". 語글. *.…🎵本\"글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'/n/00_._._...._"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "'/",
+"album": "aΩ한글™’*",
+"title": "'™_‐™>'< "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'_/aΩ한글™’_/00_'™_‐™_'_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "b語–  | ",
+"album": "9é —“Z| >—1 ‘‐",
+"title": "”ø/'*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "b_-_/9e_-_Z_-1_'-/00_oe_'_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "?‘Å 한한ø_Å11a",
+"album": "/한",
+"title": "’øba Z– c/"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_‘Å 한한ø_Å11a/-한/00 ’øba Z– c-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ">|½…–“ ™/a:/'ø",
+"album": " ﬁ",
+"title": ".ñ–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "__½…–“ ™_a__'ø/ ﬁ/00 .ñ–"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Y‐한한X—_ßΩ日語:語",
+"album": "—本—①90“①øY本",
+"title": "\\aß‐"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y‐한한X—_ßΩ日語_語/—本—①90“①øY本/00 ＿aß‐"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": " .ac",
+"album": "Xß:\\ 日c…",
+"title": "‐æ*c9–b—🎵 🎵"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " .ac/Xß__ 日c…/00 ‐æ_c9–b—🎵 🎵"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "‘_½",
+"album": "> ” øaYb…",
+"title": "Z”…½½① ’Y語X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘_½/_ ” øaYb…/00 Z”…½½① ’Y語X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "жa…글/b-",
+"album": "”–/0語Ω글/жÅ0½Z’",
+"title": "'日 Z한: Zé"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "жa…글＿b-/”–＿0語Ω글＿жÅ0½Z’/00 '日 Z한_ Zé"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "“①‐",
+"album": " .aZYc",
+"title": "日本"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_1-/_.aZYc/00_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "æ½‐Ω/🎵한🎵",
+"album": "ZbX語한bж日1ÅX-½",
+"title": "ñ*語1*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "æ½‐Ω＿🎵한🎵/ZbX語한bж日1ÅX-½/00_ñ_語1_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ø _ñ_Ω",
+"album": "—🎵½🎵🎵🎵>?:aæ",
+"title": "b|\\’'|a  "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ø _ñ_Ω/—🎵½🎵🎵🎵___aæ/00 b__’'_a  "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "_ c>Å™|éY",
+"album": "0–_/‘XΩж’",
+"title": "æ‘本 "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ c_Å™_éY/0–__‘XΩж’/00 æ‘本 "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "\"🎵a語",
+"album": "Å語0-½",
+"title": "½日_本글\"🎵ß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_🎵a語/Å語0-½/00_½日_本글_🎵ß"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "本/",
+"album": "*½ΩΩ글ﬁ9ΩY①Y",
+"title": "ß<YY한Y’aYéY9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_/_1_2_fi9_Y1Y/00_ss_YY_Y'aYeY9"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "ñ- *<ßæ本本-ñ한 ",
+"album": "–|>/bø \\ /'ж|?",
+"title": "a.YZ_ жжﬁ<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ñ- __ßæ本本-ñ한 /–__ bø    'ж__/00 a.YZ_ жжﬁ_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " Xø*ΩZ‐ﬁ",
+"album": "XY\"a",
+"title": "1'é’한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Xø_ΩZ‐ﬁ/XY_a/00_1'é’한"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "é_‘ж0:",
+"album": "_\"🎵ø🎵b\\Ω.\\🎵øé",
+"title": "Ω—*a"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "e_'_0_/_oe_b_._oee/00_-_a"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "\"b—ñ",
+"album": "00–…語“Zß",
+"title": "“—"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_b-n/00-...__Zss/00 _-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "X0.Y?éñ—",
+"album": "|…XY",
+"title": "\\—글/‐½ø0X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X0.Y_éñ—/_…XY/00 ＿—글＿‐½ø0X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "_”>/ Z—*–",
+"album": " 한1Yñ™> ",
+"title": "?ж é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_”_- Z—_–/ 한1Yñ™_ /00 _ж é"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "*-”a™Ω”b",
+"album": "—日글c’Ω\\ “ж①",
+"title": "Ωé9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-_aTM__b/-____c'__ __1/00 _e9"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "céжΩ-本\\b①–한Z",
+"album": "/c\"ñ1.<글",
+"title": "ﬁ.Yßb日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ce__-_ b1-___Z/ c_n1.____/00 fi.Yssb_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Y—é”",
+"album": "글“日/½/.—.< –?\\",
+"title": ">cæ-|æж語b‐é _"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y-e_/_1_2_.-._-_/00_cae-_ae_b-e_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "*①–—……語ø1*",
+"album": "…0?æ",
+"title": "1‘1"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_1--......_oe1_/...0_ae/00 1'1"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "\\Å_",
+"album": "ﬁñ",
+"title": "æ*‐ж\\9글?語æ XÅ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Å_/ﬁñ/00 æ_‐ж_9글_語æ XÅ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "Y\"🎵-1",
+"album": "Y‘ø<жΩ語",
+"title": "ﬁ0ñ:“ж‘ﬁ日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y_🎵-1/Y‘ø_жΩ語/00_ﬁ0ñ_“ж‘ﬁ日"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Yﬁ*‐ø-本",
+"album": "Ω:æé‘",
+"title": "日Y本글X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Yﬁ_‐ø-本/Ω_æé‘/00 日Y本글X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "añ—|日🎵語Ω-–> \\",
+"album": "Z/’æß1글",
+"title": "é글語é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "añ—_日🎵語Ω-–_  /Z ’æß1글/00 é글語é"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "\\™/",
+"album": "0c”1ß",
+"title": "æΩY—ﬁ–|‐’'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " TM /0c_1ss/00 ae_Y-fi-_-''"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "—本b",
+"album": "日 _ßé0™ \"…Ω",
+"title": "™:語ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-_b/_ _sse0TM _..._/00 TM__fi"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "*_Y①–ж ﬁc.a",
+"album": "’æ한…?bYa-Z",
+"title": ":a-\\-*語 :bb0"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Y①–ж_ﬁc.a/’æ한…_bYa-Z/00_a-_-_語_bb0"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "—|Y",
+"album": "'>\"æ글—*|X",
+"title": "*_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-_Y/'_ae_-_X/00_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "*1 한||”“9.①…",
+"album": "X🎵9本Åø\"語b\\<Y—",
+"title": "Yﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_1_9.1.../X_9_Aoe_b_Y-/00_Yfi"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "– \\½Zж—‐Å1a.ﬁ",
+"album": " ™–:",
+"title": "*”Å‘’|한Xb\\한b\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "- _ 1_2Z_--A1a.fi/ TM-_/00 __A''____Xb____b_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": ".-/<ж*1_X\\",
+"album": " |語語日本 <",
+"title": ">‘한<X ①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": ".-＿_ж_1_X＿/_語語日本_/00_‘한_X_①"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": ":9-™:–b.>",
+"album": " ”",
+"title": "‘é日語—‘< Y жY"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_9-TM_-b._/_/00_'e_-'_Y_Y"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ж”\\ñ>",
+"album": "—語æ 語é’ñ 한>½X ",
+"title": "–Z™?1c…1Y–日½c"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ж”_ñ_/—語æ 語é’ñ 한_½X /00 –Z™_1c…1Y–日½c"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "‘Z9ß本 語",
+"album": "Xc\" ж1‘ 本Y>_",
+"title": "’①æ_:-ø🎵Å語|é0:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'Z9ss_/Xc_1'_Y_/00_'1ae_-oe_A_e0_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "글한ø—\\",
+"album": "①\"🎵",
+"title": "ß語.한 1글."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "______oe-_/1__/00 ss_.___ 1___."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": ":b*”—本9½>>-한글",
+"album": "|日.жæXa\\‐'a 🎵*",
+"title": "cc>\\>?é<é½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_b_”—本9½__-한글/_日.жæXa ‐'a 🎵_/00 cc_ __é_é½"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "a日æ🎵",
+"album": " ‐🎵:ΩX한_🎵9<",
+"title": "”Ω>øÅ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a_ae_/_-_X_9_/00_oeA"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "X'-> 1글日’ΩX",
+"album": "…–|— – 글/한|é:",
+"title": " 0"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X'-_1글日’ΩX/…–_—_–_글_한_é_/00_0"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "éY½Y",
+"album": "글X.–™ß<—",
+"title": "<™™‐—>'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "eY_1_2Y/_X.-TMss_-/00_TMTM--_'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " ①ﬁ‘Y—ñæaж",
+"album": "//é’",
+"title": "ж本0Ω‐c"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "①ﬁ‘Y—ñæaж/_é’/00_ж本0Ω‐c"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "1ÅZ-‘\"” 글' \\",
+"album": "글①X\\é글Å_ø™語Yæ",
+"title": "><|”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1AZ-'__ ___' _/___1X_e___A_oeTM_Yae/00 ____"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "9①ø… _-bΩ…🎵",
+"album": "‐é",
+"title": "X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9①ø…_-bΩ…🎵/‐é/00_X"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "–9…/99™ñb",
+"album": "1①本*①?\\",
+"title": "/”™–XZ "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-9...-99TMnb/11_1_-/00_-_TM-XZ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " :’*\\‘-\\①-.ﬁ",
+"album": "한0글–語①語/?Å”X",
+"title": "añZY …日æ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'_-'--1-.fi/_0_-_1_-_A_X/00_anZY_..._ae"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "|æ 한:.\\_æ",
+"album": "½Å<<_™",
+"title": "ñZ9."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ae ____.-_ae/ 1_2A___TM/00 nZ9."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "æ—ñ",
+"album": "ﬁ“—?—‘.—ﬁ”9”_",
+"title": "Y'本ø"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "æ—ñ/ﬁ“—_—‘.—ﬁ”9”_/00_Y'本ø"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Å|'語本ßΩ9–‐…a",
+"album": " ",
+"title": "—'”™語日ßÅ½<_…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Å_'語本ßΩ9–‐…a/ /00 —'”™語日ßÅ½__…"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "9™é日ß >ﬁ‐日\\",
+"album": "_……ßΩ-",
+"title": "01b½>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9™é日ß _ﬁ‐日_/_……ßΩ-/00 01b½_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "‘b'…’ ",
+"album": "™—0|*ø",
+"title": "①‐ *béøYé™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘b'…’ /™—0__ø/00 ①‐ _béøYé™"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "“_本øb",
+"album": "./",
+"title": "글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "“_本øb/._/00_글"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "XÅ*0",
+"album": "한 9……Z 9Å.c글",
+"title": "한øÅZ™語🎵-"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "XÅ_0/한_9……Z_9Å.c글/00_한øÅZ™語🎵-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "X_",
+"album": "cb",
+"title": "語本™_0–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X_/cb/00 語本™_0–"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": ".é0Å>ßæ*ñ\\—",
+"album": "日",
+"title": "-_-9 '™글ΩXñ‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": ".e0A_ssae_n_-/_/00_-_-9_'TM_Xn'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " ‐aññb①™|",
+"album": "ß”9X …‘9“-本",
+"title": "_本Ωa” 本"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " ‐aññb①™_/ß”9X …‘9“-本/00 _本Ωa” 本"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "語ж.‐ø한ж",
+"album": "|—ﬁ½_>ø",
+"title": "?/ ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語ж.‐ø한ж/_—ﬁ½_ø/00_ж"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Ω🎵…*½|",
+"album": "‐’“",
+"title": "Z“🎵c9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Ω🎵…_½_/‐’“/00 Z“🎵c9"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ﬁ”Å語a",
+"album": "ﬁ ",
+"title": " ø?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "fi_A_a/fi_/00_oe_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "한*Z한ñΩé ",
+"album": "“",
+"title": "한</YΩ*? é/””‘Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "한_Z한ñΩé /“/00 한_＿YΩ__ é＿””‘Å"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Ω>ß日本—0c",
+"album": "9日\"X①’글글1'™ø",
+"title": ":*”cñ—bZZ c/–①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Ω_ß日本—0c/9日_X①’글글1'™ø/00 __”cñ—bZZ c –①"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "①-1Ω🎵0",
+"album": "-”*|__\\— \\*",
+"title": "X\\_½<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1-1__0/-_____ -  _/00 X _ 1_2_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "½ñ/ æ—>日X",
+"album": "ø\\Ω–—‘.*_‘日0",
+"title": ">ß_1——“?‐"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "½ñ＿ æ—_日X/ø＿Ω–—‘.__‘日0/00 _ß_1——“_‐"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "| é",
+"album": "01“ﬁ\"|ø",
+"title": "…-> b>/–0\""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_ e/01_fi__oe/00 ...-_ b_ -0_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "™.’жж-é.",
+"album": ".<\"語:語ﬁYæa",
+"title": "…Y/”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "TM.'_-e./._fiYaea/00_...Y_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "0日\" .日ﬁ語жa?",
+"album": "Å",
+"title": "?>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0日_.日ﬁ語жa_/Å/00_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "語ﬁ’-a‐",
+"album": "-\\ /",
+"title": "?ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語ﬁ’-a‐/-＿ ＿/00 _ﬁ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "øß本bY①本Å0글?",
+"album": "9ÅéжbbXÅ½",
+"title": "Ωø_é한é…1'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "øß本bY①本Å0글_/9ÅéжbbXÅ½/00 Ωø_é한é…1'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "_99",
+"album": "ﬁ ",
+"title": "0_<”‐‐ …“æ–’🎵"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_99/ﬁ_/00_0_”‐‐_…“æ–’🎵"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": ":🎵a",
+"album": "': Z",
+"title": "—ﬁøÅ|—🎵c\\жXñ”:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_a/'_Z/00_-fioeA_-_c_Xn_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Y*Z ",
+"album": "🎵Z|ΩZÅ",
+"title": "<Y” ñ:日9-<Å> "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Y_Z /🎵Z_ΩZÅ/00 _Y” ñ_日9-_Å_ "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "c“0글Ω글_™ X",
+"album": "”c|X ",
+"title": "글글語.”ß_\\ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "c“0글Ω글_™ X/”c_X /00 글글語.”ß_-ж"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": ":–",
+"album": "本",
+"title": "жß ."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-/_/00_ss_."
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "|:?жж|",
+"album": "cßæ本",
+"title": "ÅY9ZYX’.*™ ø”日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "______/cssae_/00 AY9ZYX'._TM oe__"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ñ\"Yﬁ—19Y—Å",
+"album": "ж日b",
+"title": "-ﬁ한c 語 Y0>:X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "n_Yfi-19Y-A/_b/00_-fi_c_Y0_X"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "_本éæ語?",
+"album": "ññ-",
+"title": "1"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "__eae__/nn-/00 1"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "9ж*語00øZж\\a",
+"album": "c'Z",
+"title": "<ﬁ>글 …ﬁñΩ ‐’.<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9___00oeZ_-a/c'Z/00 _fi____ ...fin_ -'._"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "é'”",
+"album": "ﬁ\\½?ж”1”b",
+"title": "Åж①-c’\""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é'”/ﬁ ½_ж”1”b/00 Åж①-c’_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "é‘—:語”’ø’\"\"ß語",
+"album": "*",
+"title": ">한日/한ñ'語"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "e'-___'oe'__ss_/_/00 _________n'_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "Ω/\\ ÅΩ글日*™é本",
+"album": "?",
+"title": "X|éæcÅ①‘ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_A_TMe_/_/00_X_eaecA1'_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "|— 한 글",
+"album": "-“ é.?“c語1|æ",
+"title": "ñ\"æ9>9Ω-語_'?X日"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_—_한_글/-“_é._“c語1_æ/00_ñ_æ9_9Ω-語_'_X日"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Å",
+"album": ".9  é”0",
+"title": "?ñ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Å/.9_é”0/00_ñ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "ß",
+"album": "-ø a글é0",
+"title": ">|1日c½語./bﬁ日‐"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ß/-ø a글é0/00 __1日c½語. bﬁ日‐"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": ":\\—ﬁ ‐>0c‐>‘",
+"album": "①Z”–0:/ñ<æé",
+"title": "\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-—ﬁ_‐_0c‐_‘/①Z”–0_-ñ_æé/00_-"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Å:|ﬁ:ø™c‘ …",
+"album": "<?— 語—–aXжø–\\",
+"title": "½- ①—…ø_ *"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "A__fi_oeTMc' .../__- _--aX_oe--/00  1_2- 1-...oe_ _"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "–/本aY",
+"album": "Z-",
+"title": "aÅæ”–\""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "–_本aY/Z-/00 aÅæ”–_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "_ ”‘“0é\"’/\\ø",
+"album": "|①½…‐?",
+"title": "🎵Z½語é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_”‘“0é_’_ø/_①½…‐_/00_🎵Z½語é"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "|日0",
+"album": "_æbé\\ß",
+"title": "_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_日0/_æbé_ß/00_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ß*\\- 語",
+"album": "_é한Xbø\\>",
+"title": "ß日c“’—.’-YΩ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ß_＿-_語/_é한Xbø＿_/00_ß日c“’—.’-YΩ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "½ _ж”>\"…’1語—",
+"album": "½01?<<日.’½  ",
+"title": "\\жñ글>‐1🎵é“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1_2_...'1_-/_1_201_.'_1_2_/00_-_n_-1_e_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": " Z½½cﬁ本”한9?",
+"album": "Y-‘bb½\\ñZ本–’:",
+"title": "-.>™|①b1|éYYb½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " Z 1_2 1_2cfi_____9_/Y-'bb 1_2_nZ_-'_/00 -._TM_1b1_eYYb 1_2"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "?<글Z/ñ① ?…a",
+"album": "X한\"\\<Zж…—½①9ø",
+"title": "’–ø –.\\??글”:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_글Z_ñ①_…a/X한_Zж…—½①9ø/00_’–ø_–._글”_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": " /ñ ",
+"album": "–”'”“b",
+"title": "🎵 글語'ß/_'“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_n_/-_'_b/00_'ss_'_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "‘🎵9",
+"album": "-—”/ .Ω",
+"title": ":'‐ *?'™0—\"ø"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘🎵9/-—”＿ .Ω/00 _'‐ __'™0—_ø"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "a<* 1……",
+"album": "‐™1本 _\"日  ",
+"title": "Å–Å日語Å. 9æ-"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a__ 1……/‐™1本 __日  /00 Å–Å日語Å. 9æ-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "Åø?9 -한‐._—",
+"album": "’.ñΩ”“ b.ñ",
+"title": " "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Åø_9_-한‐._—/’.ñΩ”“_b.ñ/00"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " <™한",
+"album": "\\‐-Ω'é —YΩ",
+"title": "本<9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_™한/＿‐-Ω'é_—YΩ/00_本_9"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‐",
+"album": "X.:/Z**Z*“-*a<",
+"title": "\\é: 한æ0🎵"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-/X.__Z__Z__-_a_/00 _e_ ___ae0_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " ñ本“ b\\/'c>🎵",
+"album": "æΩ’ß\\<æ",
+"title": "½”"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "n_b_'c_/ae_'ss_ae/00_1_2_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "-ææ/ж",
+"album": "…",
+"title": "–‐:…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-ææ＿ж/…/00 –‐_…"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "aa*™“™_",
+"album": ".—1<Å語™한/9Ωßжa",
+"title": "\"bøñ한>‘①\\|Y"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "aa_™“™_/.—1_Å語™한_9Ωßжa/00_bøñ한_‘①_Y"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " ",
+"album": "< ’本_",
+"title": "Z한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " /_ '__/00 Z___"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": " ",
+"album": "é語-½ß™”글æ00‘",
+"title": "<“ñø Å\\ø"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " /é語-½ß™”글æ00‘/00 _“ñø Å ø"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "‘🎵…?0ﬁc",
+"album": "ñ*.9ñø🎵½?é9",
+"title": "‘_Å9?:0…bæ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘🎵…_0ﬁc/ñ_.9ñø🎵½_é9/00_‘_Å9_0…bæ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "ñ語🎵Y  ß<”語",
+"album": "bøé1—Zbb9”\\™ZZ",
+"title": ".①‘Y1\"æñ*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "n__Y  ss___/boee1-Zbb9_ TMZZ/00 .1'Y1_aen_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "글 ’жæ<①X0 ",
+"album": "Y‐本/ﬁ한?",
+"title": "“\"-‐Åb\"–ﬁ><"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "글_’жæ_①X0_/Y‐本_ﬁ한_/00_“_-‐Åb_–ﬁ_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‘“",
+"album": "\\é0>””",
+"title": "한<é:æ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘“/_é0_””/00 한_é_æ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "–*½/1…Ω",
+"album": "…aZ",
+"title": "語-é*本"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "–_½-1…Ω/…aZ/00 語-é_本"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "語Ω ",
+"album": "ж -—Ω",
+"title": "‘日æc.ßß日Å.é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語Ω_/ж_-—Ω/00_‘日æc.ßß日Å.é"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "ж‐ß”ß.ø",
+"album": "” |",
+"title": "–cZ:日글Y語…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ж‐ß”ß.ø/” _/00 –cZ_日글Y語…"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "–—|<①é-’ж-_Z9",
+"album": "‘/—| ‘99語…",
+"title": "|\"<Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "–—__①é-’ж-_Z9/‘ —_ ‘99語…/00 ___Z"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "\\ø–añ™ø",
+"album": "a \\ß*:bﬁ –語æﬁ",
+"title": "”Z:ñ\"/Xé‐c0"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_oe-anTMoe/a_ss_bfi_-_aefi/00_Z_n_Xe-c0"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "9ß9’–?'ß_",
+"album": "Z語‐ ",
+"title": "ж™|①Å.\"‐日>X”é"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9ß9’–_'ß_/Z語‐ /00 ж™_①Å._‐日_X”é"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "글Ω*ж?Å ‘ññ––",
+"album": "‐>0本½-0:글日日語1",
+"title": "1/“ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "글Ω_ж_Å_‘ññ––/‐_0本½-0_글日日語1/00_1_“ж"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " c™-X-ñY",
+"album": "ñb",
+"title": "—"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " cTM-X-nY/nb/00 -"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "\\1 Xﬁæ:",
+"album": "<™“æßX",
+"title": "”a>c① Å.\\|a"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_1 Xﬁæ_/_™“æßX/00 ”a_c① Å.__a"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "“本“é ﬁøﬁ>aø™*æ",
+"album": "Y“’‘ø “ ßж",
+"title": "“한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "___e fioefi_aoeTM_ae/Y_''oe _ ss_/00 ____"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "한①",
+"album": " 🎵<c①æж①",
+"title": "жa—:'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "___1/ __c1ae_1/00 _a-_'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "🎵①½X|<’:‐ß‐",
+"album": "жbÅ–…™한ﬁ9½한—<",
+"title": "’c語\"жa9>語本X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "🎵①½X_’_‐ß‐/жbÅ–…™한ﬁ9½한—_/00_’c語_жa9_語本X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "*:한ø\\글語語‘① >½",
+"album": "9  :ñ‘ø'9ñ",
+"title": "… \""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_한ø-글語語‘①_½/9_ñ‘ø'9ñ/00_…_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "“X0_aß…日글Y>|Y",
+"album": "ø1<",
+"title": "本cﬁ0–”🎵9“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "“X0_aß…日글Y_Y/ø1_/00_本cﬁ0–”🎵9“"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "<\\a",
+"album": "*",
+"title": " -"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_-a/_/00  -"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "1->語日ß日9日‐ñ?*①",
+"album": "-1½é9:本本b",
+"title": "0. < a<> 글\""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1-_語日ß日9日‐ñ__①/-1½é9_本本b/00 0. _ a__ 글_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " Z'ß-_/Y",
+"album": "aZжßZ1:–жXæ™ñ",
+"title": "bß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " Z'ß-_-Y/aZжßZ1_–жXæ™ñ/00 bß"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "' –’é本1øY\"æ\"",
+"album": "글0/Å>",
+"title": "\".™ —<ø½"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'_-'e_1oeY_ae_/_0_A_/00_.TM_-_oe_1_2"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "‐ñ",
+"album": "Å*“*ß \\”本 Ω_”Å",
+"title": "a—ø|"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‐ñ/Å_“_ß ＿”本 Ω_”Å/00 a—ø_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ж9<æ”1\"",
+"album": "ñ–\" ﬁ—",
+"title": "½1-*™”bæ語b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_9_ae_1_/n-_fi-/00_1_21-_TM_bae_b"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "/Å🎵b–æ",
+"album": ".本日한ZZ™\\<ø.æ",
+"title": "‐ж日–™Å"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_A_b-ae/._____ZZTM__oe.ae/00 -__-TMA"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‘0ﬁ글ñ",
+"album": "æж'‐æ™_:™ﬁ”’Å",
+"title": "*ø>“한ñ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'0fi_n/ae_'-aeTM_TMfi_'A/00_oe_n"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "X_X'< Z/:“ ",
+"album": "ñ’æ’Y",
+"title": "한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "X_X'_ Z-__ /n'ae'Y/00 ___"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "9‘글<éY9",
+"album": ">ΩÅ\\0cZ“>",
+"title": "글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "9'____eY9/__A_0cZ__/00 ___"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "\\?-–-_🎵–",
+"album": "'🎵1①語Ωß🎵…Y.<",
+"title": "日?’:™ "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " _---__-/'_11__ss_...Y._/00 __'_TM "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "a",
+"album": "本Å ™한é<“",
+"title": "‐語\\<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a/本Å_™한é_“/00_‐語_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "'本øZa‐🎵bﬁ’",
+"album": "ø™ Ω>“/Å Ω…①",
+"title": "/“c— />— a本*\""
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'_oeZa-_bfi'/oeTM ____A _...1/00 __c- __- a___"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "한½ж/\"’“①-한.<ß",
+"album": "b \"'한.",
+"title": "9-æ한\"0é🎵ﬁ9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "한½ж＿_’“①-한._ß/b _'한./00 9-æ한_0é🎵ﬁ9"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Ω–\"🎵글",
+"album": "本…|*ж한a\\|\\>",
+"title": ".Å*|b한Ω<\"a”?1"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Ω–_🎵글/本…_ж한a＿_＿_/00_.Å_b한Ω_a”_1"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "0”-Å*Z",
+"album": "ñ“<é‘‘ 한c|",
+"title": "½ *…-—“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0_-A_Z/n_e''_c_/00_1_2_...--_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "本 :::c.本‘:",
+"album": "’日“",
+"title": "“éжX.ж"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_c._'_/'_/00_e_X._"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "c語|c",
+"album": "?'",
+"title": "“9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "c語_c/_'/00 “9"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "½9ø1</ﬁ🎵|",
+"album": "Z—| ß/ '",
+"title": "“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "½9ø1__ﬁ🎵_/Z—_ ß_ '/00 “"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "– 글\\①🎵 |9 . ",
+"album": "한Ω>é日Zæ 🎵",
+"title": "c<™ø–—?|<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "–_글_①🎵_9_._/한Ω_é日Zæ_🎵/00_c_™ø–—_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "-Z/'日ﬁÅ.",
+"album": "YжZ‘語한c①1b‘“",
+"title": "①ж*?bæ‐?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-Z-'日ﬁÅ./YжZ‘語한c①1b‘“/00 ①ж__bæ‐_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "글/:9",
+"album": "™",
+"title": "日ﬁ?1“æéaÅæ本"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "글＿_9/™/00_日ﬁ_1“æéaÅæ本"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "ﬁ한cß本1“ ",
+"album": "-9 ”ß1”æ",
+"title": "?Z:0–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "fi___css_1_ /-9 _ss1_ae/00 _Z_0-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "”’”-‘/1bZ|\\>\\0",
+"album": "æ",
+"title": "cZ—"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "”’”-‘_1bZ_0/æ/00_cZ—"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "æ<🎵한™/9…日①– —",
+"album": "c'…",
+"title": "/|0한/ñ 0한글글|Ω‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ae_____TM-9..._1- -/c'.../00 -_0___-n 0___________'"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ΩXΩ?ﬁa“‐🎵æ‐",
+"album": "1",
+"title": "Å™æYÅ:"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ΩXΩ_ﬁa“‐🎵æ‐/1/00 Å™æYÅ_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Å*é",
+"album": "①Zñb>",
+"title": "0ß“ñ-ﬁ0éc:‐a"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Å_é/①Zñb_/00_0ß“ñ-ﬁ0éc_‐a"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "–日>X:ж:ñ*本 —ñø",
+"album": "\\-",
+"title": " é0'ﬁ語語 –9XÅ한"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-_X_n_-noe/_-/00_e0'fi_-9XA_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ﬁ— 🎵½1 本ﬁaæ",
+"album": ":”語한0ﬁ\\",
+"title": "|/‐>Zñ½-"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "fi- _ 1_21 _fiaae/______0fi_/00 __-_Zn 1_2-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "①b0*æ½",
+"album": "™”|",
+"title": "cñ0>…/_<’½9”?*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "①b0_æ½/™”_/00 cñ0_…___’½9”__"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "한9\"*本ñ/①_ﬁ.ñ1",
+"album": "한|-ß",
+"title": "🎵<ß—ß9 éXÅΩ*-‘"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "한9__本ñ＿①_ﬁ.ñ1/한_-ß/00 🎵_ß—ß9 éXÅΩ_-‘"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "11é本–”‘①/1-Ω|日",
+"album": "’*a日語글Å-Y*Z/ ",
+"title": "\"…“>①:\"? '日 本 "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "11e_-_'1_1-_/'_a_A-Y_Z_/00_..._1_'_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "cb_‐*‘Z™ﬁÅ",
+"album": ":“’🎵",
+"title": "|–c<* 0ßΩ ' …"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "cb_-_'ZTMfiA/__'_/00 _-c__ 0ss_ ' ..."
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "①Ω語日>\"??½Z\\ c",
+"album": "½ø",
+"title": "‐-ΩÅ|?"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1_1_2Z-_c/_1_2oe/00_--_A_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "‐0…",
+"album": "b:é",
+"title": "”—1…한æﬁ–_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-0.../b_e/00_-1..._aefi-_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ">9b①X -1<\"本",
+"album": "”日",
+"title": " æΩ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_9b1X -1___/__/00  ae_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "1ñ_",
+"album": "ß-1<ø1…>",
+"title": ":ßé Z‘|①–"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1n_/ss-1_oe1..._/00 _sse Z'_1-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "*½ 9|>æb’ ",
+"album": "-語",
+"title": "æ *>X9글🎵?本0é'"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_½ 9__æb’ /-語/00 æ __X9글🎵_本0é'"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "Ωc|<>語” ",
+"album": ">X'語本‘ß日'🎵……",
+"title": "éñ?1Y<™Z本."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_c_/_X'_'ss_'_....../00_en_1Y_TMZ_."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "‘\"…’-æ…’Z1: 日",
+"album": "日ñΩ",
+"title": "本a:X\\a한:🎵 "
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘_…’-æ…’Z1_ 日/日ñΩ/00 本a_X_a한_🎵 "
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "‘🎵글",
+"album": "ß—?a \\日><…",
+"title": " “céÅ1日½ñ1‐①"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "‘🎵글/ß—_a_-日_…/00_“céÅ1日½ñ1‐①"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "語語“……9a|—語ßé",
+"album": "bΩ“c0—YZ‐ß",
+"title": "\\*ΩñΩZ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "語語“……9a_—語ßé/bΩ“c0—YZ‐ß/00 __ΩñΩZ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "<‘①’'“한/ÅY",
+"album": "0”'語1’Å",
+"title": "/:\\:\\|bß?\"X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'1''_____AY/0_'_1'A/00 ______bss__X"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "한<🎵글‐本™語_—",
+"album": "–\"ßc –½>",
+"title": "™”b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "________-_TM__-/-_ssc - 1_2_/00 TM_b"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "-\\?é글½①0|aﬁ''ø",
+"album": "🎵0||語|<9- ",
+"title": "ﬁ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "-＿_é글½①0_aﬁ''ø/🎵0__語__9- /00 ﬁ"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "한>\\” aé/æ",
+"album": "*|*’bY’*本",
+"title": "ΩéY‐…語ø‐*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "한_＿” aé＿æ/___’bY’_本/00 ΩéY‐…語ø‐_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "b\"*béXﬁ",
+"album": ":",
+"title": "語‘Ω– ①|Y’"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "b__béXﬁ/_/00 語‘Ω– ①_Y’"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "글 ",
+"album": "–ñ :-語’?‘|한—ж",
+"title": "*æ½…‐.Zb’’‐X9"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "글_/–ñ_-語’_‘_한—ж/00_æ½…‐.Zb’’‐X9"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "ææﬁ",
+"album": "Å.a日Z",
+"title": "語’11*ñﬁ日語-語a🎵b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ææﬁ/Å.a日Z/00 語’11_ñﬁ日語-語a🎵b"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "Å",
+"album": "::ﬁ ñ",
+"title": "Y™本\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "Å/_ﬁ_ñ/00_Y™本_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "0>Å>—_ ß—本",
+"album": ">ø ",
+"title": "-’ 日™ ñ…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "0_A_-_ss-_/_oe_/00_-'_TM_n..."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " é1Z½日🎵æ——ø",
+"album": "1½Å“-–\"… ①…",
+"title": "|é\\"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "é1Z½日🎵æ——ø/1½Å“-–_…_①…/00_é-"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "ñ本ß”",
+"album": "Å’Ω 9/\\'",
+"title": "|YY<0—-글–™ж–aß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ñ本ß”/Å’Ω 9--'/00 _YY_0—-글–™ж–aß"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "b‘™1",
+"album": "🎵'æ>",
+"title": "'Ω½."
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "b'TM1/_'ae_/00_'_1_2."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ">글”X",
+"album": "ж",
+"title": "a½語 b"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_글”X/ж/00_a½語_b"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "ñ'b™글½本ñ9ﬁc_",
+"album": "日語™–>‐? ’–b\"|'",
+"title": "Y"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "ñ'b™글½本ñ9ﬁc_/日語™–_‐_’–b_'/00_Y"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " a‘æ0 한— Z 0?a",
+"album": "Z’™‘:ß\\",
+"title": "日>"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a‘æ0_한—_Z_0_a/Z’™‘_ß＿/00_日_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": " ‐ﬁ_‘ ™™aZ-🎵",
+"album": "\\->|",
+"title": "X'Åж1”“"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": " ‐ﬁ_‘ ™™aZ-🎵/＿-__/00 X'Åж1”“"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": ".|æ/글ñ本\\<c|글ø",
+"album": "\\æ‐øYZ  <’",
+"title": "“X"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "._ae_n_c_oe/_ae-oeYZ_'/00_X"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "c한1½",
+"album": "\\½‐æß:?'9",
+"title": "|™–-ñ*”–X</"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "c한1½/_½‐æß_'9/00_™–-ñ_”–X_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "a한’ 한1Y0\\글ж",
+"album": "1b_“_a’*éø/",
+"title": "a*日:>1æ*"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "a한’ 한1Y0 글ж/1b_“_a’_éø /00 a_日__1æ_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "<글①“жaΩ\\Z",
+"album": "–ж/—10”–",
+"title": "0a>-½’日.™"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_1_a_Z/-_-10_-/00_0a_-_1_2'_.TM"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "b.‐<Y 0_ñ'0",
+"album": "‐ø?.",
+"title": "ß‐0日æ"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "b.‐_Y 0_ñ'0/‐ø_./00 ß‐0日æ"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": " ‘-_1?9",
+"album": "ж™9‘ 本🎵/“’_",
+"title": ":-9ß"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "'-_1_9/_TM9'_'_/00_-9ss"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "жZ\\Yﬁ‘bb日 ‐",
+"album": "①🎵Z  é:ﬁæ‘",
+"title": "é한ß‐Å…"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_Z_Yfi'bb_-/1_Z_e_fiae'/00_e_ss-A..."
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": "日’語™c<🎵//_‐ßñ",
+"album": "Å —\\",
+"title": "語Y“ Åæ語?한<Å글"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "日’語™c_🎵--_‐ßñ/Å —-/00 語Y“ Åæ語_한_Å글"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "cñ“'”bΩ—_’<<",
+"album": "“—",
+"title": "Y_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "cn_'_b_-_'__/_-/00 Y_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "?‘|ø½1–b™",
+"album": "Zé\"9' >>글",
+"title": "“① a91/"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_'_oe 1_21-bTM/Ze_9' _____/00 _1 a91_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "1‐ñﬁ‐‘c",
+"album": "ﬁ①:|本c한9’ﬁ‐",
+"title": "글<"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "1‐ñﬁ‐‘c/ﬁ①_本c한9’ﬁ‐/00_글_"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": " "
+},
+"tags": {
+"albumartist": "”é.?‘\\\\",
+"album": "?-“글…0/—",
+"title": "Yæ” 本語* Y0  '"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_e._'  /_-____...0 -/00 Yae_ ___ Y0  '"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "_"
+},
+"tags": {
+"albumartist": "é*9“1X_本",
+"album": ".‐“①9\\—?–a ß*한",
+"title": "한:”½\" \"①X*™_"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "e_9_1X_/.-_19_-_-a_ss_/00_1_2_1X_TM_"
+},
+{
+"settings": {
+"ascii_filenames": false,
+"replace_spaces_with_underscores": false,
+"replace_dir_separator": "＿"
+},
+"tags": {
+"albumartist": "—a9",
+"album": "語 ’'",
+"title": "\"X>–Y"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "—a9/語 ’'/00 _X_–Y"
+},
+{
+"settings": {
+"ascii_filenames": true,
+"replace_spaces_with_underscores": true,
+"replace_dir_separator": "-"
+},
+"tags": {
+"albumartist": " 글01:",
+"album": "/ñ_ >–>‘ø",
+"title": "--9?ßa ½— Y🎵Z"
+},
+"template": "%albumartist%/%album%/$num(%tracknumber%,2) %title%",
+"picard": "_01_/-n_-_'oe/00_--9_ssa_1_2-_Y_Z"
+}
+]

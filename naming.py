@@ -203,14 +203,16 @@ class Ctx:
     """The variables a naming script sees: the tags (a "/" in a value made "_", as Picard
     does for file names), and TagMender's own: %_year%, %_albumartists_sorted%,
     %_multiartist%, %_edition%, %_edition_kind% (Picard's %_name% is the hidden ~name)."""
-    def __init__(self, tags: dict):
+    def __init__(self, tags: dict, dir_sep: str = "_", win_compat: bool = False):
         import picard_script as ps
+        import picard_text
         self.tags = {k.lower(): (v if isinstance(v, list) else [v]) for k, v in tags.items() if v not in (None, "")}
         self._derive()
         self.metadata = ps.Metadata()
+        sep = dir_sep if isinstance(dir_sep, str) and "/" not in dir_sep and "\\" not in dir_sep else "_"
         for k, v in self.tags.items():
             name = "~" + k[1:] if k.startswith("_") else k
-            self.metadata[name] = [str(x).replace("/", "_") for x in v]
+            self.metadata[name] = [picard_text.sanitize_filename(str(x), sep, win_compat) for x in v]
         self._start = {k: self.metadata.getall(k) for k in self.metadata}
 
     def _derive(self):
@@ -297,18 +299,29 @@ def template_for(naming: dict) -> str:
     return PRESETS[preset]
 
 
-def render(template: str, tags: dict) -> list[str]:
+def render(template: str, tags: dict, settings: dict | None = None, compat: str = "") -> list[str]:
     """The path components (folders..., file name without extension). Empty components
-    are dropped; each is stripped of surrounding spaces."""
+    are dropped; each is stripped of surrounding spaces. settings: Picard's file naming
+    options (picard_config.tag_settings): "/" in a value replaced with replace_dir_separator,
+    then ascii_filenames and replace_spaces_with_underscores, as Picard's script_to_filename;
+    compat "windows": with Picard's Windows compatibility (else filenames.make_path does it)."""
     import picard_script as ps
     _register_own()
-    ctx = Ctx(tags)
+    st = settings or {}
+    ctx = Ctx(tags, st.get("replace_dir_separator", "_"), compat == "windows")
     try:
         text = _ev(compile_template(template), ctx)
     except ps.ScriptError as exc:
         raise TemplateError(str(exc)) from None
     except (TypeError, ValueError, OverflowError, MemoryError, RecursionError, IndexError, KeyError) as exc:
         raise TemplateError(f"{type(exc).__name__}: {exc}") from None      # ($delprefix(), $pad(x,1e12,y) ...)
+    if st.get("ascii_filenames"):
+        import picard_text
+        text = picard_text.replace_non_ascii(text, pathsave=True, win_compat=compat == "windows")
+    if compat == "windows":                      # (Picard's replace_win32_incompat, before the spaces go)
+        text = re.sub(r'[*:<>?|"]', "_", text)
+    if st.get("replace_spaces_with_underscores"):
+        text = re.sub(r"[\s_]+", "_", text.strip())
     return [p.strip() for p in text.replace("\x00", "").split("/") if p.strip()]
 
 

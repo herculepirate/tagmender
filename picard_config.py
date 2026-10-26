@@ -174,6 +174,9 @@ TAG_DEFAULTS = {
     "min_genre_usage": 90,
     "genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
     "join_genres": "",
+    "ascii_filenames": False,                     # Options > File Naming
+    "replace_spaces_with_underscores": False,
+    "replace_dir_separator": "_",
     "enable_tagger_scripts": False,               # Options > Scripting
     "list_of_scripts": [],                        # [(position, name, enabled, script text)]
 }
@@ -476,6 +479,8 @@ def validate_tag_settings(overrides: dict) -> list[str]:
             p.append(f"picard.{k} must be a number from 0 to 100")
         elif k in ("genres_filter", "join_genres") and not isinstance(v, str):
             p.append(f"picard.{k} must be text")
+        elif k == "replace_dir_separator" and not (isinstance(v, str) and "/" not in v and "\\" not in v):
+            p.append("picard.replace_dir_separator must be text without / or \\")
     return p
 
 

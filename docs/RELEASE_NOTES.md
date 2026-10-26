@@ -50,7 +50,9 @@ editor has the ID3 choices). Without them each file keeps its ID3 version and ID
 before. They apply when a file is written, and the preview says so. Undo now puts back an
 MP3's own ID3v1 and APEv2 tags and a FLAC file's ID3 tags exactly; before, undo rebuilt an
 ID3v1 tag from the restored ID3v2 tag. A WAV file's RIFF INFO now carries every field the file
-holds, as Picard writes it, not only the fields that changed.
+holds, as Picard writes it, not only the fields that changed. Picard's Options > File Naming
+are followed too: non-ASCII characters replaced, spaces made underscores, and the character
+that stands for a "/" in a value (checked against Picard's own code).
 
 **Choose the release yourself**, as Picard's "Other versions": `tagmender plan ALBUM --release
 LINK` (or `run`), or "Use another release…" in the app's preview, with a MusicBrainz or Discogs

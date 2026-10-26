@@ -42,6 +42,13 @@ class Hidden(Base):
         got = tagio.read(sorted(dest.rglob("*.flac"))[0])
         self.assertFalse([k for k in got if "releasecomment" in k or k.startswith("~")], sorted(got))
 
+    def test_picards_file_naming_options(self):
+        d, dest, p = self.plan(naming={"template": "%albumartist%/%album% [%_releasecomment%]/%title%"},
+                               follow_picard=False, picard={"ascii_filenames": True,
+                                                            "replace_spaces_with_underscores": True})
+        rel = [str(Path(fe["dst"]).relative_to(dest)) for fe in p["albums"][0]["files"]]
+        self.assertEqual(rel[0], "Band/Album_[deluxe]/T0.flac", rel)
+
     def test_a_failing_naming_script_is_a_conflict(self):
         d, dest, p = self.plan(naming={"template": "%albumartist%/$delprefix()/%title%"})
         a = p["albums"][0]

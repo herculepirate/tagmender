@@ -90,7 +90,10 @@ output recorded from Picard's own code.
 | Move additional files | off | Full | cue/playlist references updated |
 | Delete empty directories | on | Full | |
 | Windows compatibility | on | Full | plus byte, UTF-16 and path limits, shortening |
-| Replace non-ASCII characters | off | Missing | |
+| Replace non-ASCII characters | off | Full | `ascii_filenames`, Picard's own replacement tables |
+| Replace spaces with underscores | off | Full | `replace_spaces_with_underscores` |
+| Directory separator character | `_` | Full | `replace_dir_separator`: a "/" in a value; checked against Picard's script_to_filename |
+| Windows compatibility replacement characters | `_` | Partial | always `_` |
 | Overwrite existing files | off | Excluded | never overwrites |
 | Naming script language | - | Full | Picard's own script engine (`picard_script/`): all 82 functions, plus `$words` |
 | Tagger scripts (change tags with a script) | - | Full | Picard's own, from Picard.ini (or a profile's `picard.list_of_scripts`), run on each track after Discogs Enrichment, with Picard's hidden variables; `$delete` removes the tag |

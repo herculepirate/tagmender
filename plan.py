@@ -679,7 +679,7 @@ class Planner:
         # ($set(Title,X), $set(GENRE,Jazz) - a field TagMender writes, spelled otherwise: that
         # field, the script's value winning; Picard, case-sensitive, would add a TXXX:Title -
         # docs/PICARD_COVERAGE.md)
-        known = {k for k in list(tags) + list(target) if k == k.lower()}
+        known = {k for k in target if k == k.lower()}     # (the release's fields - not a custom tag of the file's)
         for k in [k for k in out if k != k.lower() and k.lower() in known and k not in tags]:
             v_ = out.pop(k)
             if out.get(k.lower()) == tags.get(k.lower()):      # (the script set "title" itself too: that)
@@ -925,7 +925,8 @@ class Planner:
             # (Vorbis and APEv2 keep a described comment in COMMENT as "text (desc)", which Picard
             # writes whole from the track's comments: a plain comment a script unset goes)
             if "comment" in unset_ and "comment" not in raw and before.get("comment") and \
-                    any(k_.startswith("comment:") and raw[k_] for k_ in raw) and \
+                    (any(k_.startswith("comment:") and raw[k_] for k_ in raw) or
+                     any(k_.startswith("comment:") and v_ for k_, v_ in before.items())) and \
                     tagio.family_of(f) in ("vorbis", "apev2") and \
                     p.policy("comment") not in ("preserve", "lock", "fill_missing") and "comment" not in removals:
                 removals.append("comment")
@@ -947,7 +948,17 @@ class Planner:
                 # (a Vorbis/APEv2 comment "text (desc)" is the described comment: the file's
                 # plain comment it replaces goes, as Picard replaces it)
                 removals.append("comment")
-            changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
+            # (a Vorbis total only inside "5/9" is none, as Picard reads it; one under one of its two
+            # names is written under both when the file is written, as Picard saves it)
+            v_inside, v_one = tagio.vorbis_totals(f)
+            before_d = {k_: v_ for k_, v_ in before.items() if k_ not in v_inside}
+            changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
+            for tot_ in v_one:
+                kept_pol = p.policy(tot_) in ("preserve", "lock", "fill_missing")
+                if tot_ not in changes and before.get(tot_) and (tot_ not in unset_ or kept_pol) and \
+                        tot_ not in removals:
+                    changes[tot_] = list(before[tot_]) if p.policy(tot_) in ("preserve", "lock", "fill_missing") \
+                        or not target.get(tot_) else list(target[tot_])
             as_is = tagio.fragmented(f)
             named = changes               # (named as its album's other files are, whatever it holds)
             if as_is:                     # (moved or copied with its album as it is, never written to)
@@ -974,7 +985,8 @@ class Planner:
                 fe["first"] = _first_values(raw, changes)
             if changes.get("license") and raw.get("license"):
                 fe["license_count"] = len(raw["license"])      # (one URL: WCOP; several: TXXX:LICENSE)
-            kept_ = sorted(t_ for _n, t_ in tagio.NUMBER_PAIRS if t_ in unset_ and t_ not in changes)
+            kept_ = sorted(t_ for _n, t_ in tagio.NUMBER_PAIRS if t_ in unset_ and t_ not in changes
+                           and p.policy(t_) not in ("preserve", "lock", "fill_missing"))
             if changes and kept_ and not tagio.combined_pairs(f):
                 fe["keep"] = kept_                   # (a total a script unset: as the file has it)
             # the file's tags after the write, as values (not as an ID3v2.3 tag joins them: a
@@ -1029,6 +1041,10 @@ class Planner:
                     for k_, sp_ in tagio.spellings(f).items():     # (the file's own TXXX:EDITION as %EDITION%)
                         if k_ in names and k_ not in whole:
                             names[sp_] = names.pop(k_)
+                    for rk_ in raw:                     # (a script's $set(MyTag,...) as %MyTag%, not %mytag%,
+                        lk_ = tagio.field_name(rk_)     # as Picard's case-sensitive names have it)
+                        if rk_ != lk_ and lk_ in names and lk_ not in before and lk_ not in whole:
+                            names[rk_] = names.pop(lk_)
                     if folder_mode != "off":
                         # (for the name only: a Picard script working the edition out itself
                         # from %media% and %date% gets the release's first-disc values for every

@@ -393,14 +393,15 @@ def _place(tmp: Path, dst: Path):
     _fsync_dir(dst.parent)
 
 
-def _tags_sig(path, legacy=0, mp4_zero=True) -> str:
+def _tags_sig(path, legacy=0, mp4_zero=True, split_custom=True) -> str:
     """A fingerprint of a file's tags: undo leaves files whose tags were edited later alone.
     "v2:" marks how this version reads tags (described comments and lyrics); legacy: as the
     versions before read them, to compare with their jobs' fingerprints. mp4_zero False: an
     M4A's track or disc number 0 read as none, as versions before d25358a read it."""
     try:
         t = tagio.read(path, legacy=legacy) if legacy else \
-            (tagio.read(path) if mp4_zero else tagio.read(path, mp4_zero=False))
+            (tagio.read(path) if (mp4_zero and split_custom) else
+             tagio.read(path, mp4_zero=mp4_zero, split_custom=split_custom))
     except Exception:
         return ""
     h = hashlib.sha1(json.dumps(sorted((k, [str(x) for x in v] if isinstance(v, list) else str(v))
@@ -417,7 +418,10 @@ def _sig_is(path, sig, backup=None, blobs=None) -> bool:
     if not sig:
         return False
     if str(sig).startswith("v2:"):
-        return _tags_sig(path) == sig or _tags_sig(path, mp4_zero=False) == sig
+        # (as this version reads tags; or as versions before read an M4A's track 0, or a user
+        # tag spelled like a field: merged into it)
+        return _tags_sig(path) == sig or _tags_sig(path, mp4_zero=False) == sig or \
+            _tags_sig(path, split_custom=False) == sig or _tags_sig(path, mp4_zero=False, split_custom=False) == sig
     if _tags_sig(path, legacy=2) == sig:
         return True
     if _tags_sig(path, legacy=1) != sig:

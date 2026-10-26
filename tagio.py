@@ -388,7 +388,7 @@ def spellings(path) -> dict:
     return out
 
 
-def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
+def read(path, legacy=False, mp4_zero=True, split_custom=True) -> dict[str, list[str]]:
     """{field: [values]} with Picard's names. Pictures are counted in '~pictures'. legacy:
     as an earlier TagMender read a file, for the fingerprints its jobs recorded - 1 (True):
     before 609b541 (no described comments or lyrics), 2: 609b541 to b1f0b98 (described by
@@ -400,6 +400,17 @@ def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     if tags is None:
         return out
+    # a user tag (TXXX, an MP4 custom atom, an APEv2 item) none of Picard's names, but spelled
+    # like a field the file keeps elsewhere - TXXX:TOTALTRACKS beside TRCK "1/9", as ffmpeg
+    # leaves them: a custom tag of its own ("~custom:TOTALTRACKS"), as Picard reads it, never
+    # merged into the field
+    deferred = [] if (split_custom and not legacy) else None
+
+    def custom(name, orig, vals):
+        if deferred is None:
+            _add(out, name, vals)
+        else:
+            deferred.append((name, orig, vals))
     if fam == "id3":
         pics = 0
         for key, frame in tags.items():
@@ -413,7 +424,10 @@ def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
                     name = desc.lower()                    # (ID3v2.3's place for TMOO and TDRL)
                 if is_performer(name) or name in _TIPL_R:
                     name = _LEGACY + name
-                _add(out, name, frame.text)
+                if desc.lower() not in _ID3_FREE_R and name == desc.lower():
+                    custom(name, desc, list(frame.text))
+                else:
+                    _add(out, name, frame.text)
             elif fid in ("TMCL", "TIPL", "IPLS"):
                 for role, person in frame.people:
                     if fid != "TMCL" and role in TIPL_ROLES:
@@ -502,10 +516,15 @@ def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
             elif key in _MP4_TEXT_R:
                 _add(out, _MP4_TEXT_R[key], vals)
             elif key.startswith(_FF):
-                name = key[len(_FF):]
-                name = _MP4_FREE_R.get(name.lower(), name.lower())
-                _add(out, _LEGACY + name if name.startswith("performer:") else name,
-                     [bytes(v).decode("utf-8", "replace") for v in vals])
+                orig = key[len(_FF):]
+                name = _MP4_FREE_R.get(orig.lower(), orig.lower())
+                text = [bytes(v).decode("utf-8", "replace") for v in vals]
+                if name.startswith("performer:"):
+                    _add(out, _LEGACY + name, text)
+                elif orig.lower() not in _MP4_FREE_R:
+                    custom(name, orig, text)
+                else:
+                    _add(out, name, text)
     elif fam == "apev2":
         for key, val in tags.items():
             if val.kind != 0:                                  # binary (cover art) / external
@@ -524,7 +543,12 @@ def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
                     _add(out, pk, [pv])
             else:
                 name = _APE_R.get(k, k)
-                _add(out, _LEGACY + name if name.startswith("performer:") else name, vals)
+                if name.startswith("performer:"):
+                    _add(out, _LEGACY + name, vals)
+                elif k not in _APE_R:
+                    custom(name, key, vals)
+                else:
+                    _add(out, name, vals)
     elif fam == "asf":
         for key, vals in tags.items():
             if key == "WM/Picture":
@@ -540,6 +564,11 @@ def read(path, legacy=False, mp4_zero=True) -> dict[str, list[str]]:
                 _add(out, "totaldiscs", [t])
             else:
                 _add(out, name, text)
+    for name, orig, vals in deferred or ():
+        if name in out:
+            _add(out, "~custom:" + orig, vals)
+        else:
+            _add(out, name, vals)
     return out
 
 
@@ -997,6 +1026,28 @@ def latin1_or_utf8(*texts) -> int:
         return 3
 
 
+def vorbis_totals(path) -> tuple[set, set]:
+    """(totals a Vorbis file has only inside its number - "5/9" -, totals it has under one of
+    their two names only - TRACKTOTAL, as EAC and Mp3tag write it): Picard reads the first as
+    no total, and writes both names of every total it saves."""
+    try:
+        f = open_file(path)
+    except Exception:
+        return set(), set()
+    if family(f) != "vorbis" or f.tags is None:
+        return set(), set()
+    inside, one = set(), set()
+    for num_name, tot, names in (("TRACKNUMBER", "totaltracks", ("TOTALTRACKS", "TRACKTOTAL")),
+                                 ("DISCNUMBER", "totaldiscs", ("TOTALDISCS", "DISCTOTAL"))):
+        have = [n for n in names if n in f.tags]
+        num = f.tags.get(num_name) or []
+        if not have and num and "/" in str(num[0]) and str(num[0]).split("/", 1)[1].strip():
+            inside.add(tot)
+        elif len(have) == 1:
+            one.add(tot)
+    return inside, one
+
+
 def family_of(path) -> str:
     """The file's tag family (id3, vorbis, mp4, apev2, asf), or ""."""
     try:
@@ -1313,10 +1364,15 @@ def _set_id3(f, tags, k, vals, spell=None):
         tags.delall(fid)
         if vals:
             tags.add(Frames[fid](encoding=3, text=vals))
+            # (what Picard drops when it writes these: the older places of the same thing)
+            for old in {"TSO2": ("TXXX:ALBUMARTISTSORT",), "TSOA": ("XSOA",), "TSOP": ("XSOP",)}.get(fid, ()):
+                tags.delall(old)
         return
     desc = ID3_FREETEXT.get(k) or (spell if spell and spell.lower() == k else k)
     existing = [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == desc.lower()]
-    keep_case = tags[existing[0]].desc if existing else desc
+    # (a custom tag keeps the file's own spelling; one of Picard's is written as Picard names it
+    # - the frame Picard and players read - its other spellings going)
+    keep_case = desc if (k in ID3_FREETEXT and k not in CI_ONLY) else (tags[existing[0]].desc if existing else desc)
     for key in existing:
         del tags[key]
     if vals:

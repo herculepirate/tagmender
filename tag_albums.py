@@ -706,6 +706,8 @@ def _flac_raw_fits(path, raw: bytes) -> bool:
 
 
 def _mp4_value(values, blob_dir):
+    if not isinstance(values, (list, tuple)):          # (cpil, pgap, pcst: a bare true/false)
+        return {"scalar": _mp4_value([values], blob_dir)[0]}
     out = []
     for v in values:
         if isinstance(v, bytes):                     # covers and freeform
@@ -857,7 +859,8 @@ def restore_tags(path, rec, blob_dir):
     elif tags and "mp4" in tags:
         for k, vals in tags["mp4"]:
             out = []
-            for v in vals:
+            scalar = isinstance(vals, dict) and "scalar" in vals
+            for v in ([vals["scalar"]] if scalar else vals):
                 if "bytes" in v:
                     data = _read_blob(blob_dir, v["bytes"])
                     out.append(MP4Cover(data, v["fmt"]) if v["kind"] == "MP4Cover"
@@ -866,7 +869,7 @@ def restore_tags(path, rec, blob_dir):
                     out.append(tuple(v["tuple"]))
                 else:
                     out.append(v["value"])
-            f.tags[k] = out
+            f.tags[k] = out[0] if scalar and out else out
     f.save(**(save_kw if isinstance(f, MP4) else {}))
     ends = rec.get("flac_ends")
     if isinstance(f, FLAC) and ends:

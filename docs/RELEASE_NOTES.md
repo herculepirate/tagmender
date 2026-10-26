@@ -118,6 +118,17 @@ keeps its version. Undo of a run that wrote through a symbolic link puts back th
 to. Opus covers an earlier version wrote are repaired on the next run. One license URL goes
 into WCOP (a Wayback Machine link too), as Picard writes it.
 
+**Tags other taggers left (twenty-ninth review, Picard parity).** An M4A with a compilation,
+gapless or podcast flag is tagged again (it failed the album, TagMender's own Various Artists
+M4As on a second run too). A user tag spelled like a field the file keeps elsewhere
+(TXXX:TOTALTRACKS beside TRCK, as ffmpeg leaves a converted FLAC's tags) is read as a tag of
+its own, as Picard reads it, instead of failing the album; writing the album artist's sort
+drops an old TXXX:ALBUMARTISTSORT, as Picard does. Picard's own TXXX names are written as
+Picard spells them. A FLAC or Ogg total inside "5/9" counts as none and one under one name gets
+both, as Picard writes them; a preserved total beats a script's $unset. A naming script's
+%MyTag% names files alike on every run. $unset(comment) beside a described comment in the file
+removes the plain one.
+
 **Picard parity (twenty-eighth review).** Opus covers carry no size, as Picard writes them
 (players built on libopusfile showed none); a FLAC or Ogg total is written under both names
 whenever its number or total is (TRACKTOTAL alone gets TOTALTRACKS); the "picard" naming preset

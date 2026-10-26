@@ -27,7 +27,11 @@ e.g. the recording ID is `UFID:http://musicbrainz.org` in ID3, `MUSICBRAINZ_TRAC
 and `MusicBrainz Track Id` in MP4; the release-track ID is `MusicBrainz Release Track Id` /
 `MUSICBRAINZ_RELEASETRACKID`. Vorbis gets both `TOTALTRACKS` and `TRACKTOTAL` (and the disc
 equivalents), as Picard writes them. A custom tag that already exists in another letter case
-keeps its case.
+keeps its case and is updated there (Picard, whose names are case-sensitive, would add a second
+frame beside it: TXXX:originalyear beside the file's TXXX:ORIGINALYEAR); one of Picard's own
+(MusicBrainz Album Id, BARCODE, ARTISTS ...) is written as Picard names it. A user tag spelled
+like a field the file keeps elsewhere (TXXX:TOTALTRACKS beside TRCK, as ffmpeg leaves them) is
+read as a tag of its own and left alone, as Picard reads it.
 
 ## What TagMender never does while tagging
 - transcode, resample, normalise or repair audio (the audio check fails the write otherwise);

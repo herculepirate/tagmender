@@ -1086,6 +1086,14 @@ def choose_pressing(tied, preferred_countries=None):
     not contradict anything the files, folder or scans say."""
     if len(tied) < 2:
         return None
+    # The edition your folder names ("[2021 RM]") rules out the pressings of other years
+    # before anything else decides; the country order once picked Sepultura's 2006 US
+    # Dante XXI over the 2021 remaster in BMG's box (85.7 over 90.5).
+    edition = [s for s in tied if s.get("pressing_year") and s.get("year_ok")]
+    if edition and len(edition) < len(tied):
+        if len(edition) == 1:
+            return edition[0], {"date": f"the {edition[0]['pressing_year']} edition your folder names"}
+        tied = edition
     rel = _relative_clues(tied)
     allc = {id(s): dict(s.get("clues") or {}, **rel[id(s)]) for s in tied}
     # A Discogs pressing "matches the disc ID" only because a MusicBrainz release with
@@ -1795,6 +1803,8 @@ def album_only(final, cfg, source=""):
     tied = [s for s in final.get("scored") or [best]
             if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
             and title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n]
+    if best.get("pressing_year") and best.get("year_ok"):
+        tied = [s for s in tied if s.get("year_ok")]   # the edition your folder names, not the others
     if len(tied) < 2:
         return None
     # what the files are (a CD rip, a download, a vinyl rip) narrows the pressings whose

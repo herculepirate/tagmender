@@ -1297,6 +1297,27 @@ class PressingEvidence(unittest.TestCase):
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
         self.assertFalse(r["best"].get("own_catno_absent"))
 
+    def test_the_folders_edition_year_rules_out_other_pressings_in_a_tie(self):
+        """Sepultura - 2006 - Dante XXI [2021 RM]: disc 4 of BMG's 2021 box (CD and vinyl
+        boxes score the same). Your country order picked the 2006 US CD, which scored lower
+        and is not the edition the folder names."""
+        tr = [{"disc": 1, "num": i + 1, "title": f"T{i}", "secs": 200.0 + i} for i in range(3)]
+        a = album(title="Dante XXI", year=2006, folder="2006 - Dante XXI [2021 RM]", pressing_year=2021, tracks=tr)
+
+        def c(**kw):
+            return cand(title="Dante XXI", tracks=[dict(x) for x in tr], **kw)
+        us = c(id="us06", country="US", year=2006, date="2006", formats={"cd"})
+        cd = c(id="cdbox", country="XE", year=2021, date="2021", formats={"cd"})
+        lp = c(id="lpbox", country="XE", year=2021, date="2021", formats={"vinyl"})
+        s = [mc.score_candidate(a, x, CFG) for x in (us, cd, lp)]
+        r = dict(mc.classify(s, CFG), scored=s)
+        self.assertIn(r["best"]["cand"]["id"], ("cdbox", "lpbox"))
+        ao = mc.album_only(r, CFG, "")
+        self.assertEqual(sorted(t["id"] for t in ao["tied"]), ["cdbox", "lpbox"])   # never the 2006 CD
+        s = [mc.score_candidate(a, x, CFG) for x in (us, cd)]
+        r = mc.classify(s, CFG)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cdbox"), r["why"])
+
     def test_the_scans_packaging_picks_the_pressing(self):
         """Cynic - 2015 - Carbon-Based Anatomy: the jewel case and the digipak share the barcode
         and number; the folder's "scan-digipak.jpg" says which one this is."""

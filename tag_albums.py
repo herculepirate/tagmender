@@ -365,25 +365,31 @@ def _fragmented(fh) -> bool:
     return False
 
 
-def _udta(fh):
-    """(offset, size) of the moov's udta atom (where MP4 tags live), or None."""
+def _child(fh, at, n, name, skip=8):
+    """(offset, size) of the first child atom name in the atom at (n bytes), or None. (A meta
+    atom has 4 bytes of version and flags before its children.)"""
     import struct
-    at, n = _moov(fh)
-    pos, end = at + 8, at + n
+    pos, end = at + skip, at + n
     while pos + 8 <= end:
         fh.seek(pos)
         size, kind = struct.unpack(">I4s", fh.read(8))
         if size < 8:
             return None
-        if kind == b"udta":
+        if kind == name:
             return pos, size
         pos += size
     return None
 
 
-def _drop_udta(path):
-    """The udta atom a job added to an MP4 that had none, out again - only where the audio
-    lies before the moov (its offsets do not move)."""
+def _udta(fh):
+    """(offset, size) of the moov's udta atom (where MP4 tags live), or None."""
+    at, n = _moov(fh)
+    return _child(fh, at, n, b"udta")
+
+
+def _drop_udta(path, meta_only=False):
+    """The udta atom (or the meta atom in it) a job added to an MP4 that had none, out again
+    - only where the audio lies before the moov (its offsets do not move)."""
     import struct
     from mutagen._util import delete_bytes
     with open(path, "r+b") as fh:
@@ -391,12 +397,18 @@ def _drop_udta(path):
         u = _udta(fh)
         if u is None or _mdat_after(fh, at):
             return
-        fh.seek(at)
-        if struct.unpack(">I", fh.read(4))[0] != n:  # (a 64-bit size: left alone)
+        cut = _child(fh, u[0], u[1], b"meta") if meta_only else u
+        if cut is None:
             return
-        delete_bytes(fh, u[1], u[0])
-        fh.seek(at)
-        fh.write(struct.pack(">I", n - u[1]))
+        heads = [(at, n)] + ([u] if meta_only else [])
+        for pos, size in heads:                      # (64-bit sizes: left alone)
+            fh.seek(pos)
+            if struct.unpack(">I", fh.read(4))[0] != size:
+                return
+        delete_bytes(fh, cut[1], cut[0])
+        for pos, size in heads:
+            fh.seek(pos)
+            fh.write(struct.pack(">I", size - cut[1]))
 
 
 def _first_chunk(moov: bytes):
@@ -543,9 +555,11 @@ def _backup_raw(path, f, blob_dir, kind=RECORD_KIND) -> dict:
         rec["v"] = kind_
         rec["flac_raw"] = _blob(_head(path, True), blob_dir)
         return rec
-    if isinstance(f, MP4) and kind_ >= 4 and not (f.tags and len(f.tags)):
-        with open(path, "rb") as fh:                 # (no tags, or an empty list: alike - none)
-            rec["mp4_udta"] = _udta(fh) is not None
+    if isinstance(f, MP4) and kind_ >= 4 and f.tags is None:
+        with open(path, "rb") as fh:                 # (no tags: whether it had a udta, a meta in it)
+            u = _udta(fh)
+            rec["mp4_udta"] = u is not None
+            rec["mp4_meta"] = u is not None and _child(fh, u[0], u[1], b"meta") is not None
         return rec
     if f.tags is None:
         return rec
@@ -633,9 +647,55 @@ def _mp4_value(values, blob_dir):
     return out
 
 
+def rec_key(rec) -> str:
+    """A tag backup record compared without the order of its tags (mutagen lists Vorbis
+    comment keys from a set: the order differs between two reads of one file); an MP4 with an
+    empty tag counts as one with none."""
+    rec = dict(rec or {})
+    tags = dict(rec.get("tags") or {})
+    if tags.get("mp4") == []:
+        tags = {}
+        for k in ("padding", "mp4_udta", "mp4_meta"):
+            rec.pop(k, None)
+    elif not tags:
+        for k in ("mp4_udta", "mp4_meta"):
+            rec.pop(k, None)
+    for k in ("vorbis", "mp4"):
+        if k in tags:
+            tags[k] = sorted(json.dumps(x, sort_keys=True, default=str) for x in tags[k])
+    rec["tags"] = tags
+    return json.dumps(rec, sort_keys=True, default=str)
+
+
+def same_as_backup(path, rec) -> bool:
+    """path holds what the backup record says (compared as the version that made it made it)."""
+    import tempfile
+    old = rec or {}
+    with tempfile.TemporaryDirectory() as d:
+        kind = old.get("v") or (1 if ("trailer" in old or "flac_ends" in old) else 0)
+        told = old.get("tags") or {}
+        # (two shapes were written as "v": 3: b589302's raw heads and moov, c8c7cd6's today's)
+        newer3 = kind == 3 and not ("mp4_moov" in told or "flac_raw" in told)
+        now = backup_tags(path, d, kind=RECORD_KIND if newer3 else kind)
+        if newer3:
+            now["v"] = 3
+        return rec_key(now) == rec_key(old)
+
+
 def restore_tags(path, rec, blob_dir):
+    """The file's tags as the record has them. Nothing is written to a file that holds them
+    already, nor to a fragmented MP4 (its audio would no longer play)."""
     from mutagen.flac import Picture
     from mutagen.mp4 import MP4Cover
+    import tagio
+    try:
+        if same_as_backup(path, rec):
+            return
+    except Exception:
+        pass
+    if tagio.fragmented(path):
+        raise ValueError(f"{Path(path).name} is a fragmented MP4: its tags are left as they are "
+                         "(writing them would break its audio)")
     f = _open(path)
     if f is None:
         raise ValueError("cannot open")
@@ -697,6 +757,8 @@ def restore_tags(path, rec, blob_dir):
             f.delete()
         if rec.get("mp4_udta") is False:
             _drop_udta(path)
+        elif rec.get("mp4_meta") is False:
+            _drop_udta(path, meta_only=True)
         return
     if isinstance(f, FLAC) and not tags and f.tags is not None:     # (it had no comment block)
         f.metadata_blocks = [b for b in f.metadata_blocks if b is not f.tags]
@@ -830,6 +892,12 @@ def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow
         files = audio_files(folder)
         if not files:
             skipped.append((path, "no audio files"))
+            continue
+        import tagio
+        frag = [p.name for p in files if tagio.fragmented(p)]
+        if frag:                                    # (Picard writes through mutagen too)
+            skipped.append((path, f"{frag[0]} is a fragmented MP4: Picard would break its audio; "
+                                  "the album is left for you"))
             continue
         release = {"album": [b.get("title") or ""], "albumartist": [b.get("artist") or ""],
                    "artist": [b.get("artist") or ""]}
@@ -1193,13 +1261,17 @@ def main():
     blob_dir.mkdir(parents=True)
     log = open(run_dir / "picard.log", "w", encoding="utf-8")
     journal = []
+    pending = []                     # (the batch being seeded: in the journal even if the run stops)
     results = []
     print(f"Run {run_id}: backups and log in {run_dir}")
     try:
         for start in range(0, len(albums), args.batch):
             batch = []
+            import tagio
             for a in albums[start:start + args.batch]:        # 0: the match is still the matcher's pick
-                why = recheck(args.matches_db, a, args.allow_old_matches)
+                frag = [Path(p).name for p in a["files"] if tagio.fragmented(p)]
+                why = (f"{frag[0]} is a fragmented MP4: Picard would break its audio" if frag else
+                       recheck(args.matches_db, a, args.allow_old_matches))
                 if why:
                     print(f"    skipped {Path(a['path']).parent.name} | {Path(a['path']).name}: {why}")
                     results.append({"album": a["path"], "state": "skipped", "saved": 0, "files": len(a["files"]),
@@ -1218,9 +1290,10 @@ def main():
                            "old_albumid": before["albumid"]}
                     a["records"].append(rec)
                 # every album prepared so far in this batch (later ones have no backup yet)
+                pending = [{"album": x["path"], "mbid": x["mbid"], "files": x["records"], "extras": x["extras"]}
+                           for x in batch if "records" in x]
                 with open(run_dir / "journal.json", "w") as fh:
-                    json.dump(journal + [{"album": x["path"], "mbid": x["mbid"], "files": x["records"],
-                                          "extras": x["extras"]} for x in batch if "records" in x], fh)
+                    json.dump(journal + pending, fh)
                 for p in a["files"]:
                     write_albumid(Path(p), a["mbid"])
                     # until Picard saves it, the album is not done: a seed left behind by a run
@@ -1228,6 +1301,7 @@ def main():
                     write_tagmender(Path(p), "Seeded", "release ID written; Picard has not saved yet")
             journal += [{"album": a["path"], "mbid": a["mbid"], "files": a["records"], "extras": a["extras"],
                          "moves": a.setdefault("moves", [])} for a in batch]
+            pending = []
             started = time.time()
             n0 = start + 1
             print(f"[{n0}-{start + len(batch)}/{len(albums)}] Picard: tagging {len(batch)} album(s)…", flush=True)
@@ -1285,7 +1359,7 @@ def main():
               f"--undo {run_id} restores everything in this run.")
     finally:
         with open(run_dir / "journal.json", "w") as fh:
-            json.dump(journal, fh)
+            json.dump(journal + pending, fh)
         with open(run_dir / "results.csv", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=["album", "state", "saved", "files", "discogs", "now_in",
                                                "release", "not_saved"])
@@ -1320,10 +1394,11 @@ def unresolved_albums(matches_db, only=None):
 
 
 def mark_unresolved(args, out_dir):
+    import tagio
     albums = unresolved_albums(args.matches_db, args.only)
     todo = []
     for path, reason in albums:
-        files = audio_files(Path(path))
+        files = [p for p in audio_files(Path(path)) if not tagio.fragmented(p)]   # (never written to)
         if not files or all(read_ids(p)["trackid"] for p in files):
             continue                                     # tagged by hand since
         if all(read_tagmender(p) == ("Unresolved", reasons.encode(reason)) for p in files):

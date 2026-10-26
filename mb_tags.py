@@ -598,7 +598,7 @@ def release_tags(rel, settings=None) -> list[dict]:
             # (Picard counts the artist as Track._customize_metadata leaves it: the Various
             # Artists name, punctuation converted)
             who = (tt.get("artist") or common.get("albumartist") or [""])[0]
-            if VARIOUS_ARTISTS_ID in (tt.get("musicbrainz_artistid") or []):
+            if (tt.get("musicbrainz_artistid") or []) == [VARIOUS_ARTISTS_ID]:
                 who = s["va_name"]
             artists.add(_asciipunct(who) if s["convert_punctuation"] and isinstance(who, str) else who)
             if kind != "track" or id(m) not in audio or rec.get("video"):

@@ -376,6 +376,10 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
         print(f"  × {folder.name}: {dec.summary().reason()}")
         return
     files = dec.kept
+    import tagio
+    # (a fragmented MP4 is measured with its album - its album gain is the album's - but never
+    # written to: its audio would no longer play)
+    frag = {p for p in files if tagio.fragmented(p)}
     planned = {p: {} for p in files}
     created = []
     if args.replaygain and (args.overwrite or not get(files[0], "REPLAYGAIN_ALBUM_GAIN")):
@@ -408,8 +412,10 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
     if finding:
         for p in files:
             planned[p]["TAGMENDER_QUALITY"] = finding
-    changes = {p: v for p, v in planned.items() if v}
+    changes = {p: v for p, v in planned.items() if v and p not in frag}
     summary = sorted({k for v in changes.values() for k in v})
+    if frag:
+        summary.append(f"not {', '.join(sorted(x.name for x in frag))} (a fragmented MP4: never written to)")
     report.append({"album": str(folder), "changes": ", ".join(summary), "quality": finding})
     print(f"  {'+' if args.apply else '?'} {folder.name}: {', '.join(summary) or 'nothing to add'}"
           + (f"  [{finding}]" if finding else ""))

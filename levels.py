@@ -398,7 +398,7 @@ def audiophile(prop, profile, http, cache: Cache, log=None) -> list[str]:
         else:
             misses = 0
             for i, f in enumerate(files):
-                if have[i].get("lyrics") or f.with_suffix(".lrc").exists():
+                if any(k == "lyrics" or k.startswith("lyrics:") for k in have[i]) or f.with_suffix(".lrc").exists():
                     continue
                 secs = _seconds(f)
                 try:
@@ -420,7 +420,7 @@ def audiophile(prop, profile, http, cache: Cache, log=None) -> list[str]:
     # measurements never replace what the file already has
     for i in range(len(files)):
         for k, v in extra[i].items():
-            if not have[i].get(k):
+            if not have[i].get(k) and not (k == "lyrics" and any(x.startswith("lyrics:") for x in have[i])):
                 prop.targets[i][k] = v if isinstance(v, list) else [v]
     if sidecars:
         prop.sidecars = sidecars

@@ -803,7 +803,7 @@ class Planner:
                 str((before.get("tagmender") or [""])[0]).lower() == "unresolved" else []
             # what Picard would delete (compilation on a release not by Various Artists, what a
             # tagger script $delete-s) - never a field the profile preserves or locks
-            removals += [x for x in (target.pop("~remove", None) or [])
+            removals += [tagio.canonical(f, x) for x in (target.pop("~remove", None) or [])
                          if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
             # Picard's hidden variables (%_multiartist%, what a tagger script $set): for the file
             # naming script only, never written
@@ -814,6 +814,11 @@ class Planner:
             raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
+            if raw.get("comment") and not target.get("comment") and before.get("comment") and \
+                    p.policy("comment") not in ("preserve", "lock", "fill_missing"):
+                # (a Vorbis/APEv2 comment "text (desc)" is the described comment: the file's
+                # plain comment it replaces goes, as Picard replaces it)
+                removals.append("comment")
             changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
             as_is = tagio.fragmented(f)
             named = changes               # (named as its album's other files are, whatever it holds)
@@ -902,8 +907,10 @@ class Planner:
                     fmt2 = tagio.file_options(dst, self._file_settings())    # (as the copy holds them)
                     changes2, rows2 = diff_tags(have, tagio.stored(dst, raw, fmt2), p,
                                                 conf if identified else 100.0, removals)
-                    if fe.get("as_is") or tagio.fragmented(dst):
+                    fe.pop("as_is", None)
+                    if tagio.fragmented(dst):            # (the copy as it is: never written to)
                         changes2, rows2 = {}, []
+                        fe["as_is"] = True
                     fe.pop("format", None)
                     if changes2 and fmt2:
                         fe["format"] = fmt2

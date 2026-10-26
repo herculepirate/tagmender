@@ -217,8 +217,8 @@ def holds(path, field: str) -> bool:
     """Whether a file of this kind has a place for field, as Picard writes it: MP4 and WMA
     have none for performer:<role> credits; WMA none for custom tags."""
     ext = Path(str(path)).suffix.lower()
-    if ext in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp"):
-        return not field.startswith("performer:") and not (field.startswith("comment:") and len(field) > 8)
+    if ext in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp"):            # (Picard's MP4File.supports_tag)
+        return not field.startswith("performer:") and not (field.startswith("comment:") and len(field) > 9)
     if ext in (".wma", ".asf"):
         return field in ASF_MAP or field == "totaldiscs" or field in CI_ONLY or \
             field.startswith("lyrics:")                                          # (no total tracks)
@@ -314,8 +314,34 @@ def _add(out, name, values):
 # --------------------------------------------------------------------------
 # reading
 # --------------------------------------------------------------------------
-def read(path) -> dict[str, list[str]]:
-    """{field: [values]} with Picard's names. Pictures are counted in '~pictures'."""
+def _comm_name(base, lang, desc, default) -> str:
+    """Picard 3's name for a COMM / USLT frame (create_lang_desc_tag): "comment",
+    "comment::desc", "comment:deu", "comment:deu:desc"; lyrics with "xxx" as no language."""
+    if base == "comment" and desc == "iTunes_CDDB_1":
+        return "itunes_cddb_1"
+    parts = [base]
+    if lang and lang.lower() != default:
+        parts.append(lang)
+    elif desc:
+        parts.append("")
+    if desc:
+        parts.append(desc)
+    return ":".join(parts)
+
+
+def _split_ape_comment(value: str) -> tuple[str, str]:
+    """An APEv2 Comment "text (desc)" as Picard reads it: at the last " (" (apev2.py)."""
+    if value.endswith(")"):
+        start = value.rfind(" (")
+        if start > 0:
+            return "comment:" + value[start + 2:-1], value[:start]
+    return "comment", value
+
+
+def read(path, legacy=False) -> dict[str, list[str]]:
+    """{field: [values]} with Picard's names. Pictures are counted in '~pictures'. legacy:
+    as TagMender before 609b541 read a file (no described comments or lyrics), for the
+    signatures earlier jobs recorded."""
     f = open_file(path)
     fam = family(f)
     tags = f.tags
@@ -354,10 +380,15 @@ def read(path) -> dict[str, list[str]]:
                 n, t = _split_pair(frame.text[0])
                 _add(out, "discnumber", [n])
                 _add(out, "totaldiscs", [t])
+            elif fid == "COMM" and legacy:
+                if frame.desc == "":
+                    _add(out, "comment", frame.text)
+            elif fid == "USLT" and legacy:
+                _add(out, "lyrics", [frame.text])
             elif fid == "COMM":
-                _add(out, "comment" + (":" + frame.desc if frame.desc else ""), frame.text)
+                _add(out, _comm_name("comment", frame.lang, frame.desc, "eng"), frame.text)
             elif fid == "USLT":
-                _add(out, "lyrics" + (":" + frame.desc if frame.desc else ""), [frame.text])
+                _add(out, _comm_name("lyrics", frame.lang, frame.desc, "xxx"), [frame.text])
             elif fid == "WOAR":
                 _add(out, "website", [frame.url])
             elif fid == "WCOP":
@@ -384,7 +415,7 @@ def read(path) -> dict[str, list[str]]:
             name = VORBIS_R.get(k, k)
             if name in ("totaltracks", "totaldiscs") and name in out:
                 continue                                    # TOTALTRACKS and TRACKTOTAL both present
-            if name in ("performer", "comment"):        # ("Joe Barr (Piano)", "EAC (ripper)": Picard)
+            if name == "performer" or (name == "comment" and not legacy):   # ("Joe Barr (Piano)", "EAC (ripper)")
                 for v in vals:
                     pk, pv = _split_performer(v, name)
                     _add(out, pk, [pv])
@@ -431,9 +462,9 @@ def read(path) -> dict[str, list[str]]:
                 n, t = _split_pair(vals[0])
                 _add(out, "tracknumber" if k == "track" else "discnumber", [n])
                 _add(out, "totaltracks" if k == "track" else "totaldiscs", [t])
-            elif k in ("performer", "comment"):
+            elif k == "performer" or (k == "comment" and not legacy):
                 for v in vals:
-                    pk, pv = _split_performer(v, k)
+                    pk, pv = _split_performer(v, k) if k == "performer" else _split_ape_comment(v)
                     _add(out, pk, [pv])
             else:
                 name = _APE_R.get(k, k)
@@ -652,6 +683,21 @@ def file_vars(path) -> dict:
     return out
 
 
+def canonical(path, k: str) -> str:
+    """A field's name as read() gives it back for this file ("comment:ripper" is an ID3
+    file's "comment::ripper", as Picard 3 names a described comment)."""
+    if not (k.startswith("comment:") or k.startswith("lyrics:")):
+        return k
+    try:
+        if family(open_file(path)) != "id3":
+            return k
+    except Unsupported:
+        return k
+    base = k.split(":", 1)[0]
+    dflt = "eng" if base == "comment" else "xxx"
+    return _comm_name(base, *_lang_desc(k, dflt), dflt)
+
+
 def stored(path, target: dict, fmt: dict | None = None) -> dict:
     """target as the file will hold it, and as read() will give it back: what an ID3v2.3 tag
     makes of it (several values joined with "/", the original date a year, a date without
@@ -671,11 +717,21 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(f.tags) == 3)
     except Unsupported:
         return out
+    if fam == "id3":                                 # (a COMM/USLT frame's name as Picard 3 reads it back)
+        for k in [k for k in out if (k.startswith("comment:") or k.startswith("lyrics:"))]:
+            base = k.split(":", 1)[0]
+            dflt = "eng" if base == "comment" else "xxx"
+            name = _comm_name(base, *_lang_desc(k, dflt), dflt)
+            if name != k:
+                v = out.pop(k)
+                if v is not None:
+                    out[name] = list(dict.fromkeys(list(out.get(name) or []) + list(v)))
     for base in ("performer", "comment"):
         if fam in ("vorbis", "apev2") and out.get(base):
             plain = []
             for v in out[base]:
-                k, name = _split_performer(str(v), base)
+                k, name = _split_ape_comment(str(v)) if (base, fam) == ("comment", "apev2") \
+                    else _split_performer(str(v), base)
                 if k == base:
                     plain.append(v)
                 else:
@@ -683,11 +739,16 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
             out[base] = plain
             if not plain:
                 del out[base]
-    if fam != "id3":                                 # (one lyrics field there: "lyrics:desc" goes into it)
+    if fam != "id3" and any(k.startswith("lyrics:") for k in out):
+        # (one lyrics field there: "lyrics:desc" goes into it, beside the lyrics the file has -
+        # as Picard writes the file's lyrics and the described ones together)
+        base = out["lyrics"] if "lyrics" in out else (read(path).get("lyrics") or [])
+        new = list(base or [])
         for k in [k for k in out if k.startswith("lyrics:")]:
-            v = out.pop(k)
-            if v:
-                out["lyrics"] = list(out.get("lyrics") or []) + list(v)
+            new += [x for x in (out.pop(k) or []) if x not in new]
+        if fam in ("mp4", "asf"):
+            new = new[-1:]                           # (one value there: Picard keeps the last)
+        out["lyrics"] = new
     if v23:
         for k, v in list(out.items()):
             if not isinstance(v, list) or not v:
@@ -754,9 +815,20 @@ def fragmented(path) -> bool:
     import tag_albums
     try:
         with open(path, "rb") as fh:                 # (by what it is, whatever its name: .m4a, .alac, .aac)
-            if fh.read(8)[4:8] != b"ftyp":
-                return False
-            return tag_albums._fragmented(fh)
+            import struct
+            pos = 0
+            for _ in range(4):                       # (free/skip/wide boxes may come before ftyp)
+                fh.seek(pos)
+                head = fh.read(8)
+                if len(head) < 8:
+                    return False
+                n, kind = struct.unpack(">I4s", head)
+                if kind == b"ftyp":
+                    return tag_albums._fragmented(fh)
+                if kind not in (b"free", b"skip", b"wide") or n < 8:
+                    return False
+                pos += n
+            return False
     except OSError:
         return False
 
@@ -894,16 +966,19 @@ def _set_id3(f, tags, k, vals):
         if vals:
             tags.add(UFID(owner=UFID_OWNER, data=vals[0].encode("ascii")))
         return
-    if is_comment(k):                               # (COMM with its description: Picard's comment:desc)
-        lang, desc = _lang_desc(k) if ":" in k else ("eng", "")
-        for key in [x for x in tags if x.startswith("COMM:") and tags[x].desc == desc]:
+    if is_comment(k) or k == "itunes_cddb_1":    # (COMM: Picard's comment, comment::desc, comment:deu ...)
+        lang, desc = ("eng", "iTunes_CDDB_1") if k == "itunes_cddb_1" else \
+            (_lang_desc(k) if ":" in k else ("eng", ""))
+        for key in [x for x in tags if x.startswith("COMM:") and tags[x].desc == desc and tags[x].lang == lang]:
             del tags[key]
-        if vals:
+        if vals and desc.lower()[:4] == "itun":      # (iTunes' own: Latin-1, NUL-ended, as Picard)
+            tags.add(COMM(encoding=0, lang="eng", desc=desc, text=[v + "\x00" for v in vals]))
+        elif vals:
             tags.add(COMM(encoding=3, lang=lang, desc=desc, text=vals))
         return
     if k == "lyrics" or k.startswith("lyrics:"):
         lang, desc = _lang_desc(k, "xxx") if ":" in k else ("xxx", "")
-        for key in [x for x in tags if x.startswith("USLT:") and tags[x].desc == desc]:
+        for key in [x for x in tags if x.startswith("USLT:") and tags[x].desc == desc and tags[x].lang == lang]:
             del tags[key]
         if vals:
             tags.add(USLT(encoding=3, lang=lang, desc=desc, text="\n".join(vals)))

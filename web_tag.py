@@ -892,7 +892,8 @@ def main(argv=None):
                 reason = ("not on MusicBrainz, Discogs, Deezer, iTunes or Bandcamp" if not best else
                           f"not on MusicBrainz or Discogs; {row['source'] or 'web'} near miss "
                           f"{row['page']}: {'; '.join(why)}")[:250]
-                files = [Path(t["path"]) for t in album["tracks"]]
+                import tagio
+                files = [Path(t["path"]) for t in album["tracks"] if not tagio.fragmented(t["path"])]
                 recs = [{"path": str(p), "new_path": str(p), "key": "", "backup": ta.backup_tags(p, blob_dir)}
                         for p in files]
                 journal.append({"album": str(base), "mbid": None, "files": recs, "extras": [], "moves": []})
@@ -911,6 +912,13 @@ def main(argv=None):
             whole = dec.summary() or next(iter(dec.excluded.values()))
             row["result"] = whole.reason()
             print(f"  ×   {base.parent.name} | {base.name}: {whole.reason()}")
+            report.append(row)
+            continue
+        import tagio
+        frag = [Path(t["path"]).name for t in album["tracks"] if tagio.fragmented(t["path"])]
+        if frag:                                         # (never written to: its audio would break)
+            row["result"] = f"{frag[0]} is a fragmented MP4: the album is left for you"
+            print(f"  ×   {base.parent.name} | {base.name}: {row['result']}")
             report.append(row)
             continue
         tags = tags_for(album, best["cand"], http, cache, source, token)

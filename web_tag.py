@@ -481,6 +481,70 @@ def discogs_matched(http, release_id):
     return [c]
 
 
+def pressing_matched(http, source, release_id):
+    """One release the matcher proved the album by (MusicBrainz or Discogs), as a source."""
+    if source == "discogs":
+        return discogs_matched(http, release_id)
+    rel = http.get_json(f"https://musicbrainz.org/ws/2/release/{release_id}"
+                        f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+    if not rel:
+        return []
+    c = ma.mb_candidate(rel)
+    counts = {}
+    for tr in c["tracks"]:
+        counts[tr["disc"]] = counts.get(tr["disc"], 0) + 1
+        tr["num"] = counts[tr["disc"]]
+    c.update(genre="", cover="", media="")
+    return [c]
+
+
+def album_only_source(http, album, cfg, ocr, matched):
+    """(source name, scored best, why) for an album the matcher is sure of when only its
+    pressing is not: the best of the tied pressings, its tracks one to one with the files.
+    Its pressing fields are dropped later (album_only_tags)."""
+    info = (matched or {}).get("album_only") or {}
+    best = (matched or {}).get("best") or {}
+    if not info.get("tied") or not best.get("id"):
+        return None, None, []
+    kinds = {k for t in info["tied"] for k in t.get("formats") or ()}
+    if info.get("source") and kinds and info["source"] not in kinds:
+        # none of them is what your copy is (a CD rip tied between vinyl pressings)
+        return None, None, [f"your copy is {info['source']}; the tied pressings are {', '.join(sorted(kinds))}"]
+    cands = pressing_matched(http, best.get("source"), best["id"])
+    if not cands or len(cands[0]["tracks"]) != len(album["tracks"]):
+        return None, None, ["the tied pressing's tracks do not line up with the files"]
+    s = mc.score_candidate(album, cands[0], cfg, ocr)
+    if not s.get("tracks_ok") or (s.get("dur_frac") or 0) < 1.0:
+        return None, s, ["the tied pressing's track lengths do not all agree with the files"]
+    return f"album only ({len(info['tied'])} pressings fit)", s, []
+
+
+_MEDIA = {"cd": "CD", "vinyl": "Vinyl", "cassette": "Cassette", "digital": "Digital Media"}
+
+
+def album_only_tags(tags, info):
+    """Each file's tags kept to what every tied pressing shares (mc.album_only_tags). The
+    media is the tied pressings' own when they agree, else what your copy is (its rip log
+    says CD), else left out; the date is the earliest pressing's when they differ."""
+    tied = info.get("tied") or []
+    kinds = {",".join(t.get("formats") or ()) for t in tied}
+    media = (_MEDIA.get(next(iter(kinds)), "") if len(kinds) == 1 else "") or _MEDIA.get(info.get("source") or "", "")
+    years = sorted(t["year"] for t in tied if t.get("year"))
+    reason = (f"pressing unknown: {len(tied)} pressings fit equally "
+              f"({', '.join(sorted({t.get('country') or '?' for t in tied}))}); "
+              "album tags only, no release IDs, catalogue number or barcode")
+    out = []
+    for t in tags:
+        t = dict(t, originaldate=str(years[0]) if years else "")
+        t = mc.album_only_tags(t, tied)
+        if years and len(set(years)) == 1:
+            t["date"] = str(years[0])               # the year they share, not one pressing's day
+        t.pop("originaldate", None)
+        t.update(tagmender="Resolved", tagmender_reason=reason, tagmender_source="", media=media)
+        out.append({k: v for k, v in t.items() if v not in ("", None, [])})
+    return out
+
+
 def find(http, album, cfg, ocr="", matched=None):
     """(source name, scored best) of the first source whose album passes the
     matcher's proof, else (None, best near miss or None)."""
@@ -686,7 +750,7 @@ def undo(out_dir, run_id):
     return ta.undo(out_dir, run_id)
 
 
-def unresolved(matches_db, only=None, include_review=False, include_discogs=True):
+def unresolved(matches_db, only=None, include_review=False, include_discogs=True, include_album_only=True):
     """Albums Picard cannot tag: no match, review (if asked), and confident
     matches found on Discogs only (MusicBrainz has no release for Picard to use)."""
     db = sqlite3.connect(Path(matches_db).expanduser())
@@ -697,7 +761,9 @@ def unresolved(matches_db, only=None, include_review=False, include_discogs=True
         discogs_only = (include_discogs and o.get("status") == "auto"
                         and (o.get("best") or {}).get("source") == "discogs"
                         and not (o.get("best") or {}).get("mb_id"))   # else Picard tags its MB twin
-        if ((o.get("status") in wanted or discogs_only) and Path(path).is_dir()
+        # the album is certain and only its pressing is not: album tags, no release IDs
+        album_only = include_album_only and o.get("status") != "auto" and bool(o.get("album_only"))
+        if ((o.get("status") in wanted or discogs_only or album_only) and Path(path).is_dir()
                 and (not only or only.casefold() in path.casefold())):
             out.append(o)
     return out
@@ -760,7 +826,10 @@ def main(argv=None):
                               exclude=pre.excluded, blind=chosen)
         if not album["tracks"]:
             continue
-        source, best, why = find(http, album, cfg, cached_ocr(db, base), o)
+        if o.get("album_only") and o.get("status") != "auto":
+            source, best, why = album_only_source(http, album, cfg, cached_ocr(db, base), o)
+        else:
+            source, best, why = find(http, album, cfg, cached_ocr(db, base), o)
         row = {"album": o["path"], "source": source or "", "page": (best or {}).get("cand", {}).get("url", ""),
                "matched": f"{best['cand']['artist']} - {best['cand']['title']} ({best['cand']['year']})" if best else "",
                "confidence": best["confidence"] if best else "", "result": ""}
@@ -793,7 +862,11 @@ def main(argv=None):
             report.append(row)
             continue
         tags = tags_for(album, best["cand"], http, cache, source, token)
-        dest = target_folder(base, best["cand"], args.library) if not args.keep_folders else base
+        album_only = source.startswith("album only")
+        if album_only:
+            tags = album_only_tags(tags, o["album_only"])
+        # an album-only album stays where it is: its folder year is not a pressing's
+        dest = target_folder(base, best["cand"], args.library) if not (args.keep_folders or album_only) else base
         row["result"] = "would tag" if not args.apply else "tagged"
         if dest != base:
             row["result"] += f", move to {dest}"

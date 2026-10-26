@@ -1801,8 +1801,11 @@ def album_only(final, cfg, source=""):
     # shared fields are written: a CD rip is tagged from the CDs only, so its media is "CD"
     if source:
         same_kind = [s for s in tied if source in (s["cand"].get("formats") or ())]
-        if same_kind:
-            tied = same_kind
+        if not same_kind and any(s["cand"].get("formats") for s in tied):
+            # none of them is what your copy is (a CD rip among vinyl pressings: Between The
+            # Buried And Me - Automata I & II): their shared tags would name the wrong media
+            return None
+        tied = same_kind or tied
     return {"source": source, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
                       "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
                       "year": s["cand"].get("year")} for s in tied]}

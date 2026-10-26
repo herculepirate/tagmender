@@ -26,7 +26,8 @@ from collections import Counter
 from pathlib import Path
 
 AUDIT_LABELS = [("tagged_both", "MusicBrainz + Discogs"), ("musicbrainz_only", "MusicBrainz only"),
-                ("discogs_only", "Discogs only"), ("partial", "Partly tagged"), ("untagged", "Untagged")]
+                ("discogs_only", "Discogs only"), ("partial", "Partly tagged"),
+                ("album_only", "Album tags (pressing unknown)"), ("untagged", "Untagged")]
 
 
 def reason_group(why):

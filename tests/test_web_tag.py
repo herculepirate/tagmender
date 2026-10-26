@@ -317,6 +317,72 @@ class WebTag(Base):
         self.run_main(web, "--apply", "--keep-folders")
         self.assertNotIn("DISCOGS_RELEASE_ID", mutagen.File(self.album / "01.flac"))
 
+    def test_a_certain_album_of_unknown_pressing_gets_album_tags_only(self):
+        """Ne Obliviscaris - Portal Of I, Cynic, Nile, Slayer...: the album is proven (title,
+        artist, every track length) but two pressings fit equally. It was left untagged; now
+        it gets what every pressing shares, never a release ID, catalogue number or barcode,
+        stays in its folder, and the audit no longer lists it as untagged."""
+        rel = {"id": "m1", "title": "The Exuviae of Gods, Pt. 2", "date": "2018-03-02", "country": "US",
+               "barcode": "0790168000123", "packaging": "Jewel Case",
+               "label-info": [{"catalog-number": "SPIN200", "label": {"name": "20 Buck Spin"}}],
+               "artist-credit": [{"name": "Mournful Congregation", "joinphrase": "",
+                                  "artist": {"id": "mc-id", "name": "Mournful Congregation",
+                                             "sort-name": "Mournful Congregation"}}],
+               "media": [{"format": "CD", "tracks": [{"title": f"Part {i + 1}", "length": s * 1000, "recording": {}}
+                                                     for i, s in enumerate(LENS)]}]}
+
+        class M(FakeWeb):
+            def get_json(self, url, host):
+                if "/ws/2/release/m1" in url:
+                    return rel
+                return super().get_json(url, host)
+        tied = [{"source": "mb", "id": "m1", "label": "20 Buck Spin", "country": "US", "formats": ["cd"], "year": 2018},
+                {"source": "mb", "id": "m2", "label": "20 Buck Spin", "country": "DE", "formats": ["cd"], "year": 2017}]
+        db = sqlite3.connect(self.db)
+        db.execute("UPDATE results SET result=?", (json.dumps({
+            "path": str(self.album), "status": "review", "artist_folder": "Mournful Congregation",
+            "album_folder": self.album.name, "best": {"source": "mb", "id": "m1", "mb_id": "m1"},
+            "why": ["runner-up m2 within 0.0 points (likely another pressing)"],
+            "album_only": {"source": "cd", "tied": tied}}),))
+        db.commit()
+        self.run_main(M(), "--apply")
+        self.assertTrue(self.album.is_dir())                       # not moved: its year is no pressing's
+        f = mutagen.File(self.album / "01.flac")
+        self.assertEqual((f["ALBUM"], f["TITLE"], f["LABEL"], f["MEDIA"], f["DATE"], f["TAGMENDER"]),
+                         (["The Exuviae of Gods, Pt. 2"], ["Part 1"], ["20 Buck Spin"], ["CD"], ["2017"],
+                          ["Resolved"]))
+        self.assertTrue(f["TAGMENDER_REASON"][0].startswith("pressing unknown: 2 pressings fit equally"))
+        for k in ("MUSICBRAINZ_ALBUMID", "BARCODE", "CATALOGNUMBER", "DISCOGS_RELEASE_ID",
+                  "RELEASECOUNTRY", "TAGMENDER_SOURCE"):
+            self.assertNotIn(k, f, k)
+        m = mutagen.File(self.album / "02.mp3")
+        self.assertNotIn("TXXX:BARCODE", m.tags)
+        self.assertEqual(str(m.tags["TALB"]), "The Exuviae of Gods, Pt. 2")
+        import audit_untagged
+        import io
+        self.assertEqual(audit_untagged.audit_album(self.album, io.StringIO())["Status"], "album_only")
+
+    def test_album_only_never_names_media_the_copy_is_not(self):
+        """Between The Buried And Me - Automata I & II: a CD rip tied between vinyl pressings
+        only: their shared tags would say Vinyl, so it is left for a person."""
+        sys.path.insert(0, str(HERE))
+        import match_core as mc
+        from tests.test_match import album, cand, CFG
+        a = album()
+        tied = [mc.score_candidate(a, cand(id="v1", country="US", formats={"vinyl"}), CFG),
+                mc.score_candidate(a, cand(id="v2", country="US", formats={"vinyl"}), CFG)]
+        r = dict(mc.classify(tied, CFG), scored=tied)
+        self.assertIsNone(mc.album_only(r, CFG, "cd"))
+        self.assertIsNotNone(mc.album_only(r, CFG, "vinyl"))
+        self.assertIsNotNone(mc.album_only(r, CFG, ""))
+        # an older matcher result that still says so is not tagged either
+        info = {"source": "cd", "tied": [{"source": "discogs", "id": "1", "formats": ["vinyl"]},
+                                         {"source": "discogs", "id": "2", "formats": ["vinyl"]}]}
+        src, _best, why = wt.album_only_source(None, {"tracks": []}, CFG, "", {"album_only": info,
+                                                                              "best": {"source": "discogs", "id": "1"}})
+        self.assertIsNone(src)
+        self.assertIn("vinyl", why[0])
+
     def test_discogs_only_match_is_tagged_from_its_release(self):
         sys.path.insert(0, _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
                         or str(HERE / "herculepirate" / "picard-discogs-enrichment"))

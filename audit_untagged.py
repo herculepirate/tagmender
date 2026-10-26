@@ -19,6 +19,7 @@ Status values:
   musicbrainz_only / discogs_only
   partial         some files tagged, some not (or IDs differ between files)
   untagged        no file has either ID  <- the candidates for matching
+  album_only      no IDs on purpose: the album is certain, its pressing is not (web_tag)
   iso_only        no taggable audio, only .iso (SACD) images
   no_audio        folder has no audio at all
 """
@@ -45,6 +46,8 @@ DEFAULT_SKIP = ("various artists", "various", "va", "v.a.", "v/a")
 
 MB_KEY = "musicbrainzalbumid"
 DG_KEY = "discogsreleaseid"
+REASON_KEY = "tagmenderreason"
+ALBUM_ONLY_REASON = "pressing unknown"        # web_tag's album-only tags (no release IDs)
 
 # Image file names worth OCR/barcode inspection later.
 BACK_HINT = re.compile(r"back|rear|tray|inlay|disc|cd\d?|label|barcode|booklet|insert|inside", re.I)
@@ -73,7 +76,7 @@ def first_text(value):
 def read_tags(path):
     """Return (dict of wanted tags, length_seconds). Wanted keys:
     mb, dg, artist, album, date, disc."""
-    out = {"mb": "", "dg": "", "artist": "", "album": "", "date": "", "disc": ""}
+    out = {"mb": "", "dg": "", "artist": "", "album": "", "date": "", "disc": "", "reason": ""}
     length = 0.0
     ext = path.suffix.lower()
     try:
@@ -86,6 +89,8 @@ def read_tags(path):
                     out["mb"] = first_text(v)
                 elif nk == DG_KEY:
                     out["dg"] = first_text(v)
+                elif nk == REASON_KEY:
+                    out["reason"] = first_text(v)
                 elif k == "\xa9alb":
                     out["album"] = first_text(v)
                 elif k == "aART":
@@ -113,6 +118,8 @@ def read_tags(path):
                     out["mb"] = first_text(frame.text)
                 elif nk == DG_KEY:
                     out["dg"] = first_text(frame.text)
+                elif nk == REASON_KEY:
+                    out["reason"] = first_text(frame.text)
             for fid, field in (("TALB", "album"), ("TPE2", "artist"),
                                ("TDRC", "date"), ("TPOS", "disc")):
                 fr = tags.getall(fid)
@@ -131,6 +138,7 @@ def read_tags(path):
             lowered.setdefault(norm_key(str(k)), v)
         out["mb"] = first_text(lowered.get(MB_KEY, ""))
         out["dg"] = first_text(lowered.get(DG_KEY, ""))
+        out["reason"] = first_text(lowered.get(REASON_KEY, ""))
         out["album"] = first_text(lowered.get("album", ""))
         out["artist"] = first_text(lowered.get("albumartist", "")
                                    or lowered.get("artist", ""))
@@ -193,6 +201,7 @@ def audit_album(album_dir, log):
     discs = set()
     fmts = Counter()
     errors = 0
+    album_only = 0
     for p in audio:
         t, length = read_tags(p)
         fmts[p.suffix.lower().lstrip(".")] += 1
@@ -203,6 +212,8 @@ def audit_album(album_dir, log):
         if t["mb"]:
             mb_n += 1
             mb_ids[t["mb"]] += 1
+        if str(t.get("reason") or "").startswith(ALBUM_ONLY_REASON):
+            album_only += 1
         if t["dg"]:
             dg_n += 1
             dg_ids[t["dg"]] += 1
@@ -218,7 +229,9 @@ def audit_album(album_dir, log):
         has_mb, has_dg = mb_n > 0, dg_n > 0
         consistent = len(mb_ids) <= 1 and len(dg_ids) <= 1
         full_mb, full_dg = mb_n == n, dg_n == n
-        if not has_mb and not has_dg:
+        if not has_mb and not has_dg and album_only == n:
+            status = "album_only"      # tagged from what every pressing shares; the pressing is unknown
+        elif not has_mb and not has_dg:
             status = "untagged"
         elif not consistent:
             status = "partial"

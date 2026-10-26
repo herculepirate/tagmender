@@ -120,6 +120,12 @@ def check_web_plan(report_csv: Path, wanted: dict) -> tuple[list, list]:
     return found, problems
 
 
+def album_only_rows(report_csv: Path) -> list:
+    """The albums web_tag tags from what every tied pressing shares (pressing unknown)."""
+    with open(report_csv, newline="", encoding="utf-8") as fh:
+        return [r["album"] for r in csv.DictReader(fh) if r["source"].startswith("album only")]
+
+
 def results_of(out: str) -> tuple[Path | None, dict]:
     """The run's results.csv and {album: state} from tag_albums' output."""
     m = re.search(r"^Results: (.+results\.csv)$", out, re.M)
@@ -179,6 +185,12 @@ def main(argv=None):
         if problems:
             raise Stop("the Discogs-only albums would not be tagged from Discogs:\n  " + "\n  ".join(problems))
         r.say(f"3. Discogs-only albums checked: {len(found)} album(s), each from its Discogs release")
+        album_only = album_only_rows(Path(m.group(1))) if args.new else []
+        if album_only:
+            r.say(f"   album tags only (the album is certain, its pressing is not; no release IDs): "
+                  f"{len(album_only)} album(s)")
+            for a in album_only:
+                r.log.write(f"album only: {a}\n")
 
         if not args.apply:
             r.say("Checks passed. Nothing was changed. Run again with --apply to tag.")
@@ -199,10 +211,10 @@ def main(argv=None):
             for a, s in sorted(states.items()):
                 if not s.startswith("tagged"):
                     r.say(f"     NOT DONE ({s}): {a}")
-        if found:
+        if found or album_only:
             out = r.run("web_tag.py", "--matches-db", fixes, "--library", lib, "--apply", check=False)
             m = re.search(r"(\d+) of (\d+) found on the web", out)
-            r.say(f"5. Discogs-only: {m.group(1) if m else '?'} of {m.group(2) if m else '?'} tagged from Discogs")
+            r.say(f"5. Discogs-only and album-only: {m.group(1) if m else '?'} of {m.group(2) if m else '?'} tagged")
         r.say("Done.")
         return 0
     except Stop as exc:

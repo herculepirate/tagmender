@@ -402,23 +402,24 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 q = q.parent
     by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
     ours = {s_.parent for s_ in moved}
-    # an artist folder holding the artist's other albums, with this album's tracks loose in it:
-    #  - a loose single (one track) beside folders that are neither its discs nor its bonus:
-    #    the folder's own files are no one album's (they all stay);
-    #  - an album ripped flat, in a folder named after its artist (not a self-titled album's
-    #    own folder, "Band/Band/"): its files go with it, but the artist photo and the
-    #    folder's own art (fanart, logo ...) stay.
+    # an artist folder (one holding the artist's other albums below it, or named after the album
+    # artist - not a self-titled album's own folder, "Band/Band/") with this album's tracks in it:
+    #  - its own art (artist.jpg, fanart, logo, backdrops, extrafanart/ ...) and the artist's
+    #    photo never go with an album;
+    #  - a loose single (one track) beside the artist's albums takes nothing of the folder's
+    #    own (only its own .lrc and the like): one album folder beside it is not enough to
+    #    tell an artist folder from a release with, say, its remixes in a folder below.
     import artwork as _artwork
     compat_ = (profile.get("filenames") or {}).get("compat", "windows")
     discs_here = any(q.parent == src_dir and _DISC_NAME.match(q.name) for q in ours)
     loose = [s_ for s_ in moved if s_.parent == src_dir]
-    src_shared = len(loose) == 1 and not discs_here and any(
-        f_ != src_dir and not _DISC_NAME.match(f_.relative_to(src_dir).parts[0])
-        and not _artwork._BONUS.match(f_.relative_to(src_dir).parts[0])
-        for f_ in foreign if src_dir in f_.parents)
-    artist_folder = src_shared or (bool(foreign) and _artwork.named_after(src_dir, artist, compat_)
-                                   and not _artwork.named_after(src_dir.parent, artist, compat_))
+    others = {f_.relative_to(src_dir).parts[0] for f_ in foreign if src_dir in f_.parents}
+    others = {x for x in others if not _DISC_NAME.match(x) and not _artwork._BONUS.match(x)}
+    named = _artwork.named_after(src_dir, artist, compat_) and not _artwork.named_after(src_dir.parent, artist, compat_)
+    artist_folder = bool(others) or named
+    src_shared = bool(others) and len(loose) == 1 and not discs_here and (named or len(others) >= 2)
     keep = _artwork.artist_folder_keeps(src_dir, single=loose if single else ()) if artist_folder else set()
+
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus
         album), only the folders holding this album's own music, and what is inside them,
@@ -432,6 +433,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             q = q.parent
     out = []
     for d, here in tree:
+        if artist_folder and d != src_dir and d.relative_to(src_dir).parts[0].lower() in _artwork.ARTIST_ART_DIRS:
+            continue                                        # the artist's extrafanart/ ...
         anchor = d
         while anchor not in dmap:
             anchor = anchor.parent
@@ -935,8 +938,8 @@ class Planner:
             # the artist folder (where the album is, or goes) has its photo - the user's own, or
             # one corrected by hand: that one goes into the tracks, never a second one
             try:
-                data = there.read_bytes()
-                image = str(_artwork._stage(data, staging)[0])
+                image = str(_artwork._stage(there.read_bytes(), staging)[0])
+                data = Path(image).read_bytes()          # (as staged: a PNG made JPEG, the same every run)
                 source = f"the artist folder's {there.name}"
             except Exception:
                 return None
@@ -950,6 +953,7 @@ class Planner:
                 return None
         if dkey is not None:
             claims.setdefault(dkey, (image, source, data))
+        authoritative = there is not None or bool(ap.get("own"))
         # the photo's identity - of the artist folder's file, as it is or will be - goes into the
         # description of the picture embedded: a corrected artist.jpg replaces it on a later run
         ident = _artwork.photo_identity(data)
@@ -965,7 +969,10 @@ class Planner:
                 if not (fe["dst"] in fronts or _artwork.has_front(fe["src"])):
                     continue
                 marks = _artwork.our_artist_marks(fe["src"])
-                if marks and any(m != ident for m in marks):
+                types8 = [t for t, _d in _artwork._pictures(fe["src"])].count(8)
+                # replaced only from the artist folder's own photo (the user's word: never by a
+                # download), and only where every artist picture in the track is TagMender's
+                if authoritative and marks and len(marks) == types8 and any(m != ident for m in marks):
                     into.append(fe["dst"])                 # TagMender's own, from another photo
                     replace.append(fe["dst"])
                 elif not _artwork.has_artist_picture(fe["src"]):
@@ -977,7 +984,8 @@ class Planner:
             emb = str(_artwork.embed_copy(Path(image), staging, _artwork.ARTIST_EMBED_MAX_SIDE))
         except Exception:
             emb, into = None, []
-        if want["file"] and artist_dir is not None and there is None:
+        if want["file"] and artist_dir is not None and there is None and \
+                not os.path.lexists(artist_dir / want["file"]):
             target = artist_dir / want["file"]
             key = fnm.fold(target)
             if self.claimed.get(key) is None and not any(sc["dst"] == str(target) for sc in entry["sidecars"]):

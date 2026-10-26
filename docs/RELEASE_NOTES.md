@@ -27,6 +27,18 @@ in ID3, MP4 and APEv2, and the WMA fields Picard knows. WMA files are no longer 
 every run for a track total they cannot hold, and an M4A with a compilation flag no longer
 fails to read.
 
+**Artist folders (twelfth review).** The artist's own art stays in the artist folder whatever
+it is called: artist.jpg, fanart, fanart1, backdrop2, logo, banner ... and extrafanart/; a
+folder.jpg beside an album's own cover.jpg is the artist's. A disc set ripped into the artist
+folder (CD1, CD2) counts as an album there: its folder.jpg is its cover, never the artist photo.
+A single in a folder with only one album below it (a release with its remixes) takes its cover
+and log with it. An artist.jpg that is a symbolic link is the artist's photo (never written
+over: the album was failing). The artist folder's own photo is used without a download wherever
+the album is - flat in the artist folder, or being moved out of it (a moved album takes it
+along) - and the tracks' picture follows a corrected one also with "embed only"; a picture of
+the user's own beside TagMender's is never touched, and a download never replaces a picture
+made from the user's photo.
+
 **Desktop app**: the results of background work (preview, apply, watched folders ...) are now
 handled on the window's own thread; before, they ran on the worker's thread, which could leave
 the window showing stale numbers or crash it.

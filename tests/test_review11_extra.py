@@ -129,7 +129,7 @@ class CacheRules(unittest.TestCase):
         self.assertEqual(artwork.cached_artist_photo("dir:/x/Artist"), (False, None))
         artwork.remember_artist_photo(ARTIST_MBID, {"image": str(src), "source": "s"}, "Artist")
         self.assertTrue(artwork.cached_artist_photo(ARTIST_MBID)[1])
-        self.assertEqual(artwork.forget_artist_photos(""), 2)
+        self.assertEqual(artwork.forget_artist_photos(""), 1)     # (the name-found one was never kept)
         self.assertEqual(list(artwork._photo_cache_dir().iterdir()), [])
 
 

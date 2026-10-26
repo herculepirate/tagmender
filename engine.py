@@ -536,35 +536,35 @@ class Engine:
         # move profile already filed (a library organised into itself)
         stays = op == "in_place" or str(folder) != str(prop.source_dir) or \
             (op == "move" and bool(dest) and real_src.startswith(os.path.realpath(os.path.expanduser(dest)) + os.sep))
-        if want["file"] and stays:
-            roots = [s_["path"] for s_ in self.profile["sources"]] + \
-                ([self.profile["destination"]] if self.profile["destination"] else [])
-            artist_dir = artwork.artist_dir_for(folder, who, roots, self.profile["filenames"]["compat"])
-            if artist_dir is not None and not artwork.artist_folder_has_photo(artist_dir):
-                lacking = True
-            elif artist_dir is not None and want["embed"] and not lacking:
-                # the artist folder's photo was changed (a wrong one corrected): the picture
-                # TagMender embedded from the old one is replaced
-                try:
-                    ident = artwork.photo_identity(artwork.artist_folder_photo(artist_dir).read_bytes())
-                except Exception:
-                    ident = None
-                lacking = ident is not None and any(m != ident for f in files
-                                                    for m in artwork.our_artist_marks(f))
-        elif want["file"]:
-            lacking = True                # (moved or copied: where it lands is the plan's; cached below)
+        roots = [s_["path"] for s_ in self.profile["sources"]] + \
+            ([self.profile["destination"]] if self.profile["destination"] else [])
+        compat = self.profile["filenames"]["compat"]
+        if stays:
+            artist_dir = artwork.artist_dir_for(folder, who, roots, compat)
+        # the artist folder the album is in now: where it stays, or where a move takes it from
+        home = artist_dir if artist_dir is not None else \
+            artwork.artist_dir_for(Path(prop.source_dir), who, roots, compat)
+        photo = artwork.artist_folder_photo(home) if home is not None else None
+        if photo is not None:
+            # the artist folder's own photo (the user's, or one corrected by hand) is the artist's
+            # photo: no download; the tracks' picture follows it (TagMender's own, from an older
+            # photo, is replaced), and a moved album takes it along
+            try:
+                path, w, h = artwork._stage(photo.read_bytes(), ex.STATE_DIR / "staging" / self.job)
+                ident = artwork.photo_identity(Path(path).read_bytes())
+            except Exception:
+                return
+            stale = want["embed"] and any(m != ident for f in files for m in artwork.our_artist_marks(f))
+            if lacking or stale or not stays:
+                prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who, "own": True,
+                                     "source": f"the artist folder's {photo.name}"}
+            return
+        if want["file"] and (artist_dir is not None or not stays):
+            lacking = True                # (an artist folder that can take a photo; or moved or copied:
+            #                               where it lands is the plan's, looked up and kept below)
         if not lacking:
             return
-        # the artist folder's own photo (artist.jpg, folder.jpg) is the artist's photo: no download
-        if artist_dir is not None and artwork.artist_folder_has_photo(artist_dir):
-            mine = artwork.artist_folder_photo(artist_dir)
-            try:
-                path, w, h = artwork._stage(mine.read_bytes(), ex.STATE_DIR / "staging" / self.job)
-                prop.artist_photo = {"image": str(path), "width": w, "height": h, "artist": who,
-                                     "source": f"the artist folder's {mine.name}"}
-            except Exception:
-                pass
-            return
+        artist_dir = home
         mbid = mbids.split(";")[0].strip()
         # kept across runs by MusicBrainz artist ID; without one, by the artist's folder (two
         # artists may share a name, never a folder) - or for this run only, by name

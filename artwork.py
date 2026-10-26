@@ -546,9 +546,13 @@ def has_front(path) -> bool:
 
 
 ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album folders) both are its photo
-# the artist folder's own art for Kodi, Jellyfin, Plex: never any one album's
-ARTIST_FOLDER_ART = ("artist", "fanart", "logo", "clearlogo", "banner", "clearart", "landscape", "backdrop")
+# the artist folder's own art for Kodi, Jellyfin, Plex - never any one album's: artist.jpg,
+# fanart.jpg, fanart1.jpg, backdrop2.jpg, logo.png ..., and the extrafanart folders
+ARTIST_ART = re.compile(r"^(?:artist|fanart|logo|clearlogo|banner|clearart|landscape|backdrop)(?:[-_ ]?\d+)?$",
+                        re.IGNORECASE)
+ARTIST_ART_DIRS = ("extrafanart", "extrathumbs", "backdrops")
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+ALBUM_COVER_STEMS = ("cover", "front")    # an album's own cover beside a folder.jpg: folder.jpg is the artist's
 ARTIST_MARK = "TagMender artist photo "     # + the photo's identity: TagMender's own embedded artist picture
 
 
@@ -593,7 +597,7 @@ def our_artist_marks(path) -> list:
 
 def artist_folder_keeps(folder, single=()) -> set:
     """The files of an artist folder that stay when an album moves out of it: its photo and
-    its own art (fanart, logo, banner ...)."""
+    its own art (fanart, logo, banner, backdrop2 ...)."""
     keep = set()
     try:
         names = os.listdir(folder)
@@ -601,7 +605,7 @@ def artist_folder_keeps(folder, single=()) -> set:
         return keep
     for n in names:
         st, ext = os.path.splitext(n)
-        if st.lower() in ARTIST_FOLDER_ART and ext.lower() in IMAGE_EXT:
+        if ARTIST_ART.match(st) and ext.lower() in IMAGE_EXT:
             keep.add(Path(folder) / n)
     ph = artist_folder_photo(folder, single)
     if ph is not None:
@@ -609,16 +613,29 @@ def artist_folder_keeps(folder, single=()) -> set:
     return keep
 
 
-def _flat_album_here(folder: Path, names, single=()) -> bool:
-    """An album lies ripped flat in folder (the artist folder): two or more loose tracks
-    tagged as one album, or three or more loose untagged tracks. A folder.jpg there is that
-    album's cover. One or two untagged loose tracks (a single, an A- and B-side) are no
-    album. single: the files of a single being planned now, left out of the count."""
-    skip = {os.path.basename(str(x)) for x in single}
+def album_here(folder: Path, names=None, single=()) -> bool:
+    """An album lies in folder itself (the artist folder): two or more loose tracks tagged
+    as one album, three or more loose untagged tracks, or disc folders (CD1, CD2) right
+    below it. A folder.jpg there is that album's cover. One or two untagged loose tracks (a
+    single, an A- and B-side) are no album. single: the files of a single being planned now,
+    left out of the count."""
+    from engine import is_disc_dir
+    folder = Path(folder)
+    if names is None:
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            return False
+    skip = {os.path.realpath(str(x)) for x in single}
     albums, untagged = {}, 0
     for n in names:
-        if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith(".") and n not in skip:
-            t = _album_id(Path(folder) / n)[0]
+        if n.startswith("."):
+            continue
+        p = folder / n
+        if os.path.realpath(str(p)) in skip:
+            continue
+        if Path(n).suffix.lower() in ex.AUDIO_EXT:
+            t = _album_id(p)[0]
             if t:
                 albums[t] = albums.get(t, 0) + 1
                 if albums[t] >= 2:
@@ -627,13 +644,20 @@ def _flat_album_here(folder: Path, names, single=()) -> bool:
                 untagged += 1
                 if untagged >= 3:
                     return True
+        elif is_disc_dir(p) and p.is_dir() and not p.is_symlink():
+            try:
+                if any(Path(m).suffix.lower() in ex.AUDIO_EXT and os.path.realpath(str(p / m)) not in skip
+                       for m in os.listdir(p)):
+                    return True
+            except OSError:
+                continue
     return False
 
 
 def artist_folder_photo(folder, single=()) -> Path | None:
     """The artist folder's own photo: artist.jpg, or folder.jpg (Kodi, Jellyfin) - unless
-    an album lies ripped flat in the folder (then folder.jpg is its cover). single: see
-    _flat_album_here."""
+    an album lies in the folder itself with no cover.jpg or front.jpg of its own (then
+    folder.jpg is its cover). A symbolic link to a photo counts. single: see album_here."""
     try:
         names = sorted(os.listdir(folder))
     except OSError:
@@ -641,15 +665,44 @@ def artist_folder_photo(folder, single=()) -> Path | None:
     pics = {}
     for n in names:                                     # (names first: one stat per candidate only)
         st, ext = os.path.splitext(n)
-        if st.lower() in ARTIST_STEMS and ext.lower() in (".jpg", ".jpeg", ".png"):
+        if st.lower() in ARTIST_STEMS + ALBUM_COVER_STEMS and ext.lower() in (".jpg", ".jpeg", ".png"):
             pics.setdefault(st.lower(), n)
-    stems = ("artist",) if "folder" in pics and _flat_album_here(Path(folder), names, single) else ARTIST_STEMS
+    stems = ARTIST_STEMS
+    if "folder" in pics and not any(c in pics for c in ALBUM_COVER_STEMS) and album_here(Path(folder), names, single):
+        stems = ("artist",)
     for stem in stems:
         if stem in pics:
             x = Path(folder) / pics[stem]
-            if x.is_file() and not x.is_symlink():
+            if x.is_file():
                 return x
     return None
+
+
+def holds_other_albums(folder) -> bool:
+    """A folder below folder (not one of its disc folders) holds music: folder is an artist
+    folder holding albums."""
+    from engine import is_disc_dir
+    try:
+        subs = [Path(folder) / n for n in os.listdir(folder) if not n.startswith(".")]
+    except OSError:
+        return False
+    for d in subs:
+        if is_disc_dir(d) or _BONUS.match(d.name) or d.is_symlink() or not d.is_dir():
+            continue
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        if any(Path(n).suffix.lower() in ex.AUDIO_EXT for n in names):
+            return True
+        for n in names:
+            if is_disc_dir(d / n):
+                try:
+                    if any(Path(m).suffix.lower() in ex.AUDIO_EXT for m in os.listdir(d / n)):
+                        return True
+                except OSError:
+                    continue
+    return False
 
 
 def named_after(folder, artist: str, compat="windows") -> bool:
@@ -668,15 +721,18 @@ def artist_folder_has_photo(folder) -> bool:
 
 
 def artist_dir_for(album_folder, artist: str, roots, compat="windows") -> Path | None:
-    """Where the album artist's photo goes: the album folder's parent, when it lies strictly
-    inside one of roots (never a root itself) and is named after the album artist ("The
-    Beatles" or "Beatles, The"); else None."""
+    """Where the album artist's photo goes: the album folder's parent - or the album folder
+    itself when the album lies ripped flat in its artist folder, beside the artist's other
+    albums - when it lies strictly inside one of roots (never a root itself) and is named
+    after the album artist ("The Beatles" or "Beatles, The"); else None."""
     from engine import is_disc_dir
     import filenames as fnm
     album = Path(album_folder)
     if is_disc_dir(album):
         album = album.parent
     d = album.parent
+    if named_after(album, artist, compat) and not named_after(d, artist, compat) and holds_other_albums(album):
+        d = album                         # an album ripped flat into its artist folder
     rs = [Path(os.path.realpath(os.path.expanduser(str(r)))) for r in roots]
     real = Path(os.path.realpath(str(d)))
     if not any(r in real.parents for r in rs) or real in rs:
@@ -778,7 +834,8 @@ def forget_artist_photos(match: str = "") -> int:
         except OSError:
             continue
     if not match:                         # (entries an older TagMender kept have no .key)
-        hashes = {f.name.split(".")[0] for f in d.iterdir() if not f.name.startswith(".")}
+        hashes = {f.name.split(".")[0] for f in d.iterdir() if not f.name.startswith(".")
+                  and f.suffix in (".jpg", ".none")}          # (what `artist-photos` lists)
         for f in d.iterdir():
             try:
                 f.unlink()

@@ -21,7 +21,13 @@ is that album's cover, not the artist's photo; a self-titled album ("Metallica/M
 is never taken for the artist folder; an album holding another album ("Live 1995") or a disc
 set holding a bonus album takes its cover and log along; a failed download is asked again,
 only "none found" waits 30 days; artists without a MusicBrainz ID are remembered by their
-folder, and a library a move profile already filed is not looked up again.
+folder, and a library a move profile already filed is not looked up again. Tenth review
+(tests/test_review10_*.py): an artist folder holding the artist's albums keeps its photo when a
+loose release (a 7" single, a flat EP) moves out; the artist folder's photo - also the one a
+move or copy files into - is the one embedded, never a second downloaded one; folder.jpg beside
+a single loose track is still the artist's; photos are kept between runs only by MusicBrainz
+ID and refreshed after 180 days, "none found" after 7; `tagmender artist-photos` lists them and
+`--forget` drops a wrong one.
 
 **Small covers are replaced** (artwork.replace "larger_only", the default; "Replace an album's
 own cover when it is smaller than the minimum size" in the app). A cover smaller than

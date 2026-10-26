@@ -779,6 +779,24 @@ def _watch_manage(args):
     return None
 
 
+def cmd_artist_photos(args):
+    """The artist photos kept between runs (so an artist is looked up once): list or forget them
+    - after a wrong match, forget it, delete the artist.jpg and run again."""
+    import artwork
+    d = artwork._photo_cache_dir()
+    if args.forget is not None:
+        n = artwork.forget_artist_photos(args.forget)
+        print(f"forgot {n} artist photo(s)" + (f" matching {args.forget!r}" if args.forget else ""))
+        return EXIT_OK
+    for k in sorted(d.glob("*.key")) if d.is_dir() else []:
+        h = k.stem
+        state = "photo" if (d / f"{h}.jpg").exists() else "none found" if (d / f"{h}.none").exists() else "-"
+        src = (d / f"{h}.src").read_text().strip() if (d / f"{h}.src").exists() else ""
+        key, _t, name = k.read_text().partition("\t")
+        print(f"{state:<11} {name or '?'}  ({key})  {src}")
+    return EXIT_OK
+
+
 def cmd_watch(args):
     import watcher
     done = _watch_manage(args)
@@ -884,6 +902,9 @@ def work_parsers(sub):
             a.add_argument("--yes", "-y", action="store_true")
             a.add_argument("--json", action="store_true")
             a.add_argument("-o", "--output", metavar="PLAN")
+    a = sub.add_parser("artist-photos", help="artist photos kept between runs: list, or --forget [ID or folder]")
+    a.add_argument("--forget", nargs="?", const="", metavar="MATCH",
+                   help="forget all, or those whose MusicBrainz artist ID or folder contains MATCH")
     a = sub.add_parser("watch", help="keep watched folders processed (foreground; see contrib/ for a service)")
     a.add_argument("--once", action="store_true", help="one pass, then exit")
     a.add_argument("--nice", action="store_true", help="lowest CPU and I/O priority")
@@ -907,6 +928,7 @@ def work_parsers(sub):
 
 WORK = {"scan": cmd_scan, "plan": cmd_plan, "apply": cmd_apply, "run": cmd_run, "jobs": cmd_jobs, "undo": cmd_undo,
         "recover": cmd_recover, "unresolved": cmd_unresolved, "retry": cmd_retry, "watch": cmd_watch,
+        "artist-photos": cmd_artist_photos,
         "formats": cmd_formats, "gui": cmd_gui}
 
 

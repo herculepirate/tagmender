@@ -548,21 +548,51 @@ def has_front(path) -> bool:
 ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album folders) both are its photo
 
 
+def _flat_album_here(folder: Path, names) -> bool:
+    """Two or more tracks of one album lie loose in folder (an album ripped flat into the
+    artist folder): a folder.jpg there is that album's cover. One loose track (a single)
+    is not an album."""
+    albums = {}
+    for n in names:
+        if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."):
+            t = _album_id(Path(folder) / n)[0]
+            if t:
+                albums[t] = albums.get(t, 0) + 1
+                if albums[t] >= 2:
+                    return True
+    return False
+
+
 def artist_folder_photo(folder) -> Path | None:
-    """The artist folder's own photo (artist.jpg, or folder.jpg - Kodi, Jellyfin), if any. A
-    folder.jpg beside music of the folder's own (a loose album ripped flat there) is that
-    music's cover, not the artist's photo: then only artist.* counts."""
+    """The artist folder's own photo: artist.jpg, or folder.jpg (Kodi, Jellyfin) - unless
+    an album lies ripped flat in the folder (then folder.jpg is its cover)."""
     try:
-        loose = any(x.is_file() and x.suffix.lower() in ex.AUDIO_EXT and not x.name.startswith(".")
-                    for x in Path(folder).iterdir())
-        for stem in (("artist",) if loose else ARTIST_STEMS):
-            for x in sorted(Path(folder).iterdir()):
-                if x.is_file() and not x.is_symlink() and x.stem.lower() == stem and \
-                        x.suffix.lower() in (".jpg", ".jpeg", ".png"):
-                    return x
+        names = sorted(os.listdir(folder))
     except OSError:
         return None
+    pics = {}
+    for n in names:                                     # (names first: one stat per candidate only)
+        st, ext = os.path.splitext(n)
+        if st.lower() in ARTIST_STEMS and ext.lower() in (".jpg", ".jpeg", ".png"):
+            pics.setdefault(st.lower(), n)
+    stems = ("artist",) if "folder" in pics and _flat_album_here(Path(folder), names) else ARTIST_STEMS
+    for stem in stems:
+        if stem in pics:
+            x = Path(folder) / pics[stem]
+            if x.is_file() and not x.is_symlink():
+                return x
     return None
+
+
+def named_after(folder, artist: str, compat="windows") -> bool:
+    """folder is named after artist ("The Beatles", "Beatles, The")."""
+    import filenames as fnm
+    if not artist:
+        return False
+    names = {artist}
+    if artist.lower().startswith("the "):
+        names.add(f"{artist[4:]}, {artist[:3]}")
+    return fnm.fold(Path(folder).name) in {fnm.fold(fnm.safe_component(n, compat)) for n in names}
 
 
 def artist_folder_has_photo(folder) -> bool:
@@ -608,6 +638,9 @@ def is_collaboration(artist_mbids: str, folder_name: str) -> bool:
 
 
 CACHE_MAX_SIDE = 1500            # artist photos kept for later runs: as large as an artist.jpg needs
+IMAGE_DAYS = 180                 # a kept photo is looked up again after this long
+NONE_DAYS = 7                    # "none found" (a source may only have been down: CoverUp's Wikimedia
+#                                  and Discogs sources report an outage as "nothing found")
 
 
 def _photo_cache_dir() -> Path:
@@ -622,6 +655,8 @@ def cached_artist_photo(key: str):
     h = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:20]
     d = _photo_cache_dir()
     img, none = d / f"{h}.jpg", d / f"{h}.none"
+    if img.exists() and _time.time() - img.stat().st_mtime > IMAGE_DAYS * 86400:
+        return False, None                # (asked again now and then: a better or corrected photo)
     if img.exists():
         try:
             with __import__("PIL.Image", fromlist=["Image"]).open(img) as im:
@@ -630,16 +665,44 @@ def cached_artist_photo(key: str):
             return False, None
         src = (d / f"{h}.src").read_text().strip() if (d / f"{h}.src").exists() else "artist photo"
         return True, {"image": str(img), "width": w, "height": h2, "source": src}
-    if none.exists() and _time.time() - none.stat().st_mtime < 30 * 86400:
+    if none.exists() and _time.time() - none.stat().st_mtime < NONE_DAYS * 86400:
         return True, None
     return False, None
 
 
-def remember_artist_photo(key: str, got):
+def forget_artist_photos(match: str = "") -> int:
+    """Forget the artist photos kept for later runs (all, or those whose key - a MusicBrainz
+    artist ID, or an artist folder - contains match). Returns how many."""
+    d = _photo_cache_dir()
+    n = 0
+    if not d.is_dir():
+        return 0
+    keys = {}
+    for f in d.glob("*.key"):
+        try:
+            keys[f.stem] = f.read_text()
+        except OSError:
+            continue
+    for h, key in keys.items():
+        if match and match.casefold() not in key.casefold():
+            continue
+        for ext in (".jpg", ".src", ".none", ".key"):
+            try:
+                (d / f"{h}{ext}").unlink()
+            except FileNotFoundError:
+                pass
+        n += 1
+    return n
+
+
+def remember_artist_photo(key: str, got, name: str = ""):
     h = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:20]
     d = _photo_cache_dir()
     d.mkdir(parents=True, exist_ok=True)
     try:
+        (d / f"{h}.key").write_text(f"{key}\t{name}")       # (for listing and forget_artist_photos)
+        if got and got.get("image") and key.startswith("dir:"):
+            return got                    # (found by name only: kept for this run, never for later ones)
         if got and got.get("image"):
             tmp = d / f".{h}.{os.getpid()}.tmp"            # (two TagMenders at once never share one)
             small = embed_copy(Path(got["image"]), ex.STATE_DIR / "staging" / "artist-cache", CACHE_MAX_SIDE)

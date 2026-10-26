@@ -576,7 +576,7 @@ class Engine:
                     prop.why = list(prop.why) + [f"no artist photo: {got['note']}"]
                 # "none found" is kept (asked again after 30 days); a failed search is not
                 if lasting and ((got and got.get("image")) or (got or {}).get("note") == "no artist photo found"):
-                    got = artwork.remember_artist_photo(key, got if got and got.get("image") else None)
+                    got = artwork.remember_artist_photo(key, got if got and got.get("image") else None, who)
             cache[key] = got if got and got.get("image") else None
         if cache[key]:
             prop.artist_photo = dict(cache[key], artist=who)

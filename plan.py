@@ -326,7 +326,7 @@ _DISC_NAME = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|[a-h])\b"
 MAX_TREE = 5000                           # entries looked at below one album folder
 
 
-def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False):
+def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist=""):
     """([(companion, destination)], why not): the non-audio files that go with an album
     that moves or is copied, as Picard's "move additional files" and foobar2000's "move
     entire source folder content" do:
@@ -386,7 +386,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             continue
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
-            return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only)[0], \
+            return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only, artist=artist)[0], \
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
@@ -400,16 +400,12 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 q = q.parent
     by_stem = {(s_.parent, s_.stem): d_ for s_, d_ in moved.items()}
     ours = {s_.parent for s_ in moved}
-    # a source folder whose other music sits in folders that are neither its discs nor its
-    # bonus ("Bonus CD", "Extras" ...) - an artist folder with a loose single and the artist's
-    # albums: its own pictures are no one album's; the artist photo stays
+    # an artist folder (named after the album artist) holding the artist's other albums, with
+    # this album's tracks loose in it: its own pictures (the artist photo) are no one album's
     import artwork as _artwork
-    loose = sum(1 for s_ in moved if s_.parent == src_dir) <= 1     # a loose single, not an album's worth
-    src_shared = loose and any(f_ != src_dir and not _DISC_NAME.match(f_.relative_to(src_dir).parts[0])
-                               and not _artwork._BONUS.match(f_.relative_to(src_dir).parts[0])
-                               for f_ in foreign if src_dir in f_.parents)
     discs_here = any(q.parent == src_dir and _DISC_NAME.match(q.name) for q in ours)
-
+    src_shared = bool(foreign) and _artwork.named_after(src_dir, artist,
+                                                        (profile.get("filenames") or {}).get("compat", "windows"))
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus
         album), only the folders holding this album's own music, and what is inside them,
@@ -765,7 +761,9 @@ class Planner:
             src_root = Path(prop.source_dir)
             real_src = os.path.realpath(src_root)
             at_root = real_src in self.library_roots() or (real_src in self.roots() and len(pairs) == 1)
-            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root)
+            who = ((prop.targets[0].get("albumartist") or prop.targets[0].get("artist") or [""])[0]
+                   if prop.targets else "") or ""
+            comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root, artist=who)
             if why_not:
                 entry["notes"].append(why_not)
             for c, want in comps:
@@ -891,6 +889,25 @@ class Planner:
         want = _artwork.artist_settings(self.profile) if ap else None
         if not ap or not want or not entry["files"] or not Path(ap.get("image") or "").exists():
             return None
+        album = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
+        artist_dir = _artwork.artist_dir_for(album, ap.get("artist", ""), self.roots(),
+                                             self.profile["filenames"]["compat"])
+        staging = ex.STATE_DIR / "staging" / self.job
+        image, source = ap["image"], ap.get("source", "")
+        there = _artwork.artist_folder_photo(artist_dir) if artist_dir is not None else None
+        if there is not None:
+            # the artist folder (where the album is, or goes) has its photo - the user's own, or
+            # one corrected by hand: that one goes into the tracks, never a second one
+            try:
+                image = str(_artwork._stage(there.read_bytes(), staging)[0])
+                source = f"the artist folder's {there.name}"
+            except Exception:
+                return None
+        else:
+            try:                          # (a copy of its own: the photo planned is the photo written)
+                image = str(_artwork._stage(Path(image).read_bytes(), staging)[0])
+            except Exception:
+                return None
         into = []
         if want["embed"]:
             fronts = set((entry.get("artwork") or {}).get("embed_into") or [])
@@ -904,26 +921,20 @@ class Planner:
                 if fe["dst"] in into and fe["op"] == "none":       # only the artist photo is new
                     fe["op"] = "tag" if fe["dst"] == fe["src"] else op
         try:
-            emb = str(_artwork.embed_copy(Path(ap["image"]), ex.STATE_DIR / "staging" / self.job,
-                                          _artwork.ARTIST_EMBED_MAX_SIDE))
+            emb = str(_artwork.embed_copy(Path(image), staging, _artwork.ARTIST_EMBED_MAX_SIDE))
         except Exception:
             emb, into = None, []
-        if want["file"]:
-            album = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
-            artist_dir = _artwork.artist_dir_for(album, ap.get("artist", ""), self.roots(),
-                                                 self.profile["filenames"]["compat"])
-            target = artist_dir / want["file"] if artist_dir is not None else None
-            key = fnm.fold(target) if target is not None else None
-            if target is not None and not _artwork.artist_folder_has_photo(artist_dir) and \
-                    self.claimed.get(key) is None and \
-                    not any(sc["dst"] == str(target) for sc in entry["sidecars"]):
+        if want["file"] and artist_dir is not None and there is None:
+            target = artist_dir / want["file"]
+            key = fnm.fold(target)
+            if self.claimed.get(key) is None and not any(sc["dst"] == str(target) for sc in entry["sidecars"]):
                 self.claimed[key] = "artist-photo"
-                data = Path(ap["image"]).read_bytes()
-                entry["sidecars"].append({"src": entry["files"][0]["src"], "dst": str(target), "from": ap["image"],
+                data = Path(image).read_bytes()
+                entry["sidecars"].append({"src": entry["files"][0]["src"], "dst": str(target), "from": image,
                                           "sha256": hashlib.sha256(data).hexdigest(), "kind": "artist"})
         if not into and not any(sc.get("kind") == "artist" for sc in entry["sidecars"]):
             return None
-        return {"image": ap["image"], "embed": emb, "embed_into": into, "source": ap.get("source", ""),
+        return {"image": image, "embed": emb, "embed_into": into, "source": source,
                 "artist": ap.get("artist", "")}
 
     def _earlier_copy(self, dst: Path, src: Path, dest_root=None, legacy=None):

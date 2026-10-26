@@ -524,9 +524,13 @@ def _embed_one(p, jpeg, w, h, desc) -> bool:
             f.tags = f.tags or {}
             f.tags["covr"] = [MP4Cover(jpeg, imageformat=MP4Cover.FORMAT_JPEG)]
         elif f.tags is not None and (isinstance(f.tags, ID3) or f.tags.__class__.__module__.startswith("mutagen.id3")):
-            for k in [k for k in list(f.tags.keys()) if k.startswith("APIC") and f.tags[k].type == 3]:
-                del f.tags[k]
-            f.tags.add(APIC(encoding=tagio.latin1_or_utf8(desc), mime="image/jpeg", type=3, desc=desc, data=jpeg))
+            def edit(t):
+                for k in [k for k in list(t.keys()) if k.startswith("APIC") and t[k].type == 3]:
+                    del t[k]
+                t.add(APIC(encoding=tagio.latin1_or_utf8(desc), mime="image/jpeg", type=3, desc=desc, data=jpeg))
+            # (in the tag's own version, its other frames - and an MP3's ID3v1 tag - as they are)
+            tagio.edit_id3(p, f, edit)
+            return True
         elif hasattr(f, "tags") and f.tags is not None and hasattr(f.tags, "keys"):   # Ogg Vorbis / Opus
             existing = []
             for b64 in f.tags.get("metadata_block_picture", []):

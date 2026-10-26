@@ -959,6 +959,9 @@ class Planner:
             for num_, tot_ in tagio.combined_pairs(f):
                 if (num_ in removals or num_ in unset_) and num_ not in raw:
                     raw.pop(tot_, None)
+                elif p.policy(num_) in ("preserve", "lock") and not before.get(num_) and \
+                        p.policy(tot_) not in ("preserve", "lock") and not before.get(tot_):
+                    raw.pop(tot_, None)          # (no number of its own, kept so: no place for a total)
                 elif tot_ in unset_ and tot_ not in raw and tot_ not in removals and before.get(tot_) and \
                         p.policy(tot_) not in ("preserve", "lock", "fill_missing"):
                     removals.append(tot_)                    # (a total Picard preserves stays)
@@ -984,7 +987,10 @@ class Planner:
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
             import levels as _lv
             if identified and conf >= float(p["thresholds"]["replace_min_confidence"]) and _lv.level(p) != "basic":
+                join_ = tagio.v23_join(f, fmt) if cust_set else None
                 for k_, v_ in cust_set.items():
+                    if join_ and len(_vals(v_)) > 1:         # (an ID3v2.3 TXXX: its values joined, as written)
+                        v_ = [join_.join(_vals(v_))]
                     if _vals(v_) and _vals(v_) != _vals(before.get(k_)):
                         changes[k_] = _vals(v_)
                         rows.append({"field": k_[8:], "before": _vals(before.get(k_)), "after": _vals(v_),
@@ -994,11 +1000,15 @@ class Planner:
                         changes[k_] = None
                         rows.append({"field": k_[8:], "before": _vals(before.get(k_)), "after": [],
                                      "action": "removed by a tagger script (a user tag)"})
+            riff_copied = []
             if changes:                   # (a WAV's fields kept only in its RIFF INFO: into ID3, as Picard)
                 for k_ in sorted(tagio.riff_only(f)):
                     if k_ not in changes and k_ not in removals and before.get(k_) and p.policy(k_) != "lock" and \
                             _lv.restrict({k_: before[k_]}, p).get(k_) and tagio.holds(f, k_):
-                        changes[k_] = list(before[k_])
+                        # (as the frame holds it - a date that is no date, a genre "(17)", may read
+                        # back otherwise: copied as it comes, never failing the album)
+                        changes[k_] = _vals(tagio.stored(f, {k_: before[k_]}, fmt).get(k_)) or list(before[k_])
+                        riff_copied.append(k_)
                         rows.append({"field": k_, "before": list(before[k_]), "after": list(before[k_]),
                                      "action": "written into the ID3 tag (the file had it in its RIFF INFO only), "
                                                "as Picard"})
@@ -1024,6 +1034,8 @@ class Planner:
                                       "play); it goes with its album as it is")
             fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
                   "diff": rows, "fingerprint": _fp(f)}
+            if riff_copied:
+                fe["lenient"] = riff_copied
             if as_is:
                 fe["as_is"] = True
             elif tagio.opus_pictures_need_fix(f):

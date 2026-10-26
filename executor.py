@@ -1178,8 +1178,8 @@ class Executor:
                 if src_digest is not None and after != src_digest:
                     raise StepError(f"{src.name}: audio data differed after writing tags; original kept")
                 got = tagio.read(stage)
-                for k, v in changes.items():
-                    if (got.get(k) or []) != (v or []):
+                for k, v in changes.items():     # (a WAV's RIFF INFO copied into ID3 is as the frame keeps it)
+                    if (got.get(k) or []) != (v or []) and k not in (fe.get("lenient") or ()):
                         raise StepError(f"{src.name}: tag {k} did not read back as written")
                 with open(stage, "rb+") as fh:
                     os.fsync(fh.fileno())
@@ -1237,8 +1237,9 @@ class Executor:
                 if src_digest is not None and payload.digest(stage) != src_digest:
                     raise StepError(f"{src.name}: audio data differed after writing tags; original kept")
                 got = tagio.read(stage)
+                fe_ = a["files"][j] if j < len(a.get("files") or []) else {}
                 for k, v in changes.items():
-                    if (got.get(k) or []) != (v or []):
+                    if (got.get(k) or []) != (v or []) and k not in (fe_.get("lenient") or ()):
                         raise StepError(f"{src.name}: tag {k} did not read back as written")
                 with open(stage, "rb+") as fh:
                     os.fsync(fh.fileno())

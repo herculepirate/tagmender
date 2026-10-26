@@ -637,7 +637,13 @@ def riff_info(path) -> dict:
                 except UnicodeDecodeError:
                     v = raw.decode("windows-1252", errors="replace")
                 v = v.rstrip("\0")
-                if v:
+                if v and name == "tracknumber" and "/" in v:      # (ITRK "1/12": the number and its total,
+                    n_, t_ = _split_pair(v)                       # as TagMender reads a TRCK)
+                    if n_:
+                        out["tracknumber"] = [n_]
+                    if t_:
+                        out["totaltracks"] = [t_]
+                elif v:
                     out[name] = [v]
     except Exception:
         return {}
@@ -893,6 +899,20 @@ def canonical(path, k: str) -> str:
     base = k.split(":", 1)[0]
     dflt = "eng" if base == "comment" else "xxx"
     return _comm_name(base, *_lang_desc(k, dflt), dflt)
+
+
+def v23_join(path, fmt: dict | None = None):
+    """What joins several values of a frame when the write leaves an ID3v2.3 tag ("/", or
+    Picard's id3v23_join_with), else None."""
+    fmt = fmt or {}
+    try:
+        f = open_file(path)
+    except Unsupported:
+        return None
+    if family(f) != "id3":
+        return None
+    v23 = fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(f.tags) == 3
+    return (fmt.get("join") or "/") if v23 else None
 
 
 def stored(path, target: dict, fmt: dict | None = None) -> dict:

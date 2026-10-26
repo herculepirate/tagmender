@@ -123,17 +123,32 @@ def _not_fragmented(path):
                          "(its audio would no longer play)")
 
 
+def _staged(path, write):
+    """write(stage, path) on a staging copy that takes the file's place in one rename, its
+    audio checked (executor.staged_write): a crash never leaves a half-moved track. A link
+    is written in the file it points to, as its undo puts it back."""
+    import executor
+    path = Path(path)
+    _not_fragmented(path)
+    real = Path(os.path.realpath(path)) if path.is_symlink() else path
+    executor.staged_write(real, lambda stage: write(stage, real))
+
+
 def write_albumid(path, mbid):
     """Write only the MusicBrainz release ID, the way Picard stores it for each format."""
-    _not_fragmented(path)
-    f = mutagen.File(path)
+    _staged(path, lambda stage, real: _write_albumid(stage, real, mbid))
+
+
+def _write_albumid(path, real, mbid):
+    import tagio
+    f = tagio.mutagen_file(path)                    # (a staging copy: by its content and inner name)
     if f is None:
         raise ValueError("not an audio file mutagen can write")
     if isinstance(f, MP4):
         if f.tags is None:
             f.add_tags()
         f.tags["----:com.apple.iTunes:MusicBrainz Album Id"] = [MP4FreeForm(mbid.encode())]
-    elif f.tags is not None and isinstance(f.tags, ID3) or path.suffix.lower() == ".mp3":
+    elif f.tags is not None and isinstance(f.tags, ID3) or real.suffix.lower() == ".mp3":
         def edit(t):
             t.delall("TXXX:MusicBrainz Album Id")
             t.add(TXXX(encoding=3, desc="MusicBrainz Album Id", text=[mbid]))
@@ -154,9 +169,12 @@ TAGMENDER_REASON = "TAGMENDER_REASON"       # why an album is unresolved
 def write_tagmender(path, status, reason=""):
     """TAGMENDER=Resolved|Unresolved (and the reason when unresolved), in the form
     each format stores a custom tag. Nothing else in the file changes."""
-    path = Path(path)
-    _not_fragmented(path)
-    f = mutagen.File(path)
+    _staged(path, lambda stage, real: _write_tagmender(stage, real, status, reason))
+
+
+def _write_tagmender(path, real, status, reason):
+    import tagio
+    f = tagio.mutagen_file(path)                    # (a staging copy: by its content and inner name)
     if f is None:
         raise ValueError("not an audio file mutagen can write")
     reason = reasons.encode(reason) if status == "Unresolved" else ""
@@ -169,7 +187,7 @@ def write_tagmender(path, status, reason=""):
             f.tags[key] = [MP4FreeForm(reason.encode())]
         elif key in f.tags:
             del f.tags[key]
-    elif (f.tags is not None and isinstance(f.tags, ID3)) or path.suffix.lower() == ".mp3":
+    elif (f.tags is not None and isinstance(f.tags, ID3)) or real.suffix.lower() == ".mp3":
         def edit(t):
             t.delall(f"TXXX:{TAGMENDER_TAG}")
             t.delall(f"TXXX:{TAGMENDER_REASON}")

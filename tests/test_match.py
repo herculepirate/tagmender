@@ -190,6 +190,23 @@ class Core(unittest.TestCase):
                                                       label="Nuclear Blast"), CFG)], CFG)
         self.assertEqual(mc.combine(mbr, dge, ["PL", "DE"])["best"]["cand"]["id"], "9")  # evidence wins
 
+    def test_a_shared_barcode_does_not_make_two_countries_one_pressing(self):
+        """Kreator - Enemy Of God Revisited (SPV 69848 CD+DVD, Germany): Discogs's German
+        pressing was given the US MusicBrainz release (SPV 6984L, same barcode) as its twin,
+        so Picard's plan contradicted the folder and the album was tagged by nothing."""
+        n = mc.norm_code
+        us = cand(id="us", country="US", catnos={n("SPV 6984L CD+DVD")}, barcodes={"693723698441"})
+        de = cand(id="2247495", source="discogs", country="Germany", catnos={n("SPV 69848 CD+DVD")},
+                  barcodes={"693723698441"})
+        self.assertFalse(mc.same_pressing(us, de))
+        self.assertTrue(mc.same_pressing(dict(us, country="DE", catnos={n("SPV 69848")}), de))
+        self.assertTrue(mc.same_pressing(dict(us, country="XE", catnos=set()), de))   # Europe, no number: barcode
+        a = album(barcodes={"693723698441"})
+        mbr = dict(mc.classify([mc.score_candidate(a, us, CFG)], CFG), scored=[mc.score_candidate(a, us, CFG)])
+        dgr = mc.classify([mc.score_candidate(a, de, CFG)], CFG)
+        dgr = dict(dgr, status="auto")
+        self.assertNotIn("mb_twin", mc.combine(mbr, dgr))
+
     def test_same_label_country_year_and_tracks_is_one_release(self):
         mbc = cand(id="m", label="Death Cult Switzerland", country="CH", catnos=set())
         dgc = cand(id="d", source="discogs", label="Death Cult Switzerland", country="Switzerland",

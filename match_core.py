@@ -1668,6 +1668,13 @@ def same_pressing(a, b):
     to that Discogs release, or the barcode, or the catalogue number and country agree."""
     if str(a.get("discogs_id") or "") and str(a.get("discogs_id")) == str(b.get("id")):
         return True
+    # one barcode is often printed on several countries' pressings (SPV's US and German
+    # Enemy Of God Revisited; Noise's Coroner): a country or catalogue number that differs
+    # makes them two pressings, whatever the barcode
+    ca, cb = country_code(a.get("country")), country_code(b.get("country"))
+    if (ca and cb and ca != cb and not {ca, cb} & {"XW", "XE"}) or (
+            a.get("catnos") and b.get("catnos") and not catnos_agree(a.get("catnos"), b.get("catnos"))):
+        return False
     if ({barcode_key(x) for x in a.get("barcodes") or ()} & {barcode_key(x) for x in b.get("barcodes") or ()}) - {""}:
         return True
     if (catnos_agree(a.get("catnos"), b.get("catnos"))

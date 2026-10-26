@@ -75,11 +75,11 @@ output recorded from Picard's own code.
 |---|---|---|---|
 | Providers (CAA, local files, URL relationships) | CAA | Full | CoverUp (plugin) first, then CAA and Discogs; order per profile |
 | CAA image size, approved only, restrict types | - | Partial | fixed front-1200 |
-| Embed / save as files | - | Full | |
-| Embed only one front | on | Full | |
+| Embed images into tags / save as separate files | on / off | Partial | TagMender's own profile settings (`artwork.embed_front`, `artwork.files`: both on), not read from Picard.ini; the file is `cover.jpg` (Picard's cover file name script is not read); covers are not embedded into WavPack or WMA |
+| Embed only one front | on | Full | always one front |
 | Overwrite existing images | off | Full | `replace: larger_only` replaces only small covers, backed up |
 | Resize / convert / enlarge for tags and files | off | Partial | embed limit 1200 px, enlarge small; no format conversion setting |
-| Keep embedded images | off | Full | |
+| Keep embedded images | off | Partial | an embedded cover is kept unless it is small (`replace: larger_only`); Picard's setting is not read |
 | Remove images from tags | off | Missing | |
 | Artist photo | - | Extra | not in Picard |
 
@@ -87,8 +87,8 @@ output recorded from Picard's own code.
 
 | Picard | Default | TagMender | Notes |
 |---|---|---|---|
-| Rename and move files | - | Full | journaled and undoable |
-| Move additional files | off | Full | cue/playlist references updated |
+| Rename and move files | - | Partial | journaled and undoable; the profile's operation (in place, copy, move) and naming decide - no rename-only or move-without-renaming mode |
+| Move additional files | off | Partial | always on for a moved or copied album, by TagMender's own list (`companions`: logs, cue sheets, images, lyrics ...), not Picard's pattern; cue/playlist references updated |
 | Delete empty directories | on | Full | follows Picard's setting unless the profile sets `remove_empty_dirs` |
 | Windows compatibility | on | Full | follows Picard's setting unless the profile sets `filenames.compat`; plus byte, UTF-16 and path limits, shortening; control characters (a tab) are replaced too, which Picard keeps (Windows does not allow them) |
 | Windows long path support | off (off Windows) | Full | `windows_long_paths`: off, a path below the destination's mount point fits 259 characters, shortened as Picard shortens it |

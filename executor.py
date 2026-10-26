@@ -711,7 +711,7 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc=
         desc = desc or "Artist"
         while desc in taken:                              # (APIC frames are told apart by description)
             desc += " "
-        f.tags.add(APIC(encoding=3, mime=mime, type=ptype, desc=desc, data=data))
+        f.tags.add(APIC(encoding=tagio.latin1_or_utf8(desc), mime=mime, type=ptype, desc=desc, data=data))
     elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
         old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or [])
         keep = []
@@ -728,7 +728,8 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc=
                 return
         pic = Picture()
         pic.type, pic.mime, pic.data, pic.desc = ptype, mime, data, desc
-        pic.width, pic.height = _image_size(data)            # (as Picard records them)
+        if type(f).__name__ != "OggOpus":   # (as Picard: libopusfile refuses a picture with a size but no depth)
+            pic.width, pic.height = _image_size(data)
         f.tags["METADATA_BLOCK_PICTURE"] = keep + [base64.b64encode(pic.write()).decode("ascii")]
     else:
         return
@@ -792,11 +793,12 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
         taken = {a.desc for a in f.tags.getall("APIC")}
         while desc in taken:                              # (APIC frames are told apart by description)
             desc = (desc or "Front") + " "
-        f.tags.add(APIC(encoding=3, mime=mime, type=3, desc=desc, data=data))
+        f.tags.add(APIC(encoding=tagio.latin1_or_utf8(desc), mime=mime, type=3, desc=desc, data=data))
     elif type(f).__name__ in ("OggVorbis", "OggOpus", "OggFLAC"):
         pic = Picture()
         pic.type, pic.mime, pic.data = 3, mime, data
-        pic.width, pic.height = _image_size(data)            # (as Picard records them)
+        if type(f).__name__ != "OggOpus":   # (as Picard: libopusfile refuses a picture with a size but no depth)
+            pic.width, pic.height = _image_size(data)
         new = base64.b64encode(pic.write()).decode("ascii")
         old = list(f.tags.get("METADATA_BLOCK_PICTURE", []) or [])      # (the other pictures always stay)
         if old and replace:
@@ -1714,6 +1716,8 @@ def _write_extras(fe) -> dict:
         out["names"] = fe["names"]
     if fe.get("first"):
         out["first"] = fe["first"]
+    if fe.get("keep"):
+        out["keep"] = fe["keep"]
     return out
 
 

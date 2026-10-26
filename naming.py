@@ -41,7 +41,9 @@ PRESETS = {
     "tagmender": ("$join(%_albumartists_sorted%, & )/$if(%_year%,%_year% - )$words(%album%,5)/"
                   "$if($gt(%totaldiscs%,1),Disc $num(%discnumber%,2)/$num(%discnumber%,1)$num(%tracknumber%,2),"
                   "$num(%tracknumber%,2)).$initials($upper(%title%))"),
-    "picard": ("$if2(%albumartist%,%artist%)/$if(%albumartist%,%album%/,)$if($gt(%totaldiscs%,1),%discnumber%-,)"
+    # (Picard 3.0.2's default file naming script, picard/const/defaults.py)
+    "picard": ("$if2(%albumartist%,%artist%)/$if(%albumartist%,%album%/,)"
+               "$if($gt(%totaldiscs%,1),$if($gt(%totaldiscs%,9),$num(%discnumber%,2),%discnumber%)-,)"
                "$if($and(%albumartist%,%tracknumber%),$num(%tracknumber%,2) ,)$if(%_multiartist%,%artist% - ,)%title%"),
     "artist-album-track": ("$if2(%albumartist%,%artist%)/$if(%_year%,%_year% - )%album%/"
                            "$if($gt(%totaldiscs%,1),$num(%discnumber%,1)-)$num(%tracknumber%,2) - %title%"),

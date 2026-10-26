@@ -922,13 +922,25 @@ class Planner:
             # as Picard names it, below)
             removals_named = list(removals)
             unset_ = self.__dict__.get("_unset", {}).get(str(f), set())
+            # (Vorbis and APEv2 keep a described comment in COMMENT as "text (desc)", which Picard
+            # writes whole from the track's comments: a plain comment a script unset goes)
+            if "comment" in unset_ and "comment" not in raw and before.get("comment") and \
+                    any(k_.startswith("comment:") and raw[k_] for k_ in raw) and \
+                    tagio.family_of(f) in ("vorbis", "apev2") and \
+                    p.policy("comment") not in ("preserve", "lock", "fill_missing") and "comment" not in removals:
+                removals.append("comment")
             for num_, tot_ in tagio.combined_pairs(f):
                 if (num_ in removals or num_ in unset_) and num_ not in raw:
                     raw.pop(tot_, None)
-                elif tot_ in unset_ and tot_ not in raw and tot_ not in removals and before.get(tot_):
-                    removals.append(tot_)
+                elif tot_ in unset_ and tot_ not in raw and tot_ not in removals and before.get(tot_) and \
+                        p.policy(tot_) not in ("preserve", "lock", "fill_missing"):
+                    removals.append(tot_)                    # (a total Picard preserves stays)
             fmt = tagio.file_options(f, self._file_settings())       # (Picard: ID3v2 version, ID3v1, ...)
             target = tagio.stored(f, raw, fmt)
+            for k_, v_ in list(target.items()):   # (a value the format holds as none - an M4A total 0: the
+                if v_ is None and raw.get(k_) and before.get(k_) and k_ not in removals:     # file's goes)
+                    removals.append(k_)
+                    target.pop(k_)
             if raw.get("comment") and not target.get("comment") and before.get("comment") and \
                     p.policy("comment") not in ("preserve", "lock", "fill_missing"):
                 # (a Vorbis/APEv2 comment "text (desc)" is the described comment: the file's
@@ -952,6 +964,9 @@ class Planner:
                 fe["names"] = spell
             if _first_values(raw, changes):
                 fe["first"] = _first_values(raw, changes)
+            kept_ = sorted(t_ for _n, t_ in tagio.NUMBER_PAIRS if t_ in unset_ and t_ not in changes)
+            if changes and kept_ and not tagio.combined_pairs(f):
+                fe["keep"] = kept_                   # (a total a script unset: as the file has it)
             # the file's tags after the write, as values (not as an ID3v2.3 tag joins them: a
             # field the file already holds as the target says is named "A & B", not "A_B")
             merged = {k: (raw[k] if k in raw and _vals(target.get(k)) == _vals(v) else v) for k, v in before.items()}

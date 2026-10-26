@@ -108,6 +108,15 @@ the watcher keeps two loose albums you undid undone. A profile saved before this
 Windows-safe names and removes empty folders as before, and one saved now keeps what it says;
 only a profile that never says follows Picard's settings.
 
+**Picard parity (twenty-eighth review).** Opus covers carry no size, as Picard writes them
+(players built on libopusfile showed none); a FLAC or Ogg total is written under both names
+whenever its number or total is (TRACKTOTAL alone gets TOTALTRACKS); the "picard" naming preset
+is Picard 3's default script (10+ disc sets "01-01"); a preserved total stays when a script
+unsets it; $delete(ENCODER) works outside ID3; several licenses go into TXXX:LICENSE in ID3v2.3;
+an unset plain comment goes beside a described one; an M4A total 0 is written; number and
+picture frames are written in Latin-1, as Picard writes them. docs/PICARD_COVERAGE.md now says
+where cover art and the files that go with an album follow TagMender's profile, not Picard.
+
 **More of Picard's settings followed (twenty-seventh review).** Windows compatibility, Delete
 empty directories and Preserve timestamps follow Picard's settings (its option profiles too)
 unless the profile sets them; the preferred release countries are read from the Picard.ini

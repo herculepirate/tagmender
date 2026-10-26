@@ -769,12 +769,14 @@ def file_vars(path) -> dict:
 def canonical(path, k: str) -> str:
     """A field's name as read() gives it back for this file ("comment:ripper" is an ID3
     file's "comment::ripper", as Picard 3 names a described comment)."""
-    if not (k.startswith("comment:") or k.startswith("lyrics:")):
-        return k
     try:
         fam = family(open_file(path))
     except Unsupported:
         return k
+    if not (k.startswith("comment:") or k.startswith("lyrics:")):
+        # (Vorbis, APEv2, MP4 and WMA names are not case-sensitive there, as Picard reads them:
+        # $delete(ENCODER) is the file's "encoder")
+        return field_name(k) if fam != "id3" else k
     if fam in ("vorbis", "mp4", "asf") and k.startswith("lyrics:"):
         return "lyrics"                              # (one lyrics field there: Picard removes it)
     if fam != "id3":
@@ -915,6 +917,25 @@ def _mp4_int(x, zero=False):
     return n if (0 if zero else 1) <= n < 1 << 15 else None
 
 
+def latin1_or_utf8(*texts) -> int:
+    """The ID3 text encoding Picard uses for number and picture frames, Latin-1 (0) - UTF-8
+    (3) when the text has characters Latin-1 has not (Picard would make them "?")."""
+    try:
+        for t in texts:
+            str(t or "").encode("latin-1")
+        return 0
+    except UnicodeEncodeError:
+        return 3
+
+
+def family_of(path) -> str:
+    """The file's tag family (id3, vorbis, mp4, apev2, asf), or ""."""
+    try:
+        return family(open_file(path))
+    except Exception:
+        return ""
+
+
 def combined_pairs(path) -> tuple:
     """The (number, total) pairs the format keeps in one field - "5/9" in ID3 (and the
     movement's MVIN), APEv2 and WMA's disc, trkn (5, 9) in MP4; none in Vorbis, whose totals
@@ -995,13 +1016,14 @@ def fragmented(path) -> bool:
 
 
 def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None,
-          names: dict | None = None, first: dict | None = None) -> None:
+          names: dict | None = None, first: dict | None = None, keep=()) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then). fmt: file_options() - what else saving the file does, as
     Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed). names: {field:
     its spelling} - a custom tag a tagger script made ("MyTag") is written as it spelled it,
     as Picard writes it (an ID3 TXXX, an MP4 custom atom). first: {field: [its first value]}
-    of fields an ID3v2.3 tag gets joined, for the ID3v1 tag (see save_id3)."""
+    of fields an ID3v2.3 tag gets joined, for the ID3v1 tag (see save_id3). keep: totals a
+    tagger script unset - left as the file has them (a Vorbis file's total fields)."""
     names = {field_name(k): v for k, v in (names or {}).items()}
     changes = _norm(changes)
     if not changes:
@@ -1052,7 +1074,13 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
             if pair in pairs_done:
                 continue
             pairs_done.add(pair)
-            _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair), changed=changes)
+            _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair), changed=changes, keep=set(keep))
+            continue
+        if fam == "id3" and k == "license" and vals and (len(vals) > 1 or (
+                v23 and re.search(re.escape(join) + r"\s*[A-Za-z][A-Za-z0-9+.-]*://", str(vals[0])))):
+            tags.delall("WCOP")                # (several licenses: TXXX:LICENSE, never one WCOP of them joined)
+            tags.delall("TXXX:LICENSE")
+            tags.add(TXXX(encoding=3, desc="LICENSE", text=[join.join(vals)] if v23 else list(vals)))
             continue
         if fam == "id3" and v23 and vals and len(vals) > 1 and k not in ("website",):
             vals = [join.join(vals)]           # (ID3v2.3: several values joined, as Picard joins them)
@@ -1091,13 +1119,14 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
         f.save()
 
 
-def _write_pair(fam, f, tags, pair, n, t, changed=None):
+def _write_pair(fam, f, tags, pair, n, t, changed=None, keep=frozenset()):
     num, tot = pair
     if fam == "id3":
         fid = {"tracknumber": "TRCK", "discnumber": "TPOS", "movementnumber": "MVIN"}[num]
         tags.delall(fid)
         if n:
-            tags.add(Frames[fid](encoding=3, text=[f"{n}/{t}" if t else n]))
+            text_ = f"{n}/{t}" if t else n
+            tags.add(Frames[fid](encoding=latin1_or_utf8(text_), text=[text_]))   # (Latin-1, as Picard)
     elif fam == "vorbis":
         names = (["TRACKNUMBER"], ["TOTALTRACKS", "TRACKTOTAL"]) if num == "tracknumber" else \
                 (["DISCNUMBER"], ["TOTALDISCS", "DISCTOTAL"])
@@ -1113,7 +1142,9 @@ def _write_pair(fam, f, tags, pair, n, t, changed=None):
                 del tags[names[0][0]]
             if n:
                 tags[names[0][0]] = [n]
-        if changed is None or tot in changed or (inside and (num in changed)):
+        # (both names of a total, whenever the number or the total is written - as Picard writes
+        # them on every save: TRACKTOTAL alone, as EAC and Mp3tag leave it, gets TOTALTRACKS too)
+        if (changed is None or tot in changed or num in changed) and tot not in keep:
             for name in names[1]:
                 if name in tags:
                     del tags[name]

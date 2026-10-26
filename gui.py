@@ -598,8 +598,12 @@ class Overview(QWidget):
         import engine
         from PySide6.QtWidgets import QInputDialog
         key = os.path.realpath(a["source_dir"])
+        files = sorted({fe["src"] for fe in a.get("files") or []} | {x.get("file") for x in a.get("skipped") or []
+                                                                     if x.get("file")})
+        was = self.forced.get(key)
         ref, ok = QInputDialog.getText(self, APP, f"The release for {Path(a['source_dir']).name}:\n"
-                                       "a MusicBrainz or Discogs release link (or ID)", text=self.forced.get(key, ""))
+                                       "a MusicBrainz or Discogs release link (or ID)",
+                                       text=(was or {}).get("ref", "") if isinstance(was, dict) else (was or ""))
         if not ok:
             return
         ref = ref.strip()
@@ -609,7 +613,7 @@ class Overview(QWidget):
             QMessageBox.warning(self, APP, "That is not a MusicBrainz or Discogs release link.")
             return
         else:
-            self.forced[key] = ref
+            self.forced[key] = {"ref": ref, "files": files}    # (this album only: a folder may hold several)
         self.preview()
 
     def process_anyway(self):

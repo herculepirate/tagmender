@@ -489,7 +489,7 @@ def save_id3(f, tags, keep_original_date=True, keep_date=True):
             tags.delall(x)
         for fr in tdrc:
             tags.add(fr)
-    f.save(v2_version=3, v23_sep="/")
+    f.save(v2_version=3, v23_sep=None)     # (what changes was joined with "/" already: the rest as it was)
 
 
 def stored(path, target: dict) -> dict:
@@ -579,7 +579,7 @@ def _write_riff_info(path, changes, encoding="windows-1252"):
                 info.insert_chunk(cid, data)
 
 
-def write(path, changes: dict) -> None:
+def write(path, changes: dict, riff: dict | None = None) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then)."""
     changes = _norm(changes)
@@ -618,6 +618,8 @@ def write(path, changes: dict) -> None:
             pairs_done.add(pair)
             _write_pair(fam, f, tags, pair, *_pair(current, changes, *pair))
             continue
+        if fam == "id3" and v23 and vals and len(vals) > 1 and k not in ("website",):
+            vals = ["/".join(vals)]            # (ID3v2.3: several values joined, as Picard joins them)
         if fam == "id3" and v23 and k in ("mood", "releasedate"):
             _set_id3(f, tags, "~v23:" + k, vals)
         else:
@@ -625,7 +627,7 @@ def write(path, changes: dict) -> None:
     if fam == "id3":
         save_id3(f, tags, keep_original_date="originaldate" not in changes, keep_date="date" not in changes)
         if type(f).__name__ == "WAVE":
-            _write_riff_info(path, changes)
+            _write_riff_info(path, {**changes, **{k: v for k, v in (riff or {}).items() if v}})
     else:
         f.save()
 
@@ -696,8 +698,8 @@ def _set_id3(f, tags, k, vals):
     if k == "license":                              # one URL: WCOP; else TXXX:LICENSE
         tags.delall("WCOP")
         tags.delall("TXXX:LICENSE")
-        if vals and len(vals) == 1 and _is_url(vals[0]):
-            tags.add(WCOP(url=vals[0]))
+        if vals and len(vals) == 1 and _is_url(vals[0]) and not re.search(r"/https?://", vals[0]):
+            tags.add(WCOP(url=vals[0]))       # (one URL - never several joined for ID3v2.3)
         elif vals:
             tags.add(TXXX(encoding=3, desc="LICENSE", text=vals))
         return
@@ -736,9 +738,10 @@ def _set_id3_people(tags, credits, v23=False):
         (tmcl if key[:4] == "TMCL" else tipl).extend([list(p) for p in fr.people])
         del tags[key]
 
-    def drop(lists, roles):
+    def drop(lists, roles):                   # (a role in another case - an earlier TagMender's - too)
+        low = {r.lower() for r in roles}
         for lst in lists:
-            lst[:] = [p for p in lst if p[0] not in roles]
+            lst[:] = [p for p in lst if p[0].lower() not in low]
     for k, vals in credits.items():
         if is_performer(k):
             role = _role(k)
@@ -748,7 +751,7 @@ def _set_id3_people(tags, credits, v23=False):
             role = _TIPL_R[k]
             drop((tipl,), (role,))
             tipl.extend([[role, v] for v in vals or []])
-        for x in [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == k]:
+        for x in [x for x in tags if x.startswith("TXXX:") and x[5:].lower() == k.lower()]:
             del tags[x]
     if v23:                                         # (one IPLS in v2.3: all in TIPL, as Picard)
         tipl, tmcl = tipl + tmcl, []
@@ -765,8 +768,8 @@ def _set_performers(fam, tags, credits):
         return
     key = "PERFORMER" if fam == "vorbis" else next((x for x in tags.keys() if x.lower() == "performer"), "Performer")
     old = list(tags[key]) if key in tags else []
-    roles = {_role(k) for k in credits}
-    keep = [v for v in old if (_role(_split_performer(v)[0]) not in roles)]
+    roles = {_role(k).lower() for k in credits}
+    keep = [v for v in old if (_role(_split_performer(v)[0]).lower() not in roles)]
     new = list(keep)
     for k, vals in credits.items():
         role = _role(k)
@@ -777,7 +780,7 @@ def _set_performers(fam, tags, credits):
         tags[key] = new
     for k in credits:
         if ":" in k:                      # (PERFORMER:ROLE, as an earlier TagMender wrote it)
-            for x in [x for x in tags.keys() if x.lower() == k]:
+            for x in [x for x in tags.keys() if x.lower() == k.lower()]:
                 del tags[x]
 
 

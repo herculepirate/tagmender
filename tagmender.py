@@ -468,8 +468,13 @@ def _make_plan(args):
     p = e.plan(args.path, progress=_progress)
     if sys.stderr.isatty():
         print(file=sys.stderr)
-    if ref and not any(os.path.realpath(a["source_dir"]) in e.force for a in p["albums"]):
-        raise SystemExit(f"tagmender: --release: {args.path} is not one album's folder (give the album folder)")
+    if ref:
+        here = [a for a in p["albums"] if os.path.realpath(a["source_dir"]) in e.force]
+        if not here:
+            raise SystemExit(f"tagmender: --release: {args.path} is not one album's folder (give the album folder)")
+        if len(here) > 1:
+            raise SystemExit(f"tagmender: --release: {args.path} holds {len(here)} albums; choose the release "
+                             "for one of them in the app's preview")
     return prof, p
 
 

@@ -722,12 +722,17 @@ class Planner:
             removals += [x for x in (target.pop("~remove", None) or [])
                          if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
             # what the format has a place for, as it will hold it (an ID3v2.3 tag joins values ...)
-            target = tagio.stored(f, {k: v for k, v in target.items() if tagio.holds(f, k)})
+            raw = {k: v for k, v in target.items() if tagio.holds(f, k)}
+            target = tagio.stored(f, raw)
             changes, rows = diff_tags(before, target, p, conf if identified else 100.0, removals)
             fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
                   "diff": rows, "fingerprint": _fp(f)}
+            if changes and f.suffix.lower() == ".wav":       # (RIFF INFO: the values as they are, as Picard)
+                fe["riff"] = {k: raw.get(k) for k in changes if k in tagio.RIFF_INFO and changes[k] is not None}
             if op in ("copy", "move"):
-                merged = {**{k: v for k, v in before.items()}, **{k: v for k, v in changes.items() if v is not None}}
+                # (named from the values, not from how an ID3v2.3 tag joins them: "A & B", not "A_B")
+                merged = {**{k: v for k, v in before.items()},
+                          **{k: (raw.get(k) or v) for k, v in changes.items() if v is not None}}
                 for k, v in changes.items():
                     if v is None:
                         merged.pop(k, None)

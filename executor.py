@@ -1050,7 +1050,7 @@ class Executor:
                 src_st = os.stat(src)
                 _keep_owner(stage, src_st)
                 if changes:
-                    tagio.write(stage, changes)
+                    tagio.write(stage, changes, **({"riff": fe["riff"]} if fe.get("riff") else {}))
                 if embed:
                     _embed_all(stage, a, fe["dst"])
                 if self.preserve_times:
@@ -1109,7 +1109,8 @@ class Executor:
                 _copy_fsync(src, stage)
                 _keep_owner(stage, os.stat(src))
                 if changes:
-                    tagio.write(stage, changes)
+                    riff = (a["files"][j] if j < len(a.get("files") or []) else {}).get("riff")
+                    tagio.write(stage, changes, **({"riff": riff} if riff else {}))
                 if embed:
                     _embed_all(stage, a, str(dst))
                 if self.preserve_times:

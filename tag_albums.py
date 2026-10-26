@@ -249,7 +249,7 @@ def backup_tags(path, blob_dir):
         if f.tags.version[1] >= 4:
             f.tags.save(str(tmp), v2_version=4)
         else:                                 # (as the file has it: v2.3 frames, never mutagen's v2.4 view)
-            ID3(str(path), translate=False).save(str(tmp), v2_version=3)
+            ID3(str(path), translate=False).save(str(tmp), v2_version=3, v23_sep=None)
         rec["tags"] = {"id3": _blob(tmp.read_bytes(), blob_dir), "id3_version": f.tags.version[1]}
         tmp.unlink()
     elif isinstance(f, MP4):
@@ -297,7 +297,7 @@ def restore_tags(path, rec, blob_dir):
         v23 = tags.get("id3_version", 4) < 4
         id3 = ID3(str(tmp), translate=not v23)
         tmp.unlink()
-        id3.save(str(path), v2_version=3 if v23 else 4)
+        id3.save(str(path), v2_version=3 if v23 else 4, v23_sep=None)        # (several values as stored)
         return
     if rec.get("format") == "MP3" or str(path).lower().endswith(".mp3"):
         try:
@@ -318,7 +318,7 @@ def restore_tags(path, rec, blob_dir):
                 if "bytes" in v:
                     data = (Path(blob_dir) / v["bytes"]).read_bytes()
                     out.append(MP4Cover(data, v["fmt"]) if v["kind"] == "MP4Cover"
-                               else MP4FreeForm(data, v["fmt"] or 1))
+                               else MP4FreeForm(data, 1 if v["fmt"] is None else v["fmt"]))
                 elif "tuple" in v:
                     out.append(tuple(v["tuple"]))
                 else:

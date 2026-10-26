@@ -274,8 +274,18 @@ class Engine:
         return out
 
     # ---- identification ------------------------------------------------------
+    def forced_for(self, g: Group, alone: bool = True):
+        """The release the user chose for this album: force maps an album folder to a link (for
+        the folder's only album) or to {"ref": link, "files": [the album's files]} (one album of
+        a folder holding several)."""
+        v = (getattr(self, "force", None) or {}).get(os.path.realpath(str(g.folder)))
+        if isinstance(v, dict):
+            mine = {os.path.realpath(str(f)) for f in g.files}
+            return v.get("ref") if mine == {os.path.realpath(str(f)) for f in v.get("files") or []} else None
+        return v if v and alone else None
+
     def identify(self, g: Group) -> planmod.Proposal:
-        ref = (getattr(self, "force", None) or {}).get(os.path.realpath(str(g.folder)))
+        ref = self.forced_for(g, getattr(self, "_alone", True))
         prop = self._forced(g, ref) if ref else self._identify(g)
         # every audio file of the album as found (its second copies too: "01 a.flac" and
         # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)
@@ -751,6 +761,10 @@ class Engine:
 
     def proposals(self, path, progress=None, cancel=None):
         groups = self.albums_in(path)
+        per_folder = {}
+        for g in groups:
+            k = os.path.realpath(str(g.folder))
+            per_folder[k] = per_folder.get(k, 0) + 1
         out = []
         for i, g in enumerate(groups):
             if cancel and cancel():
@@ -758,6 +772,7 @@ class Engine:
             if progress:
                 progress(i, len(groups), str(g.folder))
             try:
+                self._alone = per_folder[os.path.realpath(str(g.folder))] == 1     # (a folder's only album?)
                 prop = self.identify(g)
                 self.add_artwork(prop)
                 self.apply_level(prop)

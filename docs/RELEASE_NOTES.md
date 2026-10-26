@@ -80,6 +80,17 @@ Qt writes them: a list of one item (one translation locale, one preferred countr
 preserved tag), quoted text, and Picard 2's names. The app frees what each background job
 used (a watched-folders window open for days grew).
 
+**Fourteenth review.** A release chosen with "Use another release…" applies to that album only,
+never to the folder's other albums or loose tracks (`--release` refuses a folder holding several).
+An ID3v2.3 MP3 copied or moved is named from its values ("A & B", not "A_B"); writing one field
+keeps the other frames' values as they were stored (several values are joined only for what is
+written, as Picard joins them); undo restores a v2.3 tag's several values exactly; two licence
+URLs go to TXXX:LICENSE, never a made-up WCOP. A performer credit an earlier TagMender wrote with
+a lower-case role ("hammond organ") is replaced, not doubled. WAV RIFF INFO gets the values as
+they are ("Rock, Pop", "2001-05"). Undo keeps an M4A freeform atom's type.
+Known limitation: when an artist's last album moves out of an artist folder, the folder's own
+art (fanart, logo, extrafanart/) stays there; only artist.jpg is made at the destination.
+
 **Desktop app**: the results of background work (preview, apply, watched folders ...) are now
 handled on the window's own thread; before, they ran on the worker's thread, which could leave
 the window showing stale numbers or crash it.

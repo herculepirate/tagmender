@@ -73,12 +73,19 @@ along) - and the tracks' picture follows a corrected one also with "embed only";
 the user's own beside TagMender's is never touched, and a download never replaces a picture
 made from the user's photo.
 
-**Undo, byte for byte (seventeenth review).** A job's backup now keeps an MP3's ID3v2 tag,
-a FLAC file's whole metadata and an M4A file's moov atom exactly as they were, and Ogg and Opus
-comments in their order and spelling with their padding: undo gives back the very same file
+**Undo, byte for byte (seventeenth and eighteenth reviews).** A job's backup now keeps an
+MP3's ID3v2 tag and a FLAC file's whole metadata exactly as they were (a FLAC file's is put
+back whole only when its stream info, seek table and cue sheet are as they were - a cue sheet
+added since stays), M4A tags with their room, and Ogg and Opus comments in their order and
+spelling with their padding: undo gives back the very same file
 (before, tags came back with frames reordered, Vorbis names in lower case, padding grown, an
 empty seek table or comment block moved or added). Jobs recorded by any earlier version are
-still recognised and undone as they were recorded. Mood and release date can be removed or
+still recognised and undone as they were recorded. Backup data is written safely and
+checked before use: damaged data is never written into a file. A fragmented MP4 (as some
+streaming downloads are) is skipped and left untouched: the tool TagMender writes MP4 tags
+with cannot keep its fragments' audio offsets. Known limits: an M4A whose tag had no room
+comes back 8 bytes larger (an empty "free" atom), and an Ogg file whose comments span several
+pages, or hold text that is not UTF-8, is put back with the same tags but not byte for byte. Mood and release date can be removed or
 changed in every kind of ID3 tag. Tagger scripts see every field of the release at the
 Basic level too, never a field the release deletes, keep the whitespace of the file's own
 fields, decide the album's edition, and a script that fails on a file stops only that album.

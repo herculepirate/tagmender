@@ -724,6 +724,20 @@ def _write_riff_info(path, changes, encoding="windows-1252"):
                 info.insert_chunk(cid, data)
 
 
+def fragmented(path) -> bool:
+    """A fragmented MP4 (moof boxes, as some streaming downloads are): mutagen cannot keep the
+    offsets of its fragments when its tags grow, so TagMender does not write to it."""
+    if Path(str(path)).suffix.lower() not in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp") and \
+            not _STAGE.match(Path(str(path)).name):
+        return False
+    import tag_albums
+    try:
+        with open(path, "rb") as fh:
+            return tag_albums._fragmented(fh)
+    except OSError:
+        return False
+
+
 def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then). fmt: file_options() - what else saving the file does, as
@@ -731,6 +745,9 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
     changes = _norm(changes)
     if not changes:
         return
+    if fragmented(path):
+        raise Unsupported(f"{Path(path).name} is a fragmented MP4: TagMender does not write to it "
+                          "(its audio would no longer play)")
     fmt = fmt or {}
     join = fmt.get("join") or "/"
     f = open_file(path)

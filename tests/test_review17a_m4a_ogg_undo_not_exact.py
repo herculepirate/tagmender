@@ -36,7 +36,24 @@ class M4aOggUndoNotExact(Base):
         self.assertEqual([f.read_bytes() for f in fs], orig)
 
     def test_m4a(self):
-        self.go([make(self.lib / "A" / "m" / f"0{n} t.m4a", 440 + 100 * n) for n in (1, 2)])
+        """M4A: the tags and their room as they were (the moov is not put back raw: its sample
+        offsets must follow the file as it is now - review 18A). An M4A whose tag had no "free"
+        atom comes back with an empty one (8 bytes): mutagen always writes it."""
+        import payload
+        import tag_albums as ta
+        import tempfile
+        fs = [make(self.lib / "A" / "m" / f"0{n} t.m4a", 440 + 100 * n) for n in (1, 2)]
+        d = tempfile.mkdtemp()
+        recs = [executor._rec_key(ta.backup_tags(f, d)) for f in fs]
+        sizes, digests = [f.stat().st_size for f in fs], [payload.digest(f) for f in fs]
+        prop = self.proposal(source_dir=str(fs[0].parent), files=[str(f) for f in fs],
+                             targets=[target(1, "First"), target(2, "Second")])
+        res = executor.Executor(pl.build([prop], self.profile())).run()
+        self.assertEqual(res["counts"], {"done": 1})
+        executor.undo(res["job"])
+        self.assertEqual([executor._rec_key(ta.backup_tags(f, d)) for f in fs], recs)
+        self.assertEqual([payload.digest(f) for f in fs], digests)
+        self.assertTrue(all(0 <= f.stat().st_size - n <= 8 for f, n in zip(fs, sizes)))
 
     def test_ogg_vorbis(self):
         self.go([make(self.lib / "A" / "o" / f"0{n} t.ogg", 440 + 100 * n) for n in (1, 2)])

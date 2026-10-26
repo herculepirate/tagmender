@@ -768,6 +768,9 @@ class Planner:
         for f in kept:
             try:
                 before = tagio.read(f)
+                if tagio.fragmented(f):
+                    raise tagio.Unsupported("a fragmented MP4: TagMender does not write to it (mutagen cannot "
+                                            "keep its fragments' offsets; its audio would no longer play)")
             except tagio.Unsupported as exc:
                 entry["skipped"].append({"file": str(f), "label": "Skipped", "rule": "unsupported_format",
                                          "matched": str(exc)})

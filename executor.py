@@ -657,6 +657,8 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
+    if tagio.fragmented(path):
+        raise tagio.Unsupported(f"{Path(path).name} is a fragmented MP4: no cover is written into it")
     f = tagio.mutagen_file(path)
     if isinstance(f, FLAC):
         pic = Picture()

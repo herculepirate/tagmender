@@ -64,7 +64,9 @@ that file as you made it and says so (`--force` puts it back anyway).
 ## 5. Then more
 
 Widen step by step: an artist, a letter, a whole library. A job that is interrupted (power cut,
-unmounted share) is put back as it was the next time TagMender starts (`tagmender recover`).
+unmounted share) can always be put back as it was: `tagmender recover`, or **Jobs > Recover
+interrupted jobs** in the app (the background watcher does it by itself). Until then TagMender
+refuses new jobs, so nothing is done on top of a half-finished one.
 If the library's drive is not mounted, TagMender waits; it never writes to the folder the drive
 should be mounted on.
 

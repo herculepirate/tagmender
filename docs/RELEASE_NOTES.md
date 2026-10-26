@@ -46,7 +46,13 @@ journal before every pass and job. Sixth review (tests/test_review6_cover.py): t
 step and the plan ask one question - does this folder hold another album's music? - so a picture
 in an artist folder is never an untagged single's cover, a folder that will never get a cover
 file is not looked up again on every run, and an album's untagged copies and its files in
-_old/2delete folders do not stop its small cover being replaced.
+_old/2delete folders do not stop its small cover being replaced. Seventh review
+(tests/test_review7_cover.py): a small Bonus/Extras/B-Sides folder (untagged, or by the same
+artist) does not make the album's folder shared, so its cover.jpg is its own; no cover is ever
+generated beside a real cover file; a loose single moved into a folder of its own gets a cover
+file; WavPack, APE and DSF albums (never embedded into) are not looked up on every run; the
+shared-folder question stops at the first other album (a loose track at a library root no
+longer reads the library); "01 - a.mp3" is a copy of "01 a.flac".
 
 **Watched folders file what is dropped into them.** Each watched folder belongs to a profile;
 an album folder or loose tracks dropped there are identified, tagged and moved (or copied)

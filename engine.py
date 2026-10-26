@@ -563,7 +563,9 @@ class Engine:
             import artwork
             folder, files, ours = self._art_view(prop)
             small = artwork.small_covers(folder, files, self.profile, ours=ours)
-            if not artwork.needs_art(folder, files, self.profile, small=small):
+            # (the album stays where it is judged: tagged in place, or a copy profile's copies)
+            stays = self.profile["operation"] == "in_place" or str(folder) != str(prop.source_dir)
+            if not artwork.needs_art(folder, files, self.profile, small=small, stays=stays):
                 return                        # every track and the folder have a cover: nothing to look for
             if self._art is None:
                 self._art = artwork.chain(self.profile, ex.STATE_DIR / "staging" / self.job, self.http,
@@ -574,7 +576,7 @@ class Engine:
             got = artwork.find_front(self._art, prop.source_dir, ids, (t.get("albumartist") or [""])[0],
                                      (t.get("album") or [""])[0], self.log,
                                      files=getattr(prop, "group_files", None) or prop.files, own=own,
-                                     keep=bool(small["owns"]))
+                                     keep=bool(small["owns"]) or artwork.folder_cover(folder) is not None)
             if got and got.get("front") and artwork.has_small(small):
                 # what the larger cover replaces (artwork.replace "larger_only"); backed up, undoable
                 got["replace"] = {"file": str(small["file"][0]) if small.get("file") else None,

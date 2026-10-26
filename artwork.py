@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import os
 import re
 import urllib.request
 from pathlib import Path
@@ -531,7 +532,7 @@ def artist_folder_has_photo(folder) -> bool:
         return False
 
 
-def needs_art(folder, files, profile, small=None) -> str:
+def needs_art(folder, files, profile, small=None, stays=True) -> str:
     """Why the album needs a cover ("" when it does not): a track without an embedded front
     (when covers are embedded), or no picture in its folder (when cover files are written),
     or a cover smaller than artwork.min_px (artwork.replace "larger_only")."""
@@ -548,13 +549,18 @@ def needs_art(folder, files, profile, small=None) -> str:
         return (f"{Path(t).name} has pictures but no front cover" if not w else
                 f"the cover in {Path(t).name} is {w}x{h}, smaller than {art['min_px']} px")
     if art.get("embed_front", True):
+        from plan import EMBEDDABLE
         for f in files:
+            if Path(f).suffix.lower() not in EMBEDDABLE:
+                continue                          # (WavPack, APE, DSF ...: a cover is never embedded there)
             try:
                 if not tagio.read(f).get("~pictures"):
                     return f"{Path(f).name} has no cover"
             except Exception:
                 return f"{Path(f).name} could not be read"
-    if art.get("files", True) and not small.get("shared"):     # (a shared folder never gets one)
+    # a shared folder never gets a cover file - while the album stays there; moved or copied
+    # into a folder of its own, it gets one
+    if art.get("files", True) and not (small.get("shared") and stays):
         try:
             if not any(x.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp")
                        for d in _album_dirs(folder) for x in d.iterdir() if x.is_file()):
@@ -593,8 +599,10 @@ def _is_disc(d: Path) -> bool:
 
 
 def _bare_stem(p: Path) -> str:
-    """"02 b (1)" and "02 b" alike: a duplicate's name."""
-    return re.sub(r"\s*\(\d+\)$", "", p.stem).casefold()
+    """"02 b (1)", "02 - b", "02. b" and "02 b" alike: a duplicate's (or another format's) name."""
+    st = re.sub(r"\s*\(\d+\)$", "", p.stem)
+    st = re.sub(r"^(\d+)\s*[-._]+\s*", r"\1 ", st)
+    return re.sub(r"\s+", " ", st).strip().casefold()
 
 
 def _nobodys(part: str) -> bool:
@@ -603,45 +611,58 @@ def _nobodys(part: str) -> bool:
     return part.startswith((".", "@", "_")) or part == "2delete"
 
 
+_BONUS = re.compile(r"^(bonus|extras?|b[- ]?sides?|outtakes|demos?|rarities|unreleased|instrumentals?)\b",
+                    re.IGNORECASE)
+
+
 def _other_music(folder: Path, files) -> bool:
     """folder (or any folder below it) holds music that is not this album's - so a picture
     there is no one album's cover. files: every file of the album (as grouped, and where the
     plan puts them). The album's own: copies of its tracks ("02 b (1).flac", "01 - a.mp3"
     beside "01 a.flac"), tracks tagged as the same album, its untagged disc folders, and - for
-    an untagged album of several tracks - an untagged bonus folder smaller than the album
-    itself. A loose single beside the artist's album folders is not an album with bonus
-    folders: that folder's picture is the artist's."""
+    an album of several tracks - a bonus folder ("Bonus", "Extras", "B-Sides" ...) smaller
+    than the album, untagged or by the same artist. A loose single beside the artist's album
+    folders is not an album with bonus folders: that folder's picture is the artist's.
+    Answers as soon as it knows (a library root is not read to the end); a folder that
+    cannot be read counts as holding other music."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return False                        # (a folder the plan is yet to make holds nothing)
     mine = {str(f) for f in files}
     ids = {_album_id(f) for f in files} if files else set()
     untagged = bool(files) and ids <= {("", "")}      # the album itself carries no tags
     ids.discard(("", ""))                   # (untagged is no album: never "the same" as this one)
+    whos = {w for _t, w in ids}
     stems = {_bare_stem(Path(f)) for f in files}
-    top = sum(1 for f in files if Path(f).parent == Path(folder))
-    try:
-        found = [p for p in folder.rglob("*")
-                 if p.suffix.lower() in ex.AUDIO_EXT and not any(_nobodys(x) for x in p.relative_to(folder).parts)
-                 and str(p) not in mine and p.is_file()]
-    except OSError:
-        return False
-    per_sub = {}
-    for p in found:
-        rel = p.relative_to(folder).parts
-        if len(rel) > 1:
-            per_sub[rel[0]] = per_sub.get(rel[0], 0) + 1
-    for p in found:
-        rel = p.relative_to(folder).parts
-        aid = _album_id(p)
-        if aid in ids:
-            continue                                  # the same album (a copy, a bonus track)
-        if _bare_stem(p) in stems and aid in (("", ""), *ids):
-            continue                                  # a copy of one of its own tracks
-        if aid == ("", "") and len(rel) > 1:
-            if _is_disc(folder / rel[0]):
+    top = sum(1 for f in files if Path(f).parent == folder)
+    counts = {}
+    trouble = []
+    for dirpath, dirs, names in os.walk(folder, onerror=trouble.append):
+        d = Path(dirpath)
+        rel_dir = d.relative_to(folder).parts
+        dirs[:] = sorted(x for x in dirs if not _nobodys(x))
+        for n in sorted(names):
+            p = d / n
+            if p.suffix.lower() not in ex.AUDIO_EXT or n.startswith(".") or str(p) in mine:
+                continue
+            aid = _album_id(p)
+            if aid in ids:
+                continue                              # the same album (a copy, a bonus track)
+            if _bare_stem(p) in stems and aid in (("", ""), *ids):
+                continue                              # a copy of one of its own tracks
+            if not rel_dir:
+                return True                           # another album's track beside this one
+            sub = rel_dir[0]
+            if aid == ("", "") and _is_disc(folder / sub):
                 continue                              # its untagged disc folder
-            if untagged and top >= 2 and per_sub[rel[0]] < top:
-                continue                              # an untagged album's (smaller) untagged bonus folder
-        return True
-    return False
+            bonus_like = _BONUS.match(sub) is not None
+            ok = top >= 2 and bonus_like and ((untagged and aid == ("", "")) or (aid[1] and aid[1] in whos))
+            if not ok:
+                return True
+            counts[sub] = counts.get(sub, 0) + 1
+            if counts[sub] >= top:
+                return True                           # (a "bonus" folder as big as the album is not one)
+    return bool(trouble)
 
 
 class CoverArtArchive:

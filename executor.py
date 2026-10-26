@@ -493,6 +493,42 @@ def _copy_fsync(src: Path, dst: Path):
     shutil.copystat(src, dst)
 
 
+def staged_write(path, edit, what="tags"):
+    """Change a file through a staging copy beside it (edit(stage) writes into the copy): the
+    copy takes the file's place - with its owner, and only when its audio is the same - in
+    one rename, so a crash never leaves a half-written track. Used by every writer outside a
+    job (enrich, CoverUp batch, their undo)."""
+    path = Path(path)
+    st = os.stat(path)
+    stage = _stage_name(path, "edit")
+    try:
+        _copy_fsync(path, stage)
+        before = payload.digest(path)
+        edit(stage)
+        if before is not None and payload.digest(stage) != before:
+            raise StepError(f"{path.name}: audio data differed after writing {what}; left as it is")
+        with open(stage, "rb+") as fh:
+            os.fsync(fh.fileno())
+        _keep_owner(stage, st)
+        os.replace(stage, path)
+    except BaseException:
+        stage.unlink(missing_ok=True)
+        raise
+    _fsync_dir(path.parent)
+
+
+def write_json_durably(path, data):
+    """A JSON record written whole or not at all (temp file, fsync, rename)."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    _fsync_dir(path.parent)
+
+
 def _stage_name(dst: Path, job) -> Path:
     """A hidden staging file next to dst. Short whatever dst's name is: a name near the
     filesystem's 255-byte limit would not fit with a prefix and suffix added."""
@@ -2300,6 +2336,11 @@ def prune(days: int) -> list[str]:
             with job_lock(d.name, active=False):   # (backups only: no music changes)
                 ev = Journal(d).read()
                 if not ev or not any(e.get("ev") in ("end", "recovered", "undone") for e in ev):
+                    continue
+                # (an undo begun and not finished whole - cut short, or with problems: its album
+                # is half put back, and these backups are what finishes it)
+                last_begin = max((i for i, e in enumerate(ev) if e.get("ev") == "undo_begin"), default=None)
+                if last_begin is not None and not any(e.get("ev") == "undone" for e in ev[last_begin:]):
                     continue
                 if ev[-1]["t"] < cutoff and not (d / "PRUNED").exists():
                     for sub in ("blobs", "files", "companions"):

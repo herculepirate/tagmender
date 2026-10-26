@@ -82,13 +82,19 @@ def get(path, name):
 
 def put(path, values):
     """Write {VORBIS_NAME: value or [values]} in the file's own format."""
-    from mutagen.id3 import ID3, TXXX, TCON, USLT
-    from mutagen.mp4 import MP4, MP4FreeForm
     import tagio
     if tagio.fragmented(path):
         raise tagio.Unsupported(f"{Path(path).name} is a fragmented MP4: TagMender does not write to it "
                                 "(its audio would no longer play)")
-    f = mutagen.File(path)
+    import executor
+    executor.staged_write(path, lambda stage: _put(stage, values))
+
+
+def _put(path, values):
+    from mutagen.id3 import ID3, TXXX, TCON, USLT
+    from mutagen.mp4 import MP4, MP4FreeForm
+    import tagio
+    f = tagio.mutagen_file(path)                      # (a staging copy: by its content and inner name)
     if f.tags is None:
         f.add_tags()
     vals = {k: (v if isinstance(v, list) else [v]) for k, v in values.items() if v not in (None, "", [])}
@@ -218,13 +224,20 @@ def remember_instrumental(artist):
     (stored in rules.json as "no_lyrics_artists"; delete an entry to look again)."""
     if not artist:
         return
-    rules = _rules()
+    path = CONFIG / "rules.json"
+    try:
+        rules = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError):
+        return                            # (a file that cannot be read is never written over)
+    if not isinstance(rules, dict):
+        return
     names = rules.setdefault("no_lyrics_artists", [])
     if mc.fold(artist) not in {mc.fold(n) for n in names}:
         names.append(artist)
         try:
             CONFIG.mkdir(parents=True, exist_ok=True)
-            (CONFIG / "rules.json").write_text(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")
+            import executor
+            executor.write_json_durably(path, rules)
         except OSError:
             pass
 
@@ -423,14 +436,20 @@ def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
     if args.apply and changes:
         recs = [{"path": str(p), "new_path": str(p), "key": "", "backup": ta.backup_tags(p, blob_dir)}
                 for p in changes]
-        journal.append({"album": str(folder), "mbid": None, "files": recs, "extras": [], "moves": [],
-                        "created": [str(c) for c, _t in created]})
-        with open(run_dir / "journal.json", "w") as fh:
-            json.dump(journal, fh)
+        entry = {"album": str(folder), "mbid": None, "files": recs, "extras": [], "moves": [],
+                 "created": [str(c) for c, _t in created], "created_sha": {}}
+        journal.append(entry)
+        import executor
+        executor.write_json_durably(run_dir / "journal.json", journal)     # (the backups, before any write)
         for p, tags in changes.items():
             put(p, tags)
+            for r in recs:                  # (the file as written: undo leaves a later edit alone)
+                if r["path"] == str(p):
+                    r["after_sig"] = executor._tags_sig(p)
         for c, text in created:
             c.write_text(text, encoding="utf-8")
+            entry["created_sha"][str(c)] = hashlib.sha256(c.read_bytes()).hexdigest()
+        executor.write_json_durably(run_dir / "journal.json", journal)
 
 
 def main(argv=None):
@@ -444,6 +463,8 @@ def main(argv=None):
     ap.add_argument("--process-anyway", action="store_true",
                     help="also albums an Ignore/Skip rule excludes (this run only)")
     ap.add_argument("--undo", help="restore a run")
+    ap.add_argument("--force", action="store_true",
+                    help="with --undo: put back files edited after the run too")
     ap.add_argument("--only", help="only folders whose path contains this text")
     ap.add_argument("--out-dir", default="~/Downloads/tagging")
     ap.add_argument("--cache-db", default="~/Downloads/matching/match_state.db")
@@ -453,9 +474,18 @@ def main(argv=None):
     if args.undo:
         journal = json.loads((out_dir / f"run-{args.undo}" / "journal.json").read_text())
         for e in journal:
+            shas = e.get("created_sha") or {}
             for created in e.get("created", []):
-                Path(created).unlink(missing_ok=True)
-        return ta.undo(out_dir, args.undo)
+                c = Path(created)
+                if not c.exists():
+                    continue
+                if not args.force and (created not in shas or
+                                       hashlib.sha256(c.read_bytes()).hexdigest() != shas[created]):
+                    print(f"  {c} was changed after the run (or not recorded); left as it is "
+                          f"(--force deletes it anyway)")
+                    continue
+                c.unlink()
+        return ta.undo(out_dir, args.undo, force=args.force)
     if args.navidrome and not args.roots:
         print("Navidrome rescan " + ("requested" if navidrome_rescan() else "failed (see navidrome.json)"))
         return 0

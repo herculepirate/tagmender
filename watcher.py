@@ -216,13 +216,15 @@ class Watcher:
         if st.ignored_item(folder) and \
                 st.still_ignored(folder, ex.signature(ex.audio_files(folder)), ex.rules_hash(rules)):
             return False, "ignored (unchanged)"
-        if not row and key != planmod.db_text(folder):
-            # (an album undone while it was the folder's only music is remembered by the folder;
-            # music dropped beside it since makes its key the folder and its files)
-            plain = db.execute("SELECT signature, status, attempts, next_try, ts FROM processed WHERE folder=?",
-                               (planmod.db_text(folder),)).fetchone()
-            if plain and plain[1] == "undone" and shape(folder, files) in (plain[0] or "").split("|"):
-                return False, "undone"
+        if not row:
+            # (an album undone while it was the folder's only music is remembered by the folder,
+            # one undone beside other music by the folder and its files: music dropped beside it
+            # since, or taken away, changes which - the undo still holds)
+            alts = {planmod.db_text(folder)} | ({_files_key(folder, files)} if files else set())
+            for alt in sorted(alts - {key}):
+                other = db.execute("SELECT signature, status FROM processed WHERE folder=?", (alt,)).fetchone()
+                if other and other[1] == "undone" and shape(folder, files) in (other[0] or "").split("|"):
+                    return False, "undone"
         if not row:
             return True, "new"
         signature, status, attempts, next_try, ts = row

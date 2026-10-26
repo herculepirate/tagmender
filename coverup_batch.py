@@ -449,29 +449,69 @@ def local_typed(res, art, local_min):
 # --------------------------------------------------------------------------
 # Embedding the front (mutagen), with a backup of what was there
 # --------------------------------------------------------------------------
-def embed_front(files, jpeg, w, h, desc, backup):
-    """Replace embedded front pictures with `jpeg` in every file. Previous pictures are
-    recorded in `backup` (dict path -> list) so undo can put them back."""
-    import mutagen
-    from mutagen.flac import FLAC, Picture
-    from mutagen.id3 import APIC, ID3
-    from mutagen.mp4 import MP4, MP4Cover
+def embed_front(files, jpeg, w, h, desc, backup, blob_dir=None, persist=None):
+    """Replace embedded front pictures with `jpeg` in every file. The file's tags as they
+    were are recorded in `backup` (path -> {"rec": a tag backup}, with blob_dir; else the
+    pictures, as older batches kept them) - and persist() saves that record - before the
+    file is written, through a staging copy: a crash never loses a cover or half-writes a track."""
+    import executor
+    import tag_albums as ta
     done, skipped = 0, []
     import tagio
+    blob_dir = blob_dir if blob_dir is not None else _default_blobs()
     for p in files:
         if tagio.fragmented(p):
             skipped.append(f"{p.name}: a fragmented MP4 (not written to: its audio would no longer play)")
             continue
         try:
-            f = mutagen.File(p)
+            f = tagio.mutagen_file(p)
         except Exception as exc:
             skipped.append(f"{p.name}: {exc}")
             continue
         if f is None:
             skipped.append(f"{p.name}: unreadable")
             continue
-        _ids, before = read_ids_and_art(p)
-        backup[str(p)] = [(t, m, d, base64.b64encode(data).decode()) for t, m, d, data in before]
+        if blob_dir is not None:
+            Path(blob_dir).mkdir(parents=True, exist_ok=True)
+            backup[str(p)] = {"rec": ta.backup_tags(p, blob_dir)}
+        else:
+            _ids, before = read_ids_and_art(p)
+            backup[str(p)] = [(t, m, d, base64.b64encode(data).decode()) for t, m, d, data in before]
+        if persist is not None:
+            persist()                                  # (the backup on disk before the file changes)
+        try:
+            ok = []
+            executor.staged_write(p, lambda stage: ok.append(_embed_one(stage, jpeg, w, h, desc)), "a cover")
+        except Exception as exc:
+            skipped.append(f"{p.name}: {exc}")
+            backup.pop(str(p), None)
+            continue
+        if not ok or not ok[0]:
+            skipped.append(f"{p.name}: format not supported for embedding")
+            backup.pop(str(p), None)
+            continue
+        if isinstance(backup.get(str(p)), dict):        # (as written: undo leaves a later edit alone)
+            backup[str(p)].update(after_sig=executor._tags_sig(p), after_pics=executor._pics_sig(p))
+        if persist is not None:
+            persist()
+        done += 1
+    return done, skipped
+
+
+def _default_blobs() -> Path:
+    """Where a tag backup's data is kept when the caller names no batch folder."""
+    import exclusions as ex
+    return ex.STATE_DIR / "coverup-blobs"
+
+
+def _embed_one(p, jpeg, w, h, desc) -> bool:
+    """The front cover of one file (a staging copy) replaced by jpeg; False: no place for it."""
+    from mutagen.flac import FLAC, Picture
+    from mutagen.id3 import APIC, ID3
+    from mutagen.mp4 import MP4, MP4Cover
+    import tagio
+    f = tagio.mutagen_file(p)
+    if True:
         pic = Picture()
         pic.type, pic.mime, pic.desc, pic.data, pic.width, pic.height, pic.depth = 3, "image/jpeg", desc, jpeg, w, h, 24
         if isinstance(f, FLAC):
@@ -498,23 +538,40 @@ def embed_front(files, jpeg, w, h, desc, backup):
                     pass
             f.tags["metadata_block_picture"] = existing + [base64.b64encode(pic.write()).decode()]
         else:
-            skipped.append(f"{p.name}: format not supported for embedding")
-            backup.pop(str(p), None)
-            continue
-        f.save()
-        done += 1
-    return done, skipped
+            return False
+        if isinstance(f.tags, ID3) or (f.tags is not None and f.tags.__class__.__module__.startswith("mutagen.id3")):
+            tagio.save_id3(f, f.tags)                  # (in the tag's own version: a v2.3 tag stays v2.3)
+        else:
+            f.save()
+        return True
 
 
-def restore_embedded(path, pics):
+def restore_embedded(path, pics, blob_dir=None, force=False):
+    """Put a file's tags back as the batch found them: a tag backup restored whole (unless
+    the file was edited after the batch, without force), or older batches' pictures."""
+    import executor
+    import tag_albums as ta
+    import tagio
+    if isinstance(pics, dict):
+        if tagio.fragmented(path):
+            raise ValueError(f"{Path(path).name} is a fragmented MP4: not written to")
+        if not force and pics.get("after_sig") and not ta.same_as_backup(path, pics["rec"]) and \
+                (not executor._sig_is(path, pics["after_sig"]) or
+                 (pics.get("after_pics") and executor._pics_sig(path) != pics["after_pics"])):
+            raise ValueError("edited after the batch; left as it is (--force puts it back)")
+        blobs = blob_dir if blob_dir is not None and Path(blob_dir).is_dir() else _default_blobs()
+        executor.staged_write(path, lambda stage: ta.restore_tags(stage, pics["rec"], blobs))
+        return
+    executor.staged_write(path, lambda stage: _restore_pictures(stage, pics))
+
+
+def _restore_pictures(path, pics):
     import mutagen
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
     from mutagen.mp4 import MP4, MP4Cover
     import tagio
-    if tagio.fragmented(path):
-        raise ValueError(f"{Path(path).name} is a fragmented MP4: not written to")
-    f = mutagen.File(path)
+    f = tagio.mutagen_file(path)
     raw = [(t, m, d, base64.b64decode(b)) for t, m, d, b in pics]
     if isinstance(f, FLAC):
         f.clear_pictures()
@@ -542,7 +599,10 @@ def restore_embedded(path, pics):
             f.tags["metadata_block_picture"] = out
         elif "metadata_block_picture" in f.tags:
             del f.tags["metadata_block_picture"]
-    f.save()
+    if f.tags is not None and (isinstance(f.tags, ID3) or f.tags.__class__.__module__.startswith("mutagen.id3")):
+        tagio.save_id3(f, f.tags)                      # (in the tag's own version)
+    else:
+        f.save()
 
 
 # --------------------------------------------------------------------------
@@ -947,9 +1007,8 @@ def process_album(album_dir, ctx, args):
             emb_note = f"kept embedded {fe[0]}x{fe[1]} (as large)"
         else:
             desc = f"CoverUp: {c.provider}" if s["record_source_in_comment"] else ""
-            backup = {}
-            n, skipped = embed_front(info["files"], data, w, h, desc, backup)
-            ctx["embed_backup"].update(backup)
+            n, skipped = embed_front(info["files"], data, w, h, desc, ctx["embed_backup"],
+                                     blob_dir=ctx.get("blob_dir"), persist=ctx.get("save_record"))
             emb_note = f"embedded {w}x{h} in {n} file(s)" + (f"; {len(skipped)} skipped" if skipped else "")
     for row, a in zip(out["rows"], actions):
         row["action"] = "applied" if a["cand"].data is not None else "download failed"
@@ -993,7 +1052,7 @@ def album_dirs(args):
     return out
 
 
-def undo(batch_id, out_dir):
+def undo(batch_id, out_dir, force=False):
     from coverup.apply import files as F
     state = Path(out_dir) / f"applied_{batch_id}.json"
     if not state.exists():
@@ -1003,9 +1062,10 @@ def undo(batch_id, out_dir):
     for folder in rec.get("folders", []):
         restored_files += F.undo_batch(folder, batch_id)
     n = 0
+    blob_dir = Path(out_dir) / f"blobs_{batch_id}"
     for path, pics in rec.get("embedded", {}).items():
         try:
-            restore_embedded(path, pics)
+            restore_embedded(path, pics, blob_dir=blob_dir, force=force)
             n += 1
         except Exception as exc:
             print(f"  could not restore {path}: {exc}")
@@ -1021,6 +1081,7 @@ def main():
     ap.add_argument("--process-anyway", action="store_true",
                     help="also albums an Ignore/Skip rule excludes (this run only)")
     ap.add_argument("--undo", help="undo an applied batch by its id")
+    ap.add_argument("--force", action="store_true", help="with --undo: also files edited after the batch")
     ap.add_argument("--local-min", type=int, default=1000, help="local image short side for 'local first'")
     ap.add_argument("--upscale-to", type=int, default=500,
                     help="enlarge chosen images smaller than this (px); 0 = off (default 500)")
@@ -1052,7 +1113,7 @@ def main():
     out_dir = Path(args.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.undo:
-        undo(args.undo, out_dir)
+        undo(args.undo, out_dir, force=args.force)
         return
 
     import match_albums as ma
@@ -1092,13 +1153,15 @@ def main():
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s_search, s_write = upscale_settings(s, args.upscale_to, args.low_res_floor)
     ctx = {"ma": ma, "mc": mc, "s": s_search, "s_write": s_write, "upscale_to": args.upscale_to, "http": http, "log": log, "match_db": match_db, "batch": batch,
-           "touched_folders": set(), "embed_backup": {}}
+           "touched_folders": set(), "embed_backup": {}, "blob_dir": out_dir / f"blobs_{batch}"}
     record = out_dir / f"applied_{batch}.json"
 
     def save_record():
-        if args.apply:
-            record.write_text(json.dumps({"batch": batch, "folders": sorted(ctx["touched_folders"]),
-                                          "embedded": ctx["embed_backup"]}))
+        if args.apply:                         # (whole or not at all: never a half-written record)
+            import executor
+            executor.write_json_durably(record, {"batch": batch, "folders": sorted(ctx["touched_folders"]),
+                                                 "embedded": ctx["embed_backup"]})
+    ctx["save_record"] = save_record
     counts = {}
     try:
         for i, d in enumerate(todo, 1):

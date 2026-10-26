@@ -90,6 +90,15 @@ apply the same plan, which a job never runs twice. Turning "Also save it as arti
 your own artist photo there (for a moved album, the one in the folder it came from), not a
 download.
 
+**The tools beside the jobs (twenty-seventh review).** ReplayGain and lyrics (`enrich.py`)
+and CoverUp's batch covers are written through a staging copy, as jobs are: a crash or power
+cut never leaves a track half rewritten. CoverUp's batch keeps each track's tags before it
+writes, on disk: a crash loses no cover, and its undo puts the track back byte for byte (an
+ID3v2.3 tag stays v2.3). Their undo leaves a track or .lrc edited since alone and says so
+(--force puts it back anyway). An exclusions.json that is not valid JSON (a stray comma) is
+reported, never replaced with the default rules. `jobs prune` keeps the backups of a job whose
+undo was cut short or had problems.
+
 **Watched folders and Picard.ini (twenty-sixth review).** "Process anyway" in the app lets
 the album's own files through, never the folder they lie in (for loose tracks in a watched
 folder, that switched the rules off for everything dropped there later); an album you undid

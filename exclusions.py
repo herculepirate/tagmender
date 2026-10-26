@@ -130,10 +130,20 @@ def _validate(node, rid):
 
 
 def _read_json(path):
+    """The file's JSON; None when there is no such file. A file that is there but cannot be
+    read as JSON (a hand edit with a stray comma) is an error - never taken for a missing
+    one and overwritten with the defaults (the user's rules would be lost)."""
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
         return None
+    except OSError as exc:
+        raise RuleError(f"{path} cannot be read: {exc}") from None
+    try:
+        return json.loads(text)
+    except ValueError as exc:
+        raise RuleError(f"{path} is not valid JSON ({exc}); fix it, or move it away to start again "
+                        "with the default rules - it is left as it is") from None
 
 
 def rules_file():
@@ -158,9 +168,13 @@ def _raw_rules(scope="global", create_defaults=True):
 
 
 def _write(path, data):
+    """Whole or not at all: a temp file of this process, synced, renamed over path."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, path)
 
 

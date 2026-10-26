@@ -1598,7 +1598,7 @@ def tidy_run(out_dir, run_id, root=None):
     return 0
 
 
-def undo(out_dir, run_id):
+def undo(out_dir, run_id, force=False):
     run_dir = out_dir / f"run-{run_id}"
     journal = json.loads((run_dir / "journal.json").read_text())
     blob_dir = run_dir / "blobs"
@@ -1619,7 +1619,14 @@ def undo(out_dir, run_id):
                 print(f"  not found: {cur}")
                 continue
             try:
-                restore_tags(cur, rec["backup"], blob_dir)
+                import executor
+                if rec.get("after_sig") and not force and not executor._sig_is(cur, rec["after_sig"]) and \
+                        not same_as_backup(cur, rec["backup"]):
+                    failed += 1
+                    print(f"  {cur}: its tags were edited after the run; left as they are (--force puts them back)")
+                    continue
+                # (through a staging copy: a crash never leaves a half-written track)
+                executor.staged_write(cur, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
                 old = Path(rec["path"])
                 if cur != old:
                     old.parent.mkdir(parents=True, exist_ok=True)

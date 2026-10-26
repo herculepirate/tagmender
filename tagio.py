@@ -695,9 +695,12 @@ def canonical(path, k: str) -> str:
     if not (k.startswith("comment:") or k.startswith("lyrics:")):
         return k
     try:
-        if family(open_file(path)) != "id3":
-            return k
+        fam = family(open_file(path))
     except Unsupported:
+        return k
+    if fam in ("vorbis", "mp4", "asf") and k.startswith("lyrics:"):
+        return "lyrics"                              # (one lyrics field there: Picard removes it)
+    if fam != "id3":
         return k
     base = k.split(":", 1)[0]
     dflt = "eng" if base == "comment" else "xxx"
@@ -723,6 +726,10 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
         v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(f.tags) == 3)
     except Unsupported:
         return out
+    if fam == "id3":                                 # (one USLT per language and description: the last value)
+        for k in [k for k in out if k == "lyrics" or k.startswith("lyrics:")]:
+            if isinstance(out[k], list) and len(out[k]) > 1:
+                out[k] = out[k][-1:]
     if fam == "id3":                                 # (a COMM/USLT frame's name as Picard 3 reads it back)
         for k in [k for k in out if (k.startswith("comment:") or k.startswith("lyrics:"))]:
             base = k.split(":", 1)[0]
@@ -972,10 +979,16 @@ def _set_id3(f, tags, k, vals):
         if vals:
             tags.add(UFID(owner=UFID_OWNER, data=vals[0].encode("ascii")))
         return
-    if is_comment(k) or k == "itunes_cddb_1":    # (COMM: Picard's comment, comment::desc, comment:deu ...)
-        lang, desc = ("eng", "iTunes_CDDB_1") if k == "itunes_cddb_1" else \
-            (_lang_desc(k) if ":" in k else ("eng", ""))
-        for key in [x for x in tags if x.startswith("COMM:") and tags[x].desc == desc and tags[x].lang == lang]:
+    if k == "itunes_cddb_1":                         # (Picard: a COMM of its own, Latin-1; removed:
+        tags.delall("TXXX:itunes_cddb_1")           # only a TXXX of that name goes)
+        if vals:
+            tags.delall("COMM:iTunes_CDDB_1:eng")
+            tags.add(COMM(encoding=0, lang="eng", desc="iTunes_CDDB_1", text=vals))
+        return
+    if is_comment(k):                               # (COMM: Picard's comment, comment::desc, comment:deu ...)
+        lang, desc = _lang_desc(k) if ":" in k else ("eng", "")
+        for key in [x for x in tags if x.startswith("COMM:") and tags[x].desc == desc
+                    and str(tags[x].lang).lower() == lang.lower()]:
             del tags[key]
         if vals and desc.lower()[:4] == "itun":      # (iTunes' own: Latin-1, NUL-ended, as Picard)
             tags.add(COMM(encoding=0, lang="eng", desc=desc, text=[v + "\x00" for v in vals]))
@@ -984,10 +997,11 @@ def _set_id3(f, tags, k, vals):
         return
     if k == "lyrics" or k.startswith("lyrics:"):
         lang, desc = _lang_desc(k, "xxx") if ":" in k else ("xxx", "")
-        for key in [x for x in tags if x.startswith("USLT:") and tags[x].desc == desc and tags[x].lang == lang]:
+        for key in [x for x in tags if x.startswith("USLT:") and tags[x].desc == desc
+                    and str(tags[x].lang).lower() == lang.lower()]:
             del tags[key]
-        if vals:
-            tags.add(USLT(encoding=3, lang=lang, desc=desc, text="\n".join(vals)))
+        if vals:                                    # (one frame per language and description: Picard
+            tags.add(USLT(encoding=3, lang=lang, desc=desc, text=vals[-1]))   # keeps the last value)
         return
     if k.startswith("~v23:"):                       # mood, releasedate in a v2.3 tag (Picard)
         name = {"mood": "mood", "releasedate": "RELEASEDATE"}[k[5:]]
@@ -1071,7 +1085,8 @@ def _set_performers(fam, tags, credits, base="performer"):
     key = base.upper() if fam == "vorbis" else next((x for x in tags.keys() if x.lower() == base), base.title())
     old = list(tags[key]) if key in tags else []
     roles = {_role(k).lower() for k in credits}
-    keep = [v for v in old if (_role(_split_performer(v, base)[0]).lower() not in roles)]
+    split = _split_ape_comment if (base, fam) == ("comment", "apev2") else (lambda v: _split_performer(v, base))
+    keep = [v for v in old if (_role(split(v)[0]).lower() not in roles)]
     new = list(keep)
     for k, vals in credits.items():
         role = _role(k)

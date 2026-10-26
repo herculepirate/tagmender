@@ -804,7 +804,8 @@ class Planner:
             # what Picard would delete (compilation on a release not by Various Artists, what a
             # tagger script $delete-s) - never a field the profile preserves or locks
             removals += [tagio.canonical(f, x) for x in (target.pop("~remove", None) or [])
-                         if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")]
+                         if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")
+                         and x != "itunes_cddb_1"]      # (Picard's $delete leaves iTunes' own COMM there)
             # Picard's hidden variables (%_multiartist%, what a tagger script $set): for the file
             # naming script only, never written
             hidden = {"_" + k[1:]: v for k, v in {**tagio.file_vars(f), **target}.items()

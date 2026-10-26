@@ -274,7 +274,8 @@ class Engine:
 
     # ---- identification ------------------------------------------------------
     def identify(self, g: Group) -> planmod.Proposal:
-        prop = self._identify(g)
+        ref = (getattr(self, "force", None) or {}).get(os.path.realpath(str(g.folder)))
+        prop = self._forced(g, ref) if ref else self._identify(g)
         # every audio file of the album as found (its second copies too: "01 a.flac" and
         # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)
         prop.group_files = [str(f) for f in g.files]
@@ -342,6 +343,55 @@ class Engine:
             if p:
                 return p
         return self._unresolved(out, files, base, errors)
+
+    def _forced(self, g: Group, ref: str) -> planmod.Proposal:
+        """The release the user chose for this album (Picard's "Other versions", or a pasted
+        MusicBrainz or Discogs link): no search; the matcher's score of it is shown, and the
+        tags are written as for any match - when its tracks line up with the files."""
+        kind, rid = parse_release_ref(ref)
+        outside = self._outside(g)
+        album = ma.read_album(g.folder, g.folder.parent.name, g.folder.name, exclude={str(x) for x in outside})
+        mine = {str(f) for f in g.files}
+        files = [t["path"] for t in album["tracks"] if t.get("path") in mine] or [str(f) for f in g.files]
+        base = dict(source_dir=str(g.folder), files=files, provider_errors={})
+        if kind is None:
+            return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
+                                    reason=f"not a MusicBrainz or Discogs release: {ref}")
+        try:
+            if kind == "mb":
+                det = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                         f"?inc=recordings+artist-credits+labels+url-rels+release-groups&fmt=json", "mb")
+                cand = ma.mb_candidate(det) if det else None
+            else:
+                det = self.http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+                cand = ma.discogs_candidate(det, self.dm) if det and self.dm is not None else None
+        except ma.ProviderUnavailable as exc:
+            return planmod.Proposal(**base, status="unresolved", reason_codes=[exc.kind if exc.kind == "rate_limited"
+                                                                               else "other"],
+                                    reason=f"the release you chose could not be fetched: {exc}")
+        if not cand:
+            return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
+                                    reason=f"the release you chose was not found: {ref}")
+        sc = mc.score_candidate(album, cand, self.cfg)
+        best = dict(cand, confidence=100.0, notes=list(sc.get("notes") or []))
+        if kind == "mb":
+            best["mb_id"] = cand["id"]
+        else:
+            best["discogs_id"] = cand["id"]
+        why = [f"the release you chose ({ref}); the matcher scores it {sc.get('confidence', 0):.0f}"]
+        if not sc.get("tracks_ok"):
+            why.append("its track list does not fit the files well: check the preview")
+        out = {"status": "auto", "best": best, "why": why, "margin": None}
+        try:
+            prop = self._identified(out, album, files, base)
+        except ma.ProviderUnavailable as exc:
+            return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
+                                    reason=f"the release you chose could not be fetched: {exc}")
+        except Exception as exc:
+            return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
+                                    reason=f"the release you chose does not fit the files: {exc}")
+        prop.why = why + [w for w in prop.why if w not in why]
+        return prop
 
     def _release(self, best):
         return {"album": [best.get("title") or ""], "albumartist": [best.get("artist") or ""],
@@ -698,6 +748,25 @@ class Engine:
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))])
         p["provider_notes"] = self.notes
         return p
+
+
+_MBID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.IGNORECASE)
+
+
+def parse_release_ref(ref: str):
+    """("mb", MBID) or ("discogs", "123") for a MusicBrainz or Discogs release link or ID
+    ("https://musicbrainz.org/release/<mbid>", a bare MBID, "https://www.discogs.com/release/123-...",
+    "discogs:123", "[r123]"); (None, "") otherwise."""
+    ref = str(ref or "").strip()
+    m = re.search(r"musicbrainz\.org/release/" + _MBID.pattern, ref, re.IGNORECASE) or \
+        (re.fullmatch(_MBID.pattern, ref, re.IGNORECASE) and re.match(_MBID.pattern, ref, re.IGNORECASE))
+    if m:
+        return "mb", m.group(1).lower()
+    m = re.search(r"discogs\.com/(?:[^/?#]+/)?release/(\d+)", ref, re.IGNORECASE) or \
+        re.fullmatch(r"(?:discogs:|\[?r)(\d+)\]?", ref, re.IGNORECASE)
+    if m:
+        return "discogs", m.group(1)
+    return None, ""
 
 
 # --------------------------------------------------------------------------

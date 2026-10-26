@@ -23,7 +23,7 @@ output recorded from Picard's own code.
 | Preferred release formats (weights) | - | Partial | formats come from folder names and the files, not Picard's weights |
 | Preferred release types (weights) | - | Missing | Picard ranks album / single / EP / live / compilation ... by sliders |
 | Match thresholds | - | Full | TagMender's own (`thresholds` in profiles) |
-| Choose another release ("Other versions", paste an MBID or URL) | - | Missing | no way yet to force a release for an album |
+| Choose another release ("Other versions", paste an MBID or URL) | - | Full | `plan|run ALBUM --release LINK`; in the app, "Use another release…" |
 | Standalone recordings (`nat_name`) | `[standalone recordings]` | Missing | non-album tracks are left unresolved |
 | Interactive cluster / drag-and-drop matching | - | Excluded | plans are previewed and approved instead |
 

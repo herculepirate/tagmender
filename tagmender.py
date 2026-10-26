@@ -460,9 +460,16 @@ def _make_plan(args):
     e = engine.Engine(prof, ocr=getattr(args, "ocr", False))
     for prov, note in e.notes.items():
         _err(f"note: {prov}: {note}")
+    ref = getattr(args, "release", None)
+    if ref:
+        if engine.parse_release_ref(ref)[0] is None:
+            raise SystemExit(f"tagmender: --release: not a MusicBrainz or Discogs release link or ID: {ref}")
+        e.force = {os.path.realpath(os.path.expanduser(args.path)): ref}
     p = e.plan(args.path, progress=_progress)
     if sys.stderr.isatty():
         print(file=sys.stderr)
+    if ref and not any(os.path.realpath(a["source_dir"]) in e.force for a in p["albums"]):
+        raise SystemExit(f"tagmender: --release: {args.path} is not one album's folder (give the album folder)")
     return prof, p
 
 
@@ -873,6 +880,8 @@ def work_parsers(sub):
         a = sub.add_parser(name, help="identify and preview" if name == "plan" else "plan, then apply")
         a.add_argument("path")
         a.add_argument("--ocr", action="store_true", help="read barcodes and catalogue numbers from scans")
+        a.add_argument("--release", metavar="LINK", help="use this release for the album at PATH: a MusicBrainz or "
+                                                          "Discogs release link or ID (no search)")
         a.add_argument("--json", action="store_true")
         prof(a)
         if name == "plan":

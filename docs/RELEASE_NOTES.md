@@ -27,6 +27,11 @@ in ID3, MP4 and APEv2, and the WMA fields Picard knows. WMA files are no longer 
 every run for a track total they cannot hold, and an M4A with a compilation flag no longer
 fails to read.
 
+**Choose the release yourself**, as Picard's "Other versions": `tagmender plan ALBUM --release
+LINK` (or `run`), or "Use another release…" in the app's preview, with a MusicBrainz or Discogs
+release link or ID. No search is made; the preview says how the matcher scores the release, and
+one whose tracks do not fit the files is left unresolved rather than forced.
+
 **Artist folders (twelfth review).** The artist's own art stays in the artist folder whatever
 it is called: artist.jpg, fanart, fanart1, backdrop2, logo, banner ... and extrafanart/; a
 folder.jpg beside an album's own cover.jpg is the artist's. A disc set ripped into the artist

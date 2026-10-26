@@ -426,7 +426,12 @@ class Overview(QWidget):
         self.btn_web.clicked.connect(lambda: self.selected() and search_web(self.selected()))
         self.btn_open = QPushButton("Open folder")
         self.btn_open.clicked.connect(lambda: self.selected() and open_folder(self.selected()["source_dir"]))
-        for b in (self.btn_anyway, self.btn_web, self.btn_open):
+        self.btn_release = QPushButton("Use another release…")
+        self.btn_release.setToolTip("Tag this album from the release you choose: paste its MusicBrainz or Discogs "
+                                    "link (as Picard's \"Other versions\")")
+        self.btn_release.clicked.connect(self.choose_release)
+        self.forced = {}
+        for b in (self.btn_anyway, self.btn_web, self.btn_open, self.btn_release):
             acts.addWidget(b)
         acts.addStretch(1)
         dl.addLayout(acts)
@@ -462,7 +467,7 @@ class Overview(QWidget):
         self.btn_apply.setEnabled(not on and bool(self.plan) and self.actionable() > 0)
         self.btn_cancel.setEnabled(on)
         self.bar.setVisible(on)
-        for b in (self.btn_anyway, self.btn_web, self.btn_open):
+        for b in (self.btn_anyway, self.btn_web, self.btn_open, self.btn_release):
             b.setEnabled(not on and self.selected() is not None)
         if self.selected():
             self.btn_anyway.setEnabled(not on and self.selected()["status"] == "excluded")
@@ -473,6 +478,7 @@ class Overview(QWidget):
 
     def set_path(self, path):
         self.path = path
+        self.forced = {}
         self.where.setText(path)
         self.plan = None
         self.model.set_plan(None)
@@ -493,11 +499,12 @@ class Overview(QWidget):
         except pf.ProfileError as exc:
             QMessageBox.warning(self, APP, str(exc))
             return
-        path, ocr = self.path, self.ocr.isChecked()
+        path, ocr, forced = self.path, self.ocr.isChecked(), dict(self.forced)
 
         def work(w):
             import engine
             e = engine.Engine(prof, ocr=ocr)
+            e.force = forced
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled)
         self.busy(True)
         self.summary.setText("Identifying… nothing is changed while previewing.")
@@ -581,6 +588,27 @@ class Overview(QWidget):
             one = dict(self.plan or {"job": "", "profile": "", "operation": ""}, albums=[a], summary={a["status"]: 1})
             self.detail.setPlainText(planmod.preview(one, verbose=False))
         self.busy(False)
+
+    def choose_release(self):
+        a = self.selected()
+        if not a:
+            return
+        import engine
+        from PySide6.QtWidgets import QInputDialog
+        key = os.path.realpath(a["source_dir"])
+        ref, ok = QInputDialog.getText(self, APP, f"The release for {Path(a['source_dir']).name}:\n"
+                                       "a MusicBrainz or Discogs release link (or ID)", text=self.forced.get(key, ""))
+        if not ok:
+            return
+        ref = ref.strip()
+        if not ref:
+            self.forced.pop(key, None)
+        elif engine.parse_release_ref(ref)[0] is None:
+            QMessageBox.warning(self, APP, "That is not a MusicBrainz or Discogs release link.")
+            return
+        else:
+            self.forced[key] = ref
+        self.preview()
 
     def process_anyway(self):
         a = self.selected()

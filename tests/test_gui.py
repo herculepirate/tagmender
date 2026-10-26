@@ -94,6 +94,33 @@ class Gui(te.Base):
         self.assertTrue(wait(lambda: len(seen) == 3, self.app), seen)
         self.assertEqual(seen, {"done": True, "progress": True, "failed": True})
 
+    def test_use_another_release_previews_again_with_it(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QInputDialog
+        ov = self.win.pages["Overview"]
+        ov.refresh_profiles()
+        ov.profile.setCurrentText("Auto")
+        ov.set_path(str(self.lib))
+        self.assertTrue(wait(lambda: ov.plan is not None, self.app), ov.summary.text())
+        ov.table.selectRow(0)
+        self.app.processEvents()
+        a = ov.selected()
+        link = "https://musicbrainz.org/release/0a8e97fd-4f6a-4bd7-8e4b-6d3a0b2ad2f1"
+        with mock.patch.object(QInputDialog, "getText", return_value=(link, True)), \
+                mock.patch.object(type(ov), "preview") as again:
+            ov.choose_release()
+        self.assertEqual(ov.forced, {_os.path.realpath(a["source_dir"]): link})
+        again.assert_called_once()
+        with mock.patch.object(QInputDialog, "getText", return_value=("not a link", True)), \
+                mock.patch.object(self.gui.QMessageBox, "warning") as warned, \
+                mock.patch.object(type(ov), "preview") as again:
+            ov.choose_release()
+        warned.assert_called_once()
+        again.assert_not_called()
+        ov.set_path(str(self.lib))
+        self.assertEqual(ov.forced, {})
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.btn_cancel.isEnabled(), self.app))
+
     def test_preview_shows_excluded_as_ignored_then_apply(self):
         ov = self.win.pages["Overview"]
         ov.refresh_profiles()

@@ -13,6 +13,7 @@ without needing MusicBrainz Picard. Built for libraries laid out as
 tagmender setup                                   # Discogs token, AcoustID key (stored mode 600)
 tagmender plan ~/Music/Inbox --profile Lossy      # identify and preview; changes nothing
 tagmender run ~/Music/Inbox --profile Lossy       # preview, confirm, apply
+tagmender plan "~/Music/Band/2005 - Album" --release https://musicbrainz.org/release/<id>   # this release
 tagmender undo 20261024-091200-ab12               # put a job back
 tagmender gui                                     # the desktop app
 tagmender watch                                   # keep watched folders processed

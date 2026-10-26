@@ -50,9 +50,9 @@ class FlatAlbumWithBothCoverFiles(R8):
         p, res = self.run_one(prof, prop)
         self.assertEqual(res["counts"], {"done": 1}, res)
         self.assertFalse((artist / "cover.jpg").exists())
-        self.assertFalse((artist / "folder.jpg").exists(),
-                         "the flat album's folder.jpg stayed behind in the artist folder (taken for the "
-                         "artist's photo) while its cover.jpg went")
+        # (since review 14: an artist folder's folder.jpg is never carried off - it may be the
+        # artist's image - nor ever put into tracks as the artist picture)
+        self.assertTrue((artist / "folder.jpg").exists())
 
 
 class FolderNamedAfterArtistNoOtherMusic(R8):

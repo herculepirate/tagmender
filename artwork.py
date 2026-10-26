@@ -549,8 +549,8 @@ def has_front(path) -> bool:
 ARTIST_STEMS = ("artist", "folder")   # in an artist folder (one holding album folders) both are its photo
 # the artist folder's own art for Kodi, Jellyfin, Plex - never any one album's: artist.jpg,
 # fanart.jpg, fanart1.jpg, backdrop2.jpg, logo.png ..., and the extrafanart folders
-ARTIST_ART = re.compile(r"^(?:artist|fanart|logo|clearlogo|banner|clearart|landscape|backdrop|background)"
-                        r"(?:[-_ ]?\d+)?$", re.IGNORECASE)
+ARTIST_ART = re.compile(r"^(?:artist(?:[-_ ][a-z]+)?|fanart|logo|clearlogo|banner|clearart|landscape|backdrop|background)"
+                        r"(?:[-_ ]?\d+)?$", re.IGNORECASE)          # (Plex: artist-poster, artist-background)
 ARTIST_ART_DIRS = ("extrafanart", "extrathumbs", "backdrops")
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 ALBUM_COVER_STEMS = ("cover", "front")    # an album's own cover beside a folder.jpg: folder.jpg is the artist's
@@ -615,26 +615,38 @@ def _images(folder, stem: str) -> list:
 
 def folder_jpg_is_the_albums(folder, single=()) -> bool:
     """A folder.jpg in an artist folder is the cover of the album lying there (ripped flat,
-    or in disc folders right below) when it is the same picture as that album's cover.jpg or
-    front.jpg, or when the album has no other cover file; otherwise (Jellyfin and Kodi save
-    the artist's image so) it is the artist's."""
+    or in disc folders right below) when it looks like that album's cover.jpg or front.jpg
+    (the same picture, perhaps smaller), or when the album has no other cover file; otherwise
+    (Jellyfin and Kodi save the artist's image so) it is the artist's."""
     fj = _images(folder, "folder")
     if not fj or not album_here(Path(folder), None, single):
         return False
     covers = [x for stem in ALBUM_COVER_STEMS for x in _images(folder, stem)]
     if not covers:
         return True
+    mine = [h for h in (_look(x) for x in covers) if h is not None]
+    return any(h is not None and any(bin(h ^ m).count("1") <= 6 for m in mine) for h in (_look(x) for x in fj))
+
+
+def _look(path):
+    """A 64-bit picture of how an image looks (8x8 grey, above or below its mean): the same
+    cover saved twice, or saved smaller, looks the same; None when unreadable."""
     try:
-        mine = {hashlib.sha256(x.read_bytes()).hexdigest() for x in covers}
-        return any(hashlib.sha256(x.read_bytes()).hexdigest() in mine for x in fj)
-    except OSError:
-        return False
+        from PIL import Image
+        with Image.open(path) as im:
+            g = im.convert("L").resize((8, 8))
+            px = list(g.getdata())
+    except Exception:
+        return None
+    mean = sum(px) / len(px)
+    return sum(1 << i for i, v in enumerate(px) if v > mean)
 
 
 def artist_folder_keeps(folder, single=()) -> set:
     """The files of an artist folder that stay when an album moves out of it: the artist's
-    photo and art (artist.jpg, fanart, logo, banner, backdrop2 ...), and a folder.jpg that is
-    not the cover of the album leaving."""
+    photo and art (artist.jpg, fanart, logo, banner, backdrop2 ...) and its folder.jpg - which
+    may be the artist's image (Jellyfin, Kodi) as well as an album's cover: never carried off.
+    (The album gets its cover where it lands: its own cover.jpg, or the artwork step's.)"""
     keep = set()
     try:
         names = os.listdir(folder)
@@ -644,8 +656,7 @@ def artist_folder_keeps(folder, single=()) -> set:
         st, ext = os.path.splitext(n)
         if ARTIST_ART.match(st) and ext.lower() in IMAGE_EXT:
             keep.add(Path(folder) / n)
-    if not folder_jpg_is_the_albums(folder, single):
-        keep.update(_images(folder, "folder"))
+    keep.update(_images(folder, "folder"))
     return keep
 
 
@@ -791,10 +802,11 @@ def named_after(folder, artist: str, compat="windows") -> bool:
     return fnm.fold(Path(folder).name) in _artist_names(artist, compat)
 
 
-def artist_dir_for(album_folder, artist: str, roots, compat="windows") -> Path | None:
+def artist_dir_for(album_folder, artist: str, roots, compat="windows", album_name: str = "") -> Path | None:
     """The album artist's folder, where the artist's photo is: the album folder's parent - or
     the album folder itself when the album lies ripped flat in its artist folder (beside the
-    artist's other albums, or right below a root) - when it is named after the album artist
+    artist's other albums, or, album_name given, named after the artist and not after the
+    album: never a self-titled album's own folder) - when it is named after the album artist
     and lies inside one of roots (never a root itself); else None."""
     from engine import is_disc_dir
     import filenames as fnm
@@ -808,8 +820,10 @@ def artist_dir_for(album_folder, artist: str, roots, compat="windows") -> Path |
         return any(r in real.parents for r in rs) and real not in rs
     d = album.parent
     if named_after(album, artist, compat) and not named_after(d, artist, compat) and inside(album) and \
-            (holds_other_albums(album) or not inside(d)):
-        d = album                         # an album ripped flat into its artist folder
+            (holds_other_albums(album) or
+             (album_name and fnm.fold(album.name) != fnm.fold(fnm.safe_component(album_name, compat))
+              and fnm.fold(album.name) != fnm.fold(album_name))):
+        d = album                         # an album ripped flat into its artist folder (not a self-titled album's own)
     if not inside(d):
         return None
     if not named_after(d, artist, compat):

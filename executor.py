@@ -1307,7 +1307,7 @@ class Executor:
         # later never keeps an album from going back)
         self.journal.write(ev="new_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns,
                            **({"kind": sc["kind"]} if sc.get("kind") else {}))
-        if sc.get("kind") == "artist":
+        if sc.get("kind") == "artist" and sc.get("download"):
             import artwork
             artwork.remember_written(dst, hashlib.sha256(data).hexdigest())     # (a download, not the user's)
         done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))

@@ -149,7 +149,9 @@ class DiscSetInArtistFolderLeavesItsCover(R8):
         p, res = self.run_one(prof, prop)
         self.assertEqual(res["counts"], {"done": 1}, res)
         self.assertFalse((artist / "Twin.log").exists(), sorted(os.listdir(artist)))
-        self.assertFalse((artist / "folder.jpg").exists(), "the disc set's cover stayed while its log went")
+        # (since review 14: an artist folder's folder.jpg is never carried off - it may be the
+        # artist's image - nor ever put into tracks as the artist picture)
+        self.assertTrue((artist / "folder.jpg").exists())
 
 
 if __name__ == "__main__":

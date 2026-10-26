@@ -43,8 +43,9 @@ class FlatAlbum(R8):
         prof = self.profile(operation="move", destination=str(self.dest))
         p, res = self.move_flat(prof)
         self.assertEqual(res["counts"], {"done": 1}, res)
-        self.assertFalse((self.artist / "folder.jpg").exists(),
-                         "the flat album's cover stayed in the artist folder (it moved with it before 98f62ae)")
+        # (since review 14: a folder.jpg in an artist folder is never carried off - it may be the
+        # artist's image as well - and never put into tracks as the artist picture: see the next test)
+        self.assertTrue((self.artist / "folder.jpg").exists())
 
     def test_left_cover_becomes_the_artist_photo(self):
         prof = self.profile(operation="move", destination=str(self.dest))

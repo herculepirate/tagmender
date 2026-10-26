@@ -416,9 +416,19 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     others = {f_.relative_to(src_dir).parts[0] for f_ in foreign if src_dir in f_.parents}
     others = {x for x in others if not _DISC_NAME.match(x) and not _artwork._BONUS.match(x)}
     named = _artwork.named_after(src_dir, artist, compat_) and not _artwork.named_after(src_dir.parent, artist, compat_)
-    artist_folder = bool(others) or named
-    src_shared = bool(others) and len(loose) == 1 and not discs_here and (named or len(others) >= 2)
-    keep = _artwork.artist_folder_keeps(src_dir, single=loose if single else ()) if artist_folder else set()
+    # the artist's own art (artist.jpg, fanart, logo ...: never an album's) stays wherever other
+    # music is below, or in a folder named after the artist; a folder.jpg stays only in what is
+    # surely an artist folder - holding two or more other albums, or named after the artist and
+    # holding another - else it is this album's cover (an album folder with a bonus or live
+    # album inside it, an artist's only album ripped flat)
+    sure = len(others) >= 2 or (named and bool(others))
+    src_shared = len(loose) == 1 and not discs_here and sure
+    keep = set()
+    if sure:
+        keep = _artwork.artist_folder_keeps(src_dir, single=loose if single else ())
+    elif others or named:
+        keep = {x for x in _artwork.artist_folder_keeps(src_dir) if x.stem.lower() != "folder"}
+    artist_folder = sure or bool(others) or named              # (its extrafanart/ ... stay too)
 
     def shared_ok(d):
         """With another album's music in the tree (disc 2 tagged as another title, a bonus
@@ -930,8 +940,9 @@ class Planner:
         if not ap or not want or not entry["files"] or not Path(ap.get("image") or "").exists():
             return None
         album = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in entry["files"]]))
+        title = ((prop.targets[0].get("album") or [""])[0]) if prop.targets else ""
         artist_dir = _artwork.artist_dir_for(album, ap.get("artist", ""), self.roots(),
-                                             self.profile["filenames"]["compat"])
+                                             self.profile["filenames"]["compat"], title)
         staging = ex.STATE_DIR / "staging" / self.job
         image, source = ap["image"], ap.get("source", "")
         _who, single = _album_artist(prop)
@@ -953,17 +964,41 @@ class Planner:
                 source = f"the artist folder's {there.name}"
             except Exception:
                 return None
-        elif dkey is not None and dkey in claims:
-            image, source, data = claims[dkey]     # another album of this folder, this run: its photo
+        elif dkey is not None and dkey in claims and (claims[dkey]["own"] or not ap.get("own")):
+            # another album of this folder, this run: its photo
+            c = claims[dkey]
+            image, source, data = c["image"], c["source"], c["data"]
         else:
             try:                          # (a copy of its own: the photo planned is the photo written)
                 image = str(_artwork._stage(Path(image).read_bytes(), staging)[0])
                 data = Path(image).read_bytes()
             except Exception:
                 return None
+        theirs = there is not None and not _artwork.written_by_us(there)
+        own_here = theirs or (there is None and (claims[dkey]["own"] if dkey in claims and
+                                                 (claims[dkey]["own"] or not ap.get("own")) else bool(ap.get("own"))))
         if dkey is not None:
-            claims.setdefault(dkey, (image, source, data))
-        authoritative = (there is not None and not _artwork.written_by_us(there)) or bool(ap.get("own"))
+            c = claims.get(dkey)
+            if c is not None and not c["own"] and own_here:
+                # the user's own photo came with a later album: it takes over from the download an
+                # earlier album of this folder claimed (that album's tracks and the artist.jpg)
+                try:
+                    emb_own = str(_artwork.embed_copy(Path(image), staging, _artwork.ARTIST_EMBED_MAX_SIDE))
+                except Exception:
+                    emb_own = None
+                for e in c["entries"]:
+                    if e.get("artist_photo") and emb_own:
+                        e["artist_photo"].update(image=image, embed=emb_own, source=source,
+                                                 mark=_artwork.artist_mark(_artwork.photo_identity(data)))
+                if c["sidecar"] is not None:
+                    c["sidecar"].update({"from": image, "sha256": hashlib.sha256(data).hexdigest()})
+                    c["sidecar"].pop("download", None)
+                c.update(image=image, source=source, data=data, own=True)
+            elif c is None:
+                c = claims[dkey] = {"image": image, "source": source, "data": data, "own": own_here,
+                                    "entries": [], "sidecar": None}
+            c["entries"].append(entry)
+        authoritative = own_here
         # the photo's identity - of the artist folder's file, as it is or will be - goes into the
         # description of the picture embedded: a corrected artist.jpg replaces it on a later run
         ident = _artwork.photo_identity(data)
@@ -1001,8 +1036,12 @@ class Planner:
             if self.claimed.get(key) is None and not any(sc["dst"] == str(target) for sc in entry["sidecars"]):
                 self.claimed[key] = "artist-photo"
                 data = Path(image).read_bytes()
-                entry["sidecars"].append({"src": entry["files"][0]["src"], "dst": str(target), "from": image,
-                                          "sha256": hashlib.sha256(data).hexdigest(), "kind": "artist"})
+                sc_ = {"src": entry["files"][0]["src"], "dst": str(target), "from": image,
+                       "sha256": hashlib.sha256(data).hexdigest(), "kind": "artist",
+                       **({} if own_here else {"download": True})}
+                entry["sidecars"].append(sc_)
+                if dkey is not None and claims.get(dkey) is not None and claims[dkey]["sidecar"] is None:
+                    claims[dkey]["sidecar"] = sc_
         if not into and not any(sc.get("kind") == "artist" for sc in entry["sidecars"]):
             return None
         return {"image": image, "embed": emb, "embed_into": into, "source": source,

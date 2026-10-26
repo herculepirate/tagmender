@@ -604,11 +604,16 @@ class Engine:
         roots = [s_["path"] for s_ in self.profile["sources"]] + \
             ([self.profile["destination"]] if self.profile["destination"] else [])
         compat = self.profile["filenames"]["compat"]
+        title = (t.get("album") or [""])[0]
         if stays:
-            artist_dir = artwork.artist_dir_for(folder, who, roots, compat)
-        # the artist folder the album is in now: where it stays, or where a move takes it from
-        home = artist_dir if artist_dir is not None else \
-            artwork.artist_dir_for(Path(prop.source_dir), who, roots, compat)
+            artist_dir = artwork.artist_dir_for(folder, who, roots, compat, title)
+        # the artist folder the album is in now: where it stays (its copies' for a copy
+        # profile), or where a move takes it from; with no artist.jpg there, the source's own
+        src_dir = artwork.artist_dir_for(Path(prop.source_dir), who, roots, compat, title)
+        home = artist_dir if artist_dir is not None else src_dir
+        if home is not None and src_dir is not None and home != src_dir and \
+                artwork.artist_folder_photo(home) is None and artwork.artist_folder_photo(src_dir) is not None:
+            home = src_dir
         single = "single" in [x.lower() for x in t.get("releasetype") or []]
         mine = [Path(f) for f in prop.files] if single else ()
         photo = artwork.artist_folder_photo(home) if home is not None else None

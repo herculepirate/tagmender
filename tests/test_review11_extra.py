@@ -40,9 +40,10 @@ class FlatAlbumLeavesTheArtistsArt(R8):
         prop.group_files = [str(x), str(y)]
         p, res = self.run_one(prof, prop)
         self.assertEqual(res["counts"], {"done": 1}, res)
-        for n in ("artist.jpg", "fanart.jpg", "logo.png"):
+        # (folder.jpg stays too: it may be the artist's image - Jellyfin, Kodi; never carried off)
+        for n in ("artist.jpg", "fanart.jpg", "logo.png", "folder.jpg"):
             self.assertTrue((artist / n).exists(), f"{n} left the artist folder")
-        for n in ("folder.jpg", "Flat.cue", "Flat.log"):
+        for n in ("Flat.cue", "Flat.log"):
             self.assertFalse((artist / n).exists(), f"{n} stayed behind: {sorted(os.listdir(artist))}")
 
 

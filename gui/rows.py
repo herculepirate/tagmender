@@ -241,11 +241,11 @@ class ListSheet(QDialog):
     """Edit a list of names: one row each, "+" adds, "−" removes, rows are dragged to reorder
     (checkable: each row has a switch-like tick, for an ordered list of sources)."""
 
-    def __init__(self, parent, headline, body, items, checkable=False, known=None, words=None):
+    def __init__(self, parent, headline, body, items, checkable=False, known=None, words=None, folders=False):
         super().__init__(parent.window() if parent is not None else None)
         sheets.prepare(self, headline)
         self.resize(460, 420)
-        self.checkable, self.words = checkable, words or {}
+        self.checkable, self.words, self.folders = checkable, words or {}, folders
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 20, 20, 16)
         head = QLabel(headline)
@@ -272,9 +272,16 @@ class ListSheet(QDialog):
         if not checkable:
             self.entry = QLineEdit()
             self.entry.setAccessibleName(tr("New item"))
-            self.entry.setPlaceholderText(tr("Type a name, then Add"))
+            self.entry.setPlaceholderText(tr("Type a folder, or Choose Folder…") if folders else
+                                          tr("Type a name, then Add"))
             self.entry.returnPressed.connect(self.add_typed)
             row.addWidget(self.entry, 1)
+            if folders:                                  # (a folder is picked, not typed)
+                pick = QPushButton(tr("Choose Folder…"))
+                pick.setAutoDefault(False)
+                pick.setAccessibleName(tr("Choose a folder to add"))
+                pick.clicked.connect(self.add_chosen)
+                row.addWidget(pick)
             add = QToolButton()
             add.setProperty("role", "tool")
             add.setIcon(icons.icon("plus", "ink"))
@@ -306,6 +313,14 @@ class ListSheet(QDialog):
             self.add(text)
             self.entry.clear()
 
+    def add_chosen(self):
+        from .common import music_folder
+        last = self.list.item(self.list.count() - 1).text() if self.list.count() else ""
+        start = os.path.dirname(os.path.expanduser(last)) if last else music_folder()
+        folder = sheets.choose_folder(self, tr("Choose a folder to add"), start)
+        if folder and folder not in self.items():
+            self.add(folder)
+
     def remove(self):
         for it in self.list.selectedItems():
             self.list.takeItem(self.list.row(it))
@@ -327,9 +342,9 @@ class ListField(QWidget):
     opens a ListSheet. checkable: an ordered choice of `known` names (sources)."""
     changed = Signal()
 
-    def __init__(self, name, body="", checkable=False, known=None, words=None, noun=None):
+    def __init__(self, name, body="", checkable=False, known=None, words=None, noun=None, folders=False):
         super().__init__()
-        self.name, self.body, self.checkable = name, body, checkable
+        self.name, self.body, self.checkable, self.folders = name, body, checkable, folders
         self.known, self.words, self.noun = known or [], words or {}, noun
         self._items = []
         row = QHBoxLayout(self)
@@ -354,13 +369,23 @@ class ListField(QWidget):
     def set_value(self, items):
         self._items = list(items or [])
         shown = [self.words.get(x, str(x)) for x in self._items]
-        text = ", ".join(shown) if shown else tr("None")
-        self.summary.setText(self.summary.fontMetrics().elidedText(text, Qt.ElideRight, 260))
+        self._text = text = ", ".join(shown) if shown else tr("None")
+        self._elide()
         self.summary.setToolTip(", ".join(shown))
         self.summary.setAccessibleName(tr("{0}: {1}").format(self.name, text))
 
+    def _elide(self):
+        """The summary cut with "…" at its end to the width it has now (never clipped at the start)."""
+        width = max(self.summary.width(), 60)
+        self.summary.setText(self.summary.fontMetrics().elidedText(getattr(self, "_text", ""), Qt.ElideRight, width))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
     def edit(self):
-        dlg = ListSheet(self, self.name, self.body, self._items, self.checkable, self.known, self.words)
+        dlg = ListSheet(self, self.name, self.body, self._items, self.checkable, self.known, self.words,
+                        folders=self.folders)
         if sheets.run(dlg, "list"):
             new = dlg.items()
             if new != self._items:
@@ -516,6 +541,32 @@ class Group(QWidget):
             if shown:
                 first = False
         self.setVisible(not first)
+
+
+class SectionFold(QToolButton):
+    """A section's heading that folds it: a chevron and the title; what it holds shows below
+    it while it is open (open to start)."""
+
+    toggled_by_user = Signal(bool)
+
+    def __init__(self, text, holder):
+        super().__init__()
+        self.holder = holder
+        self.setText(text)
+        self.setCheckable(True)
+        self.setChecked(True)
+        self.setProperty("role", "sectionfold")
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setAccessibleName(text)
+        self.setToolTip(tr("Click to fold or unfold this section"))
+        self.toggled.connect(self._show)
+        self.clicked.connect(lambda on: self.toggled_by_user.emit(on))
+        self._show(True)
+
+    def _show(self, on):
+        self.setIcon(icons.icon("chevron-down" if on else "chevron-right", "ink", 18))
+        self.setIconSize(QSize(18, 18))
+        self.holder.setVisible(on)
 
 
 class Disclosure(QToolButton):

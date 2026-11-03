@@ -312,8 +312,9 @@ def get_text(parent, headline, body="", text="", action=None, placeholder="") ->
     return e.text(), ok
 
 
-def show_text(parent, headline, text, body="", mono=True, copy=False):
-    """Read-only text (a plan, a script, results) in a sheet, monospace for scripts and logs."""
+def show_text(parent, headline, text, body="", mono=True, copy=False, preview=()):
+    """Read-only text (a plan, a script, results) in a sheet, monospace for scripts and logs.
+    preview: (what, result) lines shown under it, such as where example albums would go."""
     s = Sheet(parent, headline, body, "info", "accent")
     s.setMaximumWidth(16777215)
     s.resize(760, 460)
@@ -323,6 +324,18 @@ def show_text(parent, headline, text, body="", mono=True, copy=False):
     if mono:
         t.setFont(style.mono())
     s.extra.addWidget(t, 1)
+    if preview:
+        head = QLabel(tr("Preview"))
+        head.setProperty("role", "grouptitle")
+        s.extra.addWidget(head)
+        for what, result in preview:
+            line = QLabel(f"<b>{html.escape(what)}</b><br><span style=\"font-family:monospace\">"
+                          f"{html.escape(result)}</span>")
+            line.setTextFormat(Qt.RichText)
+            line.setWordWrap(True)
+            line.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            line.setAccessibleName(f"{what}: {result}")
+            s.extra.addWidget(line)
     if copy:
         s.add_button(tr("Copy"), on=lambda: QApplication.clipboard().setText(text))
     s.add_button(tr("Close"), default=True)

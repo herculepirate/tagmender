@@ -30,10 +30,13 @@ import naming
 import profiles as pf
 
 from . import sheets
+from .common import _gui_prefs, _set_gui_pref
 from .i18n import N_, tr
-from .rows import (Disclosure, FolderField, Group, ListField, ListSheet, Popup, Row, Segmented, Stepper, Switch,
-                   caption)
+from .rows import (Disclosure, FolderField, Group, ListField, ListSheet, Popup, Row, SectionFold, Segmented, Stepper,
+                   Switch, caption)
 from .widgets import FlowLayout
+
+FOLDED_PREF = "profile_sections_folded"              # gui.json: the sections folded the last time
 
 # ---- the words each choice shows (sentence case; the key behind it is saved) ------------------
 OPERATION_WORDS = {"in_place": N_("Fix in place"), "copy": N_("Copy into the library"),
@@ -47,6 +50,10 @@ NAMING_WORDS = {"tagmender": N_("Short names (initials)"), "standard": N_("Stand
                 "artist-album-track": N_("Artist / Year - Album / 01 - Title"),
                 "singleton": N_("Singles"), "classical": N_("Classical, by composer"), "all-music": N_("All music"),
                 "various-artists": N_("Various artists"), "classical-performer": N_("Classical, by performer")}
+# the cover sources, each on or off and in the order they are asked
+ART_SOURCE_WORDS = {"caa": N_("Cover Art Archive (MusicBrainz)"), "discogs": N_("Discogs"),
+                    "coverup": N_("CoverUp: fanart.tv, TheAudioDB, Last.fm, shops"),
+                    "web": N_("Shops and web image search"), "local": N_("The album's own scans")}
 ART_SOURCE_CHOICES = (
     (N_("CoverUp, then Cover Art Archive, then Discogs"), ["coverup", "caa", "discogs"]),
     (N_("Cover Art Archive, then Discogs, then CoverUp"), ["caa", "discogs", "coverup"]),
@@ -59,7 +66,7 @@ ART_SOURCE_CHOICES = (
 )
 AUTO_ON_OFF = ((None, N_("Automatic")), (True, N_("On")), (False, N_("Off")))
 DETAIL_CHOICES = ((True, N_("On")), (False, N_("Off")), ("audiophile", N_("At the Audiophile level")),
-                  ("tagger", N_("As my other tagger says")))
+                  ("tagger", N_("Same as my existing tagger")))
 WEB_SOURCE_WORDS = {"deezer": N_("Deezer"), "itunes": N_("Apple (iTunes)"), "bandcamp": N_("Bandcamp"),
                     "wikipedia": N_("Wikipedia")}
 ENGINE_WORDS = {"mojeek": N_("Mojeek"), "marginalia": N_("Marginalia"), "tavily": N_("Tavily (paid AI search)")}
@@ -94,8 +101,8 @@ GROUPS = {
                    False),
     "genres": ("tags", N_("Genres"), "", False),
     "artists": ("tags", N_("Artists and languages"),
-                N_("Automatic: as your other tagger says when its settings are used (Advanced), "
-                   "else the usual default."), False),
+                N_("Automatic: what your existing tagger does, when its settings are used (Tags › Advanced), "
+                   "else TagMender's default."), False),
     "credits": ("tags", N_("Credits"), "", False),
     "versions": ("tags", N_("Dates and versions"), "", False),
     "discogs": ("tags", N_("Discogs details"), N_("Written as tags of their own."), False),
@@ -160,7 +167,8 @@ class S:
     attr: str = ""                  # the Profiles page's older name for the control
     rng: tuple = (0, 100)
     suffix: str = ""
-    custom: str = ""                # popup: "list" or "check" - its Choose… opens a list sheet
+    custom: str = ""                # popup: "list" or "check" - its Choose… opens a list sheet; list: "check", or
+                                    # "folders" (Choose Folder… beside the typed entry)
     known: tuple = ()
     words: dict = field(default_factory=dict)
     personal: bool = False          # folders and words: kept by presets and Restore Defaults
@@ -220,6 +228,18 @@ def _acoustid_put(d, v, _vals):
 def _artist_file_put(d, v, _vals):
     was = dig(d, "artwork.artist.file") or ""
     plant(d, "artwork.artist.file", (was or "artist.jpg") if v else "")
+
+
+def _art_when_get(d):
+    """Look for covers: "small" is "needed" with small covers replaced (artwork.replace)."""
+    if dig(d, "artwork.when", "needed") == "always":
+        return "always"
+    return "small" if dig(d, "artwork.replace", "never") == "larger_only" else "needed"
+
+
+def _art_when_put(d, v, _vals):
+    plant(d, "artwork.when", "always" if v == "always" else "needed")
+    plant(d, "artwork.replace", "larger_only" if v == "small" else "never")
 
 
 def _sources_get(d):
@@ -369,7 +389,7 @@ SETTINGS = [
     S("description", N_("Description"), "text", "general", personal=True, attr="desc"),
     # Source
     S("_sources", N_("Folders this profile covers"), "list", "folders", get=_sources_get, put=_sources_put,
-      personal=True, foot=N_("The music this profile looks after. A preview can still run on any folder.")),
+      custom="folders", personal=True, foot=N_("The music this profile looks after. A preview can still run on any folder.")),
     S("_recursive", N_("Include subfolders"), "switch", "folders", get=_recursive_get, put=_recursive_put,
       enable=_recursive_reason, foot=N_("Albums inside folders inside these ones are found too.")),
     S("skip_folders", N_("Skip these folders"), "list", "folders",
@@ -458,12 +478,12 @@ SETTINGS = [
                        ("rip_info", N_("Rip log")), ("quality", N_("Dynamic range and quality")))],
     S("genres.musicbrainz", N_("Genres from MusicBrainz"), "popup", "genres", put=_genres_put,
       choices=(("auto", N_("Automatic")), (True, N_("On")), (False, N_("Off")),
-               ("tagger", N_("As my other tagger says")))),
+               ("tagger", N_("Same as my existing tagger")))),
     S("genres.max", N_("At most"), "stepper", "genres", rng=(1, 20), suffix=N_(" genres"),
       enable=_when(lambda v: v.get("genres.musicbrainz") is not False)),
     S("genres.discogs_styles", N_("Discogs styles"), "popup", "genres",
       choices=(("genre_if_none", N_("In Genre when nothing else gives one")), ("own_tag", N_("In a tag of their own")),
-               ("genre", N_("In Genre")), ("both", N_("Both")), ("tagger", N_("As my other tagger says")))),
+               ("genre", N_("In Genre")), ("both", N_("Both")), ("tagger", N_("Same as my existing tagger")))),
     S("genres.web", N_("Genres from the web"), "segmented", "genres",
       choices=(("off", N_("Off")), ("store", N_("Store genres")), ("keywords", N_("Also keywords")))),
     S("tagger.standardize_artist_names", N_("Artist names"), "popup", "artists", attr="pic_names",
@@ -487,13 +507,14 @@ SETTINGS = [
       get=_tagger_get("standardize_instruments"), put=_tagger_put("standardize_instruments"), choices=AUTO_ON_OFF),
     S("dates.date_tag", N_("Date holds"), "popup", "versions",
       choices=(("release", N_("This pressing's date")), ("original", N_("The first release date")),
-               ("tagger", N_("As my other tagger says"))),
+               ("tagger", N_("Same as my existing tagger"))),
       foot=N_("The first release date is always written as Original Date too.")),
     S("keep_versions", N_("Separate versions"), "switch", "versions", attr="versions",
       foot=N_("A remaster or remix keeps its version in the album title, so servers show it apart.")),
     S("versions.style", N_("Show the version"), "popup", "versions",
-      choices=(("paren", N_("In the album title (…)")), ("bracket", N_("In the album title […]")),
-               ("tags_only", N_("In tags only"))), show=lambda v: v.get("keep_versions")),
+      choices=(("paren", N_("Album (Remaster 2024)")), ("bracket", N_("Album [Remaster 2024]")),
+               ("tags_only", N_("Album, with the version in its own tags"))), show=lambda v: v.get("keep_versions"),
+      foot=N_("How a remaster, remix or deluxe edition is told apart from the original.")),
     S("versions.extra_tags", N_("Write version tags"), "switch", "versions", show=lambda v: v.get("keep_versions"),
       foot=N_("ALBUMVERSION and RELEASECOMMENT, read by LMS and other servers.")),
     S("split_versions", N_("Split two versions found in one folder"), "switch", "versions", attr="split_box",
@@ -531,20 +552,22 @@ SETTINGS = [
       get=_tagger_get("remove_id3_from_flac"), put=_tagger_put("remove_id3_from_flac"), choices=AUTO_ON_OFF),
     S("tagger.remove_ape_from_mp3", N_("Remove APE tags from MP3"), "popup", "tags_adv",
       get=_tagger_get("remove_ape_from_mp3"), put=_tagger_put("remove_ape_from_mp3"), choices=AUTO_ON_OFF),
-    S("follow_tagger_settings", N_("Use settings from my other tagger"), "switch", "tags_adv",
-      foot=N_("Read each run. Settings changed here take priority.")),
+    S("follow_tagger_settings", N_("Use my existing tagger's settings"), "switch", "tags_adv",
+      foot=N_("When another tagger is installed on this computer, its settings file is read on each run, "
+              "so the tags come out the way it writes them. Anything you set here wins.")),
     # Artwork
     S("artwork.enabled", N_("Find front covers"), "switch", "covers", attr="art"),
-    S("artwork.sources", N_("Cover sources"), "popup", "covers", attr="art_src",
-      choices=tuple((v, label) for label, v in ART_SOURCE_CHOICES)),
-    S("artwork.when", N_("Look for covers"), "popup", "covers", attr="art_when",
-      choices=(("needed", N_("Only for albums missing a cover")), ("always", N_("For every album")))),
+    S("artwork.sources", N_("Cover sources"), "list", "covers", attr="art_src", custom="check",
+      known=tuple(ART_SOURCE_WORDS), words=ART_SOURCE_WORDS,
+      foot=N_("Tick the sources to ask and put them in order: the first one with a big enough cover wins.")),
+    S("artwork.when", N_("Look for covers"), "popup", "covers", attr="art_when", get=_art_when_get, put=_art_when_put,
+      choices=(("needed", N_("Only when an album has no cover")),
+               ("small", N_("When it has none, or one below the smallest size")),
+               ("always", N_("For every album"))),
+      foot=N_("A small cover that is replaced is backed up first: Undo puts it back.")),
     S("artwork.min_px", N_("Smallest cover kept"), "popup", "covers",
-      choices=tuple((n, f"{n} px") for n in (500, 600, 1000, 1200))),
-    S("artwork.replace", N_("Replace small covers"), "switch", "covers", attr="art_replace",
-      get=lambda d: dig(d, "artwork.replace", "never") == "larger_only",
-      put=_bool_put("artwork.replace", "larger_only", "never"),
-      foot=N_("When the album's own cover is below the smallest size. Undo puts it back.")),
+      choices=tuple((n, f"{n} px") for n in (500, 600, 1000, 1200)),
+      foot=N_("Measured on the short side. A cover found below this is not used.")),
     S("artwork.enlarge", N_("Enlarge small covers"), "switch", "covers", attr="art_enlarge",
       foot=N_("A cover down to 250 px is enlarged to the smallest size.")),
     S("artwork.embed_front", N_("Put the cover in each track"), "switch", "covers"),
@@ -562,8 +585,12 @@ SETTINGS = [
       enable=_when(lambda v: v.get("artwork.artist.enabled")),
       foot=N_("Some players then show the artist instead of the cover.")),
     S("artwork.generate", N_("Make a cover when none is found"), "popup", "art_adv", attr="art_gen",
-      choices=(("off", N_("Never")), ("template", N_("CoverUp's template (offline)")),
-               ("ai", N_("CoverUp's AI service")), ("auto", N_("CoverUp's order")))),
+      choices=(("off", N_("Never: leave the album without one")),
+               ("template", N_("Draw one with the artist and album name (on this computer)")),
+               ("ai", N_("Ask the AI image service you set up in CoverUp")),
+               ("auto", N_("Try both, in the order set in CoverUp"))),
+      foot=N_("A last resort when no source has a cover. A made cover never replaces a real one, and "
+              "nothing is sent anywhere unless you set up an AI service yourself.")),
     # Target
     S("operation", N_("What happens to files"), "segmented", "files", attr="op",
       choices=tuple((k, OPERATION_SHORT[k]) for k in pf.OPERATIONS),
@@ -653,13 +680,13 @@ PRESETS = {
                      "asks before a second copy."),
                   {"source": "discogs_preferred", "tag_level": "audiophile", "keep_versions": True,
                    "discogs_details.companies": True, "discogs_details.identifiers": True,
-                   "artwork.artist.enabled": True, "artwork.artist.embed": True, "artwork.replace": True,
+                   "artwork.artist.enabled": True, "artwork.artist.embed": True, "artwork.when": "small",
                    "artwork.enlarge": True, "naming.editions": "edition_year", "on_existing": "ask",
                    "mark_resolved": True}),
     "keep": (N_("Keep My Files as They Are"),
              N_("Fixed in place, nothing renamed, only missing tags filled in, covers and comments kept."),
              {"operation": "in_place", "rename_in_place": False, "field_policy.default": "fill_missing",
-              "artwork.replace": False, "artwork.enlarge": False, "artwork.artist.enabled": False,
+              "artwork.when": "needed", "artwork.enlarge": False, "artwork.artist.enabled": False,
               "cleanup.comments": "keep", "split_versions": False,
               "tagger.remove_id3_from_flac": False, "tagger.remove_ape_from_mp3": False}),
 }
@@ -686,6 +713,14 @@ SAMPLE = {"albumartist": ["Ada Lark & Milo Fen"], "artist": ["Ada Lark & Milo Fe
           "album": ["Songs From the Long Winter Evenings Under Northern Skies"], "title": ["The Lighthouse Keeper"],
           "tracknumber": ["3"], "discnumber": ["2"], "totaldiscs": ["2"], "date": ["1994-05-02"],
           "originaldate": ["1991-03-01"], "media": ["CD"]}
+
+
+# the Tagging Script preview's albums: an original CD, a vinyl reissue, a two-disc set
+EXAMPLES = (
+    (N_("An original CD"), dict(SAMPLE, discnumber=["1"], totaldiscs=["1"], date=["1991-03-01"])),
+    (N_("A vinyl reissue"), dict(SAMPLE, discnumber=["1"], totaldiscs=["1"], date=["2019-11-08"], media=["12\" Vinyl"])),
+    (N_("Disc 2 of a two-CD set"), SAMPLE),
+)
 
 
 def _index_of(box, value) -> int:
@@ -797,8 +832,16 @@ class ProfileEditor(QScrollArea):
         self.reset_btn.clicked.connect(lambda: self.ask_restore(None))
         tools.addWidget(self.start_btn)
         tools.addWidget(self.reset_btn)
+        for text, name, on in ((tr("Collapse All"), tr("Fold every section"), False),
+                               (tr("Expand All"), tr("Unfold every section"), True)):
+            b = QPushButton(text)
+            b.setAccessibleName(name)
+            b.setAutoDefault(False)
+            b.clicked.connect(lambda _=False, o=on: self.fold_all(o))
+            tools.addWidget(b)
         self.lay.addLayout(tools)
         self.rows, self.controls, self.groups, self.sections, self.advanced = {}, {}, {}, {}, {}
+        self.folds = {}
         self.loaded, self.defaults, self.raw = {}, {}, {}
         self._loading = False
         for sid, title, hint in SECTIONS:
@@ -806,6 +849,9 @@ class ProfileEditor(QScrollArea):
         self.lay.addStretch(1)
         self.setWidget(body)
         self.body = body
+        for sid in _gui_prefs().get(FOLDED_PREF) or []:      # (folded the last time)
+            if sid in self.folds:
+                self.folds[sid].setChecked(False)
         self.load({}, pf.from_dict({"name": "x"}, check=False).data, pf.from_dict({"name": "x"}, check=False).data)
 
     # ---- building ----------------------------------------------------------------------
@@ -814,11 +860,17 @@ class ProfileEditor(QScrollArea):
         v = QVBoxLayout(box)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(12)
-        if sid != "general":
-            head = QLabel(tr(title))
-            head.setProperty("role", "title")
-            head.setAccessibleName(tr(title))
-            v.addWidget(head)
+        outer = v
+        if sid != "general":                                 # (a heading that folds what follows it)
+            inner = QWidget()
+            fold = SectionFold(tr(title), inner)
+            fold.toggled_by_user.connect(lambda _on: self._remember_folds())
+            outer.addWidget(fold, 0, Qt.AlignLeft)
+            outer.addWidget(inner)
+            self.folds[sid] = fold
+            v = QVBoxLayout(inner)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(12)
             if hint:
                 v.addWidget(caption(tr(hint), "hint"))
         holder = QWidget()
@@ -894,7 +946,8 @@ class ProfileEditor(QScrollArea):
             c.textChanged.connect(self._changed)
         elif spec.kind == "list":
             c = ListField(label, tr(spec.foot) if spec.foot else "", checkable=spec.custom == "check",
-                          known=list(spec.known), words={k: tr(w) for k, w in spec.words.items()})
+                          known=list(spec.known), words={k: tr(w) for k, w in spec.words.items()},
+                          folders=spec.custom == "folders")
             c.changed.connect(self._changed)
         else:
             c = QLineEdit()
@@ -1099,12 +1152,22 @@ class ProfileEditor(QScrollArea):
         self.first_problem_key = next((k for k in self.rows if k in found), None)
         self.first_problem = self.rows[self.first_problem_key] if self.first_problem_key else None
 
+    def fold_all(self, on):
+        for f in self.folds.values():
+            f.setChecked(on)
+        self._remember_folds()
+
+    def _remember_folds(self):
+        _set_gui_pref(FOLDED_PREF, [s for s, f in self.folds.items() if not f.isChecked()])
+
     def reveal_first_problem(self):
-        """Scroll to the first row with a problem, opening its Advanced fold when it is in one."""
+        """Scroll to the first row with a problem, opening its section and its Advanced fold."""
         key = getattr(self, "first_problem_key", None)
         if not key:
             return
         g = GROUPS[BY_KEY[key].group] if key in BY_KEY else None
+        if g and g[0] in self.folds:
+            self.folds[g[0]].setChecked(True)
         if g and g[3] and g[0] in self.advanced:
             self.advanced[g[0]].setChecked(True)
         self.ensureWidgetVisible(self.rows[key])
@@ -1123,6 +1186,22 @@ class ProfileEditor(QScrollArea):
                 except Exception:
                     v = False
             out[key] = bool(v)
+        return out
+
+    def examples(self) -> list:
+        """(what, path) for each example album, named as this profile names files now."""
+        vals = self.values()
+        nm = {"preset": vals.get("naming.preset"), "editions": vals.get("naming.editions"),
+              "template": dig(self.raw, "naming.template") or ""}
+        fn = {"max_album_words": vals.get("filenames.max_album_words", 0)}
+        out = []
+        for what, tags in EXAMPLES:
+            try:
+                comps = naming.render(naming.effective_template(nm, fn), tags, self._name_settings(vals),
+                                      vals.get("filenames.compat") or "windows")
+                out.append((tr(what), "/".join(comps) + ".flac"))
+            except Exception as exc:                            # (a script of the profile's own that fails)
+                out.append((tr(what), tr("No example: {0}").format(exc)))
         return out
 
     def show_preview(self, vals):
@@ -1189,6 +1268,8 @@ class ProfileEditor(QScrollArea):
                     g.tidy()
             if sid in self.advanced:
                 self.advanced[sid].setVisible(not text or adv_hit)
+            if text and hit and sid in self.folds:           # (a match in a folded section shows)
+                self.folds[sid].setChecked(True)
             box.setVisible(not text or hit)
         return text
 

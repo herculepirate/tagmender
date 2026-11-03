@@ -264,6 +264,10 @@ def stylesheet():
     QToolButton[role="disclosure"] {{ border: 1px solid transparent; border-radius: {CONTROL}px; padding: 3px 6px;
                                       color: {muted}; font-weight: 600; }}
     QToolButton[role="disclosure"]:hover {{ background: {line}; }}
+    QToolButton[role="sectionfold"] {{ border: 1px solid transparent; border-radius: {CONTROL}px; padding: 2px 6px 2px 0;
+                                       font-size: 20px; font-weight: 600; color: {ink}; }}
+    QToolButton[role="sectionfold"]:hover {{ background: {line}; }}
+    QToolButton[role="sectionfold"]:focus {{ border: 2px solid {accent}; }}
     QToolButton[role="disclosure"]:focus {{ border: 2px solid {accent}; padding: 2px 5px; }}
     QHeaderView::section {{ background: {base}; color: {muted}; border: none; border-bottom: 1px solid {line};
                             padding: 4px 8px; font-weight: 600; }}

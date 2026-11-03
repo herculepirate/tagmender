@@ -350,9 +350,10 @@ class Gui(te.Base):
         self.app.processEvents()
         pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Art"))
         self.app.processEvents()
-        self.assertEqual((pr.art_src.currentData(), pr.art_when.currentData(), pr.art_enlarge.isChecked(),
-                          pr.art_gen.currentData()), (["coverup", "caa", "discogs"], "needed", True, "off"))
-        pr.art_src.setCurrentIndex(pr.art_src.findData(["caa", "discogs"]))
+        self.assertEqual((pr.art_src.value(), pr.art_when.currentData(), pr.art_enlarge.isChecked(),
+                          pr.art_gen.currentData()), (["coverup", "caa", "discogs"], "small", True, "off"))   # (small ones replaced)
+        pr.art_src.set_value(["caa", "discogs"])
+        pr.art_src.changed.emit()
         pr.art_when.setCurrentIndex(pr.art_when.findData("always"))
         pr.art_enlarge.setChecked(False)
         pr.art_gen.setCurrentIndex(pr.art_gen.findData("template"))
@@ -360,6 +361,11 @@ class Gui(te.Base):
         a = pf.load("Art")["artwork"]
         self.assertEqual((a["sources"], a["when"], a["enlarge"], a["generate"]),
                          (["caa", "discogs"], "always", False, "template"))
+        # "when it has none, or one below the smallest size" is a missing cover plus replacing small ones
+        pr.art_when.setCurrentIndex(pr.art_when.findData("small"))
+        pr.save()
+        a = pf.load("Art")["artwork"]
+        self.assertEqual((a["when"], a["replace"]), ("needed", "larger_only"))
 
     def test_settings_never_show_a_saved_key(self):
         st = self.win.preferences()

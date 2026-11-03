@@ -190,5 +190,50 @@ class Cli(Base):
         self.assertIn("not valid JSON", out)
 
 
+
+class RenameDeleteCopyNames(Base):
+    def test_new_names_count_up_and_stop_at_the_most_a_computer_keeps(self):
+        self.assertEqual(pf.next_name(), "Profile 1")
+        pf.save(pf.from_dict({"name": "Profile 1"}))
+        pf.save(pf.from_dict({"name": "Profile 3"}))
+        self.assertEqual(pf.next_name(), "Profile 2")                   # (the first free number)
+        for i in range(pf.MAX_PROFILES - 2):
+            pf.save(pf.from_dict({"name": f"Other {i}"}))
+        self.assertEqual(len(pf.names()), pf.MAX_PROFILES)
+        self.assertEqual(pf.next_name(), "")
+
+    def test_a_rename_carries_the_name_into_the_file_and_what_refers_to_it(self):
+        import app_settings
+        import watcher
+        pf.save(pf.from_dict({"name": "Inbox"}))
+        app_settings.set_value("default_profile", "Inbox")
+        watcher.plans_dir().mkdir(parents=True, exist_ok=True)
+        (watcher.plans_dir() / "j1.json").write_text(json.dumps({"profile": "Inbox", "albums": []}))
+        pf.rename("Inbox", "Ambient")
+        self.assertEqual(pf.names(), ["Ambient"])
+        self.assertEqual(pf.raw("Ambient")["name"], "Ambient")
+        self.assertEqual(app_settings.get("default_profile"), "Ambient")
+        self.assertEqual(json.loads((watcher.plans_dir() / "j1.json").read_text())["profile"], "Ambient")
+
+    def test_a_name_in_use_or_unsafe_is_refused(self):
+        pf.save(pf.from_dict({"name": "A"}))
+        pf.save(pf.from_dict({"name": "B"}))
+        for bad in ("b", "", "../x", ".hidden", "default", "global"):
+            with self.assertRaises(pf.ProfileError, msg=bad):
+                pf.rename("A", bad)
+        pf.rename("A", "a")                                             # (only its case changes)
+        self.assertEqual(sorted(pf.names()), ["B", "a"])
+
+    def test_a_delete_keeps_a_copy_and_lets_go_of_the_default(self):
+        import app_settings
+        pf.save(pf.from_dict({"name": "Gone"}))
+        app_settings.set_value("default_profile", "Gone")
+        kept = pf.delete("Gone")
+        self.assertEqual(pf.names(), [])
+        self.assertEqual(json.loads(kept.read_text())["name"], "Gone")
+        self.assertEqual(kept.parent.name, ".deleted")
+        self.assertEqual(app_settings.get("default_profile"), "last")
+
+
 if __name__ == "__main__":
     unittest.main()

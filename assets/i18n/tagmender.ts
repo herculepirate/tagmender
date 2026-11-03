@@ -52,7 +52,7 @@
         <location line="+124"/>
         <location filename="../../gui/inspector.py" line="+158"/>
         <location filename="../../gui/preferences.py" line="+412"/>
-        <location filename="../../gui/profiles.py" line="+386"/>
+        <location filename="../../gui/profiles.py" line="+397"/>
         <location filename="../../gui/setup.py" line="+216"/>
         <location line="+431"/>
         <location filename="../../gui/sheets.py" line="+167"/>
@@ -547,7 +547,7 @@
         <location line="+7"/>
         <location filename="../../gui/manual_match.py" line="+669"/>
         <location line="+1"/>
-        <location filename="../../gui/profiles.py" line="-364"/>
+        <location filename="../../gui/profiles.py" line="-375"/>
         <location filename="../../gui/tagnames.py" line="+22"/>
         <location filename="../../gui/versions.py" line="+27"/>
         <source>Title</source>
@@ -606,7 +606,7 @@
     <message>
         <location line="+0"/>
         <location filename="../../gui/preferences.py" line="-458"/>
-        <location filename="../../gui/profile_editor.py" line="+457"/>
+        <location filename="../../gui/profile_editor.py" line="+477"/>
         <location filename="../../gui/tagnames.py" line="-9"/>
         <source>AcoustID</source>
         <translation type="unfinished"></translation>
@@ -746,7 +746,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/search.py" line="+381"/>
         <location filename="../../gui/sheets.py" line="-101"/>
         <location line="+5"/>
-        <location line="+121"/>
+        <location line="+134"/>
         <source>Close</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1978,6 +1978,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/script_editor.py" line="+176"/>
+        <location filename="../../gui/sheets.py" line="-13"/>
         <source>Preview</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2122,7 +2123,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/overview.py" line="+85"/>
-        <location filename="../../gui/profile_editor.py" line="+424"/>
+        <location filename="../../gui/profile_editor.py" line="+456"/>
         <location filename="../../gui/rows.py" line="+207"/>
         <source>Choose…</source>
         <translation type="unfinished"></translation>
@@ -2758,7 +2759,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/manual_match.py" line="+587"/>
         <location line="+1"/>
         <location filename="../../gui/profiles.py" line="-1"/>
-        <location line="+428"/>
+        <location line="+440"/>
         <location filename="../../gui/script_editor.py" line="-528"/>
         <location line="+11"/>
         <source>File</source>
@@ -2766,7 +2767,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/profiles.py" line="-425"/>
+        <location filename="../../gui/profiles.py" line="-437"/>
         <location filename="../../gui/report.py" line="-207"/>
         <location filename="../../gui/watched.py" line="-239"/>
         <location line="+181"/>
@@ -2849,7 +2850,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/inspector.py" line="-70"/>
-        <location filename="../../gui/profile_editor.py" line="-807"/>
+        <location filename="../../gui/profile_editor.py" line="-852"/>
         <source>Tags</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3050,7 +3051,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/jobs.py" line="-107"/>
         <location filename="../../gui/report.py" line="-2"/>
         <location line="+7"/>
-        <location filename="../../gui/rows.py" line="+88"/>
+        <location filename="../../gui/rows.py" line="+95"/>
         <location filename="../../gui/style.py" line="+43"/>
         <location filename="../../gui/watched.py" line="-277"/>
         <source>Done</source>
@@ -3178,7 +3179,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+8"/>
-        <location filename="../../gui/profiles.py" line="+531"/>
+        <location filename="../../gui/profiles.py" line="+543"/>
         <source>What</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3436,7 +3437,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+2"/>
-        <location filename="../../gui/profiles.py" line="-288"/>
+        <location filename="../../gui/profiles.py" line="-289"/>
         <location filename="../../gui/watched.py" line="-427"/>
         <source>When</source>
         <translation type="unfinished"></translation>
@@ -3448,7 +3449,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/profiles.py" line="-217"/>
+        <location filename="../../gui/profiles.py" line="-228"/>
         <source>Rule</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3573,7 +3574,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/preferences.py" line="+256"/>
         <location line="+403"/>
         <location line="+2"/>
-        <location filename="../../gui/profiles.py" line="+336"/>
+        <location filename="../../gui/profiles.py" line="+347"/>
         <location line="+2"/>
         <location filename="../../gui/setup.py" line="+575"/>
         <location line="+2"/>
@@ -3989,9 +3990,9 @@ New: {after}
         <location line="+5"/>
         <location line="+26"/>
         <location line="+12"/>
-        <location filename="../../gui/profile_editor.py" line="+639"/>
+        <location filename="../../gui/profile_editor.py" line="+667"/>
         <location line="+1"/>
-        <location filename="../../gui/rows.py" line="+62"/>
+        <location filename="../../gui/rows.py" line="+70"/>
         <source>None</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4096,7 +4097,7 @@ New: {after}
     </message>
     <message>
         <location line="+4"/>
-        <location filename="../../gui/profile_editor.py" line="-637"/>
+        <location filename="../../gui/profile_editor.py" line="-665"/>
         <source>Artwork</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4118,9 +4119,9 @@ New: {after}
         <location line="+10"/>
         <location line="+17"/>
         <location filename="../../gui/overview.py" line="+19"/>
-        <location filename="../../gui/profiles.py" line="-367"/>
+        <location filename="../../gui/profiles.py" line="-378"/>
         <location line="+1"/>
-        <location line="+427"/>
+        <location line="+439"/>
         <location filename="../../gui/report.py" line="-4"/>
         <location filename="../../gui/tagnames.py" line="-23"/>
         <location filename="../../gui/watched.py" line="+313"/>
@@ -4363,7 +4364,7 @@ New: {after}
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/profiles.py" line="-78"/>
+        <location filename="../../gui/profiles.py" line="-79"/>
         <location line="+1"/>
         <source>problem</source>
         <translation type="unfinished"></translation>
@@ -5250,7 +5251,7 @@ New: {after}
     <message>
         <location line="-287"/>
         <location line="+805"/>
-        <location filename="../../gui/profile_editor.py" line="+786"/>
+        <location filename="../../gui/profile_editor.py" line="+831"/>
         <source>Advanced</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5396,7 +5397,7 @@ New: {after}
     </message>
     <message>
         <location line="+2"/>
-        <location filename="../../gui/profile_editor.py" line="-784"/>
+        <location filename="../../gui/profile_editor.py" line="-829"/>
         <source>Identification</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6078,7 +6079,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-78"/>
+        <location filename="../../gui/profile_editor.py" line="-82"/>
         <location line="+2"/>
         <source>Fix in place</source>
         <translation type="unfinished"></translation>
@@ -6104,17 +6105,18 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+9"/>
         <source>Cover Art Archive, then Discogs, then CoverUp</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="-5"/>
+        <location line="+8"/>
         <source>Discogs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-11"/>
+        <location line="-15"/>
         <source>Leave alone</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6130,12 +6132,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+0"/>
-        <location line="+343"/>
+        <location line="+360"/>
         <source>Move aside</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-342"/>
+        <location line="-359"/>
         <source>Basic</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6175,19 +6177,19 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profiles.py" line="-370"/>
-        <location line="+428"/>
+        <location filename="../../gui/profiles.py" line="-381"/>
+        <location line="+440"/>
         <source>Ignore</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-428"/>
-        <location line="+428"/>
+        <location line="-440"/>
+        <location line="+440"/>
         <source>Skip</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-426"/>
+        <location line="-438"/>
         <source>Album artist</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6271,32 +6273,32 @@ It holds no keys or tokens.</source>
     <message>
         <location line="+0"/>
         <location line="+4"/>
-        <location line="+197"/>
+        <location line="+208"/>
         <source>Action</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-201"/>
+        <location line="-212"/>
         <location line="+5"/>
-        <location line="+196"/>
+        <location line="+207"/>
         <source>Applies to</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-200"/>
+        <location line="-211"/>
         <location line="+5"/>
         <source>Match</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="-3"/>
-        <location line="+198"/>
+        <location line="+209"/>
         <location filename="../../gui/search.py" line="-682"/>
         <source>Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-192"/>
+        <location line="-203"/>
         <location line="+43"/>
         <source>Field</source>
         <translation type="unfinished"></translation>
@@ -6356,7 +6358,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+2"/>
+        <location filename="../../gui/profile_editor.py" line="+6"/>
         <source>CoverUp, then Cover Art Archive, then Discogs</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6404,12 +6406,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+381"/>
+        <location line="+395"/>
         <source>New profile</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-380"/>
+        <location line="-394"/>
         <source>New profile (Ctrl+N)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6424,12 +6426,32 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+5"/>
+        <source>Rename…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Rename the profile shown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Delete…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Delete the profile shown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
         <source>Profile settings and rules</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+528"/>
+        <location filename="../../gui/profile_editor.py" line="+548"/>
         <source>Put pictures in a folder of their own</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6449,73 +6471,57 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-55"/>
+        <location line="-60"/>
         <source>Find front covers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Only for albums missing a cover</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
+        <location line="+7"/>
         <source>For every album</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+5"/>
         <source>Enlarge small covers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-4"/>
-        <source>Replace small covers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <location filename="../../gui/preferences.py" line="-700"/>
-        <location filename="../../gui/profile_editor.py" line="-135"/>
+        <location filename="../../gui/profile_editor.py" line="-142"/>
         <location line="+4"/>
-        <location line="+152"/>
-        <location line="+68"/>
+        <location line="+227"/>
         <source>Never</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-67"/>
-        <source>CoverUp&apos;s AI service</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-95"/>
+        <location filename="../../gui/profile_editor.py" line="-169"/>
         <source>As credited on the release</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-411"/>
+        <location line="-424"/>
         <location line="+1"/>
-        <location line="+399"/>
-        <location line="+246"/>
+        <location line="+412"/>
+        <location line="+261"/>
         <location filename="../../gui/profiles.py" line="+42"/>
         <location filename="../../gui/script_editor.py" line="-48"/>
         <source>On</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-646"/>
+        <location line="-674"/>
         <location line="+1"/>
-        <location line="+399"/>
+        <location line="+412"/>
         <location line="+8"/>
-        <location line="+109"/>
+        <location line="+116"/>
         <location line="+4"/>
         <location line="+3"/>
-        <location line="+122"/>
+        <location line="+130"/>
         <source>Off</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-178"/>
+        <location line="-192"/>
         <source>Update one that is there</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6536,37 +6542,29 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-397"/>
-        <location line="+355"/>
+        <location line="-411"/>
+        <location line="+368"/>
         <location filename="../../gui/tagnames.py" line="+4"/>
         <source>Lyrics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-397"/>
-        <location line="+371"/>
+        <location line="-410"/>
+        <location line="+384"/>
         <location line="+29"/>
         <location line="+11"/>
-        <location line="+53"/>
+        <location line="+54"/>
         <location line="+4"/>
         <source>Automatic</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-467"/>
+        <location line="-481"/>
         <source>At the Audiophile level</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <location line="+399"/>
-        <location line="+5"/>
-        <location line="+24"/>
-        <source>As my other tagger says</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-427"/>
+        <location line="+2"/>
         <source>Deezer</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6632,12 +6630,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+550"/>
+        <location line="+570"/>
         <source>Albums nothing identified</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-550"/>
+        <location line="-570"/>
         <source>What happens to an album no database can prove.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6658,12 +6656,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+294"/>
+        <location line="+307"/>
         <source>Audio files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-294"/>
+        <location line="-307"/>
         <source>Other files are left where they are. Nothing is converted.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6718,12 +6716,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>Automatic: as your other tagger says when its settings are used (Advanced), else the usual default.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Credits</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6769,12 +6762,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+447"/>
+        <location line="+463"/>
         <source>Artist photos</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-447"/>
+        <location line="-463"/>
         <source>At the Enthusiast and Audiophile levels.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6790,12 +6783,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+483"/>
+        <location line="+503"/>
         <source>Files that go with the album</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-482"/>
+        <location line="-502"/>
         <source>When a file is already there</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6805,7 +6798,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+218"/>
+        <location line="+231"/>
         <source>Discogs needs a free personal token: Preferences › Keys.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7197,12 +7190,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+62"/>
+        <location line="+63"/>
         <source>Keep</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-60"/>
+        <location line="-61"/>
         <source>ReplayGain</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7212,7 +7205,87 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+112"/>
+        <location line="+37"/>
+        <source>Album (Remaster 2024)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Album [Remaster 2024]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Album, with the version in its own tags</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>How a remaster, remix or deluxe edition is told apart from the original.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+38"/>
+        <source>Use my existing tagger&apos;s settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>When another tagger is installed on this computer, its settings file is read on each run, so the tags come out the way it writes them. Anything you set here wins.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>Tick the sources to ask and put them in order: the first one with a big enough cover wins.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Only when an album has no cover</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>When it has none, or one below the smallest size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>A small cover that is replaced is backed up first: Undo puts it back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Measured on the short side. A cover found below this is not used.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+18"/>
+        <source>Never: leave the album without one</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Draw one with the artist and album name (on this computer)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Ask the AI image service you set up in CoverUp</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Try both, in the order set in CoverUp</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>A last resort when no source has a cover. A made cover never replaces a real one, and nothing is sent anywhere unless you set up an AI service yourself.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+5"/>
         <source>Copy or move: into the library folder, named as below.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7544,7 +7617,22 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+62"/>
+        <location line="+12"/>
+        <source>An original CD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>A vinyl reissue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Disc 2 of a two-CD set</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+56"/>
         <source>A name, such as Library or Inbox</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7560,12 +7648,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+462"/>
+        <location line="+508"/>
         <source>Start from a preset</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-459"/>
+        <location line="-505"/>
         <source>Restore Defaults…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7575,7 +7663,27 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+43"/>
+        <location line="+5"/>
+        <source>Collapse All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Fold every section</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Expand All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Unfold every section</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+54"/>
         <source>Example</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7606,12 +7714,12 @@ It holds no keys or tokens.</source>
     </message>
     <message>
         <location line="+29"/>
-        <location filename="../../gui/rows.py" line="-149"/>
+        <location filename="../../gui/rows.py" line="-164"/>
         <source>Choose: {0}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+165"/>
+        <location line="+166"/>
         <source>&lt;a href=&quot;setup&quot;&gt;Set Up…&lt;/a&gt;</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7621,7 +7729,8 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+63"/>
+        <location line="+76"/>
+        <location line="+13"/>
         <source>No example: {0}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7651,7 +7760,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+72"/>
+        <location line="+74"/>
         <source>Nothing would change.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7696,13 +7805,13 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-621"/>
+        <location line="-675"/>
         <source>Apply without asking</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="+16"/>
-        <location filename="../../gui/profile_editor.py" line="-591"/>
+        <location filename="../../gui/profile_editor.py" line="-615"/>
         <source>Standard</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7727,7 +7836,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+798"/>
+        <location line="+847"/>
         <source>Tagging Script…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7737,17 +7846,50 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-473"/>
+        <location line="-505"/>
         <source>Description</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-259"/>
+        <location line="-335"/>
+        <source>Cover Art Archive (MusicBrainz)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>CoverUp: fanart.tv, TheAudioDB, Last.fm, shops</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Shops and web image search</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>The album&apos;s own scans</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <location line="+412"/>
+        <location line="+5"/>
+        <location line="+24"/>
+        <source>Same as my existing tagger</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-406"/>
+        <source>Automatic: what your existing tagger does, when its settings are used (Tags › Advanced), else TagMender&apos;s default.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
         <source>Files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+220"/>
+        <location line="+233"/>
         <source>Only at the Audiophile level, with ReplayGain on.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7907,22 +8049,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>In the album title (…)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <source>In the album title […]</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>In tags only</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="+4"/>
         <source>Write version tags</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8057,32 +8184,17 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>Use settings from my other tagger</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Read each run. Settings changed here take priority.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
+        <location line="+7"/>
         <source>Cover sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+8"/>
         <source>Smallest cover kept</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
-        <source>When the album&apos;s own cover is below the smallest size. Undo puts it back.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+4"/>
         <source>A cover down to 250 px is enlarged to the smallest size.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8142,17 +8254,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>CoverUp&apos;s template (offline)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>CoverUp&apos;s order</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+8"/>
         <source>What happens to files</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8162,17 +8264,17 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-134"/>
+        <location line="-141"/>
         <source>Tagging level</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+51"/>
+        <location line="+52"/>
         <source>A folder for each version, tagged from its own release.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-31"/>
+        <location line="-32"/>
         <source>Artist names</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8182,7 +8284,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+81"/>
+        <location line="+84"/>
         <source>Look for covers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8203,7 +8305,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+241"/>
+        <location filename="../../gui/profile_editor.py" line="+253"/>
         <source>Profile settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8284,7 +8386,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+37"/>
+        <location line="+38"/>
         <source>The profile “{name}” cannot be read.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8386,7 +8488,67 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+97"/>
+        <location line="+46"/>
+        <source>No more profiles can be made.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>{n} profiles is the most one computer keeps. Delete one you no longer use, then try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Every setting is copied except its folders: a folder belongs to one profile.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+10"/>
+        <source>Rename “{name}”</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Its settings, folders and rules stay the same.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Rename</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>The profile was not renamed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Delete the profile “{name}”?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Its settings and rules are removed, and its folders are no longer looked after. Your music and the job history are not touched.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>A copy is kept in the profiles folder, under .deleted, to bring it back.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Delete Profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>The profile was not deleted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+66"/>
         <source>The built-in settings have new defaults.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8421,49 +8583,35 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-111"/>
+        <location line="-171"/>
         <source>Create Profile</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../gui/profile_editor.py" line="-39"/>
-        <location filename="../../gui/profiles.py" line="+36"/>
+        <location filename="../../gui/profiles.py" line="+49"/>
+        <location line="+10"/>
         <source>Profile name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profiles.py" line="-29"/>
-        <location line="+12"/>
+        <location filename="../../gui/profiles.py" line="-47"/>
+        <location line="+11"/>
         <source>The profile was not created.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-11"/>
-        <source>A profile named “{name}” already exists.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+25"/>
+        <location line="+23"/>
         <source>Duplicate “{name}”</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>A name for the copy. Its folders are not copied: a folder belongs to one profile.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>{name} copy</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="+3"/>
         <source>Duplicate</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+16"/>
+        <location line="+62"/>
         <source>Tagging script for editions</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8473,7 +8621,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+20"/>
+        <location line="+21"/>
         <source>Saved profile {name}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9142,7 +9290,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     <message>
         <location filename="../../gui/account.py" line="-229"/>
         <location filename="../../gui/profile_editor.py" line="+21"/>
-        <location line="+490"/>
+        <location line="+536"/>
         <location filename="../../gui/sheets.py" line="+108"/>
         <location line="+28"/>
         <location line="+58"/>
@@ -9248,9 +9396,9 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-1212"/>
+        <location filename="../../gui/profile_editor.py" line="-1290"/>
         <location filename="../../gui/setup.py" line="+3"/>
-        <location filename="../../gui/sheets.py" line="+61"/>
+        <location filename="../../gui/sheets.py" line="+74"/>
         <source>Copy</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9282,11 +9430,27 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     </message>
     <message>
         <location line="+1"/>
+        <source>Type a folder, or Choose Folder…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <source>Type a name, then Add</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+4"/>
+        <source>Choose Folder…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <location line="+38"/>
+        <source>Choose a folder to add</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-32"/>
         <location line="+1"/>
         <source>Add</source>
         <translation type="unfinished"></translation>
@@ -9303,7 +9467,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+51"/>
+        <location line="+59"/>
         <source>Edit…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9319,7 +9483,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+43"/>
+        <location line="+53"/>
         <source>changed from default</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9331,6 +9495,11 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     <message>
         <location line="+33"/>
         <source>Problem: {0}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+99"/>
+        <source>Click to fold or unfold this section</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -10573,7 +10742,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+598"/>
+        <location filename="../../gui/profile_editor.py" line="+622"/>
         <location filename="../../gui/watched.py" line="-177"/>
         <source>Wait until unchanged for</source>
         <translation type="unfinished"></translation>
@@ -11055,7 +11224,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-564"/>
+        <location filename="../../gui/profile_editor.py" line="-584"/>
         <location filename="../../gui/window.py" line="+3"/>
         <source>Automation</source>
         <translation type="unfinished"></translation>

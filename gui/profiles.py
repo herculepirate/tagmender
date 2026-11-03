@@ -219,6 +219,17 @@ class Profiles(QWidget):
         self.dup_btn.setAccessibleName(tr("Duplicate the profile shown"))
         self.dup_btn.clicked.connect(self.duplicate)
         left.addWidget(self.dup_btn)
+        manage = QHBoxLayout()                               # (rename and delete the profile shown)
+        manage.setSpacing(6)
+        self.rename_btn = QPushButton(tr("Rename…"))
+        self.rename_btn.setAccessibleName(tr("Rename the profile shown"))
+        self.rename_btn.clicked.connect(self.rename)
+        manage.addWidget(self.rename_btn)
+        self.delete_btn = QPushButton(tr("Delete…"))
+        self.delete_btn.setAccessibleName(tr("Delete the profile shown"))
+        self.delete_btn.clicked.connect(self.delete)
+        manage.addWidget(self.delete_btn)
+        left.addLayout(manage)
         lay.addLayout(left, 1)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -410,7 +421,8 @@ class Profiles(QWidget):
         settings_on = name != "global"
         self.shown_name = name if settings_on else None
         self.tabs.setTabEnabled(0, settings_on)
-        self.dup_btn.setEnabled(settings_on)
+        for b in (self.dup_btn, self.rename_btn, self.delete_btn):
+            b.setEnabled(settings_on)
         if settings_on and getattr(self, "_rules_forced", False):
             self.tabs.setCurrentIndex(0)                      # (back from the global rules)
         self._rules_forced = not settings_on
@@ -592,15 +604,21 @@ class Profiles(QWidget):
     def new(self):
         """New Profile…: a name and what it starts from (Typical Library, Collector, Keep My
         Files as They Are)."""
+        if not self.room_for_one():
+            return
         dlg = PresetSheet(self, tr("New profile"), with_name=True, action=tr("Create Profile"))
+        dlg.name.setText(pf.next_name())
+        dlg.name.selectAll()
         if sheets.run(dlg, "new_profile") and dlg.name.text().strip():
             self.create(dlg.name.text().strip(), dlg.preset())
 
     def create(self, name, preset="typical", base=None) -> bool:
         """Save a new profile NAME from a preset, or as a copy of the profile `base`."""
-        if pf.path_of(name).exists():
-            sheets.warning(self, tr("The profile was not created."),
-                           tr("A profile named “{name}” already exists.").format(name=name))
+        if not self.room_for_one():
+            return False
+        problem = pf.name_problem(name)
+        if problem:
+            sheets.warning(self, tr("The profile was not created."), problem[0].upper() + problem[1:] + ".")
             return False
         try:
             if base:
@@ -621,16 +639,71 @@ class Profiles(QWidget):
             self.win.pages["Overview"].refresh_profiles()
         return True
 
+    def room_for_one(self) -> bool:
+        """False, having said so, when this computer already has MAX_PROFILES profiles."""
+        if pf.next_name():
+            return True
+        sheets.warning(self, tr("No more profiles can be made."),
+                       tr("{n} profiles is the most one computer keeps. Delete one you no longer use, "
+                          "then try again.").format(n=pf.MAX_PROFILES))
+        return False
+
     def duplicate(self):
         base = self.shown_name
-        if not base:
+        if not base or not self.room_for_one():
             return
         name, ok = sheets.get_text(self, tr("Duplicate “{name}”").format(name=base),
-                                   tr("A name for the copy. Its folders are not copied: a folder belongs to one "
-                                      "profile."), text=tr("{name} copy").format(name=base),
+                                   tr("Every setting is copied except its folders: a folder belongs to one "
+                                      "profile."), text=pf.next_name(),
                                    action=tr("Duplicate"), placeholder=tr("Profile name"))
         if ok and name.strip():
             self.create(name.strip(), base=base)
+
+    def rename(self):
+        old = self.shown_name
+        if not old or not self.may_leave():
+            return
+        name, ok = sheets.get_text(self, tr("Rename “{name}”").format(name=old),
+                                   tr("Its settings, folders and rules stay the same."), text=old,
+                                   action=tr("Rename"), placeholder=tr("Profile name"))
+        name = name.strip()
+        if not ok or not name or name == old:
+            return
+        try:
+            pf.rename(old, name)
+        except (pf.ProfileError, OSError) as exc:
+            sheets.warning(self, tr("The profile was not renamed."), str(exc))
+            return
+        self.shown_name = None
+        self._after_change(name)
+
+    def delete(self):
+        name = self.shown_name
+        if not name:
+            return
+        if not sheets.confirm(self, tr("Delete the profile “{name}”?").format(name=name),
+                              tr("Its settings and rules are removed, and its folders are no longer looked after. "
+                                 "Your music and the job history are not touched."),
+                              tr("A copy is kept in the profiles folder, under .deleted, to bring it back."),
+                              tr("Delete Profile"), destructive=True):
+            return
+        try:
+            pf.delete(name)
+        except (pf.ProfileError, OSError) as exc:
+            sheets.warning(self, tr("The profile was not deleted."), str(exc))
+            return
+        self.saved_values = self.values()                     # (its unsaved changes went with it)
+        self.shown_name = None
+        self._after_change(None)
+
+    def _after_change(self, select):
+        """The list read again after a rename or delete, SELECT shown; Overview told."""
+        self.reload()
+        rows = [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())]
+        if select in rows:
+            self.list.setCurrentRow(rows.index(select))
+        if self.win is not None and hasattr(self.win, "pages"):
+            self.win.pages["Overview"].refresh_profiles()
 
     def picard_script_text(self) -> str:
         import naming
@@ -647,7 +720,8 @@ class Profiles(QWidget):
         sheets.show_text(self, tr("Tagging script for editions"), text,
                          tr("For another tagger that runs TagMender scripts to name and tag as this profile does. "
                             "(Such a tagger works the edition out per track: a set mixing media, such as a CD with "
-                            "a 7\" bonus disc, gets two folders there; TagMender keeps it in one.)"), copy=True)
+                            "a 7\" bonus disc, gets two folders there; TagMender keeps it in one.)"), copy=True,
+                         preview=self.editor.examples())
 
     def save_clicked(self):
         """Save Profile with problems shown: the first one is scrolled to instead."""

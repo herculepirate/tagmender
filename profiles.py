@@ -14,6 +14,8 @@ are upgraded in memory; `migrate` writes the upgrade, keeping a backup.
   validate(dict) -> [problems]  [] when the profile is usable
   save(profile)                 atomic write
   names()                       the profiles on disk
+  next_name() / rename / delete  "Profile N" for a new one (at most MAX_PROFILES); a rename
+                                carries the profile's references along, a delete keeps a copy
   install_examples()            the shipped examples (Lossy), never overwriting yours
 """
 from __future__ import annotations
@@ -1210,6 +1212,90 @@ def from_dict(data: dict, *, check=True) -> Profile:
 def names() -> list[str]:
     d = profiles_dir()
     return sorted(p.stem for p in d.glob("*.json")) if d.is_dir() else []
+
+
+# how many profiles one computer keeps, and the name a new or copied one starts with
+MAX_PROFILES = 15
+NEW_NAME = "Profile {n}"
+
+
+def next_name() -> str:
+    """The first free "Profile N" (1 to MAX_PROFILES); "" when MAX_PROFILES profiles exist."""
+    have = {n.casefold() for n in names()}
+    if len(have) >= MAX_PROFILES:
+        return ""
+    return next(NEW_NAME.format(n=i) for i in range(1, MAX_PROFILES + 2)
+                if NEW_NAME.format(n=i).casefold() not in have)
+
+
+def name_problem(name: str, old: str = "") -> str:
+    """Why NAME cannot be a profile's (new) name ("" when it can)."""
+    name = name.strip()
+    if not name:
+        return "a profile needs a name"
+    if name in (".", "..") or "/" in name or "\\" in name or name.startswith("."):
+        return "a profile's name cannot start with a dot or hold / or \\"
+    if name.casefold() == "default" or name.casefold() == "global":
+        return f"{name!r} is a name TagMender uses itself"
+    if name.casefold() != old.casefold() and name.casefold() in {n.casefold() for n in names()}:
+        return f"a profile named {name!r} already exists"
+    return ""
+
+
+def rename(old: str, new: str) -> Path:
+    """Rename the profile OLD to NEW: its file, the name inside it, and what refers to it
+    (this computer's default profile, plans a watched folder left waiting)."""
+    new = new.strip()
+    problem = name_problem(new, old)
+    if problem:
+        raise ProfileError(problem)
+    src = path_of(old)
+    data = json.loads(src.read_text(encoding="utf-8"))
+    data["name"] = new
+    dst = path_of(new)
+    tmp = dst.with_name(f".{dst.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, dst)
+    if dst != src:
+        src.unlink()
+    _rename_references(old, new)
+    return dst
+
+
+def delete(name: str) -> Path:
+    """Remove the profile NAME. A copy is kept in profiles/.deleted/ (put it back by moving it
+    to profiles/); the job history keeps the name it ran under."""
+    src = path_of(name)
+    if not src.exists():
+        raise ProfileError(f"no profile named {name!r}")
+    keep = profiles_dir() / ".deleted" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(src, keep)
+    _rename_references(name, None)
+    return keep
+
+
+def _rename_references(old: str, new: str | None):
+    """What names a profile, moved to NEW (None: the profile is gone)."""
+    try:
+        import app_settings
+        if app_settings.get("default_profile") == old:
+            app_settings.set_value("default_profile", new or "last")
+    except Exception:                       # (an unreadable settings file stays as it is)
+        pass
+    if new is None:
+        return
+    try:
+        import watcher
+        for f in watcher.plans_dir().glob("*.json"):
+            plan = json.loads(f.read_text(encoding="utf-8"))
+            if plan.get("profile") == old:
+                plan["profile"] = new
+                tmp = f.with_name(f".{f.name}.tmp")
+                tmp.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, f)
+    except (OSError, ValueError, ImportError):
+        pass
 
 
 def raw(name: str) -> dict:

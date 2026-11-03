@@ -143,7 +143,7 @@ class Editor(Base):
         self.assertEqual(raw["tag_level"], "basic")
         self.assertEqual(raw["tagger"], {"va_name": "V.A."})                # (a setting the app has no row for)
         self.assertEqual(raw["artwork"]["sources"], ["local", "caa"])        # (an order of its own, kept)
-        self.assertEqual(pr.art_src.currentData(), ["local", "caa"])        # (shown as it is)
+        self.assertEqual(pr.art_src.value(), ["local", "caa"])              # (shown as it is)
 
     def test_choose_opens_a_list_and_a_custom_value_stays_with_its_profile(self):
         from gui import profile_editor as pe
@@ -199,8 +199,8 @@ class Editor(Base):
                          ("copy", str(self.tmp), "mine"))
         self.assertTrue(pr.dirty())
         ed.apply_preset("keep")
-        self.assertEqual((ed.value("operation"), ed.value("field_policy.default"), ed.value("artwork.replace")),
-                         ("in_place", "fill_missing", False))
+        self.assertEqual((ed.value("operation"), ed.value("field_policy.default"), ed.value("artwork.when")),
+                         ("in_place", "fill_missing", "needed"))
         ed.apply_preset("typical")
         self.assertEqual(ed.value("source"), "musicbrainz_preferred")
         self.assertEqual(ed.value("field_policy.default"), "replace")
@@ -412,6 +412,58 @@ class PreferencesPanes(Base):
         ed = self.win.pages["Profiles"].editor
         for row in ed.findChildren(Row):
             self.assertTrue(row.control.accessibleName(), row.label_text)
+
+
+
+class ProfileManagement(Base):
+    def test_duplicate_rename_and_delete_from_the_page(self):
+        from unittest import mock
+        pr = self.page("Profile 1", description="mine")
+        with mock.patch.object(self.gui.sheets, "get_text", return_value=(self.pf.next_name(), True)) as ask:
+            pr.duplicate()
+        self.assertEqual(ask.call_args.kwargs["text"], "Profile 2")    # (the next free "Profile N")
+        self.assertEqual(self.pf.raw("Profile 2")["description"], "mine")
+        with mock.patch.object(self.gui.sheets, "get_text", return_value=("Ambient", True)):
+            pr.rename()
+        self.assertEqual(sorted(self.pf.names()), ["Ambient", "Profile 1"])
+        self.assertEqual(pr.shown_name, "Ambient")
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=True):
+            pr.delete()
+        self.assertEqual(self.pf.names(), ["Profile 1"])
+
+    def test_no_more_than_the_most_a_computer_keeps(self):
+        for i in range(self.pf.MAX_PROFILES):
+            self.pf.save(self.pf.from_dict({"name": f"P{i}"}))
+        pr = self.win.pages["Profiles"]
+        self.assertFalse(pr.create("One more"))
+        self.assertNotIn("One more", self.pf.names())
+        self.assertIn("No more profiles can be made.", str(self.gui.sheets.shown))
+
+    def test_sections_fold_and_stay_folded(self):
+        pr = self.page("Folds")
+        ed = pr.editor
+        ed.folds["tags"].click()                                        # (folded by hand: remembered)
+        settle(self.app)
+        self.assertFalse(ed.folds["tags"].isChecked())
+        self.assertIn("tags", self.gui.common._gui_prefs()["profile_sections_folded"])
+        ed.search("artist photos")                                      # (a match opens its section)
+        self.assertTrue(ed.folds["artwork"].isChecked())
+        ed.search("")
+        ed.fold_all(False)
+        self.assertFalse(any(f.isChecked() for f in ed.folds.values()))
+        ed.fold_all(True)
+        self.assertEqual(self.gui.common._gui_prefs()["profile_sections_folded"], [])
+
+    def test_a_folder_is_chosen_for_the_folders_a_profile_covers(self):
+        from unittest import mock
+        from gui.rows import ListSheet
+        pr = self.page("Src")
+        self.assertTrue(pr.editor.controls["_sources"].folders)
+        sheet = ListSheet(pr, "Folders", "", [], folders=True)
+        with mock.patch.object(self.gui.sheets, "choose_folder", return_value=str(self.tmp)):
+            sheet.add_chosen()
+            sheet.add_chosen()                                          # (the same folder only once)
+        self.assertEqual(sheet.items(), [str(self.tmp)])
 
 
 if __name__ == "__main__":

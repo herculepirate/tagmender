@@ -38,11 +38,20 @@ PANE_ALIASES = {"Checks": "Advanced"}
 # Keep Undo Backups For: (days, words); 0 is for ever
 KEEP_CHOICES = ((7, N_("1 Week")), (30, N_("30 Days")), (90, N_("90 Days")), (0, N_("Forever")))
 # each key: a short name beside the field, and under it what it is for and where to get it
-KEYS = {"discogs": (N_("Discogs token"), N_("Your personal access token: discogs.com/settings/developers")),
-        "acoustid": (N_("AcoustID key"), N_("An application key: acoustid.org/new-application")),
+KEYS = {"discogs": (N_("Discogs token"), N_("Lets TagMender look albums up on Discogs. At "
+                                             "discogs.com/settings/developers, choose Generate new token and paste "
+                                             "it here.")),
+        "acoustid": (N_("AcoustID application key"),
+                     N_("Lets TagMender identify tracks by their sound.\n"
+                        "1. Log in at acoustid.org (free).\n"
+                        "2. At acoustid.org/new-application, register an application: any name, such as "
+                        "TagMender.\n"
+                        "3. Paste the API key it shows here.\n"
+                        "This is not your user key: that one goes under Account, and only for sending "
+                        "fingerprints.")),
         "fanart": (N_("fanart.tv key"), N_("For CoverUp's covers and artist photos: fanart.tv/get-an-api-key")),
-        "audiodb": (N_("TheAudioDB key"), N_("For CoverUp (optional)")),
-        "lastfm": (N_("Last.fm key"), N_("For CoverUp (optional)")),
+        "audiodb": (N_("TheAudioDB key"), N_("More covers and artist photos for CoverUp (optional)")),
+        "lastfm": (N_("Last.fm key"), N_("More covers for CoverUp: last.fm/api/account/create (optional)")),
         "gnudb": (N_("gnudb e-mail"), N_("The e-mail you registered at gnudb.org, for disc lookups (optional)")),
         "mojeek": (N_("Mojeek key"), N_("Mojeek Search API: mojeek.com/services/search/web-search-api (optional)")),
         "marginalia": (N_("Marginalia key"), N_("Web search; without a key the shared public key is used (optional)")),
@@ -50,8 +59,12 @@ KEYS = {"discogs": (N_("Discogs token"), N_("Your personal access token: discogs
         "mb_client_id": (N_("Client ID"),
                          N_("Of your own MusicBrainz application (step 1 above)")),
         "mb_client_secret": (N_("Client secret"), N_("Of the same application")),
-        "acoustid_user": (N_("AcoustID user key"), N_("Your own key, for sending fingerprints: acoustid.org/api-key "
-                                               "(not the application key under Keys)"))}
+        "acoustid_user": (N_("AcoustID user key"),
+                          N_("Only for sending an album's fingerprints back to AcoustID (Album › Submit "
+                             "AcoustIDs). Identifying tracks works without it.\n"
+                             "1. Log in at acoustid.org.\n"
+                             "2. Open acoustid.org/api-key and paste the key shown there.\n"
+                             "This is not the application key under Keys."))}
 # the keys entered on the Account pane, not under Keys (yours, not a provider's)
 ACCOUNT_KEYS = ("mb_client_id", "mb_client_secret", "acoustid_user")
 SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the environment"),
@@ -211,18 +224,21 @@ class GeneralPane(SettingsPane):
         self.motion.toggled.connect(lambda on: _set_gui_pref("reduce_motion", bool(on)))
         look.add(Row(tr("Reduce motion"), self.motion, tr("No fades or slide-ins for sheets and the inspector.")))
         self.lay.addWidget(look)
-        lib = Group(tr("Library"))
-        self.music = FolderField(tr("Music folder"), tr("Choose your music folder"))
+        lib = Group(tr("Folders and playback"))
+        self.music = FolderField(tr("Folder choosers open in"), tr("Choose where folder choosers open"))
         self.music.setText(str(data.get("library_folder") or ""))
         self.music.edit.setPlaceholderText(tr("The system Music folder"))
         self.music.edit.editingFinished.connect(self.set_music)
         self.music.button.clicked.connect(self.set_music)
-        lib.add(Row(tr("Music folder"), self.music, tr("Where folder choosers start.")))
+        lib.add(Row(tr("Folder choosers open in"), self.music,
+                    tr("Only where Choose Folder… windows start. It changes nothing in your music, and it is not "
+                       "where music is copied: that is each profile's library folder.")))
         self.skip = _popup(tr("Skip by"), ((5, N_("5 seconds")), (10, N_("10 seconds")), (15, N_("15 seconds"))),
                            (data.get("player") or {}).get("skip_seconds", 10))
         self.skip.currentIndexChanged.connect(lambda _i: self.save("player.skip_seconds", self.skip.currentData(),
                                                                           self.skip))
-        lib.add(Row(tr("Skip by"), self.skip, tr("Controls › Skip Forward and Skip Back.")))
+        lib.add(Row(tr("Skip by"), self.skip, tr("How far Controls › Skip Forward and Skip Back jump in the playing "
+                                                 "track.")))
         self.lay.addWidget(lib)
         tell = Group(tr("Watching and notifications"), tr("Notifications come only while TagMender is in the "
                                                           "background."))
@@ -237,11 +253,13 @@ class GeneralPane(SettingsPane):
         self.notify = Switch(tr("When a preview or apply finishes"))
         self.notify.setChecked(bool(notes.get("finished", True)))
         self.notify.toggled.connect(lambda on: self.save("notifications.finished", bool(on), self.notify))
-        tell.add(Row(tr("When a preview or apply finishes"), self.notify))
+        tell.add(Row(tr("When a preview or apply finishes"), self.notify, tr("A desktop notification says what was "
+                                                                              "done.")))
         self.notify_watch = Switch(tr("When watched folders file or hold albums"))
         self.notify_watch.setChecked(bool(notes.get("watch", True)))
         self.notify_watch.toggled.connect(lambda on: self.save("notifications.watch", bool(on), self.notify_watch))
-        tell.add(Row(tr("When watched folders file or hold albums"), self.notify_watch))
+        tell.add(Row(tr("When watched folders file or hold albums"), self.notify_watch,
+                     tr("When an album dropped into a watched folder is filed, or held for your review.")))
         self.lay.addWidget(tell)
         self.finish()
 
@@ -288,22 +306,26 @@ class NetworkPane(SettingsPane):
         self.connection = ConnectionPanel(self)
         conn.add_widget(self.connection)
         self.lay.addWidget(conn)
-        saved = Group(tr("Saved lookups"))
-        self.refresh = _popup(tr("Ask again after"), ((0, N_("Never")), (7, N_("1 week")), (30, N_("30 days")),
+        saved = Group(tr("Saved lookups"), tr("Each database answer is kept on this computer, so processing an album "
+                                              "again is quick and the services are not asked twice."))
+        self.refresh = _popup(tr("Look up again after"), ((0, N_("Never")), (7, N_("1 week")), (30, N_("30 days")),
                                                       (90, N_("90 days"))),
                               (data.get("network") or {}).get("refresh_days", 30))
         self.refresh.currentIndexChanged.connect(lambda _i: self.save("network.refresh_days",
                                                                       self.refresh.currentData(), self.refresh))
-        saved.add(Row(tr("Ask again after"), self.refresh,
-                      tr("Only when an album is processed again, never in the background: a large library is not "
-                         "asked all at once.")))
+        saved.add(Row(tr("Look up again after"), self.refresh,
+                      tr("An older saved answer is asked for again, so database corrections reach your tags. Only "
+                         "when an album is processed again, never in the background. Never: saved answers are "
+                         "kept for good.")))
         self.lay.addWidget(saved)
-        scans = Group(tr("Reading scans"), tr("Scans are read on this computer; nothing is sent."))
+        scans = Group(tr("Reading scans"), tr("Text recognition (OCR) reads barcodes and catalogue numbers off cover "
+                                              "scans and booklets, on this computer; nothing is sent."))
         langs = list((data.get("ocr") or {}).get("languages") or [])
         self.langs = ListField(tr("Scan languages"), tr("Tesseract language codes, such as eng, deu or jpn."))
         self.langs.set_value(langs)
         self.langs.changed.connect(lambda: self.save("ocr.languages", self.langs.value(), self.langs))
-        scans.add(Row(tr("Scan languages"), self.langs, tr("None listed: English and your system language.")))
+        scans.add(Row(tr("Scan languages"), self.langs, tr("The languages printed on your scans. None listed: English "
+                                                          "and your system language.")))
         self.effort = Segmented(tr("Scan reading"))
         for key, words in (("quick", N_("Quick")), ("standard", N_("Standard")), ("thorough", N_("Thorough"))):
             self.effort.addItem(tr(words), key)
@@ -311,7 +333,8 @@ class NetworkPane(SettingsPane):
         self.effort.currentIndexChanged.connect(lambda _i: self.save("ocr.effort", self.effort.currentData(),
                                                                                        self.effort))
         scans.add(Row(tr("Scan reading"), self.effort,
-                      tr("Thorough reads up to 40 images and can take minutes per album.")))
+                      tr("How many images are read per album: Quick up to 8, Standard 15, Thorough 40 (that can "
+                         "take minutes per album).")))
         self.lay.addWidget(scans)
         self.finish()
 
@@ -328,7 +351,8 @@ class FilesPane(SettingsPane):
         undo = Group(tr("Undo"))
         self.keep = _popup(tr("Keep undo backups for"), KEEP_CHOICES, data["backups"]["keep_days"])
         self.keep.activated.connect(self.set_keep)
-        undo.add(Row(tr("Keep undo backups for"), self.keep, tr("Undo works for this long after a change.")))
+        undo.add(Row(tr("Keep undo backups for"), self.keep, tr("Backups are copies of the files as they were, so Undo "
+                                                               "works for this long after a change.")))
         self.auto = Switch(tr("Delete old backups automatically"))
         self.auto.setChecked(bool(data["backups"]["auto_clean"]))
         self.auto.clicked.connect(self.set_auto)
@@ -336,12 +360,15 @@ class FilesPane(SettingsPane):
                      tr("After each apply, backups older than this are deleted, and those changes can no longer be "
                         "undone. Off: they stay until you delete them.")))
         self.lay.addWidget(undo)
-        dup = Group(tr("Duplicates"), tr("Nothing is ever deleted outright."))
+        dup = Group(tr("Duplicates"), tr("When two copies of the same tracks are found, the one not kept is moved "
+                                         "out of the way. Nothing is ever deleted."))
         self.dupes = QLineEdit(str(data["duplicates"]["folder_name"]))
         self.dupes.setAccessibleName(tr("Duplicate copies folder"))
         self.dupes.setMinimumWidth(160)
         self.dupes.editingFinished.connect(self.set_dupes)
-        dup.add(Row(tr("Duplicate copies go to"), self.dupes, tr("A folder of this name at the top of the library.")))
+        dup.add(Row(tr("Duplicates folder"), self.dupes,
+                    tr("Duplicate copies are moved into a folder of this name at the top of the library, keeping "
+                       "their artist and album folders. Look through it and empty it yourself.")))
         self.lay.addWidget(dup)
         self.finish()
 

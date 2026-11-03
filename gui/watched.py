@@ -196,7 +196,8 @@ class WatchDialog(QDialog):
         if p["operation"] == "in_place":
             notes.append(tr("This profile fixes albums where they are, so dropped albums stay in this folder. "
                             "To file them into your library, choose a profile that moves or copies."))
-        dest = Path(os.path.abspath(os.path.expanduser(p["destination"]))) if p["destination"] else None
+        own = (p.source_destination(text) if text else "") or p["destination"]   # (this folder's own library)
+        dest = Path(os.path.abspath(os.path.expanduser(own))) if own else None
         if folder is not None and dest is not None and p["operation"] != "in_place":
             if dest == folder:
                 notes.append(tr("This folder IS the profile's library: every album already in it will be "
@@ -468,7 +469,7 @@ class Watched(QWidget):
         and the background service's state are asked on a worker (an unmounted share can hang
         for seconds, and systemctl is a process)."""
         rows = self.rows()
-        _fill(self.table, [(path, p.name, watch_does(p), tr("Automatically") if p["unattended"] else tr("Asks first"),
+        _fill(self.table, [(path, p.name, watch_does(p, path), tr("Automatically") if p["unattended"] else tr("Asks first"),
                             "…") for path, p in rows])
         for r, (path, _p) in enumerate(rows):
             self.table.item(r, 0).setToolTip(path)

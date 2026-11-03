@@ -367,8 +367,8 @@ class Row(QFrame):
 CONNECTION_LOOK = {"ok": ("circle-check", "done"), "no_key": ("circle-check", "done"),
                    "busy": ("circle-alert", "unresolved"), "unreachable": ("circle-x", "failed"),
                    "refused": ("triangle-alert", "failed")}
-CONNECTION_FOOTER = N_("Sends one small request to each service. Your Discogs token and AcoustID key go only "
-                       "to their own service; nothing about your music is sent.")
+CONNECTION_FOOTER = N_("Sends one small request to each service. Your Discogs token and AcoustID application "
+                       "key go only to their own service; nothing about your music is sent.")
 
 
 def connection_words(r) -> str:

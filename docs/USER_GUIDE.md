@@ -57,7 +57,7 @@ numbers read from scans (OCR), links and codes left in tags, fingerprints. A gen
 Tavily (a paid AI search) only when named and never alone. No search page is scraped.
 
 **Uses the MusicBrainz tag mapping**, so files read the same in other taggers and players.
-File names come from TagMender scripts in the tagging script language, Discogs data and artwork
+File names come from TagMender scripts in the tagging script language ([scripting guide](SCRIPTING.md)), Discogs data and artwork
 from Discogs Enrichment and CoverUp's code, and settings imported from an existing tagger
 installation are found automatically; every change is staged, verified, journaled and undoable.
 
@@ -117,8 +117,8 @@ Nothing is changed until you apply a preview, and every job can be undone.
 
 Documentation: [setup](SETUP.md) · [profiles and naming](PROFILES.md) ·
 [providers and keys](PROVIDERS.md) · [formats](FORMATS.md) · [architecture](ARCHITECTURE.md) ·
-[features](FEATURES.md) · [upgrading from 0.1](MIGRATION.md) · [roadmap](ROADMAP.md) ·
-[release notes](RELEASE_NOTES.md).
+[features](FEATURES.md) · [scripting guide](SCRIPTING.md) · [upgrading from 0.1](MIGRATION.md) ·
+[roadmap](ROADMAP.md) · [release notes](RELEASE_NOTES.md).
 
 ## The batch tools (0.1)
 
@@ -386,8 +386,8 @@ Discs MusicBrainz has no disc ID for are listed in
 
 ## Covers and misc folders
 
-A profile can keep each album folder tidy (Profiles: "Put pictures in a folder of their own",
-"Put rip logs and notes in a folder of their own"; profile `subfolders`, both off by default):
+A profile can keep each album folder tidy (Profiles: "Pictures in their own folder",
+"Rip logs in their own folder"; profile `subfolders`, both off by default):
 
 ```
 Album/cover.jpg                    stays: the front cover, what players show
@@ -535,7 +535,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 | Album > Info… (Ctrl+I) | A file's format, codec, bitrate, length, every tag as stored and its embedded pictures (read only) |
 | Inspector > Tags (Album > Tag) | The selected album's tags, original and new; edit a value (double-click, Return or F2), revert it, add or remove a tag (Delete), for one file or all of them; Edit > Undo Edit (Ctrl+Z) takes back the last edit |
 | Inspector > Artwork | The cover now and the new one; drop an image file or link to use it instead |
-| Tools > Script Editor… (Ctrl+Shift+E) | The profile's file naming script and tagger scripts, with highlighting, completion, function help, errors marked where they are and a preview on the selected album |
+| Tools > Script Editor… (Ctrl+Shift+E) | The profile's file naming script and tagger scripts, with highlighting, completion, function help, errors marked where they are and a preview on the selected album; the language is in the [Scripting guide](SCRIPTING.md) |
 | Tools > Tags from File Names… (Ctrl+Shift+G) | A pattern such as `%artist% - %album%/%tracknumber% %title%` read from the selected album's file names, with a preview; the tags become your edits |
 | Edit > Job Details… (Ctrl+Shift+J) | What a job did, file by file and tag by tag (on the Jobs page), with Undo |
 | Edit > Show Report… (Ctrl+Shift+B) | The report of the selected job, the preview or the albums needing attention: what needs your decision, what could not finish, what was done, with folder links and Apply This Release (see [The report](#the-report-what-a-run-did-and-what-is-left-for-you)) |
@@ -548,7 +548,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 | Album > Submit AcoustIDs… | Send the album's fingerprints to AcoustID with your user key, after a sheet lists every track |
 | Controls > Play/Pause (Space) | Play the selected album in the player bar under the pages; Next, Previous, Stop. It lets go of the files before Apply or Undo |
 | Profiles > Settings | Every setting of the profile in sections (Source, Identification, Tags, Artwork, Target, Albums nothing identified, Automation); see [Profile settings in the app](#profile-settings-in-the-app) |
-| Preferences > General | Appearance, language, reduce motion; the music folder folder choosers start in; how far Skip Forward and Back go; keep watching while open; notifications (only while TagMender is in the background) |
+| Preferences > General | Appearance, language, reduce motion; where folder choosers open (Folder choosers open in); how far Skip Forward and Back go; keep watching while open; notifications (only while TagMender is in the background) |
 | Preferences > Network & Privacy | Test Connection (MusicBrainz, Discogs, AcoustID, the Cover Art Archive); the proxy (the `http_proxy` and `https_proxy` environment variables); how long saved lookups are kept before an album processed again asks again; the languages and effort for reading scans |
 | Preferences > File Safety | How long Undo works (backups kept 1 week, 30 or 90 days, or for ever), cleaning old backups after each apply (a sheet names the jobs that would lose Undo first), the folder duplicate copies go into |
 | Preferences > Advanced | The plugin folder (code that runs inside TagMender: this computer's setting, never a profile's), TagMender's checks and the diagnostics export (folder and file names hidden unless you untick it) |

@@ -1212,8 +1212,9 @@ class Planner:
             dest_root = Path(vsplit["parent"])
             self._split_roots.add(os.path.realpath(str(dest_root)))
         elif op in ("copy", "move"):
-            # (an identified album of lossy files only: the lossy library when the profile has one)
-            dest = p.destination_for(kept) if identified and hasattr(p, "destination_for") else p["destination"]
+            # (the lossy library for an album of lossy files only, else its source folder's own library)
+            dest = p.destination_for(kept, prop.source_dir) if identified and hasattr(p, "destination_for") \
+                else p["destination"]
             dest_root = Path(p["unresolved"]["move_to"] if not identified else dest).expanduser()
             if not dest_root.is_dir():
                 entry["status"] = "blocked"
@@ -1909,8 +1910,9 @@ class Planner:
             return True
         if p["operation"] != "move":
             return False
-        # (the main library, or the lossy one an all-lossy album is filed into)
-        roots = [r for r in (p["destination"], (p.get("destinations") or {}).get("lossy")) if r]
+        # (any library the profile files into: the main one, a source folder's own, the lossy one)
+        import profiles
+        roots = profiles.filing_roots(getattr(p, "data", p))
         dests = [os.path.realpath(os.path.expanduser(str(r))).rstrip(os.sep) + os.sep for r in roots]
         return any(all(os.path.realpath(fe["src"]).startswith(d) for fe in files) for d in dests)
 
@@ -2370,17 +2372,19 @@ class Planner:
 
     def library_roots(self):
         """The profile's own folders (not a folder named on the command line)."""
+        import profiles
         p = self.profile
         r = [os.path.realpath(os.path.expanduser(s["path"])) for s in p["sources"]]
-        for d in (p["destination"], (p.get("destinations") or {}).get("lossy"), p["unresolved"].get("move_to")):
+        for d in profiles.filing_roots(getattr(p, "data", p)) + [p["unresolved"].get("move_to")]:
             if d:
                 r.append(os.path.realpath(os.path.expanduser(d)))
         return r
 
     def roots(self):
+        import profiles
         p = self.profile
         r = [os.path.realpath(os.path.expanduser(s["path"])) for s in p["sources"]]
-        for d in (p["destination"], (p.get("destinations") or {}).get("lossy"), p["unresolved"].get("move_to")):
+        for d in profiles.filing_roots(getattr(p, "data", p)) + [p["unresolved"].get("move_to")]:
             if d:
                 r.append(os.path.realpath(os.path.expanduser(d)))
         return list(dict.fromkeys(r + self.extra_roots))

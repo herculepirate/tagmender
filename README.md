@@ -184,6 +184,7 @@ Flatpak. See [Building the packages](docs/USER_GUIDE.md#building-the-packages).
 | [Formats](docs/FORMATS.md) | What each audio format supports |
 | [Features](docs/FEATURES.md) | Every feature and its status |
 | [Upgrading](docs/MIGRATION.md) | Coming from the 0.1 batch tools |
+| [Scripting guide](docs/SCRIPTING.md) | The naming and tagging script language: every function, with recipes |
 | [Release notes](docs/RELEASE_NOTES.md) · [Roadmap](docs/ROADMAP.md) | What changed, what comes next |
 | [Architecture](docs/ARCHITECTURE.md) · [Translating](docs/TRANSLATING.md) | For contributors |
 

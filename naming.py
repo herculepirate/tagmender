@@ -1,4 +1,4 @@
-"""naming.py - file and folder names from tags, with a subset of Picard's scripting language.
+"""naming.py - file and folder names from tags, with the full tagging script language.
 
 A template gives the path of a file below the destination, without the extension;
 "/" separates folders. Example (the "tagmender" preset):
@@ -7,31 +7,20 @@ A template gives the path of a file below the destination, without the extension
     $if($gt(%totaldiscs%,1),Disc $num(%discnumber%,2)/$num(%discnumber%,1)$num(%tracknumber%,2),
     $num(%tracknumber%,2)).$initials($upper(%title%))
 
-Supported (same meaning as in Picard unless noted):
-  %name%                     the tag's value; several values are joined with "; "
-  %_year%                    year of originaldate, else of date        (TagMender)
-  %_albumartists_sorted%     the album artists (ALBUMARTISTS tag), A to Z; else the album artist as written (TagMender)
-  %_multiartist%             "1" when the release's tracks are by more than one artist (Picard's)
+The script runs on the full engine (tagscript): every function of the language, as in
+Picard, plus TagMender's $words(t,n) (the first n words). docs/SCRIPTING.md documents
+the syntax and every function. TagMender's own variables:
+  %_year%                    year of originaldate, else of date
+  %_albumartists_sorted%     the album artists (ALBUMARTISTS tag), A to Z; else the album artist as written
+  %_multiartist%             "1" when the release's tracks are by more than one artist
   %_edition%                 the edition: "<reissue year> <kind>" ("2019 Vinyl", "Vinyl", "2015 WEB",
-                             "2014 CD"); empty for an original CD and when the media is unknown (TagMender)
-  %_edition_kind%            the kind alone ("Vinyl", "WEB", "Tape"); empty for a CD (TagMender)
-  $if(cond,then[,else])  $if2(a,b,...)  $not(x)  $and(a,b,...)  $or(a,b,...)
-  $eq(a,b)  $ne(a,b)  $gt(a,b)  $lt(a,b)  $gte(a,b)  $lte(a,b)       (numbers compared as numbers)
-  $num(n,len)  $left(t,n)  $right(t,n)  $lower(t)  $upper(t)  $title(t)  $trim(t)
-  $replace(t,search,repl)  $firstalphachar(t[,other])  $truncate(t,n)  $year(date)
-  $join(%name%,sep)  $getmulti(%name%,index)  $lenmulti(%name%)  $noop(...)
-  $set(name,v)  $unset(name)  $get(name)   variables for the rest of the name (never tags)
-  $rsearch(t,regex)  $sortmulti(multi)  $in(t,s)  $add(a,b)  $sub(a,b)  $mul(a,b)  $div(a,b)
-  $words(t,n)    the first n words                                       (TagMender)
-  $initials(t)   the first letter of each word that starts with a letter (as Picard)
-  \\, \\$ \\% \\( \\) \\,   literal characters
+                             "2014 CD"); empty for an original CD and when the media is unknown
+  %_edition_kind%            the kind alone ("Vinyl", "WEB", "Tape"); empty for a CD
 
-Not supported: $copy and other functions that change tags (naming here never changes
-tags; $set only names a variable for the rest of the name), $rreplace and plugin
-functions. An unknown function is an error when the template is checked, not a silent
-empty string.
-
-A "/" inside a tag value becomes "_" (it would otherwise create a folder), as in Picard.
+Naming never changes tags: $set, $copy, $delete ... only change variables for the rest of
+the name. An unknown function is an error when the template is checked, not a silent
+empty string. A "/" inside a tag value becomes "_" (it would otherwise create a folder),
+as in Picard; empty path parts are dropped.
 """
 from __future__ import annotations
 

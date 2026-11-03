@@ -293,6 +293,29 @@ class Target(Base):
         p = planmod.build([prop_for(mp3)], self.copy_profile())
         self.assertTrue(all(fe["dst"].startswith(str(self.dest)) for fe in all_files(p)))
 
+    def test_each_source_folder_files_into_its_own_library(self):
+        ambient_in, extreme_in = self.tmp / "in" / "ambient", self.tmp / "in" / "extreme"
+        ambient = self.dest / "ambient"
+        ambient.mkdir(parents=True)
+        a = album(ambient_in / "Band A" / "Calm", 2)
+        e = album(extreme_in / "Band B" / "Loud", 2)
+        prof = self.copy_profile(sources=[{"path": str(ambient_in), "destination": str(ambient)},
+                                          {"path": str(extreme_in)}])            # (none: the profile's)
+        self.assertEqual(pf.validate(prof.data), [])
+        p = planmod.build([prop_for(a), prop_for(e)], prof)
+        by_src = {al["source_dir"]: [fe["dst"] for fe in al["files"]] for al in p["albums"]}
+        self.assertTrue(all(d.startswith(str(ambient) + "/") for d in by_src[str(a[0].parent)]), by_src)
+        self.assertTrue(all(d.startswith(str(self.dest) + "/") and not d.startswith(str(ambient) + "/")
+                            for d in by_src[str(e[0].parent)]), by_src)
+        self.assertEqual(prof.filing_roots(), [str(self.dest), str(ambient)])
+        # a source's library that is not there blocks only its albums, and is never created
+        gone = self.tmp / "unmounted"
+        prof = self.copy_profile(sources=[{"path": str(ambient_in), "destination": str(gone)}])
+        p = planmod.build([prop_for(a)], prof)
+        self.assertEqual(p["albums"][0]["status"], "blocked")
+        self.assertFalse(gone.exists())
+        self.assertTrue(pf.validate(dict(prof.data, sources=[{"path": str(ambient_in), "destination": "rel/x"}])))
+
     def _taken(self, **over):
         files = album(self.lib / "Band A" / "Album A", 1)
         there = self.dest / "Band A" / "1999 - Album A" / "01 - Song Number 0.flac"

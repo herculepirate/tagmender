@@ -76,25 +76,27 @@ CHOOSE = "__choose__"                                     # a pop-up's "Choose�
 # ---- sections and groups (in reading order) ---------------------------------------------------
 SECTIONS = (
     ("general", N_("General"), ""),
-    ("source", N_("Source"), N_("Where music comes from, and which files are read.")),
-    ("identification", N_("Identification"), N_("How an album is matched to its release.")),
-    ("tags", N_("Tags"), N_("What is written into the files.")),
-    ("artwork", N_("Artwork"), N_("Covers and artist photos.")),
-    ("target", N_("Target"), N_("Where files go and what they are called.")),
-    ("unresolved", N_("Albums nothing identified"), N_("What happens to an album no database can prove.")),
-    ("automation", N_("Automation"), N_("What the profile's watched folders do.")),
+    ("source", N_("Source"), N_("Which folders are read, and which files in them.")),
+    ("identification", N_("Identification"), N_("How each album is matched to a release in the music databases.")),
+    ("tags", N_("Tags"), N_("What is written into the files' tags.")),
+    ("artwork", N_("Artwork"), N_("Front covers and artist photos: where they come from and where they go.")),
+    ("target", N_("Target"), N_("Where the files end up and what they are called.")),
+    ("unresolved", N_("Albums nothing identified"), N_("What happens to an album no database can identify for sure.")),
+    ("automation", N_("Automation"), N_("What happens to albums dropped into this profile's watched folders.")),
 )
 # group id -> (section, title, footnote, advanced)
 GROUPS = {
     "general": ("general", "", "", False),
-    "folders": ("source", N_("Folders"), N_("Watched folders are chosen on the Watched folders page."), False),
-    "audio": ("source", N_("Audio files"), N_("Other files are left where they are. Nothing is converted."), False),
+    "folders": ("source", N_("Folders"), N_("Which of them are watched for new music is chosen on the Watched folders page."), False),
+    "audio": ("source", N_("Audio files"), N_("Files in other formats are left where they are. Nothing is converted."), False),
     "source_adv": ("source", "", "", True),
-    "databases": ("identification", N_("Databases"), N_("Partial albums always wait for your review."), False),
+    "databases": ("identification", N_("Databases"), N_("Partial: the album is known but not its exact release, so only the details that are certain "
+                    "are written. Partial albums always wait for your review."), False),
     "evidence": ("identification", N_("Evidence"),
-                 N_("Each lookup sends only what it names. Nothing is sent to an account."), False),
+                 N_("Extra clues for albums whose tags and file names are not enough. Each one sends only what "
+                    "it names, and nothing is sent to an account."), False),
     "releases": ("identification", N_("Preferred releases"),
-                 N_("These break ties between pressings nothing else tells apart."), False),
+                 N_("When several pressings of an album fit equally well, these decide which one is used."), False),
     "ident_adv": ("identification", "", "", True),
     "written": ("tags", N_("What is written"), "", False),
     "audiophile": ("tags", N_("Extras at the Audiophile level"), N_("Only when the tagging level is Audiophile."),
@@ -105,20 +107,26 @@ GROUPS = {
                    "else TagMender's default."), False),
     "credits": ("tags", N_("Credits"), "", False),
     "versions": ("tags", N_("Dates and versions"), "", False),
-    "discogs": ("tags", N_("Discogs details"), N_("Written as tags of their own."), False),
-    "lyrics": ("tags", N_("Lyrics"), N_("From LRCLIB."), False),
-    "loudness": ("tags", N_("Loudness"), "", False),
+    "discogs": ("tags", N_("Discogs details"),
+                N_("Extra details from Discogs, each in a tag of its own. At the Audiophile level: only when the "
+                   "tagging level is Audiophile."), False),
+    "lyrics": ("tags", N_("Lyrics"), N_("From LRCLIB, a free lyrics database."), False),
+    "loudness": ("tags", N_("Loudness"),
+                 N_("ReplayGain: volume tags that let players play every track equally loud. Measured at the "
+                    "Audiophile level."), False),
     "notes": ("tags", N_("TagMender notes in files"), "", False),
     "tags_adv": ("tags", "", "", True),
     "covers": ("artwork", N_("Covers"),
-               N_("CoverUp asks many services (fanart.tv, TheAudioDB, Last.fm, shops) for the album's name."), False),
+               N_("Cover Art Archive: the covers people add to MusicBrainz. CoverUp, the cover finder that comes "
+                  "with TagMender, searches fanart.tv, TheAudioDB, Last.fm and shops by the album's name."), False),
     "artist_photos": ("artwork", N_("Artist photos"), N_("At the Enthusiast and Audiophile levels."), False),
     "art_adv": ("artwork", "", "", True),
     "files": ("target", N_("Files"), "", False),
     "names": ("target", N_("Names"), "", False),
     "subfolders": ("target", N_("Pictures and logs"), "", False),
     "companions": ("target", N_("Files that go with the album"), "", False),
-    "existing": ("target", N_("When a file is already there"), "", False),
+    "existing": ("target", N_("When a file is already there"),
+                 N_("A file of the same name is already where the new one would go."), False),
     "target_adv": ("target", "", "", True),
     "unres": ("unresolved", "", "", False),
     "watch": ("automation", N_("Watched folders"),
@@ -168,7 +176,8 @@ class S:
     rng: tuple = (0, 100)
     suffix: str = ""
     custom: str = ""                # popup: "list" or "check" - its Choose… opens a list sheet; list: "check", or
-                                    # "folders" (Choose Folder… beside the typed entry)
+                                    # "folders" (Choose Folder… beside the typed entry), or "sources"
+                                    # (folders, each with where its albums go: SourcesSheet)
     known: tuple = ()
     words: dict = field(default_factory=dict)
     personal: bool = False          # folders and words: kept by presets and Restore Defaults
@@ -243,13 +252,24 @@ def _art_when_put(d, v, _vals):
 
 
 def _sources_get(d):
-    return [s.get("path", "") for s in d.get("sources") or [] if isinstance(s, dict)]
+    """Each folder with its own destination ("" = the profile's)."""
+    return [{"path": s.get("path", ""), "destination": s.get("destination") or ""}
+            for s in d.get("sources") or [] if isinstance(s, dict)]
 
 
 def _sources_put(d, v, vals):
     was = {s.get("path"): s for s in d.get("sources") or [] if isinstance(s, dict)}
     deep = vals.get("_recursive", True)
-    d["sources"] = [dict(was.get(p) or {"path": p, "watch": False}, path=p, recursive=deep) for p in v]
+    out = []
+    for item in v:
+        path, dest = (item.get("path", ""), item.get("destination") or "") if isinstance(item, dict) else (item, "")
+        s = dict(was.get(path) or {"path": path, "watch": False}, path=path, recursive=deep)
+        if dest:
+            s["destination"] = dest
+        else:
+            s.pop("destination", None)                    # (the profile's destination)
+        out.append(s)
+    d["sources"] = out
 
 
 def _recursive_get(d):
@@ -389,64 +409,76 @@ SETTINGS = [
     S("description", N_("Description"), "text", "general", personal=True, attr="desc"),
     # Source
     S("_sources", N_("Folders this profile covers"), "list", "folders", get=_sources_get, put=_sources_put,
-      custom="folders", personal=True, foot=N_("The music this profile looks after. A preview can still run on any folder.")),
+      custom="sources", personal=True, foot=N_("The music this profile looks after. A preview can still be run on any other folder.")),
     S("_recursive", N_("Include subfolders"), "switch", "folders", get=_recursive_get, put=_recursive_put,
-      enable=_recursive_reason, foot=N_("Albums inside folders inside these ones are found too.")),
+      enable=_recursive_reason, foot=N_("Albums in folders inside these are found too.")),
     S("skip_folders", N_("Skip these folders"), "list", "folders",
-      foot=N_("By name, such as #recycle or _*. Never read or changed. Hidden folders and TagMender's own "
+      foot=N_("By name, such as #recycle, or _* for every name starting with _. Never read or changed. Hidden folders and TagMender's own "
               "Unidentified and Duplicates folders are always skipped.")),
     S("formats", N_("Audio files"), "popup", "audio", attr="formats", custom="check",
       choices=(([], N_("All formats")), (["lossless"], N_("Lossless only")), (["lossy"], N_("Lossy only"))),
       known=pf.LOSSLESS + pf.LOSSY, words=FORMAT_WORDS,
-      foot=N_("Decided by the codec: an .m4a file holding ALAC counts as lossless.")),
+      foot=N_("Lossless: FLAC, ALAC, WAV and the like. Lossy: MP3, AAC, Opus and the like. Told by the "
+              "sound inside, so an .m4a file holding ALAC counts as lossless.")),
     S("_lossy_on", N_("Put lossy files in a different folder"), "switch", "audio",
-      get=lambda d: bool(dig(d, "destinations.lossy")), put=_lossy_on_put, personal=True, enable=_dest_reason),
+      get=lambda d: bool(dig(d, "destinations.lossy")), put=_lossy_on_put, personal=True, enable=_dest_reason,
+      foot=N_("Lossy files go into a library of their own instead of the library folder.")),
     S("destinations.lossy", N_("Folder for lossy files"), "folder", "audio", put=_lossy_put, personal=True,
-      show=lambda v: v.get("_lossy_on"), enable=_dest_reason),
-    S("quality_action", N_("When a lossless file looks converted from lossy"), "popup", "audio",
+      show=lambda v: v.get("_lossy_on"), enable=_dest_reason,
+      foot=N_("Named the same way as in the library folder.")),
+    S("quality_action", N_("Fake lossless files"), "popup", "audio",
       choices=(("note", N_("Note it")), ("hold", N_("Hold for review")), ("move", N_("Move aside"))),
       enable=_when(_audiophile_on("quality"), N_("Only at the Audiophile level, with Dynamic range and quality on.")),
-      foot=N_("Move aside puts the album in the folder for albums nothing identified. A profile that "
-              "copies holds it instead.")),
+      foot=N_("A lossless file made from an MP3 or other lossy file. Move aside puts the album in the folder "
+              "for albums nothing identified; a profile that copies holds it for review instead.")),
     S("exclude_paths", N_("Skip these paths"), "list", "source_adv",
-      foot=N_("Patterns on the whole path, such as */Downloads/*.")),
+      foot=N_("Patterns matched against the whole path, such as */Downloads/*. Never read or changed.")),
     S("grouping.join_deluxe_folders", N_("Join \"(Deluxe Edition)\" folders"), "switch", "source_adv",
       foot=N_("A folder beside the album holding only its bonus tracks is tagged as part of the album.")),
     S("on_unwritable", N_("When a file can't be written"), "popup", "source_adv",
-      choices=(("skip_album", N_("Leave the whole album")), ("skip_file", N_("Leave only that file")))),
+      choices=(("skip_album", N_("Leave the whole album")), ("skip_file", N_("Leave only that file"))),
+      foot=N_("Such as a read-only file. Left albums are tried again on the next run.")),
     # Identification
     S("source", N_("Preferred database"), "popup", "databases", attr="source",
       choices=tuple((k, SOURCE_WORDS[k]) for k in pf.SOURCES), note=_source_note,
-      foot=N_("MusicBrainz needs no key and gives the IDs media servers use.")),
+      foot=N_("Which database identifies albums, and whose tags win. MusicBrainz needs no key and gives "
+              "the IDs media servers use.")),
     S("providers.musicbrainz.enabled", N_("Ask MusicBrainz"), "switch", "databases", attr="mb",
-      enable=_db_reason("musicbrainz")),
+      enable=_db_reason("musicbrainz"), foot=N_("Free, and needs no key.")),
     S("providers.discogs.enabled", N_("Ask Discogs"), "switch", "databases", attr="dg",
-      enable=_db_reason("discogs")),
+      enable=_db_reason("discogs"), foot=N_("Needs a free Discogs token (Preferences › Keys).")),
     S("identification.accept", N_("Tag an album when"), "popup", "databases",
-      choices=(("exact", N_("The exact release is known")), ("album", N_("The album is known")),
-               ("partial", N_("Some details are certain (Partial)")))),
+      choices=(("exact", N_("Exact release is known")), ("album", N_("Album is known, pressing unsure")),
+               ("partial", N_("Some details are certain (Partial)"))),
+      foot=N_("The lower the bar, the more albums get tags. Albums below it are handled as albums "
+              "nothing identified.")),
     S("acoustid", N_("Audio fingerprints"), "popup", "evidence", get=_acoustid_get, put=_acoustid_put,
       choices=(("unsure", N_("Only when unsure")), ("always", N_("Every album")), ("off", N_("Never"))),
       enable=_needs("fpcalc", "acoustid", words=N_("Needs fpcalc and an AcoustID key.")),
-      foot=N_("Sends audio fingerprints to AcoustID.")),
+      foot=N_("Identifies tracks by their sound. Sends AcoustID a fingerprint: a short code worked out from "
+              "the audio, not the audio itself.")),
     S("ocr", N_("Read scans and booklets"), "popup", "evidence",
       choices=(("auto", N_("When the album has scans")), ("on", N_("Every album")), ("off", N_("Never"))),
       enable=_needs("tesseract", words=N_("Needs Tesseract OCR.")),
-      foot=N_("Barcodes and catalogue numbers, read on this computer.")),
+      foot=N_("Text recognition (OCR) finds barcodes and catalogue numbers on cover scans and booklets. "
+              "Runs on this computer.")),
     S("providers.web.gnudb", N_("Look up discs on gnudb"), "switch", "evidence",
       enable=_needs("gnudb", words=N_("Needs your gnudb e-mail (Preferences › Keys).")),
-      foot=N_("Sends the disc's track layout.")),
+      foot=N_("gnudb (formerly freedb) lists what others typed in for a CD. Sends only the disc's track "
+              "lengths.")),
     S("providers.web.shops", N_("Look up barcodes in music stores"), "switch", "evidence",
-      foot=N_("Sends the barcode to Deezer and Apple.")),
+      foot=N_("When the barcode search found nothing sure. Sends only the barcode, to Deezer and Apple.")),
     S("providers.web.enabled", N_("Web fallback"), "switch", "evidence", attr="web",
-      foot=N_("Store and encyclopaedia pages, when no database has the album.")),
+      foot=N_("When no database has the album, store and encyclopaedia pages are checked instead.")),
     S("providers.web.sources", N_("Web fallback sources"), "list", "evidence", custom="check",
-      known=pf.WEB_SOURCES, words=WEB_SOURCE_WORDS, show=lambda v: v.get("providers.web.enabled")),
+      known=pf.WEB_SOURCES, words=WEB_SOURCE_WORDS, show=lambda v: v.get("providers.web.enabled"),
+      foot=N_("The sites checked. Only the album's name and barcode are sent.")),
     S("providers.web.partial", N_("Use store pages for Partial tags"), "switch", "evidence", attr="web_partial",
       enable=_when(lambda v: v.get("providers.web.enabled")),
-      foot=N_("No release details: no release IDs, barcode or catalogue number.")),
+      foot=N_("An album found only on a store page gets the tags that name no release: no release IDs, "
+              "barcode or catalogue number.")),
     S("singles.identify", N_("Identify loose tracks"), "switch", "evidence",
-      foot=N_("A single file is matched to its recording by its fingerprint.")),
+      foot=N_("A track on its own, not part of an album, is matched to its recording by its fingerprint.")),
     S("matching.preferred_countries", N_("Preferred release countries"), "popup", "releases", custom="list",
       choices=(("auto", N_("Automatic")), ("none", N_("No preference"))),
       foot=N_("Automatic: your region, then Worldwide, then Europe.")),
@@ -458,13 +490,15 @@ SETTINGS = [
       foot=N_("Such as CD, Vinyl, Digital Media.")),
     S("discogs_enrichment.merge_mode", N_("When both databases have a value"), "popup", "ident_adv",
       get=_merge_get, put=_merge_put,
-      choices=(("", N_("As the preferred database says")), ("fill_gaps", N_("Fill gaps only")),
-               ("override", N_("Keep Discogs's")), ("combine", N_("Combine both")))),
+      choices=(("", N_("Preferred database wins")), ("fill_gaps", N_("Fill only empty tags from Discogs")),
+               ("override", N_("Discogs wins")), ("combine", N_("Both values"))),
+      foot=N_("When MusicBrainz and Discogs disagree on a tag.")),
     S("_engines", N_("Web search"), "list", "ident_adv", custom="check", get=_engines_get, put=_engines_put,
       known=pf.WEB_ENGINES[1:], words=ENGINE_WORDS,
-      foot=N_("Off unless engines are ticked. Sends the codes on the scans to the engines chosen.")),
+      foot=N_("A general web search for the codes read from the scans, such as the catalogue number. Off "
+              "unless an engine is ticked; keys go in Preferences › Keys.")),
     S("matching.extra_careful", N_("Extra-careful matching"), "switch", "ident_adv",
-      foot=N_("Asks you about more albums. It only ever asks for more proof, never less.")),
+      foot=N_("Needs more proof before tagging, so more albums wait for your review.")),
     # Tags
     S("tag_level", N_("Tagging level"), "popup", "written", attr="level",
       choices=tuple((k, LEVEL_WORDS[k]) for k in ("basic", "enthusiast", "audiophile")),
@@ -472,115 +506,157 @@ SETTINGS = [
               "Audiophile: also loudness, lyrics, fingerprints, rip log, dynamic range.")),
     S("field_policy.default", N_("Existing tags"), "popup", "written",
       choices=(("replace", N_("Replace")), ("fill_missing", N_("Fill in missing only")),
-               ("preserve", N_("Keep")))),
-    *[S(f"audiophile.{k}", label, "switch", "audiophile", enable=_when(_is("tag_level", "audiophile")))
-      for k, label in (("replaygain", N_("ReplayGain")), ("lyrics", N_("Lyrics")), ("acoustid", N_("AcoustID")),
-                       ("rip_info", N_("Rip log")), ("quality", N_("Dynamic range and quality")))],
+               ("preserve", N_("Keep"))),
+      foot=N_("Tags the files already have. Replace: the databases' values win. Fill in missing only: "
+              "only empty tags get a value. Keep: they are left as they are.")),
+    *[S(f"audiophile.{k}", label, "switch", "audiophile", enable=_when(_is("tag_level", "audiophile")), foot=foot)
+      for k, label, foot in (
+          ("replaygain", N_("ReplayGain"), N_("Volume tags that let players play every track equally loud.")),
+          ("lyrics", N_("Lyrics"), N_("Looked up on LRCLIB and saved as set under Lyrics.")),
+          ("acoustid", N_("AcoustID"), N_("Each track's fingerprint ID, checked against its MusicBrainz "
+                                          "recording.")),
+          ("rip_info", N_("Rip log"), N_("The disc ID and the rip log's verdict: the ripper, and whether the "
+                                         "rip was error-free.")),
+          ("quality", N_("Dynamic range and quality"), N_("A dynamic range (DR) value, and a warning when a "
+                                                          "lossless file was made from a lossy one.")))],
     S("genres.musicbrainz", N_("Genres from MusicBrainz"), "popup", "genres", put=_genres_put,
       choices=(("auto", N_("Automatic")), (True, N_("On")), (False, N_("Off")),
-               ("tagger", N_("Same as my existing tagger")))),
+               ("tagger", N_("Same as my existing tagger"))),
+      foot=N_("The genres people voted for on MusicBrainz. Automatic: on, or as your existing tagger does "
+              "when its settings are used.")),
     S("genres.max", N_("At most"), "stepper", "genres", rng=(1, 20), suffix=N_(" genres"),
-      enable=_when(lambda v: v.get("genres.musicbrainz") is not False)),
+      enable=_when(lambda v: v.get("genres.musicbrainz") is not False),
+      foot=N_("Per album. Any more are left out.")),
     S("genres.discogs_styles", N_("Discogs styles"), "popup", "genres",
-      choices=(("genre_if_none", N_("In Genre when nothing else gives one")), ("own_tag", N_("In a tag of their own")),
-               ("genre", N_("In Genre")), ("both", N_("Both")), ("tagger", N_("Same as my existing tagger")))),
+      choices=(("genre_if_none", N_("Genre, only when no other genre")), ("own_tag", N_("Own tag (DISCOGS_STYLE)")),
+               ("genre", N_("Always in Genre")), ("both", N_("Both: Genre and own tag")),
+               ("tagger", N_("Same as my existing tagger"))),
+      foot=N_("Styles are Discogs's finer genres, such as Deep House or Shoegaze.")),
     S("genres.web", N_("Genres from the web"), "segmented", "genres",
-      choices=(("off", N_("Off")), ("store", N_("Store genres")), ("keywords", N_("Also keywords")))),
+      choices=(("off", N_("Off")), ("store", N_("Store genres")), ("keywords", N_("Also keywords"))),
+      foot=N_("For albums found on store pages: the store's genres, and with Also keywords, Bandcamp's tags "
+              "too.")),
     S("tagger.standardize_artist_names", N_("Artist names"), "popup", "artists", attr="pic_names",
       get=_tagger_get("standardize_artist_names"), put=_tagger_put("standardize_artist_names"),
       choices=((None, N_("Automatic")), ("none", N_("As credited on the release")),
-               ("variations", N_("Standard name for spelling variations")),
-               ("all", N_("Standard name, also for former names")))),
+               ("variations", N_("Fix spelling variations")),
+               ("all", N_("Always the standard name"))),
+      foot=N_("The standard name is the one MusicBrainz lists for the artist. Always: also for releases "
+              "made under a former name.")),
     S("tagger.translate_artist_names", N_("Translate artist names"), "popup", "artists",
       get=_tagger_get("translate_artist_names"), put=_tagger_put("translate_artist_names"), choices=AUTO_ON_OFF,
-      foot=N_("Into your system language.")),
+      foot=N_("The name in your system language, when MusicBrainz knows one.")),
     S("tagger.convert_punctuation", N_("Plain punctuation"), "popup", "artists",
       get=_tagger_get("convert_punctuation"), put=_tagger_put("convert_punctuation"), choices=AUTO_ON_OFF,
       foot=N_("Curly quotes and dashes become plain ones.")),
     S("tagger.release_ars", N_("Credits on the album"), "popup", "credits", attr="pic_rel",
       get=_tagger_get("release_ars"), put=_tagger_put("release_ars"), choices=AUTO_ON_OFF,
-      foot=N_("Producer, engineer, mixer.")),
+      foot=N_("Producer, engineer, mixer and others credited for the whole album.")),
     S("tagger.track_ars", N_("Credits on each track"), "popup", "credits", attr="pic_trk",
       get=_tagger_get("track_ars"), put=_tagger_put("track_ars"), choices=AUTO_ON_OFF,
       foot=N_("Composer, lyricist, performers and their instruments.")),
     S("tagger.standardize_instruments", N_("Standard instrument names"), "popup", "credits",
-      get=_tagger_get("standardize_instruments"), put=_tagger_put("standardize_instruments"), choices=AUTO_ON_OFF),
+      get=_tagger_get("standardize_instruments"), put=_tagger_put("standardize_instruments"), choices=AUTO_ON_OFF,
+      foot=N_("Instruments as MusicBrainz names them, rather than as each credit words them.")),
     S("dates.date_tag", N_("Date holds"), "popup", "versions",
       choices=(("release", N_("This pressing's date")), ("original", N_("The first release date")),
                ("tagger", N_("Same as my existing tagger"))),
       foot=N_("The first release date is always written as Original Date too.")),
     S("keep_versions", N_("Separate versions"), "switch", "versions", attr="versions",
-      foot=N_("A remaster or remix keeps its version in the album title, so servers show it apart.")),
+      foot=N_("A remaster or remix keeps its version in the album title, so media servers list it apart "
+              "from the original.")),
     S("versions.style", N_("Show the version"), "popup", "versions",
       choices=(("paren", N_("Album (Remaster 2024)")), ("bracket", N_("Album [Remaster 2024]")),
                ("tags_only", N_("Album, with the version in its own tags"))), show=lambda v: v.get("keep_versions"),
       foot=N_("How a remaster, remix or deluxe edition is told apart from the original.")),
     S("versions.extra_tags", N_("Write version tags"), "switch", "versions", show=lambda v: v.get("keep_versions"),
-      foot=N_("ALBUMVERSION and RELEASECOMMENT, read by LMS and other servers.")),
+      foot=N_("ALBUMVERSION and RELEASECOMMENT tags, read by LMS and other media servers.")),
     S("split_versions", N_("Split two versions found in one folder"), "switch", "versions", attr="split_box",
-      foot=N_("A folder for each version, tagged from its own release.")),
-    *[S(f"discogs_details.{k}", label, "popup", "discogs", choices=DETAIL_CHOICES)
-      for k, label in (("performers", N_("Performers")), ("companies", N_("Companies")),
-                       ("identifiers", N_("Matrix and other codes")), ("marketplace", N_("Marketplace numbers")),
-                       ("notes", N_("Release notes")))],
-    S("lyrics.enabled", N_("Find lyrics"), "switch", "lyrics"),
+      foot=N_("Such as a remaster beside a remix: each goes into a folder of its own, tagged from its own "
+              "release.")),
+    *[S(f"discogs_details.{k}", label, "popup", "discogs", choices=DETAIL_CHOICES, foot=foot)
+      for k, label, foot in (
+          ("performers", N_("Performers"), N_("Musicians and their instruments, as Discogs credits them.")),
+          ("companies", N_("Companies"), N_("Labels, studios, pressing plants and publishers.")),
+          ("identifiers", N_("Matrix and other codes"), N_("The codes stamped or printed on the disc and "
+                                                           "sleeve, such as the matrix in the run-out groove.")),
+          ("marketplace", N_("Marketplace numbers"), N_("How many Discogs users have and want it, its rating, "
+                                                        "copies for sale and the lowest price.")),
+          ("notes", N_("Release notes"), N_("The free-text notes on the Discogs release page.")))],
+    S("lyrics.enabled", N_("Find lyrics"), "switch", "lyrics", foot=N_("Saved where chosen below.")),
     S("lyrics.sidecar", N_("Next to the track (.lrc)"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled"),
-      foot=N_("Read by Plex and Jellyfin.")),
+      foot=N_("A .lrc file beside each track, read by Plex and Jellyfin. Synced lyrics only.")),
     S("lyrics.embed", N_("In the file"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled"),
-      foot=N_("Read by Navidrome and phones.")),
-    S("lyrics.synced", N_("Prefer synced lyrics"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled")),
+      foot=N_("In the track's tags, read by Navidrome and phones.")),
+    S("lyrics.synced", N_("Prefer synced lyrics"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled"),
+      foot=N_("Lines timed to the music, which players scroll along. Off: the plain text, in the file.")),
     S("loudness.replace_existing", N_("Recalculate ReplayGain"), "switch", "loudness",
       enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
-      foot=N_("Replaces values other tools wrote.")),
+      foot=N_("Measures every track again and replaces values other programs wrote. Off: those are kept.")),
     S("mark_resolved", N_("Mark identified albums"), "switch", "notes",
-      foot=N_("TAGMENDER=Resolved in each file. Re-runs, checks and retries use it to find finished albums.")),
+      foot=N_("Writes TAGMENDER=Resolved into each file, so re-runs, checks and retries can tell finished "
+              "albums.")),
     S("cleanup.comments", N_("Comments"), "segmented", "tags_adv",
-      choices=(("keep", N_("Keep")), ("remove", N_("Remove")))),
+      choices=(("keep", N_("Keep")), ("remove", N_("Remove"))),
+      foot=N_("The files' comment tags, often a note from the ripper or the shop.")),
     S("loudness.album_gain", N_("Album gain"), "switch", "tags_adv",
-      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY)),
+      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
+      foot=N_("A ReplayGain value for the whole album, which keeps quiet tracks quieter than loud ones.")),
     S("loudness.opus_r128", N_("Opus gain tags"), "switch", "tags_adv",
-      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY)),
+      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
+      foot=N_("The R128 volume tags Opus players read, as well as ReplayGain.")),
     S("tagger.write_id3v23", N_("MP3 tag version"), "popup", "tags_adv", attr="pic_v2",
       get=_id3_get("write_id3v23"), put=_id3_put("write_id3v23"),
       choices=((None, N_("Automatic")), ("keep", N_("Keep each file's")), (False, N_("Newest (ID3v2.4)")),
-               (True, N_("For older players (ID3v2.3)")))),
+               (True, N_("For older players (ID3v2.3)"))),
+      foot=N_("ID3 is the tag format of MP3 files. Some older players and car stereos read only version "
+              "2.3.")),
     S("tagger.write_id3v1", N_("Old MP3 tag (ID3v1)"), "popup", "tags_adv", attr="pic_v1",
       get=_id3_get("write_id3v1"), put=_id3_put("write_id3v1"),
       choices=((None, N_("Automatic")), ("keep", N_("Update one that is there")), (True, N_("Write")),
-               (False, N_("Remove")))),
+               (False, N_("Remove"))),
+      foot=N_("A tiny, very old tag that only a few old players still need.")),
     S("tagger.remove_id3_from_flac", N_("Remove stray MP3 tags from FLAC"), "popup", "tags_adv",
-      get=_tagger_get("remove_id3_from_flac"), put=_tagger_put("remove_id3_from_flac"), choices=AUTO_ON_OFF),
+      get=_tagger_get("remove_id3_from_flac"), put=_tagger_put("remove_id3_from_flac"), choices=AUTO_ON_OFF,
+      foot=N_("FLAC files have tags of their own; MP3-style tags left in them confuse some players.")),
     S("tagger.remove_ape_from_mp3", N_("Remove APE tags from MP3"), "popup", "tags_adv",
-      get=_tagger_get("remove_ape_from_mp3"), put=_tagger_put("remove_ape_from_mp3"), choices=AUTO_ON_OFF),
+      get=_tagger_get("remove_ape_from_mp3"), put=_tagger_put("remove_ape_from_mp3"), choices=AUTO_ON_OFF,
+      foot=N_("APE is an older tag format some programs add to MP3s; it can disagree with the main tags.")),
     S("follow_tagger_settings", N_("Use my existing tagger's settings"), "switch", "tags_adv",
       foot=N_("When another tagger is installed on this computer, its settings file is read on each run, "
               "so the tags come out the way it writes them. Anything you set here wins.")),
     # Artwork
-    S("artwork.enabled", N_("Find front covers"), "switch", "covers", attr="art"),
+    S("artwork.enabled", N_("Find front covers"), "switch", "covers", attr="art",
+      foot=N_("Looks for the album's front cover in the sources below.")),
     S("artwork.sources", N_("Cover sources"), "list", "covers", attr="art_src", custom="check",
       known=tuple(ART_SOURCE_WORDS), words=ART_SOURCE_WORDS,
       foot=N_("Tick the sources to ask and put them in order: the first one with a big enough cover wins.")),
     S("artwork.when", N_("Look for covers"), "popup", "covers", attr="art_when", get=_art_when_get, put=_art_when_put,
       choices=(("needed", N_("Only when an album has no cover")),
-               ("small", N_("When it has none, or one below the smallest size")),
+               ("small", N_("Also when its cover is too small")),
                ("always", N_("For every album"))),
-      foot=N_("A small cover that is replaced is backed up first: Undo puts it back.")),
-    S("artwork.min_px", N_("Smallest cover kept"), "popup", "covers",
+      foot=N_("Too small: below the smallest cover size. A cover that is replaced is backed up first, so "
+              "Undo puts it back.")),
+    S("artwork.min_px", N_("Smallest cover size"), "popup", "covers",
       choices=tuple((n, f"{n} px") for n in (500, 600, 1000, 1200)),
-      foot=N_("Measured on the short side. A cover found below this is not used.")),
+      foot=N_("Measured on the short side. A cover found smaller than this is not used.")),
     S("artwork.enlarge", N_("Enlarge small covers"), "switch", "covers", attr="art_enlarge",
-      foot=N_("A cover down to 250 px is enlarged to the smallest size.")),
-    S("artwork.embed_front", N_("Put the cover in each track"), "switch", "covers"),
+      foot=N_("When only a smaller cover is found (250 px or more), it is enlarged to the smallest size "
+              "instead of being left out.")),
+    S("artwork.embed_front", N_("Put the cover in each track"), "switch", "covers",
+      foot=N_("Players and phones then show it even without the cover file.")),
     S("artwork.embed_max_side", N_("Cover size in tracks"), "popup", "covers",
       choices=tuple((n, f"{n} px") for n in (600, 1000, 1200, 1600)) + ((0, N_("As found")),),
-      show=lambda v: v.get("artwork.embed_front")),
-    S("artwork.files", N_("Save a cover file"), "switch", "covers", foot=N_("cover.jpg beside the music.")),
+      show=lambda v: v.get("artwork.embed_front"),
+      foot=N_("Bigger covers are shrunk to this, on the long side, before they go into the tracks.")),
+    S("artwork.files", N_("Save a cover file"), "switch", "covers", foot=N_("cover.jpg in the album folder, which most media servers show.")),
     S("artwork.artist.enabled", N_("Artist photos"), "switch", "artist_photos", attr="art_artist",
       foot=N_("Asks fanart.tv, TheAudioDB, Wikimedia Commons or Discogs once per artist.")),
-    S("artwork.artist.file", N_("Save artist.jpg in the artist folder"), "switch", "artist_photos",
+    S("artwork.artist.file", N_("Save artist.jpg"), "switch", "artist_photos",
       attr="art_artist_file", get=lambda d: bool(dig(d, "artwork.artist.file")), put=_artist_file_put,
       enable=_when(lambda v: v.get("artwork.artist.enabled")),
-      foot=N_("What Plex, Jellyfin, Navidrome and LMS show. Never over one that is there.")),
+      foot=N_("In the artist folder, where Plex, Jellyfin, Navidrome and LMS look for it. One already there "
+              "is never replaced.")),
     S("artwork.artist.embed", N_("Put it in each track"), "switch", "artist_photos",
       enable=_when(lambda v: v.get("artwork.artist.enabled")),
       foot=N_("Some players then show the artist instead of the cover.")),
@@ -594,80 +670,104 @@ SETTINGS = [
     # Target
     S("operation", N_("What happens to files"), "segmented", "files", attr="op",
       choices=tuple((k, OPERATION_SHORT[k]) for k in pf.OPERATIONS),
-      foot=N_("Copy or move: into the library folder, named as below.")),
-    S("destination", N_("Library folder"), "folder", "files", attr="dest", personal=True, enable=_dest_reason),
+      foot=N_("Fix in place: the files stay where they are. Copy or move: into the library folder, named as "
+              "below.")),
+    S("destination", N_("Library folder"), "folder", "files", attr="dest", personal=True, enable=_dest_reason,
+      foot=N_("Where copied or moved albums go.")),
     S("rename_in_place", N_("Rename files where they are"), "switch", "files",
-      show=_is("operation", "in_place"), foot=N_("Tidy names without a second library.")),
+      show=_is("operation", "in_place"), foot=N_("The files get the names set below, without making a second "
+                                                "library.")),
     S("naming.preset", N_("Folder layout"), "popup", "names", attr="naming", note=_naming_note,
-      choices=tuple((k, NAMING_WORDS.get(k, k)) for k in naming.PRESETS)),
+      choices=tuple((k, NAMING_WORDS.get(k, k)) for k in naming.PRESETS),
+      foot=N_("How the folders and files in the library are named.")),
     S("filenames.max_album_words", N_("Shorten album folder names"), "popup", "names",
       choices=((0, N_("Off")), (5, N_("5 words")), (8, N_("8 words"))),
       enable=lambda v: None if v.get("naming.preset") in WORD_PRESETS and not v.get("_template") else
-      N_("This folder layout always uses the whole album title.")),
+      N_("This folder layout always uses the whole album title."),
+      foot=N_("Long album titles are cut to this many words in the folder name. The tags keep the whole "
+              "title.")),
     S("naming.editions", N_("Editions in folder names"), "popup", "names", attr="editions",
       choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl], [WEB])")),
-               ("edition_year", N_("Edition and reissue year ([2019 Vinyl])")))),
+               ("edition_year", N_("Edition and reissue year ([2019 Vinyl])"))),
+      foot=N_("Tells a vinyl or download apart from the CD in the folder name.")),
     S("naming.album_editions", N_("Edition in the Album tag"), "popup", "names", attr="album_editions",
       choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl], [WEB])")),
-               ("edition_year", N_("Edition and reissue year ([2019 Vinyl])")))),
-    S("subfolders.covers", N_("Put pictures in a folder of their own"), "switch", "subfolders", attr="sub_covers",
-      foot=N_("Scans and booklets. The front cover stays beside the music.")),
+               ("edition_year", N_("Edition and reissue year ([2019 Vinyl])"))),
+      foot=N_("The same, added to the album title in the tags.")),
+    S("subfolders.covers", N_("Pictures in their own folder"), "switch", "subfolders", attr="sub_covers",
+      foot=N_("Scans and booklets go into it. The front cover stays beside the music.")),
     S("subfolders.covers_name", N_("Pictures folder name"), "text", "subfolders", attr="sub_covers_name",
       enable=_when(lambda v: v.get("subfolders.covers"))),
-    S("subfolders.misc", N_("Put rip logs and notes in a folder of their own"), "switch", "subfolders",
-      attr="sub_misc", foot=N_("Cue sheets and playlists stay beside the audio they name.")),
+    S("subfolders.misc", N_("Rip logs in their own folder"), "switch", "subfolders",
+      attr="sub_misc", foot=N_("Rip logs, notes and checksums go into it. Cue sheets and playlists stay "
+                               "beside the audio they name.")),
     S("subfolders.misc_name", N_("Logs and notes folder name"), "text", "subfolders", attr="sub_misc_name",
       enable=_when(lambda v: v.get("subfolders.misc"))),
     S("subfolders.where", N_("For multi-disc albums"), "popup", "subfolders", attr="sub_where",
-      choices=(("album", N_("One for the album")), ("disc", N_("One in each disc")))),
+      choices=(("album", N_("One for the album")), ("disc", N_("One in each disc"))),
+      foot=N_("Where the pictures and logs folders go.")),
     S("companions", N_("Files that go with the album"), "list", "companions",
-      foot=N_("Extensions, such as .cue and .log.")),
+      foot=N_("Files with these extensions, such as .cue and .log, are copied or moved with the music.")),
     S("companions_rewrite_cues", N_("Update cue sheets and playlists"), "switch", "companions",
-      foot=N_("New file names are written into them.")),
+      foot=N_("The new file names are written into them, so they still find the music.")),
     S("remove_empty_dirs", N_("Remove empty folders after moving"), "switch", "companions",
-      show=_is("operation", "move")),
+      show=_is("operation", "move"), foot=N_("Folders left empty once the music is moved out are removed.")),
     S("preserve_timestamps", N_("Keep file dates"), "popup", "companions", choices=AUTO_ON_OFF,
-      foot=N_("Matters for \"Recently added\" in players.")),
+      foot=N_("Files keep their modified date, so \"Recently added\" in players stays as it was. Automatic: as "
+              "your existing tagger is set.")),
     S("on_existing", N_("Then"), "popup", "existing",
       choices=(("keep_both", N_("Keep both")), ("skip", N_("Skip it")), ("ask", N_("Ask me"))),
-      foot=N_("Watched folders that apply without asking keep both.")),
+      foot=N_("Keep both: the new file gets a second name, as below. Watched folders that apply without asking "
+              "always keep both.")),
     S("naming.duplicate_suffix", N_("Name the second copy"), "segmented", "existing",
-      choices=(("number", N_("Name (2)")), ("code", N_("Short code")))),
+      choices=(("number", N_("Name (2)")), ("code", N_("Short code"))),
+      foot=N_("Short code: a few letters and digits, such as Name ~1a2b.")),
     S("filenames.compat", N_("Names safe for"), "popup", "target_adv",
-      choices=(("windows", N_("All systems")), ("linux", N_("Linux and Mac only")))),
+      choices=(("windows", N_("All systems")), ("linux", N_("Linux and Mac only"))),
+      foot=N_("All systems: also Windows and network shares (NAS), so no characters such as : or ?.")),
     S("filenames.fat", N_("Also USB sticks and car players"), "switch", "target_adv",
       enable=_when(_is("filenames.compat", "windows"), N_("Needs names safe for all systems.")),
-      foot=N_("Shorter paths, no trailing dots or spaces.")),
+      foot=N_("Shorter paths, and no dots or spaces at the end of names.")),
     S("tagger.ascii_filenames", N_("Plain letters only (ASCII)"), "popup", "target_adv",
-      get=_tagger_get("ascii_filenames"), put=_tagger_put("ascii_filenames"), choices=AUTO_ON_OFF),
+      get=_tagger_get("ascii_filenames"), put=_tagger_put("ascii_filenames"), choices=AUTO_ON_OFF,
+      foot=N_("Accented and other letters become plain ones in file names, such as é to e.")),
     S("tagger.replace_spaces_with_underscores", N_("Spaces become underscores"), "popup", "target_adv",
       get=_tagger_get("replace_spaces_with_underscores"), put=_tagger_put("replace_spaces_with_underscores"),
-      choices=AUTO_ON_OFF),
+      choices=AUTO_ON_OFF, foot=N_("In file and folder names.")),
     S("filenames.max_name_bytes", N_("Longest file name"), "stepper", "target_adv", rng=(16, 255),
-      suffix=N_(" bytes")),
-    S("destinations.mounted_only", N_("Only write while the library is mounted"), "popup", "target_adv",
+      suffix=N_(" bytes"),
+      foot=N_("Longer names are shortened. Most drives allow 255; accented and non-Latin letters take two or "
+              "more bytes each.")),
+    S("destinations.mounted_only", N_("Write only when mounted"), "popup", "target_adv",
       choices=(("auto", N_("For shares and drives")), ("always", N_("Always (never the system disk)"))),
-      foot=N_("Stops a copy filling the system disk when a share is not mounted.")),
+      foot=N_("When the share or drive holding the library is not connected, nothing is written, so a "
+              "copy never fills the system disk by mistake.")),
     S("allow_unverified_writes", N_("Write formats that can't be checked"), "switch", "target_adv",
-      foot=N_("Off: only files whose audio can be checked after writing are changed.")),
+      foot=N_("TagMender checks the audio is unchanged after every write. Off: formats it cannot check are "
+              "left untouched.")),
     # Albums nothing identified
     S("unresolved.action", N_("Albums nothing identified"), "popup", "unres", attr="unres",
       choices=tuple((k, UNRESOLVED_WORDS[k]) for k in pf.UNRESOLVED_ACTIONS),
-      foot=N_("Marked albums are listed under Needs attention and tried again later.")),
+      foot=N_("Mark Unresolved: TAGMENDER=Unresolved is written, and the album is listed under Needs "
+              "attention and tried again later. Move aside: moved to the folder below.")),
     S("unresolved.move_to", N_("Move to"), "folder", "unres", personal=True,
-      show=lambda v: v.get("unresolved.action") == "move" or v.get("quality_action") == "move"),
+      show=lambda v: v.get("unresolved.action") == "move" or v.get("quality_action") == "move",
+      foot=N_("Albums moved aside wait here, out of the library.")),
     S("retry.after_days", N_("Try again"), "popup", "unres",
-      choices=((7, N_("Every week")), (30, N_("Every month")), (0, N_("Never")))),
+      choices=((7, N_("Every week")), (30, N_("Every month")), (0, N_("Never"))),
+      foot=N_("Marked albums are looked up again, as the databases keep growing.")),
     S("retry.max_attempts", N_("Up to"), "stepper", "unres", rng=(1, 20), suffix=N_(" tries"),
-      show=lambda v: v.get("retry.after_days") != 0),
+      show=lambda v: v.get("retry.after_days") != 0, foot=N_("Per album. Then it is left for you.")),
     # Automation
     S("unattended", N_("Apply without asking"), "switch", "watch", attr="unattended",
-      foot=N_("For albums dropped into this profile's watched folders.")),
+      foot=N_("Albums dropped into this profile's watched folders are fixed without waiting for you. "
+              "Partial albums still wait for your review.")),
     S("watch.settle_minutes", N_("Wait until unchanged for"), "popup", "watch",
       choices=((2, N_("2 min")), (5, N_("5 min")), (10, N_("10 min")), (30, N_("30 min"))),
       foot=N_("So a copy still in progress is never touched.")),
     S("watch.interval_seconds", N_("Look every"), "popup", "watch",
-      choices=((60, N_("1 min")), (300, N_("5 min")), (900, N_("15 min")), (3600, N_("60 min")))),
+      choices=((60, N_("1 min")), (300, N_("5 min")), (900, N_("15 min")), (3600, N_("60 min"))),
+      foot=N_("How often the watched folders are checked for new music.")),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
 
@@ -947,7 +1047,7 @@ class ProfileEditor(QScrollArea):
         elif spec.kind == "list":
             c = ListField(label, tr(spec.foot) if spec.foot else "", checkable=spec.custom == "check",
                           known=list(spec.known), words={k: tr(w) for k, w in spec.words.items()},
-                          folders=spec.custom == "folders")
+                          folders=spec.custom if spec.custom in ("folders", "sources") else False)
             c.changed.connect(self._changed)
         else:
             c = QLineEdit()
@@ -1078,6 +1178,7 @@ class ProfileEditor(QScrollArea):
     def refresh(self):
         _READY.clear()                      # (asked again: a key or program may have been added)
         vals = self.values()
+        self.controls["_sources"].fallback = vals.get("destination") or ""   # (named in its Moves to column)
         for s in SETTINGS:
             row = self.rows[s.key]
             row.setVisible(bool(s.show(vals)) if s.show else True)

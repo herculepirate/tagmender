@@ -188,9 +188,11 @@ def search_web(album):
     return ident
 
 
-def watch_does(p) -> str:
-    """What a profile does with an album dropped into one of its watched folders."""
-    dest = p["destination"] or "?"
+def watch_does(p, folder=None) -> str:
+    """What a profile does with an album dropped into one of its watched folders (FOLDER: that
+    folder, whose own destination is named when it has one)."""
+    dest = (p.source_destination(folder) if folder and hasattr(p, "source_destination") else "") \
+        or p["destination"] or "?"
     return {"move": tr("Moved into {dest}").format(dest=dest),
             "copy": tr("Copied into {dest} (the drop stays)").format(dest=dest)}.get(
         p["operation"], tr("Tagged and renamed where it is (not moved)"))

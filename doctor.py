@@ -127,11 +127,13 @@ def checks() -> list[Check]:
         if not problems:
             p = pf.load(n)
             if p["operation"] in ("copy", "move"):
-                dest = Path(p["destination"]).expanduser()
-                mounted = dest.exists()
-                out.append(Check(f"profile {n} destination", "ok" if mounted else "warn",
-                                 str(dest) if mounted else f"{dest} is not there (unmounted?)",
-                                 "" if mounted else "mount it; TagMender never creates a missing destination"))
+                for i, root in enumerate(p.filing_roots()):          # (a source folder's own library too)
+                    dest = Path(root).expanduser()
+                    mounted = dest.exists()
+                    out.append(Check(f"profile {n} destination" + (f" {i + 1}" if i else ""),
+                                     "ok" if mounted else "warn",
+                                     str(dest) if mounted else f"{dest} is not there (unmounted?)",
+                                     "" if mounted else "mount it; TagMender never creates a missing destination"))
     try:
         import executor
         pending = executor.pending_jobs()

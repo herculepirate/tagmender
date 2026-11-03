@@ -230,10 +230,7 @@ class Watcher:
         """The folders a copy or move profile files albums into are there (mounted)."""
         roots = []
         if prof["operation"] in ("copy", "move"):
-            roots.append(prof["destination"])
-            lossy = (prof.get("destinations") or {}).get("lossy")
-            if lossy:
-                roots.append(lossy)
+            roots += pf.filing_roots(getattr(prof, "data", prof))     # (a source folder's own library too)
         if (prof.get("unresolved") or {}).get("action") == "move":
             roots.append(prof["unresolved"].get("move_to"))
         guard = prof.mount_guard() if hasattr(prof, "mount_guard") else "auto"
@@ -355,8 +352,7 @@ class Watcher:
         """The profile's library (and unresolved folder) where it lies inside the watched folder:
         what is already there - filed by TagMender or not - is never taken for a new drop."""
         out = []
-        for d in ([prof["destination"], (prof.get("destinations") or {}).get("lossy")]
-                  if prof["operation"] in ("copy", "move") else []) + \
+        for d in (pf.filing_roots(getattr(prof, "data", prof)) if prof["operation"] in ("copy", "move") else []) + \
                 ([prof["unresolved"].get("move_to")] if (prof.get("unresolved") or {}).get("action") == "move"
                  else []):
             if not d:

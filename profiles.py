@@ -114,7 +114,9 @@ DEFAULTS = {
     "name": "",
     "description": "",
     # what the profile covers
-    "sources": [],                        # [{"path": "...", "recursive": true, "watch": false}]
+    # [{"path": "...", "recursive": true, "watch": false, "destination": ""}]; a source's own
+    # destination ("" = the profile's) is where a copy or move files the albums found in it
+    "sources": [],
     "exclude_paths": ["*/_unresolved/*", "*/.Trash*/*"],   # globs on the full path
     # folders never looked into, by name (patterns: "_*"); hidden folders are always skipped,
     # and so are TagMender's own unidentified and duplicates folders
@@ -657,6 +659,10 @@ def validate(data: dict) -> list[str]:
         elif s.get("watch") and os.path.dirname(os.path.abspath(os.path.expanduser(s["path"]))) == \
                 os.path.abspath(os.path.expanduser(s["path"])):
             p.append(f"sources[{i}]: a whole drive ({s['path']}) cannot be watched; watch a folder on it")
+        elif not isinstance(s.get("destination", ""), str):
+            p.append(f"sources[{i}].destination must be a folder's path, or empty for the profile's destination")
+        elif s.get("destination") and not os.path.isabs(os.path.expanduser(s["destination"])):
+            p.append(f"sources[{i}].destination must be an absolute path")
     w = d.get("watch") or {}
     num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731
     if not num(w.get("settle_minutes")) or w["settle_minutes"] < 0:
@@ -741,10 +747,7 @@ def _skip_problems(d: dict) -> list[str]:
         if g.strip().strip("*/") == "":
             p.append(f"exclude_paths: {g!r} would skip everything")
     roots = [s["path"] for s in d.get("sources") or [] if isinstance(s, dict) and s.get("path")]
-    if d.get("destination"):
-        roots.append(d["destination"])
-    if isinstance(d.get("destinations"), dict) and d["destinations"].get("lossy"):
-        roots.append(d["destinations"]["lossy"])
+    roots += filing_roots(d)
     builtin = set(DEFAULTS["exclude_paths"]) | set(V2_BEHAVIOUR["exclude_paths"])
     for root in roots:
         r = _real(root)
@@ -1079,13 +1082,30 @@ class Profile:
         tracks is read with its album."""
         return (self.data.get("grouping") or {}).get("join_deluxe_folders", True) is not False
 
-    def destination_for(self, files) -> str:
+    def destination_for(self, files, source_dir=None) -> str:
         """The library an identified album goes to: destinations.lossy when one is set and
-        every file of the album is lossy, else the destination."""
+        every file of the album is lossy, else the destination of the source folder the album
+        was found in, else the profile's destination."""
         lossy = (self.data.get("destinations") or {}).get("lossy") or ""
         if lossy and files and all(audio_kind(f) == "lossy" for f in files):
             return lossy
-        return self.data.get("destination") or ""
+        return (self.source_destination(source_dir) if source_dir else "") or self.data.get("destination") or ""
+
+    def source_destination(self, folder) -> str:
+        """The own destination of the source folder that holds FOLDER (the deepest one), or ""."""
+        p = os.path.realpath(os.path.expanduser(str(folder)))
+        best, depth = "", -1
+        for s in self.data.get("sources") or []:
+            if not isinstance(s, dict) or not s.get("path"):
+                continue
+            root = os.path.realpath(os.path.expanduser(s["path"]))
+            if (p == root or p.startswith(root.rstrip(os.sep) + os.sep)) and len(root) > depth:
+                best, depth = s.get("destination") or "", len(root)
+        return best
+
+    def filing_roots(self) -> list[str]:
+        """Every library a copy or move files albums into (see filing_roots)."""
+        return filing_roots(self.data)
 
     def mount_guard(self) -> str:
         """destinations.mounted_only (MOUNT_GUARDS)."""
@@ -1217,6 +1237,15 @@ def names() -> list[str]:
 # how many profiles one computer keeps, and the name a new or copied one starts with
 MAX_PROFILES = 15
 NEW_NAME = "Profile {n}"
+
+
+def filing_roots(d: dict) -> list[str]:
+    """The libraries profile data D files albums into: its destination, each source folder's
+    own destination and the lossy library (each once, as written; never the unresolved folder)."""
+    out = [d.get("destination") or ""]
+    out += [s.get("destination") or "" for s in d.get("sources") or [] if isinstance(s, dict)]
+    out.append((d.get("destinations") or {}).get("lossy") or "" if isinstance(d.get("destinations"), dict) else "")
+    return [x for x in dict.fromkeys(out) if x and isinstance(x, str)]
 
 
 def next_name() -> str:

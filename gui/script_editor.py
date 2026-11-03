@@ -18,12 +18,13 @@ Saving writes the profile file only (profiles.save): never a music file. The scr
 through the next preview's plan, as every change does."""
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QSize, QStringListModel, Qt, QTimer
-from PySide6.QtGui import (QColor, QFont, QKeySequence, QShortcut, QSyntaxHighlighter, QTextCharFormat, QTextCursor,
-                           QTextFormat)
+from PySide6.QtCore import QSize, QStringListModel, Qt, QTimer, QUrl
+from PySide6.QtGui import (QColor, QDesktopServices, QFont, QKeySequence, QShortcut, QSyntaxHighlighter,
+                           QTextCharFormat, QTextCursor, QTextFormat)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QCompleter, QDialog, QFrame, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QSplitter,
                                QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser, QTextEdit,
@@ -59,6 +60,8 @@ OWN_VARIABLES = ("_year", "_albumartists_sorted", "_albumartists", "_multiartist
 NAMING = "naming"
 TAGGER = "tagger"
 _ERR = re.compile(r"^(\d+):(\d+)(?::\$(\w+))?: (.*)$", re.S)
+# the language's guide: the syntax, every function with an example, recipes
+GUIDE_URL = "https://github.com/herculepirate/tagmender/blob/main/docs/SCRIPTING.md"
 
 
 # --------------------------------------------------------------------------
@@ -722,8 +725,20 @@ class ScriptEditor(QDialog):
         self.help = QTextBrowser()
         self.help.setAccessibleName(tr("Function help"))
         self.help.setOpenExternalLinks(False)
+        helps = QWidget()                                 # (the function's help, and the whole guide under it)
+        hv = QVBoxLayout(helps)
+        hv.setContentsMargins(0, 0, 0, 0)
+        hv.setSpacing(style.SPACE["s"])
+        hv.addWidget(self.help, 1)
+        self.guide_link = QLabel(f'<a href="{GUIDE_URL}">{html.escape(tr("Scripting Guide"))}</a>')
+        self.guide_link.setProperty("role", "caption")
+        self.guide_link.setAccessibleName(tr("Scripting Guide"))
+        self.guide_link.setToolTip(tr("The script language, every function with an example, and recipes "
+                                      "(opens in your browser)"))
+        self.guide_link.linkActivated.connect(lambda link: QDesktopServices.openUrl(QUrl(link)))
+        hv.addWidget(self.guide_link)
         self.side.addTab(prev, icons.icon("eye"), tr("Preview"))
-        self.side.addTab(self.help, icons.icon("info"), tr("Function Help"))
+        self.side.addTab(helps, icons.icon("info"), tr("Function Help"))
         self.side.setTabToolTip(0, tr("Preview (Ctrl+1)"))
         self.side.setTabToolTip(1, tr("Function Help (Ctrl+2)"))
         self.side.setMinimumWidth(self.SIDE_W[0])

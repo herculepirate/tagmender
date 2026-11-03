@@ -2126,8 +2126,8 @@ def _protected_folders() -> set:
                 p = pf.load(n)
             except Exception:
                 continue
-            for d in [s.get("path") for s in p["sources"]] + [p["destination"], p["unresolved"].get("move_to"),
-                                                               (p.get("destinations") or {}).get("lossy")]:
+            for d in [s.get("path") for s in p["sources"]] + pf.filing_roots(p.data) + \
+                    [p["unresolved"].get("move_to")]:
                 if d:
                     out.add(os.path.realpath(os.path.expanduser(d)).rstrip(os.sep))
     except Exception:

@@ -25,7 +25,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout,
                                QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy, QSpinBox,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from . import icons, sheets, style
 from .i18n import tr
@@ -337,6 +337,120 @@ class ListSheet(QDialog):
         return out
 
 
+class SourcesSheet(QDialog):
+    """A profile's folders, each with where a copy or move files its albums ("Moves to"; empty:
+    the profile's destination). Folders are chosen or typed; Moves To… sets the selected one's."""
+
+    def __init__(self, parent, headline, body, items, fallback=""):
+        super().__init__(parent.window() if parent is not None else None)
+        sheets.prepare(self, headline)
+        self.resize(640, 420)
+        self.fallback = fallback
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 16)
+        head = QLabel(headline)
+        head.setProperty("role", "headline")
+        lay.addWidget(head)
+        if body:
+            lay.addWidget(caption(body, "hint"))
+        lay.addWidget(caption(tr("Moves to: where a copy or move files the albums found in that folder. "
+                                 "Empty: the profile's destination."), "hint"))
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels([tr("Folder"), tr("Moves to")])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAccessibleName(headline)
+        self.tree.setColumnWidth(0, 300)
+        self.tree.setTextElideMode(Qt.ElideMiddle)        # (a path's end is the part that tells folders apart)
+        lay.addWidget(self.tree, 1)
+        for s in items:
+            self.add(s)
+        row = QHBoxLayout()
+        self.entry = QLineEdit()
+        self.entry.setAccessibleName(tr("New folder"))
+        self.entry.setPlaceholderText(tr("Type a folder, or Choose Folder…"))
+        self.entry.returnPressed.connect(self.add_typed)
+        row.addWidget(self.entry, 1)
+        for text, name, slot in ((tr("Choose Folder…"), tr("Choose a folder to add"), self.add_chosen),
+                                 (tr("Moves To…"), tr("Choose where the selected folder's albums go"),
+                                  self.choose_destination),
+                                 (tr("Use Profile's"), tr("File the selected folder's albums into the profile's "
+                                                          "destination"), self.clear_destination)):
+            b = QPushButton(text)
+            b.setAutoDefault(False)
+            b.setAccessibleName(name)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        rm = QToolButton()
+        rm.setProperty("role", "tool")
+        rm.setIcon(icons.icon("minus", "ink"))
+        rm.setAccessibleName(tr("Remove the selected folder"))
+        rm.setToolTip(tr("Remove the selected folder"))
+        rm.clicked.connect(self.remove)
+        row.addWidget(rm)
+        lay.addLayout(row)
+        buttons, _ok = sheets.button_row(self, tr("Done"), self.accept)
+        lay.addLayout(buttons)
+
+    def add(self, source):
+        s = source if isinstance(source, dict) else {"path": str(source)}
+        it = QTreeWidgetItem([s.get("path", ""), ""])
+        it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+        self.tree.addTopLevelItem(it)
+        self._set_destination(it, s.get("destination") or "")
+        return it
+
+    def _set_destination(self, it, dest):
+        it.setData(1, Qt.UserRole, dest)
+        it.setText(1, dest or tr("The profile's destination{0}").format(f" ({self.fallback})" if self.fallback else ""))
+        it.setToolTip(1, it.text(1))
+
+    def paths(self) -> list:
+        return [self.tree.topLevelItem(i).text(0).strip() for i in range(self.tree.topLevelItemCount())]
+
+    def add_typed(self):
+        text = self.entry.text().strip()
+        if text and text not in self.paths():
+            self.add(text)
+        self.entry.clear()
+
+    def _start(self, near):
+        from .common import music_folder
+        return os.path.dirname(os.path.expanduser(near)) if near else music_folder()
+
+    def add_chosen(self):
+        paths = self.paths()
+        folder = sheets.choose_folder(self, tr("Choose a folder to add"), self._start(paths[-1] if paths else ""))
+        if folder and folder not in paths:
+            self.tree.setCurrentItem(self.add(folder))
+
+    def choose_destination(self):
+        it = self.tree.currentItem()
+        if it is None:
+            return
+        was = it.data(1, Qt.UserRole) or self.fallback
+        folder = sheets.choose_folder(self, tr("Where albums from {0} go").format(it.text(0)), self._start(was))
+        if folder:
+            self._set_destination(it, folder)
+
+    def clear_destination(self):
+        it = self.tree.currentItem()
+        if it is not None:
+            self._set_destination(it, "")
+
+    def remove(self):
+        for it in self.tree.selectedItems():
+            self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(it))
+
+    def items(self) -> list:
+        out = []
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            if it.text(0).strip():
+                out.append({"path": it.text(0).strip(), "destination": it.data(1, Qt.UserRole) or ""})
+        return out
+
+
 class ListField(QWidget):
     """A list shown as a short summary ("7 folders: .Trash*, @eaDir, …") with Edit…, which
     opens a ListSheet. checkable: an ordered choice of `known` names (sources)."""
@@ -345,6 +459,7 @@ class ListField(QWidget):
     def __init__(self, name, body="", checkable=False, known=None, words=None, noun=None, folders=False):
         super().__init__()
         self.name, self.body, self.checkable, self.folders = name, body, checkable, folders
+        self.fallback = ""                                  # (sources: the profile's destination, shown)
         self.known, self.words, self.noun = known or [], words or {}, noun
         self._items = []
         row = QHBoxLayout(self)
@@ -368,7 +483,8 @@ class ListField(QWidget):
 
     def set_value(self, items):
         self._items = list(items or [])
-        shown = [self.words.get(x, str(x)) for x in self._items]
+        shown = [(f"{x.get('path', '')} → {x['destination']}" if x.get("destination") else x.get("path", ""))
+                 if isinstance(x, dict) else self.words.get(x, str(x)) for x in self._items]
         self._text = text = ", ".join(shown) if shown else tr("None")
         self._elide()
         self.summary.setToolTip(", ".join(shown))
@@ -384,8 +500,11 @@ class ListField(QWidget):
         self._elide()
 
     def edit(self):
-        dlg = ListSheet(self, self.name, self.body, self._items, self.checkable, self.known, self.words,
-                        folders=self.folders)
+        if self.folders == "sources":                       # (folders, each with where its albums go)
+            dlg = SourcesSheet(self, self.name, self.body, self._items, self.fallback)
+        else:
+            dlg = ListSheet(self, self.name, self.body, self._items, self.checkable, self.known, self.words,
+                            folders=bool(self.folders))
         if sheets.run(dlg, "list"):
             new = dlg.items()
             if new != self._items:

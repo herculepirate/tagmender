@@ -17,7 +17,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `sources` | `[]` | `[{"path", "recursive", "watch"}]`; the deepest profile wins where roots overlap |
+| `sources` | `[]` | `[{"path", "recursive", "watch", "destination"}]`; the deepest profile wins where roots overlap. A source's own `destination` (absolute; empty = the profile's) is where a copy or move files the albums found in that folder, so one profile can send `/inbox/ambient` to `/music/ambient` and `/inbox/extreme` to `/music/extreme`. An all-lossy album still goes to `destinations.lossy` when one is set |
 | `exclude_paths` | _unresolved, .Trash | globs on the full path, never processed; a pattern matching the profile's own source or destination, or everything (`*`), is refused |
 | `skip_folders` | .Trash\*, .recycle, #recycle, @Recycle, @eaDir, $RECYCLE.BIN, lost+found | folder names (patterns allowed, e.g. `_*`) never looked into; hidden folders, TagMender's own unidentified folder and the duplicates folder are always skipped; `*` is refused |
 | `grouping` | `{"join_deluxe_folders": true}` | a sibling "(Deluxe Edition)" folder holding only the bonus tracks is read with its album |
@@ -60,7 +60,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `on_existing` | `keep_both` | a different file already has the name a file is given: `keep_both` (the new one gets a second name, see `naming.duplicate_suffix`), `skip` (that file is left out, noted), `ask` (the album waits for your review; with `unattended` both are kept) |
 | `on_unwritable` | `skip_album` | a folder that cannot be written (a read-only share, no permission): `skip_album` leaves the album as it is, with the reason; `skip_file` leaves only those files out. A copy only reads its source |
 | `companions_rewrite_cues` | `true` | the new file names are written into cue sheets and playlists that go with the album; `false` keeps them exactly as they are |
-| `destination` | — | must exist (never created); required for copy/move |
+| `destination` | — | must exist (never created); required for copy/move; used for every source folder without a destination of its own |
 | `naming` | preset `artist-album-track` ("Artist/1991 - Album/01 - Title", "1-01 - Title" for a set) | or `{"template": "..."}`; presets in "Naming presets" below, plus `all-music`, `various-artists` and `classical-performer` |
 | `naming.editions` | `off` | "Separate editions in folder names": `edition` adds [Vinyl] / [WEB] / [Tape]; `edition_year` adds [2019 Vinyl] / [2014 CD] (an original CD, and unknown media, get nothing) |
 | `naming.duplicate_suffix` | `number` | a second file of one name: `number` (" (2)", " (3)" ...; the first free one, the same while the folder stays as it is) or `code` (" ~1a2b", the same for one file always) |
@@ -205,13 +205,13 @@ recording IDs stay (the same performance).
 
 ## Template language
 
-A subset of the tagging script language, documented exactly (anything else is an error when the profile is
-checked):
+A naming template is a script in TagMender's tagging script language: every function of the
+language, TagMender's `$words(text,n)` (the first n words; an album ending in its `ALBUMVERSION`
+in brackets, "(Remaster 2024)", keeps that whole) and its own variables `%_year%` (original year,
+else release year), `%_albumartists_sorted%`, `%_multiartist%`, `%_edition%` and
+`%_edition_kind%`. `%field%` gives the tag (several values joined with "; "). `/` separates
+folders; a `/` inside a value becomes `_`. An unknown function is an error when the profile is
+checked. The naming script never changes tags.
 
-`%field%` (several values joined with "; "), `%_year%` (original year, else release year),
-`%_albumartists_sorted%`, `%_multiartist%`; `$if`, `$if2`, `$not`, `$and`, `$or`, `$eq`, `$ne`,
-`$gt`, `$lt`, `$gte`, `$lte` (numeric when both sides are numbers), `$num`, `$left`, `$right`,
-`$lower`, `$upper`, `$title`, `$trim`, `$replace`, `$firstalphachar`, `$truncate`, `$year`,
-`$join`, `$getmulti`, `$lenmulti`, `$noop`, and TagMender's `$words(text,n)` (the first n words; an album ending in its `ALBUMVERSION` in brackets, "(Remaster 2024)", keeps that whole) and `$initials(text)`.
-`/` separates folders; a `/` inside a value becomes `_`. Not supported: `$set`, `$unset`,
-`$copy`, `$rsearch`, `$rreplace`, plugin functions.
+See the [Scripting guide](SCRIPTING.md) for the syntax, every function with examples, and recipes
+(genre folders, year - album, multi-disc, first-letter folders, Various Artists).

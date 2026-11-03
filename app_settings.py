@@ -277,8 +277,7 @@ def library_folders() -> list[str]:
         for s in d.get("sources") or []:
             if isinstance(s, dict) and s.get("path"):
                 out.append(s["path"])
-        if d.get("destination"):
-            out.append(d["destination"])
+        out += profiles.filing_roots(d)
     return [os.path.realpath(os.path.expanduser(str(x))) for x in out]
 
 

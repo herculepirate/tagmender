@@ -1,0 +1,568 @@
+"""gui/overview.py - The Overview page: drop or choose a folder, pick a profile, Preview, then Apply."""
+from __future__ import annotations
+
+import html
+import os
+from pathlib import Path
+
+from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
+                               QPushButton, QStackedWidget, QTableView, QVBoxLayout, QWidget)
+
+from . import icons, setup, sheets
+from .common import (album_words, counts_by_label, counts_text, ex, heading, left_header, load_profile, notify,
+                     pf, planmod, plural, popup_menu, profile_names)
+from .i18n import tr
+from .work import start
+from .models import PlanModel
+from .widgets import ElidedPath as _Elided, SleeveDrop
+
+APPLY_LISTED = 5                                     # albums named in the Apply sheet (then "and N more")
+
+
+# --------------------------------------------------------------------------
+# pages
+# --------------------------------------------------------------------------
+def run_report(plan, res):
+    """The report of what Apply just did (report.build), shown once it is done; None when it
+    cannot be made (the job still is, under Jobs)."""
+    import time
+
+    import report
+    try:
+        rep = report.build(plan, res["albums"], job={"status": res.get("status") or "done"})
+    except Exception:
+        return None
+    rep["job"], rep["started"] = res.get("job") or rep["job"], time.time()
+    return rep
+
+
+class Overview(QWidget):
+    """The profile picker, search field, progress bar and Preview / Apply / Cancel live in the
+    window's toolbar (the window makes them); the album actions (Change Release: a link, Search for
+    Release, Other Versions, Choose Your Pressing, Info, Tags from File Names ...) in the Album and
+    Tools menus, the table's context menu and the inspector's header."""
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.plan = None
+        self.path = None
+        self.worker = None
+        self.forced = {}
+        lay = QVBoxLayout(self)
+        lay.addLayout(heading(tr("Overview"),
+                              tr("Choose music, pick a profile, preview what will change, then apply.")))
+        self.profile = win.profile_box
+        self.search = win.search_box
+        self.bar = win.progress
+        self.btn_preview, self.btn_apply, self.btn_cancel = (win.act(k) for k in ("preview", "apply", "cancel"))
+        self.btn_anyway, self.btn_web, self.btn_open, self.btn_release = (
+            win.act(k) for k in ("process_anyway", "search_web", "open_folder", "use_release"))
+        self.views = QStackedWidget()
+        lay.addWidget(self.views, 1)
+        self.drop = SleeveDrop()
+        self.drop.dropped.connect(self.set_path)
+        self.views.addWidget(self.drop)                     # the empty state fills the page
+        self.results = QWidget()
+        rl = QVBoxLayout(self.results)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(8)
+        strip = QFrame()
+        strip.setObjectName("strip")
+        sl = QHBoxLayout(strip)
+        sl.setContentsMargins(0, 0, 0, 0)              # (no box: the table below is the one frame)
+        self.folder_icon = QLabel()
+        self.folder_icon.setPixmap(icons.icon("folder-open", "muted").pixmap(16, 16))
+        sl.addWidget(self.folder_icon)
+        self.where = _Elided(tr("No folder chosen"))
+        sl.addWidget(self.where, 1)
+        self.ocr = QCheckBox(tr("Read scans"))
+        self.ocr.setAccessibleName(tr("Read scans for this preview"))
+        self.ocr.setToolTip(tr("Read barcodes and catalog numbers from cover scans of every album (slower). "
+                               "Unticked, the profile's OCR setting decides (default: albums with scans or a PDF)"))
+        sl.addWidget(self.ocr)
+        self.choose_btn = ch = QPushButton(tr("Choose…"))
+        ch.setAccessibleName(tr("Choose another folder"))
+        ch.setToolTip(tr("Choose another folder (Ctrl+O)"))
+        ch.clicked.connect(lambda: self.drop.choose())
+        sl.addWidget(ch)
+        rl.addWidget(strip)
+        # what the preview did without, because a key, login or program is missing (Open Setup: its row)
+        self.setup_note = QLabel("")
+        self.setup_note.setProperty("role", "hint")
+        self.setup_note.setWordWrap(True)
+        self.setup_note.setTextFormat(Qt.RichText)
+        self.setup_note.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self.setup_note.linkActivated.connect(lambda link: setup.follow(self.win, link))
+        self.setup_note.hide()
+        rl.addWidget(self.setup_note)
+        # a service busy or not answering while the run asks it (connection.status): a symbol and words
+        self.service_note = QLabel("")
+        self.service_note.setProperty("role", "attention")
+        self.service_note.setWordWrap(True)
+        self.service_note.setAccessibleName(tr("Online services"))
+        self.service_note.hide()
+        rl.addWidget(self.service_note)
+        self._service_checked = 0.0
+        self.model = PlanModel()
+        self.proxy = QSortFilterProxyModel()
+        self.proxy.setSourceModel(self.model)
+        self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.proxy.setFilterKeyColumn(-1)
+        self.table = QTableView()
+        self.table.setModel(self.proxy)
+        self.table.setSortingEnabled(True)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setTextElideMode(Qt.ElideRight)        # (the album's name first, its artist after)
+        h = self.table.horizontalHeader()
+        left_header(self.table)
+        h.setMinimumSectionSize(48)
+        for c in range(len(PlanModel.COLS)):          # the album folder and Why take what is left
+            h.setSectionResizeMode(c, QHeaderView.Stretch if c in (1, 5) else QHeaderView.ResizeToContents)
+        h.setSectionResizeMode(0, QHeaderView.Interactive)     # (fitted by fit_status: cut when narrow)
+        self.table.setAccessibleName(tr("Albums in the preview"))
+        self.table.selectionModel().selectionChanged.connect(self.show_detail)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.context_menu)
+        rl.addWidget(self.table, 1)
+        self.summary = QLabel("")
+        self.summary.setWordWrap(True)
+        self.summary.setProperty("role", "hint")
+        self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the counts are what is read)
+        rl.addWidget(self.summary)
+        self.views.addWidget(self.results)
+        self.detail = win.inspector.full                  # (the inspector's Evidence > Full preview)
+        self.refresh_profiles()
+        self.busy(False)
+
+    def filter(self, text):
+        self.proxy.setFilterFixedString(text)
+
+    # page widths under which lower-priority columns give way (the inspector shows them all):
+    # Why under 860 px (1280 px with the inspector open), Source and Score under 600 (960 px)
+    NARROW = {5: 860, 2: 600, 3: 600}
+    STATUS_MOST = 150                                 # under 600 px the Status column is cut ("Changed sin…",
+                                                      # the whole word in its tooltip): the artist stays in view
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        for c, w in self.NARROW.items():
+            hide = self.width() < w
+            if self.table.isColumnHidden(c) != hide:
+                self.table.setColumnHidden(c, hide)
+        self.fit_status()
+
+    def fit_status(self):
+        want = max(self.table.sizeHintForColumn(0), self.table.horizontalHeader().sectionSizeHint(0))
+        if self.width() < 600:
+            want = min(want, self.STATUS_MOST)
+        if self.table.columnWidth(0) != want:
+            self.table.horizontalHeader().resizeSection(0, want)
+
+    def context_menu(self, pos):
+        keys = ("@release", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
+                "exclude_again", None, "play_pause", None, "search_web", "open_folder", "copy_path")
+        # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
+        release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
+            self.win, "menus", {}) else None
+        popup_menu(self, self.table, pos, [release if k == "@release" else self.win.act(k) if k else None
+                                           for k in keys if k != "@release" or release is not None])
+
+    def refresh_profiles(self):
+        cur = self.profile.currentText()
+        self.profile.clear()
+        self.profile.addItems(profile_names())
+        if cur:
+            self.profile.setCurrentText(cur)
+
+    def busy(self, on):
+        """Preview and Apply are enabled by the window (on this page only); while work runs no
+        other folder can be chosen or dropped."""
+        self.running = on
+        self.choose_btn.setEnabled(not on)
+        self.drop.setEnabled(not on)
+        self.btn_cancel.setEnabled(on)
+        self.win.show_progress(on)
+        self.win.update_album_actions()
+
+    def actionable(self):
+        return sum(1 for a in (self.plan or {}).get("albums", [])
+                   if a["status"] in ("ready", "unresolved") and planmod.has_work(a))
+
+    def set_path(self, path, forced=None) -> bool:
+        """Preview a folder; forced: the releases chosen for its albums (engine.Engine.force), as
+        the run report's Apply This Release gives one. False when nothing ran."""
+        if getattr(self, "running", False):                 # (a second worker would take over Cancel)
+            self.win.statusBar().showMessage(tr("Finish or cancel the current work first."), 4000)
+            return False
+        if not self.may_drop_edits(path):
+            return False
+        self.path = path
+        self.forced = dict(forced or {})
+        self.where.setText(path)
+        self.views.setCurrentWidget(self.results)
+        if self.win.stack.currentWidget() is not self:
+            self.win.go("Overview")
+        self.win.place_inspector()                          # (something to inspect now)
+        self.plan = None
+        self.model.set_plan(None)
+        self.detail.clear()
+        self.busy(False)
+        self.preview()
+        return True
+
+    def preview_release(self, folder, ref, files=None, only=False) -> bool:
+        """Preview the album in `folder` with the release `ref` (a MusicBrainz ID or
+        "discogs:123"); files: the album's own files, for one album of a folder holding several;
+        only: those files alone (one version of a folder holding two), the rest left out.
+        Only the preview: nothing is written until Apply, which asks first."""
+        import engine
+        if not folder or engine.parse_release_ref(ref)[0] is None:
+            return False
+        key = os.path.realpath(str(folder))
+        choice = [dict({"ref": ref, "files": list(files)}, **({"only": True} if only else {}))] if files else ref
+        if not self.set_path(str(folder), {key: choice}):
+            return False
+        self.win.statusBar().showMessage(tr("Previewing {name} with the release you chose; nothing is written "
+                                            "until you apply.").format(name=Path(str(folder)).name), 10000)
+        return True
+
+    def may_drop_edits(self, path) -> bool:
+        """Another folder is previewed: your edits of this one are dropped, after asking (they
+        are of the preview only; nothing was written). The same folder again keeps them."""
+        insp = self.win.inspector
+        same = bool(self.path) and os.path.realpath(str(path)) == os.path.realpath(str(self.path))
+        if same:
+            return True
+        if insp.edits:
+            n = len(insp.edits)
+            where = Path(str(self.path)).name or str(self.path) if self.path else tr("this preview")
+            if not sheets.confirm(self, tr("Discard your edits of {0}?").format('1 album' if n == 1 else f'{n} albums'),
+                                  tr("Your tag and cover edits of {where} are not kept when you preview another "
+                                     "folder; nothing was written.").format(where=where),
+                                  tr("Cancel keeps them: apply this preview first to write them."), tr("Discard Edits"),
+                                  destructive=True):
+                return False
+        insp.forget_edits()                                 # (your edits were of the other folder)
+        return True
+
+    def service_status(self, force=False):
+        """Say under the folder when MusicBrainz, Discogs, AcoustID or the Cover Art Archive is
+        busy or not answering this run's requests (asked at most every 10 seconds)."""
+        import time
+        import connection
+        if not force and time.monotonic() - self._service_checked < 10:
+            return
+        self._service_checked = time.monotonic()
+        st = connection.status(ex.STATE_DIR / "cache.sqlite")
+        lines = []
+        for svc, how in sorted(st.items()):
+            name = connection.TITLES.get(svc, svc)
+            if how == "busy":
+                lines.append(tr("{0} is busy: TagMender waits and tries again, so this takes longer.").format(name))
+            elif svc == "coverartarchive":            # (it proves no album: only its covers wait)
+                lines.append(tr("{0} is not answering: covers from it are skipped for now.").format(name))
+            elif svc == "acoustid":
+                lines.append(tr("{0} is not answering: fingerprints are not looked up for now.").format(name))
+            else:
+                lines.append(tr("{0} is not answering: albums only it can prove are left to try again later.")
+                             .format(name))
+        if lines:                                     # (a symbol with the words, never colour alone)
+            self.service_note.setText("⚠ " + "  ".join(lines))
+        self.service_note.setVisible(bool(lines))
+        self.service_note.setAccessibleDescription(" ".join(lines))
+        badge = getattr(self.win, "service_badge", None)
+        if badge is not None:                         # (the same, short, on every page)
+            short = [tr("{0} busy").format(connection.TITLES.get(s, s)) if how == "busy" else
+                     tr("{0} not answering").format(connection.TITLES.get(s, s)) for s, how in sorted(st.items())]
+            badge.setText("⚠ " + ", ".join(short) if short else "")
+            badge.setToolTip(" ".join(lines))
+            badge.setAccessibleDescription(" ".join(lines))
+            badge.setVisible(bool(short))
+
+    def progress(self, i, n, what):
+        self.service_status()
+        self.bar.setMaximum(max(n, 1))
+        self.bar.setValue(i + 1)
+        self.bar.setFormat(tr("{0} of {n}: {name}").format(i + 1, n=n, name=Path(what).name))
+
+    def preview(self):
+        if not self.path:
+            return
+        try:
+            prof = load_profile(self.profile.currentText())
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("This profile cannot be used."), str(exc))
+            return
+        path, ocr, forced = self.path, self.ocr.isChecked(), dict(self.forced)
+        edits = self.win.inspector.edits_for_preview()     # (your edits from the inspector: kept)
+
+        def work(w):
+            import engine
+            e = engine.Engine(prof, ocr=True if ocr else None)    # unticked: the profile's "ocr"
+            e.force = forced
+            e.edits = edits
+            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled)
+        self.busy(True)
+        self.summary.setText(tr("Identifying… nothing is changed while previewing."))
+        self.worker = start(self, work, self.planned, self.progress, self.oops)
+
+    def planned(self, plan):
+        self.plan = plan
+        self.views.setCurrentWidget(self.results)
+        self.win.place_inspector()
+        self.model.set_plan(plan)
+        self.fit_status()
+        self.table.sortByColumn(0, Qt.AscendingOrder)
+        self.show_counts()
+        self.refresh_overrides()
+        self.busy(False)
+        self.service_status(force=True)
+        notify(self.win, "finished", tr("Preview finished"), counts_by_label(plan["albums"]))
+        if self.proxy.rowCount():
+            self.table.selectRow(0)
+        self.win.refresh_attention_badge(self.path)
+
+    def show_counts(self):
+        plan = self.plan or {"albums": []}
+        notes = "; ".join(setup.other_notes(plan))
+        said = setup.plan_notices(plan)
+        self.setup_note.setText("<br>".join(setup.rich(t, i) for i, t in said))
+        self.setup_note.setAccessibleName(" ".join(t for _i, t in said))
+        self.setup_note.setVisible(bool(said))
+        # (counted as the rows name them: an album shown "Ignored" is not "Excluded" here)
+        self.summary.setText(counts_by_label(plan["albums"]) + (f"   ({notes})" if notes else ""))
+
+    def edited(self, album):
+        """Your edit in the inspector changed an album of the preview: its row, the counts and Apply."""
+        if not self.plan or self.running or not any(a is album for a in self.plan["albums"]):
+            return
+        for r, a in enumerate(self.model.albums):
+            if a is album:
+                self.model.dataChanged.emit(self.model.index(r, 0),
+                                            self.model.index(r, self.model.columnCount() - 1))
+        self.show_counts()
+        self.win.update_album_actions()
+
+    def oops(self, msg):
+        self.busy(False)
+        self.summary.setText("Stopped: " + msg.splitlines()[0])
+        head, _, rest = msg.partition("\n")
+        sheets.warning(self, tr("Stopped: {head}").format(head=head), rest.strip())
+
+    def to_apply(self):
+        return [a for a in (self.plan or {}).get("albums", [])
+                if a["status"] in ("ready", "unresolved") and planmod.has_work(a)]
+
+    def apply_words(self):
+        """The Apply sheet: (headline, what changes, how to undo, button), from each album's own
+        operations - an album that stays in its folder is not said to be moved."""
+        from .inspector import where_files_go
+        albums = self.to_apply()
+        n = len(albums)
+        ops = {fe["op"] for a in albums for fe in a.get("files") or [] if fe.get("op") != "none"}
+        moved = {"move": tr("moved"), "copy": tr("copied")}
+        how = tr(" and ").join(moved[o] for o in ("move", "copy") if o in ops)
+        def outcome(a):
+            w = where_files_go(a) or tr("Stays in its folder, tags only")
+            return w[:1].lower() + w[1:]
+        outcomes = {outcome(a) for a in albums}
+        stays = {w[:1].lower() + w[1:] for w in (tr("Stays in its folder, names unchanged"),
+                                                  tr("Stays in its folder, tags only"))}
+        if outcomes <= stays:                         # (the sentence above says it: the albums by name)
+            what = tr("Their tags are written; each album stays in its own folder:")
+            items = [html.escape(album_words(a["source_dir"])) for a in albums[:APPLY_LISTED]]
+        else:
+            what = tr("Their tags are written and their files {how} as listed:").format(how=how) if how else \
+                tr("Their tags are written; each album stays in its own folder, as listed:")
+            items = [f"{html.escape(album_words(a['source_dir']))}: {html.escape(outcome(a))}"
+                     for a in albums[:APPLY_LISTED]]
+        if n > APPLY_LISTED:
+            items.append(f"and {n - APPLY_LISTED} more")
+        # (rich text: a wrapped line hangs under its words, not under the bullet)
+        body = (f"<p>{html.escape(what)}</p><ul style='margin-left:-24px; margin-top:0'>"
+                + "".join(f"<li>{x}</li>" for x in items) + "</ul>")
+        mine = sum(1 for a in albums if a.get("edited") and not planmod.edit_empty(a["edited"]))
+        if mine:                                      # (values you typed or a cover you chose, not the match's)
+            body += tr("<p>Includes your own edits of {0}: tags or a cover you chose, marked with a pencil in the "
+                       "inspector.</p>").format(plural(mine, tr("album"), tr("albums")))
+        word = tr("Album") if n == 1 else tr("Albums")
+        return (tr("Apply the preview to {n} {0}?").format(word.lower(), n=n), body,
+                tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), f"Apply {n} {word}")
+
+    def apply(self):
+        n = self.actionable()
+        if not n or self.running or self.edit_pending():
+            return
+        # always asked here: the profile's "Apply without asking" is for its watched folders only
+        if not sheets.confirm(self, *self.apply_words()) or self.edit_pending():
+            return
+        plan = self.plan
+        self.release_files()
+
+        def work(w):
+            import executor
+            return executor.Executor(plan, cancel=lambda: w.cancelled, progress=w.progress.emit).run()
+        self.busy(True)
+        self.summary.setText(tr("Applying…"))
+        self.worker = start(self, work, self.applied, self.progress, self.oops)
+
+    def release_files(self):
+        """The player lets go of every file Apply is about to write, move or copy (a track playing
+        from the album, or one queued after it, would hold the old file open)."""
+        player = getattr(self.win, "player", None)
+        if player is None:
+            return False
+        paths = [p for a in self.to_apply() for fe in a.get("files") or []
+                 for p in (fe.get("src"), fe.get("dst")) if p]
+        return player.release(paths)
+
+    def edit_pending(self):
+        """An edit of yours is still on its way to the preview: Apply would leave it out."""
+        if not self.win.inspector.pending():
+            return False
+        self.win.statusBar().showMessage(tr("Your edit is still being applied to the preview. "
+                                            "Apply again in a moment."), 5000)
+        return True
+
+    def applied(self, res):
+        rep = run_report(self.plan, res)
+        by_index = {r["index"]: r for r in res["albums"] if "index" in r}    # (two albums of one folder)
+        by = {a["album"]: a for a in res["albums"]}
+        for i, a in enumerate(self.plan["albums"]):
+            r = by_index.get(i) if by_index else by.get(a["source_dir"])
+            if r:
+                a["status"] = {"done": "done"}.get(r["status"], r["status"])
+                if r["status"] in ("failed", "conflict"):
+                    a["conflicts"] = [r["detail"]]
+                if r.get("label") in ("Ignored", "Skipped"):
+                    a["label"] = r["label"]
+        self.model.set_plan(self.plan)
+        self.summary.setText(f"Job {res['job']}: " + counts_text(res["counts"]) + tr(". Undo it from Jobs."))
+        self.plan = None
+        self.busy(False)
+        self.service_status(force=True)
+        notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))
+        self.win.pages["Jobs"].reload()
+        self.win.refresh_attention_badge(self.path)          # (Apply marks albums Unresolved on disk)
+        if rep is not None:
+            self.win.show_run_report(rep)                  # (what was done, what is left for you)
+
+    def cancel(self):
+        if self.worker:
+            self.worker.cancelled = True
+            self.summary.setText(tr("Cancelling after the current album…"))
+
+    def selected(self):
+        idx = self.table.currentIndex() if hasattr(self, "table") and self.table.selectionModel().hasSelection() \
+            else None
+        if not idx or not idx.isValid():
+            return None
+        # the plan's own entry, not proxy.data(UserRole): Qt hands a dict back as a copy, and an
+        # edit (the inspector, Tags from File Names) must change the album the plan applies
+        row = self.proxy.mapToSource(self.proxy.index(idx.row(), 0)).row()
+        return self.model.albums[row] if 0 <= row < len(self.model.albums) else None
+
+    def show_detail(self, *_):
+        a = self.selected()
+        if a is None:
+            self.detail.clear()
+            self.win.inspector.clear()
+        else:
+            one = dict(self.plan or {"job": "", "profile": "", "operation": ""}, albums=[a], summary={a["status"]: 1})
+            self.detail.setPlainText(planmod.preview(one, verbose=False))
+            self.win.inspector.show_album(a, self.plan)
+        self.busy(bool(getattr(self, "running", False)))
+
+    def choose_release(self):
+        a = self.selected()
+        if not a:
+            return
+        import engine
+        key = os.path.realpath(a["source_dir"])
+        files = engine.plan_entry_files(a)
+        mine = {os.path.realpath(f) for f in files}
+        choices = [c for c in (self.forced.get(key) or []) if isinstance(c, dict)]
+        was = next((c for c in choices if mine & {os.path.realpath(f) for f in c.get("files") or []}), None)
+        ref, ok = sheets.get_text(self, tr("Use another release for {name}").format(name=Path(a['source_dir']).name),
+                                  tr("Paste a MusicBrainz or Discogs release link, or its ID. The album is "
+                                     "previewed again with it; leave it empty to let TagMender choose."),
+                                  text=(was or {}).get("ref", ""), action=tr("Use Release"),
+                                  placeholder="https://musicbrainz.org/release/…")
+        if not ok:
+            return
+        ref = ref.strip()
+        if ref and engine.parse_release_ref(ref)[0] is None:
+            sheets.warning(self, tr("That is not a MusicBrainz or Discogs release link."),
+                           tr("Copy the address of the release page (musicbrainz.org/release/… or "
+                              "discogs.com/release/…), or just its ID."))
+            return
+        # (this album only: a folder may hold several, each with its own choice)
+        choices = [c for c in choices if c is not was]
+        if ref:
+            choices.append(dict({"ref": ref, "files": files}, **({"only": True} if a.get("split") else {})))
+        if choices:
+            self.forced[key] = choices
+        else:
+            self.forced.pop(key, None)
+        self.preview()
+
+    def process_anyway(self):
+        a = self.selected()
+        if a and a["status"] == "excluded":
+            folder = Path(a["source_dir"])
+            mine = {fe["src"] for fe in a.get("files") or []} | {s.get("file") for s in a.get("skipped") or []} \
+                | set(a.get("excluded_files") or [])
+            mine.discard(None)
+            # only the album's own files, never its folder: loose tracks have a watched folder or
+            # a library root for theirs, and the rules would be off for all dropped there later
+            if mine:
+                for f in sorted(mine):
+                    ex.State().allow(f)
+                what = Path(sorted(mine)[0]).name if len(mine) == 1 else \
+                    tr("{0} files in {name}").format(len(mine), name=folder.name)
+            else:
+                ex.State().allow(folder)
+                what = folder.name
+            self.summary.setText(tr("Rules will not exclude {what}. Preview again to include it; to exclude it "
+                                    "again, choose Album > Exclude Again.").format(what=what))
+            self.refresh_overrides()
+
+    # ---- Process Anyway, undone ------------------------------------------------
+    def refresh_overrides(self):
+        """The paths Process Anyway let through (read once per preview, not per selection)."""
+        try:
+            self.overrides = {os.path.abspath(str(p)) for p in ex.State().overrides()}
+        except Exception:
+            self.overrides = set()
+        self.win.update_album_actions()
+
+    def _album_paths(self, a):
+        folder = a["source_dir"]
+        mine = {fe["src"] for fe in a.get("files") or []} | {s.get("file") for s in a.get("skipped") or []} \
+            | set(a.get("excluded_files") or []) | {folder}
+        mine.discard(None)
+        return {os.path.abspath(str(p)) for p in mine}
+
+    def overridden(self, a=None):
+        """The selected album's paths that Process Anyway let through (none: Exclude Again is off)."""
+        a = a or self.selected()
+        return sorted(self._album_paths(a) & getattr(self, "overrides", set())) if a else []
+
+    def exclude_again(self):
+        a = self.selected()
+        paths = self.overridden(a)
+        if not paths:
+            return
+        st = ex.State()
+        for p in paths:
+            st.disallow(p)
+        self.refresh_overrides()
+        self.summary.setText(tr("The rules apply to {name} again. Preview again to see it "
+                                "excluded.").format(name=Path(a['source_dir']).name))

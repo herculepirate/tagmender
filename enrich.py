@@ -1,0 +1,648 @@
+#!/usr/bin/env python3
+"""enrich.py - finishing touches for tagged albums.
+
+  --replaygain   loudness (ReplayGain 2.0, EBU R128 via ffmpeg) per track and album,
+                 so albums play at an even volume (R128_* too for Opus)
+  --genres       genres from the album's MusicBrainz release group or Discogs
+                 release (styles), mapped to your own list (~/.config/tagmender/genres.json)
+  --lyrics       lyrics from LRCLIB (free, no key), time-synced where available;
+                 --lrc also saves .lrc files next to the tracks
+  --quality      finds "lossless" files transcoded from MP3/AAC (nothing above
+                 16-19.5 kHz) and "hi-res" files upsampled from CD audio (nothing
+                 above 22 kHz); writes TAGMENDER_QUALITY and a report
+  --navidrome    asks Navidrome to rescan (~/.config/tagmender/navidrome.json:
+                 {"url": "http://server:4533", "user": "...", "password": "..."})
+
+Existing values are kept unless --overwrite. Dry run by default; --apply writes;
+--undo <run> restores the tags exactly.
+
+  python3 enrich.py /mnt/music --replaygain --genres --lyrics --quality
+  python3 enrich.py /mnt/music --replaygain --genres --lyrics --quality --apply
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+import re
+import secrets
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.parse
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import match_core as mc  # noqa: E402
+import match_albums as ma  # noqa: E402
+import tag_albums as ta  # noqa: E402
+import exclusions  # noqa: E402
+
+import mutagen  # noqa: E402
+
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "tagmender"
+ALBUM_SUBFOLDERS = {"covers", "artwork", "scans", "extras", "misc"}
+q = urllib.parse.quote
+
+
+# --------------------------------------------------------------------------
+# Reading and writing a few tags in any format
+# --------------------------------------------------------------------------
+def get(path, name):
+    """One tag's value (Vorbis name, e.g. GENRE, LYRICS, MUSICBRAINZ_RELEASEGROUPID)."""
+    f = mutagen.File(path)
+    tags = getattr(f, "tags", None) or {}
+    from mutagen.id3 import ID3
+    from mutagen.mp4 import MP4
+    if isinstance(tags, ID3):
+        frames = {"GENRE": "TCON", "LYRICS": "USLT", "TITLE": "TIT2", "ARTIST": "TPE1", "ALBUM": "TALB"}
+        if name in frames:
+            fr = tags.getall(frames[name])
+            return str(fr[0].text if name == "LYRICS" else fr[0].text[0]) if fr else ""
+        names = {"MUSICBRAINZ_RELEASEGROUPID": "MusicBrainz Release Group Id",
+                 "MUSICBRAINZ_ALBUMID": "MusicBrainz Album Id"}
+        fr = tags.getall(f"TXXX:{names.get(name, name)}")
+        return str(fr[0].text[0]) if fr else ""
+    if isinstance(f, MP4):
+        atoms = {"GENRE": "\xa9gen", "LYRICS": "\xa9lyr", "TITLE": "\xa9nam", "ARTIST": "\xa9ART", "ALBUM": "\xa9alb"}
+        names = {"MUSICBRAINZ_RELEASEGROUPID": "MusicBrainz Release Group Id",
+                 "MUSICBRAINZ_ALBUMID": "MusicBrainz Album Id"}
+        v = tags.get(atoms.get(name) or f"----:com.apple.iTunes:{names.get(name, name)}")
+        if not v:
+            return ""
+        v = v[0]
+        return v.decode("utf-8", "ignore") if isinstance(v, bytes) else str(v)
+    low = {str(k).upper(): v for k, v in tags.items()}
+    v = low.get(name)
+    return str(v[0] if isinstance(v, list) else v) if v else ""
+
+
+def put(path, values):
+    """Write {VORBIS_NAME: value or [values]} in the file's own format."""
+    import tagio
+    if tagio.fragmented(path):
+        raise tagio.Unsupported(f"{Path(path).name} is a fragmented MP4: TagMender does not write to it "
+                                "(its audio would no longer play)")
+    import executor
+    executor.staged_write(path, lambda stage: _put(stage, values))
+
+
+def _put(path, values):
+    from mutagen.id3 import ID3, TXXX, TCON, USLT
+    from mutagen.mp4 import MP4, MP4FreeForm
+    import tagio
+    f = tagio.mutagen_file(path)                      # (a staging copy: by its content and inner name)
+    if f.tags is None:
+        f.add_tags()
+    vals = {k: (v if isinstance(v, list) else [v]) for k, v in values.items() if v not in (None, "", [])}
+    if isinstance(f.tags, ID3):
+        def edit(t):
+            v23 = t.version[:2] == (2, 3)
+            for k, v in vals.items():
+                if k == "GENRE":
+                    t.setall("TCON", [TCON(encoding=3, text=["/".join(v)] if v23 else v)])
+                elif k == "LYRICS":
+                    t.setall("USLT", [USLT(encoding=3, lang="eng", desc="", text=v[0])])
+                else:
+                    t.delall(f"TXXX:{k}")
+                    t.add(TXXX(encoding=3, desc=k, text=[str(x) for x in v]))
+        tagio.edit_id3(path, f, edit)                 # (its own version, its other frames as they are)
+        return
+    elif isinstance(f, MP4):
+        for k, v in vals.items():
+            if k == "GENRE":
+                f.tags["\xa9gen"] = v
+            elif k == "LYRICS":
+                f.tags["\xa9lyr"] = v
+            else:
+                f.tags[f"----:com.apple.iTunes:{k}"] = [MP4FreeForm(str(x).encode()) for x in v]
+    else:
+        for k, v in vals.items():
+            f.tags[k] = [str(x) for x in v]
+    f.save()
+
+
+# --------------------------------------------------------------------------
+# ReplayGain (EBU R128 measured by ffmpeg)
+# --------------------------------------------------------------------------
+def loudness(path):
+    """(integrated loudness LUFS, true peak dBFS) of a file."""
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=peak=true",
+                        "-f", "null", "-"], capture_output=True, text=True, timeout=1800)
+    text = r.stderr[r.stderr.rfind("Summary:"):]
+    i = re.search(r"I:\s*(-?[\d.]+)\s*LUFS", text)
+    p = re.search(r"Peak:\s*(-?[\d.]+|-inf)\s*dBFS", text)
+    if not i:
+        return None
+    peak = float(p.group(1)) if p and p.group(1) != "-inf" else -120.0
+    return float(i.group(1)), peak
+
+
+def replaygain(files):
+    """{file: tags} with track and album gain (reference -18 LUFS) and peaks."""
+    measured = {}
+    for p in files:
+        m = loudness(p)
+        if m:
+            measured[p] = (m[0], m[1], max(mutagen.File(p).info.length or 1.0, 1.0))
+    if not measured:
+        return {}
+    total = sum(d for _i, _p, d in measured.values())
+    album_i = 10 * __import__("math").log10(sum(d * 10 ** (i / 10) for i, _p, d in measured.values()) / total)
+    album_peak = max(p for _i, p, _d in measured.values())
+    out = {}
+    for p, (i, peak, _d) in measured.items():
+        tags = {"REPLAYGAIN_TRACK_GAIN": f"{-18 - i:.2f} dB", "REPLAYGAIN_TRACK_PEAK": f"{10 ** (peak / 20):.6f}",
+                "REPLAYGAIN_ALBUM_GAIN": f"{-18 - album_i:.2f} dB",
+                "REPLAYGAIN_ALBUM_PEAK": f"{10 ** (album_peak / 20):.6f}"}
+        if p.suffix.lower() == ".opus":                     # Opus players read R128 gains (ref. -23 LUFS, Q7.8)
+            tags["R128_TRACK_GAIN"] = str(round((-23 - i) * 256))
+            tags["R128_ALBUM_GAIN"] = str(round((-23 - album_i) * 256))
+        out[p] = tags
+    return out
+
+
+# --------------------------------------------------------------------------
+# Genres
+# --------------------------------------------------------------------------
+def genre_map():
+    """~/.config/tagmender/genres.json: {"map": {"funeral doom metal": "Doom Metal"},
+    "allowed": ["Doom Metal", ...], "max": 3}. Without it, the top genres as written."""
+    try:
+        return json.loads((CONFIG / "genres.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def map_genres(names, conf):
+    mapping = {mc.fold(k): v for k, v in (conf.get("map") or {}).items()}
+    allowed = {mc.fold(a): a for a in conf.get("allowed") or []}
+    out = []
+    for n in names:
+        g = mapping.get(mc.fold(n), n)
+        if allowed and mc.fold(g) not in allowed:
+            continue
+        g = allowed.get(mc.fold(g), g if any(c.isupper() for c in g) else g.title())
+        if g not in out:
+            out.append(g)
+    return out[:int(conf.get("max", 3))]
+
+
+def genres_for(http, files):
+    """Genres of the album: MusicBrainz release group (by votes), else Discogs styles."""
+    f0 = files[0]
+    rg = get(f0, "MUSICBRAINZ_RELEASEGROUPID")
+    names = []
+    if rg:
+        d = http.get_json(f"https://musicbrainz.org/ws/2/release-group/{rg}?inc=genres&fmt=json", "mb") or {}
+        names = [g["name"] for g in sorted(d.get("genres") or [], key=lambda g: -g.get("count", 0))]
+    if not names:
+        did = get(f0, "DISCOGS_RELEASE_ID")
+        if did:
+            d = http.get_json(f"https://api.discogs.com/releases/{did}", "discogs") or {}
+            names = (d.get("styles") or []) + (d.get("genres") or [])
+    return map_genres(names, genre_map())
+
+
+# --------------------------------------------------------------------------
+# Lyrics (LRCLIB)
+# --------------------------------------------------------------------------
+# Genres whose albums have no words to look up (add your own in genres.json: "instrumental")
+INSTRUMENTAL_GENRES = ("ambient", "drone", "dark ambient", "new age", "instrumental", "soundtrack", "score",
+                       "classical", "neoclassical", "minimal", "field recording", "electroacoustic",
+                       "space music", "berlin school", "meditation", "post-rock")
+
+
+def _rules():
+    try:
+        return json.loads((CONFIG / "rules.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_instrumental(artist):
+    """An artist whose album had no lyrics anywhere: skipped from now on
+    (stored in rules.json as "no_lyrics_artists"; delete an entry to look again)."""
+    if not artist:
+        return
+    path = CONFIG / "rules.json"
+    try:
+        rules = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError):
+        return                            # (a file that cannot be read is never written over)
+    if not isinstance(rules, dict):
+        return
+    names = rules.setdefault("no_lyrics_artists", [])
+    if mc.fold(artist) not in {mc.fold(n) for n in names}:
+        names.append(artist)
+        try:
+            CONFIG.mkdir(parents=True, exist_ok=True)
+            import executor
+            executor.write_json_durably(path, rules)
+        except OSError:
+            pass
+
+
+def instrumental(folder, files):
+    """No lyrics to look for: an instrumental genre in the tags or the library's
+    name ("ambient"), a 'no vox' edition, or an artist known to have none."""
+    genre = mc.fold(get(files[0], "GENRE"))
+    extra = [mc.fold(g) for g in (genre_map().get("instrumental") or [])]
+    if any(g in genre for g in [mc.fold(x) for x in INSTRUMENTAL_GENRES] + extra if g):
+        return True
+    path = mc.fold(str(folder))
+    if "ambient" in path or re.search(r"no ?vox|instrumental", path):
+        return True
+    artist = mc.fold(get(files[0], "ALBUMARTIST") or get(files[0], "ARTIST") or folder.parent.name)
+    return artist in {mc.fold(n) for n in _rules().get("no_lyrics_artists") or []}
+
+
+def lyrics_for(http, path):
+    """(synced or plain lyrics, synced?) for one track, or ("", False) - also when
+    LRCLIB is down or busy (the next run tries again)."""
+    try:
+        return _lyrics_for(http, path)
+    except Exception as exc:
+        print(f"    lyrics lookup failed for {Path(path).name}: {exc}", file=sys.stderr)
+        return "", False
+
+
+def _lyrics_for(http, path):
+    artist, title, album = get(path, "ARTIST"), get(path, "TITLE"), get(path, "ALBUM")
+    if not artist or not title:
+        return "", False
+    dur = round(mutagen.File(path).info.length or 0)
+    d = http.get_json(f"https://lrclib.net/api/get?artist_name={q(artist)}&track_name={q(title)}"
+                      f"&album_name={q(album)}&duration={dur}", "lrclib") or {}
+    if d.get("instrumental"):
+        return "", False
+    if d.get("syncedLyrics"):
+        return d["syncedLyrics"], True
+    return d.get("plainLyrics") or "", False
+
+
+# --------------------------------------------------------------------------
+# Quality: transcodes and upsampling
+# --------------------------------------------------------------------------
+def spectrum_tools():
+    """True when ffmpeg and ffprobe are installed (the spectrum check needs both)."""
+    import shutil
+    return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+
+
+def _samples(path, seconds):
+    """(sample rate, mono float samples as bytes) of `seconds` from 20 s in (from the start
+    for a short track)."""
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+                            "stream=sample_rate", "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
+    m = re.search(r"\d+", probe)                       # "44100" or "44100," depending on the file
+    rate = int(m.group(0)) if m else 0
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", "20", "-t", str(seconds), "-i", str(path), "-ac", "1",
+                          "-f", "f32le", "-"], capture_output=True).stdout
+    if not raw:
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-t", str(seconds), "-i", str(path), "-ac", "1",
+                              "-f", "f32le", "-"], capture_output=True).stdout
+    return rate, raw
+
+
+def _power_numpy(raw, n):
+    """The average power spectrum of the whole n-sample frames (numpy), or None."""
+    import numpy as np
+    x = np.frombuffer(raw[:len(raw) - len(raw) % 4], dtype="<f4")
+    frames = len(x) // n
+    if frames < 4:
+        return None
+    win = np.hanning(n)
+    power = np.zeros(n // 2 + 1)
+    for i in range(frames):
+        power += np.abs(np.fft.rfft(x[i * n:(i + 1) * n] * win)) ** 2
+    return [float(v) for v in power / frames]
+
+
+def _fft(a):
+    """In-place radix-2 FFT of a list of complex numbers (its length a power of two)."""
+    import cmath
+    n = len(a)
+    j = 0
+    for i in range(1, n):
+        bit = n >> 1
+        while j & bit:
+            j ^= bit
+            bit >>= 1
+        j |= bit
+        if i < j:
+            a[i], a[j] = a[j], a[i]
+    size = 2
+    while size <= n:
+        step = cmath.exp(-2j * cmath.pi / size)
+        half = size // 2
+        twiddles = [step ** k for k in range(half)]
+        for start in range(0, n, size):
+            for k in range(half):
+                u, v = a[start + k], a[start + k + half] * twiddles[k]
+                a[start + k], a[start + k + half] = u + v, u - v
+        size *= 2
+    return a
+
+
+def _power_stdlib(raw, n, max_frames=16):
+    """The same average power spectrum without numpy: a pure-Python FFT over at most
+    `max_frames` frames spread over the excerpt (slower, so fewer), or None."""
+    import array
+    import math
+    x = array.array("f")
+    x.frombytes(raw[:len(raw) - len(raw) % 4])
+    if sys.byteorder != "little":
+        x.byteswap()
+    frames = len(x) // n
+    if frames < 4:
+        return None
+    picks = sorted({round(i * (frames - 1) / max(1, min(frames, max_frames) - 1))
+                    for i in range(min(frames, max_frames))})
+    win = [0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1)) for i in range(n)]
+    power = [0.0] * (n // 2 + 1)
+    for f in picks:
+        spec = _fft([complex(x[f * n + i] * win[i]) for i in range(n)])
+        for i in range(n // 2 + 1):
+            power[i] += abs(spec[i]) ** 2
+    return [p / len(picks) for p in power]
+
+
+def _smooth(values, k):
+    """A k-bin moving average, centred as numpy.convolve(..., mode="same") centres it."""
+    sums = [0.0]
+    for v in values:
+        sums.append(sums[-1] + v)
+    n = len(values)
+    return [(sums[min(n, i + (k - 1) // 2 + 1)] - sums[max(0, i - k // 2)]) / k for i in range(n)]
+
+
+def _mean(values):
+    return sum(values) / len(values)
+
+
+def spectrum_cliff(path, seconds=40):
+    """(sample rate, frequency where the spectrum falls off a cliff) or None.
+
+    Lossy encoders cut everything above a fixed frequency (a "brick wall", e.g.
+    16, 19 or 20 kHz); real recordings fade gently and only stop at the
+    converter's own limit near half the sample rate. Needs ffmpeg; numpy makes it
+    quicker (without it a pure-Python FFT reads fewer frames). None when it cannot
+    be measured."""
+    import math
+    import statistics
+    if not spectrum_tools():
+        return None
+    rate, raw = _samples(path, seconds)
+    n = 8192
+    if not rate:
+        return None
+    try:
+        power = _power_numpy(raw, n)
+    except ImportError:
+        power = _power_stdlib(raw, n)
+    if power is None:
+        return None
+    db = [10 * math.log10(p + 1e-20) for p in power]
+    freqs = [i * rate / n for i in range(len(db))]
+    k = max(1, int(100 / (rate / n)))
+    db = _smooth(db, k)
+    ref = float(statistics.median(d for d, f in zip(db, freqs) if 2000 < f < 8000))
+    alive = [i for i, d in enumerate(db) if d > ref - 40]
+    if not alive:
+        return None
+    if rate > 48000:
+        # hi-res: a real recording keeps (quiet) content past 24 kHz; CD audio
+        # resampled up has nothing there at all
+        mid = [d for d, f in zip(db, freqs) if 16000 <= f < 20000]
+        high = [d for d, f in zip(db, freqs) if 30000 <= f < 40000]
+        if mid and high and _mean(mid) - _mean(high) > 70:
+            return rate, 22050.0
+    top = freqs[alive[-1]]
+    above = [d for d, f in zip(db, freqs) if top + 300 < f < top + 1300]
+    if top < rate / 2 - 1500 and above and _mean(above) < ref - 70:
+        return rate, top
+    return rate, None
+
+
+def quality(files):
+    """A finding for the album, "" when it sounds clean, or None when a track could
+    not be measured (no ffmpeg, too short, unreadable): checked on up to three
+    lossless tracks. None is never cached, so the album is measured again later."""
+    lossless = [p for p in files if p.suffix.lower() in (".flac", ".wav", ".aiff", ".aif", ".wv", ".ape")]
+    if not lossless:
+        return ""
+    picks = lossless[:: max(1, len(lossless) // 3)][:3]
+    cliffs = [spectrum_cliff(p) for p in picks]
+    if not cliffs or any(c is None for c in cliffs):
+        return None
+    rate = cliffs[0][0]
+    tops = [c[1] for c in cliffs]
+    if all(tops) and max(tops) < 20300:
+        return f"transcoded: everything above {min(tops) / 1000:.1f} kHz is cut, as lossy encoders (MP3/AAC) do"
+    if rate > 48000 and all(tops) and max(tops) <= 24000:
+        return f"upsampled: nothing above {max(tops) / 1000:.1f} kHz, so CD-rate audio in a {rate // 1000} kHz file"
+    return ""
+
+
+# --------------------------------------------------------------------------
+# Navidrome
+# --------------------------------------------------------------------------
+def navidrome_rescan():
+    """Ask Navidrome to rescan (Subsonic API startScan). True when asked."""
+    try:
+        conf = json.loads((CONFIG / "navidrome.json").read_text())
+    except (OSError, ValueError):
+        return False
+    import urllib.request
+    salt = secrets.token_hex(6)
+    token = hashlib.md5((conf["password"] + salt).encode()).hexdigest()
+    url = (f"{conf['url'].rstrip('/')}/rest/startScan?u={q(conf['user'])}&t={token}&s={salt}"
+           f"&v=1.16.1&c=tagmender&f=json")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return json.loads(r.read().decode()).get("subsonic-response", {}).get("status") == "ok"
+    except Exception:
+        return False
+
+
+# --------------------------------------------------------------------------
+def album_dirs(roots):
+    for root in roots:
+        for dirpath, dirs, names in os.walk(Path(root).expanduser()):
+            files = sorted(Path(dirpath) / n for n in names if Path(n).suffix.lower() in ta.AUDIO_EXT)
+            # the picture and papers folders inside an album folder (covers, Artwork, Extras, misc)
+            # are no album; elsewhere a folder of that name may be an artist's
+            dirs[:] = sorted(d for d in dirs if not d.startswith(".") and
+                             not (files and d.casefold() in ALBUM_SUBFOLDERS))
+            if files:
+                yield Path(dirpath), files
+
+
+def enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report):
+    dec = exclusions.gate(files, "enrich", process_anyway=args.process_anyway)
+    if dec.all_excluded:                                  # no ReplayGain, genres, lyrics or quality tags
+        report.append({"album": str(folder), "changes": dec.summary().reason(), "quality": ""})
+        print(f"  × {folder.name}: {dec.summary().reason()}")
+        return
+    files = dec.kept
+    import tagio
+    # (a fragmented MP4 is measured with its album - its album gain is the album's - but never
+    # written to: its audio would no longer play)
+    frag = {p for p in files if tagio.fragmented(p)}
+    planned = {p: {} for p in files}
+    first = next((p for p in files if p not in frag), files[0])     # (what the album has: from a file written to)
+    created = []
+    if args.replaygain and (args.overwrite or not get(first, "REPLAYGAIN_ALBUM_GAIN")):
+        if args.apply:
+            for p, tags in replaygain(files).items():
+                planned[p].update(tags)
+        else:                                       # measuring takes a while: only when writing
+            for p in files:
+                planned[p]["REPLAYGAIN_*"] = "measured with --apply"
+    if args.genres and (args.overwrite or not get(first, "GENRE")):
+        g = genres_for(http, files)
+        if g:
+            for p in files:
+                planned[p]["GENRE"] = g
+    if args.lyrics and not instrumental(folder, files):
+        found_any = False
+        for i, p in enumerate(files):
+            if args.overwrite or not get(p, "LYRICS"):
+                text, synced = lyrics_for(http, p)
+                if text:
+                    found_any = True
+                    planned[p]["LYRICS"] = text
+                    if synced and args.lrc and not p.with_suffix(".lrc").exists() and \
+                            p.with_suffix(".lrc") not in {c for c, _t in created}:   # (once: "01 a.flac" + "01 a.mp3")
+                        created.append((p.with_suffix(".lrc"), text))
+                elif i == 2 and not found_any:
+                    break                                 # three tracks without lyrics: an instrumental album
+        if not found_any:
+            remember_instrumental(get(files[0], "ALBUMARTIST") or get(files[0], "ARTIST") or folder.parent.name)
+    finding = (quality(files) or "") if args.quality else ""
+    if finding:
+        for p in files:
+            planned[p]["TAGMENDER_QUALITY"] = finding
+    changes = {p: v for p, v in planned.items() if v and p not in frag}
+    summary = sorted({k for v in changes.values() for k in v})
+    if frag:
+        summary.append(f"not {', '.join(sorted(x.name for x in frag))} (a fragmented MP4: never written to)")
+    report.append({"album": str(folder), "changes": ", ".join(summary), "quality": finding})
+    print(f"  {'+' if args.apply else '?'} {folder.name}: {', '.join(summary) or 'nothing to add'}"
+          + (f"  [{finding}]" if finding else ""))
+    if args.apply and changes:
+        recs = [{"path": str(p), "new_path": str(p), "key": "", "backup": ta.backup_tags(p, blob_dir)}
+                for p in changes]
+        entry = {"album": str(folder), "mbid": None, "files": recs, "extras": [], "moves": [],
+                 "created": [str(c) for c, _t in created],
+                 # (what each .lrc will hold, known before it is written: an undo after a cut-short
+                 # run removes what it made)
+                 "created_sha": {str(c): hashlib.sha256(text.encode("utf-8")).hexdigest() for c, text in created}}
+        journal.append(entry)
+        import executor
+        executor.write_json_durably(run_dir / "journal.json", journal)     # (the backups, before any write)
+        failed = []
+        for p, tags in changes.items():
+            rec = next(r for r in recs if r["path"] == str(p))
+            try:
+                put(p, tags)
+            except Exception as exc:        # (a link, a track a job holds ...: this one is not written,
+                rec["not_written"] = True   # and its undo leaves it alone; the others go on)
+                failed.append(f"{p.name}: {exc}")
+            else:
+                rec["after_sig"] = executor._tags_sig(p)       # (as written: undo leaves a later edit alone)
+            executor.write_json_durably(run_dir / "journal.json", journal)
+        for c, text in created:
+            tmp = c.with_name(f".{c.name}.{run_dir.name}.tmp")     # (whole or not at all; named by the run)
+            try:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                if c.exists():                                     # (one made meanwhile: never written over)
+                    entry["created_sha"].pop(str(c), None)
+                    continue
+                os.replace(tmp, c)
+            finally:
+                tmp.unlink(missing_ok=True)
+        executor.write_json_durably(run_dir / "journal.json", journal)
+        if failed:
+            report[-1]["changes"] += f" (partly: {'; '.join(failed)})"
+            print(f"    not written: {'; '.join(failed)}")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("roots", nargs="*")
+    for opt in ("replaygain", "genres", "lyrics", "quality", "navidrome"):
+        ap.add_argument(f"--{opt}", action="store_true")
+    ap.add_argument("--lrc", action="store_true", help="also save time-synced lyrics as .lrc files")
+    ap.add_argument("--overwrite", action="store_true", help="replace values the files already have")
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--process-anyway", action="store_true",
+                    help="also albums an Ignore/Skip rule excludes (this run only)")
+    ap.add_argument("--undo", help="restore a run")
+    ap.add_argument("--force", action="store_true",
+                    help="with --undo: put back files edited after the run too")
+    ap.add_argument("--only", help="only folders whose path contains this text")
+    ap.add_argument("--out-dir", default="~/Downloads/tagging")
+    ap.add_argument("--cache-db", default="~/Downloads/matching/match_state.db")
+    args = ap.parse_args(argv)
+    out_dir = Path(args.out_dir).expanduser()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.undo:
+        journal = json.loads((out_dir / f"run-{args.undo}" / "journal.json").read_text())
+        for e in journal:
+            shas = e.get("created_sha") or {}
+            for created in e.get("created", []):
+                c = Path(created)
+                Path(c.with_name(f".{c.name}.run-{args.undo}.tmp")).unlink(missing_ok=True)   # (a run cut short)
+                if not c.exists():
+                    continue
+                if not args.force and (created not in shas or
+                                       hashlib.sha256(c.read_bytes()).hexdigest() != shas[created]):
+                    print(f"  {c} was changed after the run (or not recorded); left as it is "
+                          f"(--force deletes it anyway)")
+                    continue
+                c.unlink()
+        return ta.undo(out_dir, args.undo, force=args.force)
+    if args.navidrome and not args.roots:
+        print("Navidrome rescan " + ("requested" if navidrome_rescan() else "failed (see navidrome.json)"))
+        return 0
+
+    db = sqlite3.connect(Path(args.cache_db).expanduser(), timeout=60)
+    http = ma.Http(db, dict(mc.DEFAULT_CFG), ma._discogs_token())
+    run_dir = blob_dir = None
+    if args.apply:
+        run_dir = out_dir / f"run-enrich-{time.strftime('%Y%m%d-%H%M%S')}"
+        blob_dir = run_dir / "blobs"
+        blob_dir.mkdir(parents=True)
+    journal, report = [], []
+    for folder, files in album_dirs(args.roots):
+        if args.only and args.only.casefold() not in str(folder).casefold():
+            continue
+        try:
+            enrich_album(folder, files, args, http, run_dir, blob_dir, journal, report)
+        except Exception as exc:                          # one album's problem never stops the run
+            print(f"  ! {folder.name}: skipped ({type(exc).__name__}: {exc})")
+            report.append({"album": str(folder), "changes": f"skipped: {exc}", "quality": ""})
+    path = (run_dir or out_dir) / "enrich_report.csv"
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["album", "changes", "quality"])
+        w.writeheader()
+        w.writerows(report)
+    print(f"\n{len(report)} album(s). Report: {path}")
+    if args.apply:
+        print(f"Undo: python3 enrich.py --undo {run_dir.name[len('run-'):]}")
+        if args.navidrome:
+            print("Navidrome rescan " + ("requested" if navidrome_rescan() else "failed (see navidrome.json)"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

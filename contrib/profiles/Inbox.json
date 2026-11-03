@@ -1,0 +1,11 @@
+{
+  "version": 3,
+  "name": "Inbox",
+  "description": "Watches the inbox; identified albums move into the library, the rest are marked and set aside.",
+  "sources": [{"path": "~/Music/Inbox", "recursive": true, "watch": true}],
+  "operation": "move",
+  "destination": "~/Music/Library",
+  "unresolved": {"action": "move", "move_to": "~/Music/Inbox/_unresolved"},
+  "unattended": true,
+  "watch": {"settle_minutes": 15}
+}

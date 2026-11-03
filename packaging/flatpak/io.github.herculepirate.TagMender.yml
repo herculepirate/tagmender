@@ -1,0 +1,90 @@
+# Flatpak of TagMender (desktop app, command line and the watched-folders watcher).
+#
+#   flatpak install flathub org.kde.Sdk//6.10 io.qt.PySide.BaseApp//6.10
+#   flatpak-builder --user --install --force-clean build-dir \
+#       packaging/flatpak/io.github.herculepirate.TagMender.yml
+#   flatpak run io.github.herculepirate.TagMender            (the app; no arguments opens it)
+#   flatpak run io.github.herculepirate.TagMender watch      (the watcher, in a terminal)
+#
+# Python wheels are pinned to the versions the test suite passed with (as the AppImage);
+# python3-deps.json was made from PyPI's own sha256 digests.
+# The player uses Qt Multimedia from the PySide BaseApp; reading a CD in the drive uses libdiscid
+# (built below) and python-discid (in python3-deps.json).
+id: io.github.herculepirate.TagMender
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+base: io.qt.PySide.BaseApp
+base-version: '6.10'
+command: tagmender
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh          # the PySide BaseApp's build-only files
+finish-args:
+  - --share=ipc
+  - --share=network                 # MusicBrainz, Discogs, cover art, AcoustID; the browser link on 127.0.0.1
+  - --socket=pulseaudio             # the player
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --device=all                    # the CD drive (/dev/sr0) for Look Up CD; Flatpak has no narrower one
+  # Read and write every folder you can: music libraries live on other drives and shares
+  # (/media, /mnt, /run/media, /srv), files are moved between them, and settings imported
+  # from an existing tagger installation (~/.config/MusicBrainz, or that tagger's Flatpak
+  # folder) are read. "home" or "xdg-music" alone cannot reach a library on /media.
+  - --filesystem=host
+  - --filesystem=/run/media
+  # A tagger installed as a Flatpak keeps its settings under ~/.var/app, which "host" does not
+  # include (read only; the folder name is that application's ID)
+  - --filesystem=~/.var/app/org.musicbrainz.Picard/config/MusicBrainz:ro
+  - --filesystem=xdg-run/gvfs       # shares mounted by the file manager (smb://, sftp://)
+  # Watching after the app is closed goes through the Background portal (autostart);
+  # it needs no permission here.
+modules:
+  - name: libdiscid
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://github.com/metabrainz/libdiscid/releases/download/v0.7.0/libdiscid-0.7.0.tar.gz
+        sha256: c230ed462c5ed7d7403ceb6984c57c8d05de42386d796bcd893636c0b0ba222f
+  - python3-deps.json
+  - name: tagmender
+    buildsystem: simple
+    build-commands:
+      - mkdir -p ${FLATPAK_DEST}/lib/tagmender/vendor
+      # the same files as build_deb.sh and build_appimage.sh (git ls-files '*.py' 'coverup_fonts/*'
+      # 'assets/icons/lucide/*' 'assets/i18n/*', without tests/ and tools/): the source below is the
+      # git checkout, so only tracked files are here, and find goes into every gui/ subpackage
+      - find . \( -name '*.py' -o -path './coverup_fonts/*' -o -path './assets/icons/lucide/*'
+        -o -path './assets/i18n/*' \) -type f -not -path './tests/*' -not -path './tools/*'
+        -not -path './vendor/*' -not -path './.git/*' -exec install -Dm644 {} "${FLATPAK_DEST}/lib/tagmender/{}" \;
+      - echo f0f875ec2ea58c650419cc85426029562ffc2dc3 > vendor/picard-discogs-enrichment/VENDORED_COMMIT
+      - echo f8f4199b5471eddb934d874bcb67f342c67e6490 > vendor/picard-coverup/VENDORED_COMMIT
+      - for d in picard-discogs-enrichment picard-coverup; do rm -rf "vendor/$d/tests" "vendor/$d/.git";
+        cp -r "vendor/$d" ${FLATPAK_DEST}/lib/tagmender/vendor/; done
+      - install -Dm755 packaging/flatpak/tagmender.sh ${FLATPAK_DEST}/bin/tagmender
+      - install -Dm644 packaging/io.github.herculepirate.TagMender.desktop
+        ${FLATPAK_DEST}/share/applications/io.github.herculepirate.TagMender.desktop
+      - install -Dm644 packaging/io.github.herculepirate.TagMender.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/io.github.herculepirate.TagMender.metainfo.xml
+      - install -Dm644 packaging/tagmender.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.herculepirate.TagMender.svg
+    sources:
+      # the main branch of this checkout as committed (tracked files only, as git ls-files):
+      # untracked or git-ignored files (local notes, run output, *.csv/*.db/*.log, plans) never
+      # reach the build directory; commit first, uncommitted changes are not built
+      - type: git
+        path: ../..
+        branch: main
+      - type: git
+        url: https://github.com/herculepirate/picard-discogs-enrichment
+        commit: f0f875ec2ea58c650419cc85426029562ffc2dc3
+        dest: vendor/picard-discogs-enrichment
+      - type: git
+        url: https://github.com/herculepirate/picard-coverup
+        commit: f8f4199b5471eddb934d874bcb67f342c67e6490
+        dest: vendor/picard-coverup

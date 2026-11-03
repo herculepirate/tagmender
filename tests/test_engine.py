@@ -1,0 +1,870 @@
+# Tests for engine.py and mb_tags.py with recorded-style API responses (no network):
+# MusicBrainz-only, Discogs-only, both on one pressing, providers disagreeing, missing
+# credentials, outages, mixed folders, single tracks, rules on identified metadata,
+# and the whole path through the planner and executor.
+import os as _os, tempfile as _tempfile  # noqa: E402
+_os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
+_os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
+
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+import urllib.parse as up
+from pathlib import Path
+from unittest import mock
+
+HERE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(HERE))
+PLUGIN = Path(_os.environ.get("TAGMENDER_DISCOGS_PLUGIN") or
+              (sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else
+               "../picard-discogs-enrichment")).expanduser()
+if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+    sys.argv.pop(1)
+_os.environ["TAGMENDER_DISCOGS_PLUGIN"] = str(PLUGIN)
+
+import engine  # noqa: E402
+import exclusions as ex  # noqa: E402
+import executor  # noqa: E402
+import logsetup  # noqa: E402
+import match_albums as ma  # noqa: E402
+import mb_tags  # noqa: E402
+import plan as pl  # noqa: E402
+import profiles as pf  # noqa: E402
+import tagio  # noqa: E402
+
+LENS = [10000, 20000, 30000]
+import _v2_defaults  # noqa: E402  (written for the defaults before schema 3)
+_v2_defaults.use()
+
+
+def mb_release(rid, artist, title, lens=LENS, country="DE", discogs=None, catno="CAT-1", aid="a-1"):
+    rels = []
+    if discogs:
+        rels.append({"type": "discogs", "url": {"resource": f"https://www.discogs.com/release/{discogs}"}})
+    return {"id": rid, "title": title, "date": "2005-03-01", "country": country, "status": "Official",
+            "barcode": "0123456789012",
+            "release-group": {"id": f"rg-{rid}", "primary-type": "Album", "secondary-types": ["Live"],
+                              "first-release-date": "1999-01-01"},
+            "text-representation": {"script": "Latn", "language": "eng"},
+            "artist-credit": [{"name": artist, "joinphrase": "", "artist": {"id": aid, "name": artist,
+                                                                            "sort-name": f"{artist}, The"}}],
+            "label-info": [{"label": {"name": "Label MB"}, "catalog-number": catno}],
+            "relations": rels,
+            "media": [{"format": "CD", "position": 1, "tracks": [
+                {"id": f"{rid}-t{i}", "position": i + 1, "title": f"T{i}", "length": ms,
+                 "recording": {"id": f"{rid}-r{i}", "title": f"T{i}", "isrcs": [f"DEXX0500000{i}"]}}
+                for i, ms in enumerate(lens)]},
+                {"format": "DVD-Video", "position": 2, "tracks": [{"id": "v", "title": "Video", "length": 1,
+                                                                  "recording": {"id": "vr", "video": True}}]}]}
+
+
+def dg_release(rid, artist, title, durs=("0:10", "0:20", "0:30"), catno="CAT-1", country="Germany"):
+    return {"id": rid, "title": title, "year": 2005, "released": "2005-03-01",
+            "uri": f"https://www.discogs.com/release/{rid}", "artists": [{"name": artist, "id": 77}],
+            "labels": [{"name": "Label DG", "catno": catno}], "identifiers": [], "country": country,
+            "genres": ["Electronic"], "styles": ["Ambient"],
+            "formats": [{"name": "CD", "descriptions": ["Album"]}],
+            "tracklist": [{"type_": "track", "position": str(i + 1), "title": f"T{i}", "duration": d}
+                          for i, d in enumerate(durs)]}
+
+
+class FakeHttp:
+    def __init__(self, mb=(), dg=(), mb_down=False):
+        self.db = None
+        self.mb = {r["id"]: r for r in mb}
+        self.dg = {r["id"]: r for r in dg}
+        self.mb_down = mb_down
+        self.calls = []
+
+    def get_json(self, url, host):
+        self.calls.append((host, url))
+        if host == "mb":
+            if self.mb_down:
+                raise ma.ProviderUnavailable("mb", "outage", "HTTP 503")
+            if "/ws/2/release/?" in url:
+                q = up.unquote(url.split("query=")[1].split("&")[0])
+                return {"releases": [{"id": r["id"], "track-count": len(r["media"][0]["tracks"])}
+                                     for r in self.mb.values() if r["title"] in q]}
+            if "/ws/2/" in url and "/release/" in url:
+                return self.mb.get(url.split("/release/")[1].split("?")[0])
+            return {"releases": [], "recordings": [], "artists": []}
+        if host == "discogs":
+            if "/database/search" in url:
+                q = up.unquote(url)
+                return {"results": [{"id": r["id"], "title": f"{r['artists'][0]['name']} - {r['title']}",
+                                     "year": "2005"} for r in self.dg.values() if r["title"] in q]}
+            tail = url.rsplit("/", 1)[1]
+            return self.dg.get(int(tail)) if tail.isdigit() else None
+        return None
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        if not (PLUGIN / "discogs_mapping.py").exists():
+            self.skipTest(f"Discogs Enrichment not found at {PLUGIN}")
+        self.tmp = Path(tempfile.mkdtemp())
+        self.saved = (ex.CONFIG_DIR, ex.STATE_DIR)
+        ex.CONFIG_DIR, ex.STATE_DIR = self.tmp / "config", self.tmp / "state"
+        ex._write(ex.rules_file(), {"rules": []})
+        _os.environ["DISCOGS_TOKEN"] = "test-token"
+        _os.environ.pop("TAGMENDER_PROFILE", None)
+        _os.environ["TAGMENDER_TAGGER_INI"] = str(self.tmp / "no-Picard.ini")   # never this machine's
+        logsetup.reset()
+        self.lib = self.tmp / "lib"
+
+    def picard_ini(self, preserved="comment, tagmender, tagmender_reason", **plugin):
+        """A Picard.ini with these Discogs Enrichment settings, as Picard writes them."""
+        ini = self.tmp / "Picard.ini"
+        lines = ["[plugin.dd789f69-332f-498a-af94-d8e3273cc435]", "token=never-read"]
+        lines += [f"{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in plugin.items()]
+        lines += ["", "[setting]", "clear_existing_tags=true", f"preserved_tags={preserved}", ""]
+        ini.write_text("\n".join(lines))
+        _os.environ["TAGMENDER_TAGGER_INI"] = str(ini)
+        return ini
+
+    def tearDown(self):
+        logsetup.reset()
+        _os.environ.pop("DISCOGS_TOKEN", None)
+        _os.environ.pop("TAGMENDER_PROFILE", None)
+        _os.environ.pop("TAGMENDER_TAGGER_INI", None)
+        ex.CONFIG_DIR, ex.STATE_DIR = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def album(self, artist, title, n=3, folder=None, **extra):
+        d = self.lib / artist / (folder or f"2005 - {title}")
+        d.mkdir(parents=True, exist_ok=True)
+        for i in range(n):
+            meta = sum((["-metadata", f"{k}={v}"] for k, v in
+                        dict({"title": f"T{i}", "album": title, "albumartist": artist, "track": str(i + 1)},
+                             **extra).items()), [])
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                            f"sine=frequency={300 + 50 * i}:duration={10 * (i + 1)}", "-ar", "8000", "-ac", "1",
+                            *meta, str(d / f"{i + 1:02d}{extra.get('_ext', '.flac')}"), "-y"], check=True)
+        return d
+
+    def engine(self, http, **prof):
+        d = {"name": "default", "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False}}
+        d.update(prof)
+        return engine.Engine(pf.from_dict(d), http=http)
+
+
+class MbTags(unittest.TestCase):
+    def test_picard_mapping_and_video_tracks_left_out(self):
+        tags = mb_tags.release_tags(mb_release("r1", "Band", "Album"))
+        self.assertEqual(len(tags), 3)
+        t = tags[1]
+        self.assertEqual(t["title"], ["T1"])
+        self.assertEqual(t["musicbrainz_recordingid"], ["r1-r1"])
+        self.assertEqual(t["musicbrainz_trackid"], ["r1-t1"])
+        self.assertEqual(t["musicbrainz_albumartistid"], ["a-1"])
+        self.assertEqual(t["albumartistsort"], ["Band, The"])
+        # (the DVD counts as Picard counts it: disc 1 of 2; its video is never an audio file's)
+        self.assertEqual((t["tracknumber"], t["totaltracks"], t["discnumber"], t["totaldiscs"]),
+                         (["2"], ["3"], ["1"], ["2"]))
+        self.assertEqual(t["releasetype"], ["album", "live"])
+        self.assertEqual(t["releasestatus"], ["official"])
+        self.assertEqual((t["originaldate"], t["date"]), (["1999-01-01"], ["2005-03-01"]))
+        self.assertEqual((t["label"], t["catalognumber"]), (["Label MB"], ["CAT-1"]))
+        self.assertEqual(t["isrc"], ["DEXX05000001"])
+
+
+class Identify(Base):
+    def test_musicbrainz_only(self):
+        d = self.album("Band A", "Album A")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-a", "Band A", "Album A")]))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"))
+        self.assertEqual(p.targets[0]["musicbrainz_albumid"], ["mb-a"])
+        self.assertGreaterEqual(p.confidence, 90)
+
+    def test_discogs_only_without_any_musicbrainz_id(self):
+        d = self.album("Band B", "Album B")
+        eng = self.engine(FakeHttp(dg=[dg_release(901, "Band B", "Album B")]))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider, p.release_id), ("identified", "discogs", "901"))
+        t = p.targets[0]
+        self.assertEqual(t["discogs_release_id"], ["901"])
+        self.assertEqual(t["catalognumber"], ["CAT-1"])
+        self.assertEqual(t["releasecountry"], ["DE"])                 # the plugin's country -> code
+        self.assertEqual(t["genre"], ["Electronic"])
+        self.assertFalse([k for k in t if k.startswith("musicbrainz_")])
+
+    def test_same_pressing_on_both_mb_base_and_discogs_applied_as_the_plugin_does(self):
+        # no Picard.ini: the plugin's defaults (styles kept separate); the merge combine, as the
+        # profile fine-tunes Discogs preferred
+        d = self.album("Band C", "Album C")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-c", "Band C", "Album C", discogs=902)],
+                                   dg=[dg_release(902, "Band C", "Album C")]),
+                          discogs_enrichment={"merge_mode": "combine"})
+        p = eng.identify(eng.albums_in(d)[0])
+        t = p.targets[0]
+        self.assertEqual(p.provider, "musicbrainz+discogs")
+        self.assertEqual(t["musicbrainz_albumid"], ["mb-c"])
+        self.assertEqual(t["discogs_release_id"], ["902"])
+        self.assertEqual(t["genre"], ["Electronic"])                  # MusicBrainz had none
+        self.assertEqual(t["label"], ["Label DG", "Label MB"])        # combine: Discogs first, both kept
+        self.assertEqual(t["discogs_style"], ["Ambient"])
+        self.assertEqual(p.provenance["discogs_release_id"], "discogs")
+        self.assertEqual(p.provenance["musicbrainz_recordingid"], "musicbrainz")
+
+    def test_providers_disagree_folder_catalogue_number_decides_nothing_is_mixed(self):
+        d = self.album("Band D", "Album D", folder="2005 - Album D [CAT-901]")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-d", "Band D", "Album D", catno="OTHER-100", country="US")],
+                                   dg=[dg_release(903, "Band D", "Album D", catno="CAT-901")]))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "discogs"))
+        self.assertFalse([k for k in p.targets[0] if k.startswith("musicbrainz_")])
+        self.assertEqual(p.targets[0]["catalognumber"], ["CAT-901"])
+
+    def test_providers_disagree_without_evidence_preferred_source_decides_nothing_is_mixed(self):
+        # (Sources: Discogs preferred, the default: Discogs's pick stands, never a guess or a review)
+        d = self.album("Band D2", "Album D2")                         # the folder says nothing about the copy
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
+                                   dg=[dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
+        eng.cfg["preferred_countries"] = ["US"]
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider, p.tier), ("identified", "discogs", "exact"))
+        self.assertFalse([k for k in p.targets[0] if k.startswith("musicbrainz_")])   # the other pressing stays out
+        self.assertEqual(p.targets[0]["catalognumber"], ["CAT-901"])
+        self.assertTrue(any("Discogs decides (Sources: Discogs preferred)" in n for n in p.evidence), p.evidence)
+
+    def test_providers_disagree_without_evidence_country_order_decides_nothing_is_mixed(self):
+        # (the matcher's own order, no Sources preference, as validate.py runs it)
+        d = self.album("Band D2", "Album D2")                         # the folder says nothing about the copy
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
+                                   dg=[dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
+        eng.cfg["preferred_countries"] = ["US"]
+        eng.cfg["prefer_source"] = ""
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"))
+        self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])   # the other pressing stays out
+        # the country order is a guess (M4a R2): the album is tagged without the pressing's IDs
+        self.assertNotIn("catalognumber", p.targets[0])
+        self.assertNotIn("musicbrainz_albumid", p.targets[0])
+        self.assertEqual(p.targets[0]["album"], ["Album D2"])
+
+    def test_missing_discogs_token_still_identifies_from_musicbrainz(self):
+        _os.environ.pop("DISCOGS_TOKEN")
+        d = self.album("Band E", "Album E")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-e", "Band E", "Album E")]))
+        self.assertIn("missing_credentials", eng.notes["discogs"])
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "identified")
+        self.assertEqual(p.provider_errors, {"discogs": "missing_credentials"})
+
+    def test_musicbrainz_outage_discogs_identifies(self):
+        d = self.album("Band F", "Album F")
+        eng = self.engine(FakeHttp(dg=[dg_release(904, "Band F", "Album F")], mb_down=True))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "discogs"))
+        self.assertEqual(p.provider_errors.get("musicbrainz"), "outage")
+
+    def test_nothing_found_is_unresolved_with_codes(self):
+        d = self.album("Band G", "Album G")
+        p = self.engine(FakeHttp()).identify(engine.Engine.albums_in(self.engine(FakeHttp()), d)[0])
+        self.assertEqual(p.status, "unresolved")
+        self.assertIn("no_candidate", p.reason_codes)
+
+    def test_outage_without_another_source_is_retryable_not_no_candidate(self):
+        d = self.album("Band H", "Album H")
+        eng = self.engine(FakeHttp(mb_down=True), providers={"discogs": {"enabled": False},
+                                                             "web": {"enabled": False}})
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "unresolved")
+        self.assertIn("musicbrainz_unavailable", p.reason_codes)
+
+    def test_no_provider_asked_is_not_called_no_candidate(self):
+        _os.environ.pop("DISCOGS_TOKEN")
+        d = self.album("Band Q", "Album Q")
+        eng = self.engine(FakeHttp(), providers={"musicbrainz": {"enabled": False}, "web": {"enabled": False}})
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.reason_codes, ["missing_credentials"])
+        self.assertIn("no provider could be asked", p.reason)
+
+    def test_profile_rules_do_not_leak_into_a_later_default_run(self):
+        pf.save(pf.from_dict({"name": "Strict", "exclusions": [
+            {"id": "all", "name": "all", "action": "skip", "target": "album",
+             "when": {"all": [{"field": "album", "op": "contains", "value": "Album"}]}}]}))
+        engine.Engine(pf.load("Strict"), http=FakeHttp())
+        self.engine(FakeHttp())                                        # the default profile afterwards
+        self.assertNotEqual(_os.environ.get("TAGMENDER_PROFILE"), "Strict")
+
+    def test_excluded_album_makes_no_web_or_fingerprint_lookups(self):
+        ex._write(ex.rules_file(), {"rules": [{"id": "nv", "name": "nv", "action": "ignore", "target": "album",
+                                               "when": {"all": [{"field": "album", "op": "contains",
+                                                                 "value": "[no vox]"}]}}]})
+        d = self.album("Band NV", "Album [no vox]")
+        http = FakeHttp()
+        eng = self.engine(http, providers={"web": {"enabled": True}})
+        looked = []
+        with mock.patch("web_tag.find", side_effect=lambda *a, **k: looked.append("web") or (None, None, [])), \
+                mock.patch.object(ma, "fingerprint_ready", return_value=True), \
+                mock.patch.object(engine.Engine, "_single", side_effect=lambda *a: looked.append("fp")):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((http.calls, looked), ([], []))
+        self.assertEqual(p.status, "unresolved")
+        a = pl.build([p], eng.profile)["albums"][0]
+        self.assertEqual((a["status"], a["label"]), ("excluded", "Ignored"))
+
+    def test_web_is_asked_once_for_an_album_neither_database_has(self):
+        """The web fallback (a Partial album: tests/test_web_partial.py) asks every web source
+        once; it writes no barcode, so the album's documents are not needed for it."""
+        d = self.album("Band W", "Album W")
+        eng = self.engine(FakeHttp(), providers={"web": {"enabled": True}})
+        seen = []
+        with mock.patch("web_tag.album_candidates", side_effect=lambda h, a, log=None, sources=None: seen.append(a["title"]) or []):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(seen, ["Album W"])
+        self.assertEqual(p.status, "unresolved")
+
+    def test_profile_shops_setting_reaches_the_matcher(self):
+        """providers.web.shops (and web switched off) decides whether the shops are asked."""
+        d = self.album("Band S", "Album S")
+        for web, want in [(None, True), ({"enabled": True, "shops": False}, False), ({"enabled": False}, False)]:
+            prof = {"name": "default", "artwork": {"enabled": False}}
+            if web is not None:
+                prof["providers"] = {"web": web}
+            eng = engine.Engine(pf.from_dict(prof), http=FakeHttp())
+            seen = []
+
+            def process(row, http, cfg, dm, args):
+                seen.append(getattr(args, "use_shops", True))
+                raise ma.ProviderUnavailable("mb", "outage", "stub")
+            with mock.patch.object(ma, "process", side_effect=process), \
+                    mock.patch("web_tag.find", return_value=(None, None, [])):
+                eng.identify(eng.albums_in(d)[0])
+            self.assertEqual(seen[:1], [want], web)
+
+    def test_profile_ocr_setting_reaches_the_matcher(self):
+        """The profile's ocr (auto by default) goes to the matcher as the mode; --ocr forces on."""
+        d = self.album("Band O", "Album O")
+        for prof, ocr, want in [({}, None, "auto"), ({"ocr": "off"}, None, "off"), ({"ocr": "off"}, True, "on"),
+                                ({"ocr": "on"}, None, "on")]:
+            with mock.patch.object(ma, "ocr_problems", return_value=[]):
+                eng = engine.Engine(pf.from_dict(dict(prof, name="default", artwork={"enabled": False})),
+                                    http=FakeHttp(), ocr=ocr)
+            seen = []
+
+            def process(row, http, cfg, dm, args):
+                seen.append(args.ocr)
+                raise ma.ProviderUnavailable("mb", "outage", "stub")
+            with mock.patch.object(ma, "process", side_effect=process), \
+                    mock.patch("web_tag.find", return_value=(None, None, [])):
+                eng.identify(eng.albums_in(d)[0])
+            self.assertEqual(seen[:1], [want], (prof, ocr))
+
+    SHOP_NOTE = "Deezer: UPC 075678264320 = Band S - Album S (lengths agree)"
+
+    def test_shop_clue_in_the_evidence_of_a_matched_album(self):
+        d = self.album("Band M", "Album M")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")]))
+        real = ma.process
+
+        def process(*a):
+            return dict(real(*a), shop_notes=[self.SHOP_NOTE])
+        with mock.patch.object(ma, "process", side_effect=process):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "identified")
+        self.assertIn(self.SHOP_NOTE, p.evidence)
+        self.assertNotIn(self.SHOP_NOTE, p.why)
+
+    def test_shop_clue_in_the_evidence_of_an_album_for_review(self):
+        d = self.album("Band S", "Album S")
+        eng = self.engine(FakeHttp())
+        out = {"status": "review", "why": ["confidence 70 below 90"], "shop_notes": [self.SHOP_NOTE],
+               "best": {"source": "mb", "id": "a", "mb_id": "a", "url": "u", "confidence": 70.0,
+                        "notes": ["title agrees"]}}
+        with mock.patch.object(ma, "process", return_value=out):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "unresolved")
+        self.assertEqual(p.evidence, ["title agrees", self.SHOP_NOTE])
+        self.assertNotIn(self.SHOP_NOTE, p.why)
+        self.assertNotIn(self.SHOP_NOTE, p.reason)
+
+    def test_track_mismatch_after_a_match_is_not_a_provider_outage(self):
+        d = self.album("Band T", "Album T")
+        rel = mb_release("mb-t", "Band T", "Album T")
+        eng = self.engine(FakeHttp(mb=[rel]))
+        with mock.patch.object(mb_tags, "release_tags", return_value=[{"title": ["x"]}]):   # 1 track, 3 files
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "unresolved")
+        self.assertEqual(p.provider_errors, {})
+        self.assertNotIn("musicbrainz_unavailable", p.reason_codes)
+
+    def test_ocr_note_is_told_once_not_as_each_albums_provider_error(self):
+        """OCR is not a provider: OCR that cannot run leaves a note for the run, but no album
+        shows it as a provider error or as "no provider could be asked (ocr: ...)"."""
+        d = self.album("Band O", "Album O")
+        with mock.patch.object(ma, "ocr_problems", return_value=["tesseract binary missing"]), \
+                mock.patch("requirements.problem", return_value=""):   # (the same whether Tesseract is installed or not)
+            eng = engine.Engine(pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
+                                              "artwork": {"enabled": False}}),
+                                http=FakeHttp(mb=[mb_release("mb-o", "Band O", "Album O")]), ocr=True)
+        self.assertIn("tesseract binary missing", eng.notes.get("ocr", ""))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "identified")
+        self.assertNotIn("ocr", p.provider_errors)
+        # no provider asked at all: the reason names the providers, never OCR
+        eng.use_mb = eng.use_discogs = False
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertNotIn("ocr", p.provider_errors)
+        self.assertNotIn("ocr", p.reason)
+
+    def test_gnudb_note_is_told_once_not_as_each_albums_provider_error(self):
+        """gnudb not set up (most users: web on, gnudb on, no registered address) leaves one
+        note for the run, but no album shows it as a provider error or in "no provider
+        could be asked (...)"."""
+        d = self.album("Band G", "Album G")
+        with mock.patch.dict(_os.environ, {}), mock.patch.object(engine.Engine, "_web", return_value=None):
+            _os.environ.pop("TAGMENDER_GNUDB_USER", None)
+            eng = engine.Engine(pf.from_dict({"name": "default", "providers": {"web": {"enabled": True}},
+                                              "artwork": {"enabled": False}}),
+                                http=FakeHttp(mb=[mb_release("mb-g", "Band G", "Album G")]))
+            self.assertIn("gnudb", eng.notes)
+            p = eng.identify(eng.albums_in(d)[0])
+            self.assertEqual(p.status, "identified")
+            self.assertNotIn("gnudb", p.provider_errors)
+            eng.use_mb = eng.use_discogs = False
+            p = eng.identify(eng.albums_in(d)[0])
+            self.assertNotIn("gnudb", p.provider_errors)
+            self.assertNotIn("gnudb", p.reason)
+
+    def test_rejected_discogs_token_still_identifies_from_musicbrainz(self):
+        d = self.album("Band R", "Album R")
+        eng = self.engine(FakeHttp(mb=[mb_release("mb-r", "Band R", "Album R")]))
+        with mock.patch.object(ma, "discogs_search", side_effect=ma.AuthError("401")):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"))
+        self.assertEqual(p.provider_errors.get("discogs"), "missing_credentials")
+
+    def test_mixed_folder_is_split_by_album(self):
+        d = self.album("Mixed", "Album M1", folder="downloads")
+        for i in range(2):
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency={700 + i}:duration=5",
+                            "-ar", "8000", "-ac", "1", "-metadata", "album=Other Album", "-metadata",
+                            "albumartist=Someone", "-metadata", f"title=O{i}", str(d / f"o{i}.flac"), "-y"], check=True)
+        groups = engine.Engine.albums_in(self.engine(FakeHttp()), d)
+        self.assertEqual(sorted(len(g.files) for g in groups), [2, 3])
+        self.assertTrue(all(len(g.others) == 5 - len(g.files) for g in groups))
+
+    def test_disc_folders_belong_to_their_album(self):
+        d = self.lib / "X" / "2005 - Box"
+        for disc in ("CD1", "CD2"):
+            (d / disc).mkdir(parents=True)
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", "-ar", "8000",
+                            "-metadata", "album=Box", str(d / disc / "01.flac"), "-y"], check=True)
+        groups = engine.Engine.albums_in(self.engine(FakeHttp()), self.lib)
+        self.assertEqual([(g.folder.name, len(g.files)) for g in groups], [("2005 - Box", 2)])
+
+    def test_single_track_by_fingerprint_is_a_recording_not_an_album(self):
+        d = self.lib / "Singles"
+        d.mkdir(parents=True)
+        f = d / "song.flac"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=3", str(f), "-y"],
+                       check=True)
+        http = FakeHttp()
+        real = http.get_json
+
+        def acoustid(url, host):
+            if host == "acoustid":
+                return {"results": [{"id": "ac-1", "score": 0.97, "recordings": [
+                    {"id": "rec-9", "title": "Song", "artists": [{"id": "ar-1", "name": "Singer"}]}]}]}
+            return real(url, host)
+        http.get_json = acoustid
+        with mock.patch.object(ma, "fingerprint_ready", return_value=True), \
+                mock.patch.object(ma, "fingerprint", return_value={"duration": 3, "fingerprint": "AQAA"}), \
+                mock.patch.object(ma, "acoustid_key", return_value="k"):
+            eng = self.engine(http)
+            p = eng.identify(eng.albums_in(f)[0])
+        self.assertEqual((p.status, p.provider), ("identified", "acoustid"))
+        self.assertEqual(p.targets[0]["musicbrainz_recordingid"], ["rec-9"])
+        self.assertNotIn("album", p.targets[0])
+        self.assertIn("album edition is not established", p.why[0])
+
+
+def exhorder_like(rid=950):
+    """A Discogs release as the Exhorder run met it: Title Case titles, a coarse genre with the
+    useful detail in styles, marketplace numbers, credits, a master with the original year."""
+    r = dg_release(rid, "Band E", "Album In The Vatican")
+    r["tracklist"] = [{"type_": "track", "position": str(i + 1), "title": f"Death In Vain {i}", "duration": d}
+                      for i, d in enumerate(("0:10", "0:20", "0:30"))]
+    r["genres"], r["styles"] = ["Rock"], ["Thrash"]
+    r["released"], r["master_id"] = "2008-05-19", 77
+    r["community"] = {"have": 297, "want": 189, "rating": {"average": 4.52, "count": 27}}
+    r["num_for_sale"], r["lowest_price"], r["estimated_weight"], r["data_quality"] = 11, 51.75, 85, "Needs Vote"
+    r["extraartists"] = [{"name": "Duane Simoneaux", "role": "Producer"}, {"name": "Vinnie LaBella", "role": "Producer"}]
+    return r
+
+
+
+class AlbumOnly(Base):
+    """When nothing tells the pressings apart, the album is still
+    tagged with everything every pressing shares - musicians, genres, the album's IDs -
+    and nothing that names one pressing (release IDs, catalogue number, barcode)."""
+
+    def test_an_album_whose_pressing_is_unknown_gets_album_tags_only(self):
+        d = self.album("Ihsahn", "Amr", folder="2018 - Amr")
+        eng = self.engine(FakeHttp())
+        tied = [{"source": "mb", "id": "a", "label": "Candlelight", "country": "XE", "formats": ["cd"], "year": 2018},
+                {"source": "mb", "id": "b", "label": "Candlelight", "country": "US", "formats": ["cd"], "year": 2018}]
+        out = {"status": "review", "why": ["runner-up b within 0.0 points (likely another pressing)"],
+               "best": {"source": "mb", "id": "a", "mb_id": "a", "url": "u", "confidence": 100.0, "notes": []},
+               "album_only": {"tied": tied}}
+        full = {"album": ["Amr"], "albumartist": ["Ihsahn"], "musicbrainz_albumid": ["a"], "catalognumber": ["X 1"],
+                "barcode": ["123"], "label": ["Candlelight"], "releasecountry": ["XE"], "media": ["CD"],
+                "date": ["2018-05-04"], "originaldate": ["2018-05-04"], "musicbrainz_releasegroupid": ["rg"],
+                "performer:keyboards": ["Ihsahn"], "discogs_company_manufactured_by": ["Optimal"]}
+        # (both pressings of the release group have the same recordings: their musicians are
+        # every pressing's)
+        group = {"ids": {"a", "b"}, "whole": True,
+                 "pressings": [{"id": x, "tracks": [{"recording": "rec-1"}]} for x in ("a", "b")]}
+        with mock.patch.object(ma, "process", return_value=out), \
+                mock.patch.object(engine, "_mb_group", return_value=group), \
+                mock.patch.object(engine.Engine, "_identified",
+                                  lambda self, o, al, files, base, **_kw: pl.Proposal(**base, targets=[dict(full) for _ in files],
+                                                                               release_id="a", url="u",
+                                                                               provenance=dict.fromkeys(full, "musicbrainz"))):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "identified")
+        t = p.targets[0]
+        # (M3b: label and media too, though every tied pressing shares them: an album-only album
+        # writes the album's fields only, levels.album_field, as a Partial one)
+        for gone in ("musicbrainz_albumid", "catalognumber", "barcode", "releasecountry", "discogs_company_manufactured_by",
+                     "label", "media"):
+            self.assertNotIn(gone, t)                        # names one pressing, or the pressings disagree
+        for kept in ("album", "albumartist", "date", "musicbrainz_releasegroupid", "performer:keyboards"):
+            self.assertIn(kept, t)                           # true of every pressing
+        self.assertEqual(t["date"], ["2018"])                # the year they share, not one pressing's day
+        self.assertEqual((p.release_id, p.url), ("", ""))
+        self.assertIn("pressing unknown", " ".join(p.why))
+
+class ExhorderHttp(FakeHttp):
+    def get_json(self, url, host):
+        if host == "discogs" and "/masters/" in url:
+            return {"id": 77, "year": 1990, "title": "Album In The Vatican"}
+        return super().get_json(url, host)
+
+
+class PicardFidelity(Base):
+    """TagMender writes what Picard + Discogs Enrichment would, with the user's settings."""
+
+    def identify(self, **prof):
+        d = self.album("Band E", "Album In The Vatican")
+        mb = mb_release("mb-e", "Band E", "Album In The Vatican", discogs=950)
+        for i, t in enumerate(mb["media"][0]["tracks"]):
+            t["title"] = t["recording"]["title"] = f"Death in Vain {i}"
+        eng = self.engine(ExhorderHttp(mb=[mb], dg=[exhorder_like()]), **prof)
+        return eng.identify(eng.albums_in(d)[0])
+
+    def test_users_settings_override_separate_styles_no_marketplace(self):
+        self.picard_ini(merge_mode="override", style_mode="separate", marketplace=False,
+                        import_notes=True, prefer_original_date=False)
+        t = self.identify().targets[0]
+        self.assertEqual(t["genre"], ["Rock"])                     # override: Discogs' genre, as Picard writes
+        self.assertEqual(t["discogs_style"], ["Thrash"])           # styles stay in discogs_style
+        self.assertEqual(t["title"], ["Death In Vain 0"])          # track tags go through override too
+        self.assertEqual(t["date"], ["2008-05-19"])                # the pressing's date ...
+        self.assertEqual(t["originalyear"][0][:4], "1990")         # ... the work's year from the master
+        self.assertEqual(t["producer"], ["Duane Simoneaux", "Vinnie LaBella"])
+        self.assertFalse([k for k in t if k.startswith("discogs_community") or k in (
+            "discogs_num_for_sale", "discogs_lowest_price", "discogs_estimated_weight", "discogs_data_quality")])
+
+    def test_marketplace_numbers_only_when_switched_on(self):
+        self.picard_ini(merge_mode="override", marketplace=True)
+        t = self.identify().targets[0]
+        self.assertEqual(t["discogs_community_have"], ["297"])
+
+    def test_style_mode_genre_and_prefer_original_date(self):
+        self.picard_ini(merge_mode="override", style_mode="genre", prefer_original_date=True)
+        t = self.identify().targets[0]
+        self.assertEqual(t["genre"], ["Thrash"])
+        self.assertNotIn("discogs_style", t)
+        self.assertEqual(t["date"][0][:4], "1990")
+
+    def test_fill_gaps_keeps_musicbrainz_values(self):
+        # (the merge follows Sources: MusicBrainz preferred is fill_gaps, whatever the tagger
+        # settings say)
+        self.picard_ini(merge_mode="override")
+        t = self.identify(source="musicbrainz_preferred").targets[0]
+        self.assertEqual(t["title"], ["Death in Vain 0"])
+        self.assertEqual(t["label"], ["Label MB"])
+        self.assertEqual(t["discogs_release_id"], ["950"])         # supplementary fields always added
+
+    def test_protected_tags_and_profile_override(self):
+        self.picard_ini(merge_mode="override", protected_tags="producer, Genre")
+        t = self.identify().targets[0]
+        self.assertNotIn("producer", t)
+        self.assertNotIn("genre", t)
+        p = self.identify(discogs_enrichment={"merge_mode": "mb_only"})
+        self.assertEqual(p.provider, "musicbrainz")
+        self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])
+
+    def test_picard_preserved_tags_are_kept_on_the_file(self):
+        self.picard_ini(preserved="comment, tagmender, tagmender_reason, totaltracks", merge_mode="override")
+        prof = pf.from_dict({"name": "default"})
+        self.assertEqual(prof.policy("totaltracks"), "fill_missing")
+        self.assertEqual(prof.policy("TOTALTRACKS"), "fill_missing")
+        self.assertEqual(prof.policy("tagmender"), "replace")      # TagMender still writes its marker
+        self.assertEqual(pf.from_dict({"name": "x", "field_policy": {"fields": {"totaltracks": "replace"}}})
+                         .policy("totaltracks"), "replace")         # the profile's own word wins
+        self.assertEqual(pf.from_dict({"name": "y", "follow_picard": False}).policy("totaltracks"), "replace")
+        d = self.album("Band E", "Album In The Vatican", TRACKTOTAL="08")
+        mb = mb_release("mb-e", "Band E", "Album In The Vatican", discogs=950)
+        eng = self.engine(ExhorderHttp(mb=[mb], dg=[exhorder_like()]))
+        plan = eng.plan(d)
+        text = pl.preview(plan)
+        self.assertNotIn("totaltracks: 08", text)
+
+    def test_bad_enrichment_setting_is_a_profile_problem(self):
+        self.assertTrue(pf.validate({"name": "x", "discogs_enrichment": {"merge_mode": "sometimes"}}))
+        self.assertTrue(pf.validate({"name": "x", "discogs_enrichment": {"tokn": "x"}}))
+        self.assertEqual(pf.validate({"name": "x", "discogs_enrichment": {"merge_mode": "fill_gaps"}}), [])
+
+    def test_settings_come_from_picard_ini_and_never_the_token(self):
+        import tagger_settings
+        ini = self.picard_ini(merge_mode="override", marketplace=False)
+        s = tagger_settings.enrichment()
+        self.assertEqual((s["merge_mode"], s["marketplace"]), ("override", False))
+        self.assertNotIn("token", s)
+        self.assertEqual(tagger_settings.source(), str(ini))
+        _os.environ["TAGMENDER_TAGGER_INI"] = str(self.tmp / "missing.ini")
+        self.assertEqual(tagger_settings.enrichment()["merge_mode"], "combine")   # the plugin's default
+
+
+EAC_LOG = """Exact Audio Copy V1.6 from 23. October 2020
+
+TOC of the extracted CD
+
+     Track |   Start  |  Length  | Start sector | End sector
+    ---------------------------------------------------------
+        1  |  0:00.00 |  0:10.00 |         0    |       749
+        2  |  0:10.00 |  0:20.00 |       750    |      2249
+        3  |  0:30.00 |  0:30.00 |      2250    |      4499
+
+Track  1
+
+     Accurately ripped (confidence 5)  [ABCD1234]  (AR v2)
+
+Track  2
+
+     Accurately ripped (confidence 5)  [ABCD1235]  (AR v2)
+
+Track  3
+
+     Accurately ripped (confidence 5)  [ABCD1236]  (AR v2)
+
+All tracks accurately ripped
+
+No errors occurred
+"""
+
+
+class LevelHttp(FakeHttp):
+    """FakeHttp with LRCLIB and AcoustID answers."""
+    def __init__(self, *a, lyrics=None, acoustid=None, **k):
+        super().__init__(*a, **k)
+        self.lyrics = lyrics or {}
+        self.acoustid = acoustid
+
+    def get_json(self, url, host):
+        if host == "lrclib":
+            self.calls.append((host, url))
+            title = up.unquote(url.split("track_name=")[1].split("&")[0])
+            return self.lyrics.get(title)
+        if host == "acoustid":
+            self.calls.append((host, url))
+            return self.acoustid
+        return super().get_json(url, host)
+
+
+class Levels(Base):
+    """Basic, Enthusiast and Audiophile: how much is written."""
+
+    def identify(self, http, d, **prof):
+        eng = self.engine(http, **prof)
+        return eng, eng.plan(d)
+
+    def test_basic_writes_only_the_basic_fields_and_never_a_comment(self):
+        d = self.album("Band L", "Album L", label="Old Label", comment="my note")
+        http = FakeHttp(mb=[mb_release("mb-l", "Band L", "Album L", discogs=930)], dg=[dg_release(930, "Band L", "Album L")])
+        _eng, p = self.identify(http, d, tag_level="basic")
+        f = p["albums"][0]["files"][0]
+        written = set(f["changes"])
+        self.assertTrue(written <= set(__import__("levels").BASIC_FIELDS) | {"tagmender", "tagmender_reason"},
+                        written)
+        self.assertIn("date", written)
+        executor.Executor(p).run()
+        t = tagio.read(d / "01.flac")
+        self.assertEqual(t["label"], ["Old Label"])                 # a lower level never removes anything
+        self.assertEqual(t["description"], ["my note"])            # (ffmpeg writes a comment as DESCRIPTION)
+        self.assertNotIn("musicbrainz_albumid", t)
+        self.assertEqual(__import__("levels").restrict({"comment": ["x"], "title": ["y"]}, pf.from_dict(
+            {"name": "b", "tag_level": "basic", "level_fields": {"add": ["comment"]}})), {"title": ["y"]})
+
+    def test_level_fields_add_and_drop(self):
+        d = self.album("Band M", "Album M")
+        http = FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")])
+        _eng, p = self.identify(http, d, tag_level="basic", level_fields={"add": ["label"], "drop": ["genre"]})
+        self.assertIn("label", p["albums"][0]["files"][0]["changes"])
+        _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")]), d,
+                                level_fields={"drop": ["isrc", "tagmender"]})
+        ch = p["albums"][0]["files"][0]["changes"]
+        self.assertNotIn("isrc", ch)
+        self.assertIn("tagmender", ch)                              # TagMender's own marker always
+        self.assertIn("musicbrainz_albumid", ch)
+
+    def test_enthusiast_is_the_default_and_measures_nothing(self):
+        d = self.album("Band N", "Album N")
+        with mock.patch("levels.loudness") as loud:
+            _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-n", "Band N", "Album N")]), d)
+        loud.assert_not_called()
+        self.assertNotIn("replaygain_track_gain", p["albums"][0]["files"][0]["changes"])
+
+    def test_audiophile_replaygain_dynamic_range_rip_info_lyrics(self):
+        d = self.album("Band O", "Album O")
+        (d / "rip.log").write_text(EAC_LOG, encoding="utf-8")
+        http = LevelHttp(mb=[mb_release("mb-o", "Band O", "Album O")],
+                         lyrics={"T0": {"syncedLyrics": "[00:01.00] la la"}, "T1": {"plainLyrics": "words"}})
+        _eng, p = self.identify(http, d, tag_level="audiophile", audiophile={"acoustid": False})
+        a = p["albums"][0]
+        f0, f1 = a["files"][0]["changes"], a["files"][1]["changes"]
+        for f in (f0, f1):
+            self.assertRegex(f["replaygain_track_gain"][0], r"^-?\d+\.\d\d dB$")
+            self.assertTrue(f["dynamic_range"][0].isdigit())
+        self.assertEqual(f0["replaygain_album_gain"], f1["replaygain_album_gain"])
+        self.assertEqual(f0["album_dynamic_range"], f1["album_dynamic_range"])
+        import match_albums
+        toc = match_albums.log_tocs(d)[1]
+        self.assertEqual(f0["musicbrainz_discid"], [match_albums.mb_discid(toc)])
+        self.assertEqual(f0["tagmender_rip"], ["EAC V1.6; AccurateRip: all tracks accurate; no errors"])
+        self.assertNotIn("lyrics", f0)                               # synced: a .lrc file, not embedded
+        self.assertEqual(f1["lyrics"], ["words"])                    # plain lyrics have no file of their own
+        self.assertEqual([Path(s["dst"]).name for s in a["sidecars"]], ["01.lrc"])
+        self.assertIn("lyric 01.lrc", pl.preview(p))
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1})
+        self.assertEqual((d / "01.lrc").read_text(), "[00:01.00] la la")
+        self.assertTrue(tagio.read(d / "02.flac")["replaygain_album_gain"])
+        executor.undo(p["job"])
+        self.assertFalse((d / "01.lrc").exists())
+        self.assertNotIn("replaygain_album_gain", tagio.read(d / "02.flac"))
+
+    def test_measurements_are_cached_and_never_replace_existing_values(self):
+        d = self.album("Band P", "Album P", REPLAYGAIN_TRACK_GAIN="-3.00 dB")
+        prof = dict(tag_level="audiophile", audiophile={"acoustid": False, "lyrics": False, "rip_info": False})
+        import levels
+        real = levels.loudness
+        with mock.patch("levels.loudness", side_effect=real) as loud:
+            _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-p", "Band P", "Album P")]), d, **prof)
+            self.assertEqual(loud.call_count, 3)
+            self.identify(FakeHttp(mb=[mb_release("mb-p", "Band P", "Album P")]), d, **prof)
+            self.assertEqual(loud.call_count, 3)                     # the second plan used the cache
+        ch = p["albums"][0]["files"][0]["changes"]
+        self.assertNotIn("replaygain_track_gain", ch)                # the file's own value stays
+        self.assertIn("replaygain_album_gain", ch)
+
+    def test_acoustid_only_when_it_confirms_the_recording(self):
+        d = self.album("Band Q", "Album Q")
+        good = {"results": [{"id": "aid-1", "score": 0.95, "recordings": [{"id": "mb-q-r0"}]}]}
+        prof = dict(tag_level="audiophile", audiophile={"lyrics": False, "quality": False, "replaygain": False})
+        with mock.patch.object(ma, "fingerprint_ready", return_value=True), \
+                mock.patch.object(ma, "fingerprint", return_value={"duration": 10, "fingerprint": "AQAA"}), \
+                mock.patch.object(ma, "acoustid_key", return_value="k"):
+            _eng, p = self.identify(LevelHttp(mb=[mb_release("mb-q", "Band Q", "Album Q")], acoustid=good), d, **prof)
+        files = p["albums"][0]["files"]
+        self.assertEqual(files[0]["changes"]["acoustid_id"], ["aid-1"])
+        self.assertNotIn("acoustid_id", files[1]["changes"])         # its recording is not in that result
+        with mock.patch.object(ma, "fingerprint_ready", return_value=False):
+            _eng, p = self.identify(FakeHttp(mb=[mb_release("mb-q", "Band Q", "Album Q")]), d, **prof)
+        self.assertTrue(any("AcoustID" in w for w in p["albums"][0]["identification"]["why"]))
+
+    def test_instrumental_albums_are_not_looked_up_for_lyrics(self):
+        d = self.album("Band R", "Album R", folder="2005 - Album R [no vox]")
+        http = LevelHttp(mb=[mb_release("mb-r", "Band R", "Album R")])
+        self.identify(http, d, tag_level="audiophile",
+                      audiophile={"acoustid": False, "replaygain": False, "quality": False})
+        self.assertFalse([c for c in http.calls if c[0] == "lrclib"])
+
+    def test_profile_checks(self):
+        self.assertTrue(pf.validate({"name": "x", "tag_level": "expert"}))
+        self.assertTrue(pf.validate({"name": "x", "audiophile": {"bpm": True}}))
+        self.assertTrue(pf.validate({"name": "x", "level_fields": {"add": "label"}}))
+        self.assertEqual(pf.validate({"name": "x", "tag_level": "audiophile", "audiophile": {"lyrics": False}}), [])
+
+
+class EndToEnd(Base):
+    def test_identify_plan_apply_and_repeat(self):
+        d = self.album("Band Z", "Album Z")
+        eng = self.engine(FakeHttp(dg=[dg_release(905, "Band Z", "Album Z")]))
+        p = eng.plan(d)
+        self.assertEqual(p["albums"][0]["status"], "ready", pl.preview(p))
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1})
+        t = tagio.read(d / "01.flac")
+        self.assertEqual((t["tagmender"], t["discogs_release_id"]), (["Resolved"], ["905"]))
+        again = self.engine(FakeHttp(dg=[dg_release(905, "Band Z", "Album Z")])).plan(d)
+        self.assertEqual(again["albums"][0]["status"], "unchanged")
+
+    def test_rule_matching_only_the_identified_title(self):
+        ex._write(ex.rules_file(), {"rules": [{"id": "nv", "name": "no vox", "action": "ignore", "target": "album",
+                                               "when": {"all": [{"field": "album", "op": "contains",
+                                                                 "value": "[no vox]"}]}}]})
+        d = self.album("Band V", "Album V")                               # files do not say [no vox]
+        eng = self.engine(FakeHttp(dg=[dg_release(906, "Band V", "Album V [No Vox]")]))
+        with mock.patch.object(ma, "discogs_search",
+                               lambda http, album, cfg, dm: [ma.discogs_candidate(http.dg[906], dm)]):
+            p = eng.plan(d)
+        a = p["albums"][0]
+        self.assertEqual((a["status"], a["label"]), ("excluded", "Ignored"))
+        before = (d / "01.flac").read_bytes()
+        executor.Executor(p).run()
+        self.assertEqual((d / "01.flac").read_bytes(), before)
+
+
+class Artwork(Base):
+    """CoverUp's real pipeline, offline: only its local-files source is switched on."""
+    def setUp(self):
+        super().setUp()
+        coverup = Path(_os.environ.get("TAGMENDER_COVERUP_DIR", "../picard-coverup")).expanduser()
+        if not (coverup / "pipeline.py").exists():
+            self.skipTest("CoverUp not found (set TAGMENDER_COVERUP_DIR)")
+
+    def _engine(self, http, d):
+        import artwork
+        eng = self.engine(http, artwork={"enabled": True, "provider": "coverup"})
+        cu = artwork.CoverUp(self.tmp / "staging")
+        cu.s = cu.s.with_(providers_enabled=["local"])
+        eng._art = [cu]
+        return eng
+
+    def test_local_scan_is_embedded_into_files_without_art_and_no_file_is_added(self):
+        from PIL import Image
+        d = self.album("Band K", "Album K")
+        Image.new("RGB", (1200, 1200), (200, 30, 30)).save(d / "folder.jpg", quality=90)
+        eng = self._engine(te_http := FakeHttp(dg=[dg_release(910, "Band K", "Album K")]), d)
+        p = eng.plan(d)
+        art = p["albums"][0]["artwork"]
+        self.assertIsNotNone(art, pl.preview(p))
+        self.assertEqual(art["source"], "coverup:local")
+        self.assertEqual(len(art["embed_into"]), 3)
+        self.assertIsNone(art["file"])                       # the folder already has its image
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1})
+        self.assertEqual(tagio.read(d / "02.flac")["~pictures"], ["1"])
+        del te_http
+
+    def test_no_cover_anywhere_does_not_block_tagging(self):
+        d = self.album("Band L", "Album L")
+        eng = self._engine(FakeHttp(dg=[dg_release(911, "Band L", "Album L")]), d)
+        p = eng.plan(d)
+        a = p["albums"][0]
+        self.assertIsNone(a["artwork"])
+        self.assertTrue(any(w.startswith("no cover") for w in a["identification"]["why"]))
+        executor.Executor(p).run()
+        self.assertEqual(tagio.read(d / "01.flac")["discogs_release_id"], ["911"])
+
+
+if __name__ == "__main__":
+    unittest.main()

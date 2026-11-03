@@ -1,0 +1,11 @@
+{
+  "version": 3,
+  "name": "Classical",
+  "description": "Western classical: composer folders, MusicBrainz decides the release.",
+  "sources": [{"path": "/mnt/music/Classical"}],
+  "tradition": "western_classical",
+  "source": "musicbrainz_preferred",
+  "naming": {"preset": "classical"},
+  "operation": "move",
+  "destination": "/mnt/music/Classical"
+}

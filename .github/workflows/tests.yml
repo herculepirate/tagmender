@@ -1,0 +1,35 @@
+# Every push and pull request runs the whole test suite, so a change from any session or machine
+# that breaks something is caught before it reaches the library. On main, build.yml runs it
+# before building the packages.
+name: tests
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {repository: herculepirate/picard-discogs-enrichment, path: plugins/picard-discogs-enrichment}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {repository: herculepirate/picard-coverup, path: plugins/picard-coverup}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: {python-version: "3.12"}
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - name: Python packages
+        run: pip install -r packaging/requirements-appimage.txt
+      - name: Run every suite
+        env:
+          TAGMENDER_DISCOGS_PLUGIN: ${{ github.workspace }}/plugins/picard-discogs-enrichment
+          TAGMENDER_COVERUP_DIR: ${{ github.workspace }}/plugins/picard-coverup
+          QT_QPA_PLATFORM: offscreen
+        run: ./run_tests.sh

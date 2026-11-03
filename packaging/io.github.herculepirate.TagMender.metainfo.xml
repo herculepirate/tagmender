@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.herculepirate.TagMender</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <name>TagMender</name>
+  <summary>Identify, tag and organise music with MusicBrainz and Discogs</summary>
+  <description>
+    <p>TagMender identifies albums and single tracks with MusicBrainz and Discogs as equal sources,
+    previews every change, writes tags with the MusicBrainz tag mapping, so files read the same in
+    other taggers and players, and organises files with journaled operations that can be undone.</p>
+    <p>Each album is marked with how sure the identification is: the exact release, the album only
+    (its pressings tie), Partial (what every pressing shares) or Unresolved. Free official services
+    are asked first; a web search is off unless you set one up.</p>
+    <ul>
+      <li>An inspector with the original and new tags, artwork and the evidence</li>
+      <li>Search, other versions and a pressing chooser; match files to tracks by hand</li>
+      <li>Naming and tagging scripts in the tagging script language, with a script editor</li>
+      <li>Look up a CD, the musicbrainz.org tagger buttons, a player</li>
+      <li>Your MusicBrainz collections and ratings, and AcoustID submissions, with your own login</li>
+      <li>Watched folders that tag and file what is dropped into them</li>
+    </ul>
+    <p>You bring your own keys (a Discogs token, an AcoustID key, ...); nothing is bundled.</p>
+  </description>
+  <launchable type="desktop-id">io.github.herculepirate.TagMender.desktop</launchable>
+  <provides><binary>tagmender</binary></provides>
+  <url type="homepage">https://github.com/herculepirate/tagmender</url>
+  <url type="bugtracker">https://github.com/herculepirate/tagmender/issues</url>
+  <developer id="io.github.herculepirate"><name>herculepirate</name></developer>
+  <releases><release version="0.2.0" date="2026-10-24"/></releases>
+  <content_rating type="oars-1.1"/>
+</component>

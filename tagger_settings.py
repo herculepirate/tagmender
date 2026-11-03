@@ -1,0 +1,731 @@
+"""tagger_settings.py - your Picard and Discogs Enrichment settings, so TagMender writes what
+your Picard would.
+
+TagMender applies Discogs data with the Discogs Enrichment plugin's own code. The plugin's
+behaviour depends on its settings (Options > Plugins > Discogs Enrichment), which Picard keeps
+in Picard.ini under [plugin.dd789f69-...]. This module reads them, together with the few
+Picard settings that decide what ends up in a file:
+
+  enrichment(profile_overrides) -> dict    every plugin setting: Picard.ini first, then the
+                                           plugin's own defaults; a profile's
+                                           "discogs_enrichment" entries win over both
+  preserved_tags()               -> set    Options > Tags > "Preserve these tags" (lower case)
+  tag_settings(profile_overrides) -> dict  Picard's own settings that decide the tags written
+                                           from MusicBrainz (Options > Metadata, Releases):
+                                           Picard.ini first, else the defaults of the Picard
+                                           version that wrote it; a profile's "picard" entries
+                                           win over both
+  source()                       -> str    where the settings came from (for `doctor` and plans)
+
+Picard.ini is found at $TAGMENDER_TAGGER_INI (older: $TAGMENDER_PICARD_INI), else the Flatpak location, else
+~/.config/MusicBrainz/Picard.ini. It is only ever read. The plugin token is never returned.
+"""
+from __future__ import annotations
+
+import configparser
+import hashlib
+import importlib.util
+import os
+from pathlib import Path
+
+DISCOGS_PLUGIN_UUID = "dd789f69-332f-498a-af94-d8e3273cc435"
+CANDIDATES = ("~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini",
+              "~/.config/MusicBrainz/Picard.ini")
+
+# The plugin's settings and their defaults (discogs_runtime.DEFAULTS), used when the plugin's
+# own copy cannot be read. Only what changes the tags written is listed.
+FALLBACK_DEFAULTS = {
+    "merge_mode": "combine",
+    "style_mode": "separate",
+    "protected_tags": "",
+    "marketplace": False,
+    "performers": True,
+    "companies": True,
+    "identifiers": True,
+    "import_notes": False,
+    "prefer_original_date": False,
+    "split_collaborations": True,
+    "track_tags": True,
+}
+CHOICES = {
+    "merge_mode": ("mb_only", "fill_gaps", "override", "combine", "discogs_only"),
+    "style_mode": ("separate", "genre", "both"),
+}
+BOOLS = tuple(k for k, v in FALLBACK_DEFAULTS.items() if isinstance(v, bool))
+
+_cache: dict = {}
+
+
+def ini_path() -> Path | None:
+    env = os.environ.get("TAGMENDER_TAGGER_INI") or os.environ.get("TAGMENDER_PICARD_INI")   # (older name)
+    if env:
+        p = Path(env).expanduser()
+        return p if p.exists() else None
+    for c in CANDIDATES:
+        p = Path(c).expanduser()
+        if p.exists():
+            return p
+    return None
+
+
+def _read(path: Path | None) -> configparser.RawConfigParser | None:
+    if path is None:
+        return None
+    # The cache is keyed on the file's text, not its modified time: the clock behind a file's
+    # modified time ticks only every few milliseconds, so a Picard.ini saved twice in quick
+    # succession can keep the same time and would hand back the old settings.
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    key = (str(path), hashlib.sha1(data).hexdigest())
+    if key not in _cache:
+        cp = configparser.RawConfigParser(strict=False, interpolation=None)
+        cp.optionxform = str
+        try:
+            cp.read_string(data.decode("utf-8"), source=str(path))
+        except (configparser.Error, UnicodeDecodeError):
+            cp = None
+        _cache.clear()
+        _cache[key] = cp
+    return _cache[key]
+
+
+def plugin_defaults() -> dict:
+    """The plugin's own defaults, from its discogs_runtime.py when it can be found."""
+    out = dict(FALLBACK_DEFAULTS)
+    try:
+        import companions
+        f = companions.discogs_dir() / "discogs_runtime.py"
+        spec = importlib.util.spec_from_file_location("_tm_discogs_runtime", f)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        for k in FALLBACK_DEFAULTS:
+            if k in mod.DEFAULTS:
+                out[k] = mod.DEFAULTS[k]
+    except Exception:
+        pass
+    return out
+
+
+def _value(key, raw):
+    if key in BOOLS:
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
+    return _qt_text(str(raw)).strip()
+
+
+def from_ini(path: Path | None = None) -> dict:
+    """The plugin settings Picard.ini holds (only those it holds)."""
+    cp = _read(path if path is not None else ini_path())
+    sec = f"plugin.{DISCOGS_PLUGIN_UUID}"
+    if cp is None or not cp.has_section(sec):
+        return {}
+    return {k: _value(k, cp.get(sec, k)) for k in FALLBACK_DEFAULTS if cp.has_option(sec, k)}
+
+
+def enrichment(overrides: dict | None = None, path: Path | None = None) -> dict:
+    s = plugin_defaults()
+    s.update(from_ini(path))
+    for k, v in (overrides or {}).items():
+        if k in FALLBACK_DEFAULTS:
+            s[k] = _value(k, v) if isinstance(v, str) and k in BOOLS else v
+    for k, allowed in CHOICES.items():
+        if s.get(k) not in allowed:
+            s[k] = FALLBACK_DEFAULTS[k]
+    return s
+
+
+def profile_settings(cp) -> list:
+    """The settings of Picard 3's enabled option profiles ([profiles] in Picard.ini), in
+    Picard's order: the first that sets an option (not to null) is what Picard uses."""
+    if cp is None or not cp.has_section("profiles"):
+        return []
+    try:
+        profs = []
+        if cp.has_option("profiles", "user_profiles"):
+            for it in _qt_unescape(cp.get("profiles", "user_profiles")):
+                v = _qt_variant(it[9:-1]) if it.startswith("@Variant(") and it.endswith(")") else None
+                if isinstance(v, dict):
+                    profs.append(v)
+                elif isinstance(v, list):
+                    profs += [x for x in v if isinstance(x, dict)]
+        sets = {}
+        if cp.has_option("profiles", "user_profile_settings"):
+            items = _qt_unescape(cp.get("profiles", "user_profile_settings"))
+            v = _qt_variant(items[0][9:-1]) if items and items[0].startswith("@Variant(") and \
+                items[0].endswith(")") else None
+            sets = v if isinstance(v, dict) else {}
+        return [sets.get(p.get("id")) or {} for p in profs if p.get("enabled") and isinstance(sets.get(p.get("id")), dict)]
+    except Exception:
+        return []
+
+
+def _from_profiles(cp, key):
+    """(found, value) of an option in Picard's enabled option profiles."""
+    for ps in profile_settings(cp):
+        if key in ps and ps[key] is not None:
+            return True, ps[key]
+    return False, None
+
+
+def preserved_tags(path: Path | None = None) -> set:
+    """Tags Picard keeps as they are on the file, lower case. Empty when Picard.ini is absent."""
+    cp = _read(path if path is not None else ini_path())
+    if cp is None:
+        return set()
+    found, v = _from_profiles(cp, "preserved_tags")
+    if found:
+        vals = v if isinstance(v, list) else str(v).replace("\n", ",").split(",")
+        return {str(x).strip().lower() for x in vals if str(x).strip()}
+    raw = cp.get("setting", "preserved_tags", fallback="")
+    if raw.strip().startswith("@") or '"' in raw:            # (one tag: Qt's binary form; or quoted)
+        return {x.lower() for x in _qt_list(raw)}
+    return {x.strip().lower() for x in raw.replace("\n", ",").split(",") if x.strip()}
+
+
+def picard_bool(name: str, default: bool = False, path: Path | None = None) -> bool:
+    """One of Picard's own true/false settings (an enabled option profile's, else [setting]
+    in Picard.ini)."""
+    cp = _read(path if path is not None else ini_path())
+    if cp is None:
+        return default
+    found, v = _from_profiles(cp, name)
+    if found:
+        return v if isinstance(v, bool) else _qt_bool(str(v))
+    if not cp.has_option("setting", name):
+        return default
+    return _qt_bool(cp.get("setting", name))
+
+
+# Picard's settings that change the tags written from MusicBrainz, with Picard 3's defaults
+# (picard/options.py). A Picard 2 Picard.ini without a setting means Picard 2's default.
+TAG_DEFAULTS = {
+    "standardize_artist_names": "variations",     # none | variations | all
+    "always_standardize_multivalue_artist": False,
+    "translate_artist_names": False,
+    "translation_locales": ["en"],
+    "translate_from_sortname": False,
+    "translate_album_titles": False,
+    "translate_artist_names_script_exception": False,
+    "script_exceptions": [],                       # [(script, percent)]: names in these not translated
+    "translate_track_titles": False,
+    "release_ars": True,
+    "track_ars": False,
+    "standardize_instruments": True,
+    "standardize_vocals": True,
+    "va_name": "Various Artists",
+    "convert_punctuation": False,
+    "preferred_release_countries": [],
+    "use_genres": False,                          # Options > Metadata > Genres
+    "only_my_genres": False,
+    "artists_genres": False,
+    "folksonomy_tags": False,
+    "max_genres": 5,
+    "min_genre_usage": 90,
+    "genres_filter": "-seen live\n-favorites\n-fixme\n-owned",
+    "join_genres": "",
+    "ascii_filenames": False,                     # Options > File Naming
+    "replace_spaces_with_underscores": False,
+    "replace_dir_separator": "_",
+    "windows_long_paths": False,                  # (off: with Windows compatibility, paths fit 259 characters)
+    "enable_tagger_scripts": False,               # Options > Scripting
+    "list_of_scripts": [],                        # [(position, name, enabled, script text)]
+}
+# Picard's settings for what saving a file does beside its fields (Options > Tags; used by
+# tagio.file_options). Read from Picard.ini when it holds them; without them TagMender keeps
+# each file as it is (its ID3v2 version, an ID3v1 tag if it has one), where Picard 3 would
+# write ID3v2.4 and ID3v1.
+FILE_DEFAULTS = {
+    "write_id3v23": None,                         # True: ID3v2.3, False: ID3v2.4, None: as the file has it
+    "id3v23_join_with": "/",
+    "write_id3v1": None,                          # True: write, False: remove, None: update one that is there
+    "remove_ape_from_mp3": False,
+    "remove_id3_from_flac": False,
+    "fix_missing_seekpoints_flac": False,
+}
+PICARD2_DEFAULTS = {"standardize_artist_names": "none"}      # (Picard 2: "standardize_artists", off)
+STANDARDIZE = ("none", "variations", "all")
+_LISTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, list) and k != "script_exceptions")
+_TAG_BOOLS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, bool))
+_TAG_INTS = tuple(k for k, v in TAG_DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool))
+
+
+def _qt_unescape(raw: str) -> list:
+    """The strings of one value as Qt's QSettings writes it to an ini file (IniFormat): items
+    split by top-level commas, "..." quoting, \\n \\t \\0 \\xHHHH escapes; an item
+    "@Variant(...)" is a value in Qt's binary form (see _qt_variant)."""
+    out, cur, quoted, i, n, any_text = [], [], False, 0, len(raw), False
+    raw = raw.strip()
+    n = len(raw)
+    while i < n:
+        c = raw[i]
+        if c == '"':
+            quoted = not quoted
+            any_text = True
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            e = raw[i + 1]
+            if e == "x":
+                j = i + 2
+                while j < n and j < i + 6 and raw[j] in "0123456789abcdefABCDEF":
+                    j += 1
+                cur.append(chr(int(raw[i + 2:j] or "0", 16)))
+                i = j
+                continue
+            cur.append({"n": "\n", "t": "\t", "r": "\r", "0": "\0", "a": "\a", "b": "\b", "f": "\f",
+                        "v": "\v"}.get(e, e))
+            i += 2
+            continue
+        if c == "," and not quoted:
+            out.append("".join(cur).strip() if not any_text else "".join(cur))
+            cur, any_text = [], False
+            i += 1
+            while i < n and raw[i] == " ":
+                i += 1
+            continue
+        cur.append(c)
+        i += 1
+    out.append("".join(cur))
+    return out
+
+
+def _qt_variant(data: str):
+    """A list of strings (or a string) from Qt's binary QVariant form, as Qt 5 and 6 write
+    it for a list of one string; None when it is something else."""
+    import struct
+    b = data.encode("latin-1", "replace")
+
+    def parse(qt5):
+        pos = 0
+
+        def u32():
+            nonlocal pos
+            v = struct.unpack(">I", b[pos:pos + 4])[0]
+            pos += 4
+            return v
+
+        def qstring():
+            nonlocal pos
+            ln = u32()
+            if ln == 0xFFFFFFFF:
+                return ""
+            v = b[pos:pos + ln].decode("utf-16-be")
+            pos += ln
+            return v
+
+        def variant():
+            nonlocal pos
+            t = u32()
+            if qt5:
+                pos += 1                                       # (the "is null" byte of Qt 5)
+            if t == 0:                                         # an invalid (null) QVariant: no value
+                if pos + 4 <= len(b) and b[pos:pos + 4] == b"\xff\xff\xff\xff":
+                    pos += 4
+                return None
+            if t == 10:                                        # QString
+                return qstring()
+            if t in (9, 11):                                   # QVariantList, QStringList
+                return [variant() if t == 9 else qstring() for _ in range(u32())]
+            if t == 8:                                         # QVariantMap (Picard's option profiles)
+                out_ = {}
+                for _ in range(u32()):
+                    k_ = qstring()
+                    out_[k_] = variant()
+                return out_
+            if t == 6:                                         # double
+                v = struct.unpack(">d", b[pos:pos + 8])[0]
+                pos += 8
+                return v
+            if t == 1:                                         # bool
+                v = b[pos] != 0
+                pos += 1
+                return v
+            if t in (2, 3):                                    # int, uint
+                v = struct.unpack(">i" if t == 2 else ">I", b[pos:pos + 4])[0]
+                pos += 4
+                return v
+            if t in (4, 5):                                    # qlonglong, qulonglong
+                v = struct.unpack(">q" if t == 4 else ">Q", b[pos:pos + 8])[0]
+                pos += 8
+                return v
+            if t == 127:                                       # a user type: PyQt's Python object
+                ln = u32()
+                name = b[pos:pos + ln]
+                pos += ln
+                if not name.startswith(b"PyQt_PyObject"):
+                    raise ValueError(name)
+                ln = u32()
+                v = _plain_unpickle(b[pos:pos + ln])
+                pos += ln
+                return list(v) if isinstance(v, tuple) else v
+            raise ValueError(t)
+        v = variant()
+        if pos != len(b):
+            raise ValueError("left over")
+        return v
+    for qt5 in (False, True):
+        try:
+            return parse(qt5)
+        except (ValueError, struct.error, UnicodeDecodeError):
+            continue
+    return None
+
+
+def _plain_unpickle(data: bytes):
+    """Plain data (tuples, lists, strings, numbers, booleans) from a pickle, as PyQt stores a
+    Python value in an ini file - never any object: no class or function is ever looked up,
+    so nothing in the file can run."""
+    import io
+    import pickle
+
+    class Plain(pickle.Unpickler):
+        def find_class(self, module, name):
+            raise pickle.UnpicklingError(f"not plain data: {module}.{name}")
+    try:
+        v = Plain(io.BytesIO(data)).load()
+    except Exception as exc:
+        raise ValueError(str(exc)) from None
+
+    def plain(x):
+        if isinstance(x, (str, int, float, bool)) or x is None:
+            return True
+        if isinstance(x, (list, tuple)):
+            return all(plain(y) for y in x)
+        return False
+    if not plain(v):
+        raise ValueError("not plain data")
+    return v
+
+
+def _qt_value(raw: str):
+    """A string, or a list of strings, from an ini value as Qt wrote it."""
+    items = _qt_unescape(raw)
+    vals = []
+    for it in items:
+        if it.startswith("@Variant(") and it.endswith(")"):
+            v = _qt_variant(it[9:-1])
+            if isinstance(v, list):
+                vals.extend(str(x) for x in v)
+                continue
+            if isinstance(v, str):
+                vals.append(v)
+                continue
+            continue
+        if it.startswith("@Invalid("):
+            continue
+        vals.append(it)
+    return vals if len(items) > 1 or (items and items[0].startswith("@Variant(")) else (vals[0] if vals else "")
+
+
+def _scripts(raw: str) -> list:
+    """Picard's tagger scripts as it keeps them: [(position, name, enabled, text)]."""
+    items = _qt_unescape(raw)
+    out = []
+    for it in items:
+        v = _qt_variant(it[9:-1]) if it.startswith("@Variant(") and it.endswith(")") else None
+        if isinstance(v, list):
+            for x in v if v and isinstance(v[0], list) else [v]:
+                if isinstance(x, list) and len(x) == 4:
+                    out.append([int(x[0]) if isinstance(x[0], int) else 0, str(x[1]), bool(x[2]), str(x[3])])
+    return out
+
+
+def _script_exceptions(raw) -> list:
+    """Picard's translation script exceptions: [(script, percent)] (a pickled list of pairs)."""
+    vals = []
+    items = _qt_unescape(raw) if isinstance(raw, str) else []
+    for it in items:
+        v = _qt_variant(it[9:-1]) if it.startswith("@Variant(") and it.endswith(")") else None
+        if isinstance(v, list):
+            vals += v if v and isinstance(v[0], (list, tuple)) else [v]
+    if not isinstance(raw, str):
+        vals = list(raw or [])
+    out = []
+    for x in vals:
+        if isinstance(x, (list, tuple)) and len(x) == 2:
+            try:
+                out.append((str(x[0]), int(x[1])))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def tagger_scripts(settings: dict) -> list:
+    """The texts of the tagger scripts that run: enabled and not empty, in their order (none
+    unless "Enable tagger scripts" is on). A profile may list plain texts."""
+    if not settings.get("enable_tagger_scripts"):
+        return []
+    out = []
+    for x in settings.get("list_of_scripts") or []:
+        if isinstance(x, str):
+            out.append((0, x))
+        elif isinstance(x, (list, tuple)) and len(x) == 4 and x[2] and x[3]:
+            out.append((x[0] if isinstance(x[0], int) else 0, str(x[3])))
+    return [t for _p, t in out if t.strip()]
+
+
+def _qt_bool(raw: str) -> bool:
+    """A true/false setting as Qt reads it from an ini file ("true", "1", "yes", "on")."""
+    v = _qt_value(raw)
+    return str(v[0] if isinstance(v, list) and v else v).strip().lower() in ("true", "1", "yes", "on")
+
+
+def _qt_list(raw: str) -> list:
+    v = _qt_value(raw)
+    return [x.strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
+
+
+def _qt_text(raw: str) -> str:
+    v = _qt_value(raw)
+    return ", ".join(v) if isinstance(v, list) else v
+
+
+def picard_version(path: Path | None = None) -> tuple:
+    """The version of Picard that last wrote Picard.ini, e.g. (3, 0, 2); () unknown."""
+    import re as _re
+    cp = _read(path if path is not None else ini_path())
+    raw = cp.get("application", "version", fallback="") if cp is not None else ""
+    return tuple(int(x) for x in _re.findall(r"\d+", raw)[:3])
+
+
+def tag_settings(overrides: dict | None = None, path: Path | None = None) -> dict:
+    p = path if path is not None else ini_path()
+    cp = _read(p)
+    s = {k: (list(v) if isinstance(v, list) else v) for k, v in TAG_DEFAULTS.items()}
+    s.update(FILE_DEFAULTS)
+    if cp is not None:
+        ver = picard_version(p)
+        if ver and ver[0] < 3:
+            s.update(PICARD2_DEFAULTS)
+        get = (lambda k: cp.get("setting", k)) if cp.has_section("setting") else None
+        if get is not None:
+            if cp.has_option("setting", "standardize_artists"):          # Picard 2
+                s["standardize_artist_names"] = "all" if get("standardize_artists").strip().lower() == "true" \
+                    else "none"
+            if cp.has_option("setting", "artist_locales") and not cp.has_option("setting", "translation_locales"):
+                s["translation_locales"] = _qt_list(get("artist_locales")) or s["translation_locales"]
+            elif cp.has_option("setting", "artist_locale") and not cp.has_option("setting", "translation_locales"):
+                s["translation_locales"] = _qt_list(get("artist_locale")) or s["translation_locales"]  # (Picard 2.5)
+            if cp.has_option("setting", "standardize_instruments") and ver and ver[0] < 3 and \
+                    not cp.has_option("setting", "standardize_vocals"):     # (Picard 2: one setting for both)
+                s["standardize_vocals"] = get("standardize_instruments").strip().lower() == "true"
+            for k in TAG_DEFAULTS:
+                if not cp.has_option("setting", k):
+                    continue
+                raw = get(k)
+                if k == "list_of_scripts":
+                    s[k] = _scripts(raw)
+                    continue
+                if k == "script_exceptions":
+                    s[k] = _script_exceptions(raw)
+                    continue
+                if k in _TAG_BOOLS:
+                    s[k] = _qt_bool(raw)
+                elif k in _TAG_INTS:
+                    try:
+                        s[k] = max(0, min(100, int(str(_qt_value(raw)).strip())))   # (Picard's 0-100)
+                    except ValueError:
+                        pass
+                elif k in _LISTS:
+                    s[k] = _qt_list(raw)
+                else:
+                    s[k] = _qt_text(raw)
+            for k in FILE_DEFAULTS:
+                if cp.has_option("setting", k):
+                    raw = get(k)
+                    s[k] = _qt_value(raw) if k == "id3v23_join_with" else _qt_bool(raw)
+                    if k == "id3v23_join_with" and not (isinstance(s[k], str) and s[k]):
+                        s[k] = "/"
+        # Picard 3's option profiles: an enabled one that sets an option wins over [setting]
+        # (a Picard 2 profile under Picard 2's names too)
+        if not _from_profiles(cp, "standardize_artist_names")[0]:
+            found, v = _from_profiles(cp, "standardize_artists")
+            if found:
+                s["standardize_artist_names"] = "all" if (v if isinstance(v, bool) else _qt_bool(str(v))) else "none"
+        if not _from_profiles(cp, "translation_locales")[0]:
+            found, v = _from_profiles(cp, "artist_locales")
+            if found and v:
+                s["translation_locales"] = [str(x) for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
+        for k in list(TAG_DEFAULTS) + list(FILE_DEFAULTS):
+            found, v = _from_profiles(cp, k)
+            if not found:
+                continue
+            want = TAG_DEFAULTS.get(k, FILE_DEFAULTS.get(k))
+            try:
+                if k == "script_exceptions":
+                    s[k] = _script_exceptions(v)
+                elif k == "list_of_scripts":
+                    vv = v if isinstance(v, list) else []
+                    s[k] = [[int(x[0]) if isinstance(x[0], int) else 0, str(x[1]), bool(x[2]), str(x[3])]
+                            for x in vv if isinstance(x, (list, tuple)) and len(x) == 4]
+                elif isinstance(want, bool) or (want is None and k != "id3v23_join_with"):
+                    s[k] = v if isinstance(v, bool) else _qt_bool(str(v))
+                elif isinstance(want, int):
+                    s[k] = int(v)
+                elif isinstance(want, list):
+                    s[k] = [str(x) for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
+                else:
+                    s[k] = str(v)
+            except (TypeError, ValueError):
+                pass
+    for k, v in (overrides or {}).items():
+        if k in TAG_DEFAULTS or k in FILE_DEFAULTS:
+            s[k] = v
+    if s["standardize_artist_names"] not in STANDARDIZE:
+        s["standardize_artist_names"] = TAG_DEFAULTS["standardize_artist_names"]
+    return s
+
+
+# Picard's Options > Metadata > Preferred Releases beside the countries (picard/options.py):
+# release types to prefer (in order) and to discourage, and medium formats to prefer (in
+# order). Picard 3's defaults are empty lists: no preference. match_core uses them only as
+# the last tie-break between pressings of one album (match_core.prefer_type_and_format).
+MATCH_DEFAULTS = {
+    "preferred_release_types": [],
+    "discouraged_release_types": [],
+    "preferred_release_formats": [],
+}
+
+
+def _release_type_scores(raw) -> list:
+    """Picard 2's release_type_scores, [(type, score 0..1)]: PyQt's pickled pairs (one per
+    item, or one list of them), or the old text form "Album 0.9 Single 0.5"."""
+    vals = []
+    if isinstance(raw, str):
+        for it in _qt_unescape(raw):
+            if it.startswith("@Variant(") and it.endswith(")"):
+                v = _qt_variant(it[9:-1])
+                if isinstance(v, list):
+                    vals += v if v and isinstance(v[0], (list, tuple)) else [v]
+            elif it.strip() and not it.startswith("@"):
+                words = it.split()                     # (picard/config_upgrade_hooks.py, 1.3.0dev4)
+                vals += [(words[i], words[i + 1] if i + 1 < len(words) else 0.0)
+                         for i in range(0, len(words), 2)]
+    else:
+        vals = list(raw) if isinstance(raw, (list, tuple)) else []
+    out = []
+    for x in vals:
+        if isinstance(x, (list, tuple)) and len(x) == 2 and str(x[0]).strip():
+            try:
+                out.append((str(x[0]).strip(), float(x[1])))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _types_from_scores(scores: list) -> tuple:
+    """(preferred, discouraged) from Picard 2's scores, as Picard 3 converts them
+    (picard/config_upgrade_hooks.py, convert_release_type_scores_to_lists): above 0.5
+    preferred, highest first; below 0.5 discouraged; 0.5 (Picard 2's default) neither."""
+    preferred = sorted(((t, sc) for t, sc in scores if sc > 0.5), key=lambda x: x[1], reverse=True)
+    return [t for t, _sc in preferred], [t for t, sc in scores if sc < 0.5]
+
+
+def _names(v) -> list:
+    """Type or format names from a setting: text items only (a stray number or None from a
+    damaged Picard.ini is no name)."""
+    return [x.strip() for x in (v if isinstance(v, (list, tuple)) else [v]) if isinstance(x, str) and x.strip()]
+
+
+def matching_preferences(overrides: dict | None = None, path: Path | None = None,
+                         follow_picard: bool = True) -> dict:
+    """Picard's preferred release types, discouraged release types and preferred medium
+    formats: an enabled option profile's, else [setting] in Picard.ini (one name in Qt's
+    binary form, a list, or @Invalid() for none), else Picard 2's release_type_scores
+    converted as Picard 3 converts them, else Picard 3's defaults (none); a profile's
+    "picard" entries override them. follow_picard False (the profile's flag): Picard.ini is
+    not read, only Picard 3's defaults and the overrides. For match_core's settings
+    (cfg.update(...))."""
+    s = {k: list(v) for k, v in MATCH_DEFAULTS.items()}
+    cp = _read(path if path is not None else ini_path()) if follow_picard else None
+    if cp is not None:
+        typed = False
+        for k in MATCH_DEFAULTS:
+            found, v = _from_profiles(cp, k)
+            if found:
+                s[k] = _names(v)
+            elif cp.has_option("setting", k):
+                s[k] = _names(_qt_value(cp.get("setting", k)))
+            else:
+                continue
+            typed = typed or k != "preferred_release_formats"
+        if not typed:                                  # Picard 2 (Picard 3 drops the old option)
+            found, v = _from_profiles(cp, "release_type_scores")
+            if not found and cp.has_option("setting", "release_type_scores"):
+                found, v = True, cp.get("setting", "release_type_scores")
+            if found:
+                s["preferred_release_types"], s["discouraged_release_types"] = \
+                    _types_from_scores(_release_type_scores(v))
+    for k, v in (overrides or {}).items():
+        if k in MATCH_DEFAULTS and isinstance(v, list):
+            s[k] = _names(v)
+    return s
+
+
+def validate_tag_settings(overrides: dict) -> list[str]:
+    p = []
+    for k, v in (overrides or {}).items():
+        if k in MATCH_DEFAULTS:
+            if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+                p.append(f"tagger.{k} must be a list of names (e.g. [\"Album\"], [\"CD\", \"Digital Media\"])")
+            continue
+        if k in FILE_DEFAULTS:
+            if k == "id3v23_join_with":
+                if not (isinstance(v, str) and v):
+                    p.append("tagger.id3v23_join_with must be the text that joins values (usually \"/\" or \"; \")")
+            elif k in ("write_id3v23", "write_id3v1"):
+                if v is not None and not isinstance(v, bool):
+                    p.append(f"tagger.{k} must be true, false or null (as each file has it)")
+            elif not isinstance(v, bool):
+                p.append(f"tagger.{k} must be true or false")
+            continue
+        if k not in TAG_DEFAULTS:
+            p.append(f"tagger.{k} is not a tagger setting TagMender follows "
+                     f"(use {', '.join(list(TAG_DEFAULTS) + list(FILE_DEFAULTS) + list(MATCH_DEFAULTS))})")
+        elif k == "standardize_artist_names" and v not in STANDARDIZE:
+            p.append(f"tagger.standardize_artist_names must be one of {', '.join(STANDARDIZE)}")
+        elif k in _TAG_BOOLS and not isinstance(v, bool):
+            p.append(f"tagger.{k} must be true or false")
+        elif k == "list_of_scripts" and not (isinstance(v, list) and all(
+                isinstance(x, str) or (isinstance(x, list) and len(x) == 4 and isinstance(x[3], str)) for x in v)):
+            p.append("tagger.list_of_scripts must be a list of scripts: texts, or [position, name, enabled, text]")
+        elif k in _LISTS and k != "list_of_scripts" and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            p.append(f"tagger.{k} must be a list of strings")
+        elif k == "va_name" and not (isinstance(v, str) and v.strip()):
+            p.append("tagger.va_name must be a name")
+        elif k in _TAG_INTS and not (isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100):
+            p.append(f"tagger.{k} must be a number from 0 to 100")
+        elif k in ("genres_filter", "join_genres") and not isinstance(v, str):
+            p.append(f"tagger.{k} must be text")
+        elif k == "replace_dir_separator" and not (isinstance(v, str) and "/" not in v and "\\" not in v):
+            p.append("tagger.replace_dir_separator must be text without / or \\")
+    return p
+
+
+def source(path: Path | None = None) -> str:
+    p = path if path is not None else ini_path()
+    return str(p) if p is not None and from_ini(p) else "the plugin's defaults (no tagger settings found)"
+
+
+def source_label(path: Path | None = None) -> str:
+    """Where the settings came from, in words for people (source() gives the file itself)."""
+    p = path if path is not None else ini_path()
+    if p is None or not from_ini(p):
+        return "the plugin's defaults (no tagger settings found)"
+    if path is None and (os.environ.get("TAGMENDER_TAGGER_INI") or os.environ.get("TAGMENDER_PICARD_INI")):
+        return f"the settings file in TAGMENDER_TAGGER_INI ({p})"
+    return "settings imported from an existing tagger installation, found automatically"
+
+
+def validate(overrides: dict) -> list[str]:
+    p = []
+    for k, v in (overrides or {}).items():
+        if k not in FALLBACK_DEFAULTS:
+            p.append(f"discogs_enrichment.{k} is not a Discogs Enrichment setting "
+                     f"(use {', '.join(FALLBACK_DEFAULTS)})")
+        elif k in CHOICES and v not in CHOICES[k]:
+            p.append(f"discogs_enrichment.{k} must be one of {', '.join(CHOICES[k])}")
+        elif k in BOOLS and not isinstance(v, bool):
+            p.append(f"discogs_enrichment.{k} must be true or false")
+    return p

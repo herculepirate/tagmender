@@ -1,0 +1,2794 @@
+{
+"picard": {
+".aiff": {
+"COMM::eng": [
+"Cm"
+],
+"MVIN": [
+"2/4"
+],
+"MVNM": [
+"Mv"
+],
+"TALB": [
+"Al"
+],
+"TBPM": [
+"120"
+],
+"TCMP": [
+"1"
+],
+"TCOM": [
+"C1"
+],
+"TCON": [
+"Rock",
+"Pop"
+],
+"TCOP": [
+"(c)"
+],
+"TDOR": [
+"1999-01-02"
+],
+"TDRC": [
+"2001-05-01"
+],
+"TDRL": [
+"2001-05-01"
+],
+"TENC": [
+"Enc"
+],
+"TEXT": [
+"Ly"
+],
+"TIPL": [
+[
+"DJ-mix",
+"DJ"
+],
+[
+"arranger",
+"Ar"
+],
+[
+"engineer",
+"E"
+],
+[
+"mix",
+"Mx"
+],
+[
+"producer",
+"P1"
+],
+[
+"producer",
+"P2"
+]
+],
+"TIT1": [
+"Gr"
+],
+"TIT2": [
+"T"
+],
+"TIT3": [
+"St"
+],
+"TKEY": [
+"Am"
+],
+"TLAN": [
+"eng"
+],
+"TMCL": [
+[
+"guitar",
+"G1"
+],
+[
+"guitar",
+"G2"
+],
+[
+"lead vocals",
+"V"
+],
+[
+"performer",
+"Pf"
+]
+],
+"TMED": [
+"CD"
+],
+"TMOO": [
+"Md"
+],
+"TOAL": [
+"OA"
+],
+"TOPE": [
+"OAr"
+],
+"TPE1": [
+"A & B"
+],
+"TPE2": [
+"AA"
+],
+"TPE3": [
+"Co"
+],
+"TPE4": [
+"Re"
+],
+"TPOS": [
+"1/2"
+],
+"TPUB": [
+"L1",
+"L2"
+],
+"TRCK": [
+"3/12"
+],
+"TSO2": [
+"AA s"
+],
+"TSOA": [
+"Al s"
+],
+"TSOC": [
+"C1 s"
+],
+"TSOP": [
+"A, The"
+],
+"TSOT": [
+"T s"
+],
+"TSRC": [
+"USX1"
+],
+"TSSE": [
+"x"
+],
+"TSST": [
+"Disc A"
+],
+"TXXX:ALBUMARTISTS": [
+"AA"
+],
+"TXXX:ARTISTS": [
+"A",
+"B"
+],
+"TXXX:ASIN": [
+"B000"
+],
+"TXXX:Acoustid Id": [
+"ac-id"
+],
+"TXXX:BARCODE": [
+"0123"
+],
+"TXXX:CATALOGNUMBER": [
+"CAT 1"
+],
+"TXXX:DIRECTOR": [
+"Di"
+],
+"TXXX:MusicBrainz Album Artist Id": [
+"aa-id"
+],
+"TXXX:MusicBrainz Album Id": [
+"al-id"
+],
+"TXXX:MusicBrainz Album Release Country": [
+"GB"
+],
+"TXXX:MusicBrainz Album Status": [
+"official"
+],
+"TXXX:MusicBrainz Album Type": [
+"album",
+"live"
+],
+"TXXX:MusicBrainz Artist Id": [
+"a-id",
+"b-id"
+],
+"TXXX:MusicBrainz Composer Id": [
+"c-id"
+],
+"TXXX:MusicBrainz Disc Id": [
+"d-id"
+],
+"TXXX:MusicBrainz Release Group Id": [
+"rg-id"
+],
+"TXXX:MusicBrainz Release Track Id": [
+"t-id"
+],
+"TXXX:MusicBrainz Work Id": [
+"w-id"
+],
+"TXXX:REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"TXXX:REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"TXXX:REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"TXXX:REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"TXXX:SCRIPT": [
+"Latn"
+],
+"TXXX:SHOWMOVEMENT": [
+"1"
+],
+"TXXX:WORK": [
+"Wk"
+],
+"TXXX:Writer": [
+"W"
+],
+"TXXX:discogs_release_id": [
+"777"
+],
+"TXXX:originalyear": [
+"1999"
+],
+"TXXX:tagmender": [
+"Resolved"
+],
+"UFID:http://musicbrainz.org": [
+"r-id"
+],
+"USLT::xxx": [
+"l",
+"a",
+" ",
+"l",
+"a"
+],
+"WCOP": [
+"https://creativecommons.org/x"
+],
+"WOAR:https://ex.org": [
+"https://ex.org"
+]
+},
+".flac": {
+"ACOUSTID_ID": [
+"ac-id"
+],
+"ALBUM": [
+"Al"
+],
+"ALBUMARTIST": [
+"AA"
+],
+"ALBUMARTISTS": [
+"AA"
+],
+"ALBUMARTISTSORT": [
+"AA s"
+],
+"ALBUMSORT": [
+"Al s"
+],
+"ARRANGER": [
+"Ar"
+],
+"ARTIST": [
+"A & B"
+],
+"ARTISTS": [
+"A",
+"B"
+],
+"ARTISTSORT": [
+"A, The"
+],
+"ASIN": [
+"B000"
+],
+"BARCODE": [
+"0123"
+],
+"BPM": [
+"120"
+],
+"CATALOGNUMBER": [
+"CAT 1"
+],
+"COMMENT": [
+"Cm"
+],
+"COMPILATION": [
+"1"
+],
+"COMPOSER": [
+"C1"
+],
+"COMPOSERSORT": [
+"C1 s"
+],
+"CONDUCTOR": [
+"Co"
+],
+"COPYRIGHT": [
+"(c)"
+],
+"DATE": [
+"2001-05-01"
+],
+"DIRECTOR": [
+"Di"
+],
+"DISCNUMBER": [
+"1"
+],
+"DISCOGS_RELEASE_ID": [
+"777"
+],
+"DISCSUBTITLE": [
+"Disc A"
+],
+"DISCTOTAL": [
+"2"
+],
+"DJMIXER": [
+"DJ"
+],
+"ENCODEDBY": [
+"Enc"
+],
+"ENCODER": [
+"Lavf60.16.100"
+],
+"ENCODERSETTINGS": [
+"x"
+],
+"ENGINEER": [
+"E"
+],
+"GENRE": [
+"Rock",
+"Pop"
+],
+"GROUPING": [
+"Gr"
+],
+"ISRC": [
+"USX1"
+],
+"KEY": [
+"Am"
+],
+"LABEL": [
+"L1",
+"L2"
+],
+"LANGUAGE": [
+"eng"
+],
+"LICENSE": [
+"https://creativecommons.org/x"
+],
+"LYRICIST": [
+"Ly"
+],
+"LYRICS": [
+"la la"
+],
+"MEDIA": [
+"CD"
+],
+"MIXER": [
+"Mx"
+],
+"MOOD": [
+"Md"
+],
+"MOVEMENT": [
+"2"
+],
+"MOVEMENTNAME": [
+"Mv"
+],
+"MOVEMENTTOTAL": [
+"4"
+],
+"MUSICBRAINZ_ALBUMARTISTID": [
+"aa-id"
+],
+"MUSICBRAINZ_ALBUMID": [
+"al-id"
+],
+"MUSICBRAINZ_ARTISTID": [
+"a-id",
+"b-id"
+],
+"MUSICBRAINZ_COMPOSERID": [
+"c-id"
+],
+"MUSICBRAINZ_DISCID": [
+"d-id"
+],
+"MUSICBRAINZ_RELEASEGROUPID": [
+"rg-id"
+],
+"MUSICBRAINZ_RELEASETRACKID": [
+"t-id"
+],
+"MUSICBRAINZ_TRACKID": [
+"r-id"
+],
+"MUSICBRAINZ_WORKID": [
+"w-id"
+],
+"ORIGINALALBUM": [
+"OA"
+],
+"ORIGINALARTIST": [
+"OAr"
+],
+"ORIGINALDATE": [
+"1999-01-02"
+],
+"ORIGINALYEAR": [
+"1999"
+],
+"PERFORMER": [
+"G1 (guitar)",
+"G2 (guitar)",
+"V (lead vocals)",
+"Pf"
+],
+"PRODUCER": [
+"P1",
+"P2"
+],
+"RELEASECOUNTRY": [
+"GB"
+],
+"RELEASEDATE": [
+"2001-05-01"
+],
+"RELEASESTATUS": [
+"official"
+],
+"RELEASETYPE": [
+"album",
+"live"
+],
+"REMIXER": [
+"Re"
+],
+"REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"SCRIPT": [
+"Latn"
+],
+"SHOWMOVEMENT": [
+"1"
+],
+"SUBTITLE": [
+"St"
+],
+"TAGMENDER": [
+"Resolved"
+],
+"TITLE": [
+"T"
+],
+"TITLESORT": [
+"T s"
+],
+"TOTALDISCS": [
+"2"
+],
+"TOTALTRACKS": [
+"12"
+],
+"TRACKNUMBER": [
+"3"
+],
+"TRACKTOTAL": [
+"12"
+],
+"WEBSITE": [
+"https://ex.org"
+],
+"WORK": [
+"Wk"
+],
+"WRITER": [
+"W"
+]
+},
+".m4a": {
+"----:com.apple.iTunes:ALBUMARTISTS": [
+"AA"
+],
+"----:com.apple.iTunes:ARTISTS": [
+"A",
+"B"
+],
+"----:com.apple.iTunes:ASIN": [
+"B000"
+],
+"----:com.apple.iTunes:Acoustid Id": [
+"ac-id"
+],
+"----:com.apple.iTunes:BARCODE": [
+"0123"
+],
+"----:com.apple.iTunes:CATALOGNUMBER": [
+"CAT 1"
+],
+"----:com.apple.iTunes:CONDUCTOR": [
+"Co"
+],
+"----:com.apple.iTunes:DISCSUBTITLE": [
+"Disc A"
+],
+"----:com.apple.iTunes:DJMIXER": [
+"DJ"
+],
+"----:com.apple.iTunes:ENGINEER": [
+"E"
+],
+"----:com.apple.iTunes:ISRC": [
+"USX1"
+],
+"----:com.apple.iTunes:LABEL": [
+"L1",
+"L2"
+],
+"----:com.apple.iTunes:LANGUAGE": [
+"eng"
+],
+"----:com.apple.iTunes:LICENSE": [
+"https://creativecommons.org/x"
+],
+"----:com.apple.iTunes:LYRICIST": [
+"Ly"
+],
+"----:com.apple.iTunes:MEDIA": [
+"CD"
+],
+"----:com.apple.iTunes:MIXER": [
+"Mx"
+],
+"----:com.apple.iTunes:MOOD": [
+"Md"
+],
+"----:com.apple.iTunes:MusicBrainz Album Artist Id": [
+"aa-id"
+],
+"----:com.apple.iTunes:MusicBrainz Album Id": [
+"al-id"
+],
+"----:com.apple.iTunes:MusicBrainz Album Release Country": [
+"GB"
+],
+"----:com.apple.iTunes:MusicBrainz Album Status": [
+"official"
+],
+"----:com.apple.iTunes:MusicBrainz Album Type": [
+"album",
+"live"
+],
+"----:com.apple.iTunes:MusicBrainz Artist Id": [
+"a-id",
+"b-id"
+],
+"----:com.apple.iTunes:MusicBrainz Composer Id": [
+"c-id"
+],
+"----:com.apple.iTunes:MusicBrainz Disc Id": [
+"d-id"
+],
+"----:com.apple.iTunes:MusicBrainz Release Group Id": [
+"rg-id"
+],
+"----:com.apple.iTunes:MusicBrainz Release Track Id": [
+"t-id"
+],
+"----:com.apple.iTunes:MusicBrainz Track Id": [
+"r-id"
+],
+"----:com.apple.iTunes:MusicBrainz Work Id": [
+"w-id"
+],
+"----:com.apple.iTunes:PRODUCER": [
+"P1",
+"P2"
+],
+"----:com.apple.iTunes:RELEASEDATE": [
+"2001-05-01"
+],
+"----:com.apple.iTunes:REMIXER": [
+"Re"
+],
+"----:com.apple.iTunes:REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"----:com.apple.iTunes:REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"----:com.apple.iTunes:REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"----:com.apple.iTunes:SCRIPT": [
+"Latn"
+],
+"----:com.apple.iTunes:SUBTITLE": [
+"St"
+],
+"----:com.apple.iTunes:arranger": [
+"Ar"
+],
+"----:com.apple.iTunes:discogs_release_id": [
+"777"
+],
+"----:com.apple.iTunes:encodersettings": [
+"x"
+],
+"----:com.apple.iTunes:initialkey": [
+"Am"
+],
+"----:com.apple.iTunes:originalalbum": [
+"OA"
+],
+"----:com.apple.iTunes:originalartist": [
+"OAr"
+],
+"----:com.apple.iTunes:originaldate": [
+"1999-01-02"
+],
+"----:com.apple.iTunes:originalyear": [
+"1999"
+],
+"----:com.apple.iTunes:performer": [
+"Pf"
+],
+"----:com.apple.iTunes:tagmender": [
+"Resolved"
+],
+"----:com.apple.iTunes:website": [
+"https://ex.org"
+],
+"----:com.apple.iTunes:writer": [
+"W"
+],
+"aART": [
+"AA"
+],
+"cpil": [
+"True"
+],
+"cprt": [
+"(c)"
+],
+"disk": [
+"(1, 2)"
+],
+"shwm": [
+"1"
+],
+"soaa": [
+"AA s"
+],
+"soal": [
+"Al s"
+],
+"soar": [
+"A, The"
+],
+"soco": [
+"C1 s"
+],
+"sonm": [
+"T s"
+],
+"tmpo": [
+"120"
+],
+"trkn": [
+"(3, 12)"
+],
+"©ART": [
+"A & B"
+],
+"©alb": [
+"Al"
+],
+"©cmt": [
+"Cm"
+],
+"©day": [
+"2001-05-01"
+],
+"©dir": [
+"Di"
+],
+"©gen": [
+"Rock",
+"Pop"
+],
+"©grp": [
+"Gr"
+],
+"©lyr": [
+"la la"
+],
+"©mvc": [
+"4"
+],
+"©mvi": [
+"2"
+],
+"©mvn": [
+"Mv"
+],
+"©nam": [
+"T"
+],
+"©too": [
+"Enc"
+],
+"©wrk": [
+"Wk"
+],
+"©wrt": [
+"C1"
+]
+},
+".mp3": {
+"COMM::eng": [
+"Cm"
+],
+"MVIN": [
+"2/4"
+],
+"MVNM": [
+"Mv"
+],
+"TALB": [
+"Al"
+],
+"TBPM": [
+"120"
+],
+"TCMP": [
+"1"
+],
+"TCOM": [
+"C1"
+],
+"TCON": [
+"Rock",
+"Pop"
+],
+"TCOP": [
+"(c)"
+],
+"TDOR": [
+"1999-01-02"
+],
+"TDRC": [
+"2001-05-01"
+],
+"TDRL": [
+"2001-05-01"
+],
+"TENC": [
+"Enc"
+],
+"TEXT": [
+"Ly"
+],
+"TIPL": [
+[
+"DJ-mix",
+"DJ"
+],
+[
+"arranger",
+"Ar"
+],
+[
+"engineer",
+"E"
+],
+[
+"mix",
+"Mx"
+],
+[
+"producer",
+"P1"
+],
+[
+"producer",
+"P2"
+]
+],
+"TIT1": [
+"Gr"
+],
+"TIT2": [
+"T"
+],
+"TIT3": [
+"St"
+],
+"TKEY": [
+"Am"
+],
+"TLAN": [
+"eng"
+],
+"TMCL": [
+[
+"guitar",
+"G1"
+],
+[
+"guitar",
+"G2"
+],
+[
+"lead vocals",
+"V"
+],
+[
+"performer",
+"Pf"
+]
+],
+"TMED": [
+"CD"
+],
+"TMOO": [
+"Md"
+],
+"TOAL": [
+"OA"
+],
+"TOPE": [
+"OAr"
+],
+"TPE1": [
+"A & B"
+],
+"TPE2": [
+"AA"
+],
+"TPE3": [
+"Co"
+],
+"TPE4": [
+"Re"
+],
+"TPOS": [
+"1/2"
+],
+"TPUB": [
+"L1",
+"L2"
+],
+"TRCK": [
+"3/12"
+],
+"TSO2": [
+"AA s"
+],
+"TSOA": [
+"Al s"
+],
+"TSOC": [
+"C1 s"
+],
+"TSOP": [
+"A, The"
+],
+"TSOT": [
+"T s"
+],
+"TSRC": [
+"USX1"
+],
+"TSSE": [
+"x"
+],
+"TSST": [
+"Disc A"
+],
+"TXXX:ALBUMARTISTS": [
+"AA"
+],
+"TXXX:ARTISTS": [
+"A",
+"B"
+],
+"TXXX:ASIN": [
+"B000"
+],
+"TXXX:Acoustid Id": [
+"ac-id"
+],
+"TXXX:BARCODE": [
+"0123"
+],
+"TXXX:CATALOGNUMBER": [
+"CAT 1"
+],
+"TXXX:DIRECTOR": [
+"Di"
+],
+"TXXX:MusicBrainz Album Artist Id": [
+"aa-id"
+],
+"TXXX:MusicBrainz Album Id": [
+"al-id"
+],
+"TXXX:MusicBrainz Album Release Country": [
+"GB"
+],
+"TXXX:MusicBrainz Album Status": [
+"official"
+],
+"TXXX:MusicBrainz Album Type": [
+"album",
+"live"
+],
+"TXXX:MusicBrainz Artist Id": [
+"a-id",
+"b-id"
+],
+"TXXX:MusicBrainz Composer Id": [
+"c-id"
+],
+"TXXX:MusicBrainz Disc Id": [
+"d-id"
+],
+"TXXX:MusicBrainz Release Group Id": [
+"rg-id"
+],
+"TXXX:MusicBrainz Release Track Id": [
+"t-id"
+],
+"TXXX:MusicBrainz Work Id": [
+"w-id"
+],
+"TXXX:REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"TXXX:REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"TXXX:REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"TXXX:REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"TXXX:SCRIPT": [
+"Latn"
+],
+"TXXX:SHOWMOVEMENT": [
+"1"
+],
+"TXXX:WORK": [
+"Wk"
+],
+"TXXX:Writer": [
+"W"
+],
+"TXXX:discogs_release_id": [
+"777"
+],
+"TXXX:originalyear": [
+"1999"
+],
+"TXXX:tagmender": [
+"Resolved"
+],
+"UFID:http://musicbrainz.org": [
+"r-id"
+],
+"USLT::xxx": [
+"l",
+"a",
+" ",
+"l",
+"a"
+],
+"WCOP": [
+"https://creativecommons.org/x"
+],
+"WOAR:https://ex.org": [
+"https://ex.org"
+]
+},
+".mp3 v2.3": {
+"COMM::eng": [
+"Cm"
+],
+"MVIN": [
+"2/4"
+],
+"MVNM": [
+"Mv"
+],
+"TALB": [
+"Al"
+],
+"TBPM": [
+"120"
+],
+"TCMP": [
+"1"
+],
+"TCOM": [
+"C1"
+],
+"TCON": [
+"Rock/Pop"
+],
+"TCOP": [
+"(c)"
+],
+"TDOR": [
+"1999"
+],
+"TDRC": [
+"2001-05-01"
+],
+"TENC": [
+"Enc"
+],
+"TEXT": [
+"Ly"
+],
+"TIPL": [
+[
+"DJ-mix",
+"DJ"
+],
+[
+"arranger",
+"Ar"
+],
+[
+"engineer",
+"E"
+],
+[
+"guitar",
+"G1"
+],
+[
+"guitar",
+"G2"
+],
+[
+"lead vocals",
+"V"
+],
+[
+"mix",
+"Mx"
+],
+[
+"performer",
+"Pf"
+],
+[
+"producer",
+"P1"
+],
+[
+"producer",
+"P2"
+]
+],
+"TIT1": [
+"Gr"
+],
+"TIT2": [
+"T"
+],
+"TIT3": [
+"St"
+],
+"TKEY": [
+"Am"
+],
+"TLAN": [
+"eng"
+],
+"TMED": [
+"CD"
+],
+"TOAL": [
+"OA"
+],
+"TOPE": [
+"OAr"
+],
+"TPE1": [
+"A & B"
+],
+"TPE2": [
+"AA"
+],
+"TPE3": [
+"Co"
+],
+"TPE4": [
+"Re"
+],
+"TPOS": [
+"1/2"
+],
+"TPUB": [
+"L1/L2"
+],
+"TRCK": [
+"3/12"
+],
+"TSO2": [
+"AA s"
+],
+"TSOA": [
+"Al s"
+],
+"TSOC": [
+"C1 s"
+],
+"TSOP": [
+"A, The"
+],
+"TSOT": [
+"T s"
+],
+"TSRC": [
+"USX1"
+],
+"TSSE": [
+"x"
+],
+"TSST": [
+"Disc A"
+],
+"TXXX:ALBUMARTISTS": [
+"AA"
+],
+"TXXX:ARTISTS": [
+"A/B"
+],
+"TXXX:ASIN": [
+"B000"
+],
+"TXXX:Acoustid Id": [
+"ac-id"
+],
+"TXXX:BARCODE": [
+"0123"
+],
+"TXXX:CATALOGNUMBER": [
+"CAT 1"
+],
+"TXXX:DIRECTOR": [
+"Di"
+],
+"TXXX:MusicBrainz Album Artist Id": [
+"aa-id"
+],
+"TXXX:MusicBrainz Album Id": [
+"al-id"
+],
+"TXXX:MusicBrainz Album Release Country": [
+"GB"
+],
+"TXXX:MusicBrainz Album Status": [
+"official"
+],
+"TXXX:MusicBrainz Album Type": [
+"album/live"
+],
+"TXXX:MusicBrainz Artist Id": [
+"a-id/b-id"
+],
+"TXXX:MusicBrainz Composer Id": [
+"c-id"
+],
+"TXXX:MusicBrainz Disc Id": [
+"d-id"
+],
+"TXXX:MusicBrainz Release Group Id": [
+"rg-id"
+],
+"TXXX:MusicBrainz Release Track Id": [
+"t-id"
+],
+"TXXX:MusicBrainz Work Id": [
+"w-id"
+],
+"TXXX:RELEASEDATE": [
+"2001-05-01"
+],
+"TXXX:REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"TXXX:REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"TXXX:REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"TXXX:REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"TXXX:SCRIPT": [
+"Latn"
+],
+"TXXX:SHOWMOVEMENT": [
+"1"
+],
+"TXXX:WORK": [
+"Wk"
+],
+"TXXX:Writer": [
+"W"
+],
+"TXXX:discogs_release_id": [
+"777"
+],
+"TXXX:mood": [
+"Md"
+],
+"TXXX:originalyear": [
+"1999"
+],
+"TXXX:tagmender": [
+"Resolved"
+],
+"UFID:http://musicbrainz.org": [
+"r-id"
+],
+"USLT::xxx": [
+"l",
+"a",
+" ",
+"l",
+"a"
+],
+"WCOP": [
+"https://creativecommons.org/x"
+],
+"WOAR:https://ex.org": [
+"https://ex.org"
+]
+},
+".ogg": {
+"ACOUSTID_ID": [
+"ac-id"
+],
+"ALBUM": [
+"Al"
+],
+"ALBUMARTIST": [
+"AA"
+],
+"ALBUMARTISTS": [
+"AA"
+],
+"ALBUMARTISTSORT": [
+"AA s"
+],
+"ALBUMSORT": [
+"Al s"
+],
+"ARRANGER": [
+"Ar"
+],
+"ARTIST": [
+"A & B"
+],
+"ARTISTS": [
+"A",
+"B"
+],
+"ARTISTSORT": [
+"A, The"
+],
+"ASIN": [
+"B000"
+],
+"BARCODE": [
+"0123"
+],
+"BPM": [
+"120"
+],
+"CATALOGNUMBER": [
+"CAT 1"
+],
+"COMMENT": [
+"Cm"
+],
+"COMPILATION": [
+"1"
+],
+"COMPOSER": [
+"C1"
+],
+"COMPOSERSORT": [
+"C1 s"
+],
+"CONDUCTOR": [
+"Co"
+],
+"COPYRIGHT": [
+"(c)"
+],
+"DATE": [
+"2001-05-01"
+],
+"DIRECTOR": [
+"Di"
+],
+"DISCNUMBER": [
+"1"
+],
+"DISCOGS_RELEASE_ID": [
+"777"
+],
+"DISCSUBTITLE": [
+"Disc A"
+],
+"DISCTOTAL": [
+"2"
+],
+"DJMIXER": [
+"DJ"
+],
+"ENCODEDBY": [
+"Enc"
+],
+"ENCODER": [
+"Lavc60.31.102 libvorbis"
+],
+"ENCODERSETTINGS": [
+"x"
+],
+"ENGINEER": [
+"E"
+],
+"GENRE": [
+"Rock",
+"Pop"
+],
+"GROUPING": [
+"Gr"
+],
+"ISRC": [
+"USX1"
+],
+"KEY": [
+"Am"
+],
+"LABEL": [
+"L1",
+"L2"
+],
+"LANGUAGE": [
+"eng"
+],
+"LICENSE": [
+"https://creativecommons.org/x"
+],
+"LYRICIST": [
+"Ly"
+],
+"LYRICS": [
+"la la"
+],
+"MEDIA": [
+"CD"
+],
+"MIXER": [
+"Mx"
+],
+"MOOD": [
+"Md"
+],
+"MOVEMENT": [
+"2"
+],
+"MOVEMENTNAME": [
+"Mv"
+],
+"MOVEMENTTOTAL": [
+"4"
+],
+"MUSICBRAINZ_ALBUMARTISTID": [
+"aa-id"
+],
+"MUSICBRAINZ_ALBUMID": [
+"al-id"
+],
+"MUSICBRAINZ_ARTISTID": [
+"a-id",
+"b-id"
+],
+"MUSICBRAINZ_COMPOSERID": [
+"c-id"
+],
+"MUSICBRAINZ_DISCID": [
+"d-id"
+],
+"MUSICBRAINZ_RELEASEGROUPID": [
+"rg-id"
+],
+"MUSICBRAINZ_RELEASETRACKID": [
+"t-id"
+],
+"MUSICBRAINZ_TRACKID": [
+"r-id"
+],
+"MUSICBRAINZ_WORKID": [
+"w-id"
+],
+"ORIGINALALBUM": [
+"OA"
+],
+"ORIGINALARTIST": [
+"OAr"
+],
+"ORIGINALDATE": [
+"1999-01-02"
+],
+"ORIGINALYEAR": [
+"1999"
+],
+"PERFORMER": [
+"G1 (guitar)",
+"G2 (guitar)",
+"V (lead vocals)",
+"Pf"
+],
+"PRODUCER": [
+"P1",
+"P2"
+],
+"RELEASECOUNTRY": [
+"GB"
+],
+"RELEASEDATE": [
+"2001-05-01"
+],
+"RELEASESTATUS": [
+"official"
+],
+"RELEASETYPE": [
+"album",
+"live"
+],
+"REMIXER": [
+"Re"
+],
+"REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"SCRIPT": [
+"Latn"
+],
+"SHOWMOVEMENT": [
+"1"
+],
+"SUBTITLE": [
+"St"
+],
+"TAGMENDER": [
+"Resolved"
+],
+"TITLE": [
+"T"
+],
+"TITLESORT": [
+"T s"
+],
+"TOTALDISCS": [
+"2"
+],
+"TOTALTRACKS": [
+"12"
+],
+"TRACKNUMBER": [
+"3"
+],
+"TRACKTOTAL": [
+"12"
+],
+"WEBSITE": [
+"https://ex.org"
+],
+"WORK": [
+"Wk"
+],
+"WRITER": [
+"W"
+]
+},
+".opus": {
+"ACOUSTID_ID": [
+"ac-id"
+],
+"ALBUM": [
+"Al"
+],
+"ALBUMARTIST": [
+"AA"
+],
+"ALBUMARTISTS": [
+"AA"
+],
+"ALBUMARTISTSORT": [
+"AA s"
+],
+"ALBUMSORT": [
+"Al s"
+],
+"ARRANGER": [
+"Ar"
+],
+"ARTIST": [
+"A & B"
+],
+"ARTISTS": [
+"A",
+"B"
+],
+"ARTISTSORT": [
+"A, The"
+],
+"ASIN": [
+"B000"
+],
+"BARCODE": [
+"0123"
+],
+"BPM": [
+"120"
+],
+"CATALOGNUMBER": [
+"CAT 1"
+],
+"COMMENT": [
+"Cm"
+],
+"COMPILATION": [
+"1"
+],
+"COMPOSER": [
+"C1"
+],
+"COMPOSERSORT": [
+"C1 s"
+],
+"CONDUCTOR": [
+"Co"
+],
+"COPYRIGHT": [
+"(c)"
+],
+"DATE": [
+"2001-05-01"
+],
+"DIRECTOR": [
+"Di"
+],
+"DISCNUMBER": [
+"1"
+],
+"DISCOGS_RELEASE_ID": [
+"777"
+],
+"DISCSUBTITLE": [
+"Disc A"
+],
+"DISCTOTAL": [
+"2"
+],
+"DJMIXER": [
+"DJ"
+],
+"ENCODEDBY": [
+"Enc"
+],
+"ENCODER": [
+"Lavc60.31.102 libopus"
+],
+"ENCODERSETTINGS": [
+"x"
+],
+"ENGINEER": [
+"E"
+],
+"GENRE": [
+"Rock",
+"Pop"
+],
+"GROUPING": [
+"Gr"
+],
+"ISRC": [
+"USX1"
+],
+"KEY": [
+"Am"
+],
+"LABEL": [
+"L1",
+"L2"
+],
+"LANGUAGE": [
+"eng"
+],
+"LICENSE": [
+"https://creativecommons.org/x"
+],
+"LYRICIST": [
+"Ly"
+],
+"LYRICS": [
+"la la"
+],
+"MEDIA": [
+"CD"
+],
+"MIXER": [
+"Mx"
+],
+"MOOD": [
+"Md"
+],
+"MOVEMENT": [
+"2"
+],
+"MOVEMENTNAME": [
+"Mv"
+],
+"MOVEMENTTOTAL": [
+"4"
+],
+"MUSICBRAINZ_ALBUMARTISTID": [
+"aa-id"
+],
+"MUSICBRAINZ_ALBUMID": [
+"al-id"
+],
+"MUSICBRAINZ_ARTISTID": [
+"a-id",
+"b-id"
+],
+"MUSICBRAINZ_COMPOSERID": [
+"c-id"
+],
+"MUSICBRAINZ_DISCID": [
+"d-id"
+],
+"MUSICBRAINZ_RELEASEGROUPID": [
+"rg-id"
+],
+"MUSICBRAINZ_RELEASETRACKID": [
+"t-id"
+],
+"MUSICBRAINZ_TRACKID": [
+"r-id"
+],
+"MUSICBRAINZ_WORKID": [
+"w-id"
+],
+"ORIGINALALBUM": [
+"OA"
+],
+"ORIGINALARTIST": [
+"OAr"
+],
+"ORIGINALDATE": [
+"1999-01-02"
+],
+"ORIGINALYEAR": [
+"1999"
+],
+"PERFORMER": [
+"G1 (guitar)",
+"G2 (guitar)",
+"V (lead vocals)",
+"Pf"
+],
+"PRODUCER": [
+"P1",
+"P2"
+],
+"RELEASECOUNTRY": [
+"GB"
+],
+"RELEASEDATE": [
+"2001-05-01"
+],
+"RELEASESTATUS": [
+"official"
+],
+"RELEASETYPE": [
+"album",
+"live"
+],
+"REMIXER": [
+"Re"
+],
+"REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"SCRIPT": [
+"Latn"
+],
+"SHOWMOVEMENT": [
+"1"
+],
+"SUBTITLE": [
+"St"
+],
+"TAGMENDER": [
+"Resolved"
+],
+"TITLE": [
+"T"
+],
+"TITLESORT": [
+"T s"
+],
+"TOTALDISCS": [
+"2"
+],
+"TOTALTRACKS": [
+"12"
+],
+"TRACKNUMBER": [
+"3"
+],
+"TRACKTOTAL": [
+"12"
+],
+"WEBSITE": [
+"https://ex.org"
+],
+"WORK": [
+"Wk"
+],
+"WRITER": [
+"W"
+]
+},
+".wav": {
+"COMM::eng": [
+"Cm"
+],
+"MVIN": [
+"2/4"
+],
+"MVNM": [
+"Mv"
+],
+"TALB": [
+"Al"
+],
+"TBPM": [
+"120"
+],
+"TCMP": [
+"1"
+],
+"TCOM": [
+"C1"
+],
+"TCON": [
+"Rock",
+"Pop"
+],
+"TCOP": [
+"(c)"
+],
+"TDOR": [
+"1999-01-02"
+],
+"TDRC": [
+"2001-05-01"
+],
+"TDRL": [
+"2001-05-01"
+],
+"TENC": [
+"Enc"
+],
+"TEXT": [
+"Ly"
+],
+"TIPL": [
+[
+"DJ-mix",
+"DJ"
+],
+[
+"arranger",
+"Ar"
+],
+[
+"engineer",
+"E"
+],
+[
+"mix",
+"Mx"
+],
+[
+"producer",
+"P1"
+],
+[
+"producer",
+"P2"
+]
+],
+"TIT1": [
+"Gr"
+],
+"TIT2": [
+"T"
+],
+"TIT3": [
+"St"
+],
+"TKEY": [
+"Am"
+],
+"TLAN": [
+"eng"
+],
+"TMCL": [
+[
+"guitar",
+"G1"
+],
+[
+"guitar",
+"G2"
+],
+[
+"lead vocals",
+"V"
+],
+[
+"performer",
+"Pf"
+]
+],
+"TMED": [
+"CD"
+],
+"TMOO": [
+"Md"
+],
+"TOAL": [
+"OA"
+],
+"TOPE": [
+"OAr"
+],
+"TPE1": [
+"A & B"
+],
+"TPE2": [
+"AA"
+],
+"TPE3": [
+"Co"
+],
+"TPE4": [
+"Re"
+],
+"TPOS": [
+"1/2"
+],
+"TPUB": [
+"L1",
+"L2"
+],
+"TRCK": [
+"3/12"
+],
+"TSO2": [
+"AA s"
+],
+"TSOA": [
+"Al s"
+],
+"TSOC": [
+"C1 s"
+],
+"TSOP": [
+"A, The"
+],
+"TSOT": [
+"T s"
+],
+"TSRC": [
+"USX1"
+],
+"TSSE": [
+"x"
+],
+"TSST": [
+"Disc A"
+],
+"TXXX:ALBUMARTISTS": [
+"AA"
+],
+"TXXX:ARTISTS": [
+"A",
+"B"
+],
+"TXXX:ASIN": [
+"B000"
+],
+"TXXX:Acoustid Id": [
+"ac-id"
+],
+"TXXX:BARCODE": [
+"0123"
+],
+"TXXX:CATALOGNUMBER": [
+"CAT 1"
+],
+"TXXX:DIRECTOR": [
+"Di"
+],
+"TXXX:MusicBrainz Album Artist Id": [
+"aa-id"
+],
+"TXXX:MusicBrainz Album Id": [
+"al-id"
+],
+"TXXX:MusicBrainz Album Release Country": [
+"GB"
+],
+"TXXX:MusicBrainz Album Status": [
+"official"
+],
+"TXXX:MusicBrainz Album Type": [
+"album",
+"live"
+],
+"TXXX:MusicBrainz Artist Id": [
+"a-id",
+"b-id"
+],
+"TXXX:MusicBrainz Composer Id": [
+"c-id"
+],
+"TXXX:MusicBrainz Disc Id": [
+"d-id"
+],
+"TXXX:MusicBrainz Release Group Id": [
+"rg-id"
+],
+"TXXX:MusicBrainz Release Track Id": [
+"t-id"
+],
+"TXXX:MusicBrainz Work Id": [
+"w-id"
+],
+"TXXX:REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"TXXX:REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"TXXX:REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"TXXX:REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"TXXX:SCRIPT": [
+"Latn"
+],
+"TXXX:SHOWMOVEMENT": [
+"1"
+],
+"TXXX:WORK": [
+"Wk"
+],
+"TXXX:Writer": [
+"W"
+],
+"TXXX:discogs_release_id": [
+"777"
+],
+"TXXX:originalyear": [
+"1999"
+],
+"TXXX:tagmender": [
+"Resolved"
+],
+"UFID:http://musicbrainz.org": [
+"r-id"
+],
+"USLT::xxx": [
+"l",
+"a",
+" ",
+"l",
+"a"
+],
+"WCOP": [
+"https://creativecommons.org/x"
+],
+"WOAR:https://ex.org": [
+"https://ex.org"
+]
+},
+".wma": {
+"ASIN": [
+"B000"
+],
+"Acoustid/Id": [
+"ac-id"
+],
+"Author": [
+"A & B"
+],
+"Copyright": [
+"(c)"
+],
+"Description": [
+"Cm"
+],
+"MusicBrainz/Album Artist Id": [
+"aa-id"
+],
+"MusicBrainz/Album Id": [
+"al-id"
+],
+"MusicBrainz/Album Release Country": [
+"GB"
+],
+"MusicBrainz/Album Status": [
+"official"
+],
+"MusicBrainz/Album Type": [
+"album",
+"live"
+],
+"MusicBrainz/Artist Id": [
+"a-id",
+"b-id"
+],
+"MusicBrainz/Composer Id": [
+"c-id"
+],
+"MusicBrainz/Disc Id": [
+"d-id"
+],
+"MusicBrainz/Release Group Id": [
+"rg-id"
+],
+"MusicBrainz/Release Track Id": [
+"t-id"
+],
+"MusicBrainz/Track Id": [
+"r-id"
+],
+"MusicBrainz/Work Id": [
+"w-id"
+],
+"REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"Title": [
+"T"
+],
+"WM/ALBUMARTISTS": [
+"AA"
+],
+"WM/ARTISTS": [
+"A",
+"B"
+],
+"WM/AlbumArtist": [
+"AA"
+],
+"WM/AlbumArtistSortOrder": [
+"AA s"
+],
+"WM/AlbumSortOrder": [
+"Al s"
+],
+"WM/AlbumTitle": [
+"Al"
+],
+"WM/ArtistSortOrder": [
+"A, The"
+],
+"WM/AuthorURL": [
+"https://ex.org"
+],
+"WM/Barcode": [
+"0123"
+],
+"WM/BeatsPerMinute": [
+"120"
+],
+"WM/CatalogNo": [
+"CAT 1"
+],
+"WM/Composer": [
+"C1"
+],
+"WM/ComposerSortOrder": [
+"C1 s"
+],
+"WM/Conductor": [
+"Co"
+],
+"WM/ContentGroupDescription": [
+"Gr"
+],
+"WM/DJMixer": [
+"DJ"
+],
+"WM/Director": [
+"Di"
+],
+"WM/EncodedBy": [
+"Enc"
+],
+"WM/EncodingSettings": [
+"x"
+],
+"WM/Engineer": [
+"E"
+],
+"WM/Genre": [
+"Rock",
+"Pop"
+],
+"WM/ISRC": [
+"USX1"
+],
+"WM/InitialKey": [
+"Am"
+],
+"WM/IsCompilation": [
+"1"
+],
+"WM/Language": [
+"eng"
+],
+"WM/Lyrics": [
+"la la"
+],
+"WM/Media": [
+"CD"
+],
+"WM/Mixer": [
+"Mx"
+],
+"WM/ModifiedBy": [
+"Re"
+],
+"WM/Mood": [
+"Md"
+],
+"WM/OriginalAlbumTitle": [
+"OA"
+],
+"WM/OriginalArtist": [
+"OAr"
+],
+"WM/OriginalReleaseTime": [
+"1999-01-02"
+],
+"WM/OriginalReleaseYear": [
+"1999"
+],
+"WM/PartOfSet": [
+"1/2"
+],
+"WM/Producer": [
+"P1",
+"P2"
+],
+"WM/Publisher": [
+"L1",
+"L2"
+],
+"WM/Script": [
+"Latn"
+],
+"WM/SetSubTitle": [
+"Disc A"
+],
+"WM/SubTitle": [
+"St"
+],
+"WM/TitleSortOrder": [
+"T s"
+],
+"WM/TrackNumber": [
+"3"
+],
+"WM/Work": [
+"Wk"
+],
+"WM/Writer": [
+"Ly"
+],
+"WM/Year": [
+"2001-05-01"
+]
+},
+".wv": {
+"ALBUMARTISTS": [
+"AA"
+],
+"Acoustid_Id": [
+"ac-id"
+],
+"Album": [
+"Al"
+],
+"Album Artist": [
+"AA"
+],
+"Albumartistsort": [
+"AA s"
+],
+"Albumsort": [
+"Al s"
+],
+"Arranger": [
+"Ar"
+],
+"Artist": [
+"A & B"
+],
+"Artists": [
+"A\u0000B"
+],
+"Artistsort": [
+"A, The"
+],
+"Asin": [
+"B000"
+],
+"BPM": [
+"120"
+],
+"Barcode": [
+"0123"
+],
+"CatalogNumber": [
+"CAT 1"
+],
+"Comment": [
+"Cm"
+],
+"Compilation": [
+"1"
+],
+"Composer": [
+"C1"
+],
+"Composersort": [
+"C1 s"
+],
+"Conductor": [
+"Co"
+],
+"Copyright": [
+"(c)"
+],
+"Director": [
+"Di"
+],
+"Disc": [
+"1/2"
+],
+"DiscSubtitle": [
+"Disc A"
+],
+"Discogs_Release_Id": [
+"777"
+],
+"Djmixer": [
+"DJ"
+],
+"EncodedBy": [
+"Enc"
+],
+"Encodersettings": [
+"x"
+],
+"Engineer": [
+"E"
+],
+"Genre": [
+"Rock\u0000Pop"
+],
+"Grouping": [
+"Gr"
+],
+"ISRC": [
+"USX1"
+],
+"Key": [
+"Am"
+],
+"Label": [
+"L1\u0000L2"
+],
+"Language": [
+"eng"
+],
+"License": [
+"https://creativecommons.org/x"
+],
+"Lyricist": [
+"Ly"
+],
+"Lyrics": [
+"la la"
+],
+"MOVEMENT": [
+"2"
+],
+"MOVEMENTNAME": [
+"Mv"
+],
+"MOVEMENTTOTAL": [
+"4"
+],
+"MUSICBRAINZ_ALBUMSTATUS": [
+"official"
+],
+"MUSICBRAINZ_ALBUMTYPE": [
+"album\u0000live"
+],
+"Media": [
+"CD"
+],
+"MixArtist": [
+"Re"
+],
+"Mixer": [
+"Mx"
+],
+"Mood": [
+"Md"
+],
+"Musicbrainz_Albumartistid": [
+"aa-id"
+],
+"Musicbrainz_Albumid": [
+"al-id"
+],
+"Musicbrainz_Artistid": [
+"a-id\u0000b-id"
+],
+"Musicbrainz_Composerid": [
+"c-id"
+],
+"Musicbrainz_Discid": [
+"d-id"
+],
+"Musicbrainz_Releasegroupid": [
+"rg-id"
+],
+"Musicbrainz_Workid": [
+"w-id"
+],
+"Original Artist": [
+"OAr"
+],
+"Originalalbum": [
+"OA"
+],
+"Originaldate": [
+"1999-01-02"
+],
+"Originalyear": [
+"1999"
+],
+"Performer": [
+"G1 (guitar)\u0000G2 (guitar)\u0000V (lead vocals)\u0000Pf"
+],
+"Producer": [
+"P1\u0000P2"
+],
+"REPLAYGAIN_ALBUM_GAIN": [
+"-5.00 dB"
+],
+"REPLAYGAIN_ALBUM_PEAK": [
+"0.95"
+],
+"REPLAYGAIN_TRACK_GAIN": [
+"-6.00 dB"
+],
+"REPLAYGAIN_TRACK_PEAK": [
+"0.9"
+],
+"Releasecountry": [
+"GB"
+],
+"Releasedate": [
+"2001-05-01"
+],
+"SHOWMOVEMENT": [
+"1"
+],
+"Script": [
+"Latn"
+],
+"Subtitle": [
+"St"
+],
+"Tagmender": [
+"Resolved"
+],
+"Title": [
+"T"
+],
+"Titlesort": [
+"T s"
+],
+"Track": [
+"3/12"
+],
+"Weblink": [
+"https://ex.org"
+],
+"Work": [
+"Wk"
+],
+"Writer": [
+"W"
+],
+"Year": [
+"2001-05-01"
+],
+"encoder": [
+"Lavf60.16.100"
+],
+"musicbrainz_releasetrackid": [
+"t-id"
+],
+"musicbrainz_trackid": [
+"r-id"
+]
+}
+},
+"tags": {
+"acoustid_id": [
+"ac-id"
+],
+"album": [
+"Al"
+],
+"albumartist": [
+"AA"
+],
+"albumartists": [
+"AA"
+],
+"albumartistsort": [
+"AA s"
+],
+"albumsort": [
+"Al s"
+],
+"arranger": [
+"Ar"
+],
+"artist": [
+"A & B"
+],
+"artists": [
+"A",
+"B"
+],
+"artistsort": [
+"A, The"
+],
+"asin": [
+"B000"
+],
+"barcode": [
+"0123"
+],
+"bpm": [
+"120"
+],
+"catalognumber": [
+"CAT 1"
+],
+"comment": [
+"Cm"
+],
+"compilation": [
+"1"
+],
+"composer": [
+"C1"
+],
+"composersort": [
+"C1 s"
+],
+"conductor": [
+"Co"
+],
+"copyright": [
+"(c)"
+],
+"date": [
+"2001-05-01"
+],
+"director": [
+"Di"
+],
+"discnumber": [
+"1"
+],
+"discogs_release_id": [
+"777"
+],
+"discsubtitle": [
+"Disc A"
+],
+"djmixer": [
+"DJ"
+],
+"encodedby": [
+"Enc"
+],
+"encodersettings": [
+"x"
+],
+"engineer": [
+"E"
+],
+"genre": [
+"Rock",
+"Pop"
+],
+"grouping": [
+"Gr"
+],
+"isrc": [
+"USX1"
+],
+"key": [
+"Am"
+],
+"label": [
+"L1",
+"L2"
+],
+"language": [
+"eng"
+],
+"license": [
+"https://creativecommons.org/x"
+],
+"lyricist": [
+"Ly"
+],
+"lyrics": [
+"la la"
+],
+"media": [
+"CD"
+],
+"mixer": [
+"Mx"
+],
+"mood": [
+"Md"
+],
+"movement": [
+"Mv"
+],
+"movementnumber": [
+"2"
+],
+"movementtotal": [
+"4"
+],
+"musicbrainz_albumartistid": [
+"aa-id"
+],
+"musicbrainz_albumid": [
+"al-id"
+],
+"musicbrainz_artistid": [
+"a-id",
+"b-id"
+],
+"musicbrainz_composerid": [
+"c-id"
+],
+"musicbrainz_discid": [
+"d-id"
+],
+"musicbrainz_recordingid": [
+"r-id"
+],
+"musicbrainz_releasegroupid": [
+"rg-id"
+],
+"musicbrainz_trackid": [
+"t-id"
+],
+"musicbrainz_workid": [
+"w-id"
+],
+"originalalbum": [
+"OA"
+],
+"originalartist": [
+"OAr"
+],
+"originaldate": [
+"1999-01-02"
+],
+"originalyear": [
+"1999"
+],
+"performer": [
+"Pf"
+],
+"performer:guitar": [
+"G1",
+"G2"
+],
+"performer:lead vocals": [
+"V"
+],
+"producer": [
+"P1",
+"P2"
+],
+"releasecountry": [
+"GB"
+],
+"releasedate": [
+"2001-05-01"
+],
+"releasestatus": [
+"official"
+],
+"releasetype": [
+"album",
+"live"
+],
+"remixer": [
+"Re"
+],
+"replaygain_album_gain": [
+"-5.00 dB"
+],
+"replaygain_album_peak": [
+"0.95"
+],
+"replaygain_track_gain": [
+"-6.00 dB"
+],
+"replaygain_track_peak": [
+"0.9"
+],
+"script": [
+"Latn"
+],
+"showmovement": [
+"1"
+],
+"subtitle": [
+"St"
+],
+"tagmender": [
+"Resolved"
+],
+"title": [
+"T"
+],
+"titlesort": [
+"T s"
+],
+"totaldiscs": [
+"2"
+],
+"totaltracks": [
+"12"
+],
+"tracknumber": [
+"3"
+],
+"website": [
+"https://ex.org"
+],
+"work": [
+"Wk"
+],
+"writer": [
+"W"
+]
+}
+}

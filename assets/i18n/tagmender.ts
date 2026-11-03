@@ -6,7 +6,7 @@
     <message>
         <location filename="../../gui/account.py" line="+46"/>
         <location filename="../../gui/preferences.py" line="+35"/>
-        <location line="+663"/>
+        <location line="+673"/>
         <location line="+72"/>
         <source>Account</source>
         <translation type="unfinished"></translation>
@@ -597,7 +597,7 @@
     </message>
     <message>
         <location line="+7"/>
-        <location filename="../../gui/inspector.py" line="+936"/>
+        <location filename="../../gui/inspector.py" line="+944"/>
         <location line="+29"/>
         <location filename="../../gui/jobs.py" line="+89"/>
         <location filename="../../gui/models.py" line="+0"/>
@@ -1305,6 +1305,16 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+0"/>
         <source>Rate the file shown in the inspector 5 stars of 5</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>&amp;Find Covers…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Every cover there is for the album - your own, found online, or made - to pick one</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2228,7 +2238,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/overview.py" line="+170"/>
         <location filename="../../gui/report.py" line="+80"/>
         <location filename="../../gui/search.py" line="-503"/>
-        <location filename="../../gui/window.py" line="+713"/>
+        <location filename="../../gui/window.py" line="+714"/>
         <source>Finish or cancel the current work first.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3433,7 +3443,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location filename="../../gui/history.py" line="-29"/>
-        <location filename="../../gui/window.py" line="-437"/>
+        <location filename="../../gui/window.py" line="-438"/>
         <source>History</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3482,7 +3492,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/inspector.py" line="-1033"/>
+        <location filename="../../gui/inspector.py" line="-1041"/>
         <source>Added</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3856,13 +3866,13 @@ New: {after}
     </message>
     <message>
         <location line="+2"/>
-        <location line="+763"/>
+        <location line="+771"/>
         <location line="+18"/>
         <source>The image is larger than {0} MB.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-772"/>
+        <location line="-780"/>
         <source>That is not a picture TagMender can use: choose a JPEG, PNG, WebP, GIF, BMP or TIFF image.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3893,6 +3903,11 @@ New: {after}
     </message>
     <message>
         <location line="+3"/>
+        <source>Find Covers…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <source>Choose Image…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3932,7 +3947,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+16"/>
         <location line="+6"/>
         <source>Choose an Image for the Cover</source>
         <translation type="unfinished"></translation>
@@ -5256,26 +5271,26 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="-1152"/>
-        <location line="+170"/>
+        <location filename="../../gui/preferences.py" line="-1162"/>
+        <location line="+180"/>
         <location filename="../../gui/profile_editor.py" line="-17"/>
         <source>General</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-170"/>
+        <location line="-180"/>
         <source>Keys</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+918"/>
+        <location line="+928"/>
         <location line="+101"/>
         <location line="+2"/>
         <source>Checks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1014"/>
+        <location line="-1024"/>
         <source>1 Week</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5286,19 +5301,19 @@ New: {after}
     </message>
     <message>
         <location line="+1"/>
-        <location line="+312"/>
+        <location line="+322"/>
         <source>File Safety</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-312"/>
-        <location line="+1000"/>
+        <location line="-322"/>
+        <location line="+1010"/>
         <location filename="../../gui/profile_editor.py" line="+931"/>
         <source>Advanced</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-995"/>
+        <location line="-1005"/>
         <source>30 Days</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5406,14 +5421,14 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+8"/>
-        <location line="+446"/>
+        <location line="+17"/>
+        <location line="+447"/>
         <location line="+29"/>
         <source>Saved on this computer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-475"/>
+        <location line="-476"/>
         <location line="+1"/>
         <source>Set by the environment</source>
         <translation type="unfinished"></translation>
@@ -5437,7 +5452,7 @@ New: {after}
     </message>
     <message>
         <location filename="../../gui/account.py" line="-357"/>
-        <location filename="../../gui/preferences.py" line="+2"/>
+        <location filename="../../gui/preferences.py" line="+3"/>
         <source>OK</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5542,7 +5557,45 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-111"/>
+        <location line="-197"/>
+        <location filename="../../requirements.py" line="+51"/>
+        <source>Image service key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>For AI covers (Album › Artwork › Find Covers…): the API key of your own image service, such as an OpenAI key from platform.openai.com/api-keys. Each cover made is a request it may charge for; nothing is sent until you confirm.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <location filename="../../requirements.py" line="+5"/>
+        <source>Image service address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Leave empty for OpenAI (https://api.openai.com/v1), or give another service that speaks the same images API.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <location filename="../../requirements.py" line="+4"/>
+        <source>Image model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Leave empty for gpt-image-1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>AI covers (optional)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+70"/>
         <source>That setting could not be saved.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5924,7 +5977,7 @@ New: {after}
     </message>
     <message>
         <location filename="../../gui/search.py" line="+682"/>
-        <location filename="../../gui/window.py" line="+580"/>
+        <location filename="../../gui/window.py" line="+581"/>
         <source>Select an album in Overview first.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6051,8 +6104,8 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1000"/>
-        <location line="+389"/>
+        <location line="-1010"/>
+        <location line="+399"/>
         <location line="+614"/>
         <source>Plugins</source>
         <translation type="unfinished"></translation>
@@ -6109,7 +6162,7 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1139"/>
+        <location line="-1149"/>
         <source>Lets TagMender look albums up on Discogs. At discogs.com/settings/developers, choose Generate new token and paste it here.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6141,7 +6194,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+164"/>
+        <location line="+174"/>
         <source>Folders and playback</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6589,7 +6642,7 @@ This is not the application key under Keys.</source>
     <message>
         <location filename="../../gui/profiles.py" line="+43"/>
         <location line="+8"/>
-        <location filename="../../gui/window.py" line="-579"/>
+        <location filename="../../gui/window.py" line="-580"/>
         <source>Profiles</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9748,7 +9801,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <location line="+6"/>
         <location line="+1"/>
         <location filename="../../gui/window.py" line="+47"/>
-        <location line="+702"/>
+        <location line="+703"/>
         <source>Search</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9926,7 +9979,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     </message>
     <message>
         <location line="+4"/>
-        <location filename="../../requirements.py" line="-64"/>
+        <location filename="../../requirements.py" line="-124"/>
         <source>Required for best results</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11886,7 +11939,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/window.py" line="-753"/>
+        <location filename="../../gui/window.py" line="-754"/>
         <source>Library</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11960,7 +12013,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+93"/>
+        <location line="+94"/>
         <source>Keyboard shortcuts</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12115,7 +12168,7 @@ GPL-2.0-or-later. Icons: Lucide (ISC).</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="-258"/>
+        <location filename="../../gui/preferences.py" line="-268"/>
         <location filename="../../requirements.py" line="+1"/>
         <source>AcoustID application key</source>
         <translation type="unfinished"></translation>
@@ -12132,12 +12185,12 @@ GPL-2.0-or-later. Icons: Lucide (ISC).</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+55"/>
+        <location line="+67"/>
         <source>Fingerprints (AcoustID) are not used</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-53"/>
+        <location line="-65"/>
         <source>Sends an album&apos;s fingerprints to AcoustID (Submit AcoustIDs), so others can identify it too.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12341,6 +12394,51 @@ GPL-2.0-or-later. Icons: Lucide (ISC).</source>
     <message>
         <location line="+1"/>
         <source>Web search (tavily) is off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Makes AI covers (Find Covers… › Make AI Covers…) with your own OpenAI-compatible image service; Tavily, when set up, finds their reference images.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Make AI Covers… is not available; finding covers works as before.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>AI covers are not available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Another OpenAI-compatible image service than OpenAI&apos;s own (optional).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>OpenAI&apos;s own address is used.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>OpenAI&apos;s address is used</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Another image model than gpt-image-1 (optional).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>gpt-image-1 is used.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>gpt-image-1 is used</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

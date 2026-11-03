@@ -379,6 +379,23 @@ notices don't appear. How the engines are chained, and their monthly caps, are i
 
 When an engine is not set up, the search goes to the next engine the profile lists.
 
+### AI covers (optional)
+
+Album › Artwork › Find Covers… shows every cover for an album: your own pictures, what the cover
+sources find, and, with an image service set up, **Make AI Covers…**. Four presets: *Faithful*
+(restores your own small cover), *Creative* (a new cover in the artist's style), *Art* (a fan-art
+take) and *Era* (a cover in the style of the album's year and genre). The covers are made by your
+own OpenAI-compatible image service; Tavily, when set up, only finds the reference images Creative
+and Art need. Each cover made is a request your service may charge for, and nothing is sent until
+the sheet listing them is confirmed. A made cover is marked as generated, so a real cover found
+later replaces it.
+
+| Key | Setup name · Variable · File | Get it |
+|---|---|---|
+| Image service key | `image_api_key` · `TAGMENDER_IMAGE_API_KEY` · `image_api_key` | An API key from <https://platform.openai.com/api-keys>, or from another service with the same images API |
+| Image service address | `image_api_url` · `TAGMENDER_IMAGE_API_URL` · `image_api_url` | Empty for OpenAI; another compatible service's address otherwise |
+| Image model | `image_model` · `TAGMENDER_IMAGE_MODEL` · `image_model` | Empty for gpt-image-1 |
+
 ### Programs and modules
 
 [Optional programs](#optional-programs) has the install command for each distro. After

@@ -29,11 +29,15 @@ ENV = {"discogs": "DISCOGS_TOKEN", "acoustid": "TAGMENDER_ACOUSTID_KEY",
        "mojeek": "TAGMENDER_MOJEEK_KEY", "marginalia": "TAGMENDER_MARGINALIA_KEY", "tavily": "TAVILY_API_KEY",
        # your MusicBrainz account (mb_account.py) and sending fingerprints (acoustid_submit.py)
        "mb_client_id": "TAGMENDER_MB_CLIENT_ID", "mb_client_secret": "TAGMENDER_MB_CLIENT_SECRET",
-       "acoustid_user": "TAGMENDER_ACOUSTID_USER_KEY"}
+       "acoustid_user": "TAGMENDER_ACOUSTID_USER_KEY",
+       # your own AI image service, for AI covers (covers_ai.py): OpenAI-compatible
+       "image_api_key": "TAGMENDER_IMAGE_API_KEY", "image_api_url": "TAGMENDER_IMAGE_API_URL",
+       "image_model": "TAGMENDER_IMAGE_MODEL"}
 FILES = {"discogs": "discogs_token", "acoustid": "acoustid_key",
          "fanart": "fanart_key", "audiodb": "audiodb_key", "lastfm": "lastfm_key", "gnudb": "gnudb_user",
          "mojeek": "mojeek_key", "marginalia": "marginalia_key", "tavily": "tavily_key",
-         "mb_client_id": "mb_client_id", "mb_client_secret": "mb_client_secret", "acoustid_user": "acoustid_user_key"}
+         "mb_client_id": "mb_client_id", "mb_client_secret": "mb_client_secret", "acoustid_user": "acoustid_user_key",
+         "image_api_key": "image_api_key", "image_api_url": "image_api_url", "image_model": "image_model"}
 # saved logins (JSON, not one secret a file): kept 0600 by their own module, checked by doctor
 TOKEN_FILES = {"musicbrainz_login": "musicbrainz_login.json"}
 # CoverUp's own setting names for the keys it can take from here when Picard.ini has none
@@ -52,7 +56,10 @@ LABELS = {"discogs": "Discogs personal access token (discogs.com/settings/develo
                           "an \"Installed application\"; optional, for collections and ratings)",
           "mb_client_secret": "MusicBrainz application client secret (the same application; optional)",
           "acoustid_user": "AcoustID user key, for sending fingerprints (acoustid.org/api-key; "
-                           "not the application key; optional)"}
+                           "not the application key; optional)",
+          "image_api_key": "API key of your AI image service, for AI covers (an OpenAI-compatible one; optional)",
+          "image_api_url": "address of your AI image service (default https://api.openai.com/v1; optional)",
+          "image_model": "the image model to use (default gpt-image-1; optional)"}
 
 
 class CredentialError(RuntimeError):

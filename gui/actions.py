@@ -77,6 +77,8 @@ COMMANDS = {
     "rate_3": (N_("&3 Stars"), None, None, N_("Rate the file shown in the inspector 3 stars of 5")),
     "rate_4": (N_("&4 Stars"), None, None, N_("Rate the file shown in the inspector 4 stars of 5")),
     "rate_5": (N_("&5 Stars"), None, None, N_("Rate the file shown in the inspector 5 stars of 5")),
+    "find_covers": (N_("&Find Covers…"), "Ctrl+Alt+F", "search",
+                    N_("Every cover there is for the album - your own, found online, or made - to pick one")),
     "choose_cover": (N_("&Choose Image…"), "Ctrl+Alt+C", "image", N_("Use an image file as the album's new cover")),
     "cover_link": (N_("Use Image &Link…"), None, "globe", N_("Use an image from the web as the album's new cover")),
     "suggested_cover": (N_("Use &Suggested Cover"), None, "sparkles",
@@ -166,7 +168,7 @@ RATING_MENU = ("rate_none", None, "rate_1", "rate_2", "rate_3", "rate_4", "rate_
 RATINGS = {"rate_none": None, "rate_1": 1, "rate_2": 2, "rate_3": 3, "rate_4": 4, "rate_5": 5}
 TAG_MENU = ("edit_tag", "revert_tag", "use_suggested", "remove_tag", None, "add_tag", None,
             (N_("Ra&ting"), RATING_MENU))
-COVER_MENU = ("choose_cover", "cover_link", "suggested_cover")
+COVER_MENU = ("find_covers", "choose_cover", "cover_link", "suggested_cover")
 # the Album > Change Release submenu (and the inspector's Change Release button)
 RELEASE_MENU = ("use_release", *_search.MENU)
 # commands whose keys act only where focus is in the inspector's Tags (Delete and F2 elsewhere stay

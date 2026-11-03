@@ -231,6 +231,7 @@ class Main(QMainWindow):
             "remove_tag": lambda: self.inspector.tags.remove_selected(),
             "add_tag": lambda: (self.inspector.show_tab("Tags"), self.inspector.tags.add_tag()),
             **{k: (lambda n=n: self.rate(n)) for k, n in actmod.RATINGS.items()},
+            "find_covers": lambda: (self.inspector.show_tab("Artwork"), self.inspector.art.find_covers()),
             "choose_cover": lambda: (self.inspector.show_tab("Artwork"), self.inspector.art.choose_file()),
             "cover_link": lambda: (self.inspector.show_tab("Artwork"), self.inspector.art.ask_url()),
             "suggested_cover": lambda: self.inspector.art.clear(),
@@ -449,7 +450,7 @@ class Main(QMainWindow):
         for k in actmod.RATINGS:
             self.commands[k].setEnabled(rate_on)
         cover_on = here and art.album is x and art.editable()
-        for k in ("choose_cover", "cover_link"):
+        for k in ("find_covers", "choose_cover", "cover_link"):
             self.commands[k].setEnabled(cover_on)
         mine = ((x or {}).get("artwork") or {}).get("by") == planmod.BY_YOU if kind == "overview" else False
         self.commands["suggested_cover"].setEnabled(cover_on and mine)

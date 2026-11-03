@@ -67,6 +67,15 @@ KEYS = {"discogs": (N_("Discogs token"), N_("Lets TagMender look albums up on Di
                              "1. Log in at acoustid.org.\n"
                              "2. Open acoustid.org/api-key and paste the key shown there.\n"
                              "This is not the application key under Keys."))}
+KEYS.update({
+    "image_api_key": (N_("Image service key"),
+                      N_("For AI covers (Album › Artwork › Find Covers…): the API key of your own image "
+                         "service, such as an OpenAI key from platform.openai.com/api-keys. Each cover "
+                         "made is a request it may charge for; nothing is sent until you confirm.")),
+    "image_api_url": (N_("Image service address"),
+                      N_("Leave empty for OpenAI (https://api.openai.com/v1), or give another service that "
+                         "speaks the same images API.")),
+    "image_model": (N_("Image model"), N_("Leave empty for gpt-image-1."))})
 # the keys entered on the Account pane, not under Keys (yours, not a provider's)
 ACCOUNT_KEYS = ("mb_client_id", "mb_client_secret", "acoustid_user")
 SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the environment"),
@@ -74,7 +83,8 @@ SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the en
 # the keys in groups, the ones that matter first (a key credentials.py knows and no group names: "Other")
 KEY_GROUPS = ((N_("Identification"), ("discogs", "acoustid", "gnudb")),
               (N_("Covers and artist photos"), ("fanart", "audiodb", "lastfm")),
-              (N_("Web search (optional)"), ("mojeek", "marginalia", "tavily")))
+              (N_("Web search (optional)"), ("mojeek", "marginalia", "tavily")),
+              (N_("AI covers (optional)"), ("image_api_key", "image_api_url", "image_model")))
 # a check's state as every status in the app says it: icon, STATUS colour key and word
 CHECK_STATE = {"ok": ("circle-check", "done", N_("OK")), "warn": ("circle-alert", "unresolved", N_("Needs a look")),
                "fail": ("circle-x", "failed", N_("Problem"))}

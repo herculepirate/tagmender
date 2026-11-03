@@ -764,7 +764,8 @@ class ArtworkView(QWidget):
         self.hint = _label(tr("Drop an image file or an image link here to use it as the new cover."), "hint")
         col_all.addWidget(self.hint)
         self.buttons = {}
-        for line in ((("file", tr("Choose Image…"), "image", self.choose_file),),     # (one a line: 280 px wide)
+        for line in ((("find", tr("Find Covers…"), "search", self.find_covers),),    # (one a line: 280 px wide)
+                     (("file", tr("Choose Image…"), "image", self.choose_file),),
                      (("url", tr("Use Image Link…"), "globe", self.ask_url),),
                      (("clear", tr("Use Suggested Cover"), "sparkles", self.clear),)):
             r = QHBoxLayout()
@@ -798,7 +799,7 @@ class ArtworkView(QWidget):
 
     def retint(self):
         self.empty.retint()
-        for key, icon in (("file", "image"), ("url", "globe"), ("clear", "sparkles")):
+        for key, icon in (("find", "search"), ("file", "image"), ("url", "globe"), ("clear", "sparkles")):
             self.buttons[key].setIcon(icons.icon(icon, "ink"))
 
     def editable(self) -> bool:
@@ -882,6 +883,13 @@ class ArtworkView(QWidget):
         start(self.owner, work, done, failed=lambda _m: None)
 
     # ---- your cover -----------------------------------------------------
+    def find_covers(self):
+        """Every cover there is for the album, to pick one by eye (gui/cover_chooser.py)."""
+        if not self.editable():
+            return
+        from .cover_chooser import open_chooser
+        open_chooser(self.owner)
+
     def choose_file(self):
         if not self.editable():
             return

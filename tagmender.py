@@ -353,6 +353,74 @@ def cmd_profiles(args):
     return 2
 
 
+def plugins_parser(sub):
+    p = sub.add_parser("plugins", help="plugins: list, install, switch on or off, remove; new and check for authors")
+    ps = p.add_subparsers(dest="plcmd", required=True)
+    ps.add_parser("list", help="the installed plugins and whether each is on")
+    a = ps.add_parser("install", help="install a plugin from its .zip or folder (switched off)")
+    a.add_argument("source")
+    for name, text in (("enable", "switch a plugin on"), ("disable", "switch a plugin off"),
+                       ("remove", "remove a plugin (kept in plugins/.removed)")):
+        ps.add_parser(name, help=text).add_argument("id")
+    a = ps.add_parser("new", help="start a new plugin: a folder with plugin.toml and __init__.py")
+    a.add_argument("name")
+    a.add_argument("--where", default=".")
+    ps.add_parser("check", help="say what is wrong with a plugin folder").add_argument("folder")
+
+
+def cmd_plugins(args):
+    import plugins
+    try:
+        if args.plcmd == "list":
+            rows = plugins.installed()
+            if not rows:
+                print(f"No plugins installed ({plugins.plugins_dir()}).")
+            for p in rows:
+                state = f"error: {p.error}" if p.error else ("on" if p.enabled else "off")
+                print(f"{p.id:24} {p.version:10} {state}  {p.manifest.get('description', '')}")
+            return 0
+        if args.plcmd == "install":
+            p = plugins.install(args.source)
+            print(f"Installed {p.name} {p.version} ({p.id}), switched off. Switch it on with: "
+                  f"tagmender plugins enable {p.id}")
+            return 0
+        if args.plcmd in ("enable", "disable"):
+            if not any(p.id == args.id for p in plugins.installed()):
+                print(f"No plugin {args.id!r} is installed.", file=sys.stderr)
+                return 1
+            plugins.set_enabled(args.id, args.plcmd == "enable")
+            print(f"{args.id}: {'on' if args.plcmd == 'enable' else 'off'}")
+            return 0
+        if args.plcmd == "remove":
+            kept = plugins.remove(args.id)
+            print(f"Removed {args.id}; it is kept in {kept}")
+            return 0
+        if args.plcmd == "new":
+            d = plugins.new(args.name, args.where)
+            print(f"Started {d}: edit plugin.toml and __init__.py, then: tagmender plugins check {d}")
+            return 0
+        problems = plugins.check(args.folder)
+        for x in problems:
+            print(x)
+        if not problems:
+            print("Ready: it loads and registers cleanly.")
+        return 1 if problems else 0
+    except plugins.PluginError as exc:
+        print(f"Plugin error: {exc}", file=sys.stderr)
+        return 1
+
+
+def _load_plugins():
+    """The plugins switched on, loaded once; one that fails is named, never fatal."""
+    try:
+        import plugins
+        for p in plugins.load_enabled():
+            if p.error:
+                _err(f"Plugin {p.id} is switched off: {p.error}")
+    except Exception as exc:                  # (plugins never stop a run)
+        _err(f"Plugins were not loaded: {exc}")
+
+
 def profiles_parser(sub):
     p = sub.add_parser("profiles", help="processing profiles")
     ps = p.add_subparsers(dest="pcmd", required=True)
@@ -1188,6 +1256,9 @@ def main(argv=None):
         import version
         print(f"tagmender {version.VERSION}")
         return 0
+    if argv[:1] == ["--no-plugins"]:                 # (a run without any plugin: docs/PLUGINS.md)
+        os.environ["TAGMENDER_NO_PLUGINS"] = "1"
+        argv = argv[1:]
     if argv[:1] == ["--profile"] and len(argv) > 1:
         profile, argv = argv[1], argv[2:]
         os.environ["TAGMENDER_PROFILE"] = profile
@@ -1204,6 +1275,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     rules_parser(sub)
     profiles_parser(sub)
+    plugins_parser(sub)
     doctor_parser(sub)
     work_parsers(sub)
     if not argv:
@@ -1212,6 +1284,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     args.profile = profile
     if args.cmd in WORK:
+        _load_plugins()
         try:
             return WORK[args.cmd](args)
         except pf.ProfileError as exc:
@@ -1224,6 +1297,8 @@ def main(argv=None):
         return cmd_doctor(args)
     if args.cmd == "setup":
         return cmd_setup(args)
+    if args.cmd == "plugins":
+        return cmd_plugins(args)
     if args.cmd == "profiles":
         try:
             return cmd_profiles(args)

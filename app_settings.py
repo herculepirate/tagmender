@@ -76,7 +76,9 @@ DEFAULTS = {
     # Advanced
     "logs": {"detailed": False, "max_mb": 10},
     "diagnostics": {"hide_names": True},
-    "plugins": {"folder": ""},        # "" = the copies that come with TagMender
+    # folder: where the Discogs Enrichment and CoverUp code is ("" = the copies that come with
+    # TagMender); enabled: the plugins switched on (plugins.py), settings: {plugin id: {key: value}}
+    "plugins": {"folder": "", "enabled": [], "settings": {}},
     "tagger_command": "",             # "" = found on PATH, then the Flatpak
     # one-time notices already shown (a new install has nothing to be told about)
     "notices": {"builtin_defaults": True},
@@ -350,6 +352,11 @@ def validate(data: dict, libraries=None) -> list[str]:
     folder = _value(d, "plugins.folder")
     if isinstance(folder, str) and folder and not os.path.isdir(os.path.expanduser(folder)):
         p.append(f"plugins.folder does not exist ({folder})")
+    on = _value(d, "plugins.enabled")
+    if not isinstance(on, list) or not all(isinstance(x, str) for x in on):
+        p.append("plugins.enabled must be a list of plugin ids")
+    if not isinstance(_value(d, "plugins.settings"), dict):
+        p.append("plugins.settings must be an object: {plugin id: {setting: value}}")
     if not isinstance(d.get("tagger_command"), str):
         p.append("tagger_command must be text")
     if not isinstance(d.get("default_profile"), str) or not d["default_profile"].strip():

@@ -18,6 +18,7 @@ group's own footnote under the card. Explanations are never only in a tooltip.
 """
 from __future__ import annotations
 
+import html
 import os
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
@@ -660,6 +661,27 @@ class Group(QWidget):
             if shown:
                 first = False
         self.setVisible(not first)
+
+
+class StatusLight(QLabel):
+    """A coloured dot and a few words: green set up and working, amber not checked yet or
+    unsure, red refused or failing, grey off or not set up. The words say it too (never by
+    colour alone)."""
+
+    COLORS = {"ok": "identified", "warn": "attention", "error": "error", "off": "ignored"}
+
+    def __init__(self, state="off", text=""):
+        super().__init__()
+        self.setTextFormat(Qt.RichText)
+        self.set_state(state, text)
+
+    def set_state(self, state, text=""):
+        self.state = state if state in self.COLORS else "off"
+        dot = style.color(self.COLORS[self.state])
+        self.setText(f'<span style="color:{dot}">●</span> {html.escape(text)}' if text else
+                     f'<span style="color:{dot}">●</span>')
+        self.setAccessibleName(text or self.state)
+        self.setToolTip(text)
 
 
 class SectionFold(QToolButton):

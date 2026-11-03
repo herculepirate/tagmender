@@ -996,6 +996,12 @@ class Planner:
         # on what they made)
         self.__dict__.setdefault("_unscripted", {})[str(f)] = {k: [str(x) for x in v] for k, v in tags.items()}
         out, gone = _engine.run_tagger_scripts(self._scripts(), tags, hidden, self._log(), strip=False)
+        import plugins
+        if plugins.has_tag_processors():          # (then the plugins' tag changes: shown in the plan as any)
+            was = set(out)
+            out = plugins.process_tags(out, {"file": str(f), "album_folder": str(Path(f).parent),
+                                             "profile": getattr(self.profile, "name", "")})
+            gone = list(gone) + [k for k in was if k not in out and k not in gone]
         back = {v: k for k, v in spell.items()}
         out = {back.get(k, k): v for k, v in out.items()}
         # ($set(Title,X), $set(GENRE,Jazz) - a field TagMender writes, spelled otherwise: that
@@ -1188,8 +1194,9 @@ class Planner:
                 entry["label"] = "Skipped"
                 return entry
             op = "in_place"
-        if identified and self._scripts():
-            # Picard's tagger scripts, on each file (its own tags overlaid with the release's
+        import plugins
+        if identified and (self._scripts() or plugins.has_tag_processors()):
+            # Picard's tagger scripts (and the plugins' tag changes), on each file (its own tags overlaid with the release's
             # every field, whatever the level then writes); before anything is planned from them
             full = getattr(prop, "full_targets", None)
             full = {Path(f): t for f, t in zip(files, full)} if full and len(full) == len(files) else targets

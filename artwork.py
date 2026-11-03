@@ -186,6 +186,26 @@ class CoverUp:
         return out
 
     def front(self, folder, ids: dict, artist="", album="", files=None) -> dict | None:
+        cb = self.cb
+        pipe, res, info, s = self._search(folder, ids, artist, album, files)
+        gen_local = [c for c in res.candidates if c.provider == "local" and cb.R.is_generated(c.data)]
+        if gen_local:                     # a cover CoverUp generated earlier never blocks a real one
+            res.candidates = [c for c in res.candidates if c not in gen_local]
+            pipe.select(res)
+        return self._chosen(pipe, res, info, s)
+
+    def candidates(self, folder, ids: dict, artist="", album="", files=None) -> tuple:
+        """(pipeline, every front cover CoverUp found, largest first): for choosing one by eye.
+        Each is a coverup Candidate (provider, width, height, thumb_url/thumb_data; the full
+        image with pipeline.fetch_full)."""
+        from coverup.model import ArtType
+        pipe, res, _info, _s = self._search(folder, ids, artist, album, files)
+        fronts = [c for c in res.candidates if c.art_type == ArtType.FRONT and not c.blank]
+        fronts.sort(key=lambda c: -((c.width or 0) * (c.height or 0)))
+        return pipe, fronts
+
+    def _search(self, folder, ids, artist, album, files):
+        """CoverUp's search for the album: (pipeline, result, album info, settings used)."""
         import match_albums as ma
         import match_core as mc
         from coverup import imaging
@@ -217,10 +237,11 @@ class CoverUp:
         query = cb.make_query(info)
         res = pipe.run(query)
         self._last = (str(folder), pipe, res, query, info, s, (artist, ids.get("artist_mbid", "")))
-        gen_local = [c for c in res.candidates if c.provider == "local" and cb.R.is_generated(c.data)]
-        if gen_local:                     # a cover CoverUp generated earlier never blocks a real one
-            res.candidates = [c for c in res.candidates if c not in gen_local]
-            pipe.select(res)
+        return pipe, res, info, s
+
+    def _chosen(self, pipe, res, info, s) -> dict | None:
+        """The front CoverUp picks from a search, staged (or a note of why there is none)."""
+        cb = self.cb
 
         class _Log:
             def write(self, *_a):
@@ -429,24 +450,53 @@ def _album_dirs(folder) -> list:
     return out
 
 
+def _art_folders(d: Path) -> list:
+    """The folders of pictures below D (Artwork/, Scans/, Covers/ ..., and one level further:
+    Artwork/Scans/), as tidy.HOLDERS names them; never a link."""
+    import tidy
+    out, level = [], [d]
+    for _depth in range(2):
+        nxt = []
+        for base in level:
+            try:
+                nxt += sorted(x for x in base.iterdir() if x.is_dir() and not x.is_symlink()
+                              and x.name.casefold() in tidy.HOLDERS)
+            except OSError:
+                continue
+        out += nxt
+        level = nxt
+    return out
+
+
+def _says_front(stem: str) -> bool:
+    """A picture's name says it is the front cover ("Front", "Front Cover", "01 - front",
+    "cover1"), never another part of the case ("back", "inlay", "CD", "booklet" ...)."""
+    import tidy
+    if tidy.FRONT.match(stem):
+        return True
+    return bool((tidy.SAYS_FRONT.search(stem) or tidy.SAYS_COVER.search(stem)) and not tidy.NOT_FRONT.search(stem))
+
+
 def folder_cover(folder) -> Path | None:
-    """The album folder's own cover file (cover.jpg, folder.png, Front.jpeg ...), the largest
-    if there are several; in its disc folder when the album folder has none ("Album/Disc 01/
-    cover.jpg"); None when there is none."""
+    """The album's own cover file, the largest front there is: cover.jpg, folder.png, Front.jpeg
+    ... in the album folder or a disc folder ("Album/Disc 01/cover.jpg"), or a front in one of
+    their picture folders ("Album/Artwork/Scans/Front Cover.jpg"); one beside the music wins a
+    tie. None when there is none."""
+    best = None
     for d in _album_dirs(folder):
-        best = None
-        try:
-            for x in d.iterdir():
-                if x.is_file() and not x.is_symlink() and x.stem.lower() in COVER_STEMS and \
-                        x.suffix.lower() in (".jpg", ".jpeg", ".png"):      # (a link points at someone else's file)
-                    sz = _size_of(x.read_bytes())
-                    if sz and (best is None or min(sz) > best[1]):
-                        best = (x, min(sz))
-        except OSError:
-            continue
-        if best:
-            return best[0]
-    return None
+        places = [(d, lambda x: x.stem.lower() in COVER_STEMS)] + [(a, lambda x: _says_front(x.stem))
+                                                                    for a in _art_folders(d)]
+        for where, is_front in places:
+            try:
+                for x in sorted(where.iterdir()):
+                    if x.is_file() and not x.is_symlink() and x.suffix.lower() in (".jpg", ".jpeg", ".png") \
+                            and is_front(x):                    # (a link points at someone else's file)
+                        sz = _size_of(x.read_bytes())
+                        if sz and (best is None or min(sz) > best[1]):
+                            best = (x, min(sz))
+            except OSError:
+                continue
+    return best[0] if best else None
 
 
 def small_covers(folder, files, profile, ours=None) -> dict:

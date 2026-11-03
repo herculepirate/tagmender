@@ -14,7 +14,7 @@ from .common import (album_words, counts_by_label, counts_text, ex, heading, lef
                      pf, planmod, plural, popup_menu, profile_names)
 from .i18n import tr
 from .work import start
-from .models import PlanModel
+from .models import PlanModel, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
 
 APPLY_LISTED = 5                                     # albums named in the Apply sheet (then "and N more")
@@ -114,7 +114,7 @@ class Overview(QWidget):
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)   # (several: apply, leave out, remove)
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
@@ -130,6 +130,10 @@ class Overview(QWidget):
         self.table.selectionModel().selectionChanged.connect(self.show_detail)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
+        self.model.ticked.connect(self.win.update_album_actions)
+        from PySide6.QtGui import QShortcut, QKeySequence
+        rm = QShortcut(QKeySequence.Delete, self.table, context=Qt.WidgetShortcut)   # (the list's own Delete)
+        rm.activated.connect(self.remove_selected)
         rl.addWidget(self.table, 1)
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
@@ -171,8 +175,58 @@ class Overview(QWidget):
         # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
         release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
             self.win, "menus", {}) else None
-        popup_menu(self, self.table, pos, [release if k == "@release" else self.win.act(k) if k else None
-                                           for k in keys if k != "@release" or release is not None])
+        items = [release if k == "@release" else self.win.act(k) if k else None
+                 for k in keys if k != "@release" or release is not None]
+        chosen = self.selected_albums()
+        if chosen:                                     # (what Apply does with the selected rows)
+            from PySide6.QtGui import QAction
+            n = len(chosen)
+            mine = []
+            for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
+                                    self.apply_selected, any(can_apply(a) for a in chosen) and not self.running),
+                                   (tr("Leave Out of Apply"), lambda: self.leave_out(True),
+                                    any(can_apply(a) and not a.get(PlanModel.LEAVE_OUT) for a in chosen)),
+                                   (tr("Include in Apply"), lambda: self.leave_out(False),
+                                    any(a.get(PlanModel.LEAVE_OUT) for a in chosen)),
+                                   (tr("Remove from List"), self.remove_selected, not self.running)):
+                act = QAction(text, self)
+                act.setEnabled(on)
+                act.triggered.connect(lambda _=False, s=slot: s())
+                mine.append(act)
+            items = items + [None] + mine
+        popup_menu(self, self.table, pos, items)
+
+    def selected_albums(self) -> list:
+        """The plan's own entries of the selected rows, in the list's order."""
+        if not hasattr(self, "table"):
+            return []
+        rows = sorted({self.proxy.mapToSource(i).row() for i in self.table.selectionModel().selectedRows()})
+        return [self.model.albums[r] for r in rows if 0 <= r < len(self.model.albums)]
+
+    def leave_out(self, out):
+        self.model.set_left_out(self.selected_albums(), out)
+
+    def apply_selected(self):
+        """Apply only the selected albums: the others are left out of this Apply (not of the list)."""
+        chosen = [a for a in self.selected_albums() if can_apply(a)]
+        if not chosen:
+            return
+        ids = {id(a) for a in chosen}
+        self.model.set_left_out([a for a in self.model.albums if id(a) not in ids], True)
+        self.model.set_left_out(chosen, False)
+        self.apply()
+
+    def remove_selected(self):
+        """Take the selected albums out of this preview (their folders and files are not touched)."""
+        chosen = self.selected_albums()
+        if not chosen or self.running or not self.plan:
+            return
+        ids = {id(a) for a in chosen}
+        self.plan["albums"] = [a for a in self.plan["albums"] if id(a) not in ids]
+        self.model.set_plan(self.plan)
+        self.summary.setText(tr("{0} taken out of this preview; nothing on disk changed.")
+                             .format(plural(len(chosen), tr("album"), tr("albums"))))
+        self.win.update_album_actions()
 
     def refresh_profiles(self):
         cur = self.profile.currentText()
@@ -192,8 +246,7 @@ class Overview(QWidget):
         self.win.update_album_actions()
 
     def actionable(self):
-        return sum(1 for a in (self.plan or {}).get("albums", [])
-                   if a["status"] in ("ready", "unresolved") and planmod.has_work(a))
+        return len(self.to_apply())
 
     def set_path(self, path, forced=None) -> bool:
         """Preview a folder; forced: the releases chosen for its albums (engine.Engine.force), as
@@ -357,8 +410,9 @@ class Overview(QWidget):
         sheets.warning(self, tr("Stopped: {head}").format(head=head), rest.strip())
 
     def to_apply(self):
+        """The albums Apply carries out: those with changes, unless left out (unticked)."""
         return [a for a in (self.plan or {}).get("albums", [])
-                if a["status"] in ("ready", "unresolved") and planmod.has_work(a)]
+                if can_apply(a) and not a.get(PlanModel.LEAVE_OUT)]
 
     def apply_words(self):
         """The Apply sheet: (headline, what changes, how to undo, button), from each album's own
@@ -403,8 +457,11 @@ class Overview(QWidget):
         # always asked here: the profile's "Apply without asking" is for its watched folders only
         if not sheets.confirm(self, *self.apply_words()) or self.edit_pending():
             return
-        plan = self.plan
+        chosen = self.to_apply()
         self.release_files()
+        # (only the ticked albums go to the executor; what it reports is mapped back to the list)
+        self._applied_rows = [i for i, a in enumerate(self.plan["albums"]) if any(a is c for c in chosen)]
+        plan = dict(self.plan, albums=[self.plan["albums"][i] for i in self._applied_rows])
 
         def work(w):
             import executor
@@ -432,8 +489,12 @@ class Overview(QWidget):
         return True
 
     def applied(self, res):
-        rep = run_report(self.plan, res)
-        by_index = {r["index"]: r for r in res["albums"] if "index" in r}    # (two albums of one folder)
+        rows = getattr(self, "_applied_rows", None)
+        if not isinstance(rows, list) or not rows:          # (the whole plan was given)
+            rows = list(range(len(self.plan["albums"])))
+        rep = run_report(dict(self.plan, albums=[self.plan["albums"][i] for i in rows]), res)
+        # (the executor's index is into the albums it was given: the list's own row here)
+        by_index = {rows[r["index"]]: r for r in res["albums"] if "index" in r and r["index"] < len(rows)}
         by = {a["album"]: a for a in res["albums"]}
         for i, a in enumerate(self.plan["albums"]):
             r = by_index.get(i) if by_index else by.get(a["source_dir"])
@@ -445,7 +506,12 @@ class Overview(QWidget):
                     a["label"] = r["label"]
         self.model.set_plan(self.plan)
         self.summary.setText(f"Job {res['job']}: " + counts_text(res["counts"]) + tr(". Undo it from Jobs."))
-        self.plan = None
+        left = [a for a in self.plan["albums"] if can_apply(a)]
+        if left:                                          # (albums left out stay, to apply later)
+            self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(
+                plural(len(left), tr("album"), tr("albums"))))
+        else:
+            self.plan = None
         self.busy(False)
         self.service_status(force=True)
         notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))

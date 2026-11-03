@@ -1,7 +1,7 @@
 """gui/models.py - The plan as a table."""
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 
 from .common import album_words, label_for, plural, reasons
 from .i18n import N_, tr
@@ -29,12 +29,42 @@ def changes_text(files) -> str:
 # --------------------------------------------------------------------------
 # the plan as a table
 # --------------------------------------------------------------------------
+def can_apply(a) -> bool:
+    """The album has changes Apply would make (ready, or Unresolved with its notes)."""
+    import plan as planmod
+    return a["status"] in ("ready", "unresolved") and planmod.has_work(a)
+
+
 class PlanModel(QAbstractTableModel):
     COLS = (N_("Status"), N_("Album folder"), N_("Source"), N_("Score"), N_("Changes"), N_("Why"))
+    LEAVE_OUT = "_leave_out"           # (an album's own mark: unticked, so Apply leaves it as it is)
+    ticked = Signal()
 
     def __init__(self):
         super().__init__()
         self.albums = []
+
+    def flags(self, idx):
+        f = super().flags(idx)
+        if idx.isValid() and idx.column() == 1 and can_apply(self.albums[idx.row()]):
+            f |= Qt.ItemIsUserCheckable                  # (ticked: applied; unticked: left out)
+        return f
+
+    def setData(self, idx, value, role=Qt.EditRole):
+        if role != Qt.CheckStateRole or idx.column() != 1:
+            return False
+        self.set_left_out([self.albums[idx.row()]], Qt.CheckState(value) != Qt.Checked)
+        return True
+
+    def set_left_out(self, albums, out):
+        for a in albums:
+            if can_apply(a):
+                if out:
+                    a[self.LEAVE_OUT] = True
+                else:
+                    a.pop(self.LEAVE_OUT, None)
+        self.dataChanged.emit(self.index(0, 0), self.index(max(0, len(self.albums) - 1), len(self.COLS) - 1))
+        self.ticked.emit()
 
     def set_plan(self, plan):
         self.beginResetModel()
@@ -95,6 +125,8 @@ class PlanModel(QAbstractTableModel):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.AccessibleTextRole and c == 0:
             return label_for(a)[1]
+        if role == Qt.CheckStateRole and c == 1 and can_apply(a):
+            return Qt.Unchecked if a.get(self.LEAVE_OUT) else Qt.Checked
         if role == Qt.UserRole:
             return a
         return None

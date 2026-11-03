@@ -1,0 +1,16 @@
+id = "roman-numerals"
+name = "Roman numerals"
+version = "1.0.0"
+api = 1
+author = "TagMender"
+description = "Adds $roman() for naming scripts, and can write the disc number of a box set in Roman numerals."
+license = "GPL-2.0-or-later"
+homepage = "https://github.com/herculepirate/tagmender/tree/main/contrib/plugin-example/roman-numerals"
+requires = []
+
+[[settings]]
+key = "disc_subtitle"
+label = "Roman disc numbers in Disc Subtitle"
+kind = "switch"
+default = false
+help = "An empty Disc Subtitle on a set of several discs becomes Disc I, Disc II, ..."

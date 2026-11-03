@@ -1047,6 +1047,12 @@ def main(argv=None):
         app_settings.load()
     except OSError:
         pass
+    try:                       # (the plugins switched on: one that fails is shown in Preferences › Plugins)
+        import plugins
+        plugins.load_enabled()
+    except Exception:
+        import logging
+        logging.getLogger("tagmender.plugins").exception("plugins were not loaded")
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setApplicationName(APP)
     app.setDesktopFileName("io.github.herculepirate.TagMender")

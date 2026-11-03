@@ -183,6 +183,55 @@ class Gui(te.Base):
         self.win.go("Jobs")
         self.shot("4-jobs")
 
+    def test_apply_only_the_ticked_albums_leave_out_and_remove_from_the_list(self):
+        ov = self.win.pages["Overview"]
+        ov.refresh_profiles()
+        ov.profile.setCurrentText("Auto")
+        ov.set_path(str(self.lib))
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.running, self.app), ov.summary.text())
+        names = lambda: [ov.model.data(ov.model.index(i, 1)).split(" — ")[0] for i in range(ov.model.rowCount())]
+        g = names().index("2005 - Album G")
+        idx = ov.model.index(g, 1)
+        self.assertEqual(ov.model.data(idx, Qt.CheckStateRole), Qt.Checked)      # (ticked: applied)
+        n = names().index("2005 - Album N [no vox]")
+        self.assertIsNone(ov.model.data(ov.model.index(n, 1), Qt.CheckStateRole))  # (nothing to apply: no box)
+        ov.model.setData(idx, Qt.Unchecked, Qt.CheckStateRole)                    # (left out)
+        self.app.processEvents()
+        self.assertEqual(ov.actionable(), 0)
+        self.assertFalse(ov.btn_apply.isEnabled())
+        ov.model.setData(idx, Qt.Checked, Qt.CheckStateRole)
+        self.assertEqual(ov.actionable(), 1)
+        # Remove from List: out of the preview, the folder untouched
+        ov.table.clearSelection()
+        ov.table.selectRow(ov.proxy.mapFromSource(ov.model.index(n, 0)).row())
+        before = (self.d2 / "01.flac").read_bytes()
+        ov.remove_selected()
+        self.assertEqual(names(), ["2005 - Album G"])
+        self.assertEqual((self.d2 / "01.flac").read_bytes(), before)
+        # Apply This Album on the selected row
+        ov.table.selectRow(0)
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=True):
+            ov.apply_selected()
+        self.assertTrue(wait(lambda: ov.plan is None and not ov.running, self.app), ov.summary.text())
+        self.assertEqual(tagio.read(self.d / "01.flac")["discogs_release_id"], ["920"])
+
+    def test_albums_left_out_stay_to_apply_later(self):
+        ov = self.win.pages["Overview"]
+        a1 = {"source_dir": "/x/A", "status": "ready", "files": [{"src": "/x/A/1.flac", "dst": "/x/A/1.flac",
+              "op": "tag", "changes": {"title": ["t"]}}], "conflicts": [], "identification": {}, "notes": []}
+        a2 = dict(a1, source_dir="/x/B", files=[dict(a1["files"][0], src="/x/B/1.flac", dst="/x/B/1.flac")])
+        ov.plan = {"albums": [a1, a2], "profile": "Auto"}
+        ov.model.set_plan(ov.plan)
+        ov.model.set_left_out([a1], True)
+        self.assertEqual(ov.to_apply(), [a2])
+        ov._applied_rows = [1]                                          # (what apply() gave the executor)
+        with mock.patch.object(ov.win, "show_run_report"), mock.patch.object(self.gui.overview, "notify"):
+            ov.applied({"job": "j1", "counts": {"done": 1}, "albums": [{"album": "/x/B", "index": 0,
+                                                                        "status": "done", "label": "Done"}]})
+        self.assertEqual((a1["status"], a2["status"]), ("ready", "done"))
+        self.assertIs(ov.plan["albums"][0], a1)                         # (the preview stays for A)
+        self.assertIn("1 album left to apply", ov.summary.text())
+
     def test_rules_page_lists_and_tests_rules(self):
         pr = self.win.pages["Profiles"]
         pr.list.setCurrentRow(0)                                       # (global rules)

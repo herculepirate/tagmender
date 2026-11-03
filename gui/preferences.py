@@ -27,13 +27,15 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, Q
 from . import i18n, icons, sheets, style
 from .common import _gui_prefs, _set_gui_pref, heading, plural, section, separator
 from .i18n import N_, tr
-from .rows import FolderField, Group, ListField, Popup, Row, Segmented, Switch
+from .rows import FolderField, Group, ListField, Popup, Row, Segmented, StatusLight, Switch
 from .work import start
 
 # (key, the tab's words, icon); the key is what show_tab() takes ("Checks" still opens Advanced)
 PANES = (("General", N_("General"), "settings-2"), ("Keys", N_("Keys"), "key-round"),
          ("Account", N_("Account"), "circle-user-round"), ("Network", N_("Network & Privacy"), "globe"),
-         ("Files", N_("File Safety"), "history"), ("Advanced", N_("Advanced"), "stethoscope"))
+         ("Files", N_("File Safety"), "history"), ("Advanced", N_("Advanced"), "stethoscope"),
+         ("Plugins", N_("Plugins"), "puzzle"))
+GUIDE = "https://github.com/herculepirate/tagmender/blob/main/docs/PLUGINS.md"
 PANE_ALIASES = {"Checks": "Advanced"}
 # Keep Undo Backups For: (days, words); 0 is for ever
 KEEP_CHOICES = ((7, N_("1 Week")), (30, N_("30 Days")), (90, N_("90 Days")), (0, N_("Forever")))
@@ -414,6 +416,172 @@ class FilesPane(SettingsPane):
             return
         if not self.save("duplicates.folder_name", name):
             self.dupes.setText(app_settings.duplicates_folder())
+
+
+class PluginsPane(SettingsPane):
+    """Plugins: what other people wrote to add to TagMender (plugins.py, docs/PLUGINS.md). Each
+    installed plugin with its light and switch, its settings, Remove; Install from File…."""
+
+    def __init__(self):
+        super().__init__(tr("Plugins"), tr("Plugins add script functions and tag changes written by other people. "
+                                           "A plugin runs with your permissions: install only ones you trust."))
+        tools = QHBoxLayout()
+        for text, name, slot in ((tr("Install from File…"), tr("Install a plugin from its .zip file"), self.install),
+                                 (tr("Open Plugins Folder"), tr("Show the folder plugins are kept in"), self.open_folder),
+                                 (tr("Plugin Guide"), tr("How plugins work and how to write one (online)"),
+                                  lambda: self._open_url(GUIDE))):
+            b = QPushButton(text)
+            b.setAccessibleName(name)
+            b.setAutoDefault(False)
+            b.clicked.connect(slot)
+            tools.addWidget(b)
+        tools.addStretch(1)
+        self.lay.addLayout(tools)
+        self.holder = QVBoxLayout()
+        self.holder.setSpacing(16)
+        self.lay.addLayout(self.holder)
+        self.finish()
+        self.reload()
+
+    @staticmethod
+    def _open_url(url):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
+
+    def reload(self):
+        import plugins
+        while self.holder.count():
+            w = self.holder.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        rows = plugins.installed()
+        if not rows:
+            g = Group(tr("Installed"), tr("No plugins installed. Install from File… adds one; the Plugin Guide "
+                                          "says how to write your own."))
+            self.holder.addWidget(g)
+            return
+        for pl in rows:
+            self.holder.addWidget(self._group(pl))
+
+    def _group(self, pl):
+        import plugins
+        g = Group(pl.name, pl.manifest.get("description", ""))
+        if pl.error:
+            state, words = "error", tr("Not working: {0}").format(pl.error)
+        elif pl.enabled and pl.loaded:
+            state, words = "ok", tr("On and working")
+        elif pl.enabled:
+            state, words = "warn", tr("On: it starts the next time TagMender opens")
+        else:
+            state, words = "off", tr("Off")
+        line = QWidget()
+        h = QHBoxLayout(line)
+        h.setContentsMargins(0, 0, 0, 0)
+        sw = Switch(tr("Use {0}").format(pl.name))
+        sw.setChecked(pl.enabled)
+        sw.setEnabled(not pl.manifest == {})                # (a folder that is no plugin cannot be switched on)
+        sw.clicked.connect(lambda on, pid=pl.id: self.switch(pid, on))
+        h.addWidget(sw)
+        rm = QPushButton(tr("Remove…"))
+        rm.setAccessibleName(tr("Remove {0}").format(pl.name))
+        rm.setAutoDefault(False)
+        rm.clicked.connect(lambda _=False, p_=pl: self.remove(p_))
+        h.addWidget(rm)
+        bits = [f"{tr('Version')} {pl.version}"] + ([pl.manifest["author"]] if pl.manifest.get("author") else [])
+        g.add(Row(pl.name, line, " · ".join(bits)))
+        light = StatusLight(state, words)                    # (its own line: an error's words can be long)
+        light.setWordWrap(True)
+        light.setContentsMargins(16, 0, 16, 8)
+        g.add_widget(light)
+        for spec in pl.manifest.get("settings", []):
+            g.add(self._setting_row(pl, spec, plugins))
+        return g
+
+    def _setting_row(self, pl, spec, plugins):
+        kind, key = spec.get("kind", "text"), spec["key"]
+        try:
+            value = plugins.setting_value(pl.id, spec)
+        except plugins.PluginError as exc:
+            value, problem = "", str(exc)
+        else:
+            problem = ""
+        if kind == "switch":
+            c = Switch(spec["label"])
+            c.setChecked(bool(value))
+            c.clicked.connect(lambda on, pid=pl.id, k=key: self.set_value(pid, k, bool(on)))
+        else:
+            c = QLineEdit("" if kind == "secret" else str(value or ""))
+            c.setAccessibleName(spec["label"])
+            if kind == "secret":
+                c.setEchoMode(QLineEdit.Password)
+                c.setPlaceholderText(tr("Saved on this computer") if value else tr("Not set"))
+                c.editingFinished.connect(lambda e=c, pid=pl.id, k=key: self.set_secret(pid, k, e))
+            else:
+                c.editingFinished.connect(lambda e=c, pid=pl.id, k=key: self.set_value(pid, k, e.text().strip()))
+        row = Row(spec["label"], c, spec.get("help", ""))
+        if problem:
+            row.set_problem(problem)
+        return row
+
+    def switch(self, pid, on):
+        import plugins
+        plugins.set_enabled(pid, on)
+        if on:
+            plugins.load_enabled()                           # (on now; off takes effect at the next start)
+        self.said.setText(tr("Switched on.") if on else tr("Switched off: it stops the next time TagMender opens."))
+        self.reload()
+
+    def set_value(self, pid, key, value):
+        import app_settings
+        allv = dict(app_settings.get("plugins.settings") or {})
+        allv[pid] = dict(allv.get(pid) or {}, **{key: value})
+        self.save("plugins.settings", allv)
+
+    def set_secret(self, pid, key, edit):
+        import plugins
+        text = edit.text().strip()
+        if text:
+            plugins.store_secret(pid, key, text)
+            edit.clear()
+            edit.setPlaceholderText(tr("Saved on this computer"))
+            self.said.setText(tr("Saved."))
+
+    def install(self):
+        import plugins
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, tr("Install a plugin"), str(Path.home()),
+                                               tr("Plugins (*.zip)"))
+        if not path:
+            return
+        try:
+            pl = plugins.install(path)
+        except (plugins.PluginError, OSError) as exc:
+            sheets.warning(self, tr("The plugin was not installed."), str(exc))
+            return
+        self.said.setText(tr("Installed {0}. It is off until you switch it on.").format(pl.name))
+        self.reload()
+
+    def remove(self, pl):
+        import plugins
+        if not sheets.confirm(self, tr("Remove the plugin “{0}”?").format(pl.name),
+                              tr("It is switched off and its folder is moved aside."),
+                              tr("It is kept in the plugins folder, under .removed, to bring it back."),
+                              tr("Remove Plugin"), destructive=True):
+            return
+        try:
+            plugins.remove(pl.id)
+        except (plugins.PluginError, OSError) as exc:
+            sheets.warning(self, tr("The plugin was not removed."), str(exc))
+            return
+        self.reload()
+
+    def open_folder(self):
+        import plugins
+        from .common import open_folder
+        d = plugins.plugins_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        open_folder(d)
 
 
 class KeysPane(QWidget):
@@ -925,8 +1093,10 @@ class Preferences(QMainWindow):
         self.network = NetworkPane()
         self.files = FilesPane(self)
         self.checks_pane = AdvancedPane(self)
+        self.plugins = PluginsPane()
         self.panes = {"General": self.general, "Keys": self.keys, "Account": self.account,
-                      "Network": self.network, "Files": self.files, "Advanced": self.checks_pane}
+                      "Network": self.network, "Files": self.files, "Advanced": self.checks_pane,
+                      "Plugins": self.plugins}
         group = QActionGroup(self)
         group.setExclusive(True)
         self.tabs = {}

@@ -104,7 +104,10 @@ class Shell(unittest.TestCase):
         for r in range(ov.proxy.rowCount()):
             a = ov.proxy.data(ov.proxy.index(r, 0), Qt.UserRole)
             if a["status"] == status and (tier is None or a["identification"].get("tier") == tier):
-                ov.table.selectRow(r)
+                # (that row alone: selectRow would follow Ctrl or Shift a key click left held)
+                from PySide6.QtCore import QItemSelectionModel
+                ov.table.selectionModel().setCurrentIndex(
+                    ov.proxy.index(r, 0), QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
                 settle(self.app)
                 return ov.selected()                                  # (the plan's own entry, not a copy)
         self.fail(f"no {status} album")
@@ -158,7 +161,8 @@ class Shell(unittest.TestCase):
                     "run_in_background"):
             self.assertIn(key, self.win.commands)
         prefs = self.win.preferences()
-        self.assertEqual(list(prefs.panes), ["General", "Keys", "Account", "Network", "Files", "Advanced"])
+        self.assertEqual(list(prefs.panes), ["General", "Keys", "Account", "Network", "Files", "Advanced",
+                                             "Plugins"])
         self.assertTrue(prefs.fields and prefs.checks is not None and prefs.anon is not None)
 
     def test_the_toolbar_has_one_prominent_button_and_it_is_apply(self):

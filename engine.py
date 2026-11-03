@@ -2330,12 +2330,16 @@ class Engine:
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
 
-    def proposals(self, path, progress=None, cancel=None):
+    def proposals(self, path, progress=None, cancel=None, only=None):
+        """The albums in PATH, each identified; only: the group_key()s of the albums to look up
+        (List first's Look Up), the others left out."""
         groups = self.albums_in(path)
         per_folder = {}
         for g in groups:
             k = os.path.realpath(str(g.folder))
             per_folder[k] = per_folder.get(k, 0) + 1
+        if only is not None:
+            groups = [g for g in groups if group_key(g.folder, g.files) in only]
         out = []
         for i, g in enumerate(groups):
             if cancel and cancel():
@@ -2354,14 +2358,32 @@ class Engine:
                                             status="unresolved", reason=f"error: {exc}", reason_codes=["other"]))
         return out
 
-    def plan(self, path, progress=None, cancel=None) -> dict:
-        props = self.proposals(path, progress, cancel)
+    def listing(self, path) -> dict:
+        """The albums PATH holds, not looked up yet (List first): a plan whose albums are
+        "listed" - nothing is asked of any database and nothing can be applied."""
+        albums = []
+        for g in self.albums_in(path):
+            files = sorted(str(f) for f in g.files)
+            albums.append({"source_dir": str(g.folder), "status": "listed", "label": "", "rule": None,
+                           "identification": {"status": "listed"}, "release": {}, "files": [],
+                           "companions": [], "artwork": None, "conflicts": [], "skipped": [], "notes": [],
+                           "album_files": files, "key": group_key(g.folder, g.files)})
+        return {"job": self.job, "profile": getattr(self.profile, "name", ""),
+                "operation": self.profile["operation"], "listed": True, "albums": albums, "provider_notes": {}}
+
+    def plan(self, path, progress=None, cancel=None, only=None) -> dict:
+        props = self.proposals(path, progress, cancel, only=only)
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))],
                           edits=getattr(self, "edits", None))
         # (not kept in self.notes: those become every later album's provider errors)
         p["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
         return p
+
+
+def group_key(folder, files) -> str:
+    """One album of a folder, as List first names it: its folder and its files."""
+    return "|".join([os.path.realpath(str(folder))] + sorted(os.path.realpath(str(f)) for f in files))
 
 
 # A review or a "no match" may still have an established album (an error is retried instead)

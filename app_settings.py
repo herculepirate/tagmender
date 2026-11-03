@@ -57,6 +57,9 @@ DEFAULTS = {
     # General
     "library_folder": "",             # "" = the system Music folder
     "default_profile": "last",        # last | builtin | a profile's name
+    # a folder added (dropped, Add Folder): look its albums up at once, or list them first and
+    # look up the ones you choose (Look Up)
+    "add_folder": "look_up",          # look_up | list
     "appearance": {"accent": "teal", "text_size": "default"},
     "player": {"skip_seconds": 10},
     # Notifications (only while the window is in the background)
@@ -108,6 +111,7 @@ CHOICES = {
     "appearance.accent": ("teal", "blue", "graphite", "system"),
     "appearance.text_size": ("small", "default", "large", "larger"),
     "media_server.rescan": ("none", "navidrome", "lms", "jellyfin", "plex"),
+    "add_folder": ("look_up", "list"),
     "ocr.effort": ("quick", "standard", "thorough"),
 }
 KEEP_DAYS = (0, 7, 30, 90)

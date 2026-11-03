@@ -48,6 +48,7 @@ STATUS = {
     "blocked": ("✕", N_("Blocked"), LIGHT["error"], DARK["error"], "circle-x"),
     "failed": ("✕", N_("Failed"), LIGHT["error"], DARK["error"], "circle-x"),
     "conflict": ("✕", N_("Changed since preview"), LIGHT["error"], DARK["error"], "circle-x"),
+    "listed": ("○", N_("Not looked up"), LIGHT["ignored"], DARK["ignored"], "circle-dot"),
 }
 
 # identification tiers below an exact release (plan.TIERS), as the status column shows them

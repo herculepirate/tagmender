@@ -232,6 +232,45 @@ class Gui(te.Base):
         self.assertIs(ov.plan["albums"][0], a1)                         # (the preview stays for A)
         self.assertIn("1 album left to apply", ov.summary.text())
 
+    def test_list_first_then_look_up_the_albums_you_choose(self):
+        import app_settings
+        app_settings.set_value("add_folder", "list")
+        self.addCleanup(app_settings.set_value, "add_folder", "look_up")
+        ov = self.win.pages["Overview"]
+        ov.refresh_profiles()
+        ov.profile.setCurrentText("Auto")
+        ov.set_path(str(self.lib))
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.running, self.app), ov.summary.text())
+        self.assertTrue(ov.plan.get("listed"))
+        words = {ov.model.data(ov.model.index(i, 1)).split(" — ")[0]: ov.model.data(ov.model.index(i, 0))
+                 for i in range(ov.model.rowCount())}
+        self.assertEqual(set(words.values()), {"Not looked up"})
+        self.assertIn("not looked up yet", ov.summary.text())
+        self.assertEqual(ov.actionable(), 0)                             # (nothing to apply yet)
+        g = next(i for i in range(ov.proxy.rowCount())
+                 if ov.proxy.data(ov.proxy.index(i, 1)).startswith("2005 - Album G"))
+        ov.table.selectRow(g)
+        self.app.processEvents()                                         # (the inspector shows a listed album)
+        ov.look_up("profile")
+        self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())
+        by = {a["source_dir"]: a["status"] for a in ov.plan["albums"]}
+        self.assertEqual(by[str(self.d)], "ready")
+        self.assertEqual(by[str(self.d2)], "listed")                    # (the other: still not looked up)
+        self.assertEqual(ov.actionable(), 1)
+
+    def test_look_up_sources_are_the_profiles_or_one_alone(self):
+        from gui.overview import profile_for
+        prof = pf.from_dict({"name": "P"})
+        was = prof["source"]
+        self.assertIs(profile_for(prof, "profile"), prof)
+        self.assertEqual(profile_for(prof, "discogs")["source"], "discogs_only")
+        self.assertEqual(profile_for(prof, "musicbrainz")["source"], "musicbrainz_only")
+        web = profile_for(prof, "web")
+        self.assertFalse(web["providers"]["musicbrainz"]["identify"])
+        self.assertFalse(web["providers"]["discogs"]["identify"])
+        self.assertTrue(web["providers"]["web"]["enabled"])
+        self.assertEqual(prof["source"], was)                           # (the profile itself unchanged)
+
     def test_rules_page_lists_and_tests_rules(self):
         pr = self.win.pages["Profiles"]
         pr.list.setCurrentRow(0)                                       # (global rules)

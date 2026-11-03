@@ -245,6 +245,14 @@ class GeneralPane(SettingsPane):
         lib.add(Row(tr("Folder choosers open in"), self.music,
                     tr("Only where Choose Folder… windows start. It changes nothing in your music, and it is not "
                        "where music is copied: that is each profile's library folder.")))
+        self.adding = _popup(tr("When you add a folder"), (("look_up", N_("Look its albums up at once")),
+                                                           ("list", N_("List its albums first"))),
+                             data.get("add_folder", "look_up"))
+        self.adding.currentIndexChanged.connect(lambda _i: self.save("add_folder", self.adding.currentData(),
+                                                                     self.adding))
+        lib.add(Row(tr("When you add a folder"), self.adding,
+                    tr("List first: the albums are shown without asking any database; select some and choose "
+                       "Look Up (all sources, MusicBrainz, Discogs or the web), or Preview for all of them.")))
         self.skip = _popup(tr("Skip by"), ((5, N_("5 seconds")), (10, N_("10 seconds")), (15, N_("15 seconds"))),
                            (data.get("player") or {}).get("skip_seconds", 10))
         self.skip.currentIndexChanged.connect(lambda _i: self.save("player.skip_seconds", self.skip.currentData(),

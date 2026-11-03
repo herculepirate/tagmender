@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout
 from . import icons, setup, sheets
 from .common import (album_words, counts_by_label, counts_text, ex, heading, left_header, load_profile, notify,
                      pf, planmod, plural, popup_menu, profile_names)
-from .i18n import tr
+from .i18n import N_, tr
 from .work import start
 from .models import PlanModel, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
@@ -35,6 +35,38 @@ def run_report(plan, res):
         return None
     rep["job"], rep["started"] = res.get("job") or rep["job"], time.time()
     return rep
+
+
+# Look Up's sources (List first): the profile's, or one of them alone
+LOOK_UP = (("profile", N_("With the Profile's Sources")), ("musicbrainz", N_("MusicBrainz Only")),
+           ("discogs", N_("Discogs Only")), ("web", N_("The Web Only (store and encyclopaedia pages)")))
+
+
+def _list_first() -> bool:
+    """Preferences › General › When you add a folder: List its albums first."""
+    try:
+        import app_settings
+        return app_settings.get("add_folder") == "list"
+    except Exception:
+        return False
+
+
+def profile_for(prof, mode):
+    """PROF as Look Up uses it: as it is ("profile"), or asking only MusicBrainz, only Discogs, or
+    no database but the web (its store and encyclopaedia pages)."""
+    if mode == "profile":
+        return prof
+    import copy
+    d = copy.deepcopy(prof.data)
+    prov = d.setdefault("providers", {})
+    if mode in ("musicbrainz", "discogs"):
+        d["source"] = f"{mode}_only"
+        prov.setdefault(mode, {}).update(enabled=True, identify=True)
+    elif mode == "web":
+        for n in ("musicbrainz", "discogs"):
+            prov.setdefault(n, {})["identify"] = False
+        prov.setdefault("web", {})["enabled"] = True
+    return pf.from_dict(d)
 
 
 class Overview(QWidget):
@@ -180,8 +212,14 @@ class Overview(QWidget):
         chosen = self.selected_albums()
         if chosen:                                     # (what Apply does with the selected rows)
             from PySide6.QtGui import QAction
+            from PySide6.QtWidgets import QMenu
             n = len(chosen)
-            mine = []
+            look = QMenu(tr("Look Up"), self)
+            for mode, words in LOOK_UP:
+                act = look.addAction(tr(words))
+                act.triggered.connect(lambda _=False, m=mode: self.look_up(m))
+            look.setEnabled(not self.running)
+            mine = [look.menuAction()]
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
                                     self.apply_selected, any(can_apply(a) for a in chosen) and not self.running),
                                    (tr("Leave Out of Apply"), lambda: self.leave_out(True),
@@ -267,8 +305,83 @@ class Overview(QWidget):
         self.model.set_plan(None)
         self.detail.clear()
         self.busy(False)
-        self.preview()
+        if not self.forced and _list_first():
+            self.list_albums()                              # (looked up when you choose: Look Up)
+        else:
+            self.preview()
         return True
+
+    # ---- List first: the albums shown, looked up when you choose ---------------------------
+    def list_albums(self):
+        """The folder's albums, not looked up yet: nothing is asked of any database."""
+        try:
+            prof = load_profile(self.profile.currentText())
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("This profile cannot be used."), str(exc))
+            return
+        path = self.path
+
+        def work(_w):
+            import engine
+            return engine.Engine(prof).listing(path)
+        self.busy(True)
+        self.summary.setText(tr("Finding the albums… nothing is looked up yet."))
+        self.worker = start(self, work, self.listed, self.progress, self.oops)
+
+    def listed(self, plan):
+        self.plan = plan
+        self.views.setCurrentWidget(self.results)
+        self.win.place_inspector()
+        self.model.set_plan(plan)
+        self.fit_status()
+        self.busy(False)
+        n = len(plan["albums"])
+        self.summary.setText(tr("{0} found, not looked up yet. Select albums and choose Look Up (right-click), "
+                                "or Preview to look them all up.").format(plural(n, tr("album"), tr("albums"))))
+        if self.proxy.rowCount():
+            self.table.selectRow(0)
+
+    def look_up(self, mode="profile", albums=None):
+        """Look up the selected albums (or ALBUMS) with the profile's sources, or only
+        MusicBrainz, only Discogs, or only the web; what they find replaces their rows."""
+        import engine
+        chosen = albums if albums is not None else self.selected_albums()
+        if not chosen or self.running or not self.path:
+            return
+        try:
+            prof = profile_for(load_profile(self.profile.currentText()), mode)
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("This profile cannot be used."), str(exc))
+            return
+        keys = {a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or []) for a in chosen}
+        path, ocr, edits = self.path, self.ocr.isChecked(), self.win.inspector.edits_for_preview()
+
+        def work(w):
+            e = engine.Engine(prof, ocr=True if ocr else None)
+            e.edits = edits
+            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys)
+        self.busy(True)
+        self.summary.setText(tr("Looking up {0}… nothing is changed while previewing.").format(
+            plural(len(keys), tr("album"), tr("albums"))))
+        self.worker = start(self, work, lambda plan: self.looked_up(plan, keys), self.progress, self.oops)
+
+    def looked_up(self, new, keys):
+        """The albums looked up take the places of their rows; the others stay as they were."""
+        import engine
+        found = list(new["albums"])
+        out, placed = [], False
+        for a in (self.plan or {}).get("albums") or []:
+            k = a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])
+            if k in keys:
+                if not placed:                             # (where the first of them was)
+                    out += found
+                    placed = True
+                continue
+            out.append(a)
+        if not placed:
+            out += found
+        self.plan = dict(new, albums=out, listed=any(a["status"] == "listed" for a in out))
+        self.planned(self.plan)
 
     def preview_release(self, folder, ref, files=None, only=False) -> bool:
         """Preview the album in `folder` with the release `ref` (a MusicBrainz ID or

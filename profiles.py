@@ -271,7 +271,9 @@ DEFAULTS = {
     # covers_name; misc - rip logs, notes and checksums into misc_name (cue sheets and playlists
     # stay beside the audio they name); where - "disc": each disc folder of a set gets its own,
     # "album": one for the whole album, a folder per disc inside it
-    "subfolders": {"covers": False, "covers_name": "Artwork", "misc": False, "misc_name": "Extras", "where": "album"},
+    # covers: the album's pictures and scan folders gathered in one folder (Artwork); the front
+    # cover stays beside the music (tidy.py)
+    "subfolders": {"covers": True, "covers_name": "Artwork", "misc": False, "misc_name": "Extras", "where": "album"},
     # max_album_words: the album folder's name cut to this many words (0: the full title)
     # compat windows: names every system and NAS share takes; fat (with windows): a USB stick
     # or car player too - paths of at most 255 characters on the stick
@@ -334,6 +336,7 @@ V2_BEHAVIOUR = {
     "companions": COMPANIONS_V2,
     "subfolders.where": "disc",
     "dates.date_tag": "tagger",
+    "subfolders.covers": False,                   # (on by default since; such a profile kept it off)
     "subfolders.covers_name": "covers",
     "subfolders.misc_name": "misc",
     "filenames.max_album_words": 5,

@@ -2372,7 +2372,7 @@ class Engine:
                 "operation": self.profile["operation"], "listed": True, "albums": albums, "provider_notes": {}}
 
     def plan(self, path, progress=None, cancel=None, only=None) -> dict:
-        props = self.proposals(path, progress, cancel, only=only)
+        props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))],
                           edits=getattr(self, "edits", None))

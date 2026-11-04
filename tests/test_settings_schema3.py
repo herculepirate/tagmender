@@ -235,7 +235,8 @@ class KeepV2Behaviour(Base):
         self.assertEqual(d["version"], 3)
         self.assertEqual(d["naming"]["preset"], "tagmender")
         self.assertEqual(d["artwork"]["artist"], {"file": "", "embed": True})    # (enabled: the default now)
-        self.assertEqual(d["subfolders"], {"covers_name": "covers", "misc_name": "misc", "where": "disc"})
+        self.assertEqual(d["subfolders"], {"covers": False, "covers_name": "covers", "misc_name": "misc",
+                                           "where": "disc"})          # (pictures stayed where they were)
         self.assertEqual(d["filenames"]["max_album_words"], 5)
         self.assertEqual(pf.load("Main").to_dict(), pf.from_dict(pf.raw("Main")).to_dict())
         self.assertEqual(pf.migrate("Main"), (False, None))            # once

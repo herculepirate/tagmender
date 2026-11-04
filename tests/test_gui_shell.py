@@ -70,6 +70,7 @@ class Shell(unittest.TestCase):
     def setUp(self):
         self.gui.common._set_gui_pref("reduce_motion", True)
         self.gui.sheets.shown.clear()
+        __import__("app_settings").set_value("add_folder", "look_up")   # (these drop a folder to look it up)
         self.win = self.gui.Main()
         self.win.resize(1180, 760)
         self.win.show()
@@ -945,7 +946,7 @@ class Shell(unittest.TestCase):
         self.assertFalse(self.win.act("delete_rule").isEnabled())
         self.assertEqual(self.gui.actions.plain(self.win.act("delete_rule").text()), "Remove Rule…")
         self.assertIn("Remove Rule…", [b.text() for b in pr.rule_btns.values()])
-        self.assertEqual(pr.picard_btn.text(), "Tagging Script…")
+        self.assertEqual(pr.picard_btn.text(), "Edit Naming Script…")
         self.assertEqual(pr.editor.label_of("operation"), "What happens to files")
 
     def test_remove_condition_removes_the_one_chosen(self):

@@ -58,6 +58,7 @@ ISSUES = "https://github.com/herculepirate/tagmender/issues"
 # its 220 and the inspector its 280, with room for the two hairlines between them
 CONTENT_MIN = 456
 _styled = False
+WINDOW_PREF = "window"                                # gui.json: the window's size and place, as last left
 CD_DRIVE_PREF = "cd_drive"                             # gui.json: the drive Look Up CD reads ("" libdiscid's)
 
 
@@ -963,8 +964,40 @@ class Main(QMainWindow):
             QWidget.setTabOrder(last, w)
             last = w
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_fitted", False):              # (once: the first time it is shown)
+            self._fitted = True
+            self.fit_to_screen()
+
+    def fit_to_screen(self):
+        """The window as last left (else 1180 × 760), never larger than the screen's free area, so
+        every control and the status bar are in view; centred unless a place was kept."""
+        scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        deco_w = max(0, self.frameGeometry().width() - self.geometry().width())
+        deco_h = max(0, self.frameGeometry().height() - self.geometry().height()) or 32
+        room_w, room_h = scr.width() - deco_w, scr.height() - deco_h
+        if room_w < self.minimumWidth() or room_h < self.minimumHeight():   # (a small screen: what fits)
+            self.setMinimumSize(min(self.minimumWidth(), room_w), min(self.minimumHeight(), room_h))
+        kept = _gui_prefs().get(WINDOW_PREF) or {}
+        w = min(int(kept.get("w") or 1180), room_w)
+        h = min(int(kept.get("h") or 760), room_h)
+        self.resize(max(w, self.minimumWidth()), max(h, self.minimumHeight()))
+        x, y = kept.get("x"), kept.get("y")
+        if not isinstance(x, int) or not isinstance(y, int) or not scr.contains(x + 40, y + 40):
+            x = scr.x() + (scr.width() - self.frameGeometry().width()) // 2
+            y = scr.y() + (scr.height() - self.frameGeometry().height()) // 2
+        x = min(max(x, scr.x()), scr.right() - self.frameGeometry().width() + 1)
+        y = min(max(y, scr.y()), scr.bottom() - self.frameGeometry().height() + 1)
+        self.move(x, y)
+        if kept.get("max"):
+            self.showMaximized()
+
     def save_state(self):
         """Only widths the person dragged to: one squeezed to fit a small window is not kept."""
+        g = self.normalGeometry() if self.isMaximized() else self.geometry()
+        _set_gui_pref(WINDOW_PREF, {"w": g.width(), "h": g.height(), "x": self.x(), "y": self.y(),
+                                    "max": bool(self.isMaximized())})
         if self.nav.isVisible() and self._nav_dragged:
             _set_gui_pref("sidebar_width", self.nav.width())
         if self.inspector.isVisible() and self._fit_width is not None \

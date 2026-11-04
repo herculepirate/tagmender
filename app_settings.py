@@ -59,7 +59,7 @@ DEFAULTS = {
     "default_profile": "last",        # last | builtin | a profile's name
     # a folder added (dropped, Add Folder): look its albums up at once, or list them first and
     # look up the ones you choose (Look Up)
-    "add_folder": "look_up",          # look_up | list
+    "add_folder": "list",             # list | look_up
     "appearance": {"accent": "teal", "text_size": "default"},
     "player": {"skip_seconds": 10},
     # Notifications (only while the window is in the background)

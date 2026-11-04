@@ -50,6 +50,7 @@ class Gui(te.Base):
     def setUp(self):
         super().setUp()
         self.d = self.album("Band G", "Album G")
+        __import__("app_settings").set_value("add_folder", "look_up")   # (these drop a folder to look it up)
         self.d2 = self.album("Band N", "Album N [no vox]")
         self.http = te.FakeHttp(dg=[te.dg_release(920, "Band G", "Album G"),
                                     te.dg_release(921, "Band N", "Album N [no vox]")])
@@ -330,9 +331,8 @@ class Gui(te.Base):
         pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Ed"))
         self.app.processEvents()
         self.assertEqual((pr.editions.currentData(), pr.album_editions.currentData()), ("off", "off"))
-        self.assertFalse(pr.picard_btn.isEnabled())
+        self.assertTrue(pr.picard_btn.isEnabled())                       # (the naming script: always editable)
         pr.editions.setCurrentIndex(pr.editions.findData("edition_year"))
-        self.assertTrue(pr.picard_btn.isEnabled())
         self.assertIn("$if(%_edition%, [%_edition%])", pr.picard_script_text())
         pr.album_editions.setCurrentIndex(pr.album_editions.findData("edition"))
         self.assertIn("$set(album,%album% [%_edition%])", pr.picard_script_text())

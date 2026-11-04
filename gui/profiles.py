@@ -243,7 +243,7 @@ class Profiles(QWidget):
         self.editor = ProfileEditor(self)
         self.editor.edited.connect(self.changed)
         self.editor.open_rules.connect(lambda: self.tabs.setCurrentIndex(1))
-        self.editor.open_script.connect(self.show_picard_script)
+        self.editor.open_script.connect(self.edit_script)     # (Script Editor: editable, a live preview)
         tl.addWidget(self.editor, 1)
         tl.addWidget(separator())
         srow = QHBoxLayout()
@@ -712,6 +712,14 @@ class Profiles(QWidget):
         except AttributeError:
             tpl = ""
         return naming.tagscript(self.editions.currentData(), self.album_editions.currentData(), tpl)
+
+    def edit_script(self):
+        """The profile's naming script in Script Editor, where it is edited with a live preview
+        (the script for another tagger stays under Tools > Tagging Script for This Profile…)."""
+        if self.win is None or not self.shown_name or not self.may_leave():
+            return
+        from . import script_editor
+        script_editor.open_editor(self.win, self.shown_name, None)
 
     def show_picard_script(self):
         text = self.picard_script_text()

@@ -38,8 +38,8 @@ def run_report(plan, res):
 
 
 # Look Up's sources (List first): the profile's, or one of them alone
-LOOK_UP = (("profile", N_("With the Profile's Sources")), ("musicbrainz", N_("MusicBrainz Only")),
-           ("discogs", N_("Discogs Only")), ("web", N_("The Web Only (store and encyclopaedia pages)")))
+LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz", N_("MusicBrainz only")),
+           ("discogs", N_("Discogs only")), ("web", N_("Web only")))
 
 
 def _list_first() -> bool:
@@ -120,6 +120,30 @@ class Overview(QWidget):
         ch.clicked.connect(lambda: self.drop.choose())
         sl.addWidget(ch)
         rl.addWidget(strip)
+        # which databases to ask, and the button that asks them (nothing is looked up on a drop)
+        look = QHBoxLayout()
+        look.setContentsMargins(0, 0, 0, 0)
+        look.addWidget(QLabel(tr("Sources")))
+        from .rows import Popup
+        from PySide6.QtWidgets import QComboBox
+        self.sources = Popup()
+        self.sources.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.sources.setMinimumContentsLength(14)            # (a narrow window: the words cut, the list whole)
+        self.sources.setAccessibleName(tr("Sources to look up with"))
+        self.sources.setToolTip(tr("Which databases Look Up and Preview ask: the profile's own choice, or "
+                                   "MusicBrainz, Discogs or the web (store and encyclopaedia pages) alone"))
+        for mode, words in LOOK_UP:
+            self.sources.addItem(tr(words), mode)
+        look.addWidget(self.sources)
+        self.look_btn = QPushButton(tr("Look Up"))
+        self.look_btn.setAccessibleName(tr("Look up the selected albums, or all of them"))
+        self.look_btn.setToolTip(tr("Looks up the selected albums, or every album when none is selected, with "
+                                    "the sources chosen beside it. Nothing is written until you apply."))
+        self.look_btn.clicked.connect(self.look_up_clicked)
+        look.addWidget(self.look_btn)
+        look.addStretch(1)
+        rl.addLayout(look)
+        self.profile.currentTextChanged.connect(lambda _t: self.name_profile_sources())
         # what the preview did without, because a key, login or program is missing (Open Setup: its row)
         self.setup_note = QLabel("")
         self.setup_note.setProperty("role", "hint")
@@ -182,7 +206,7 @@ class Overview(QWidget):
 
     # page widths under which lower-priority columns give way (the inspector shows them all):
     # Why under 860 px (1280 px with the inspector open), Source and Score under 600 (960 px)
-    NARROW = {5: 860, 2: 600, 3: 600}
+    NARROW = {5: 860, 3: 600, 2: 420}                  # (Source stays longest: which database said it)
     STATUS_MOST = 150                                 # under 600 px the Status column is cut ("Changed sin…",
                                                       # the whole word in its tooltip): the artist stays in view
 
@@ -341,6 +365,36 @@ class Overview(QWidget):
         if self.proxy.rowCount():
             self.table.selectRow(0)
 
+    def look_up_clicked(self):
+        """Look Up: the selected albums, or all of them, with the sources chosen beside it."""
+        mode = self.sources.currentData() or "profile"
+        chosen = self.selected_albums() if self.table.selectionModel().hasSelection() and \
+            len(self.selected_albums()) < len((self.plan or {}).get("albums") or []) else None
+        if self.plan and chosen:
+            self.look_up(mode, chosen)
+        elif self.plan:
+            self.look_up(mode, list(self.plan["albums"]))
+        elif self.path:
+            self.preview()
+
+    def name_profile_sources(self):
+        """The first choice of Look up with says what the profile's sources are."""
+        if hasattr(self, "sources"):
+            words = self.sources_words("profile")
+            self.sources.setItemText(0, words[:1].upper() + words[1:])
+
+    def sources_words(self, mode=None) -> str:
+        mode = mode or self.sources.currentData() or "profile"
+        if mode == "profile":
+            from .profile_editor import SOURCE_WORDS
+            try:
+                src = load_profile(self.profile.currentText())["source"]
+            except Exception:
+                src = ""
+            return tr("{0} (profile)").format(tr(SOURCE_WORDS.get(src, src)) or "?")
+        return {"musicbrainz": tr("MusicBrainz only"), "discogs": tr("Discogs only"),
+                "web": tr("the web only (store and encyclopaedia pages)")}.get(mode, mode)
+
     def look_up(self, mode="profile", albums=None):
         """Look up the selected albums (or ALBUMS) with the profile's sources, or only
         MusicBrainz, only Discogs, or only the web; what they find replaces their rows."""
@@ -361,8 +415,9 @@ class Overview(QWidget):
             e.edits = edits
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys)
         self.busy(True)
-        self.summary.setText(tr("Looking up {0}… nothing is changed while previewing.").format(
-            plural(len(keys), tr("album"), tr("albums"))))
+        self.looked_with = self.sources_words(mode)
+        self.summary.setText(tr("Looking up {0} with {1}… nothing is changed while previewing.").format(
+            plural(len(keys), tr("album"), tr("albums")), self.looked_with))
         self.worker = start(self, work, lambda plan: self.looked_up(plan, keys), self.progress, self.oops)
 
     def looked_up(self, new, keys):
@@ -461,11 +516,13 @@ class Overview(QWidget):
     def preview(self):
         if not self.path:
             return
+        mode = self.sources.currentData() or "profile"
         try:
-            prof = load_profile(self.profile.currentText())
+            prof = profile_for(load_profile(self.profile.currentText()), mode)   # (Look up with: its choice)
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
+        self.looked_with = self.sources_words(mode)
         path, ocr, forced = self.path, self.ocr.isChecked(), dict(self.forced)
         edits = self.win.inspector.edits_for_preview()     # (your edits from the inspector: kept)
 
@@ -476,7 +533,7 @@ class Overview(QWidget):
             e.edits = edits
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled)
         self.busy(True)
-        self.summary.setText(tr("Identifying… nothing is changed while previewing."))
+        self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))
         self.worker = start(self, work, self.planned, self.progress, self.oops)
 
     def planned(self, plan):
@@ -503,7 +560,9 @@ class Overview(QWidget):
         self.setup_note.setAccessibleName(" ".join(t for _i, t in said))
         self.setup_note.setVisible(bool(said))
         # (counted as the rows name them: an album shown "Ignored" is not "Excluded" here)
-        self.summary.setText(counts_by_label(plan["albums"]) + (f"   ({notes})" if notes else ""))
+        said_with = getattr(self, "looked_with", "")
+        self.summary.setText(counts_by_label(plan["albums"]) + (f"   ({notes})" if notes else "") +
+                             (tr(" Looked up with {0}.").format(said_with) if said_with else ""))
 
     def edited(self, album):
         """Your edit in the inspector changed an album of the preview: its row, the counts and Apply."""

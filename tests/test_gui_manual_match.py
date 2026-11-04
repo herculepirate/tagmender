@@ -355,6 +355,7 @@ class Sheet(unittest.TestCase):
         ex.CONFIG_DIR, ex.STATE_DIR = self.tmp / "config", self.tmp / "state"
         ex._write(ex.rules_file(), {"rules": []})
         logsetup.reset()
+        __import__("app_settings").set_value("add_folder", "look_up")   # (these drop a folder to look it up)
         self.lib = self.tmp / "lib"
         self.album = self.lib / "Band" / "Alpha"
         # (the files' own numbers are the wrong way round: the plan pairs them so)

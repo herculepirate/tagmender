@@ -158,7 +158,7 @@ class ChooserSheet(unittest.TestCase):
             time.sleep(0.02)
         self.assertEqual(dlg.grid.count(), 2)
         self.assertEqual(dlg.chosen().source, "Scans/Front.jpg")           # (the big front first)
-        self.assertFalse(dlg.ai.isEnabled())                              # (no image service key)
+        self.assertTrue(dlg.ai_missing)                                   # (no image service key: it says so)
         dlg.use()
         what, data, source = insp.fetched
         self.assertEqual((what, source), ("Scans/Front.jpg", "chosen:own:Scans/Front.jpg"))

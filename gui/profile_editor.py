@@ -990,8 +990,8 @@ class ProfileEditor(QScrollArea):
                 self.preview.setAccessibleName(tr("Example"))
                 self.preview.setTextFormat(Qt.RichText)
                 g.add_widget(self.preview)
-                self.picard_btn = QPushButton(tr("Tagging Script…"))
-                self.picard_btn.setAccessibleName(tr("Tagging script for this profile"))
+                self.picard_btn = QPushButton(tr("Edit Naming Script…"))
+                self.picard_btn.setAccessibleName(tr("Edit this profile's naming script, with a live preview"))
                 self.picard_btn.setAutoDefault(False)
                 self.picard_btn.clicked.connect(self.open_script.emit)
                 g.add_widget(self.picard_btn).layout().setAlignment(self.picard_btn, Qt.AlignLeft)
@@ -1330,7 +1330,7 @@ class ProfileEditor(QScrollArea):
                                                       .format(long[0])))
         self.preview.setText(text)
         self.preview.setAccessibleDescription(self.preview.text())
-        self.picard_btn.setEnabled(vals.get("naming.editions") != "off" or vals.get("naming.album_editions") != "off")
+        self.picard_btn.setEnabled(True)                     # (the naming script: always yours to edit)
         try:
             import app_settings
             days = app_settings.get("backups.keep_days", 30)

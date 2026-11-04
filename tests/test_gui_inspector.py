@@ -70,6 +70,7 @@ class Base(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="tm-insp-"))
         self.saved = (ex.CONFIG_DIR, ex.STATE_DIR)
         ex.CONFIG_DIR, ex.STATE_DIR = self.tmp / "config", self.tmp / "state"
+        __import__("app_settings").set_value("add_folder", "look_up")   # (these drop a folder to look it up)
         ex._write(ex.rules_file(), {"rules": []})
         logsetup.reset()
         self.lib = self.tmp / "lib"
@@ -316,6 +317,7 @@ class InspectorEditing(Base):
     def setUp(self):
         super().setUp()
         self.gui.common._set_gui_pref("reduce_motion", True)
+        __import__("app_settings").set_value("add_folder", "look_up")   # (these drop a folder to look it up)
         self.gui.sheets.shown.clear()
         self.win = self.gui.Main()
         self.win.resize(1180, 760)

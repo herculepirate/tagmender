@@ -144,11 +144,27 @@ class CoverChooser(QDialog):
             why = covers_ai.not_ready()
         except ImportError:
             why = tr("not available in this version")
-        self.ai.setEnabled(not why)
+        self.ai_missing = why                             # (clickable all the same: it says what to set up)
+        self.ai.setEnabled(True)
         self.ai.setToolTip(tr("Needs: {0}").format(why) if why else
                            tr("One cover per preset: Faithful, Creative, Art and Era"))
 
     def make_ai(self):
+        if getattr(self, "ai_missing", ""):
+            ans = sheets.ask(self, tr("AI covers need an image service"),
+                             tr("AI covers are made by an image service of your own, such as OpenAI's "
+                                "(platform.openai.com/api-keys): paste its key under Preferences › Keys › AI "
+                                "covers. Each cover is a request it may charge for. A Tavily key (Keys › Web "
+                                "search) adds the Creative and Art presets, which need reference images."),
+                             buttons=(tr("Cancel"), tr("Open Preferences")), default=tr("Open Preferences"))
+            if ans == tr("Open Preferences"):
+                win = self.inspector.window()
+                if hasattr(win, "preferences"):
+                    self.reject()
+                    prefs = win.preferences()
+                    if hasattr(prefs, "show_tab"):
+                        prefs.show_tab("Keys")
+            return
         import covers_ai
         import covers_find
         _ids, artist, title = covers_find.ids_of(self.album)

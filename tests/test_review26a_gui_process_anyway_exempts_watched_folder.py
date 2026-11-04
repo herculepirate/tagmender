@@ -63,6 +63,7 @@ class ProcessAnywayLooseTracks(te.Base):
 
     def setUp(self):
         super().setUp()
+        __import__("app_settings").set_value("add_folder", "look_up")   # (these drop a folder to look it up)
         self.inbox, self.dest = self.tmp / "inbox", self.tmp / "library"
         self.inbox.mkdir()
         self.dest.mkdir()

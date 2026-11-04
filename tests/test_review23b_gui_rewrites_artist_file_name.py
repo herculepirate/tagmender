@@ -37,8 +37,7 @@ class GuiArtistFile(unittest.TestCase):
             app.processEvents()
             pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Art"))
             app.processEvents()
-            if hasattr(pr, "art_artist_file"):          # (the previous version has no such box)
-                self.assertTrue(pr.art_artist_file.isChecked())
+            self.assertEqual(pr.editor.value("artwork.artist.enabled"), "both")      # (the file, and each track)
             pr.save()                                   # (nothing changed)
             self.assertEqual(c.pf.load("Art")["artwork"]["artist"].get("file"), "artist.jpeg")
         finally:

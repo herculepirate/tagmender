@@ -88,23 +88,21 @@ class Editor(Base):
         lib, aside = self.tmp / "lib", self.tmp / "aside"
         lib.mkdir()
         aside.mkdir()
-        changes = {"skip_folders": ["#recycle", "Downloads"],              # Source
+        changes = {"_skip": ["#recycle", "Downloads", "*/Downloads/*"],       # Source
                    "formats": ["lossless"],
                    "identification.accept": "album",                         # Identification
                    "providers.web.shops": False,
                    "matching.preferred_countries": ["GB", "DE"],
                    "genres.max": 3,                                          # Tags
                    "genres.discogs_styles": "own_tag",
-                   "lyrics.enabled": True,
+                   "_lyrics": "always",
                    "artwork.min_px": 1000,                                   # Artwork
-                   "artwork.artist.enabled": True,
+                   "artwork.artist.enabled": "file",
                    "operation": "copy", "destination": str(lib),             # Target
                    "naming.preset": "standard",
                    "on_existing": "skip",
                    "unresolved.action": "move", "unresolved.move_to": str(aside),   # Nothing identified
-                   "retry.after_days": 7,
-                   "watch.settle_minutes": 30,                               # Automation
-                   "unattended": True}
+                   "retry.after_days": 7}                                    # Automation
         for k, v in changes.items():
             ed.set_value(k, v)
         self.assertEqual(ed.problems(), {})
@@ -112,8 +110,14 @@ class Editor(Base):
         self.assertTrue(pr.save())
         p = self.pf.load("Sec").data
         from gui.profile_editor import dig
-        for k, v in changes.items():
+        saved = dict(changes, skip_folders=["#recycle", "Downloads"], exclude_paths=["*/Downloads/*"])
+        saved.update({"lyrics.enabled": True, "audiophile.lyrics": True, "artwork.artist.enabled": True})
+        for k in ("_skip", "_lyrics"):
+            del saved[k]
+        for k, v in saved.items():
             self.assertEqual(dig(p, k), v, k)
+        self.assertNotIn("unattended", ed.rows)                   # (set on the Watched folders page)
+        self.assertNotIn("watch.settle_minutes", ed.rows)
         self.assertFalse(pr.dirty())
         self.assertFalse(pr.save_btn.isEnabled())
 
@@ -174,26 +178,26 @@ class Editor(Base):
         self.assertFalse(ed.rows["destination"].problem.isHidden())
         self.assertTrue(pr.save_btn.isEnabled())           # (pressed, it shows the first problem; saves nothing)
         self.assertIn("1 problem", pr.dirty_note.text())
-        ed.set_value("skip_folders", ["*"])
-        self.assertIn("every folder", ed.rows["skip_folders"].problem.text())
+        ed.set_value("_skip", ["*"])
+        self.assertIn("every folder", ed.rows["_skip"].problem.text())
         self.assertIn("2 problems", pr.dirty_note.text())
         pr.save_clicked()                                   # (scrolls to the first problem, saves nothing)
         self.assertNotEqual(self.pf.raw("Bad").get("operation"), "copy")
-        ed.set_value("skip_folders", ["#recycle"])
+        ed.set_value("_skip", ["#recycle"])
         ed.set_value("destination", str(self.tmp))
         self.assertTrue(ed.rows["destination"].problem.isHidden())
         self.assertTrue(pr.save_btn.isEnabled())
-        # the lossy folder: turned on, it needs a folder
-        ed.set_value("_lossy_on", True)
-        self.assertFalse(ed.rows["destinations.lossy"].isHidden())
-        self.assertIn("lossy", ed.rows["destinations.lossy"].problem.text())
+        # the lossy folder: empty means with the rest; a typed one is saved as it is
+        self.assertEqual(ed.value("destinations.lossy"), "")
+        ed.set_value("destinations.lossy", str(self.tmp / "lossy"))
+        self.assertEqual(ed.problems(), {})
 
     def test_presets_apply_and_keep_folders_and_what_happens_to_files(self):
         pr = self.page("Pre", operation="copy", destination=str(self.tmp), description="mine")
         ed = pr.editor
         ed.apply_preset("collector")
         self.assertEqual(ed.value("source"), "discogs_preferred")
-        self.assertTrue(ed.value("artwork.artist.enabled"))
+        self.assertEqual(ed.value("artwork.artist.enabled"), "both")
         self.assertEqual(ed.value("on_existing"), "ask")
         self.assertEqual((ed.value("operation"), ed.value("destination"), ed.value("description")),
                          ("copy", str(self.tmp), "mine"))
@@ -210,7 +214,7 @@ class Editor(Base):
         self.assertFalse(ed._ask_changes("Start from “Collector”?", target, "Use These Settings"))
         kind, head, body = self.gui.sheets.shown[-1]
         self.assertEqual(kind, "confirm")
-        self.assertIn("Preferred database: MusicBrainz preferred → Discogs preferred", body)
+        self.assertIn("Sources: MusicBrainz preferred → Discogs preferred", body)
 
     def test_restore_defaults_and_change_markers(self):
         pr = self.page("Rst", source="discogs_only", genres={"max": 9})
@@ -233,6 +237,7 @@ class Editor(Base):
     def test_naming_example_follows_the_pickers(self):
         pr = self.page("Nm")
         ed = pr.editor
+        ed.set_value("operation", "in_place_rename")                # (in place without renaming keeps the names)
         text = ed.preview.text()
         self.assertIn("Ada Lark &amp; Milo Fen/1991 - Songs From the Long Winter Evenings Under Northern Skies/"
                       "2-03 - The Lighthouse Keeper.flac", text)
@@ -243,7 +248,7 @@ class Editor(Base):
         self.assertTrue(ed.controls["filenames.max_album_words"].isEnabled())
         ed.set_value("filenames.max_album_words", 5)
         self.assertIn("/1991 - Songs From the Long Winter/Disc 02/203.TLK.flac", ed.preview.text())
-        ed.set_value("naming.duplicate_suffix", "code")
+        ed.set_value("on_existing", "keep_code")
         self.assertIn("203.TLK ~1a2b.flac", ed.preview.text())
         ed.set_value("naming.editions", "edition_year")
         self.assertIn("[1994 CD]", ed.preview.text())
@@ -282,12 +287,16 @@ class Editor(Base):
             pr.reload()
             settle(self.app, 3)
         self.assertTrue(pr.editor.rows["acoustid"].control.isEnabled())
-        # a database the preferred one leaves out: greyed, and says why
+        # a database the Sources choice leaves out: what only it uses is greyed, and says why
         pr.editor.set_value("source", "musicbrainz_only")
-        self.assertFalse(pr.dg.isEnabled())
-        self.assertIn("MusicBrainz only", pr.editor.rows["providers.discogs.enabled"].reason.text())
+        self.assertFalse(pr.editor.rows["genres.discogs_styles"].control.isEnabled())
+        self.assertIn("Discogs is not asked", pr.editor.rows["genres.discogs_styles"].reason.text())
         # rows that apply only to one choice appear only then
         self.assertTrue(pr.editor.rows["remove_empty_dirs"].isHidden())
+        pr.editor.set_value("operation", "move")
+        self.assertTrue(pr.editor.rows["remove_empty_dirs"].isHidden())       # (the default: nothing to show)
+        pr = self.page("Keeps", remove_empty_dirs=False)                      # (a saved value that differs: shown)
+        self.assertTrue(pr.editor.rows["remove_empty_dirs"].isHidden())       # (but only when moving)
         pr.editor.set_value("operation", "move")
         self.assertFalse(pr.editor.rows["remove_empty_dirs"].isHidden())
 

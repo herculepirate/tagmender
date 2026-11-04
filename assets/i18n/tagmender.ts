@@ -276,7 +276,7 @@
     </message>
     <message>
         <location line="+11"/>
-        <location filename="../../gui/watched.py" line="+124"/>
+        <location filename="../../gui/watched.py" line="+130"/>
         <source>Save Changes</source>
         <translation type="unfinished"></translation>
     </message>
@@ -608,7 +608,7 @@
     <message>
         <location line="+0"/>
         <location filename="../../gui/preferences.py" line="-463"/>
-        <location filename="../../gui/profile_editor.py" line="+516"/>
+        <location filename="../../gui/profile_editor.py" line="+526"/>
         <location filename="../../gui/tagnames.py" line="-9"/>
         <source>AcoustID</source>
         <translation type="unfinished"></translation>
@@ -2135,7 +2135,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/overview.py" line="+122"/>
-        <location filename="../../gui/profile_editor.py" line="+517"/>
+        <location filename="../../gui/profile_editor.py" line="+934"/>
         <location filename="../../gui/rows.py" line="+208"/>
         <source>Choose…</source>
         <translation type="unfinished"></translation>
@@ -2236,7 +2236,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+29"/>
         <location filename="../../gui/manual_match.py" line="-386"/>
-        <location filename="../../gui/overview.py" line="+200"/>
+        <location filename="../../gui/overview.py" line="+209"/>
         <location filename="../../gui/report.py" line="+80"/>
         <location filename="../../gui/search.py" line="-503"/>
         <location filename="../../gui/window.py" line="+716"/>
@@ -2363,8 +2363,8 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+6"/>
-        <location filename="../../gui/overview.py" line="-179"/>
-        <location line="+103"/>
+        <location filename="../../gui/overview.py" line="-187"/>
+        <location line="+111"/>
         <source>Look Up</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2784,8 +2784,8 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/profiles.py" line="-437"/>
         <location filename="../../gui/report.py" line="-207"/>
         <location filename="../../gui/rows.py" line="+153"/>
-        <location filename="../../gui/watched.py" line="-240"/>
-        <location line="+182"/>
+        <location filename="../../gui/watched.py" line="-245"/>
+        <location line="+187"/>
         <source>Folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2865,7 +2865,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/inspector.py" line="-70"/>
-        <location filename="../../gui/profile_editor.py" line="-952"/>
+        <location filename="../../gui/profile_editor.py" line="-1377"/>
         <source>Tags</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3069,7 +3069,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/rows.py" line="-58"/>
         <location line="+90"/>
         <location filename="../../gui/style.py" line="+43"/>
-        <location filename="../../gui/watched.py" line="-278"/>
+        <location filename="../../gui/watched.py" line="-284"/>
         <source>Done</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3259,11 +3259,11 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="+82"/>
         <location filename="../../gui/jobs.py" line="-9"/>
         <location filename="../../gui/overview.py" line="+49"/>
-        <location line="+74"/>
-        <location line="+59"/>
+        <location line="+75"/>
+        <location line="+100"/>
         <location line="+200"/>
         <location line="+64"/>
-        <location filename="../../gui/watched.py" line="+710"/>
+        <location filename="../../gui/watched.py" line="+716"/>
         <location line="+57"/>
         <location line="+13"/>
         <location filename="../../gui/window.py" line="-54"/>
@@ -3275,9 +3275,9 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="-82"/>
         <location line="+83"/>
         <location filename="../../gui/jobs.py" line="+0"/>
-        <location filename="../../gui/overview.py" line="-397"/>
-        <location line="+74"/>
-        <location line="+59"/>
+        <location filename="../../gui/overview.py" line="-439"/>
+        <location line="+75"/>
+        <location line="+100"/>
         <location line="+200"/>
         <location line="+64"/>
         <location filename="../../gui/watched.py" line="-70"/>
@@ -4019,7 +4019,8 @@ New: {after}
         <location line="+5"/>
         <location line="+26"/>
         <location line="+12"/>
-        <location filename="../../gui/profile_editor.py" line="+767"/>
+        <location filename="../../gui/profile_editor.py" line="+898"/>
+        <location line="+286"/>
         <location line="+1"/>
         <location filename="../../gui/rows.py" line="+96"/>
         <source>None</source>
@@ -4047,7 +4048,7 @@ New: {after}
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/watched.py" line="-355"/>
+        <location filename="../../gui/watched.py" line="-361"/>
         <source>Ignored</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4126,13 +4127,13 @@ New: {after}
     </message>
     <message>
         <location line="+4"/>
-        <location filename="../../gui/profile_editor.py" line="-765"/>
+        <location filename="../../gui/profile_editor.py" line="-1182"/>
         <source>Artwork</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/profile_editor.py" line="+13"/>
+        <location filename="../../gui/profile_editor.py" line="+15"/>
         <source>Evidence</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4153,7 +4154,7 @@ New: {after}
         <location line="+439"/>
         <location filename="../../gui/report.py" line="-4"/>
         <location filename="../../gui/tagnames.py" line="-23"/>
-        <location filename="../../gui/watched.py" line="+314"/>
+        <location filename="../../gui/watched.py" line="+320"/>
         <location line="+39"/>
         <location line="+429"/>
         <source>Album</source>
@@ -4229,7 +4230,7 @@ New: {after}
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/watched.py" line="-783"/>
+        <location filename="../../gui/watched.py" line="-789"/>
         <source>Undone</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4299,8 +4300,8 @@ New: {after}
     <message>
         <location line="+0"/>
         <location filename="../../gui/watched.py" line="+65"/>
-        <location line="+26"/>
-        <location line="+181"/>
+        <location line="+27"/>
+        <location line="+186"/>
         <location line="+43"/>
         <location line="+39"/>
         <location filename="../../gui/window.py" line="+45"/>
@@ -4832,12 +4833,13 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-707"/>
+        <location filename="../../gui/overview.py" line="-758"/>
         <source>Profile&apos;s sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+2"/>
+        <location filename="../../gui/profile_editor.py" line="-51"/>
         <source>Web only</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4884,11 +4886,13 @@ New: {after}
     </message>
     <message>
         <location line="+7"/>
+        <location line="+277"/>
+        <location filename="../../gui/profile_editor.py" line="+806"/>
         <source>Sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="-270"/>
         <source>Sources to look up with</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4908,7 +4912,12 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+20"/>
+        <location line="+7"/>
+        <source>Make this choice of sources the profile&apos;s own</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+21"/>
         <location filename="../../gui/window.py" line="+116"/>
         <source>Online services</source>
         <translation type="unfinished"></translation>
@@ -4955,6 +4964,41 @@ New: {after}
     </message>
     <message>
         <location line="+105"/>
+        <source>Sources ↺</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>For this look-up only; the profile uses {0}.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The profile&apos;s own sources. Choose another for one look-up; it goes back for the next folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <source>Make {0} the sources of “{1}”?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Every look-up with this profile, and its watched folders, then use them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Save to Profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>The profile was not changed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+20"/>
         <source>{0} (profile)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5039,14 +5083,14 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-195"/>
-        <location line="+67"/>
+        <location line="-236"/>
+        <location line="+108"/>
         <location line="+115"/>
         <source>This profile cannot be used.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-174"/>
+        <location line="-215"/>
         <source>Finding the albums… nothing is looked up yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5056,7 +5100,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+190"/>
+        <location line="+231"/>
         <source>Preview finished</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5347,7 +5391,7 @@ New: {after}
     <message>
         <location filename="../../gui/preferences.py" line="-1180"/>
         <location line="+180"/>
-        <location filename="../../gui/profile_editor.py" line="-17"/>
+        <location filename="../../gui/profile_editor.py" line="-774"/>
         <source>General</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5382,7 +5426,7 @@ New: {after}
     <message>
         <location line="-330"/>
         <location line="+1025"/>
-        <location filename="../../gui/profile_editor.py" line="+931"/>
+        <location filename="../../gui/profile_editor.py" line="+1356"/>
         <source>Advanced</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5509,7 +5553,7 @@ New: {after}
     </message>
     <message>
         <location line="+2"/>
-        <location filename="../../gui/profile_editor.py" line="-929"/>
+        <location filename="../../gui/profile_editor.py" line="-1354"/>
         <source>Identification</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5600,7 +5644,6 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+52"/>
         <location filename="../../gui/watched.py" line="-42"/>
         <location line="+26"/>
         <location line="+370"/>
@@ -6435,23 +6478,26 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-90"/>
+        <location filename="../../gui/profile_editor.py" line="-40"/>
         <location line="+2"/>
+        <location line="+1050"/>
         <source>Fix in place</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-2"/>
+        <location line="-1052"/>
+        <location line="+1053"/>
         <source>Copy into the library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="-1052"/>
+        <location line="+1052"/>
         <source>Move into the library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="-1044"/>
         <source>Short names (initials)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6477,23 +6523,23 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-3"/>
+        <location line="-5"/>
         <source>Move</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+5"/>
         <source>Mark Unresolved</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+0"/>
-        <location line="+383"/>
+        <location line="+789"/>
         <source>Move aside</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-382"/>
+        <location line="-788"/>
         <source>Basic</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6807,17 +6853,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+634"/>
+        <location filename="../../gui/profile_editor.py" line="+1078"/>
         <source>Pictures folder name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+2"/>
         <source>Logs and notes folder name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-75"/>
+        <location line="-94"/>
         <source>Find front covers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6827,28 +6873,28 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+27"/>
         <source>Enlarge small covers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="-886"/>
-        <location filename="../../gui/profile_editor.py" line="-187"/>
+        <location filename="../../gui/profile_editor.py" line="-220"/>
         <location line="+5"/>
-        <location line="+296"/>
+        <location line="+311"/>
         <source>Never</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-216"/>
+        <location filename="../../gui/profile_editor.py" line="-244"/>
         <source>As credited on the release</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-474"/>
+        <location line="-871"/>
         <location line="+1"/>
-        <location line="+455"/>
-        <location line="+318"/>
+        <location line="+860"/>
+        <location line="+330"/>
         <location filename="../../gui/profiles.py" line="+42"/>
         <location filename="../../gui/script_editor.py" line="-48"/>
         <source>On</source>
@@ -6856,19 +6902,23 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="+171"/>
-        <location filename="../../gui/profile_editor.py" line="-774"/>
+        <location filename="../../gui/profile_editor.py" line="-1191"/>
         <location line="+1"/>
-        <location line="+455"/>
-        <location line="+13"/>
-        <location line="+148"/>
+        <location line="+860"/>
+        <location line="+20"/>
+        <location line="+38"/>
+        <location line="+30"/>
+        <location line="+48"/>
+        <location line="+7"/>
+        <location line="+31"/>
         <location line="+6"/>
         <location line="+4"/>
-        <location line="+147"/>
+        <location line="+146"/>
         <source>Off</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-225"/>
+        <location filename="../../gui/profile_editor.py" line="-223"/>
         <source>Update one that is there</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6878,40 +6928,41 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-16"/>
-        <location line="+17"/>
+        <location line="-28"/>
+        <location line="+29"/>
         <source>Remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-43"/>
+        <location line="-65"/>
         <source>Split two versions found in one folder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-461"/>
-        <location line="+402"/>
+        <location line="-857"/>
         <location filename="../../gui/tagnames.py" line="+4"/>
         <source>Lyrics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-448"/>
-        <location line="+416"/>
-        <location line="+40"/>
-        <location line="+18"/>
-        <location line="+69"/>
+        <location line="-47"/>
+        <location line="+811"/>
+        <location line="+50"/>
+        <location line="+10"/>
+        <location line="+9"/>
+        <location line="+82"/>
         <location line="+6"/>
         <source>Automatic</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-548"/>
+        <location line="-967"/>
+        <location line="+918"/>
         <source>At the Audiophile level</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="-916"/>
         <source>Deezer</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6952,23 +7003,28 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+665"/>
+        <location line="+1089"/>
         <source>Albums nothing identified</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-659"/>
+        <location line="-1088"/>
+        <source>Watched folders: whether albums are filed without asking, how long to wait and how often to look are set on the Watched folders page. Notifications, and watching while TagMender is open, are in Preferences › General.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
         <source>Folders</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+327"/>
+        <location line="+734"/>
         <source>Audio files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-325"/>
+        <location line="-732"/>
         <source>Databases</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7004,11 +7060,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+3"/>
+        <location line="+834"/>
         <source>Credits</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="-833"/>
         <source>Dates and versions</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7018,7 +7075,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+1"/>
+        <source>Extra details from Discogs, each in a tag of its own.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Below the Audiophile level, lyrics are only looked up with Always.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <source>Loudness</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7177,12 +7244,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/profile_editor.py" line="+3"/>
-        <location line="+531"/>
+        <location line="+946"/>
         <source>Artist photos</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-531"/>
+        <location line="-946"/>
         <source>At the Enthusiast and Audiophile levels.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7198,33 +7265,23 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+582"/>
+        <location line="+997"/>
         <source>Files that go with the album</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-581"/>
+        <location line="-996"/>
         <source>When a file is already there</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
-        <source>Notifications, and watching while TagMender is open, are in Preferences › General.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+243"/>
+        <location line="+679"/>
         <source>Discogs needs a free personal token: Preferences › Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="-388"/>
         <source>A naming script of this profile&apos;s own is used instead (Script Editor).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+9"/>
-        <source>Not asked: the preferred database is {mode}.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7238,22 +7295,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+388"/>
         <source>Folders this profile covers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Include subfolders</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>Skip these folders</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+4"/>
+        <location line="+3"/>
         <source>All formats</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7269,11 +7321,6 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+4"/>
-        <source>Put lossy files in a different folder</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
         <source>Folder for lossy files</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7288,17 +7335,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Skip these paths</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+9"/>
         <source>Join &quot;(Deluxe Edition)&quot; folders</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+2"/>
         <source>A folder beside the album holding only its bonus tracks is tagged as part of the album.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7318,32 +7360,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Preferred database</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+4"/>
-        <source>Ask MusicBrainz</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>Ask Discogs</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+9"/>
         <source>Tag an album when</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Some details are certain (Partial)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Audio fingerprints</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7379,7 +7406,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+27"/>
         <source>Look up discs on gnudb</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7394,27 +7421,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="-28"/>
         <source>Web fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+30"/>
         <source>Web fallback sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+3"/>
-        <source>Use store pages for Partial tags</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+4"/>
         <source>Identify loose tracks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="-31"/>
         <source>Preferred release countries</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7424,22 +7446,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+2"/>
         <source>Automatic: your region, then Worldwide, then Europe.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+13"/>
         <source>Prefer these release types</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>Such as Album, EP, Compilation.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="+2"/>
         <source>Avoid these release types</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7459,12 +7476,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="-17"/>
         <source>When both databases have a value</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+6"/>
         <source>Web search</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7474,7 +7491,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+22"/>
         <source>Basic: names, numbers, date, genre. Enthusiast: everything the databases give. Audiophile: also loudness, lyrics, fingerprints, rip log, dynamic range.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7495,22 +7512,22 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+91"/>
+        <location line="+90"/>
         <source>Keep</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-86"/>
+        <location line="-483"/>
         <source>ReplayGain</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+0"/>
         <source>Rip log</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+51"/>
+        <location line="+441"/>
         <source>Album (Remaster 2024)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7530,17 +7547,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+54"/>
+        <location line="+79"/>
         <source>Use my existing tagger&apos;s settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>When another tagger is installed on this computer, its settings file is read on each run, so the tags come out the way it writes them. Anything you set here wins.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+7"/>
+        <location line="+9"/>
         <source>Tick the sources to ask and put them in order: the first one with a big enough cover wins.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7550,7 +7562,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="+20"/>
         <source>Never: leave the album without one</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7575,17 +7587,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+11"/>
+        <source>Fix in place and rename</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Fix in place: the files stay where they are (and are renamed, as set below, if you say so). Copy or move: into the library folder, named as below.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
         <source>Library folder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+2"/>
-        <source>Rename files where they are</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
         <source>Folder layout</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7627,7 +7644,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+11"/>
+        <location line="+2"/>
+        <source>Folders inside the album folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>Pictures: scans and booklets (the front cover stays beside the music). Rip logs: logs, notes and checksums (cue sheets and playlists stay beside the audio).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
         <source>For multi-disc albums</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7642,32 +7669,27 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+5"/>
         <source>Update cue sheets and playlists</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Remove empty folders after moving</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Keep file dates</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Then</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>Keep both</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
+        <location line="+3"/>
         <source>Skip it</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7677,22 +7699,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Name the second copy</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Name (2)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <source>Short code</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+7"/>
         <source>Names safe for</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7722,12 +7729,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Spaces become underscores</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Longest file name</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7757,7 +7764,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Try again</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7772,28 +7779,18 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+1"/>
+        <source>Marked albums are looked up again by the watcher, as the databases keep growing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <source>Up to</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+0"/>
         <source> tries</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+10"/>
-        <source>1 min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <source>15 min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <source>60 min</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7852,7 +7849,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+56"/>
+        <location line="+65"/>
         <source>A name, such as Library or Inbox</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7868,12 +7865,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+509"/>
+        <location line="+539"/>
         <source>Start from a preset</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-506"/>
+        <location line="-536"/>
         <source>Restore Defaults…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7903,7 +7900,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+54"/>
+        <location line="+55"/>
         <source>Example</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7949,17 +7946,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+167"/>
+        <location line="+190"/>
         <source>&lt;a href=&quot;setup&quot;&gt;Set Up…&lt;/a&gt;</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+17"/>
-        <source>Choose the folder for lossy files.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+76"/>
+        <location line="+90"/>
         <location line="+13"/>
         <source>No example: {0}</source>
         <translation type="unfinished"></translation>
@@ -7990,7 +7982,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+74"/>
+        <location line="+83"/>
         <source>Nothing would change.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8035,25 +8027,20 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-678"/>
-        <source>Apply without asking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <location filename="../../gui/preferences.py" line="-152"/>
-        <location filename="../../gui/profile_editor.py" line="-713"/>
+        <location filename="../../gui/profile_editor.py" line="-1845"/>
         <source>Standard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-772"/>
-        <location line="+362"/>
-        <location filename="../../gui/profile_editor.py" line="-4"/>
+        <location filename="../../gui/overview.py" line="-823"/>
+        <location line="+413"/>
+        <location filename="../../gui/profile_editor.py" line="-6"/>
         <source>MusicBrainz only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-361"/>
+        <location line="-412"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>MusicBrainz preferred</source>
         <translation type="unfinished"></translation>
@@ -8066,43 +8053,23 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+360"/>
+        <location line="+411"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>Discogs only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+386"/>
+        <location filename="../../gui/profile_editor.py" line="+795"/>
         <source>A lossless file made from an MP3 or other lossy file. Move aside puts the album in the folder for albums nothing identified; a profile that copies holds it for review instead.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Patterns matched against the whole path, such as */Downloads/*. Never read or changed.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="+11"/>
         <source>Such as a read-only file. Left albums are tried again on the next run.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Which database identifies albums, and whose tags win. MusicBrainz needs no key and gives the IDs media servers use.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Free, and needs no key.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>Needs a free Discogs token (Preferences › Keys).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+10"/>
         <source>Exact release is known</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8112,12 +8079,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>The lower the bar, the more albums get tags. Albums below it are handled as albums nothing identified.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="+8"/>
         <source>Identifies tracks by their sound. Sends AcoustID a fingerprint: a short code worked out from the audio, not the audio itself.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8127,7 +8089,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+28"/>
         <source>gnudb (formerly freedb) lists what others typed in for a CD. Sends only the disc&apos;s track lengths.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8137,27 +8099,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="-28"/>
         <source>When no database has the album, store and encyclopaedia pages are checked instead.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+31"/>
         <source>The sites checked. Only the album&apos;s name and barcode are sent.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>An album found only on a store page gets the tags that name no release: no release IDs, barcode or catalogue number.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
+        <location line="+2"/>
         <source>A track on its own, not part of an album, is matched to its recording by its fingerprint.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="-26"/>
         <source>Preferred database wins</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8177,7 +8134,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+2"/>
         <source>When MusicBrainz and Discogs disagree on a tag.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8192,37 +8149,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+9"/>
-        <source>Tags the files already have. Replace: the databases&apos; values win. Fill in missing only: only empty tags get a value. Keep: they are left as they are.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+4"/>
-        <source>Volume tags that let players play every track equally loud.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Looked up on LRCLIB and saved as set under Lyrics.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Each track&apos;s fingerprint ID, checked against its MusicBrainz recording.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>The disc ID and the rip log&apos;s verdict: the ripper, and whether the rip was error-free.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>A dynamic range (DR) value, and a warning when a lossless file was made from a lossy one.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="+39"/>
         <source>The genres people voted for on MusicBrainz. Automatic: on, or as your existing tagger does when its settings are used.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8232,7 +8159,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+75"/>
         <source>Genre, only when no other genre</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8252,7 +8179,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Styles are Discogs&apos;s finer genres, such as Deep House or Shoegaze.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8262,7 +8189,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="-78"/>
         <source>Fix spelling variations</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8272,72 +8199,37 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+2"/>
         <source>The standard name is the one MusicBrainz lists for the artist. Always: also for releases made under a former name.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+80"/>
         <source>The name in your system language, when MusicBrainz knows one.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
-        <source>Producer, engineer, mixer and others credited for the whole album.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+6"/>
+        <location line="-67"/>
         <source>Instruments as MusicBrainz names them, rather than as each credit words them.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+7"/>
         <source>A remaster or remix keeps its version in the album title, so media servers list it apart from the original.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+8"/>
         <source>ALBUMVERSION and RELEASECOMMENT tags, read by LMS and other media servers.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Such as a remaster beside a remix: each goes into a folder of its own, tagged from its own release.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Musicians and their instruments, as Discogs credits them.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Labels, studios, pressing plants and publishers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>The codes stamped or printed on the disc and sleeve, such as the matrix in the run-out groove.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>How many Discogs users have and want it, its rating, copies for sale and the lowest price.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>The free-text notes on the Discogs release page.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Saved where chosen below.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+16"/>
         <source>A .lrc file beside each track, read by Plex and Jellyfin. Synced lyrics only.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8357,7 +8249,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+8"/>
         <source>Writes TAGMENDER=Resolved into each file, so re-runs, checks and retries can tell finished albums.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8367,17 +8259,222 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="-9"/>
         <source>A ReplayGain value for the whole album, which keeps quiet tracks quieter than loud ones.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location line="-866"/>
+        <source>Retrying marked albums</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+68"/>
+        <source>As saved ({0})</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+262"/>
+        <source>a database is off that the preferred one needs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location line="+3"/>
-        <source>The R128 volume tags Opus players read, as well as ReplayGain.</source>
+        <source>no database or web source on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+45"/>
+        <source>looked up below the Audiophile level, not at it</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+46"/>
+        <source>{0} at the Audiophile level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>{0} as my tagger has it</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>As saved: {0}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-4"/>
+        <source>none</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+22"/>
+        <source>the album&apos;s and the tracks&apos; credits differ from these choices</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+15"/>
+        <source>on, but saved nowhere</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+73"/>
+        <source>Pictures folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Rip logs folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+36"/>
+        <source>Not written at the Basic level.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Discogs is not asked (see Sources).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Only when the web fallback is on.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Covers are off (Find front covers).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>A copy leaves your originals as they are, so nothing is marked or moved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Used only when both databases are asked, with one preferred (see Sources).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Used when files are copied, moved or renamed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Neither the pictures nor the rip logs folder is made.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Your existing tagger&apos;s settings are not used (Tags › Advanced), so Automatic and Same as my existing tagger mean TagMender&apos;s own default.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+78"/>
+        <source>A folder&apos;s own Moves to is not used when fixing in place.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+19"/>
+        <source>The web fallback is off, so store pages are not used.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+19"/>
+        <source>Lossy files go into a library of their own, named the same way as the library folder. Empty: they go with the rest.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>Skip these folders and paths</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Folders by name, such as #recycle, or _* for every name starting with _; paths, such as */Downloads/*, are matched against the whole path. Never read or changed. Hidden folders and TagMender&apos;s own Unidentified and Duplicates folders are always skipped.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Which database identifies albums, and whose tags win. MusicBrainz needs no key and gives the IDs media servers use; Discogs needs a free token (Preferences › Keys). Web only asks no database: store and encyclopaedia pages only.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Partial, also from store pages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The lower the bar, the more albums get tags. Albums below it are handled as albums nothing identified. Store pages: an album found only on a store page gets the tags that name no release.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+31"/>
+        <source>When several pressings fit equally well. Such as Album, EP, Compilation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+24"/>
+        <source>Tags the files already have. Replace: the databases&apos; values win. Fill in missing only: only empty tags get a value. Keep: they are left as they are. With Use my existing tagger&apos;s settings on (Tags › Advanced), the tags that tagger preserves are only filled when empty.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Measurements</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>ReplayGain: volume tags for equal loudness. AcoustID: each track&apos;s fingerprint ID. Rip log: the disc ID and the rip&apos;s verdict. Dynamic range and quality: a DR value, and a warning for a lossless file made from a lossy one. Lyrics: see Lyrics.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+23"/>
+        <source>Album and tracks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Tracks only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Album: producer, engineer, mixer and others credited for the whole album. Tracks: composer, lyricist, performers and their instruments.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
+        <source>Details to write</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+5"/>
+        <source>Performers: musicians and their instruments. Companies: labels, studios, pressing plants and publishers. Matrix and other codes: stamped or printed on the disc and sleeve. Marketplace numbers: how many Discogs users have and want it, its rating and lowest price. Release notes: the free text on the release page.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>Always</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Looked up on LRCLIB, a free lyrics database, and saved as set below.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+15"/>
+        <source>The R128 volume tags Opus players read, as well as ReplayGain.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+29"/>
         <source>ID3 is the tag format of MP3 files. Some older players and car stereos read only version 2.3.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8387,17 +8484,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>FLAC files have tags of their own; MP3-style tags left in them confuse some players.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>APE is an older tag format some programs add to MP3s; it can disagree with the main tags.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+2"/>
+        <source>When another tagger is installed on this computer, its settings file is read on each run, so the tags come out the way it writes them. Anything you set here wins. Off: Automatic, and Same as my existing tagger, mean TagMender&apos;s own default.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+5"/>
         <source>Looks for the album&apos;s front cover in the sources below.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8412,7 +8514,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+5"/>
+        <source>Players and phones then show it even without the cover file. The number is the longest side: bigger covers are shrunk to it before they go into the tracks.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Both</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Asks fanart.tv, TheAudioDB, Wikimedia Commons or Discogs once per artist. artist.jpg goes in the artist folder, where Plex, Jellyfin, Navidrome and LMS look for it; one already there is never replaced.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+10"/>
         <source>Smallest cover size</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8427,17 +8544,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Players and phones then show it even without the cover file.</source>
+        <location line="+52"/>
+        <source>Keep both: Name (2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Bigger covers are shrunk to this, on the long side, before they go into the tracks.</source>
+        <location line="+0"/>
+        <source>Keep both: Name ~1a2b (a short code)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+2"/>
+        <source>Keep both: the new file gets a second name. Watched folders that apply without asking always keep both, named the way set here (Ask me keeps the way it was set).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-73"/>
         <source>cover.jpg in the album folder, which most media servers show.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8447,27 +8569,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>In the artist folder, where Plex, Jellyfin, Navidrome and LMS look for it. One already there is never replaced.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+15"/>
-        <source>Fix in place: the files stay where they are. Copy or move: into the library folder, named as below.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
+        <location line="+26"/>
         <source>Where copied or moved albums go.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>The files get the names set below, without making a second library.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+4"/>
+        <location line="+3"/>
         <source>How the folders and files in the library are named.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8487,27 +8594,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>Pictures in their own folder</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Scans and booklets go into it. The front cover stays beside the music.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Rip logs in their own folder</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Rip logs, notes and checksums go into it. Cue sheets and playlists stay beside the audio they name.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+6"/>
+        <location line="+10"/>
         <source>Where the pictures and logs folders go.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8517,32 +8604,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>The new file names are written into them, so they still find the music.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Folders left empty once the music is moved out are removed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Files keep their modified date, so &quot;Recently added&quot; in players stays as it was. Automatic: as your existing tagger is set.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Keep both: the new file gets a second name, as below. Watched folders that apply without asking always keep both.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+4"/>
-        <source>Short code: a few letters and digits, such as Name ~1a2b.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
+        <location line="+14"/>
         <source>All systems: also Windows and network shares (NAS), so no characters such as : or ?.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8552,12 +8629,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Accented and other letters become plain ones in file names, such as é to e.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>In file and folder names.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8592,32 +8669,17 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Marked albums are looked up again, as the databases keep growing.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+6"/>
         <source>Per album. Then it is left for you.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Albums dropped into this profile&apos;s watched folders are fixed without waiting for you. Partial albums still wait for your review.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+7"/>
-        <source>How often the watched folders are checked for new music.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-361"/>
+        <location line="-365"/>
         <source>Description</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-355"/>
+        <location line="-766"/>
         <source>Cover Art Archive (MusicBrainz)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8638,14 +8700,14 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+13"/>
-        <location line="+455"/>
-        <location line="+9"/>
-        <location line="+30"/>
+        <location line="+860"/>
+        <location line="+29"/>
+        <location line="+54"/>
         <source>Same as my existing tagger</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-484"/>
+        <location line="-933"/>
         <source>Which folders are read, and which files in them.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8675,12 +8737,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>What happens to albums dropped into this profile&apos;s watched folders.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="+8"/>
         <source>Which of them are watched for new music is chosen on the Watched folders page.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8710,17 +8767,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
-        <source>Extra details from Discogs, each in a tag of its own. At the Audiophile level: only when the tagging level is Audiophile.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>From LRCLIB, a free lyrics database.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+8"/>
         <source>ReplayGain: volume tags that let players play every track equally loud. Measured at the Audiophile level.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8740,12 +8787,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+241"/>
+        <location line="+286"/>
         <source>Only at the Audiophile level, with ReplayGain on.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+42"/>
+        <location line="+408"/>
         <source>The music this profile looks after. A preview can still be run on any other folder.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8755,27 +8802,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>By name, such as #recycle, or _* for every name starting with _. Never read or changed. Hidden folders and TagMender&apos;s own Unidentified and Duplicates folders are always skipped.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="+4"/>
         <source>Lossless: FLAC, ALAC, WAV and the like. Lossy: MP3, AAC, Opus and the like. Told by the sound inside, so an .m4a file holding ALAC counts as lossless.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Lossy files go into a library of their own instead of the library folder.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Named the same way as in the library folder.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="+5"/>
         <source>Fake lossless files</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8785,12 +8817,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+89"/>
+        <location line="-312"/>
         <source>Dynamic range and quality</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+408"/>
         <source>At most</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8800,12 +8832,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+76"/>
         <source>Discogs styles</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+5"/>
+        <location line="+6"/>
         <source>Genres from the web</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8820,42 +8852,27 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+10"/>
+        <location line="+3"/>
         <source>Translate artist names</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Plain punctuation</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>Curly quotes and dashes become plain ones.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <source>Credits on the album</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Credits on each track</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <source>Composer, lyricist, performers and their instruments.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="-75"/>
         <source>Standard instrument names</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+5"/>
         <source>Date holds</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8870,7 +8887,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+3"/>
         <source>The first release date is always written as Original Date too.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8890,37 +8907,37 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="-424"/>
         <source>Performers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+0"/>
         <source>Companies</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+0"/>
         <source>Matrix and other codes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+1"/>
         <source>Marketplace numbers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+0"/>
         <source>Release notes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+439"/>
         <source>Find lyrics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+4"/>
         <source>Next to the track (.lrc)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8940,7 +8957,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+9"/>
         <source>Mark identified albums</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8950,7 +8967,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="-9"/>
         <source>Album gain</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8960,7 +8977,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+27"/>
         <source>MP3 tag version</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8990,27 +9007,22 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>Remove APE tags from MP3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+11"/>
         <source>Cover sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+15"/>
+        <location line="+9"/>
         <source>Put the cover in each track</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+2"/>
-        <source>Cover size in tracks</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
         <source>As found</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9020,52 +9032,42 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>Asks fanart.tv, TheAudioDB, Wikimedia Commons or Discogs once per artist.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+6"/>
+        <location line="+4"/>
         <source>Put it in each track</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
-        <source>Some players then show the artist instead of the cover.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="+5"/>
         <source>Make a cover when none is found</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+8"/>
+        <location line="+14"/>
         <source>What happens to files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+22"/>
+        <location line="+21"/>
         <source>Edition in the Album tag</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-190"/>
+        <location line="-200"/>
         <source>Tagging level</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+36"/>
+        <location line="+25"/>
         <source>Artist names</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-17"/>
+        <location line="-9"/>
         <source>Genres from MusicBrainz</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+112"/>
+        <location line="+129"/>
         <source>Look for covers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9086,7 +9088,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+282"/>
+        <location filename="../../gui/profile_editor.py" line="+284"/>
         <source>Profile settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10081,7 +10083,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     <message>
         <location filename="../../gui/account.py" line="-229"/>
         <location filename="../../gui/profile_editor.py" line="+21"/>
-        <location line="+537"/>
+        <location line="+567"/>
         <location filename="../../gui/sheets.py" line="+108"/>
         <location line="+28"/>
         <location line="+58"/>
@@ -10193,7 +10195,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-1391"/>
+        <location filename="../../gui/profile_editor.py" line="-1847"/>
         <location filename="../../gui/setup.py" line="-50"/>
         <location filename="../../gui/sheets.py" line="+74"/>
         <source>Copy</source>
@@ -10493,7 +10495,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     </message>
     <message>
         <location filename="../../gui/style.py" line="+2"/>
-        <location filename="../../gui/watched.py" line="-655"/>
+        <location filename="../../gui/watched.py" line="-661"/>
         <source>Up to date</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10521,6 +10523,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location filename="../../gui/profile_editor.py" line="+905"/>
         <location filename="../../gui/report.py" line="-2"/>
         <location filename="../../gui/style.py" line="+5"/>
         <source>Album only</source>
@@ -11588,51 +11591,33 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+9"/>
-        <location line="+180"/>
+        <location line="+4"/>
+        <source>The watcher looks as often as the shortest of all profiles&apos; settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <location line="+185"/>
         <source>What happens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+721"/>
-        <location filename="../../gui/watched.py" line="-178"/>
+        <location line="-183"/>
         <source>Wait until unchanged for</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+1"/>
-        <source>2 min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <location line="+3"/>
-        <source>5 min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-3"/>
-        <source>10 min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <source>30 min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>So a copy still in progress is never touched.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <location filename="../../gui/watched.py" line="+1"/>
         <source>Look every</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/watched.py" line="+3"/>
+        <location line="+2"/>
+        <source>These three are saved in the profile. The watcher looks as often as the shortest “Look every” of all profiles.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+6"/>
         <source>Watch Folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12075,7 +12060,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-683"/>
+        <location filename="../../gui/profile_editor.py" line="-862"/>
         <location filename="../../gui/window.py" line="+3"/>
         <source>Automation</source>
         <translation type="unfinished"></translation>

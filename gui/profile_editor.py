@@ -44,6 +44,8 @@ OPERATION_WORDS = {"in_place": N_("Fix in place"), "copy": N_("Copy into the lib
 OPERATION_SHORT = {"in_place": N_("Fix in place"), "copy": N_("Copy"), "move": N_("Move")}
 SOURCE_WORDS = {"musicbrainz_only": N_("MusicBrainz only"), "musicbrainz_preferred": N_("MusicBrainz preferred"),
                 "discogs_preferred": N_("Discogs preferred"), "discogs_only": N_("Discogs only")}
+SOURCE_CHOICES = pf.SOURCES + ("web_only",)               # (Web only: no database identifies, the web fallback does)
+SOURCE_CHOICE_WORDS = dict(SOURCE_WORDS, web_only=N_("Web only"))
 UNRESOLVED_WORDS = {"leave": N_("Leave alone"), "mark": N_("Mark Unresolved"), "move": N_("Move aside")}
 LEVEL_WORDS = {"basic": N_("Basic"), "enthusiast": N_("Enthusiast"), "audiophile": N_("Audiophile")}
 NAMING_WORDS = {"tagmender": N_("Short names (initials)"), "standard": N_("Standard"),
@@ -82,7 +84,9 @@ SECTIONS = (
     ("artwork", N_("Artwork"), N_("Front covers and artist photos: where they come from and where they go.")),
     ("target", N_("Target"), N_("Where the files end up and what they are called.")),
     ("unresolved", N_("Albums nothing identified"), N_("What happens to an album no database can identify for sure.")),
-    ("automation", N_("Automation"), N_("What happens to albums dropped into this profile's watched folders.")),
+    ("automation", N_("Automation"), N_("Watched folders: whether albums are filed without asking, how long to wait "
+                                        "and how often to look are set on the Watched folders page. Notifications, "
+                                        "and watching while TagMender is open, are in Preferences › General.")),
 )
 # group id -> (section, title, footnote, advanced)
 GROUPS = {
@@ -108,12 +112,11 @@ GROUPS = {
     "credits": ("tags", N_("Credits"), "", False),
     "versions": ("tags", N_("Dates and versions"), "", False),
     "discogs": ("tags", N_("Discogs details"),
-                N_("Extra details from Discogs, each in a tag of its own. At the Audiophile level: only when the "
-                   "tagging level is Audiophile."), False),
-    "lyrics": ("tags", N_("Lyrics"), N_("From LRCLIB, a free lyrics database."), False),
+                N_("Extra details from Discogs, each in a tag of its own."), False),
+    "lyrics": ("tags", N_("Lyrics"), N_("Below the Audiophile level, lyrics are only looked up with Always."), False),
     "loudness": ("tags", N_("Loudness"),
                  N_("ReplayGain: volume tags that let players play every track equally loud. Measured at the "
-                    "Audiophile level."), False),
+                    "Audiophile level."), True),
     "notes": ("tags", N_("TagMender notes in files"), "", False),
     "tags_adv": ("tags", "", "", True),
     "covers": ("artwork", N_("Covers"),
@@ -129,8 +132,7 @@ GROUPS = {
                  N_("A file of the same name is already where the new one would go."), False),
     "target_adv": ("target", "", "", True),
     "unres": ("unresolved", "", "", False),
-    "watch": ("automation", N_("Watched folders"),
-              N_("Notifications, and watching while TagMender is open, are in Preferences › General."), False),
+    "retry_adv": ("automation", N_("Retrying marked albums"), "", True),
 }
 
 
@@ -157,6 +159,63 @@ def same(a, b) -> bool:
     return (isinstance(a, bool) == isinstance(b, bool)) and a == b
 
 
+# ---- derived controls ----------------------------------------------------------------------
+# A control that merges several saved settings reads them into one choice (get) and writes the same
+# settings back when the choice is changed (put). A saved combination the control cannot say
+# exactly is a Saved value: shown as "As saved (...)", kept as it is until another choice is made.
+class Saved(str):
+    """A saved value its control cannot express: the words shown, and payload - the settings behind
+    it (dotted key -> value, MISSING for none) - which are written back unchanged if it is chosen."""
+
+    def __new__(cls, text, payload=None):
+        obj = str.__new__(cls, text)
+        obj.payload = payload or {}
+        return obj
+
+    def __reduce__(self):
+        return (Saved, (str(self), self.payload))
+
+
+class _Missing:
+    def __repr__(self):
+        return "MISSING"
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+MISSING = _Missing()
+SAVED = "__saved__"                                       # a pop-up item's data for the Saved value
+
+
+def unplant(d, key):
+    parts = key.split(".")
+    for k in parts[:-1]:
+        d = d.get(k)
+        if not isinstance(d, dict):
+            return
+    d.pop(parts[-1], None)
+
+
+def _saved(d, covers, words):
+    """The Saved value for the settings COVERS of data d: "As saved (words)"."""
+    payload = {k: copy.deepcopy(dig(d, k, MISSING)) for k in covers}
+    return Saved(tr("As saved ({0})").format(tr(words)), payload)
+
+
+def _write_value(spec, data, value, vals):
+    """Put value (a choice, or a Saved one) into data as spec's setting."""
+    if isinstance(value, Saved):
+        for k, v in value.payload.items():
+            unplant(data, k) if v is MISSING else plant(data, k, v)
+    else:
+        spec.write(data, value, vals)
+
+
+def _changed_from(full, key, value):
+    return bool(dig(full, key)) != bool(value)
+
+
 @dataclass
 class S:
     """One setting. get(data) -> value; put(data, value, values) writes it; show(values) and
@@ -181,6 +240,9 @@ class S:
     known: tuple = ()
     words: dict = field(default_factory=dict)
     personal: bool = False          # folders and words: kept by presets and Restore Defaults
+    read: object = None             # derived control: (data) -> the settings behind it that other rows ask about
+    covers: tuple = ()              # derived control: the saved settings it reads and writes (default: key)
+    setlike: bool = False           # a checklist whose order means nothing
 
     def value_of(self, data):
         return self.get(data) if self.get else copy.deepcopy(dig(data, self.key))
@@ -234,11 +296,6 @@ def _acoustid_put(d, v, _vals):
     d["acoustid"] = v
 
 
-def _artist_file_put(d, v, _vals):
-    was = dig(d, "artwork.artist.file") or ""
-    plant(d, "artwork.artist.file", (was or "artist.jpg") if v else "")
-
-
 def _art_when_get(d):
     """Look for covers: "small" is "needed" with small covers replaced (artwork.replace)."""
     if dig(d, "artwork.when", "needed") == "always":
@@ -281,15 +338,6 @@ def _recursive_put(d, v, _vals):
     for s in d.get("sources") or []:
         if isinstance(s, dict):
             s["recursive"] = v
-
-
-def _lossy_put(d, v, vals):
-    plant(d, "destinations.lossy", v if vals.get("_lossy_on") else "")
-
-
-def _lossy_on_put(d, v, _vals):
-    if not v:
-        plant(d, "destinations.lossy", "")
 
 
 def _merge_get(d):
@@ -370,25 +418,9 @@ def _audiophile_on(item):
 REPLAYGAIN_ONLY = N_("Only at the Audiophile level, with ReplayGain on.")
 
 
-def _source_note(v):
-    import requirements as rq
-    if v.get("source") in ("discogs_preferred", "discogs_only") and not _ready(rq, "discogs"):
-        return tr("Discogs needs a free personal token: Preferences › Keys.")
-    return ""
-
-
 def _naming_note(v):
     return tr("A naming script of this profile's own is used instead (Script Editor).") \
         if v.get("_template") else ""
-
-
-def _db_reason(name):
-    def check(v):
-        src = v.get("source") or pf.DEFAULTS["source"]
-        if pf.source_allows(src, name):
-            return None
-        return tr("Not asked: the preferred database is {mode}.").format(mode=tr(SOURCE_WORDS.get(src, src)))
-    return check
 
 
 # the folder layouts whose album folder can be cut to a number of words
@@ -396,7 +428,7 @@ WORD_PRESETS = tuple(k for k, t in naming.PRESETS.items() if "$words(%album%,5)"
 
 
 def _dest_reason(v):
-    return None if v.get("operation") in ("copy", "move") else tr("Used when files are copied or moved.")
+    return None if v.get("_op") in ("copy", "move") else tr("Used when files are copied or moved.")
 
 
 def _recursive_reason(v):
@@ -404,54 +436,434 @@ def _recursive_reason(v):
     return None if v.get("_sources") else tr("Add a folder first.")
 
 
+# ---- the derived controls: each reads the saved settings it covers, and writes them back -------
+def _source_asked(d, name):
+    """The Sources setting and the database's own switches let it identify (engine.use_mb / use_discogs)."""
+    p = dig(d, f"providers.{name}") or {}
+    src = dig(d, "source")
+    src = src if src in pf.SOURCES else pf.DEFAULTS["source"]
+    return bool(p.get("enabled")) and bool(p.get("identify", True)) and pf.source_allows(src, name)
+
+
+SOURCE_COVERS = ("source", "providers.musicbrainz.enabled", "providers.musicbrainz.identify",
+                 "providers.discogs.enabled", "providers.discogs.identify", "providers.web.enabled")
+
+
+def _source_get(d):
+    """Sources: the four choices, or Web only. A preferred database whose other one is off is
+    that database only (the other is never asked either way)."""
+    src = dig(d, "source")
+    src = src if src in pf.SOURCES else pf.DEFAULTS["source"]
+    on = {n: bool(dig(d, f"providers.{n}.enabled")) and bool(dig(d, f"providers.{n}.identify", True))
+          for n in ("musicbrainz", "discogs")}
+    if on["musicbrainz"] and on["discogs"]:
+        return src
+    for n in ("musicbrainz", "discogs"):
+        if on[n] and not on["discogs" if n == "musicbrainz" else "musicbrainz"]:
+            if src in (f"{n}_only", f"{n}_preferred"):
+                return f"{n}_only"
+            return _saved(d, SOURCE_COVERS, N_("a database is off that the preferred one needs"))
+    if dig(d, "providers.web.enabled"):
+        return "web_only"
+    return _saved(d, SOURCE_COVERS, N_("no database or web source on"))
+
+
+def _source_put(d, v, _vals):
+    if v == "web_only":
+        for n in ("musicbrainz", "discogs"):
+            plant(d, f"providers.{n}.identify", False)
+        plant(d, "providers.web.enabled", True)
+        return
+    plant(d, "source", v)
+    for n in (("musicbrainz",) if v == "musicbrainz_only" else ("discogs",) if v == "discogs_only"
+              else ("musicbrainz", "discogs")):
+        plant(d, f"providers.{n}.enabled", True)
+        plant(d, f"providers.{n}.identify", True)
+
+
+def _source_read(d):
+    src = dig(d, "source")
+    return {"_src": src if src in pf.SOURCES else pf.DEFAULTS["source"],
+            "_mb_asked": _source_asked(d, "musicbrainz"), "_dg_asked": _source_asked(d, "discogs")}
+
+
+def _accept_get(d):
+    a = dig(d, "identification.accept", "partial")
+    return "partial_web" if a == "partial" and dig(d, "providers.web.partial", False) else a
+
+
+def _accept_put(d, v, _vals):
+    plant(d, "identification.accept", "partial" if v == "partial_web" else v)
+    if v in ("partial", "partial_web"):
+        plant(d, "providers.web.partial", v == "partial_web")
+
+
+LYRICS_COVERS = ("lyrics.enabled", "audiophile.lyrics")
+
+
+def _lyrics_get(d):
+    """Lyrics: below Audiophile only lyrics.enabled counts, at it only audiophile.lyrics (levels.items)."""
+    enabled, audio = bool(dig(d, "lyrics.enabled", False)), bool(dig(d, "audiophile.lyrics", True))
+    if enabled and audio:
+        return "always"
+    if audio:
+        return "audiophile"
+    if not enabled:
+        return "off"
+    return _saved(d, LYRICS_COVERS, N_("looked up below the Audiophile level, not at it"))
+
+
+def _lyrics_put(d, v, _vals):
+    plant(d, "lyrics.enabled", v == "always")
+    plant(d, "audiophile.lyrics", v != "off")
+
+
+def _lyrics_read(d):
+    return {"_lyrics_on": bool(dig(d, "lyrics.enabled", False)) or bool(dig(d, "audiophile.lyrics", True))}
+
+
+AUDIOPHILE_ITEMS = ("replaygain", "acoustid", "rip_info", "quality")       # (lyrics: the Lyrics row)
+AUDIOPHILE_WORDS = {"replaygain": N_("ReplayGain"), "acoustid": N_("AcoustID"), "rip_info": N_("Rip log"),
+                    "quality": N_("Dynamic range and quality")}
+
+
+def _audiophile_get(d):
+    return [k for k in AUDIOPHILE_ITEMS if dig(d, f"audiophile.{k}", True)]
+
+
+def _audiophile_put(d, v, vals):
+    full = vals.get("_full") or {}
+    for k in AUDIOPHILE_ITEMS:
+        if bool(dig(full, f"audiophile.{k}", True)) != (k in v):
+            plant(d, f"audiophile.{k}", k in v)
+
+
+def _audiophile_read(d):
+    return {f"audiophile.{k}": bool(dig(d, f"audiophile.{k}", True)) for k in AUDIOPHILE_ITEMS}
+
+
+DETAIL_KEYS = ("performers", "companies", "identifiers", "marketplace", "notes")
+DETAIL_WORDS = {"performers": N_("Performers"), "companies": N_("Companies"), "identifiers": N_("Matrix and other codes"),
+                "marketplace": N_("Marketplace numbers"), "notes": N_("Release notes")}
+
+
+def _details_get(d):
+    vals = {k: dig(d, f"discogs_details.{k}", False) for k in DETAIL_KEYS}
+    if all(isinstance(v, bool) for v in vals.values()):
+        return [k for k in DETAIL_KEYS if vals[k]]
+    parts = []
+    for k, v in vals.items():
+        if v is True:
+            parts.append(tr(DETAIL_WORDS[k]))
+        elif v == "audiophile":
+            parts.append(tr("{0} at the Audiophile level").format(tr(DETAIL_WORDS[k])))
+        elif v == "tagger":
+            parts.append(tr("{0} as my tagger has it").format(tr(DETAIL_WORDS[k])))
+        elif v is not False:
+            parts.append(f"{tr(DETAIL_WORDS[k])}: {v}")
+    payload = {f"discogs_details.{k}": copy.deepcopy(dig(d, f"discogs_details.{k}", MISSING)) for k in DETAIL_KEYS}
+    words = "; ".join(parts) or tr("none")
+    # (a detail at the Audiophile level is a plain choice, as a new profile has the codes; only a
+    # value this row cannot set is "as saved")
+    plain = all(v is True or v is False or v == "audiophile" for v in vals.values())
+    return Saved(words[:1].upper() + words[1:] if plain else tr("As saved: {0}").format(words), payload)
+
+
+def _details_put(d, v, _vals):
+    for k in DETAIL_KEYS:
+        plant(d, f"discogs_details.{k}", k in v)
+
+
+CREDIT_MODES = {"auto": (None, None), "both": (True, True), "album": (True, False), "tracks": (False, True),
+                "off": (False, False)}
+CREDIT_COVERS = ("tagger.release_ars", "tagger.track_ars")
+
+
+def _credits_get(d):
+    pair = (_tagger_get("release_ars")(d), _tagger_get("track_ars")(d))
+    for k, v in CREDIT_MODES.items():
+        if pair == v and all(type(a) is type(b) for a, b in zip(pair, v)):
+            return k
+    return _saved(d, CREDIT_COVERS, N_("the album's and the tracks' credits differ from these choices"))
+
+
+def _credits_put(d, v, vals):
+    for key, x in zip(("release_ars", "track_ars"), CREDIT_MODES[v]):
+        _tagger_put(key)(d, x, vals)
+
+
+def _artist_get(d):
+    """Artist photos: off, a file in the artist folder, in each track, or both."""
+    if not dig(d, "artwork.artist.enabled"):
+        return "off"
+    file, embed = bool(dig(d, "artwork.artist.file")), bool(dig(d, "artwork.artist.embed"))
+    if file or embed:
+        return "both" if file and embed else "file" if file else "embed"
+    return _saved(d, ARTIST_COVERS, N_("on, but saved nowhere"))
+
+
+ARTIST_COVERS = ("artwork.artist.enabled", "artwork.artist.file", "artwork.artist.embed")
+
+
+def _artist_put(d, v, _vals):
+    if v == "off":
+        plant(d, "artwork.artist.enabled", False)
+        return
+    plant(d, "artwork.artist.enabled", True)
+    was = dig(d, "artwork.artist.file") or ""
+    plant(d, "artwork.artist.file", (was or "artist.jpg") if v in ("file", "both") else "")
+    plant(d, "artwork.artist.embed", v in ("embed", "both"))
+
+
+EMBED_SIDES = (600, 1000, 1200, 1600, 0)
+
+
+def _embed_get(d):
+    if not dig(d, "artwork.embed_front", True):
+        return "off"
+    side = dig(d, "artwork.embed_max_side", 1200)
+    if isinstance(side, int) and not isinstance(side, bool) and side in EMBED_SIDES:
+        return side
+    return _saved(d, ("artwork.embed_front", "artwork.embed_max_side"), f"{side} px")
+
+
+def _embed_put(d, v, _vals):
+    plant(d, "artwork.embed_front", v != "off")
+    if v != "off":
+        plant(d, "artwork.embed_max_side", v)
+
+
+def _operation_get(d):
+    op = dig(d, "operation", "in_place")
+    if op == "in_place" and dig(d, "rename_in_place", False):
+        return "in_place_rename"
+    return op
+
+
+def _operation_put(d, v, _vals):
+    if v in ("in_place", "in_place_rename"):
+        plant(d, "operation", "in_place")
+        plant(d, "rename_in_place", v == "in_place_rename")
+    else:
+        plant(d, "operation", v)
+
+
+def _operation_read(d):
+    return {"_op": dig(d, "operation", "in_place"), "_rename": bool(dig(d, "rename_in_place", False))}
+
+
+def _existing_get(d):
+    on = dig(d, "on_existing", "keep_both")
+    if on == "keep_both":
+        return "keep_code" if dig(d, "naming.duplicate_suffix", "number") == "code" else "keep_number"
+    return on
+
+
+def _existing_put(d, v, _vals):
+    if v in ("keep_number", "keep_code"):
+        plant(d, "on_existing", "keep_both")
+        plant(d, "naming.duplicate_suffix", "code" if v == "keep_code" else "number")
+    else:
+        plant(d, "on_existing", v)
+
+
+def _existing_read(d):
+    return {"naming.duplicate_suffix": dig(d, "naming.duplicate_suffix", "number")}
+
+
+SUBFOLDER_ITEMS = ("covers", "misc")
+SUBFOLDER_WORDS = {"covers": N_("Pictures folder"), "misc": N_("Rip logs folder")}
+
+
+def _subfolders_get(d):
+    return [k for k in SUBFOLDER_ITEMS if dig(d, f"subfolders.{k}")]
+
+
+def _subfolders_put(d, v, vals):
+    full = vals.get("_full") or {}
+    for k in SUBFOLDER_ITEMS:
+        if _changed_from(full, f"subfolders.{k}", k in v):
+            plant(d, f"subfolders.{k}", k in v)
+
+
+def _subfolders_read(d):
+    return {f"subfolders.{k}": bool(dig(d, f"subfolders.{k}")) for k in SUBFOLDER_ITEMS}
+
+
+def _skip_get(d):
+    return list(dig(d, "skip_folders") or []) + list(dig(d, "exclude_paths") or [])
+
+
+def _skip_put(d, v, vals):
+    """Skip folders and skip paths in one list: an entry stays in the list it came from, and a new
+    one goes by its words: with a "/" it is a path."""
+    full = vals.get("_full") or {}
+    old_names, old_paths = set(dig(full, "skip_folders") or []), set(dig(full, "exclude_paths") or [])
+    names, paths = [], []
+    for x in v:
+        in_paths = x in old_paths and x not in old_names or (x not in old_names and x not in old_paths and "/" in x)
+        (paths if in_paths else names).append(x)
+    plant(d, "skip_folders", names)
+    plant(d, "exclude_paths", paths)
+
+
+# ---- why a row does nothing now ------------------------------------------------------------
+REASON_BASIC = N_("Not written at the Basic level.")
+REASON_NO_DISCOGS = N_("Discogs is not asked (see Sources).")
+REASON_NO_WEB = N_("Only when the web fallback is on.")
+REASON_NO_ART = N_("Covers are off (Find front covers).")
+REASON_COPY = N_("A copy leaves your originals as they are, so nothing is marked or moved.")
+REASON_ONLY = N_("Used only when both databases are asked, with one preferred (see Sources).")
+REASON_NO_NAMES = N_("Used when files are copied, moved or renamed.")
+REASON_NO_SUBFOLDERS = N_("Neither the pictures nor the rip logs folder is made.")
+FOLLOW_NOTE = N_("Your existing tagger's settings are not used (Tags › Advanced), so Automatic and Same as my "
+                 "existing tagger mean TagMender's own default.")
+
+
+def _first(*checks):
+    def check(v):
+        for c in checks:
+            r = c(v)
+            if r is not None:
+                return r
+        return None
+    return check
+
+
+def _unless_basic(v):
+    return REASON_BASIC if v.get("tag_level") == "basic" else None
+
+
+def _needs_discogs(v):
+    return None if v.get("_dg_asked") else REASON_NO_DISCOGS
+
+
+def _needs_web(v):
+    return None if v.get("providers.web.enabled") else REASON_NO_WEB
+
+
+def _needs_art(v):
+    return None if v.get("artwork.enabled") else REASON_NO_ART
+
+
+def _names_used(v):
+    """In place without renaming, files keep their names: plan.py renames only for copy, move or rename_in_place."""
+    if v.get("_op") == "in_place" and not v.get("_rename"):
+        return REASON_NO_NAMES
+    return None
+
+
+def _not_on_copy(v):
+    return REASON_COPY if v.get("_op") == "copy" else None
+
+
+def _ini_found() -> bool:
+    try:
+        import tagger_settings
+        return tagger_settings.ini_path() is not None
+    except Exception:
+        return False
+
+
+def _differs(v, key) -> bool:
+    """The saved value (or the one now shown) is not the default."""
+    return not same(v["_loaded"].get(key), v["_defaults"].get(key)) or not same(v.get(key), v["_defaults"].get(key))
+
+
+def _saved_only(key, extra=None):
+    """Shown only when the saved value is not the default (the behaviour is still honoured)."""
+    return lambda v: _differs(v, key) and (extra is None or extra(v))
+
+
+def _tagger_row(key, advanced=False):
+    """A row that can follow another tagger: always shown (credits, artist names, genres... are
+    TagMender's own choices too); its note says what "Automatic" means while not following."""
+    return lambda v: True
+
+
+def _says_tagger(x) -> bool:
+    if isinstance(x, Saved):
+        return "tagger" in x.payload.values()
+    return x is None or x in ("auto", "tagger") if isinstance(x, (str, type(None))) else False
+
+
+def _follow_note(key):
+    return lambda v: tr(FOLLOW_NOTE) if not v.get("follow_tagger_settings") and _says_tagger(v.get(key)) else ""
+
+
+def _sources_note(v):
+    if v.get("_op") == "in_place" and any(isinstance(s, dict) and s.get("destination")
+                                                for s in v.get("_sources") or []):
+        return tr("A folder's own Moves to is not used when fixing in place.")
+    return ""
+
+
+def _quality_note(v):
+    if v.get("_op") == "copy" and v.get("quality_action") == "move":
+        return tr(REASON_COPY)
+    return ""
+
+
+def _source_words_note(v):
+    import requirements as rq
+    if v.get("_src") in ("discogs_preferred", "discogs_only") and v.get("_dg_asked") and not _ready(rq, "discogs"):
+        return tr("Discogs needs a free personal token: Preferences › Keys.")
+    return ""
+
+
+def _accept_note(v):
+    if v.get("identification.accept") == "partial_web" and not v.get("providers.web.enabled"):
+        return tr("The web fallback is off, so store pages are not used.")
+    return ""
+
+
 SETTINGS = [
     # General
     S("description", N_("Description"), "text", "general", personal=True, attr="desc"),
     # Source
     S("_sources", N_("Folders this profile covers"), "list", "folders", get=_sources_get, put=_sources_put,
-      custom="sources", personal=True, foot=N_("The music this profile looks after. A preview can still be run on any other folder.")),
+      custom="sources", personal=True, note=_sources_note,
+      foot=N_("The music this profile looks after. A preview can still be run on any other folder.")),
     S("_recursive", N_("Include subfolders"), "switch", "folders", get=_recursive_get, put=_recursive_put,
       enable=_recursive_reason, foot=N_("Albums in folders inside these are found too.")),
-    S("skip_folders", N_("Skip these folders"), "list", "folders",
-      foot=N_("By name, such as #recycle, or _* for every name starting with _. Never read or changed. Hidden folders and TagMender's own "
-              "Unidentified and Duplicates folders are always skipped.")),
     S("formats", N_("Audio files"), "popup", "audio", attr="formats", custom="check",
       choices=(([], N_("All formats")), (["lossless"], N_("Lossless only")), (["lossy"], N_("Lossy only"))),
       known=pf.LOSSLESS + pf.LOSSY, words=FORMAT_WORDS,
       foot=N_("Lossless: FLAC, ALAC, WAV and the like. Lossy: MP3, AAC, Opus and the like. Told by the "
               "sound inside, so an .m4a file holding ALAC counts as lossless.")),
-    S("_lossy_on", N_("Put lossy files in a different folder"), "switch", "audio",
-      get=lambda d: bool(dig(d, "destinations.lossy")), put=_lossy_on_put, personal=True, enable=_dest_reason,
-      foot=N_("Lossy files go into a library of their own instead of the library folder.")),
-    S("destinations.lossy", N_("Folder for lossy files"), "folder", "audio", put=_lossy_put, personal=True,
-      show=lambda v: v.get("_lossy_on"), enable=_dest_reason,
-      foot=N_("Named the same way as in the library folder.")),
+    S("destinations.lossy", N_("Folder for lossy files"), "folder", "audio", personal=True, enable=_dest_reason,
+      foot=N_("Lossy files go into a library of their own, named the same way as the library folder. Empty: "
+              "they go with the rest.")),
     S("quality_action", N_("Fake lossless files"), "popup", "audio",
       choices=(("note", N_("Note it")), ("hold", N_("Hold for review")), ("move", N_("Move aside"))),
       enable=_when(_audiophile_on("quality"), N_("Only at the Audiophile level, with Dynamic range and quality on.")),
+      note=_quality_note,
       foot=N_("A lossless file made from an MP3 or other lossy file. Move aside puts the album in the folder "
               "for albums nothing identified; a profile that copies holds it for review instead.")),
-    S("exclude_paths", N_("Skip these paths"), "list", "source_adv",
-      foot=N_("Patterns matched against the whole path, such as */Downloads/*. Never read or changed.")),
+    S("_skip", N_("Skip these folders and paths"), "list", "source_adv", get=_skip_get, put=_skip_put,
+      foot=N_("Folders by name, such as #recycle, or _* for every name starting with _; paths, such as "
+              "*/Downloads/*, are matched against the whole path. Never read or changed. Hidden folders and "
+              "TagMender's own Unidentified and Duplicates folders are always skipped.")),
     S("grouping.join_deluxe_folders", N_("Join \"(Deluxe Edition)\" folders"), "switch", "source_adv",
+      show=_saved_only("grouping.join_deluxe_folders"),
       foot=N_("A folder beside the album holding only its bonus tracks is tagged as part of the album.")),
     S("on_unwritable", N_("When a file can't be written"), "popup", "source_adv",
       choices=(("skip_album", N_("Leave the whole album")), ("skip_file", N_("Leave only that file"))),
       foot=N_("Such as a read-only file. Left albums are tried again on the next run.")),
     # Identification
-    S("source", N_("Preferred database"), "popup", "databases", attr="source",
-      choices=tuple((k, SOURCE_WORDS[k]) for k in pf.SOURCES), note=_source_note,
-      foot=N_("Which database identifies albums, and whose tags win. MusicBrainz needs no key and gives "
-              "the IDs media servers use.")),
-    S("providers.musicbrainz.enabled", N_("Ask MusicBrainz"), "switch", "databases", attr="mb",
-      enable=_db_reason("musicbrainz"), foot=N_("Free, and needs no key.")),
-    S("providers.discogs.enabled", N_("Ask Discogs"), "switch", "databases", attr="dg",
-      enable=_db_reason("discogs"), foot=N_("Needs a free Discogs token (Preferences › Keys).")),
-    S("identification.accept", N_("Tag an album when"), "popup", "databases",
+    S("source", N_("Sources"), "popup", "databases", attr="source", get=_source_get, put=_source_put,
+      read=_source_read, covers=SOURCE_COVERS, note=_source_words_note,
+      choices=tuple((k, SOURCE_CHOICE_WORDS[k]) for k in SOURCE_CHOICES),
+      foot=N_("Which database identifies albums, and whose tags win. MusicBrainz needs no key and gives the IDs "
+              "media servers use; Discogs needs a free token (Preferences › Keys). Web only asks no database: "
+              "store and encyclopaedia pages only.")),
+    S("identification.accept", N_("Tag an album when"), "popup", "databases", get=_accept_get, put=_accept_put,
+      note=_accept_note,
       choices=(("exact", N_("Exact release is known")), ("album", N_("Album is known, pressing unsure")),
-               ("partial", N_("Some details are certain (Partial)"))),
-      foot=N_("The lower the bar, the more albums get tags. Albums below it are handled as albums "
-              "nothing identified.")),
+               ("partial", N_("Some details are certain (Partial)")),
+               ("partial_web", N_("Partial, also from store pages"))),
+      foot=N_("The lower the bar, the more albums get tags. Albums below it are handled as albums nothing "
+              "identified. Store pages: an album found only on a store page gets the tags that name no release.")),
     S("acoustid", N_("Audio fingerprints"), "popup", "evidence", get=_acoustid_get, put=_acoustid_put,
       choices=(("unsure", N_("Only when unsure")), ("always", N_("Every album")), ("off", N_("Never"))),
       enable=_needs("fpcalc", "acoustid", words=N_("Needs fpcalc and an AcoustID key.")),
@@ -462,43 +874,41 @@ SETTINGS = [
       enable=_needs("tesseract", words=N_("Needs Tesseract OCR.")),
       foot=N_("Text recognition (OCR) finds barcodes and catalogue numbers on cover scans and booklets. "
               "Runs on this computer.")),
-    S("providers.web.gnudb", N_("Look up discs on gnudb"), "switch", "evidence",
-      enable=_needs("gnudb", words=N_("Needs your gnudb e-mail (Preferences › Keys).")),
-      foot=N_("gnudb (formerly freedb) lists what others typed in for a CD. Sends only the disc's track "
-              "lengths.")),
-    S("providers.web.shops", N_("Look up barcodes in music stores"), "switch", "evidence",
-      foot=N_("When the barcode search found nothing sure. Sends only the barcode, to Deezer and Apple.")),
     S("providers.web.enabled", N_("Web fallback"), "switch", "evidence", attr="web",
       foot=N_("When no database has the album, store and encyclopaedia pages are checked instead.")),
-    S("providers.web.sources", N_("Web fallback sources"), "list", "evidence", custom="check",
-      known=pf.WEB_SOURCES, words=WEB_SOURCE_WORDS, show=lambda v: v.get("providers.web.enabled"),
-      foot=N_("The sites checked. Only the album's name and barcode are sent.")),
-    S("providers.web.partial", N_("Use store pages for Partial tags"), "switch", "evidence", attr="web_partial",
-      enable=_when(lambda v: v.get("providers.web.enabled")),
-      foot=N_("An album found only on a store page gets the tags that name no release: no release IDs, "
-              "barcode or catalogue number.")),
-    S("singles.identify", N_("Identify loose tracks"), "switch", "evidence",
-      foot=N_("A track on its own, not part of an album, is matched to its recording by its fingerprint.")),
     S("matching.preferred_countries", N_("Preferred release countries"), "popup", "releases", custom="list",
-      choices=(("auto", N_("Automatic")), ("none", N_("No preference"))),
+      choices=(("auto", N_("Automatic")), ("none", N_("No preference"))), show=_tagger_row("matching.preferred_countries"),
+      note=_follow_note("matching.preferred_countries"),
       foot=N_("Automatic: your region, then Worldwide, then Europe.")),
-    S("matching.preferred_release_types", N_("Prefer these release types"), "list", "releases",
-      foot=N_("Such as Album, EP, Compilation.")),
-    S("matching.discouraged_release_types", N_("Avoid these release types"), "list", "releases",
-      foot=N_("Such as Bootleg, Live.")),
-    S("matching.preferred_formats", N_("Prefer these formats"), "list", "releases",
-      foot=N_("Such as CD, Vinyl, Digital Media.")),
     S("discogs_enrichment.merge_mode", N_("When both databases have a value"), "popup", "ident_adv",
       get=_merge_get, put=_merge_put,
       choices=(("", N_("Preferred database wins")), ("fill_gaps", N_("Fill only empty tags from Discogs")),
                ("override", N_("Discogs wins")), ("combine", N_("Both values"))),
+      enable=_first(_needs_discogs, lambda v: REASON_ONLY if str(v.get("_src")).endswith("_only") else None),
       foot=N_("When MusicBrainz and Discogs disagree on a tag.")),
     S("_engines", N_("Web search"), "list", "ident_adv", custom="check", get=_engines_get, put=_engines_put,
-      known=pf.WEB_ENGINES[1:], words=ENGINE_WORDS,
+      known=pf.WEB_ENGINES[1:], words=ENGINE_WORDS, enable=_needs_web,
       foot=N_("A general web search for the codes read from the scans, such as the catalogue number. Off "
               "unless an engine is ticked; keys go in Preferences › Keys.")),
     S("matching.extra_careful", N_("Extra-careful matching"), "switch", "ident_adv",
       foot=N_("Needs more proof before tagging, so more albums wait for your review.")),
+    S("matching.preferred_release_types", N_("Prefer these release types"), "list", "ident_adv",
+      foot=N_("When several pressings fit equally well. Such as Album, EP, Compilation.")),
+    S("matching.discouraged_release_types", N_("Avoid these release types"), "list", "ident_adv",
+      foot=N_("Such as Bootleg, Live.")),
+    S("matching.preferred_formats", N_("Prefer these formats"), "list", "ident_adv",
+      foot=N_("Such as CD, Vinyl, Digital Media.")),
+    S("providers.web.gnudb", N_("Look up discs on gnudb"), "switch", "ident_adv",
+      enable=_first(_needs_web, _needs("gnudb", words=N_("Needs your gnudb e-mail (Preferences › Keys)."))),
+      foot=N_("gnudb (formerly freedb) lists what others typed in for a CD. Sends only the disc's track "
+              "lengths.")),
+    S("providers.web.shops", N_("Look up barcodes in music stores"), "switch", "ident_adv", enable=_needs_web,
+      foot=N_("When the barcode search found nothing sure. Sends only the barcode, to Deezer and Apple.")),
+    S("providers.web.sources", N_("Web fallback sources"), "list", "ident_adv", custom="check",
+      known=pf.WEB_SOURCES, words=WEB_SOURCE_WORDS, show=lambda v: v.get("providers.web.enabled"),
+      foot=N_("The sites checked. Only the album's name and barcode are sent.")),
+    S("singles.identify", N_("Identify loose tracks"), "switch", "ident_adv",
+      foot=N_("A track on its own, not part of an album, is matched to its recording by its fingerprint.")),
     # Tags
     S("tag_level", N_("Tagging level"), "popup", "written", attr="level",
       choices=tuple((k, LEVEL_WORDS[k]) for k in ("basic", "enthusiast", "audiophile")),
@@ -508,59 +918,47 @@ SETTINGS = [
       choices=(("replace", N_("Replace")), ("fill_missing", N_("Fill in missing only")),
                ("preserve", N_("Keep"))),
       foot=N_("Tags the files already have. Replace: the databases' values win. Fill in missing only: "
-              "only empty tags get a value. Keep: they are left as they are.")),
-    *[S(f"audiophile.{k}", label, "switch", "audiophile", enable=_when(_is("tag_level", "audiophile")), foot=foot)
-      for k, label, foot in (
-          ("replaygain", N_("ReplayGain"), N_("Volume tags that let players play every track equally loud.")),
-          ("lyrics", N_("Lyrics"), N_("Looked up on LRCLIB and saved as set under Lyrics.")),
-          ("acoustid", N_("AcoustID"), N_("Each track's fingerprint ID, checked against its MusicBrainz "
-                                          "recording.")),
-          ("rip_info", N_("Rip log"), N_("The disc ID and the rip log's verdict: the ripper, and whether the "
-                                         "rip was error-free.")),
-          ("quality", N_("Dynamic range and quality"), N_("A dynamic range (DR) value, and a warning when a "
-                                                          "lossless file was made from a lossy one.")))],
+              "only empty tags get a value. Keep: they are left as they are. With Use my existing tagger's "
+              "settings on (Tags › Advanced), the tags that tagger preserves are only filled when empty.")),
+    S("_audiophile", N_("Measurements"), "list", "audiophile", custom="check", get=_audiophile_get,
+      put=_audiophile_put, read=_audiophile_read, known=AUDIOPHILE_ITEMS, words=AUDIOPHILE_WORDS, setlike=True,
+      covers=tuple(f"audiophile.{k}" for k in AUDIOPHILE_ITEMS), enable=_when(_is("tag_level", "audiophile")),
+      foot=N_("ReplayGain: volume tags for equal loudness. AcoustID: each track's fingerprint ID. Rip log: the "
+              "disc ID and the rip's verdict. Dynamic range and quality: a DR value, and a warning for a lossless "
+              "file made from a lossy one. Lyrics: see Lyrics.")),
     S("genres.musicbrainz", N_("Genres from MusicBrainz"), "popup", "genres", put=_genres_put,
       choices=(("auto", N_("Automatic")), (True, N_("On")), (False, N_("Off")),
                ("tagger", N_("Same as my existing tagger"))),
+      show=_tagger_row("genres.musicbrainz"), note=_follow_note("genres.musicbrainz"),
       foot=N_("The genres people voted for on MusicBrainz. Automatic: on, or as your existing tagger does "
               "when its settings are used.")),
     S("genres.max", N_("At most"), "stepper", "genres", rng=(1, 20), suffix=N_(" genres"),
       enable=_when(lambda v: v.get("genres.musicbrainz") is not False),
       foot=N_("Per album. Any more are left out.")),
-    S("genres.discogs_styles", N_("Discogs styles"), "popup", "genres",
-      choices=(("genre_if_none", N_("Genre, only when no other genre")), ("own_tag", N_("Own tag (DISCOGS_STYLE)")),
-               ("genre", N_("Always in Genre")), ("both", N_("Both: Genre and own tag")),
-               ("tagger", N_("Same as my existing tagger"))),
-      foot=N_("Styles are Discogs's finer genres, such as Deep House or Shoegaze.")),
-    S("genres.web", N_("Genres from the web"), "segmented", "genres",
-      choices=(("off", N_("Off")), ("store", N_("Store genres")), ("keywords", N_("Also keywords"))),
-      foot=N_("For albums found on store pages: the store's genres, and with Also keywords, Bandcamp's tags "
-              "too.")),
     S("tagger.standardize_artist_names", N_("Artist names"), "popup", "artists", attr="pic_names",
       get=_tagger_get("standardize_artist_names"), put=_tagger_put("standardize_artist_names"),
       choices=((None, N_("Automatic")), ("none", N_("As credited on the release")),
                ("variations", N_("Fix spelling variations")),
                ("all", N_("Always the standard name"))),
+      show=_tagger_row("tagger.standardize_artist_names"), note=_follow_note("tagger.standardize_artist_names"),
       foot=N_("The standard name is the one MusicBrainz lists for the artist. Always: also for releases "
               "made under a former name.")),
-    S("tagger.translate_artist_names", N_("Translate artist names"), "popup", "artists",
-      get=_tagger_get("translate_artist_names"), put=_tagger_put("translate_artist_names"), choices=AUTO_ON_OFF,
-      foot=N_("The name in your system language, when MusicBrainz knows one.")),
-    S("tagger.convert_punctuation", N_("Plain punctuation"), "popup", "artists",
-      get=_tagger_get("convert_punctuation"), put=_tagger_put("convert_punctuation"), choices=AUTO_ON_OFF,
-      foot=N_("Curly quotes and dashes become plain ones.")),
-    S("tagger.release_ars", N_("Credits on the album"), "popup", "credits", attr="pic_rel",
-      get=_tagger_get("release_ars"), put=_tagger_put("release_ars"), choices=AUTO_ON_OFF,
-      foot=N_("Producer, engineer, mixer and others credited for the whole album.")),
-    S("tagger.track_ars", N_("Credits on each track"), "popup", "credits", attr="pic_trk",
-      get=_tagger_get("track_ars"), put=_tagger_put("track_ars"), choices=AUTO_ON_OFF,
-      foot=N_("Composer, lyricist, performers and their instruments.")),
+    S("_credits", N_("Credits"), "popup", "credits", attr="pic_rel", get=_credits_get, put=_credits_put,
+      covers=CREDIT_COVERS, show=_tagger_row("_credits"), note=_follow_note("_credits"),
+      enable=_unless_basic,
+      choices=(("auto", N_("Automatic")), ("both", N_("Album and tracks")), ("album", N_("Album only")),
+               ("tracks", N_("Tracks only")), ("off", N_("Off"))),
+      foot=N_("Album: producer, engineer, mixer and others credited for the whole album. Tracks: composer, "
+              "lyricist, performers and their instruments.")),
     S("tagger.standardize_instruments", N_("Standard instrument names"), "popup", "credits",
       get=_tagger_get("standardize_instruments"), put=_tagger_put("standardize_instruments"), choices=AUTO_ON_OFF,
+      show=_tagger_row("tagger.standardize_instruments"), note=_follow_note("tagger.standardize_instruments"),
+      enable=_unless_basic,
       foot=N_("Instruments as MusicBrainz names them, rather than as each credit words them.")),
     S("dates.date_tag", N_("Date holds"), "popup", "versions",
       choices=(("release", N_("This pressing's date")), ("original", N_("The first release date")),
                ("tagger", N_("Same as my existing tagger"))),
+      show=_tagger_row("dates.date_tag"), note=_follow_note("dates.date_tag"),
       foot=N_("The first release date is always written as Original Date too.")),
     S("keep_versions", N_("Separate versions"), "switch", "versions", attr="versions",
       foot=N_("A remaster or remix keeps its version in the album title, so media servers list it apart "
@@ -570,123 +968,145 @@ SETTINGS = [
                ("tags_only", N_("Album, with the version in its own tags"))), show=lambda v: v.get("keep_versions"),
       foot=N_("How a remaster, remix or deluxe edition is told apart from the original.")),
     S("versions.extra_tags", N_("Write version tags"), "switch", "versions", show=lambda v: v.get("keep_versions"),
+      enable=_unless_basic,
       foot=N_("ALBUMVERSION and RELEASECOMMENT tags, read by LMS and other media servers.")),
     S("split_versions", N_("Split two versions found in one folder"), "switch", "versions", attr="split_box",
+      show=_saved_only("split_versions"),
       foot=N_("Such as a remaster beside a remix: each goes into a folder of its own, tagged from its own "
               "release.")),
-    *[S(f"discogs_details.{k}", label, "popup", "discogs", choices=DETAIL_CHOICES, foot=foot)
-      for k, label, foot in (
-          ("performers", N_("Performers"), N_("Musicians and their instruments, as Discogs credits them.")),
-          ("companies", N_("Companies"), N_("Labels, studios, pressing plants and publishers.")),
-          ("identifiers", N_("Matrix and other codes"), N_("The codes stamped or printed on the disc and "
-                                                           "sleeve, such as the matrix in the run-out groove.")),
-          ("marketplace", N_("Marketplace numbers"), N_("How many Discogs users have and want it, its rating, "
-                                                        "copies for sale and the lowest price.")),
-          ("notes", N_("Release notes"), N_("The free-text notes on the Discogs release page.")))],
-    S("lyrics.enabled", N_("Find lyrics"), "switch", "lyrics", foot=N_("Saved where chosen below.")),
-    S("lyrics.sidecar", N_("Next to the track (.lrc)"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled"),
+    S("_discogs_details", N_("Details to write"), "popup", "discogs", get=_details_get, put=_details_put,
+      custom="check", known=DETAIL_KEYS, words=DETAIL_WORDS, setlike=True,
+      covers=tuple(f"discogs_details.{k}" for k in DETAIL_KEYS), choices=(([], N_("None")),),
+      show=_tagger_row("_discogs_details"), note=_follow_note("_discogs_details"),
+      enable=_first(_unless_basic, _needs_discogs),
+      foot=N_("Performers: musicians and their instruments. Companies: labels, studios, pressing plants and "
+              "publishers. Matrix and other codes: stamped or printed on the disc and sleeve. Marketplace "
+              "numbers: how many Discogs users have and want it, its rating and lowest price. Release notes: "
+              "the free text on the release page.")),
+    S("_lyrics", N_("Find lyrics"), "popup", "lyrics", get=_lyrics_get, put=_lyrics_put, read=_lyrics_read,
+      covers=LYRICS_COVERS,
+      choices=(("off", N_("Off")), ("audiophile", N_("At the Audiophile level")), ("always", N_("Always"))),
+      foot=N_("Looked up on LRCLIB, a free lyrics database, and saved as set below.")),
+    S("lyrics.sidecar", N_("Next to the track (.lrc)"), "switch", "lyrics", show=lambda v: v.get("_lyrics_on"),
       foot=N_("A .lrc file beside each track, read by Plex and Jellyfin. Synced lyrics only.")),
-    S("lyrics.embed", N_("In the file"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled"),
+    S("lyrics.embed", N_("In the file"), "switch", "lyrics", show=lambda v: v.get("_lyrics_on"),
       foot=N_("In the track's tags, read by Navidrome and phones.")),
-    S("lyrics.synced", N_("Prefer synced lyrics"), "switch", "lyrics", show=lambda v: v.get("lyrics.enabled"),
+    S("lyrics.synced", N_("Prefer synced lyrics"), "switch", "lyrics", show=lambda v: v.get("_lyrics_on"),
       foot=N_("Lines timed to the music, which players scroll along. Off: the plain text, in the file.")),
     S("loudness.replace_existing", N_("Recalculate ReplayGain"), "switch", "loudness",
       enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
       foot=N_("Measures every track again and replaces values other programs wrote. Off: those are kept.")),
-    S("mark_resolved", N_("Mark identified albums"), "switch", "notes",
+    S("loudness.album_gain", N_("Album gain"), "switch", "loudness",
+      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
+      foot=N_("A ReplayGain value for the whole album, which keeps quiet tracks quieter than loud ones.")),
+    S("loudness.opus_r128", N_("Opus gain tags"), "switch", "loudness",
+      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
+      foot=N_("The R128 volume tags Opus players read, as well as ReplayGain.")),
+    S("mark_resolved", N_("Mark identified albums"), "switch", "notes", show=_saved_only("mark_resolved"),
       foot=N_("Writes TAGMENDER=Resolved into each file, so re-runs, checks and retries can tell finished "
               "albums.")),
     S("cleanup.comments", N_("Comments"), "segmented", "tags_adv",
       choices=(("keep", N_("Keep")), ("remove", N_("Remove"))),
       foot=N_("The files' comment tags, often a note from the ripper or the shop.")),
-    S("loudness.album_gain", N_("Album gain"), "switch", "tags_adv",
-      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
-      foot=N_("A ReplayGain value for the whole album, which keeps quiet tracks quieter than loud ones.")),
-    S("loudness.opus_r128", N_("Opus gain tags"), "switch", "tags_adv",
-      enable=_when(_audiophile_on("replaygain"), REPLAYGAIN_ONLY),
-      foot=N_("The R128 volume tags Opus players read, as well as ReplayGain.")),
+    S("genres.discogs_styles", N_("Discogs styles"), "popup", "tags_adv",
+      choices=(("genre_if_none", N_("Genre, only when no other genre")), ("own_tag", N_("Own tag (DISCOGS_STYLE)")),
+               ("genre", N_("Always in Genre")), ("both", N_("Both: Genre and own tag")),
+               ("tagger", N_("Same as my existing tagger"))),
+      enable=_needs_discogs, note=_follow_note("genres.discogs_styles"),
+      foot=N_("Styles are Discogs's finer genres, such as Deep House or Shoegaze.")),
+    S("genres.web", N_("Genres from the web"), "segmented", "tags_adv",
+      choices=(("off", N_("Off")), ("store", N_("Store genres")), ("keywords", N_("Also keywords"))),
+      foot=N_("For albums found on store pages: the store's genres, and with Also keywords, Bandcamp's tags "
+              "too.")),
+    S("tagger.translate_artist_names", N_("Translate artist names"), "popup", "tags_adv",
+      get=_tagger_get("translate_artist_names"), put=_tagger_put("translate_artist_names"), choices=AUTO_ON_OFF,
+      note=_follow_note("tagger.translate_artist_names"),
+      foot=N_("The name in your system language, when MusicBrainz knows one.")),
+    S("tagger.convert_punctuation", N_("Plain punctuation"), "popup", "tags_adv",
+      get=_tagger_get("convert_punctuation"), put=_tagger_put("convert_punctuation"), choices=AUTO_ON_OFF,
+      note=_follow_note("tagger.convert_punctuation"),
+      foot=N_("Curly quotes and dashes become plain ones.")),
     S("tagger.write_id3v23", N_("MP3 tag version"), "popup", "tags_adv", attr="pic_v2",
       get=_id3_get("write_id3v23"), put=_id3_put("write_id3v23"),
       choices=((None, N_("Automatic")), ("keep", N_("Keep each file's")), (False, N_("Newest (ID3v2.4)")),
-               (True, N_("For older players (ID3v2.3)"))),
+               (True, N_("For older players (ID3v2.3)"))), note=_follow_note("tagger.write_id3v23"),
       foot=N_("ID3 is the tag format of MP3 files. Some older players and car stereos read only version "
               "2.3.")),
     S("tagger.write_id3v1", N_("Old MP3 tag (ID3v1)"), "popup", "tags_adv", attr="pic_v1",
       get=_id3_get("write_id3v1"), put=_id3_put("write_id3v1"),
       choices=((None, N_("Automatic")), ("keep", N_("Update one that is there")), (True, N_("Write")),
-               (False, N_("Remove"))),
+               (False, N_("Remove"))), note=_follow_note("tagger.write_id3v1"),
       foot=N_("A tiny, very old tag that only a few old players still need.")),
     S("tagger.remove_id3_from_flac", N_("Remove stray MP3 tags from FLAC"), "popup", "tags_adv",
       get=_tagger_get("remove_id3_from_flac"), put=_tagger_put("remove_id3_from_flac"), choices=AUTO_ON_OFF,
+      note=_follow_note("tagger.remove_id3_from_flac"),
       foot=N_("FLAC files have tags of their own; MP3-style tags left in them confuse some players.")),
     S("tagger.remove_ape_from_mp3", N_("Remove APE tags from MP3"), "popup", "tags_adv",
       get=_tagger_get("remove_ape_from_mp3"), put=_tagger_put("remove_ape_from_mp3"), choices=AUTO_ON_OFF,
+      note=_follow_note("tagger.remove_ape_from_mp3"),
       foot=N_("APE is an older tag format some programs add to MP3s; it can disagree with the main tags.")),
     S("follow_tagger_settings", N_("Use my existing tagger's settings"), "switch", "tags_adv",
       foot=N_("When another tagger is installed on this computer, its settings file is read on each run, "
-              "so the tags come out the way it writes them. Anything you set here wins.")),
+              "so the tags come out the way it writes them. Anything you set here wins. Off: Automatic, and "
+              "Same as my existing tagger, mean TagMender's own default.")),
     # Artwork
     S("artwork.enabled", N_("Find front covers"), "switch", "covers", attr="art",
       foot=N_("Looks for the album's front cover in the sources below.")),
     S("artwork.sources", N_("Cover sources"), "list", "covers", attr="art_src", custom="check",
-      known=tuple(ART_SOURCE_WORDS), words=ART_SOURCE_WORDS,
+      known=tuple(ART_SOURCE_WORDS), words=ART_SOURCE_WORDS, enable=_needs_art,
       foot=N_("Tick the sources to ask and put them in order: the first one with a big enough cover wins.")),
     S("artwork.when", N_("Look for covers"), "popup", "covers", attr="art_when", get=_art_when_get, put=_art_when_put,
       choices=(("needed", N_("Only when an album has no cover")),
                ("small", N_("Also when its cover is too small")),
-               ("always", N_("For every album"))),
+               ("always", N_("For every album"))), enable=_needs_art,
       foot=N_("Too small: below the smallest cover size. A cover that is replaced is backed up first, so "
               "Undo puts it back.")),
-    S("artwork.min_px", N_("Smallest cover size"), "popup", "covers",
-      choices=tuple((n, f"{n} px") for n in (500, 600, 1000, 1200)),
-      foot=N_("Measured on the short side. A cover found smaller than this is not used.")),
-    S("artwork.enlarge", N_("Enlarge small covers"), "switch", "covers", attr="art_enlarge",
-      foot=N_("When only a smaller cover is found (250 px or more), it is enlarged to the smallest size "
-              "instead of being left out.")),
-    S("artwork.embed_front", N_("Put the cover in each track"), "switch", "covers",
-      foot=N_("Players and phones then show it even without the cover file.")),
-    S("artwork.embed_max_side", N_("Cover size in tracks"), "popup", "covers",
-      choices=tuple((n, f"{n} px") for n in (600, 1000, 1200, 1600)) + ((0, N_("As found")),),
-      show=lambda v: v.get("artwork.embed_front"),
-      foot=N_("Bigger covers are shrunk to this, on the long side, before they go into the tracks.")),
-    S("artwork.files", N_("Save a cover file"), "switch", "covers", foot=N_("cover.jpg in the album folder, which most media servers show.")),
-    S("artwork.artist.enabled", N_("Artist photos"), "switch", "artist_photos", attr="art_artist",
-      foot=N_("Asks fanart.tv, TheAudioDB, Wikimedia Commons or Discogs once per artist.")),
-    S("artwork.artist.file", N_("Save artist.jpg"), "switch", "artist_photos",
-      attr="art_artist_file", get=lambda d: bool(dig(d, "artwork.artist.file")), put=_artist_file_put,
-      enable=_when(lambda v: v.get("artwork.artist.enabled")),
-      foot=N_("In the artist folder, where Plex, Jellyfin, Navidrome and LMS look for it. One already there "
-              "is never replaced.")),
-    S("artwork.artist.embed", N_("Put it in each track"), "switch", "artist_photos",
-      enable=_when(lambda v: v.get("artwork.artist.enabled")),
-      foot=N_("Some players then show the artist instead of the cover.")),
+    S("artwork.embed_front", N_("Put the cover in each track"), "popup", "covers", get=_embed_get, put=_embed_put,
+      covers=("artwork.embed_front", "artwork.embed_max_side"), enable=_needs_art,
+      choices=(("off", N_("Off")),) + tuple((n, f"{n} px") for n in EMBED_SIDES[:-1]) + ((0, N_("As found")),),
+      foot=N_("Players and phones then show it even without the cover file. The number is the longest side: "
+              "bigger covers are shrunk to it before they go into the tracks.")),
+    S("artwork.files", N_("Save a cover file"), "switch", "covers", enable=_needs_art,
+      foot=N_("cover.jpg in the album folder, which most media servers show.")),
+    S("artwork.artist.enabled", N_("Artist photos"), "popup", "artist_photos", attr="art_artist", get=_artist_get,
+      put=_artist_put, covers=ARTIST_COVERS, enable=_first(_unless_basic, _needs_art),
+      choices=(("off", N_("Off")), ("file", N_("Save artist.jpg")), ("embed", N_("Put it in each track")),
+               ("both", N_("Both"))),
+      foot=N_("Asks fanart.tv, TheAudioDB, Wikimedia Commons or Discogs once per artist. artist.jpg goes in the "
+              "artist folder, where Plex, Jellyfin, Navidrome and LMS look for it; one already there is never "
+              "replaced.")),
     S("artwork.generate", N_("Make a cover when none is found"), "popup", "art_adv", attr="art_gen",
       choices=(("off", N_("Never: leave the album without one")),
                ("template", N_("Draw one with the artist and album name (on this computer)")),
                ("ai", N_("Ask the AI image service you set up in CoverUp")),
-               ("auto", N_("Try both, in the order set in CoverUp"))),
+               ("auto", N_("Try both, in the order set in CoverUp"))), enable=_needs_art,
       foot=N_("A last resort when no source has a cover. A made cover never replaces a real one, and "
               "nothing is sent anywhere unless you set up an AI service yourself.")),
+    S("artwork.min_px", N_("Smallest cover size"), "popup", "art_adv",
+      choices=tuple((n, f"{n} px") for n in (500, 600, 1000, 1200)), enable=_needs_art,
+      foot=N_("Measured on the short side. A cover found smaller than this is not used.")),
+    S("artwork.enlarge", N_("Enlarge small covers"), "switch", "art_adv", attr="art_enlarge", enable=_needs_art,
+      foot=N_("When only a smaller cover is found (250 px or more), it is enlarged to the smallest size "
+              "instead of being left out.")),
     # Target
-    S("operation", N_("What happens to files"), "segmented", "files", attr="op",
-      choices=tuple((k, OPERATION_SHORT[k]) for k in pf.OPERATIONS),
-      foot=N_("Fix in place: the files stay where they are. Copy or move: into the library folder, named as "
-              "below.")),
+    S("operation", N_("What happens to files"), "popup", "files", attr="op", get=_operation_get, put=_operation_put,
+      read=_operation_read, covers=("operation", "rename_in_place"),
+      choices=(("in_place", N_("Fix in place")), ("in_place_rename", N_("Fix in place and rename")),
+               ("copy", N_("Copy into the library")), ("move", N_("Move into the library"))),
+      foot=N_("Fix in place: the files stay where they are (and are renamed, as set below, if you say so). "
+              "Copy or move: into the library folder, named as below.")),
     S("destination", N_("Library folder"), "folder", "files", attr="dest", personal=True, enable=_dest_reason,
       foot=N_("Where copied or moved albums go.")),
-    S("rename_in_place", N_("Rename files where they are"), "switch", "files",
-      show=_is("operation", "in_place"), foot=N_("The files get the names set below, without making a second "
-                                                "library.")),
     S("naming.preset", N_("Folder layout"), "popup", "names", attr="naming", note=_naming_note,
-      choices=tuple((k, NAMING_WORDS.get(k, k)) for k in naming.PRESETS),
+      choices=tuple((k, NAMING_WORDS.get(k, k)) for k in naming.PRESETS), enable=_names_used,
       foot=N_("How the folders and files in the library are named.")),
     S("filenames.max_album_words", N_("Shorten album folder names"), "popup", "names",
       choices=((0, N_("Off")), (5, N_("5 words")), (8, N_("8 words"))),
-      enable=lambda v: None if v.get("naming.preset") in WORD_PRESETS and not v.get("_template") else
-      N_("This folder layout always uses the whole album title."),
+      enable=_first(_names_used, lambda v: None if v.get("naming.preset") in WORD_PRESETS and not v.get("_template")
+                    else N_("This folder layout always uses the whole album title.")),
       foot=N_("Long album titles are cut to this many words in the folder name. The tags keep the whole "
               "title.")),
-    S("naming.editions", N_("Editions in folder names"), "popup", "names", attr="editions",
+    S("naming.editions", N_("Editions in folder names"), "popup", "names", attr="editions", enable=_names_used,
       choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl], [WEB])")),
                ("edition_year", N_("Edition and reissue year ([2019 Vinyl])"))),
       foot=N_("Tells a vinyl or download apart from the CD in the folder name.")),
@@ -694,34 +1114,38 @@ SETTINGS = [
       choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl], [WEB])")),
                ("edition_year", N_("Edition and reissue year ([2019 Vinyl])"))),
       foot=N_("The same, added to the album title in the tags.")),
-    S("subfolders.covers", N_("Pictures in their own folder"), "switch", "subfolders", attr="sub_covers",
-      foot=N_("Scans and booklets go into it. The front cover stays beside the music.")),
-    S("subfolders.covers_name", N_("Pictures folder name"), "text", "subfolders", attr="sub_covers_name",
-      enable=_when(lambda v: v.get("subfolders.covers"))),
-    S("subfolders.misc", N_("Rip logs in their own folder"), "switch", "subfolders",
-      attr="sub_misc", foot=N_("Rip logs, notes and checksums go into it. Cue sheets and playlists stay "
-                               "beside the audio they name.")),
-    S("subfolders.misc_name", N_("Logs and notes folder name"), "text", "subfolders", attr="sub_misc_name",
-      enable=_when(lambda v: v.get("subfolders.misc"))),
+    S("_subfolders", N_("Folders inside the album folder"), "list", "subfolders", custom="check",
+      get=_subfolders_get, put=_subfolders_put, read=_subfolders_read, known=SUBFOLDER_ITEMS,
+      words=SUBFOLDER_WORDS, setlike=True, attr="sub_covers",
+      covers=tuple(f"subfolders.{k}" for k in SUBFOLDER_ITEMS),
+      foot=N_("Pictures: scans and booklets (the front cover stays beside the music). Rip logs: logs, notes and "
+              "checksums (cue sheets and playlists stay beside the audio).")),
     S("subfolders.where", N_("For multi-disc albums"), "popup", "subfolders", attr="sub_where",
       choices=(("album", N_("One for the album")), ("disc", N_("One in each disc"))),
+      enable=lambda v: None if v.get("subfolders.covers") or v.get("subfolders.misc") else REASON_NO_SUBFOLDERS,
       foot=N_("Where the pictures and logs folders go.")),
     S("companions", N_("Files that go with the album"), "list", "companions",
       foot=N_("Files with these extensions, such as .cue and .log, are copied or moved with the music.")),
     S("companions_rewrite_cues", N_("Update cue sheets and playlists"), "switch", "companions",
+      show=_saved_only("companions_rewrite_cues"),
       foot=N_("The new file names are written into them, so they still find the music.")),
     S("remove_empty_dirs", N_("Remove empty folders after moving"), "switch", "companions",
-      show=_is("operation", "move"), foot=N_("Folders left empty once the music is moved out are removed.")),
+      show=_saved_only("remove_empty_dirs", _is("_op", "move")),
+      foot=N_("Folders left empty once the music is moved out are removed.")),
     S("preserve_timestamps", N_("Keep file dates"), "popup", "companions", choices=AUTO_ON_OFF,
+      show=_tagger_row("preserve_timestamps"), note=_follow_note("preserve_timestamps"),
       foot=N_("Files keep their modified date, so \"Recently added\" in players stays as it was. Automatic: as "
               "your existing tagger is set.")),
-    S("on_existing", N_("Then"), "popup", "existing",
-      choices=(("keep_both", N_("Keep both")), ("skip", N_("Skip it")), ("ask", N_("Ask me"))),
-      foot=N_("Keep both: the new file gets a second name, as below. Watched folders that apply without asking "
-              "always keep both.")),
-    S("naming.duplicate_suffix", N_("Name the second copy"), "segmented", "existing",
-      choices=(("number", N_("Name (2)")), ("code", N_("Short code"))),
-      foot=N_("Short code: a few letters and digits, such as Name ~1a2b.")),
+    S("on_existing", N_("Then"), "popup", "existing", get=_existing_get, put=_existing_put, read=_existing_read,
+      covers=("on_existing", "naming.duplicate_suffix"),
+      choices=(("keep_number", N_("Keep both: Name (2)")), ("keep_code", N_("Keep both: Name ~1a2b (a short code)")),
+               ("skip", N_("Skip it")), ("ask", N_("Ask me"))),
+      foot=N_("Keep both: the new file gets a second name. Watched folders that apply without asking always "
+              "keep both, named the way set here (Ask me keeps the way it was set).")),
+    S("subfolders.covers_name", N_("Pictures folder name"), "text", "target_adv", attr="sub_covers_name",
+      enable=_when(lambda v: v.get("subfolders.covers"))),
+    S("subfolders.misc_name", N_("Logs and notes folder name"), "text", "target_adv", attr="sub_misc_name",
+      enable=_when(lambda v: v.get("subfolders.misc"))),
     S("filenames.compat", N_("Names safe for"), "popup", "target_adv",
       choices=(("windows", N_("All systems")), ("linux", N_("Linux and Mac only"))),
       foot=N_("All systems: also Windows and network shares (NAS), so no characters such as : or ?.")),
@@ -730,10 +1154,12 @@ SETTINGS = [
       foot=N_("Shorter paths, and no dots or spaces at the end of names.")),
     S("tagger.ascii_filenames", N_("Plain letters only (ASCII)"), "popup", "target_adv",
       get=_tagger_get("ascii_filenames"), put=_tagger_put("ascii_filenames"), choices=AUTO_ON_OFF,
+      note=_follow_note("tagger.ascii_filenames"),
       foot=N_("Accented and other letters become plain ones in file names, such as é to e.")),
     S("tagger.replace_spaces_with_underscores", N_("Spaces become underscores"), "popup", "target_adv",
       get=_tagger_get("replace_spaces_with_underscores"), put=_tagger_put("replace_spaces_with_underscores"),
-      choices=AUTO_ON_OFF, foot=N_("In file and folder names.")),
+      choices=AUTO_ON_OFF, note=_follow_note("tagger.replace_spaces_with_underscores"),
+      foot=N_("In file and folder names.")),
     S("filenames.max_name_bytes", N_("Longest file name"), "stepper", "target_adv", rng=(16, 255),
       suffix=N_(" bytes"),
       foot=N_("Longer names are shortened. Most drives allow 255; accented and non-Latin letters take two or "
@@ -747,27 +1173,18 @@ SETTINGS = [
               "left untouched.")),
     # Albums nothing identified
     S("unresolved.action", N_("Albums nothing identified"), "popup", "unres", attr="unres",
-      choices=tuple((k, UNRESOLVED_WORDS[k]) for k in pf.UNRESOLVED_ACTIONS),
+      choices=tuple((k, UNRESOLVED_WORDS[k]) for k in pf.UNRESOLVED_ACTIONS), enable=_not_on_copy,
       foot=N_("Mark Unresolved: TAGMENDER=Unresolved is written, and the album is listed under Needs "
               "attention and tried again later. Move aside: moved to the folder below.")),
     S("unresolved.move_to", N_("Move to"), "folder", "unres", personal=True,
       show=lambda v: v.get("unresolved.action") == "move" or v.get("quality_action") == "move",
       foot=N_("Albums moved aside wait here, out of the library.")),
-    S("retry.after_days", N_("Try again"), "popup", "unres",
+    # Automation: unattended, settle_minutes and interval_seconds are edited on the Watched folders page
+    S("retry.after_days", N_("Try again"), "popup", "retry_adv",
       choices=((7, N_("Every week")), (30, N_("Every month")), (0, N_("Never"))),
-      foot=N_("Marked albums are looked up again, as the databases keep growing.")),
-    S("retry.max_attempts", N_("Up to"), "stepper", "unres", rng=(1, 20), suffix=N_(" tries"),
+      foot=N_("Marked albums are looked up again by the watcher, as the databases keep growing.")),
+    S("retry.max_attempts", N_("Up to"), "stepper", "retry_adv", rng=(1, 20), suffix=N_(" tries"),
       show=lambda v: v.get("retry.after_days") != 0, foot=N_("Per album. Then it is left for you.")),
-    # Automation
-    S("unattended", N_("Apply without asking"), "switch", "watch", attr="unattended",
-      foot=N_("Albums dropped into this profile's watched folders are fixed without waiting for you. "
-              "Partial albums still wait for your review.")),
-    S("watch.settle_minutes", N_("Wait until unchanged for"), "popup", "watch",
-      choices=((2, N_("2 min")), (5, N_("5 min")), (10, N_("10 min")), (30, N_("30 min"))),
-      foot=N_("So a copy still in progress is never touched.")),
-    S("watch.interval_seconds", N_("Look every"), "popup", "watch",
-      choices=((60, N_("1 min")), (300, N_("5 min")), (900, N_("15 min")), (3600, N_("60 min"))),
-      foot=N_("How often the watched folders are checked for new music.")),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
 
@@ -796,13 +1213,13 @@ PRESET_KEEPS = ("operation", "rename_in_place", "unattended")
 
 # a problem from profiles.validate() -> the row it is about, when its words do not start with a key
 PROBLEM_ROWS = (("operation '", "destination"), ("destination must", "destination"),
-                ("no provider", "providers.musicbrainz.enabled"), ("source is", "source"),
+                ("no provider", "source"), ("source is", "source"),
                 ("unresolved.action 'move'", "unresolved.move_to"), ("quality_action 'move'", "unresolved.move_to"),
                 ("thresholds.", "matching.extra_careful"), ("sources[", "_sources"),
-                ("providers.web.search", "_engines"), ("exclude_paths", "exclude_paths"),
+                ("providers.web.search", "_engines"), ("exclude_paths", "_skip"), ("skip_folders", "_skip"),
                 ("discogs_enrichment", "discogs_enrichment.merge_mode"), ("artwork.artist", "artwork.artist.enabled"),
                 ("subfolders.covers_name", "subfolders.covers_name"), ("subfolders.misc_name", "subfolders.misc_name"),
-                ("subfolders", "subfolders.covers"), ("filenames.fat", "filenames.fat"))
+                ("subfolders", "_subfolders"), ("filenames.fat", "filenames.fat"))
 # a few problems in friendlier words
 PROBLEM_WORDS = {"needs a destination": N_("Choose the library folder: files are copied or moved into it."),
                  "needs unresolved.move_to": N_("Choose where albums are moved aside to.")}
@@ -837,6 +1254,8 @@ def _word(spec, x) -> str:
 
 def words_of(spec, value) -> str:
     """A value in the words its control shows (for the sheets that list changes)."""
+    if isinstance(value, Saved):
+        return str(value)
     if spec.kind == "switch":
         return tr("On") if value else tr("Off")
     for v, w in spec.choices:
@@ -847,14 +1266,21 @@ def words_of(spec, value) -> str:
     return str(value) if value not in (None, "") else tr("None")
 
 
+def preset_write(data, key, v):
+    """One setting of a preset, written under its saved key (a preset names saved settings, not rows)."""
+    if key == "artwork.when":
+        _art_when_put(data, v, {})
+    elif key.startswith("tagger."):
+        _tagger_put(key.split(".", 1)[1])(data, v, {})
+    else:
+        plant(data, key, v)
+
+
 def preset_data(name: str, preset: str) -> dict:
     """A new profile's data: its name and what the preset sets."""
     data = {"name": name}
-    full = pf.from_dict({"name": name}, check=False).data
-    vals = {s.key: s.value_of(full) for s in SETTINGS}
-    vals.update(PRESETS.get(preset, PRESETS["typical"])[2])
     for key, v in PRESETS.get(preset, PRESETS["typical"])[2].items():
-        BY_KEY[key].write(data, v, vals)
+        preset_write(data, key, v)
     return data
 
 
@@ -942,7 +1368,8 @@ class ProfileEditor(QScrollArea):
         self.lay.addLayout(tools)
         self.rows, self.controls, self.groups, self.sections, self.advanced = {}, {}, {}, {}, {}
         self.folds = {}
-        self.loaded, self.defaults, self.raw = {}, {}, {}
+        self.loaded, self.defaults, self.raw, self.full, self.default_full = {}, {}, {}, {}, {}
+        self._saved = {}                                     # key -> the Saved value its pop-up shows
         self._loading = False
         for sid, title, hint in SECTIONS:
             self._section(sid, title, hint)
@@ -1086,16 +1513,25 @@ class ProfileEditor(QScrollArea):
             return c.isChecked()
         if spec.kind in ("popup", "segmented"):
             v = c.currentData()
+            if isinstance(v, str) and v == SAVED:
+                return self._saved.get(key)
             return copy.deepcopy(v) if v != CHOOSE else self.loaded.get(key)
         if spec.kind == "stepper":
             return c.value()
         if spec.kind == "list":
-            return c.value()
+            v = c.value()
+            return [k for k in spec.known if k in v] if spec.setlike else v
         return c.text().strip() if spec.kind == "folder" else c.text()
 
     def values(self) -> dict:
         out = {k: self.value(k) for k in self.controls}
         out["_template"] = bool(dig(self.raw, "naming.template"))
+        out.update(_full=self.full, _loaded=self.loaded, _defaults=self.defaults, _ini=_ini_found())
+        for s in SETTINGS:                                  # (what other rows ask about a merged one)
+            if s.read:
+                scratch = copy.deepcopy(self.full)
+                _write_value(s, scratch, out[s.key], {"_full": self.full})
+                out.update(s.read(scratch))
         return out
 
     def _set(self, spec, v):
@@ -1109,7 +1545,12 @@ class ProfileEditor(QScrollArea):
                     if d != CHOOSE and not same(d, v) and not any(same(d, x) for x, _w in spec.choices):
                         c.removeItem(n)
             i = _index_of(c, v)
-            if i < 0 and spec.kind == "popup":                  # (a value this version has no words for)
+            if isinstance(v, Saved):                            # (a saved value the choices cannot say)
+                self._saved[spec.key] = v
+                at = c.count() - (1 if spec.custom else 0)
+                c.insertItem(at, str(v), SAVED)
+                i = at
+            elif i < 0 and spec.kind == "popup":                # (a value this version has no words for)
                 text = ", ".join(_word(spec, x) for x in v) if isinstance(v, list) else str(v)
                 at = c.count() - (1 if spec.custom else 0)
                 c.insertItem(at, text, copy.deepcopy(v))
@@ -1127,7 +1568,8 @@ class ProfileEditor(QScrollArea):
             c.setRange(min(spec.rng[0], n), max(spec.rng[1], n))
             c.setValue(n)
         elif spec.kind == "list":
-            c.set_value(v if isinstance(v, list) else [])
+            v = v if isinstance(v, list) else []
+            c.set_value([k for k in spec.known if k in v] if spec.setlike else v)
         else:
             c.setText("" if v is None else str(v))
 
@@ -1142,6 +1584,7 @@ class ProfileEditor(QScrollArea):
         _READY.clear()
         self._loading = True
         self.raw = copy.deepcopy(raw)
+        self.full, self.default_full = copy.deepcopy(full), copy.deepcopy(defaults)
         self.loaded = {s.key: s.value_of(full) for s in SETTINGS}
         self.defaults = {s.key: s.value_of(defaults) for s in SETTINGS}
         for s in SETTINGS:
@@ -1157,7 +1600,7 @@ class ProfileEditor(QScrollArea):
         file says about the rest - a hand-written value too - stays as it was."""
         vals = self.values()
         for key in self.changed_keys():
-            BY_KEY[key].write(data, vals[key], vals)
+            _write_value(BY_KEY[key], data, vals[key], vals)
         return data
 
     def snapshot(self) -> list:
@@ -1167,6 +1610,11 @@ class ProfileEditor(QScrollArea):
     def _changed(self, *_):
         if self._loading:
             return
+        web = self.controls["providers.web.enabled"]
+        if self.value("source") == "web_only" and not web.isChecked():
+            web.blockSignals(True)                           # (Web only needs the web fallback: it is turned on)
+            web.setChecked(True)
+            web.blockSignals(False)
         self.refresh()
         self.edited.emit()
 
@@ -1189,8 +1637,10 @@ class ProfileEditor(QScrollArea):
             else:
                 row.set_reason(text)
                 row.control.setEnabled(False)
-            if s.note and reason is None:
-                note = s.note(vals)
+            if reason is None and (s.note or isinstance(vals.get(s.key), Saved)):
+                note = s.note(vals) if s.note else ""
+                if isinstance(vals.get(s.key), Saved):           # (the whole of a saved value, the pop-up cuts it)
+                    note = f"{note}\n{vals[s.key]}" if note else str(vals[s.key])
                 row.reason.setText(note)
                 row.reason.setVisible(bool(note))
             row.set_changed(not s.personal and not same(vals[s.key], self.defaults.get(s.key)))
@@ -1224,9 +1674,6 @@ class ProfileEditor(QScrollArea):
         out = {}
         for msg in pf.validate(data):
             out.setdefault(self._row_for(msg), []).append(self._friendly(msg))
-        vals = self.values()
-        if vals.get("_lossy_on") and not vals.get("destinations.lossy"):
-            out.setdefault("destinations.lossy", []).append(tr("Choose the folder for lossy files."))
         return out
 
     @staticmethod
@@ -1386,14 +1833,23 @@ class ProfileEditor(QScrollArea):
     def preset_values(self, preset) -> dict:
         """The defaults with what the preset sets; folders, words and what happens to files
         (unless the preset says) stay as they are."""
-        target = {k: v for k, v in self.defaults.items() if not BY_KEY[k].personal and k not in PRESET_KEEPS}
-        target.update(PRESETS[preset][2])
-        return target
+        full = copy.deepcopy(self.default_full)
+        for key, v in PRESETS[preset][2].items():
+            preset_write(full, key, v)
+        named = set(PRESETS[preset][2])
+        out = {}
+        for s in SETTINGS:
+            owned = set(s.covers or (s.key,))
+            if s.personal or (owned & set(PRESET_KEEPS) and not owned & named):
+                continue
+            out[s.key] = s.value_of(full)
+        return out
 
     def defaults_for(self, section=None) -> dict:
         """What Restore Defaults sets: never folders, words, or what happens to the files
         (PRESET_KEEPS), as the confirmation says."""
-        return {k: v for k, v in self.defaults.items() if not BY_KEY[k].personal and k not in PRESET_KEEPS and
+        return {k: v for k, v in self.defaults.items()
+                if not BY_KEY[k].personal and not set(BY_KEY[k].covers or (k,)) & set(PRESET_KEEPS) and
                 (section is None or GROUPS[BY_KEY[k].group][0] == section)}
 
     def apply(self, target: dict):

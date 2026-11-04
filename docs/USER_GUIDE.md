@@ -386,8 +386,8 @@ Discs MusicBrainz has no disc ID for are listed in
 
 ## Covers and misc folders
 
-A profile can keep each album folder tidy (Profiles: "Pictures in their own folder",
-"Rip logs in their own folder"; profile `subfolders`, both off by default):
+A profile can keep each album folder tidy (Profiles: "Folders inside the album folder": the pictures
+folder and the rip logs folder; profile `subfolders`, both off by default):
 
 ```
 Album/cover.jpg                    stays: the front cover, what players show
@@ -574,7 +574,13 @@ used as evidence, preferred releases), **Tags**, **Artwork**, **Target** (what h
 the library folder, names with a live example of the folder and file name, pictures and logs
 folders, files that go with the album, a file that is already there), **Albums nothing
 identified** and **Automation**. Each row has its label and control, and a line under it saying
-what it does; rarer settings sit under each section's **Advanced**.
+what it does; rarer settings sit under each section's **Advanced**. A few rows merge several saved
+settings into one choice (Sources, including Web only; Find lyrics; What happens to files, including
+renaming in place; Artist photos). A saved combination such a row cannot say exactly shows as "As
+saved" and stays as it is until you choose something else. A row that does nothing in the current
+state (the Basic level, a database that is not asked, covers turned off, a copy) is greyed with the
+reason. Whether albums are filed without asking, how long to wait and how often to look are set on
+the Watched folders page.
 
 - A dot beside a row means it differs from the defaults. **Restore Defaults…** (all settings) and
   **Restore Section Defaults…** list each change (old → default) before anything changes.

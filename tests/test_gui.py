@@ -337,12 +337,13 @@ class Gui(te.Base):
         pr.list.setCurrentRow(row)
         self.app.processEvents()
         self.assertEqual((pr.level.currentData(), pr.level.currentText()), ("enthusiast", "Enthusiast"))
-        self.assertFalse(pr.aud["lyrics"].isEnabled())
+        checks = pr.editor.controls["_audiophile"]
+        self.assertFalse(checks.isEnabled())
         self.assertFalse(pr.save_btn.isEnabled())                       # nothing changed yet
         pr.level.setCurrentIndex(pr.level.findData("audiophile"))
         self.assertTrue(pr.save_btn.isEnabled())
-        self.assertTrue(pr.aud["lyrics"].isEnabled())
-        pr.aud["acoustid"].setChecked(False)
+        self.assertTrue(checks.isEnabled())
+        pr.editor.set_value("_audiophile", ["replaygain", "rip_info", "quality"])    # (AcoustID unticked)
         pr.save()
         p = pf.load("Lvl")
         self.assertEqual((p["tag_level"], p["audiophile"]["acoustid"], p["audiophile"]["lyrics"]),
@@ -382,18 +383,19 @@ class Gui(te.Base):
             pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Wp"))
             self.app.processEvents()
         pick()
-        self.assertTrue(pr.web_partial.isChecked())
-        self.assertEqual(pr.web_partial.isEnabled(), pr.web.isChecked())
+        ed = pr.editor
+        self.assertEqual(ed.value("identification.accept"), "partial_web")      # (Partial, also store pages)
+        pr.web.setChecked(False)
+        self.assertIn("web fallback is off", ed.rows["identification.accept"].reason.text())
         pr.web.setChecked(True)
-        self.assertTrue(pr.web_partial.isEnabled())
-        pr.web_partial.setChecked(False)
+        self.assertEqual(ed.rows["identification.accept"].reason.text(), "")
+        ed.set_value("identification.accept", "partial")
         self.assertTrue(pr.save_btn.isEnabled())
         pr.save()
         self.assertFalse(pf.load("Wp").provider_on("web", "partial"))
+        self.assertEqual(pf.load("Wp")["identification"]["accept"], "partial")
         pick()
-        self.assertFalse(pr.web_partial.isChecked())
-        pr.web.setChecked(False)
-        self.assertFalse(pr.web_partial.isEnabled())
+        self.assertEqual(ed.value("identification.accept"), "partial")
 
     def test_profile_keep_versions_is_saved(self):
         import profiles as pf
@@ -419,12 +421,12 @@ class Gui(te.Base):
         pick()
         self.assertFalse(pr.split_box.isChecked())
         # the covers and misc folders: off by default, saved with their names and where
-        self.assertFalse(pr.sub_covers.isChecked() or pr.sub_misc.isChecked())
+        self.assertEqual(pr.sub_covers.value(), [])
         self.assertFalse(pr.sub_covers_name.isEnabled())
-        pr.sub_covers.setChecked(True)
+        pr.editor.set_value("_subfolders", ["covers"])
         self.assertTrue(pr.sub_covers_name.isEnabled())
         pr.sub_covers_name.setText("Artwork")
-        pr.sub_misc.setChecked(True)
+        pr.editor.set_value("_subfolders", ["covers", "misc"])
         pr.sub_where.setCurrentIndex(pr.sub_where.findData("album"))
         pr.save()
         self.assertEqual(pf.load("Kv")["subfolders"], {"covers": True, "covers_name": "Artwork", "misc": True,

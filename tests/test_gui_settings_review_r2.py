@@ -30,9 +30,9 @@ class EditorRows(Base):
 
     def test_lossy_rows_say_they_need_copy_or_move(self):
         from gui import profile_editor as pe
-        for key in ("_lossy_on", "destinations.lossy"):
-            self.assertTrue(pe.BY_KEY[key].enable({"operation": "in_place"}), key)
-            self.assertIsNone(pe.BY_KEY[key].enable({"operation": "copy"}), key)
+        for key in ("destinations.lossy",):
+            self.assertTrue(pe.BY_KEY[key].enable({"_op": "in_place"}), key)
+            self.assertIsNone(pe.BY_KEY[key].enable({"_op": "copy"}), key)
 
     def test_include_subfolders_waits_for_a_folder(self):
         from gui import profile_editor as pe

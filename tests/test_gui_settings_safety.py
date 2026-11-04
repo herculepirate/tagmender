@@ -80,7 +80,7 @@ class Editor(Base):
         ed.set_value("tag_level", "audiophile")
         for k in keys:
             self.assertTrue(ed.rows[k].control.isEnabled(), k)
-        ed.set_value("audiophile.replaygain", False)
+        ed.set_value("_audiophile", ["acoustid", "rip_info", "quality"])
         self.assertFalse(ed.rows["loudness.album_gain"].control.isEnabled())
 
     def test_a_key_added_in_setup_counts_on_return(self):

@@ -324,7 +324,7 @@ class ProfilesPage(Base):
         page.list.setCurrentRow(names.index("Old"))
         app.processEvents()
         self.assertEqual([page.source.itemText(i) for i in range(page.source.count())],
-                         ["MusicBrainz only", "MusicBrainz preferred", "Discogs preferred", "Discogs only"])
+                         ["MusicBrainz only", "MusicBrainz preferred", "Discogs preferred", "Discogs only", "Web only"])
         self.assertEqual(page.source.currentData(), "musicbrainz_preferred")    # (the older "primary")
         page.source.setCurrentIndex(page.source.findData("discogs_only"))
         self.assertTrue(page.save_btn.isEnabled())

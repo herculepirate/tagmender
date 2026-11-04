@@ -1007,8 +1007,9 @@ class Shell(unittest.TestCase):
         md.setUrls([QUrl.fromLocalFile(str(self.tmp / "one")), QUrl.fromLocalFile(str(self.tmp / "two"))])
         with mock.patch.object(type(self.win.pages["Overview"]), "set_path") as sp:
             drop.dropEvent(QDropEvent(QPoint(5, 5), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier))
-        self.assertEqual([c.args[0] for c in sp.call_args_list], [str(self.tmp / "one")])
-        self.assertIn("drop two again", self.win.statusBar().currentMessage())   # (one folder at a time)
+        # (both listed together, under the folder holding them; nothing is looked up yet)
+        self.assertEqual([c.args[0] for c in sp.call_args_list], [str(self.tmp)])
+        self.assertEqual(sorted(sp.call_args.kwargs["within"]), [str(self.tmp / "one"), str(self.tmp / "two")])
         with mock.patch.object(type(drop), "choose") as chose:
             for button in (Qt.RightButton, Qt.MiddleButton, Qt.LeftButton):
                 for kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease):

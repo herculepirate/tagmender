@@ -324,7 +324,7 @@ class Overview(QWidget):
     def actionable(self):
         return len(self.to_apply())
 
-    def set_path(self, path, forced=None) -> bool:
+    def set_path(self, path, forced=None, within=None) -> bool:
         """Preview a folder; forced: the releases chosen for its albums (engine.Engine.force), as
         the run report's Apply This Release gives one. False when nothing ran."""
         if getattr(self, "running", False):                 # (a second worker would take over Cancel)
@@ -334,6 +334,7 @@ class Overview(QWidget):
             return False
         self.path = path
         self.forced = dict(forced or {})
+        self.within = list(within or [])                     # (several folders dropped: only these)
         self.reset_sources()                                 # (a new folder: the profile's sources again)
         self.where.setText(path)
         self.views.setCurrentWidget(self.results)
@@ -344,7 +345,7 @@ class Overview(QWidget):
         self.model.set_plan(None)
         self.detail.clear()
         self.busy(False)
-        if not self.forced and _list_first():
+        if not self.forced and (_list_first() or self.within):
             self.list_albums()                              # (looked up when you choose: Look Up)
         else:
             self.preview()
@@ -358,11 +359,11 @@ class Overview(QWidget):
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
-        path = self.path
+        path, within = self.path, list(getattr(self, "within", []) or [])
 
         def work(_w):
             import engine
-            return engine.Engine(prof).listing(path)
+            return engine.Engine(prof).listing(path, within=within or None)
         self.busy(True)
         self.summary.setText(tr("Finding the albums… nothing is looked up yet."))
         self.worker = start(self, work, self.listed, self.progress, self.oops)
@@ -375,8 +376,8 @@ class Overview(QWidget):
         self.fit_status()
         self.busy(False)
         n = len(plan["albums"])
-        self.summary.setText(tr("{0} found, not looked up yet. Select albums and choose Look Up (right-click), "
-                                "or Preview to look them all up.").format(plural(n, tr("album"), tr("albums"))))
+        self.summary.setText(tr("{0} found, not looked up yet. Select the albums you want and press Look Up "
+                                "(none selected: all of them).").format(plural(n, tr("album"), tr("albums"))))
         if self.proxy.rowCount():
             self.table.selectRow(0)
 
@@ -572,8 +573,23 @@ class Overview(QWidget):
         self.bar.setValue(i + 1)
         self.bar.setFormat(tr("{0} of {n}: {name}").format(i + 1, n=n, name=Path(what).name))
 
+    def set_folders(self, folders) -> bool:
+        """Several folders dropped at once: every album in them listed together, under the folder
+        that holds them all; nothing is looked up until you choose Look Up or Preview."""
+        folders = [os.path.abspath(str(f)) for f in folders]
+        root = os.path.commonpath(folders) if len(folders) > 1 else folders[0]
+        if root in folders and len(folders) > 1:            # (one folder inside another: its parent)
+            root = os.path.dirname(root)
+        if not self.set_path(root, within=folders):
+            return False
+        self.where.setText(tr("{0} ({1} folders)").format(root, len(folders)))
+        return True
+
     def preview(self):
         if not self.path:
+            return
+        if getattr(self, "within", None) and self.plan:      # (several folders: just the albums listed)
+            self.look_up(self.sources.currentData() or "profile", list(self.plan["albums"]))
             return
         mode = self.sources.currentData() or "profile"
         try:

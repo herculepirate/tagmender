@@ -280,6 +280,25 @@ class Gui(te.Base):
         self.assertEqual(ov.sources.currentData(), "profile")           # (now the profile's own)
         self.assertIn("Discogs only", ov.sources.itemText(0))
 
+    def test_several_folders_dropped_are_listed_together(self):
+        from gui import manual_match
+        ov = self.win.pages["Overview"]
+        ov.refresh_profiles()
+        ov.profile.setCurrentText("Auto")
+        other = self.lib / "Not dropped"
+        other.mkdir()
+        (other / "x.flac").write_bytes((self.d / "01.flac").read_bytes())
+        manual_match.add_dropped(self.win, [str(self.d), str(self.d2)])  # (as at once, whatever the setting)
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.running, self.app), ov.summary.text())
+        self.assertTrue(ov.plan.get("listed"))
+        got = sorted(a["source_dir"] for a in ov.plan["albums"])
+        self.assertEqual(got, sorted([str(self.d), str(self.d2)]))        # (not the folder left out)
+        self.assertIn("(2 folders)", ov.where.text())
+        ov.preview()                                                     # (Preview: just the albums listed)
+        self.assertTrue(wait(lambda: not ov.running and not ov.plan.get("listed"), self.app), ov.summary.text())
+        self.assertEqual(sorted(a["source_dir"] for a in ov.plan["albums"]), sorted([str(self.d), str(self.d2)]))
+        self.assertIn("ready", {a["status"] for a in ov.plan["albums"]})
+
     def test_look_up_sources_are_the_profiles_or_one_alone(self):
         from gui.overview import profile_for
         prof = pf.from_dict({"name": "P"})

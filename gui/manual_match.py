@@ -447,6 +447,13 @@ def add_dropped(win, paths) -> list:
         if present:
             tell(tr("Already in the preview: {0}.").format(_names(present)))
         return []
+    folders = [p for p in new if os.path.isdir(p)]
+    if len(folders) > 1 and hasattr(page, "set_folders"):
+        # several folders at once: all listed together (nothing looked up), you choose what to look up
+        page.set_folders(folders)
+        if present:
+            tell(tr("Already in the preview: {0}.").format(_names(present)))
+        return new
     page.set_path(new[0])
     rest = [tr("already in the preview: {0}").format(_names(present))] if present else []
     if len(new) > 1:

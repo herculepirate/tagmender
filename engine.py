@@ -2358,11 +2358,17 @@ class Engine:
                                             status="unresolved", reason=f"error: {exc}", reason_codes=["other"]))
         return out
 
-    def listing(self, path) -> dict:
+    def listing(self, path, within=None) -> dict:
         """The albums PATH holds, not looked up yet (List first): a plan whose albums are
-        "listed" - nothing is asked of any database and nothing can be applied."""
+        "listed" - nothing is asked of any database and nothing can be applied. within: only
+        the albums inside these folders (several folders dropped at once, listed under the folder
+        that holds them)."""
+        roots = [os.path.realpath(str(w)) for w in within or ()]
         albums = []
         for g in self.albums_in(path):
+            here = os.path.realpath(str(g.folder))
+            if roots and not any(here == r or here.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
+                continue
             files = sorted(str(f) for f in g.files)
             albums.append({"source_dir": str(g.folder), "status": "listed", "label": "", "rule": None,
                            "identification": {"status": "listed"}, "release": {}, "files": [],

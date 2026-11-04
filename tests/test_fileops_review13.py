@@ -149,8 +149,11 @@ class R13_03_UnresolvedMoveWaitsDaysForItsShare(Base):
             held.mkdir(parents=True)                           # the NAS is up again
             w.tick()
             w.tick()
-        self.assertTrue([x for x in tree(self.tmp / "nas") if x.endswith(".flac")],
-                        f"not moved once _unresolved was back: inbox {tree(self.lib)}")
+        # (since 0.5.0 an unattended profile files only what it is sure of: an unresolved album
+        # waits for your approval - planned as soon as the share is back, not a month later)
+        self.assertEqual(len(watcher.pending_plans()), 1,
+                         f"not planned once _unresolved was back: inbox {tree(self.lib)}")
+        self.assertFalse([x for x in tree(self.tmp / "nas") if x.endswith(".flac")])
 
 
 # ---------------------------------------------------------------------------------------

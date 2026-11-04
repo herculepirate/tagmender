@@ -216,6 +216,28 @@ class Gui(te.Base):
         self.assertTrue(wait(lambda: ov.plan is None and not ov.running, self.app), ov.summary.text())
         self.assertEqual(tagio.read(self.d / "01.flac")["discogs_release_id"], ["920"])
 
+    def test_apply_with_rows_highlighted_applies_only_those(self):
+        from PySide6.QtCore import QItemSelectionModel
+        ov = self.win.pages["Overview"]
+        a1 = {"source_dir": "/x/A", "status": "ready", "files": [{"src": "/x/A/1.flac", "dst": "/x/A/1.flac",
+              "op": "tag", "changes": {"title": ["t"]}}], "conflicts": [], "identification": {}, "notes": []}
+        a2, a3 = (dict(a1, source_dir=f"/x/{x}", files=[dict(a1["files"][0], src=f"/x/{x}/1.flac",
+                                                              dst=f"/x/{x}/1.flac")]) for x in "BC")
+        ov.plan = {"albums": [a1, a2, a3], "profile": "Auto"}
+        ov.model.set_plan(ov.plan)
+        ov.table.clearSelection()
+        ov.table.selectRow(0)
+        self.assertEqual(len(ov.to_apply()), 3)                       # (one row: every ticked album)
+        for a in (a1, a3):
+            ov.table.selectionModel().select(ov.proxy.mapFromSource(ov.model.index(ov.model.albums.index(a), 0)),
+                                             QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        ov.table.selectionModel().select(ov.proxy.mapFromSource(ov.model.index(ov.model.albums.index(a2), 0)),
+                                         QItemSelectionModel.Deselect | QItemSelectionModel.Rows)
+        self.assertEqual({a["source_dir"] for a in ov.to_apply()}, {"/x/A", "/x/C"})
+        self.assertIn("2 albums", ov.apply_words()[0])
+        ov.plan = None
+        ov.model.set_plan(None)
+
     def test_albums_left_out_stay_to_apply_later(self):
         ov = self.win.pages["Overview"]
         a1 = {"source_dir": "/x/A", "status": "ready", "files": [{"src": "/x/A/1.flac", "dst": "/x/A/1.flac",
@@ -258,6 +280,32 @@ class Gui(te.Base):
         self.assertEqual(by[str(self.d)], "ready")
         self.assertEqual(by[str(self.d2)], "listed")                    # (the other: still not looked up)
         self.assertEqual(ov.actionable(), 1)
+        # the same album again, the same way: not asked of the databases twice (you are asked first)
+        g = next(i for i in range(ov.proxy.rowCount())
+                 if ov.proxy.data(ov.proxy.index(i, 1)).startswith("2005 - Album G"))
+        ov.table.selectRow(g)
+        with mock.patch.object(self.gui.overview.sheets, "question", return_value=False) as asked, \
+                mock.patch.object(self.gui.overview, "start") as started:
+            ov.look_up("profile")
+        asked.assert_called_once()
+        started.assert_not_called()
+        with mock.patch.object(self.gui.overview.sheets, "question", return_value=True), \
+                mock.patch.object(self.gui.overview, "start") as started:
+            ov.look_up("profile")                                    # (Look Up Again)
+        started.assert_called_once()
+        ov.busy(False)
+        with mock.patch.object(self.gui.overview.sheets, "question") as asked, \
+                mock.patch.object(self.gui.overview, "start") as started:
+            ov.reload()                                              # (Refresh: again without asking)
+        asked.assert_not_called()
+        started.assert_called_once()
+        ov.busy(False)
+        # all of them: only the one not looked up yet is asked of the databases
+        ov.table.clearSelection()
+        with mock.patch.object(self.gui.overview, "start") as started:
+            ov.look_up("profile", list(ov.plan["albums"]))
+        self.assertIn("1 already looked up, skipped", ov.summary.text())
+        ov.busy(False)
 
     def test_sources_other_than_the_profiles_are_for_one_look_up(self):
         ov = self.win.pages["Overview"]

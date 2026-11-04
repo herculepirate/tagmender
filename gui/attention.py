@@ -52,7 +52,9 @@ class Attention(QWidget):
         self.root = ElidedPath("", empty=tr("No folder chosen: choose the folder to look in"))
         self.choose_btn = ch = QPushButton(tr("Choose…"))
         ch.setAccessibleName(tr("Choose a folder to look in"))
-        ch.clicked.connect(lambda: (lambda d: d and (self.root.setText(d), self.scan()))(
+        self.chosen = False                  # (a folder you chose stays; one taken from a preview follows the next)
+        ch.clicked.connect(lambda: (lambda d: d and (self.root.setText(d), setattr(self, "chosen", True),
+                                                     self.scan()))(
             sheets.choose_folder(self, tr("Choose the folder to look in"), self.root.text())))
         self.find_btn = sc = QPushButton(tr("Find Albums"))
         sc.setAccessibleName(tr("Find albums that need attention"))
@@ -164,10 +166,9 @@ class Attention(QWidget):
         page looks in - the folder previewed when none was chosen here. One rule for the badge on
         every page, so it never changes just because the page was opened."""
         root = self.root.text().strip()
-        if root and os.path.normpath(root) != os.path.normpath(str(path)):
-            return                                           # (the page looks elsewhere: its count stands)
-        if not root:
-            self.root.setText(str(path))
+        if root and self.chosen and os.path.isdir(root) and os.path.normpath(root) != os.path.normpath(str(path)):
+            return                                           # (you chose where it looks: its count stands)
+        self.root.setText(str(path))                         # (else: the folder previewed last)
         self.scan(quiet=True)
 
     def searching(self, on):

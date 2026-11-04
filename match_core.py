@@ -2402,11 +2402,27 @@ def classify(scored, cfg):
     def _says(s):
         return [x for x in s.get("clues_against") or () if x.startswith("folder name says")]
     # Several releases carry the folder's own number (an unofficial Russian CD copies the
-    # European one's NB 3099-0): then the rest of the folder name decides between them.
-    numbered_fit = any(s.get("folder_catno_agrees") and not _says(s) for s in scored)
+    # European one's NB 3099-0): then the rest of the folder name decides between them -
+    # unless your copy cannot be the one the rest fits (Mekong Delta - Toccata, "Germany,
+    # AAARRG 17" with an EAC log: the German AAARRG 17 is only a 12", the CD is Austrian).
+    numbered_fit = any(s.get("folder_catno_agrees") and not _says(s) and not format_contradictions(s)
+                       for s in scored)
+
+    def proven_by_your_copy(s):
+        clues = s.get("clues") or {}
+        return (clues.get("disc TOC") == EXACT_TOC_CLUE or "source link" in clues or "isrc" in clues
+                or barcode_agrees(s))
+
+    proven_fit = any(proven_by_your_copy(s) and not _says(s) and not format_contradictions(s) for s in scored)
 
     def folder_says(s):
         out = _says(s)
+        if proven_by_your_copy(s) and not proven_fit:
+            # what your copy itself proves (its disc ID, barcode - from tags or a scan -, ISRCs,
+            # the files' own link) outranks what a folder name says: names can be wrong. (When a
+            # proven release fits the folder name too, the name still picks between them: a
+            # barcode several pressings share.)
+            return []
         if s.get("folder_catno_agrees") and not numbered_fit:
             # the folder's own number is on it: that is the pressing
             out = [x for x in out if re.match(r"folder name says (vinyl|cd),", x)]
@@ -2455,7 +2471,8 @@ def classify(scored, cfg):
         merely found somewhere in OCR text)."""
         return barcode_agrees(s) or s["code"] in ("catalogue number", "catalogue number (folder name)")
     # Ties go to the candidate whose barcode agrees, then to the one whose year does.
-    ranked = sorted(scored, key=lambda s: (-s["confidence"], not barcode_agrees(s),
+    # (then one your copy cannot be - a CD rip log against a 12" - after the others)
+    ranked = sorted(scored, key=lambda s: (-s["confidence"], bool(format_contradictions(s)), not barcode_agrees(s),
                                            not number_agrees(s), not s["year_ok"],
                                            s.get("year_off") if s.get("year_off") is not None else 99))
     best = ranked[0]

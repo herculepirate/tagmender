@@ -1727,6 +1727,28 @@ class PressingEvidence(unittest.TestCase):
                       cand(id="cd", formats={"cd"}), cand(id="lp", formats={"vinyl"}))
         self.assertEqual(r["best"]["cand"]["id"], "lp")
 
+    def test_folder_country_does_not_drop_the_only_cd_for_vinyl_your_log_rules_out(self):
+        """Mekong Delta - 1989 - Toccata [Aaarrg! Records, Germany, AAARRG 17], with an EAC log:
+        the German AAARRG 17 is a 12" only, the CD is Austrian. The folder's "Germany" dropped the
+        CD, then the log ruled out the vinyl and the album was left Unresolved."""
+        code = {mc.norm_code("AAARRG 17")}
+        folder = "1989-Toccata [Aaarrg! Records, Germany, AAARRG 17]"
+        a = album(folder=folder, catnos=code, catnos_from_folder=code, rip_log_toc=True,
+                  audio={"hires": False, "cd_frames": True, "not_cd": False})
+        r = self.pick(a, cand(id="lp", country="DE", formats={"vinyl"}, catnos=code),
+                      cand(id="cd", country="AT", formats={"cd"}, catnos=code))
+        self.assertEqual(r["best"]["cand"]["id"], "cd", r["why"])
+        # a German CD with that number too: the folder's country still picks it
+        r = self.pick(a, cand(id="lp", country="DE", formats={"vinyl"}, catnos=code),
+                      cand(id="cd", country="AT", formats={"cd"}, catnos=code),
+                      cand(id="decd", country="DE", formats={"cd"}, catnos=code))
+        self.assertEqual(r["best"]["cand"]["id"], "decd", r["why"])
+        # your copy's own barcode (tags or a scan) outranks a country the folder name has wrong
+        a = album(folder="1989-Toccata [Germany]", barcodes={"4006759000017"})
+        r = self.pick(a, cand(id="de", country="DE", formats={"cd"}),
+                      cand(id="at", country="AT", formats={"cd"}, barcodes={"4006759000017"}))
+        self.assertEqual(r["best"]["cand"]["id"], "at", r["why"])
+
     def test_download_shop_in_the_folder_name(self):
         """Slayer - Reign In Blood [ProStudiosMasters] [RM 2015]: a 24/192 download,
         never the 1986 LP (hi-res audio alone could be a vinyl rip)."""

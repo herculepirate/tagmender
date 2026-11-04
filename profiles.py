@@ -670,8 +670,8 @@ def validate(data: dict) -> list[str]:
     num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731
     if not num(w.get("settle_minutes")) or w["settle_minutes"] < 0:
         p.append("watch.settle_minutes must be a number of minutes, 0 or more")
-    if not num(w.get("interval_seconds")) or w["interval_seconds"] < 1:
-        p.append("watch.interval_seconds must be a number of seconds, at least 1")
+    if not num(w.get("interval_seconds")) or not 1 <= w["interval_seconds"] <= 86400:
+        p.append("watch.interval_seconds must be a number of seconds, 1 to 86400 (a day)")
     if d["preserve_timestamps"] not in (None, True, False):
         p.append("preserve_timestamps must be true, false or null (as your tagger settings say)")
     import levels

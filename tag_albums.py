@@ -1270,7 +1270,10 @@ def main():
                     help="where the tagger moves files (your 'Move files to' setting); default: read from "
                          "your tagger settings")
     ap.add_argument("--tagger-ini", dest="picard_ini", metavar="PATH",
-                    default="~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini",
+                    # (TAGMENDER_TAGGER_INI first, as everywhere else: the test runner points it away
+                    # from your own settings)
+                    default=(os.environ.get("TAGMENDER_TAGGER_INI") or os.environ.get("TAGMENDER_PICARD_INI")
+                             or "~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"),
                     help="the tagger's settings file (default: found automatically)")
     ap.add_argument("--picard-ini", dest="picard_ini", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     ap.add_argument("--tagger", dest="picard", metavar="COMMAND", default=DEFAULT_PICARD,

@@ -5,7 +5,7 @@ import html
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QStackedWidget, QTableView, QVBoxLayout, QWidget)
 
@@ -41,6 +41,9 @@ def run_report(plan, res):
 LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicBrainz only")),
            ("musicbrainz_preferred", N_("MusicBrainz preferred")), ("discogs_preferred", N_("Discogs preferred")),
            ("discogs_only", N_("Discogs only")), ("web", N_("Web only")))
+
+
+RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "rate_limited", "missing_credentials"}
 
 
 def _list_first() -> bool:
@@ -87,6 +90,8 @@ class Overview(QWidget):
         self.path = None
         self.worker = None
         self.forced = {}
+        self.looked = {}            # album key -> how it was looked up (profile, sources): not again
+        self._lookup_n = 0
         lay = QVBoxLayout(self)
         lay.addLayout(heading(tr("Overview"),
                               tr("Choose music, pick a profile, preview what will change, then apply.")))
@@ -197,7 +202,13 @@ class Overview(QWidget):
             h.setSectionResizeMode(c, QHeaderView.Stretch if c in (1, 5) else QHeaderView.ResizeToContents)
         h.setSectionResizeMode(0, QHeaderView.Interactive)     # (fitted by fit_status: cut when narrow)
         self.table.setAccessibleName(tr("Albums in the preview"))
-        self.table.selectionModel().selectionChanged.connect(self.show_detail)
+        # (while the mouse drags a selection, the inspector waits: reading each album it passes
+        # over - tags, covers, on a network share - kept the drag from following the mouse)
+        self._detail_timer = QTimer(self)
+        self._detail_timer.setSingleShot(True)
+        self._detail_timer.setInterval(150)
+        self._detail_timer.timeout.connect(self.show_detail_after_drag)
+        self.table.selectionModel().selectionChanged.connect(self.selection_changed)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
         self.model.ticked.connect(self.win.update_album_actions)
@@ -315,6 +326,8 @@ class Overview(QWidget):
         """Preview and Apply are enabled by the window (on this page only); while work runs no
         other folder can be chosen or dropped."""
         self.running = on
+        if not on:
+            self._lookup_n = 0                                # (the next run says its own progress)
         self.choose_btn.setEnabled(not on)
         self.drop.setEnabled(not on)
         self.btn_cancel.setEnabled(on)
@@ -335,6 +348,7 @@ class Overview(QWidget):
         self.path = path
         self.forced = dict(forced or {})
         self.within = list(within or [])                     # (several folders dropped: only these)
+        self.looked = {}                                     # (a new folder: nothing looked up yet)
         self.reset_sources()                                 # (a new folder: the profile's sources again)
         self.where.setText(path)
         self.views.setCurrentWidget(self.results)
@@ -455,9 +469,25 @@ class Overview(QWidget):
         return {"musicbrainz": tr("MusicBrainz only"), "discogs": tr("Discogs only"),
                 "web": tr("the web only (store and encyclopaedia pages)")}.get(mode, mode)
 
-    def look_up(self, mode="profile", albums=None):
+    def lookup_stamp(self, prof, mode) -> str:
+        """What a look-up depends on (the profile as it is now, and the sources): the same again
+        finds the same, so it is not asked of the databases twice."""
+        import json
+        return json.dumps([self.profile.currentText(), mode, self.ocr.isChecked(), prof], sort_keys=True,
+                          default=str)
+
+    def reload(self):
+        """Refresh (Ctrl+R): look the selected albums (none selected: all of them) up again, even
+        those already looked up the same way."""
+        if self.running or not self.plan:
+            return
+        chosen = self.selected_albums() if self.table.selectionModel().hasSelection() else None
+        self.look_up(self.sources.currentData() or "profile", chosen or list(self.plan["albums"]), again=True)
+
+    def look_up(self, mode="profile", albums=None, again=False):
         """Look up the selected albums (or ALBUMS) with the profile's sources, or only
-        MusicBrainz, only Discogs, or only the web; what they find replaces their rows."""
+        MusicBrainz, only Discogs, or only the web; what they find replaces their rows.
+        An album already looked up the same way is skipped unless AGAIN (Refresh)."""
         import engine
         chosen = albums if albums is not None else self.selected_albums()
         if not chosen or self.running or not self.path:
@@ -467,7 +497,20 @@ class Overview(QWidget):
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
+        stamp = self.lookup_stamp(prof, mode)
         keys = {a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or []) for a in chosen}
+        done = {k for k in keys if self.looked.get(k) == stamp} if not again else set()
+        if done and done == keys:
+            n = len(keys)
+            if not sheets.question(self, tr("{0} already looked up with {1}.").format(
+                    tr("This album is") if n == 1 else tr("These {0} albums are").format(n),
+                    self.sources_words(mode)),
+                    tr("Looking up again asks the databases once more (Refresh, Ctrl+R, does the same)."),
+                    action=tr("Look Up Again")):
+                return
+            done = set()
+        keys -= done
+        skipped = len(done)
         path, ocr, edits = self.path, self.ocr.isChecked(), self.win.inspector.edits_for_preview()
 
         def work(w):
@@ -476,14 +519,38 @@ class Overview(QWidget):
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys)
         self.busy(True)
         self.looked_with = self.sources_words(mode)
-        self.summary.setText(tr("Looking up {0} with {1}… nothing is changed while previewing.").format(
-            plural(len(keys), tr("album"), tr("albums")), self.looked_with))
-        self.worker = start(self, work, lambda plan: self.looked_up(plan, keys), self.progress, self.oops)
+        self._lookup_n = len(keys)
+        self._lookup_skipped = skipped
+        self.summary.setText(self.lookup_words(0, ""))
+        self.worker = start(self, work, lambda plan: self.looked_up(plan, keys, stamp), self.progress, self.oops)
 
-    def looked_up(self, new, keys):
+    def lookup_words(self, i, name) -> str:
+        """The line under the list while albums are looked up: which one of how many."""
+        n = self._lookup_n
+        head = tr("Looking up album {0} of {n} with {w}").format(i + 1, n=n, w=self.looked_with) if name else \
+            tr("Looking up {0} with {1}").format(plural(n, tr("album"), tr("albums")), self.looked_with)
+        tail = tr(": {0}").format(name) if name else ""
+        skipped = getattr(self, "_lookup_skipped", 0)
+        note = tr(" ({0} already looked up, skipped)").format(skipped) if skipped else ""
+        return head + tail + "…" + note + tr(" Nothing is changed while previewing.")
+
+    def remember_looked(self, albums, stamp):
+        """The albums found, as looked up with STAMP (cancelled: only those it reached); not one
+        that failed or a database was busy or not answering for: that one is worth asking again."""
+        import engine
+        if stamp is None:
+            return
+        for a in albums:
+            codes = set(a.get("reason_codes") or [])
+            if a.get("status") == "listed" or codes & RETRY_CODES or str(a.get("reason", "")).startswith("error:"):
+                continue
+            self.looked[a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])] = stamp
+
+    def looked_up(self, new, keys, stamp=None):
         """The albums looked up take the places of their rows; the others stay as they were."""
         import engine
         found = list(new["albums"])
+        self.remember_looked(found, stamp)
         out, placed = [], False
         for a in (self.plan or {}).get("albums") or []:
             k = a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])
@@ -571,7 +638,15 @@ class Overview(QWidget):
         self.service_status()
         self.bar.setMaximum(max(n, 1))
         self.bar.setValue(i + 1)
-        self.bar.setFormat(tr("{0} of {n}: {name}").format(i + 1, n=n, name=Path(what).name))
+        self.bar.setFormat(tr("{0} of {n}").format(i + 1, n=n))
+        words = tr("{0} of {n}: {name}").format(i + 1, n=n, name=Path(what).name)
+        self.bar.setToolTip(words)
+        self.bar.setAccessibleDescription(words)
+        if getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
+            self.summary.setText(self.lookup_words(i, Path(what).name))
+        elif self.running:
+            self.summary.setText(tr("Identifying album {0} of {n}: {name}… nothing is changed while previewing.")
+                                 .format(i + 1, n=n, name=Path(what).name))
 
     def set_folders(self, folders) -> bool:
         """Several folders dropped at once: every album in them listed together, under the folder
@@ -609,7 +684,13 @@ class Overview(QWidget):
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled)
         self.busy(True)
         self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))
-        self.worker = start(self, work, self.planned, self.progress, self.oops)
+        stamp = None if forced else self.lookup_stamp(prof, mode)    # (a release you chose: not the same)
+
+        def done(plan):
+            self.looked = {}
+            self.remember_looked(plan.get("albums") or [], stamp)
+            self.planned(plan)
+        self.worker = start(self, work, done, self.progress, self.oops)
 
     def planned(self, plan):
         self.plan = plan
@@ -657,9 +738,15 @@ class Overview(QWidget):
         sheets.warning(self, tr("Stopped: {head}").format(head=head), rest.strip())
 
     def to_apply(self):
-        """The albums Apply carries out: those with changes, unless left out (unticked)."""
-        return [a for a in (self.plan or {}).get("albums", [])
-                if can_apply(a) and not a.get(PlanModel.LEAVE_OUT)]
+        """The albums Apply carries out: those with changes, unless left out (unticked); with
+        two or more rows highlighted, only those of them (the others stay as they are)."""
+        albums = [a for a in (self.plan or {}).get("albums", [])
+                  if can_apply(a) and not a.get(PlanModel.LEAVE_OUT)]
+        chosen = self.selected_albums() if hasattr(self, "table") else []
+        if len(chosen) >= 2:
+            ids = {id(a) for a in chosen}
+            albums = [a for a in albums if id(a) in ids]
+        return albums
 
     def apply_words(self):
         """The Apply sheet: (headline, what changes, how to undo, button), from each album's own
@@ -781,6 +868,21 @@ class Overview(QWidget):
         # edit (the inspector, Tags from File Names) must change the album the plan applies
         row = self.proxy.mapToSource(self.proxy.index(idx.row(), 0)).row()
         return self.model.albums[row] if 0 <= row < len(self.model.albums) else None
+
+    def selection_changed(self, *_):
+        from PySide6.QtWidgets import QApplication
+        if QApplication.mouseButtons() & Qt.LeftButton:
+            self._detail_timer.start()
+        else:
+            self._detail_timer.stop()
+            self.show_detail()
+
+    def show_detail_after_drag(self):
+        from PySide6.QtWidgets import QApplication
+        if QApplication.mouseButtons() & Qt.LeftButton:     # (still dragging)
+            self._detail_timer.start()
+        else:
+            self.show_detail()
 
     def show_detail(self, *_):
         a = self.selected()

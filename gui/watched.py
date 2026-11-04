@@ -38,6 +38,17 @@ TABLE_MIN = 2 * (style.ROW + 2) + 36                 # a header and two rows: ne
 FOLDER_ROWS = 4                                      # the folders list grows to this many rows, then scrolls
 
 
+# "Look every": these choices only, from a minute to a day (seconds)
+LOOK_EVERY = (60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 18000, 32400, 43200, 86400)
+
+
+def look_every_words(secs) -> str:
+    if secs < 3600:
+        return tr("{0} min").format(secs // 60)
+    hours = secs // 3600
+    return tr("1 hour") if hours == 1 else tr("{0} hours").format(hours)
+
+
 def watch_word(status):
     word, key, icon = WATCH_STATUS.get(status, (STATUS[status][1] if status in STATUS else
                                                 (status or "").replace("_", " ").capitalize(), status, None))
@@ -95,7 +106,9 @@ class WatchDialog(QDialog):
         self.does = QLabel("")
         self.does.setWordWrap(True)
         self.auto = QCheckBox(tr("File albums without asking"))
-        self.auto.setToolTip(tr("Off: each album is previewed and waits under \"Waiting for your approval\".\n"
+        self.auto.setToolTip(tr("On: albums identified for sure (Ready) are filed; any it is not sure of waits under "
+                                "\"Waiting for your approval\".\n"
+                                "Off: each album is previewed and waits under \"Waiting for your approval\".\n"
                                 "This is a profile setting: it applies to every folder the profile watches."))
         self.auto.setAccessibleName(tr("File albums without asking"))
         self.settle = QDoubleSpinBox()
@@ -105,11 +118,10 @@ class WatchDialog(QDialog):
         self.settle.setSuffix(tr(" min"))
         self.settle.setToolTip(tr("An album is left alone until nothing in it changed for this long\n"
                                   "(a copy or download still running)"))
-        self.every = QDoubleSpinBox()
-        self.every.setAccessibleName(tr("Look every, minutes"))
-        self.every.setRange(0.1, 1440)
-        self.every.setDecimals(1)
-        self.every.setSuffix(tr(" min"))
+        self.every = QComboBox()                         # (every minute up to once a day)
+        self.every.setAccessibleName(tr("Look every"))
+        for secs in LOOK_EVERY:
+            self.every.addItem(look_every_words(secs), secs)
         self.every.setToolTip(tr("The watcher looks as often as the shortest of all profiles' settings."))
         self.warn = QLabel("")
         self.warn.setWordWrap(True)
@@ -183,7 +195,8 @@ class WatchDialog(QDialog):
         self.does.setText(watch_does(p))
         self.auto.setChecked(bool(p["unattended"]))
         self.settle.setValue(p["watch"]["settle_minutes"])
-        self.every.setValue(p["watch"]["interval_seconds"] / 60)
+        secs = p["watch"]["interval_seconds"]             # (a value set elsewhere: the nearest choice)
+        self.every.setCurrentIndex(min(range(len(LOOK_EVERY)), key=lambda i: abs(LOOK_EVERY[i] - secs)))
         self.show_warnings()
 
     def problems(self):
@@ -250,7 +263,7 @@ class WatchDialog(QDialog):
                 dict(had[0] if had else {"recursive": True}, path=folder, watch=True)]
             data["unattended"] = self.auto.isChecked()
             data["watch"] = dict(data.get("watch") or {}, settle_minutes=self.settle.value(),
-                                 interval_seconds=max(1, int(round(self.every.value() * 60))))
+                                 interval_seconds=int(self.every.currentData()))
             target = pf.from_dict(data)
             others = []
             for n in pf.names():                     # a folder belongs to one profile
@@ -311,7 +324,7 @@ class Watched(QWidget):
         self.table.setMinimumHeight(TABLE_MIN)
         self.table.setAccessibleName(tr("Watched folders"))
         self.table.itemSelectionChanged.connect(self.update_buttons)
-        self.menu_for(self.table, ("change_watch", "stop_watch", None, "check_now"))
+        self.menu_for(self.table, ("change_watch", "process_again", "stop_watch", None, "check_now"))
         lay.addWidget(self.table, 1)
         # a list editor's + and − under the list, as on a Mac (Change… and Check Now: the context
         # menu, Return and the Tools menu)
@@ -567,6 +580,23 @@ class Watched(QWidget):
             return None, None
         return self.table.item(r, 0).text(), self.table.item(r, 1).text()
 
+    def process_again(self):
+        """Process Folder Again: every album in the selected folder is looked at again at the next
+        check (now), as its profile says now - one already filed or tagged where it was too. An
+        album you undid, or one a rule ignores, stays as it is."""
+        folder, profile = self.selected()
+        if not folder or self.busy:
+            return
+        if not sheets.question(self, tr("Process the albums in {0} again?").format(Path(folder).name or folder),
+                               tr("Each album there is identified again and handled as “{0}” says now. Albums you "
+                                  "undid, and albums a rule ignores, are left as they are.").format(profile),
+                               action=tr("Process Again")):
+            return
+        import watcher
+        n = watcher.forget(folder)
+        self.say(tr("{0} forgotten; checking now…").format(plural(n, tr("album record"), tr("album records"))))
+        self.check_now()
+
     def add(self):
         if not pf.names():
             sheets.information(self, tr("Create a profile first."), tr("A watched folder belongs to a profile: it says "
@@ -631,7 +661,8 @@ class Watched(QWidget):
         mins = max(1, round(self.interval_ms() / 60000))
         return sheets.confirm(self, tr("Keep watching while TagMender is open?"),
                               tr("{0} {1} checked "
-                                 "every {mins} min; albums in {names} are filed automatically, without asking.")
+                                 "every {mins} min; albums in {names} identified for sure are filed automatically, without "
+                                 "asking; any it is not sure of waits for your approval.")
                               .format(plural(len(rows), tr('watched folder'), tr('watched folders')),
                                       'is' if len(rows) == 1 else 'are', mins=mins, names=names),
                               tr("Every job can be undone from Jobs; untick this to stop."), tr("Start Watching"))

@@ -249,6 +249,56 @@ class Drop(DropBase):
         self.assertTrue(d.exists())
 
 
+    def test_unattended_files_what_it_is_sure_of_and_the_rest_waits_for_approval(self):
+        odd = self.tmp / "odd"
+        odd.mkdir()
+        prof = self.profile(unresolved={"action": "move", "move_to": str(odd)})
+        sure = self.drop("Band X", "Album X")
+        unsure = self.drop("Nobody", "Nothing Known")
+        res = watcher.Watcher([prof], once=True).tick()
+        self.assertFalse(sure.exists())                                  # (Ready: filed)
+        self.assertEqual(len(self.audio_in(self.dest)), 3)
+        self.assertTrue(unsure.exists(), res)                            # (not sure: it stays and waits)
+        self.assertEqual(list(odd.iterdir()), [])
+        self.assertEqual(len(watcher.pending_plans()), 1, res)
+        self.assertEqual(res[str(unsure)], "unresolved")                 # (what it is: still to retry later)
+        self.assertEqual(len(watcher.pending_plans()), 1)
+
+
+    def test_a_folder_given_another_profile_is_processed_again(self):
+        prof = self.profile(operation="in_place", destination="")
+        d = self.drop("Band X", "Album X")
+        w = watcher.Watcher([prof], once=True)
+        self.assertEqual(list(w.tick().values()), ["done"])
+        self.assertTrue(d.exists())                                      # (tagged where it was)
+        later = time.time() + 7200                                       # (settled, nothing touched since)
+        with mock.patch.object(watcher.time, "time", return_value=later):
+            self.assertEqual(w.tick(), {})
+            mover = self.profile(name="Mover")                           # (the folder now watched by it)
+            self.assertEqual(list(watcher.Watcher([mover], once=True).tick().values()), ["done"])
+        self.assertFalse(d.exists())
+        self.assertEqual(len(self.audio_in(self.dest)), 3)
+
+
+    def test_process_again_forgets_the_folder_but_not_an_undo(self):
+        prof = self.profile(operation="in_place", destination="")
+        d = self.drop("Band X", "Album X")
+        w = watcher.Watcher([prof], once=True)
+        self.assertEqual(list(w.tick().values()), ["done"])
+        later = time.time() + 7200
+        with mock.patch.object(watcher.time, "time", return_value=later):
+            self.assertEqual(w.tick(), {})
+            self.assertEqual(watcher.forget(self.inbox), 1)
+            self.assertEqual(list(w.tick().values()), ["unchanged"])     # (looked at again: already right)
+            db = watcher._db()
+            db.execute("UPDATE processed SET status='undone'")
+            db.commit()
+            db.close()
+            self.assertEqual(watcher.forget(self.inbox), 0)              # (an undo is kept)
+            self.assertEqual(watcher.forget(str(self.inbox) + "-other"), 0)
+        self.assertTrue(d.exists())
+
+
 class Cli(DropBase):
     def run_cli(self, *argv):
         import contextlib

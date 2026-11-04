@@ -15,8 +15,9 @@ An album is processed when:
   - an unresolved album is retried after retry.after_days, at most retry.max_attempts
     times; a provider outage or throttling is retried sooner, with growing pauses.
 
-An interrupted job found at start is recovered first. Profiles that are not
-`unattended` only plan: the plans wait in ~/.local/state/tagmender/plans/ for approval
+An interrupted job found at start is recovered first. An `unattended` profile applies an
+album only when every part of it is Ready (identified for sure); one it is not sure of is
+planned and waits, as every album of a profile that is not `unattended` does: the plans wait in ~/.local/state/tagmender/plans/ for approval
 (`tagmender watch --approve`, or Apply on the app's Watched folders page).
 """
 from __future__ import annotations
@@ -243,7 +244,7 @@ class Watcher:
             return False, "partial download inside"
         if time.time() - newest < prof["watch"]["settle_minutes"] * 60:
             return False, "still changing"
-        row = db.execute("SELECT signature, status, attempts, next_try, ts FROM processed WHERE folder=?",
+        row = db.execute("SELECT signature, status, attempts, next_try, ts, profile FROM processed WHERE folder=?",
                          (key,)).fetchone()
         rules = ex.load_rules(prof.name)
         st = ex.State()
@@ -264,7 +265,11 @@ class Watcher:
                     return False, "undone"
         if not row:
             return True, "new"
-        signature, status, attempts, next_try, ts = row
+        signature, status, attempts, next_try, ts, was = row
+        if was and was != prof.name and status != "excluded":
+            # the folder is watched by another profile now: what it does with the album may differ
+            # (one profile tagged it where it was; the new one files it in its library)
+            return True, "profile changed"
         if status == "undone":                       # a job undone by hand is not done again by itself
             return (True, "changed since the undo") if not shape_in(folder, files, signature) \
                 else (False, "undone")
@@ -428,7 +433,10 @@ class Watcher:
                     plan = planmod.build(props, prof, e.job + f"-{n_jobs}", extra_roots=[root])
                     a = plan["albums"][0]
                     res = None
-                    if prof["unattended"]:
+                    # "File albums without asking" files only what it is sure of: an album it is not
+                    # (Unresolved, Partial, a pressing it could not tell) waits for your approval
+                    sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
+                    if prof["unattended"] and sure:
                         res = executor.Executor(plan, log=self.log).run()
                         outcome = res["albums"][0]["status"] if res["albums"] else a["status"]
                     elif a["status"] == "blocked":                # nothing to apply: planned again later
@@ -468,7 +476,7 @@ class Watcher:
                     self.record(db, g.folder, prof, status, attempts,
                                 ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
                                 key=k, files=scope, deep=deep)
-                    if prof["unattended"]:
+                    if res is not None:
                         for x, out_i, _st in each:
                             self.filed(db, x, prof, out_i)
                     done[str(g.folder)] = shown
@@ -515,6 +523,22 @@ class Watcher:
                         self.stop = True
                         break
                     time.sleep(min(1, max(0, end - time.time())))
+
+
+def forget(root) -> int:
+    """Forget what was done with the albums under ROOT (a watched folder), so the next pass
+    looks at each again - as its profile says now. An album you undid stays undone (not
+    done again by itself). Returns how many records were forgotten."""
+    root = planmod.db_text(os.path.abspath(str(root))).rstrip("/")
+    db = _db()
+    try:
+        rows = [r[0] for r in db.execute("SELECT folder, status FROM processed").fetchall()
+                if r[1] != "undone" and (r[0] == root or r[0].startswith(root + "/") or r[0].startswith(root + "#"))]
+        db.executemany("DELETE FROM processed WHERE folder=?", [(f,) for f in rows])
+        db.commit()
+    finally:
+        db.close()
+    return len(rows)
 
 
 def _stop_file() -> Path:

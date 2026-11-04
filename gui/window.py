@@ -85,7 +85,7 @@ class Main(QMainWindow):
         self.setUnifiedTitleAndToolBarOnMac(True)
         self.progress = QProgressBar()
         self.progress.setFixedWidth(140)
-        self.progress.setTextVisible(False)
+        self.progress.setTextVisible(True)               # ("3 of 16"; the album's name is below the list)
         self.progress.setAccessibleName(tr("Progress"))
         self.progress_action = None
         self.profile_box = QComboBox()
@@ -245,6 +245,7 @@ class Main(QMainWindow):
             "check_now": lambda: (self.go("Watched folders"), self.pages["Watched folders"].check_now()),
             "change_watch": lambda: self.pages["Watched folders"].change(),
             "stop_watch": lambda: self.pages["Watched folders"].remove(),
+            "process_again": lambda: self.pages["Watched folders"].process_again(),
             "run_in_background": lambda: (self.go("Watched folders"), self.pages["Watched folders"].toggle_service()),
             "show_plan": lambda: self.pages["Watched folders"].show_plan(),
             "apply_plan": lambda: (self.player.release(), self.pages["Watched folders"].apply_one()),
@@ -551,7 +552,8 @@ class Main(QMainWindow):
             on_w = page is w
             folder = on_w and bool(w.selected()[0])
             plan = on_w and w.chosen_plan() is not None and not w.applying
-            for k, on in (("change_watch", folder), ("stop_watch", folder), ("show_plan", plan),
+            for k, on in (("change_watch", folder), ("stop_watch", folder), ("process_again", folder and not w.busy),
+                          ("show_plan", plan),
                           ("apply_plan", plan), ("dismiss_plan", plan),
                           ("apply_all_plans", on_w and bool(w.plans) and not w.applying)):
                 self.commands[k].setEnabled(on)

@@ -1,5 +1,32 @@
 # Release notes
 
+## 0.5.0
+
+**Watched folders**
+- *File albums without asking* now files only the albums it is sure of (Ready). An album it is
+  not sure of (Unresolved, Partial, two pressings that fit) stays where it is and waits under
+  *Waiting for your approval*.
+- A folder given another profile is processed again with it: an album tagged in place before
+  is filed into the new profile's library.
+- *Process Folder Again…* (right-click a watched folder, or Tools › Watched Folders) looks at
+  every album there again, as its profile says now. Albums you undid, and albums a rule
+  ignores, are left as they are.
+- *Look every* offers 1, 2, 5, 10, 15 and 30 minutes, and 1, 2, 3, 5, 9, 12 and 24 hours.
+
+**Looking up**
+- While albums are looked up, the line under the list says which one of how many, and the
+  toolbar bar shows the count.
+- An album already looked up the same way (profile, sources, Read scans) is not looked up
+  again; you are asked first. Refresh (Ctrl+R) looks up the selected albums again.
+- What your copy itself proves (its disc ID, a barcode from the tags or a scan, ISRCs) now
+  outranks a country or catalogue number in the folder name, which can be wrong. A release your
+  copy cannot be (a 12" when the folder has a CD rip log) is ranked after the others.
+
+**Overview**
+- With two or more rows highlighted, Apply applies only those.
+- Selecting rows by dragging the mouse no longer stalls on each album it passes over.
+- *Needs attention* follows the folder you previewed last, unless you chose one there.
+
 ## 0.4.1
 
 - Dropping several folders at once lists every album in them together; nothing is looked up

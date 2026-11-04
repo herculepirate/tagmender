@@ -214,7 +214,9 @@ class WatchedPage(unittest.TestCase):
         wp.live.setChecked(True)
         self.assertEqual(wp.timer.interval(), 600_000)
         dlg = self.gui.WatchDialog(wp, str(self.tmp / "inbox"), "Mover")
-        dlg.every.setValue(1)
+        self.assertEqual([dlg.every.itemData(i) // 60 for i in range(dlg.every.count())],
+                         [1, 2, 5, 10, 15, 30, 60, 120, 180, 300, 540, 720, 1440])
+        dlg.every.setCurrentIndex(dlg.every.findData(60))
         dlg.save()
         wp.reload()
         self.assertEqual(pf.load("Mover")["watch"]["interval_seconds"], 60)

@@ -285,7 +285,7 @@ class ScanOrder(unittest.TestCase):
             shutil.rmtree(d)
 
     def test_the_cache_key_changes_with_the_ocr_version(self):
-        self.assertEqual(ma.OCR_VERSION, "ocr-3")
+        self.assertEqual(ma.OCR_VERSION, "ocr-4")
 
 
 @unittest.skipUnless(HAVE_PIL and HAVE_TESSERACT, "Pillow, numpy and tesseract needed")

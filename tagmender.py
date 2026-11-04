@@ -368,6 +368,41 @@ def plugins_parser(sub):
     ps.add_parser("check", help="say what is wrong with a plugin folder").add_argument("folder")
 
 
+def ocr_parser(sub):
+    p = sub.add_parser("ocr", help="how scans are read: the learned reading order")
+    ps = p.add_subparsers(dest="ocrcmd", required=True)
+    a = ps.add_parser("stats", help="per kind of scan: read, paid off (its code confirmed), the rate; "
+                                    "--export writes this computer's counts to share")
+    a.add_argument("--export", nargs="?", const="-", metavar="FILE",
+                   help="write this computer's counts (kinds of scan and numbers only) to FILE, or print them")
+
+
+def cmd_ocr(args):
+    import ocr_order
+    if args.export is not None:
+        text = ocr_order.export() + "\n"
+        if args.export == "-":
+            sys.stdout.write(text)
+        else:
+            try:
+                Path(args.export).write_text(text, encoding="utf-8")
+            except OSError as exc:
+                _err(f"Could not write {args.export}: {exc}")
+                return EXIT_ERR
+            print(f"Saved to {args.export}. Nothing else is in it: kinds of scan and numbers only.")
+        return EXIT_OK
+    print(f"{'scan':<10}{'read':>8}{'paid off':>10}{'rate':>8}   {'shipped':>15}   {'this computer':>15}")
+    for row in ocr_order.stats():
+        sh, mine = row["shipped"], row["mine"]
+        reads, hits = sh["reads"] + mine["reads"], sh["hits"] + mine["hits"]
+        print(f"{row['role']:<10}{reads:>8}{hits:>10}{row['rate']:>8.0%}   "
+              f"{sh['hits']:>6} of {sh['reads']:<6}   {mine['hits']:>6} of {mine['reads']:<6}")
+    print("\nScans are read in this order (the best rate first). To help the shipped order, share "
+          "`tagmender ocr stats --export` in an issue on GitHub; nothing is sent automatically.",
+          file=sys.stderr)
+    return EXIT_OK
+
+
 def cmd_plugins(args):
     import plugins
     try:
@@ -1276,6 +1311,7 @@ def main(argv=None):
     rules_parser(sub)
     profiles_parser(sub)
     plugins_parser(sub)
+    ocr_parser(sub)
     doctor_parser(sub)
     work_parsers(sub)
     if not argv:
@@ -1299,6 +1335,8 @@ def main(argv=None):
         return cmd_setup(args)
     if args.cmd == "plugins":
         return cmd_plugins(args)
+    if args.cmd == "ocr":
+        return cmd_ocr(args)
     if args.cmd == "profiles":
         try:
             return cmd_profiles(args)

@@ -729,6 +729,27 @@ tagmender plan "/path/to/Album" --release https://musicbrainz.org/release/<id>  
 The scans are read for every album that has them: a catalogue number, "Made in ...", or
 the label's postal address on the back (D-54550 Daun, CA 90250, NG3 4GE) names the pressing.
 
+#### How scans are read
+
+Each scan has a kind, told by its name or its folder's: back, tray (inlay), disc (CD, matrix),
+obi, spine, label (sticker, barcode), booklet, front, other. The kinds whose scans most often
+carry a code that the identified release confirms (a barcode, catalogue number or matrix) are
+read first; within a kind, single panels come before booklet spreads. The page text is read in
+your languages (Preferences > Network & Privacy); the closer readings that hunt for codes are
+read in English, since codes are Latin letters and digits. Several scans are read at once.
+When a barcode decoded off the scans already finds the release for sure, only the first three
+scans' text is read. An album still unsure is investigated: the first six scans again in full,
+their codes searched, and the rest only if the album is still unsure. A catalogue number that
+looks like a misreading (fewer than 5 letters and digits, or no digit: "ZB 44") is not searched;
+numbers from tags, rip logs and file names always are.
+
+The order starts from counts shipped with TagMender and learns from your albums: after each
+album identified for sure, it counts, per kind, the scans read and those whose code the
+release confirmed. Only those counts are kept (`ocr_order.json` in the state folder), never a
+file name, folder or album. `tagmender ocr stats` shows them; `tagmender ocr stats --export
+FILE` saves them to share: attach it to an issue on TagMender's GitHub page, and the shipped
+order improves for everyone. Nothing is sent automatically.
+
 ### Sources: which database decides
 
 A profile's **Sources** setting (`source`; the app's Profiles page, "Sources"; `--source` on

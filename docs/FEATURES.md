@@ -16,6 +16,7 @@ TagMender has no setting of its own (`TAGMENDER_TAGGER_INI` names another file);
 | Feature | Status | Notes |
 |---|---|---|
 | Lookup by tags, file names, folder names | Full | plus catalogue numbers, barcodes, OCR of scans, rip logs, cue sheets, links in tags |
+| Order scans are read in | Full | the kinds of scan (back, disc, obi, booklet...) whose codes most often confirm the release first, learned from your albums (role counts only; `tagmender ocr stats`, `--export` to share them in a GitHub issue; nothing is sent) |
 | Codes searched beyond the databases' own search | Full | codes read on scans are asked of MusicBrainz and Discogs in their other spellings (separators, O/0, I/1) and through Discogs' free-text search; an optional web search (Mojeek, Marginalia; off by default, at most 3 codes an album, never junk ones, a monthly cap counting only searches that reach the engine; set up with `tagmender setup` or Preferences); no AI search unless chosen (`tavily`), no search page scraped |
 | Track number and title from file names | Full | in the matcher |
 | Audio fingerprints (AcoustID) | Full | needs fpcalc and your own AcoustID application key; when to fingerprint is the profile's `acoustid: unsure` (default) / `always` / `off`; the AcoustID provider itself is off in the default profile |

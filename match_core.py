@@ -104,8 +104,11 @@ _SCRIPTS = str.maketrans({**_CYRILLIC, **{k.upper(): v.capitalize() for k, v in 
 _CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 
 
+@functools.lru_cache(maxsize=64)
 def _romanize_cjk(text):
-    """Japanese/Chinese in Latin letters when pykakasi is installed (else unchanged)."""
+    """Japanese/Chinese in Latin letters when pykakasi is installed (else unchanged).
+    Kept for the last texts: the scans' OCR text is folded again for every candidate
+    scored, and romanising it takes seconds (eng+rus+jpn readings of a booklet)."""
     try:
         import pykakasi
     except ImportError:

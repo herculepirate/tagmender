@@ -29,6 +29,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -41,6 +42,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
 import exclusions  # noqa: E402
+import ocr_order  # noqa: E402
 import requirements  # noqa: E402
 import companions  # noqa: E402
 
@@ -2954,15 +2956,14 @@ def mb_search(http, album, cfg):
     for a in album.get("asins") or ():
         queries.append(f"asin:{a}")
     catnos = [c.replace("\\", " ").replace('"', " ") for c in album.get("catno_search", [])[:3]]
-    for c in catnos:
-        queries.append(f'catno:"{c}" AND artist:"{first}"')
+    narrow = [f'catno:"{c}" AND artist:"{first}"' for c in catnos]
+    queries += narrow
     # The label with the catalogue number: finds the pressing when the artist is credited
     # differently (an alias, Various Artists) and a bare number is shared by other labels.
     # Asked before the bare number, whose hits from other labels would end the search first.
-    for label, c in label_catnos(album):
-        queries.append(f'label:"{label}" AND catno:"{c}"')
-    for c in catnos:
-        queries.append(f'catno:"{c}"')
+    wide = [f'label:"{label}" AND catno:"{c}"' for label, c in label_catnos(album)]
+    wide += [f'catno:"{c}"' for c in catnos]
+    queries += wide
     if album.get("pressing_year"):
         queries.append(f'release:"{title}" AND artist:"{first}" AND date:{album["pressing_year"]}*')
     # The format the folder names ("[Vinyl Rip]") searched for itself: the title alone
@@ -2981,8 +2982,16 @@ def mb_search(http, album, cfg):
     queries.append(f'"{title}" AND "{first}"')
     n_files = len(album["tracks"])
     seen, hits = set(), []
+    # numbers read off scans (narrow_codes_first): a misread one matches some other
+    # release when asked alone, so the wider queries go only when the artist's found nothing
+    skip_wide = set(wide) if album.get("narrow_codes_first") and narrow else set()
+    narrow_found = False
     for query in queries:
+        if query in skip_wide and narrow_found:
+            continue
         data = http.get_json(f"https://musicbrainz.org/ws/2/release/?query={q(query)}&fmt=json&limit=15", "mb")
+        if query in narrow and (data or {}).get("releases"):
+            narrow_found = True
         for r in (data or {}).get("releases", []):
             if r["id"] not in seen:
                 seen.add(r["id"])
@@ -3349,14 +3358,13 @@ def discogs_search(http, album, cfg, dm):
         for form in mc.barcode_variants(b):
             searches.append(f"barcode={q(form)}")
     catnos = album.get("catno_search", [])[:3]
-    for c in catnos:
-        searches.append(f"catno={q(c)}&artist={q(first)}")
+    narrow = [f"catno={q(c)}&artist={q(first)}" for c in catnos]
+    searches += narrow
     # The label with the number before the bare number: a number other labels share
     # fills the results first and the search stops before asking for the label
-    for label, c in label_catnos(album):
-        searches.append(f"label={q(label)}&catno={q(c)}")
-    for c in catnos:
-        searches.append(f"catno={q(c)}")
+    wide = [f"label={q(label)}&catno={q(c)}" for label, c in label_catnos(album)]
+    wide += [f"catno={q(c)}" for c in catnos]
+    searches += wide
     if album.get("pressing_year"):
         searches.append(f"artist={q(first)}&release_title={q(title)}&year={album['pressing_year']}")
     dfmt = {"vinyl": "Vinyl", "cd": "CD", "digital": "File"}.get(album.get("media_hint") or "")
@@ -3373,8 +3381,15 @@ def discogs_search(http, album, cfg, dm):
     if short != title:
         searches.append(f"artist={q(first)}&release_title={q(short)}")
     seen, results = set(), []
+    # numbers read off scans: the wider searches only when the artist's found nothing (as mb_search)
+    skip_wide = set(wide) if album.get("narrow_codes_first") and narrow else set()
+    narrow_found = False
     for s in searches:
+        if s in skip_wide and narrow_found:
+            continue
         data = http.get_json(f"https://api.discogs.com/database/search?type=release&per_page=15&{s}", "discogs")
+        if s in narrow and (data or {}).get("results"):
+            narrow_found = True
         for r in (data or {}).get("results", []):
             if r["id"] not in seen:
                 seen.add(r["id"])
@@ -3454,10 +3469,9 @@ def discogs_search(http, album, cfg, dm):
 # Optional OCR
 # --------------------------------------------------------------------------
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
-_HINT = re.compile(r"back|rear|tray|inlay|disc|cd\d?|label|barcode|booklet|insert|inside|matrix", re.I)
 
 
-OCR_VERSION = "ocr-3"   # bump when the OCR code changes, so cached OCR is redone
+OCR_VERSION = "ocr-4"   # bump when the OCR code changes, so cached OCR is redone
 
 
 # Images that are not scans of the release: covers saved from the web, rip
@@ -3531,8 +3545,8 @@ def packaging_evidence(album_dir):
 
 def list_images(base, max_n):
     """Every image under the album folder (subfolders included), most likely
-    to carry a barcode or catalogue number first. Exact duplicate files
-    (e.g. 'scan 1 (copy).jpg') are scanned once.
+    to carry a barcode or catalogue number first (ocr_order: the roles whose scans paid
+    off most, learned). Exact duplicate files (e.g. 'scan 1 (copy).jpg') are scanned once.
 
     Returns (paths, key): the key identifies exactly these image contents, so
     OCR results can be cached and reused while the images are unchanged."""
@@ -3543,7 +3557,7 @@ def list_images(base, max_n):
             p = Path(dirpath) / n
             if p.suffix.lower() in IMAGE_EXT and not web_image(p):
                 found.append(p)
-    found.sort(key=lambda p: (_scan_rank(p), str(p).lower()))
+    found = ocr_order.rank(found, tie=_scan_shape)
     seen, out, digests = set(), [], []
     for p in found:
         try:
@@ -3555,27 +3569,53 @@ def list_images(base, max_n):
         seen.add(digest)
         out.append(str(p))
         digests.append(digest)
+        _DIGESTS[str(p)] = digest
         if max_n and len(out) >= max_n:
             break
     key = hashlib.md5((OCR_VERSION + "|" + "|".join(digests)).encode()).hexdigest()
     return out, key
 
 
-def _scan_rank(p):
-    """Which scans are read first: those named as a back, tray, disc..., then single
-    panels (a back cover, tray card, obi, sticker or disc: up to 1.7 times as wide as
-    tall), then the rest, such as booklet spreads. Alcest - Les Voyages De L'âme: 28
-    booklet spreads named img001-img028 came before the back with its sticker barcode,
-    and only the first 15 scans are read."""
-    if _HINT.search(p.stem):
-        return 0
+# each scan's contents (md5), as list_images last read them: the per-scan cache keys
+_DIGESTS = {}
+
+
+def _scan_digest(path):
+    import hashlib
+    d = _DIGESTS.get(str(path))
+    if d is None:
+        try:
+            d = hashlib.md5(Path(path).read_bytes()).hexdigest()
+        except OSError:
+            d = "path:" + str(path)                   # not readable: a reading of nothing
+        _DIGESTS[str(path)] = d
+    return d
+
+
+def images_key(paths):
+    """list_images' key for these scans (in this order)."""
+    import hashlib
+    return hashlib.md5((OCR_VERSION + "|" + "|".join(_scan_digest(p) for p in paths)).encode()).hexdigest()
+
+
+def scan_key(path):
+    """One scan's cache key: its contents and the OCR version, wherever it is in the list."""
+    import hashlib
+    return hashlib.md5((OCR_VERSION + "|scan|" + _scan_digest(path)).encode()).hexdigest()
+
+
+def _scan_shape(p):
+    """Within one role: single panels first (a back cover, tray card, obi, sticker or
+    disc: up to 1.7 times as wide as tall), then the rest, such as booklet spreads.
+    Alcest - Les Voyages De L'âme: 28 booklet spreads named img001-img028 came before the
+    back with its sticker barcode, and only the first 15 scans are read."""
     try:
         from PIL import Image
         with Image.open(p) as im:
             w, h = im.size
     except Exception:
         return 2
-    return 1 if w <= 1.7 * h else 2
+    return 0 if w <= 1.7 * h else 1
 
 
 def _cached(db, kind, key, compute):
@@ -3591,6 +3631,119 @@ def _cached(db, kind, key, compute):
     db.execute("INSERT OR REPLACE INTO ocr_cache VALUES (?,?)", (f"{kind}:{key}", json.dumps(value)))
     db.commit()
     return value
+
+
+def ocr_workers():
+    """How many tesseract runs at once: a few, leaving one processor free."""
+    return max(1, min(4, (os.cpu_count() or 2) - 1))
+
+
+_POOL = threading.local()
+
+
+def _pmap(fn, items):
+    """[fn(x) for x in items], up to ocr_workers() at once, results in the same order.
+    Called from inside a worker, it runs in turn (no pool inside a pool)."""
+    items = list(items)
+    n = ocr_workers()
+    if n <= 1 or len(items) <= 1 or getattr(_POOL, "inside", False):
+        return [fn(x) for x in items]
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run(x):
+        _POOL.inside = True
+        try:
+            return fn(x)
+        finally:
+            _POOL.inside = False
+    with ThreadPoolExecutor(max_workers=min(n, len(items))) as pool:
+        return list(pool.map(run, items))
+
+
+def _tess_env():
+    """tesseract's environment: one thread each (several run at once, see _pmap), unless
+    you set OMP_THREAD_LIMIT yourself."""
+    env = dict(os.environ)
+    env.setdefault("OMP_THREAD_LIMIT", "1")
+    return env
+
+
+def new_scan_log():
+    """What OCR read on each scan of one album, for ocr_order.record: "read" the scans
+    read (not from the cache) this time, "text" each scan's readings, "barcodes" the
+    barcodes decoded on each, "no_bars" the scans already decoded without a result."""
+    return {"read": set(), "text": {}, "barcodes": {}, "no_bars": set()}
+
+
+def each_scan(db, kind, images, read, log=None, budget_s=None):
+    """read(path) for each scan, cached per scan (its contents and the OCR version, so a
+    scan read once is not read again wherever it is in the list), several at once.
+    Returns the readings in the order of IMAGES; a scan not started within budget_s
+    reads as "". The scans read now (not from the cache) go to log["read"]."""
+    images = [str(p) for p in images]
+    keys = [f"{kind}:{scan_key(p)}" for p in images]
+    vals = [None] * len(images)
+    if db is not None:
+        db.execute("CREATE TABLE IF NOT EXISTS ocr_cache (key TEXT PRIMARY KEY, value TEXT)")
+        for i, k in enumerate(keys):
+            row = db.execute("SELECT value FROM ocr_cache WHERE key=?", (k,)).fetchone()
+            if row:
+                vals[i] = json.loads(row[0])
+    todo = [i for i, v in enumerate(vals) if v is None]
+    started = time.time()
+
+    def one(i):
+        if budget_s is not None and time.time() - started > budget_s:
+            return None
+        try:
+            return read(images[i]) or ""
+        except Exception:
+            return ""
+    for i, v in zip(todo, _pmap(one, todo)):
+        if v is None:
+            vals[i] = ""                               # over the time budget: not read
+            continue
+        vals[i] = v
+        if db is not None:
+            db.execute("INSERT OR REPLACE INTO ocr_cache VALUES (?,?)", (keys[i], json.dumps(v)))
+        if log is not None:
+            log["read"].add(images[i])
+    if db is not None and todo:
+        db.commit()
+    if log is not None:
+        for p, v in zip(images, vals):
+            if v:
+                log["text"].setdefault(p, []).append(v)
+    return vals
+
+
+def decoded_barcodes(db, images, log=None):
+    """ocr_barcodes(images), cached for exactly these scans ("barcodes2"), with the scan
+    each code was decoded on noted in log["barcodes"]."""
+    images = [str(p) for p in images]
+    if not images:
+        return set()
+
+    def compute():
+        _DECODED_ON.clear()
+        codes = sorted(ocr_barcodes(images))
+        return {"codes": codes, "from": {c: images.index(_DECODED_ON[c]) for c in codes
+                                         if _DECODED_ON.get(c) in images}}
+    value = _cached(db, "barcodes2", images_key(images), compute)
+    if isinstance(value, list):                        # a reading stored as the codes alone
+        value = {"codes": value, "from": {}}
+    found = set(value.get("codes") or ())
+    if log is not None:
+        for c, i in (value.get("from") or {}).items():
+            if isinstance(i, int) and 0 <= i < len(images):
+                log["barcodes"].setdefault(str(images[i]), set()).add(c)
+        if not found:
+            log["no_bars"].update(str(p) for p in images)
+    return found
+
+
+# the scan each barcode ocr_barcodes returned was decoded on (set as it returns)
+_DECODED_ON = {}
 
 
 def barcode_from_symbol(kind, data):
@@ -3691,7 +3844,7 @@ def ocr_barcodes(paths, per_image_s=8.0, total_s=40.0, patches_s=60.0):
                 except Exception:
                     continue
                 if hit:
-                    return hit
+                    return _decoded_on(hit, p)
             x0, y0, x1, y1 = box
             bw, bh = x1 - x0, y1 - y0
             crop = g.crop((int(max(0, x0 - bw * 0.3)), int(max(0, y0 - bh * 0.5)),
@@ -3699,7 +3852,7 @@ def ocr_barcodes(paths, per_image_s=8.0, total_s=40.0, patches_s=60.0):
             for variant in list(_barcode_variants(crop))[:4]:
                 hit = codes_in(variant)
                 if hit:
-                    return hit
+                    return _decoded_on(hit, p)
     # then whole pages, those with bar patches first: within the time box, the likely
     # scans are read before a run of booklet pages uses it up (Alcest - Les Chants De
     # L'aurore: the obi was the tenth of ten scans)
@@ -3734,8 +3887,14 @@ def ocr_barcodes(paths, per_image_s=8.0, total_s=40.0, patches_s=60.0):
             if hit or time.time() - t_img > per_image_s:
                 break
         if hit:
-            return hit
+            return _decoded_on(hit, p)
     return set()
+
+
+def _decoded_on(codes, path):
+    for c in codes:
+        _DECODED_ON[c] = str(path)
+    return codes
 
 
 _LANGS = None
@@ -3783,7 +3942,7 @@ def ocr_spines(paths):
                     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                         whole.rotate(angle, expand=True).save(tmp.name)
                         r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
-                                           capture_output=True, text=True, timeout=120)
+                                           capture_output=True, text=True, timeout=120, env=_tess_env())
                     chunks.append(r.stdout)
                 except Exception:
                     continue
@@ -3801,7 +3960,7 @@ def ocr_spines(paths):
                     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                         strip.rotate(angle, expand=True).save(tmp.name)
                         r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
-                                           capture_output=True, text=True, timeout=60)
+                                           capture_output=True, text=True, timeout=60, env=_tess_env())
                     chunks.append(r.stdout)
                 except Exception:
                     continue
@@ -4173,7 +4332,8 @@ def _tess(img, psm, langs=None, tsv=False, only=""):
         img.save(tmp.name)
         cmd = ["tesseract", tmp.name, "stdout", "--psm", str(psm)] + (["-l", langs] if langs else [])
         cmd += ["-c", "tessedit_char_whitelist=" + only] if only else []
-        r = subprocess.run(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=180)
+        r = subprocess.run(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=180,
+                           env=_tess_env())
     return r.stdout
 
 
@@ -4204,17 +4364,22 @@ def ocr_located_codes(im):
             box = lines.setdefault(key, [x, y, x + w, y + h, ""])
             box[:4] = [min(box[0], x), min(box[1], y), max(box[2], x + w), max(box[3], y + h)]
             box[4] += " " + f[11]
+        boxes = []
         for x0, y0, x1, y1, text in lines.values():
             if not _CODE_LIKE.search(text):
                 continue
             hgt = (y1 - y0) * sc
-            box = (int(max(0, x0 * sc - hgt)), int(max(0, y0 * sc - hgt * 0.5)),
-                   int(min(full.width, x1 * sc + hgt)), int(min(full.height, y1 * sc + hgt * 0.5)))
-            try:
-                chunks.append(_tess(full.crop(box), 7))
-            except Exception:
-                continue
+            boxes.append((int(max(0, x0 * sc - hgt)), int(max(0, y0 * sc - hgt * 0.5)),
+                          int(min(full.width, x1 * sc + hgt)), int(min(full.height, y1 * sc + hgt * 0.5))))
+        chunks += [c for c in _pmap(lambda box: _tess_or_empty(full.crop(box), 7), boxes) if c is not None]
     return "\n".join(chunks)
+
+
+def _tess_or_empty(img, psm):
+    try:
+        return _tess(img, psm)
+    except Exception:
+        return None
 
 
 def ocr_deep(paths, max_images=80, budget_s=900):
@@ -4240,14 +4405,13 @@ def ocr_deep(paths, max_images=80, budget_s=900):
         nx, ny = max(1, -(-g.width // tile)), max(1, -(-g.height // tile))
         if nx * ny > 1:
             tw, th = -(-g.width // nx), -(-g.height // ny)
-            for i in range(nx):
-                for j in range(ny):
-                    box = (max(0, i * tw - tw // 8), max(0, j * th - th // 8),
-                           min(g.width, (i + 1) * tw + tw // 8), min(g.height, (j + 1) * th + th // 8))
-                    try:
-                        chunks.append(_tess(g.crop(box), 11, ocr_langs()))
-                    except Exception:
-                        continue
+            boxes = [(max(0, i * tw - tw // 8), max(0, j * th - th // 8),
+                      min(g.width, (i + 1) * tw + tw // 8), min(g.height, (j + 1) * th + th // 8))
+                     for i in range(nx) for j in range(ny)]
+            # the tiles hunt codes (Latin letters and digits): English only, which reads
+            # them as well as eng+rus+jpn in a third of the time; the page text keeps
+            # your languages for the words (label names, titles)
+            chunks += [c for c in _pmap(lambda box: _tess_or_empty(g.crop(box), 11), boxes) if c]
         try:
             chunks.append(ocr_located_codes(g))
         except Exception:
@@ -4829,7 +4993,7 @@ def ocr_text(paths):
             with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                 im.save(tmp.name)
                 r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
-                                   capture_output=True, text=True, timeout=120)
+                                   capture_output=True, text=True, timeout=120, env=_tess_env())
             chunks.append(r.stdout)
         except Exception:
             continue
@@ -5149,30 +5313,117 @@ def _needs_investigation(final, album, ocr_txt, base):
     return bool(mine and theirs and not mc.catnos_agree(mine, theirs))
 
 
+def _joined(readings):
+    return "\n".join(r for r in readings if r)
+
+
+def _barcode_settles(final, album):
+    """A barcode decoded off the scans found the release the matcher is sure of: it is
+    sure ("auto") and its pick carries that barcode."""
+    decoded = {mc.barcode_key(b) for b in album.get("ocr_barcodes") or ()} - {""}
+    if not decoded or final.get("status") != "auto":
+        return False
+    cand = (final.get("best") or {}).get("cand") or {}
+    return bool(decoded & {mc.barcode_key(b) for b in cand.get("barcodes") or ()})
+
+
+def plausible_scan_catno(code):
+    """A catalogue number OCR read off a scan that may be one, not a misreading ("ZB 44",
+    "Aq30" on a sleeve's artwork): the shape codes_from_ocr_text reads and no junk_code
+    (5+ characters, letters and digits: "AMG 099", "NB 6570-2", "FO40CD" stay). Codes
+    from tags, rip logs and file names are not asked this."""
+    return not junk_code(code, "catno")
+
+
+def scan_catnos(codes, kept_text=""):
+    """codes["catnos"] without the misreadings (plausible_scan_catno), except those KEPT_TEXT
+    (the folder's documents: rip logs, notes) names as well."""
+    kept = {mc.norm_code(c) for c in mc.codes_from_ocr_text(kept_text, limit=50)["catnos"]} if kept_text else set()
+    return [c for c in codes if mc.norm_code(c) in kept or plausible_scan_catno(c)]
+
+
+INVESTIGATE_FIRST = 6        # scans the investigation reads first, in ocr_order's order
+INVESTIGATE_BUDGET_S = 900
+
+
 def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, notes, use_mb, use_discogs, db):
-    """Read everything again, harder, and search every code found everywhere."""
-    images, key = list_images(base, 80)
-    deep = _cached(db, "deep", key, lambda: ocr_deep(images)) if images else ""
-    if images and not album.get("ring_text"):
-        # the disc rings on their own as well: a matrix that clearly differs is told from them only
-        album["ring_text"] = _cached(db, "disc-rings", key, lambda: ocr_disc_rings(images))
-    if images and not album.get("ocr_barcodes"):
-        # the bars decoded on every scan, not only the first ones the first pass read; a
-        # decoded code is in the text whole, so it is searched and counts as read
-        # the first pass's kind: the key names the exact scans, so when they are the same
-        # scans (15 or fewer) the empty first result is reused, not searched again for ~100 s
-        decoded = set(_cached(db, "barcodes2", key, lambda: sorted(ocr_barcodes(images))))
-        if decoded:
-            album["ocr_barcodes"] = decoded
-            deep = deep + "\n" + "\n".join(sorted(decoded))
-    # file names and screenshot title bars are no print, read deep as in _process (R12)
-    text = drop_file_name_lines(ocr_txt + "\n" + deep + "\n" + pdf_deep(base, db), base).strip()
+    """Read everything again, harder, and search every code found everywhere. In stages:
+    the first INVESTIGATE_FIRST scans (those most likely to carry a code), their codes
+    searched; the rest only when that leaves the album unsure. One time budget for all."""
+    images, _key = list_images(base, 80)
+    log = album.setdefault("scan_log", new_scan_log())
+    stages = [images[:INVESTIGATE_FIRST], images[INVESTIGATE_FIRST:]] if images else [[]]
+    started = time.time()
+    state = {"deep": "", "tried": ({mc.barcode_key(b) for b in album["barcodes"]}
+                                   | {mc.norm_code(c) for c in album.get("catno_search", [])}),
+             "asked": set(), "titled": False, "codes": [], "strong": [], "dg_ids": [], "mb_ids": [],
+             "found": 0, "kept_text": "", "rings": not album.get("ring_text")}
+    text = ocr_txt
+    for n, stage in enumerate(stages):
+        if n and not stage:
+            break
+        left = INVESTIGATE_BUDGET_S - (time.time() - started)
+        deep = _joined(each_scan(db, "deep", stage, lambda p: ocr_deep([p]), log, budget_s=left))
+        if stage and time.time() - started > INVESTIGATE_BUDGET_S:
+            deep += "\n(investigation stopped: time budget used)"
+        if stage and state["rings"]:
+            # the disc rings on their own as well: a matrix that clearly differs is told from them only
+            rings = _joined(each_scan(db, "disc-rings", stage[:40], lambda p: ocr_disc_rings([p]), log,
+                                      budget_s=60.0))
+            if rings:
+                album["ring_text"] = _joined([album.get("ring_text") or "", rings])
+        if stage and not album.get("ocr_barcodes"):
+            # the bars decoded on every scan, not only the first ones the first pass read; a
+            # decoded code is in the text whole, so it is searched and counts as read. Scans
+            # the first pass decoded without a result are not decoded again (~100 s)
+            todo = [p for p in stage if p not in log["no_bars"]]
+            decoded = decoded_barcodes(db, todo, log) if todo else set()
+            if decoded:
+                album["ocr_barcodes"] = decoded
+                deep = deep + "\n" + "\n".join(sorted(decoded))
+        if n == 0:
+            deep = deep + "\n" + pdf_deep(base, db)
+        state["deep"] = (state["deep"] + "\n" + deep).strip()
+        # file names and screenshot title bars are no print, read deep as in _process (R12)
+        text = drop_file_name_lines(ocr_txt + "\n" + state["deep"], base).strip()
+        mb_res, dg_res, new_final = _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final,
+                                                       text, state, notes, use_mb, use_discogs)
+        if n + 1 < len(stages) and stages[n + 1] and not _needs_investigation(new_final, album, text, base):
+            break                                      # sure now: the other scans are not read
+    engine = web_engine(cfg)[0]
+    web_codes = state["codes"]
+    out["investigated"] = {"codes": web_codes, "strong": state["strong"], "web_engine": engine,
+                           "web_discogs": state["dg_ids"], "web_mb": state["mb_ids"],
+                           "found": state["found"]}
+    where = "MusicBrainz, Discogs" + (f" and the web ({engine})" if engine != "none" else
+                                      " (other spellings too)")
+    if new_final.get("best"):
+        new_final["best"]["notes"] = new_final["best"]["notes"] + [
+            "investigated: every scan read again in full; codes "
+            + (", ".join(web_codes[:6]) or "none") + f" searched on {where}"]
+    if new_final.get("status") != "auto":
+        new_final["why"] = list(new_final.get("why") or []) + [
+            "investigated: " + (f"codes {', '.join(web_codes[:6])} searched on {where}"
+                                if web_codes else "no catalogue number or barcode readable on any scan")]
+    return mb_res, dg_res, new_final, text
+
+
+def _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final, text, state, notes, use_mb,
+                       use_discogs):
+    """One stage of investigate: the codes in TEXT not searched yet, searched on MusicBrainz
+    and Discogs (other spellings too) and the web; every candidate scored again with TEXT."""
     codes = mc.codes_from_ocr_text(text, limit=10)
-    tried = {mc.barcode_key(b) for b in album["barcodes"]} | {mc.norm_code(c) for c in album.get("catno_search", [])}
+    if not state["kept_text"]:
+        state["kept_text"] = documents_text(base, ocr=False) or " "
+    # a misreading ("ZB 44") is not searched; the documents' numbers are, as typed
+    codes["catnos"] = scan_catnos(codes["catnos"], state["kept_text"])
+    tried = state["tried"]
     new_b = [b for b in codes["barcodes"] if mc.barcode_key(b) not in tried]
     new_c = [c for c in codes["catnos"] if mc.norm_code(c) not in tried]
+    tried.update(mc.barcode_key(b) for b in new_b)
+    tried.update(mc.norm_code(c) for c in new_c)
     found = {"mb": [], "discogs": []}
-    probe = dict(album, barcodes=set(new_b), catno_search=new_c)
+    probe = dict(album, barcodes=set(new_b), catno_search=new_c, narrow_codes_first=True)
     if new_b or new_c:
         if use_mb:
             found["mb"] = mb_search(http, probe, cfg)
@@ -5183,25 +5434,34 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
                 raise
             except Exception as exc:
                 notes.append(f"Discogs search of codes from the investigation failed ({exc})")
-    web_codes = codes["barcodes"] + codes["catnos"]
+    for c in codes["barcodes"] + codes["catnos"]:
+        if c not in state["codes"]:
+            state["codes"].append(c)
     first = mc.artist_parts(album["artist"])[0]
     # the strongest codes (at most 3, never junk) that no candidate lists: first their other
     # spellings on MusicBrainz and Discogs (free, cached), then the web when an engine is set up
     strong = strong_codes(text, codes, album.get("ocr_barcodes"))
+    state["strong"] = strong
     kinds = code_kinds(codes, album.get("ocr_barcodes"))
     known = (found["mb"] + found["discogs"] + [s["cand"] for s in (mb_res or {}).get("scored", [])]
              + [s["cand"] for s in (dg_res or {}).get("scored", [])])
-    missing = [c for c in strong if not any(_carries(k, c, kinds.get(c)) for k in known)]
+    # each code asked once, whichever stage read it
+    missing = [c for c in strong if not any(_carries(k, c, kinds.get(c)) for k in known)
+               and c not in state["asked"]]
+    state["asked"].update(missing)
     dg_ids, mb_ids = (variant_release_links(http, missing, known, use_mb, use_discogs, kinds=kinds, notes=notes)
                       if missing else ([], []))
     engine = web_engine(cfg)[0]
     if engine != "none" and not dg_ids and not mb_ids:
         # the web: pages naming the codes, linking to the release on Discogs or MusicBrainz
         dg_ids, mb_ids = web_release_links(http, missing, first, cfg=cfg, notes=notes) if missing else ([], [])
-        if not dg_ids and not mb_ids and not strong:
+        if not dg_ids and not mb_ids and not strong and not state["titled"]:
             # no code to tie it to: the album's own name on the web, once
+            state["titled"] = True
             title = mc.search_title(album["title"])
             dg_ids, mb_ids = web_release_links(http, [f"{title}\" \"{first}"], "", limit=1, cfg=cfg, notes=notes)
+    state["dg_ids"] += [x for x in dg_ids if x not in state["dg_ids"]]
+    state["mb_ids"] += [x for x in mb_ids if x not in state["mb_ids"]]
     have = {str(c["id"]) for c in found["discogs"]} | {str(s["cand"]["id"]) for s in (dg_res or {}).get("scored", [])}
     for rid in dg_ids:
         if use_discogs and rid not in have:
@@ -5218,24 +5478,10 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
     sure = mc.barcodes_read_whole(text, new_b)
     if sure and not album["barcodes"]:
         album["barcodes"] = set(sure)
-
+    state["found"] += len(found["mb"]) + len(found["discogs"])
     mb_res = _scored_again(mb_res, found["mb"], "mb", album, cfg, text)
     dg_res = _scored_again(dg_res, found["discogs"], "discogs", album, cfg, text)
-    new_final = mc.combine(mb_res, dg_res) or final
-    out["investigated"] = {"codes": web_codes, "strong": strong, "web_engine": engine,
-                           "web_discogs": dg_ids, "web_mb": mb_ids,
-                           "found": len(found["mb"]) + len(found["discogs"])}
-    where = "MusicBrainz, Discogs" + (f" and the web ({engine})" if engine != "none" else
-                                      " (other spellings too)")
-    if new_final.get("best"):
-        new_final["best"]["notes"] = new_final["best"]["notes"] + [
-            "investigated: every scan read again in full; codes "
-            + (", ".join(web_codes[:6]) or "none") + f" searched on {where}"]
-    if new_final.get("status") != "auto":
-        new_final["why"] = list(new_final.get("why") or []) + [
-            "investigated: " + (f"codes {', '.join(web_codes[:6])} searched on {where}"
-                                if web_codes else "no catalogue number or barcode readable on any scan")]
-    return mb_res, dg_res, new_final, text
+    return mb_res, dg_res, mc.combine(mb_res, dg_res) or final
 
 
 def process(row, http, cfg, dm, args):
@@ -5291,12 +5537,13 @@ def _process(row, http, cfg, dm, args, full_cfg):
 
     images, img_key = [], ""
     db = getattr(http, "db", None)
+    scan_log = album["scan_log"] = new_scan_log()     # what each scan gave (ocr_order.record)
     # --ocr / the profile's "ocr": on, off, or auto (only folders with scans or a PDF)
     use_ocr = ocr_wanted(getattr(args, "ocr", False), base)
     if use_ocr:
         images, img_key = list_images(base, getattr(args, "max_images", 15))
         if images:
-            found = set(_cached(db, "barcodes2", img_key, lambda: sorted(ocr_barcodes(images))))
+            found = decoded_barcodes(db, images, scan_log)
             album["ocr_barcodes"] = found               # decoded off the scans, whatever the tags say
             if found and not album["barcodes"]:
                 album["barcodes"] = found
@@ -5381,23 +5628,33 @@ def _process(row, http, cfg, dm, args, full_cfg):
     # tell which pressing your copy is, which a title match cannot.
     cover_txt = album.get("cover_text") or ""
     if (use_ocr and images) or docs_txt.strip() or cover_txt.strip():
-        # cached per language set: installing a language pack reads the scans again
+        scans = images if use_ocr else []
+        # A barcode decoded off the scans that already found a release the matcher is sure
+        # of (and that carries it): the page text of the first three scans is enough, the
+        # rest are not read. Otherwise every scan is, as always.
+        page_scans = scans[:3] if _barcode_settles(final, album) else scans
+        if len(page_scans) < len(scans):
+            out["scans_read"] = f"{len(page_scans)} of {len(scans)} (the decoded barcode found the release)"
+        # cached per scan and language set: installing a language pack reads the scans again
         kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
-        text = _cached(db, kind, img_key, lambda: ocr_text(images)) if (use_ocr and images) else ""
+        text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log))
         # a file's name (a document's heading, a screenshot's title bar) is not print on the
         # copy: "SUNN200" in an RX window's title is no "catalogue number (OCR)" (R12)
         text = drop_file_name_lines(docs_txt + "\n" + text, base).strip()
-        # "spines2": spreads are read sideways too (older cached readings did not)
-        spines = _cached(db, "spines2" if ocr_langs() == "eng" else f"spines2-{ocr_langs()}", img_key,
-                         lambda: ocr_spines(images)) if (use_ocr and images) else ""
+        # spreads are read sideways too
+        spines = _joined(each_scan(db, "spines" if ocr_langs() == "eng" else f"spines-{ocr_langs()}",
+                                   page_scans, lambda p: ocr_spines([p]), scan_log))
         if spines.strip():
             text = text + "\n" + spines
-        if not album["barcodes"] and use_ocr and images:
-            # "barcode-digits2": the digit band read alone, the first digit completed
-            digits = _cached(db, "barcode-digits2", img_key, lambda: ocr_barcode_digits(images))
+        if not album["barcodes"] and scans:
+            # the digit band read alone, the first digit completed (15 scans, 2 minutes)
+            digits = _joined(each_scan(db, "barcode-digits", scans[:15], lambda p: ocr_barcode_digits([p]),
+                                       scan_log, budget_s=120.0))
             if digits.strip():
                 text = text + "\n" + digits
-        rings = _cached(db, "disc-rings", img_key, lambda: ocr_disc_rings(images)) if (use_ocr and images) else ""
+        # every disc read, also when the barcode settled it: a matrix that differs is told only here
+        rings = _joined(each_scan(db, "disc-rings", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
+                                  budget_s=60.0))
         if rings.strip():
             text = text + "\n" + rings
             album["ring_text"] = rings                 # matrix codes: a conflict is told only here
@@ -5410,7 +5667,8 @@ def _process(row, http, cfg, dm, args, full_cfg):
             known_b = {mc.barcode_key(b) for b in album["barcodes"]}
             known_c = {mc.norm_code(c) for c in album.get("catno_search", [])}
             new_b = [b for b in codes["barcodes"] if mc.barcode_key(b) not in known_b]
-            new_c = [c for c in codes["catnos"] if mc.norm_code(c) not in known_c]
+            # a misreading ("ZB 44") is not searched; the documents' numbers are, as typed
+            new_c = [c for c in scan_catnos(codes["catnos"], docs_txt) if mc.norm_code(c) not in known_c]
             extra = {"mb": [], "discogs": []}
             # a label the documents name ("Label: X") is searched with the catalogue numbers
             labels = album.get("search_labels") or []
@@ -5427,8 +5685,10 @@ def _process(row, http, cfg, dm, args, full_cfg):
                 # the documents name goes FIRST (label_catnos keeps two labels), and with no new
                 # number it is searched alone with the album's numbers; the album's ASINs and
                 # numbers alone were searched already.
+                # each number with the artist first; the label with it and the number alone
+                # only when that finds nothing (narrow_codes_first)
                 probe = dict(album, barcodes=set(new_b), catno_search=new_c, asins=[],
-                             search_labels=(new_l + labels) if new_c else new_l)
+                             search_labels=(new_l + labels) if new_c else new_l, narrow_codes_first=True)
                 if not new_c:
                     probe["label_catnos"] = album.get("catno_search", [])
                 try:
@@ -5613,6 +5873,8 @@ def _process(row, http, cfg, dm, args, full_cfg):
                margin=final.get("margin"), version=result_version(), checked=round(time.time()))
     note_barcode_sources(out, album)
     note_gnudb(out, album, final)
+    if status == "auto" and getattr(args, "learn_scan_order", True):
+        learn_scan_order(scan_log, final)
     mb_pick = (out.get("best") or {}).get("mb_id")
     if status == "auto" and fp_mode == "always" and fingerprint_ready():
         # acoustid: always - a sure album is fingerprinted too; a disagreement is noted for
@@ -5634,6 +5896,38 @@ def _process(row, http, cfg, dm, args, full_cfg):
         if ao:
             out["album_only"] = ao              # the album is certain, its pressing is not
     return out
+
+
+def scans_confirmed(log, cand):
+    """The scans of LOG whose own reading holds a code CAND carries: a barcode (decoded off
+    that scan, or printed on it and read whole), a distinctive catalogue number, a matrix."""
+    barcodes = [b for b in cand.get("barcodes") or () if mc.barcode_key(b)]
+    keys = {mc.barcode_key(b) for b in barcodes}
+    catnos = [c for c in cand.get("catnos") or () if _distinctive(c)]
+    matrices = mc.cand_matrices(cand)
+    own = {"".join(mc.matrix_tokens(c)) for c in cand.get("catnos") or ()} | keys
+    hits = []
+    for p in sorted(set(log.get("text") or {}) | set(log.get("barcodes") or {})):
+        text = "\n".join(log.get("text", {}).get(p) or ())
+        hay = mc.norm_code(text)
+        if ({mc.barcode_key(b) for b in log.get("barcodes", {}).get(p) or ()} & keys
+                or any(mc.barcode_printed(text, b) for b in barcodes)
+                or any(mc.norm_code(c) in hay for c in catnos)
+                or any(mc.matrix_read(text, v, own) for _k, v in matrices)):
+            hits.append(p)
+    return hits
+
+
+def learn_scan_order(log, final):
+    """After a sure identification: count, per role (ocr_order), the scans OCR read this
+    time and those whose code the identified release carries. Only role counts are kept."""
+    cand = (final.get("best") or {}).get("cand")
+    if not log or not log.get("read") or not cand:
+        return
+    try:
+        ocr_order.record(sorted(log["read"]), scans_confirmed(log, cand))
+    except OSError:
+        pass
 
 
 COLS = ["Status", "Confidence", "Source", "ID", "URL", "MatchedArtist", "MatchedTitle",

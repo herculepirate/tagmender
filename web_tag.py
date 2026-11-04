@@ -474,11 +474,15 @@ def track_artists(album_artist, track):
 def cached_ocr(db, base, max_images=15):
     """The text the matcher already read from the album's scans (page and spines)."""
     try:
-        _images, key = ma.list_images(base, max_images)
-        rows = db.execute("SELECT key, value FROM ocr_cache WHERE key LIKE ?", (f"%:{key}",)).fetchall()
+        images, _key = ma.list_images(base, max_images)
+        rows = []
+        for p in images:                              # cached per scan (match_albums.each_scan)
+            rows += db.execute("SELECT key, value FROM ocr_cache WHERE key LIKE ?",
+                               (f"%:{ma.scan_key(p)}",)).fetchall()
     except Exception:
         return ""
-    return "\n".join(json.loads(v) for k, v in rows if k.startswith(("text", "spines")) and v)
+    texts = (json.loads(v) for k, v in rows if k.startswith(("text", "spines")) and v)
+    return "\n".join(t for t in texts if isinstance(t, str) and t)
 
 
 def album_text(db, base):

@@ -1,2 +1,2 @@
 """TagMender's version (one place; packaging and `tagmender --version` read it)."""
-VERSION = "0.3.0"
+VERSION = "0.4.0"

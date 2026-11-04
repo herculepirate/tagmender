@@ -1,5 +1,28 @@
 # Release notes
 
+## 0.4.0
+
+**Simpler profiles**
+- A profile shows about half as many settings: related ones are now one choice (what happens to
+  files and renaming, artist photos, the cover in each track, Audiophile measurements, Discogs
+  details, credits, pictures and logs folders), rarely changed ones appear only once changed, and
+  expert ones are under Advanced.
+- No more settings that contradict each other: lyrics are one choice; Sources has five values
+  (including Web only) instead of two extra switches; a setting that does nothing as things stand
+  is greyed out and says why (at the Basic level, with Discogs not asked, with covers off...).
+- Watching settings are set on the Watched folders page only.
+- Your saved profiles keep exactly the settings they had.
+
+**Looking up**
+- The Sources beside Look Up list every choice (the profile's, MusicBrainz or Discogs only or
+  preferred, the web only). Another choice is for that look-up only, marked ↺, and goes back to the
+  profile's for the next folder; *Make It the Profile's* keeps it.
+
+**Help**
+- A [quick start](QUICK_START.md) for new users; Help (F1) opens it.
+- Preferences › Advanced names the Discogs Enrichment and CoverUp code folder as such;
+  Preferences › Plugins shows where plugins are kept.
+
 ## 0.3.0
 
 **Adding music**

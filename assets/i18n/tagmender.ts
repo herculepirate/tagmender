@@ -1541,7 +1541,12 @@ The application key identifies TagMender, the user key identifies you; both are 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+31"/>
+        <location line="+17"/>
+        <source>Quick start: add a folder, look up, apply, undo</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+14"/>
         <source>Co&amp;llections…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1638,11 +1643,6 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+2"/>
         <source>TagMender &amp;Help</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+0"/>
-        <source>First steps: preview, apply, undo</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2239,7 +2239,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/overview.py" line="+200"/>
         <location filename="../../gui/report.py" line="+80"/>
         <location filename="../../gui/search.py" line="-503"/>
-        <location filename="../../gui/window.py" line="+715"/>
+        <location filename="../../gui/window.py" line="+716"/>
         <source>Finish or cancel the current work first.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3144,7 +3144,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/manual_match.py" line="+368"/>
         <location line="+2"/>
         <location filename="../../gui/models.py" line="-18"/>
-        <location filename="../../gui/window.py" line="-273"/>
+        <location filename="../../gui/window.py" line="-274"/>
         <source>file</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9927,7 +9927,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <location line="+6"/>
         <location line="+1"/>
         <location filename="../../gui/window.py" line="+48"/>
-        <location line="+703"/>
+        <location line="+704"/>
         <source>Search</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12070,7 +12070,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/window.py" line="-755"/>
+        <location filename="../../gui/window.py" line="-756"/>
         <source>Library</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12204,7 +12204,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+60"/>
+        <location line="+61"/>
         <source>Report a problem?</source>
         <translation type="unfinished"></translation>
     </message>

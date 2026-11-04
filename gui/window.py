@@ -727,9 +727,10 @@ class Main(QMainWindow):
         self.pages["Overview"].drop.choose()
 
     def help(self):
-        doc = HERE / "docs" / "FIRST_RUN.md"
+        """The quick start: the copy that came with TagMender, else the one on GitHub."""
+        doc = HERE / "docs" / "QUICK_START.md"
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(doc)) if doc.exists() else
-                                 QUrl("https://github.com/herculepirate/tagmender"))
+                                 QUrl("https://github.com/herculepirate/tagmender/blob/main/docs/QUICK_START.md"))
 
     def report(self):
         if sheets.question(self, tr("Report a problem?"),

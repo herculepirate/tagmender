@@ -152,7 +152,7 @@ tagmender watch                           # process watched folders unattended
 tagmender doctor --connection             # check what is set up, and which services answer
 ```
 
-New to it? Start with [First run](docs/FIRST_RUN.md).
+New to it? Start with the [Quick start](docs/QUICK_START.md) (ten minutes), then [First run](docs/FIRST_RUN.md) for a careful first session.
 
 ## Keys and requirements
 
@@ -178,6 +178,7 @@ Flatpak. See [Building the packages](docs/USER_GUIDE.md#building-the-packages).
 |---|---|
 | [User guide](docs/USER_GUIDE.md) | Everything in detail |
 | [Setup](docs/SETUP.md) | Keys, logins and optional programs |
+| [Quick start](docs/QUICK_START.md) | Install, set up, look up and apply your first album |
 | [First run](docs/FIRST_RUN.md) | A safe first session |
 | [Profiles and naming](docs/PROFILES.md) | Every setting and its default, levels, naming scripts |
 | [Providers](docs/PROVIDERS.md) | Online services, limits and caching |

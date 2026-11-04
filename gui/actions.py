@@ -130,7 +130,7 @@ COMMANDS = {
     "show_log": (N_("&Log"), "Ctrl+Shift+Y", None,
                  N_("TagMender's log: search it, show warnings only, follow new lines")),
     # Help
-    "help": (N_("TagMender &Help"), "F1", None, N_("First steps: preview, apply, undo")),
+    "help": (N_("TagMender &Help"), "F1", None, N_("Quick start: add a folder, look up, apply, undo")),
     "setup": (N_("&Set Up TagMender…"), None, "key-round",
               N_("Every key, login and optional program: what each is for and where to get it")),
     "shortcuts": (N_("&Keyboard Shortcuts"), "Ctrl+/", None, N_("Every shortcut")),

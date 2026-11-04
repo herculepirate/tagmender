@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.4.1
+
+- Dropping several folders at once lists every album in them together; nothing is looked up
+  until you select albums and press Look Up (or Preview for all). Before, only the first folder
+  was taken and the others had to be dropped again one at a time.
+
 ## 0.4.0
 
 **Simpler profiles**

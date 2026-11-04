@@ -259,6 +259,27 @@ class Gui(te.Base):
         self.assertEqual(by[str(self.d2)], "listed")                    # (the other: still not looked up)
         self.assertEqual(ov.actionable(), 1)
 
+    def test_sources_other_than_the_profiles_are_for_one_look_up(self):
+        ov = self.win.pages["Overview"]
+        ov.refresh_profiles()
+        ov.profile.setCurrentText("Auto")
+        self.app.processEvents()
+        self.assertEqual(ov.sources.currentData(), "profile")
+        self.assertEqual(ov.sources_label.text(), "Sources")
+        ov.sources.setCurrentIndex(ov.sources.findData("discogs_only"))
+        self.assertEqual(ov.sources_label.text(), "Sources ↺")
+        self.assertIn("this look-up only", ov.sources.toolTip())
+        self.assertFalse(ov.keep_link.isHidden())                         # (shown with the row)
+        ov.set_path(str(self.lib))                                       # (a new folder: the profile's again)
+        self.assertEqual(ov.sources.currentData(), "profile")
+        self.assertTrue(wait(lambda: not ov.running, self.app))
+        ov.sources.setCurrentIndex(ov.sources.findData("discogs_only"))
+        with mock.patch.object(self.gui.sheets, "question", return_value=True):
+            ov.keep_sources()
+        self.assertEqual(pf.load("Auto")["source"], "discogs_only")
+        self.assertEqual(ov.sources.currentData(), "profile")           # (now the profile's own)
+        self.assertIn("Discogs only", ov.sources.itemText(0))
+
     def test_look_up_sources_are_the_profiles_or_one_alone(self):
         from gui.overview import profile_for
         prof = pf.from_dict({"name": "P"})

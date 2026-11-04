@@ -128,7 +128,8 @@ class Overview(QWidget):
         # which databases to ask, and the button that asks them (nothing is looked up on a drop)
         look = QHBoxLayout()
         look.setContentsMargins(0, 0, 0, 0)
-        look.addWidget(QLabel(tr("Sources")))
+        self.sources_label = QLabel(tr("Sources"))
+        look.addWidget(self.sources_label)
         from .rows import Popup
         from PySide6.QtWidgets import QComboBox
         self.sources = Popup()
@@ -146,9 +147,17 @@ class Overview(QWidget):
                                     "the sources chosen beside it. Nothing is written until you apply."))
         self.look_btn.clicked.connect(self.look_up_clicked)
         look.addWidget(self.look_btn)
+        # (a choice other than the profile's is for this look-up only; this saves it into the profile)
+        self.keep_link = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
+        self.keep_link.setTextFormat(Qt.RichText)
+        self.keep_link.setAccessibleName(tr("Make this choice of sources the profile's own"))
+        self.keep_link.linkActivated.connect(lambda _h: self.keep_sources())
+        self.keep_link.hide()
+        look.addWidget(self.keep_link)
         look.addStretch(1)
         rl.addLayout(look)
-        self.profile.currentTextChanged.connect(lambda _t: self.name_profile_sources())
+        self.profile.currentTextChanged.connect(lambda _t: self.reset_sources())
+        self.sources.currentIndexChanged.connect(lambda _i: self.show_sources_state())
         # what the preview did without, because a key, login or program is missing (Open Setup: its row)
         self.setup_note = QLabel("")
         self.setup_note.setProperty("role", "hint")
@@ -325,6 +334,7 @@ class Overview(QWidget):
             return False
         self.path = path
         self.forced = dict(forced or {})
+        self.reset_sources()                                 # (a new folder: the profile's sources again)
         self.where.setText(path)
         self.views.setCurrentWidget(self.results)
         if self.win.stack.currentWidget() is not self:
@@ -381,6 +391,47 @@ class Overview(QWidget):
             self.look_up(mode, list(self.plan["albums"]))
         elif self.path:
             self.preview()
+
+    def reset_sources(self):
+        """Back to the profile's own sources: an override is for one look-up only."""
+        if hasattr(self, "sources"):
+            self.name_profile_sources()
+            self.sources.setCurrentIndex(0)
+            self.show_sources_state()
+
+    def show_sources_state(self):
+        """↺ beside Sources while the choice is not the profile's, and the link that keeps it."""
+        if not hasattr(self, "sources"):
+            return
+        mode = self.sources.currentData() or "profile"
+        other = mode != "profile"
+        self.sources_label.setText(tr("Sources ↺") if other else tr("Sources"))
+        tip = tr("For this look-up only; the profile uses {0}.").format(self.sources_words("profile")) if other else \
+            tr("The profile's own sources. Choose another for one look-up; it goes back for the next folder.")
+        self.sources_label.setToolTip(tip)
+        self.sources.setToolTip(tip)
+        self.keep_link.setVisible(other and mode in pf.SOURCES and self.profile.currentText() not in ("", "default"))
+
+    def keep_sources(self):
+        """Save the chosen sources as the profile's own (after asking)."""
+        mode = self.sources.currentData()
+        name = self.profile.currentText()
+        if mode not in pf.SOURCES or not name or name == "default":
+            return
+        if not sheets.question(self, tr("Make {0} the sources of “{1}”?").format(self.sources_words(mode), name),
+                               tr("Every look-up with this profile, and its watched folders, then use them."),
+                               action=tr("Save to Profile")):
+            return
+        try:
+            data = pf.rename_legacy(pf.raw(name))
+            data["source"] = mode
+            pf.save(pf.from_dict(data))
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("The profile was not changed."), str(exc))
+            return
+        self.reset_sources()
+        if "Profiles" in getattr(self.win, "pages", {}):
+            self.win.pages["Profiles"].reload()
 
     def name_profile_sources(self):
         """The first choice of Look up with says what the profile's sources are."""

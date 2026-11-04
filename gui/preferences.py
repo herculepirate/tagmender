@@ -455,6 +455,13 @@ class PluginsPane(SettingsPane):
             tools.addWidget(b)
         tools.addStretch(1)
         self.lay.addLayout(tools)
+        import plugins as _plugins
+        where = QLabel(tr("Plugins are kept in {0}. To write one: the Plugin Guide, and "
+                          "tagmender plugins new \"My Plugin\".").format(_plugins.plugins_dir()))
+        where.setProperty("role", "hint")
+        where.setWordWrap(True)
+        where.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lay.addWidget(where)
         self.holder = QVBoxLayout()
         self.holder.setSpacing(16)
         self.lay.addLayout(self.holder)
@@ -1052,18 +1059,21 @@ class AdvancedPane(ChecksPane):
         lay = self.layout()
         head = lay.itemAt(0).layout()
         head.itemAt(0).widget().setText(tr("Advanced"))
-        head.itemAt(1).widget().setText(tr("The plugin folder, and TagMender's checks: what it needs (ffmpeg, the "
-                                           "Discogs Enrichment and CoverUp code, keys, folders) and whether it is "
-                                           "there."))
-        group = Group(tr("Plugins"), tr("Code in this folder runs inside TagMender with your rights. Choose only a "
-                                        "folder you trust. Empty: the copies that come with TagMender."))
-        self.plugins = FolderField(tr("Plugin folder"), tr("Choose the plugin folder"))
+        head.itemAt(1).widget().setText(tr("Where the Discogs Enrichment and CoverUp code comes from, and "
+                                           "TagMender's checks: what it needs (ffmpeg, that code, keys, folders) "
+                                           "and whether it is there."))
+        group = Group(tr("Discogs Enrichment and CoverUp code"),
+                      tr("Leave it empty: TagMender uses the copies that come with it. Only for a newer copy of that "
+                         "code of your own. Code there runs inside TagMender with your rights. Plugins are not "
+                         "here: see the Plugins tab."))
+        self.plugins = FolderField(tr("Code folder"), tr("Choose the folder holding that code"))
         self.plugins.setText(str(app_settings.get("plugins.folder") or ""))
         self.plugins.edit.setPlaceholderText(tr("The copies that come with TagMender"))
         self.plugins.edit.editingFinished.connect(self.set_plugins)
         self.plugins.button.clicked.connect(self.set_plugins)
-        group.add(Row(tr("Plugin folder"), self.plugins,
-                      tr("Holds the Discogs Enrichment and CoverUp code, each in a folder of its own.")))
+        group.add(Row(tr("Code folder"), self.plugins,
+                      tr("A folder holding picard-discogs-enrichment and picard-coverup, each in a folder of its "
+                         "own.")))
         lay.insertWidget(1, group)
         self.said = QLabel("")
         self.said.setProperty("role", "hint")

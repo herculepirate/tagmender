@@ -6,7 +6,7 @@
     <message>
         <location filename="../../gui/account.py" line="+46"/>
         <location filename="../../gui/preferences.py" line="+35"/>
-        <location line="+681"/>
+        <location line="+688"/>
         <location line="+72"/>
         <source>Account</source>
         <translation type="unfinished"></translation>
@@ -53,7 +53,7 @@
         <location filename="../../gui/cover_chooser.py" line="+64"/>
         <location line="+95"/>
         <location filename="../../gui/inspector.py" line="+158"/>
-        <location filename="../../gui/preferences.py" line="+414"/>
+        <location filename="../../gui/preferences.py" line="+417"/>
         <location filename="../../gui/profiles.py" line="+397"/>
         <location filename="../../gui/setup.py" line="+216"/>
         <location line="+431"/>
@@ -607,7 +607,7 @@
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/preferences.py" line="-460"/>
+        <location filename="../../gui/preferences.py" line="-463"/>
         <location filename="../../gui/profile_editor.py" line="+516"/>
         <location filename="../../gui/tagnames.py" line="-9"/>
         <source>AcoustID</source>
@@ -742,7 +742,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="+1"/>
         <location line="+346"/>
         <location line="+1"/>
-        <location filename="../../gui/preferences.py" line="+392"/>
+        <location filename="../../gui/preferences.py" line="+395"/>
         <location filename="../../gui/report.py" line="+147"/>
         <location line="+9"/>
         <location filename="../../gui/search.py" line="+381"/>
@@ -2134,7 +2134,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/overview.py" line="+117"/>
+        <location filename="../../gui/overview.py" line="+122"/>
         <location filename="../../gui/profile_editor.py" line="+517"/>
         <location filename="../../gui/rows.py" line="+208"/>
         <source>Choose…</source>
@@ -2316,7 +2316,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+6"/>
-        <location filename="../../gui/preferences.py" line="-372"/>
+        <location filename="../../gui/preferences.py" line="-375"/>
         <location line="+12"/>
         <source>CD drive</source>
         <translation type="unfinished"></translation>
@@ -3260,7 +3260,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/jobs.py" line="-9"/>
         <location filename="../../gui/overview.py" line="+49"/>
         <location line="+74"/>
-        <location line="+56"/>
+        <location line="+59"/>
         <location line="+200"/>
         <location line="+64"/>
         <location filename="../../gui/watched.py" line="+710"/>
@@ -3275,9 +3275,9 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="-82"/>
         <location line="+83"/>
         <location filename="../../gui/jobs.py" line="+0"/>
-        <location filename="../../gui/overview.py" line="-394"/>
+        <location filename="../../gui/overview.py" line="-397"/>
         <location line="+74"/>
-        <location line="+56"/>
+        <location line="+59"/>
         <location line="+200"/>
         <location line="+64"/>
         <location filename="../../gui/watched.py" line="-70"/>
@@ -3296,7 +3296,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+36"/>
-        <location filename="../../gui/preferences.py" line="-250"/>
+        <location filename="../../gui/preferences.py" line="-257"/>
         <source>Undo</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3595,8 +3595,8 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+9"/>
-        <location filename="../../gui/preferences.py" line="+426"/>
-        <location line="+405"/>
+        <location filename="../../gui/preferences.py" line="+433"/>
+        <location line="+408"/>
         <location line="+2"/>
         <location filename="../../gui/profiles.py" line="+347"/>
         <location line="+2"/>
@@ -4832,17 +4832,17 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-699"/>
+        <location filename="../../gui/overview.py" line="-707"/>
         <source>Profile&apos;s sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+2"/>
         <source>Web only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+44"/>
+        <location line="+48"/>
         <location filename="../../gui/window.py" line="-58"/>
         <source>Overview</source>
         <translation type="unfinished"></translation>
@@ -4959,7 +4959,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+5"/>
         <source>the web only (store and encyclopaedia pages)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5039,14 +5039,14 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-192"/>
-        <location line="+64"/>
+        <location line="-195"/>
+        <location line="+67"/>
         <location line="+115"/>
         <source>This profile cannot be used.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-171"/>
+        <location line="-174"/>
         <source>Finding the albums… nothing is looked up yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5056,7 +5056,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+187"/>
+        <location line="+190"/>
         <source>Preview finished</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5345,7 +5345,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="-1170"/>
+        <location filename="../../gui/preferences.py" line="-1180"/>
         <location line="+180"/>
         <location filename="../../gui/profile_editor.py" line="-17"/>
         <source>General</source>
@@ -5357,14 +5357,14 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+936"/>
-        <location line="+101"/>
+        <location line="+943"/>
+        <location line="+104"/>
         <location line="+2"/>
         <source>Checks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1032"/>
+        <location line="-1042"/>
         <source>1 Week</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5381,13 +5381,13 @@ New: {after}
     </message>
     <message>
         <location line="-330"/>
-        <location line="+1018"/>
+        <location line="+1025"/>
         <location filename="../../gui/profile_editor.py" line="+931"/>
         <source>Advanced</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1013"/>
+        <location line="-1020"/>
         <source>30 Days</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5496,13 +5496,13 @@ New: {after}
     </message>
     <message>
         <location line="+17"/>
-        <location line="+455"/>
+        <location line="+462"/>
         <location line="+29"/>
         <source>Saved on this computer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-484"/>
+        <location line="-491"/>
         <location line="+1"/>
         <source>Set by the environment</source>
         <translation type="unfinished"></translation>
@@ -5675,12 +5675,12 @@ New: {after}
     </message>
     <message>
         <location line="+4"/>
-        <location line="+405"/>
+        <location line="+412"/>
         <source>Saved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-352"/>
+        <location line="-359"/>
         <source>How TagMender looks, where your music is, and what it tells you.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5906,7 +5906,12 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="+10"/>
+        <source>Plugins are kept in {0}. To write one: the Plugin Guide, and tagmender plugins new &quot;My Plugin&quot;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
         <source>No plugins installed. Install from File… adds one; the Plugin Guide says how to write your own.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6194,45 +6199,18 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+14"/>
-        <source>The plugin folder, and TagMender&apos;s checks: what it needs (ffmpeg, the Discogs Enrichment and CoverUp code, keys, folders) and whether it is there.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-1018"/>
+        <location line="-1011"/>
         <location line="+407"/>
-        <location line="+614"/>
         <source>Plugins</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+0"/>
-        <source>Code in this folder runs inside TagMender with your rights. Choose only a folder you trust. Empty: the copies that come with TagMender.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
-        <location line="+5"/>
-        <source>Plugin folder</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-5"/>
-        <source>Choose the plugin folder</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+627"/>
         <source>The copies that come with TagMender</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
-        <source>Holds the Discogs Enrichment and CoverUp code, each in a folder of its own.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+32"/>
+        <location line="+37"/>
         <source>Preferences</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6248,16 +6226,16 @@ It holds no keys or tokens.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-516"/>
+        <location line="-519"/>
         <location line="+151"/>
-        <location line="+365"/>
+        <location line="+368"/>
         <location filename="../../gui/setup.py" line="-34"/>
         <location line="+34"/>
         <source>key</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1157"/>
+        <location line="-1167"/>
         <source>Lets TagMender look albums up on Discogs. At discogs.com/settings/developers, choose Generate new token and paste it here.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6376,16 +6354,16 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+294"/>
+        <location line="+301"/>
         <location line="+151"/>
-        <location line="+365"/>
+        <location line="+368"/>
         <location filename="../../gui/setup.py" line="-34"/>
         <location line="+34"/>
         <source>keys</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-516"/>
+        <location line="-519"/>
         <location line="+151"/>
         <location filename="../../gui/setup.py" line="-34"/>
         <source>Saved {0}.</source>
@@ -6407,7 +6385,38 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+231"/>
+        <location line="+85"/>
+        <source>Where the Discogs Enrichment and CoverUp code comes from, and TagMender&apos;s checks: what it needs (ffmpeg, that code, keys, folders) and whether it is there.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>Discogs Enrichment and CoverUp code</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Leave it empty: TagMender uses the copies that come with it. Only for a newer copy of that code of your own. Code there runs inside TagMender with your rights. Plugins are not here: see the Plugins tab.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <location line="+5"/>
+        <source>Code folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-5"/>
+        <source>Choose the folder holding that code</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>A folder holding picard-discogs-enrichment and picard-coverup, each in a folder of its own.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+136"/>
         <location filename="../../gui/setup.py" line="+35"/>
         <source>Keys are kept only when saved. Don&apos;t Save clears what was typed.</source>
         <translation type="unfinished"></translation>
@@ -6823,7 +6832,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="-876"/>
+        <location filename="../../gui/preferences.py" line="-886"/>
         <location filename="../../gui/profile_editor.py" line="-187"/>
         <location line="+5"/>
         <location line="+296"/>
@@ -6846,7 +6855,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="+164"/>
+        <location filename="../../gui/preferences.py" line="+171"/>
         <location filename="../../gui/profile_editor.py" line="-774"/>
         <location line="+1"/>
         <location line="+455"/>
@@ -8031,31 +8040,33 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="-145"/>
+        <location filename="../../gui/preferences.py" line="-152"/>
         <location filename="../../gui/profile_editor.py" line="-713"/>
         <source>Standard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-764"/>
-        <location line="+354"/>
+        <location filename="../../gui/overview.py" line="-772"/>
+        <location line="+362"/>
         <location filename="../../gui/profile_editor.py" line="-4"/>
         <source>MusicBrainz only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location line="-361"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>MusicBrainz preferred</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+0"/>
+        <location filename="../../gui/profile_editor.py" line="+1"/>
         <source>Discogs preferred</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-353"/>
-        <location line="+353"/>
+        <location line="+1"/>
+        <location line="+360"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>Discogs only</source>
         <translation type="unfinished"></translation>
@@ -10136,7 +10147,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="+128"/>
+        <location filename="../../gui/preferences.py" line="+135"/>
         <location filename="../../gui/setup.py" line="-2"/>
         <source>Installed</source>
         <translation type="unfinished"></translation>
@@ -10444,7 +10455,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/preferences.py" line="-156"/>
+        <location filename="../../gui/preferences.py" line="-163"/>
         <location filename="../../gui/setup.py" line="+11"/>
         <source>Connection</source>
         <translation type="unfinished"></translation>

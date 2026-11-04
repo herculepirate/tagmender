@@ -38,8 +38,9 @@ def run_report(plan, res):
 
 
 # Look Up's sources (List first): the profile's, or one of them alone
-LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz", N_("MusicBrainz only")),
-           ("discogs", N_("Discogs only")), ("web", N_("Web only")))
+LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicBrainz only")),
+           ("musicbrainz_preferred", N_("MusicBrainz preferred")), ("discogs_preferred", N_("Discogs preferred")),
+           ("discogs_only", N_("Discogs only")), ("web", N_("Web only")))
 
 
 def _list_first() -> bool:
@@ -59,9 +60,13 @@ def profile_for(prof, mode):
     import copy
     d = copy.deepcopy(prof.data)
     prov = d.setdefault("providers", {})
-    if mode in ("musicbrainz", "discogs"):
-        d["source"] = f"{mode}_only"
-        prov.setdefault(mode, {}).update(enabled=True, identify=True)
+    if mode in ("musicbrainz", "discogs"):                 # (older names: one database alone)
+        mode = f"{mode}_only"
+    if mode in pf.SOURCES:                                  # (the four Sources choices of a profile)
+        d["source"] = mode
+        for n in ("musicbrainz", "discogs"):
+            if mode.startswith(n) or mode.endswith("preferred"):
+                prov.setdefault(n, {}).update(enabled=True, identify=True)
     elif mode == "web":
         for n in ("musicbrainz", "discogs"):
             prov.setdefault(n, {})["identify"] = False
@@ -392,6 +397,9 @@ class Overview(QWidget):
             except Exception:
                 src = ""
             return tr("{0} (profile)").format(tr(SOURCE_WORDS.get(src, src)) or "?")
+        from .profile_editor import SOURCE_WORDS
+        if mode in SOURCE_WORDS:
+            return tr(SOURCE_WORDS[mode])
         return {"musicbrainz": tr("MusicBrainz only"), "discogs": tr("Discogs only"),
                 "web": tr("the web only (store and encyclopaedia pages)")}.get(mode, mode)
 

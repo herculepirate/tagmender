@@ -264,8 +264,13 @@ class Gui(te.Base):
         prof = pf.from_dict({"name": "P"})
         was = prof["source"]
         self.assertIs(profile_for(prof, "profile"), prof)
+        for mode in ("musicbrainz_only", "musicbrainz_preferred", "discogs_preferred", "discogs_only"):
+            p = profile_for(prof, mode)
+            self.assertEqual(p["source"], mode)
+            for n in ("musicbrainz", "discogs"):                         # (the databases that source asks)
+                if mode.startswith(n) or mode.endswith("preferred"):
+                    self.assertTrue(p["providers"][n]["enabled"] and p["providers"][n]["identify"])
         self.assertEqual(profile_for(prof, "discogs")["source"], "discogs_only")
-        self.assertEqual(profile_for(prof, "musicbrainz")["source"], "musicbrainz_only")
         web = profile_for(prof, "web")
         self.assertFalse(web["providers"]["musicbrainz"]["identify"])
         self.assertFalse(web["providers"]["discogs"]["identify"])

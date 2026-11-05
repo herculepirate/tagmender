@@ -26,6 +26,8 @@ CODES = {
     "web_fallback_only": "only web sources (not MusicBrainz or Discogs) have this album",
     "musicbrainz_unavailable": "MusicBrainz could not be reached or answered with an error",
     "discogs_unavailable": "Discogs could not be reached or answered with an error",
+    "web_unavailable": "a web source (Deezer, iTunes, Bandcamp, Wikipedia) could not be reached; "
+                       "the album will be tried again",
     "rate_limited": "a provider asked TagMender to slow down; the album will be tried again",
     "missing_credentials": "a provider needs a key or token that is not set up",
     "unsupported_format": "TagMender cannot safely write tags to this file format",

@@ -340,9 +340,10 @@ class Watcher:
         if not row:
             return True, "new"
         signature, status, attempts, next_try, ts, was = row
-        if was and was != prof.name and status != "excluded":
+        if was and was != prof.name and status not in ("excluded", "undone"):
             # the folder is watched by another profile now: what it does with the album may differ
-            # (one profile tagged it where it was; the new one files it in its library)
+            # (one profile tagged it where it was; the new one files it in its library) - an album
+            # undone by hand stays undone whichever profile ran the job
             return True, "profile changed"
         if status == "undone":                       # a job undone by hand is not done again by itself
             return (True, "changed since the undo") if not shape_in(folder, files, signature) \
@@ -382,8 +383,10 @@ class Watcher:
         outage left it unresolved: tried again soon), blocked (waiting_destination while the
         library is not there), unresolved, partial, or what applying or planning it did."""
         errs = prop.provider_errors or {}
+        # (the web only adds evidence: an album only the web did not answer for keeps the
+        # unresolved schedule - a blocked web source would use up every quick retry in a day)
         retryable = prop.status == "unresolved" and any(
-            v in ("outage", "rate_limited", "invalid_response") for v in errs.values())
+            v in ("outage", "rate_limited", "invalid_response") for k, v in errs.items() if k != "web")
         status = ("excluded" if a["status"] == "excluded" or outcome == "excluded" else
                   "provider_error" if retryable else
                   "blocked" if a["status"] == "blocked" or outcome == "blocked" else
@@ -615,7 +618,7 @@ def forget(root) -> int:
     """Forget what was done with the albums under ROOT (a watched folder), so the next pass
     looks at each again - as its profile says now. An album you undid stays undone (not
     done again by itself). Returns how many records were forgotten."""
-    root = planmod.db_text(os.path.abspath(str(root))).rstrip("/")
+    root = planmod.db_text(os.path.abspath(os.path.expanduser(str(root)))).rstrip("/")
     db = _db()
     try:
         rows = [r[0] for r in db.execute("SELECT folder, status FROM processed").fetchall()
@@ -801,21 +804,24 @@ def apply_pending(path, log=None) -> dict:
         try:
             w = Watcher([prof], once=True, log=log)
             meta = p.get("watch") or {}
+            each = []
             for r in res.get("albums") or []:
                 a = p["albums"][r["index"]]
                 w.filed(db, a, prof, r["status"])
-                if not meta.get("key"):
-                    continue
-                folder = planmod.db_path(meta["folder"])
-                files = [planmod.db_path(f) for f in meta.get("files") or []]
                 if r["status"] in ("excluded", "skipped"):
                     continue                              # a rule says leave it: it stays "planned"
                 status = r["status"] if r["status"] in ("done", "unchanged") else \
                     "failed" if r["status"] == "failed" else "conflict"
                 if status in ("done", "unchanged") and _is_partial(a):
                     status = "partial"                    # (its release not proven: tried again later)
-                w.record(db, folder, prof, status, 1, r.get("detail") or r.get("label", ""),
-                         key=meta["key"], files=files, deep=meta.get("deep", True))
+                each.append((status, r.get("detail") or r.get("label", "")))
+            if meta.get("key") and each:
+                # (the plan's albums - a set's discs - remembered by one key: as the one most in
+                # need of another look, as a pass remembers them, never as whichever ran last)
+                status = _worst([st for st, _d in each])
+                detail = next(d for st, d in each if st == status)
+                w.record(db, planmod.db_path(meta["folder"]), prof, status, 1, detail, key=meta["key"],
+                         files=[planmod.db_path(f) for f in meta.get("files") or []], deep=meta.get("deep", True))
         finally:
             db.close()
     return res

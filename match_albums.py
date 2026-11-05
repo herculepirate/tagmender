@@ -6347,7 +6347,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # Ignore/Skip rules, as early as the files' own tags and names allow: no
     # lookups, fingerprints or OCR for what is excluded anyway.
     anyway = getattr(args, "process_anyway", False)
-    rules = exclusions.load_rules()
+    # (the engine hands its profile's rules over; the standalone tool reads them here)
+    rules = getattr(args, "rules", None)
+    rules = exclusions.load_rules() if rules is None else rules
     dec = exclusions.gate(base, "match", rules, process_anyway=anyway)
     if dec.all_excluded:
         whole = dec.summary()

@@ -294,13 +294,10 @@ def own_tag_choices(t: dict, profile, path=None) -> dict:
 class Engine:
     def __init__(self, profile, *, http=None, dm=None, ocr=None, log=None, job=None, cache=None):
         self.profile = profile
-        # the matcher reads the profile's rules from here; the default profile has none of its own,
-        # so a name left by an earlier engine (the GUI runs several) must not linger
-        if profile.name != "default":
-            os.environ["TAGMENDER_PROFILE"] = profile.name
-        else:
-            os.environ.pop("TAGMENDER_PROFILE", None)
-        self.rules = ex.load_rules(profile.name if profile.name != "default" else None)
+        # the profile's own Ignore/Skip rules, handed to the matcher with each album (never
+        # through the process environment: the GUI and its watcher run several engines at once,
+        # each for its own profile)
+        self.rules = ex.load_rules(profile.name if profile.name != "default" else "")   # ("": never $TAGMENDER_PROFILE)
         self.job = job or logsetup.new_job_id()
         self.log = log or logsetup.setup("engine", job=self.job)
         # OCR of scans: True (--ocr, the GUI's "Read scans") forces it on; otherwise the
@@ -654,7 +651,7 @@ class Engine:
                "Status": "untagged"}
         outside = self._outside(g)
         args = argparse.Namespace(ocr=self.ocr, max_images=getattr(self, "ocr_images", 15), process_anyway=False,
-                                  use_mb=self.use_mb,
+                                  use_mb=self.use_mb, rules=self.rules,
                                   use_discogs=self.use_discogs, provider_errors=errors, exclude_files=outside,
                                   use_shops=self.profile.provider_on("web", "shops"),
                                   use_gnudb=self.profile.provider_on("web", "gnudb"),
@@ -2029,11 +2026,16 @@ class Engine:
                                              n_tracks=len(album.get("tracks") or ()), failed=failed)
         except Exception as exc:
             self.log.warning("web lookup failed: %s", exc, extra={"provider": "web"})
+            base.setdefault("provider_errors", {})["web"] = "outage"   # (not "no match": nobody answered)
             return None
         if failed:
             # a source that did not answer might have held a rival that makes the others
-            # refuse: no web tags from the rest this time (the album is tried again later)
+            # refuse: no web tags from the rest this time. Recorded as an outage, not as "no
+            # candidate": the album is an error tried again later (watcher, Overview)
             self.log.info("no web tags for %s: %s did not answer", base["source_dir"], ", ".join(failed))
+            if len(set(failed)) >= len(web_tag.chosen_sources(self._web_sources())):
+                # (not one web source answered: an outage, not "no match")
+                base.setdefault("provider_errors", {})["web"] = "outage"
             return None
         pick, why = self._web_album(album, found)
         if pick and by_lengths and pick[2].get("mode") != "lengths":
@@ -2140,7 +2142,10 @@ class Engine:
             words = "; ".join(why) or ("no candidates found" if status == "nomatch" else status)
             if status == "review":
                 words = "review: " + words
-            codes += [c for c in reasons.classify(words) if c != "other" or not codes]
+            # (an outage is no evidence that no source lists the album: never "no candidate" then)
+            down = any(c == "rate_limited" or c.endswith("_unavailable") for c in codes)
+            codes += [c for c in reasons.classify(words) if (c != "other" or not codes) and
+                      not (c == "no_candidate" and down)]
         best = (out or {}).get("best") or {}
         if status in ("ignored", "skipped"):                   # the rules: the planner labels it
             codes = ["other"]
@@ -2393,21 +2398,29 @@ class Engine:
         if only is not None:
             groups = [g for g in groups if group_key(g.folder, g.files) in only]
         out = []
+        self.reached = set()                      # the group_key()s looked up (a run cancelled: not all)
         for i, g in enumerate(groups):
             if cancel and cancel():
                 break
             if progress:
                 progress(i, len(groups), str(g.folder))
+            # (the album as found and listed: every disc or version it is planned as keeps it,
+            # so a later Look Up or Refresh of those rows asks for this album again)
+            key = group_key(g.folder, g.files)
             try:
                 self._alone = per_folder[os.path.realpath(str(g.folder))] == 1     # (a folder's only album?)
                 for p in self.identify_all(g):           # (each disc of _per_disc as an album)
                     self.add_artwork(p)
                     self.apply_level(p)
+                    p.group_key = key
                     out.append(p)
             except Exception as exc:                          # one bad album never stops the run
                 self.log.exception("identifying %s failed", g.folder)
-                out.append(planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
-                                            status="unresolved", reason=f"error: {exc}", reason_codes=["other"]))
+                p = planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
+                                     status="unresolved", reason=f"error: {exc}", reason_codes=["other"])
+                p.group_key = key
+                out.append(p)
+            self.reached.add(key)
         return out
 
     def listing(self, path, within=None, meta=None) -> dict:
@@ -2441,6 +2454,7 @@ class Engine:
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))],
                           edits=getattr(self, "edits", None))
+        with_keys(p["albums"], props)
         # (not kept in self.notes: those become every later album's provider errors)
         p["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
         return p
@@ -2449,6 +2463,25 @@ class Engine:
 def group_key(folder, files) -> str:
     """One album of a folder, as List first names it: its folder and its files."""
     return "|".join([os.path.realpath(str(folder))] + sorted(os.path.realpath(str(f)) for f in files))
+
+
+def with_keys(entries, props):
+    """Each plan entry's "key": the group_key() of the album it was found as (Engine.proposals'
+    group_key), also for a set planned as a row per disc or a folder split per version - whose
+    own folder and files are not the album's. Overview's Look Up and Refresh send these keys."""
+    of = {}
+    for q in props:
+        k = getattr(q, "group_key", None)
+        if k:
+            for f in list(q.files or []) + list(getattr(q, "group_files", None) or []):
+                of.setdefault(str(f), k)
+    for a in entries:
+        if a.get("key"):
+            continue
+        k = next((of[str(f)] for f in list(a.get("album_files") or []) +
+                  [fe.get("src") for fe in a.get("files") or [] if isinstance(fe, dict)] if str(f) in of), None)
+        if k:
+            a["key"] = k
 
 
 # A review or a "no match" may still have an established album (an error is retried instead)

@@ -86,6 +86,20 @@ class LibraryFolder(tg.Gui):
         self.assertEqual(self.ov.library, "")
         self.assertEqual(self.ov.library_label.text(), "Library folder")
 
+    def test_apply_after_make_it_the_profiles_is_not_refused(self):
+        # (0.8.2) the preview went to the folder now saved as the profile's own: it still stands
+        self.preview()
+        self.choose(self.other)
+        self.assertTrue(tg.wait(lambda: not self.ov.running, self.app))
+        with mock.patch.object(self.gui.sheets, "question", return_value=True):
+            self.ov.keep_library()
+        self.assertTrue(self.ov.actionable())
+        with mock.patch.object(self.gui.sheets, "information") as told, \
+                mock.patch.object(self.gui.sheets, "confirm", return_value=False) as asked:
+            self.ov.apply()
+        told.assert_not_called()
+        asked.assert_called_once()                       # (the Apply sheet; answered Cancel)
+
     def test_choosing_the_folder_it_already_goes_to_changes_nothing(self):
         self.preview()
         self.choose(self.home / "own")

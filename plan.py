@@ -951,7 +951,7 @@ class Planner:
         self.extra_roots = [os.path.realpath(os.path.expanduser(str(r))) for r in extra_roots]
         self.extra_roots = [os.path.dirname(r) if os.path.isfile(r) else r for r in self.extra_roots]
         self.job = job_id or time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
-        self.rules = ex.load_rules(profile.name if profile.name != "default" else None) if rules is None else rules
+        self.rules = ex.load_rules(profile.name if profile.name != "default" else "") if rules is None else rules
         self.overrides = ex.State().overrides() if overrides is None else overrides
         self.claimed = {}          # folded destination path -> source (collisions inside the plan)
         self.created_dirs = set()

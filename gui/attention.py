@@ -21,6 +21,7 @@ SHORT = {"no_candidate": N_("Not found"), "incomplete_album": N_("Track count di
          "ambiguous_release": N_("Two pressings fit"), "ambiguous_artist": N_("Artist unclear"),
          "conflicting_sources": N_("Sources disagree"), "web_fallback_only": N_("Only on the web"),
          "musicbrainz_unavailable": N_("MusicBrainz unreachable"), "discogs_unavailable": N_("Discogs unreachable"),
+         "web_unavailable": N_("Web source unreachable"),
          "rate_limited": N_("Slowed down"), "missing_credentials": N_("Key missing"),
          "unsupported_format": N_("Format not writable"), "duration_mismatch": N_("Lengths differ"),
          "low_similarity": N_("Names differ"), "missing_collaborator": N_("Credit incomplete"),
@@ -117,6 +118,7 @@ class Attention(QWidget):
         self.scanning = False
         self.quiet = False                                  # (a look for the badge: no busy bar, no message)
         self.looks = 0                                      # (a newer look or list drops an older answer)
+        self.again = None                                   # (asked to look while looking: quiet or not)
 
     def filter(self, text):
         filter_table(self.table, text)
@@ -142,7 +144,10 @@ class Attention(QWidget):
             if not quiet and self.choose_btn.isEnabled():
                 self.choose_btn.click()
             return
-        if self.scanning:                                    # (one look at a time)
+        if self.scanning:
+            # (one look at a time: another follows once it ends - the folder may have changed since,
+            # or the albums in it; quiet only when every look asked for was)
+            self.again = quiet if self.again is None else (self.again and quiet)
             return
 
         def work(_w):
@@ -153,13 +158,23 @@ class Attention(QWidget):
         self.empty.set_text(tr("Looking…"), path)
         self.looks += 1
         look = self.looks
-        start(self, work, lambda rows: self.found(look, rows), failed=self.scan_failed)
+        start(self, work, lambda rows: self.found(look, rows, path), failed=self.scan_failed)
 
-    def found(self, look, rows):
-        if look != self.looks:                               # (the list was filled since: that stands)
+    def found(self, look, rows, path=None):
+        here = os.path.normpath(self.root.text().strip() or ".")
+        if look != self.looks or (path is not None and os.path.normpath(path) != here):
+            # (the list was filled since: that stands; or the answer is of another folder than
+            # the one this page now looks in: never shown under it)
             self.searching(False)
-            return
-        self.show_rows(rows)
+        else:
+            self.show_rows(rows)
+        self.scan_again()
+
+    def scan_again(self):
+        """The look asked for while another ran, now that it ended."""
+        again, self.again = self.again, None
+        if again is not None and not self.scanning:
+            self.scan(quiet=again)
 
     def count_under(self, path):
         """The badge after a preview or Apply: the albums marked Unresolved under the folder this
@@ -195,6 +210,9 @@ class Attention(QWidget):
         quiet = self.quiet
         self.searching(False)
         self.looks += 1
+        if self.again is not None:                           # (another look was asked for meanwhile)
+            self.scan_again()
+            return
         if quiet:                                            # (a look for the badge: the page stays as it was)
             return
         self.empty.set_text(tr("The folder could not be read."), msg.splitlines()[0] if msg else "")
@@ -210,9 +228,10 @@ class Attention(QWidget):
         for i, r in enumerate(rows):
             # the reason in words (the codes are in the tooltip and the inspector's Codes)
             codes = list(r["codes"]) or ["other"]
-            more = f" and {plural(len(codes) - 1, tr('more reason'), tr('more reasons'))}" if len(codes) > 1 else ""
-            it = status_cell(QTableWidgetItem(), "unresolved",
-                             f"{short_reason(codes[0])}{more}")
+            text = tr("{0} and {1}").format(short_reason(codes[0]), plural(len(codes) - 1, tr("more reason"),
+                                                                          tr("more reasons"))) \
+                if len(codes) > 1 else short_reason(codes[0])
+            it = status_cell(QTableWidgetItem(), "unresolved", text)
             tip = [reasons.describe(c).capitalize() for c in codes]
             if "missing_credentials" in codes:                     # (which key, and where to set it)
                 from . import setup

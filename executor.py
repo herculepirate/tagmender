@@ -475,6 +475,47 @@ def _keep_owner(path: Path, st):
             pass
 
 
+def _still(path, pre):
+    """path is still the file its step began with (pre: its os.stat then): no other program
+    saved, replaced or moved it while TagMender wrote its copy - else the step fails and the
+    album is put back, so that program's edit is never overwritten or deleted."""
+    try:
+        now = os.stat(path)
+    except OSError:
+        now = None
+    # (size and times, not the inode number: some shares - CIFS with noserverino - make inode
+    # numbers up and may change them; a file replaced by another program has a new ctime anyway)
+    if now is None or (now.st_size, now.st_mtime_ns, now.st_ctime_ns) != \
+            (pre.st_size, pre.st_mtime_ns, pre.st_ctime_ns):
+        raise StepError(f"{Path(path).name} changed while it was being written; original kept")
+
+
+def _writable(stage: Path):
+    """A staged copy of a read-only file (its mode copied with it) writable by its owner while
+    TagMender writes into it; the mode to give back (_mode_back) before it is placed - None
+    when it was writable already."""
+    mode = stat.S_IMODE(os.stat(stage).st_mode)
+    if mode & stat.S_IWUSR:
+        return None
+    try:
+        os.chmod(stage, mode | stat.S_IWUSR)
+    except OSError:               # (a share whose modes are the mount's: written as it allows)
+        return None
+    return mode
+
+
+def _mode_back(stage: Path, mode):
+    """The staged copy's own mode again (see _writable), durably."""
+    if mode is None:
+        return
+    os.chmod(stage, mode)
+    fd = os.open(stage, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _place_staged(stage: Path, dst: Path):
     """_place, and the staging copy is never left behind when it fails."""
     try:
@@ -693,12 +734,14 @@ def staged_write(path, edit, what="tags"):
         stage = _stage_name(path, "edit")
         try:
             _copy_fsync(path, stage)
+            mode = _writable(stage)        # (a read-only file stays read-only, written all the same)
             before = payload.digest(path)
             edit(stage)
             if before is not None and payload.digest(stage) != before:
                 raise StepError(f"{path.name}: audio data differed after writing {what}; left as it is")
             with open(stage, "rb+") as fh:
                 os.fsync(fh.fileno())
+            _mode_back(stage, mode)
             _keep_owner(stage, st)
             now = os.stat(path)            # (still the file it was: not moved, replaced or changed)
             if (now.st_ino, now.st_dev, now.st_size, now.st_mtime_ns) != \
@@ -1045,12 +1088,14 @@ def _restore(path: Path, backup: dict, jd: Path):
     try:
         if backup["kind"] == "tags":
             _copy_fsync(path, stage)
+            mode = _writable(stage)                 # (a read-only track: as it was, read-only)
             before = payload.digest(path)
             ta.restore_tags(stage, backup["rec"], jd / "blobs")
             if before is not None and payload.digest(stage) != before:
                 raise StepError(f"{path.name}: audio data differed after restoring tags; left as it is")
             with open(stage, "rb+") as fh:
                 os.fsync(fh.fileno())
+            _mode_back(stage, mode)
         else:
             _copy_fsync(Path(backup["path"]), stage)
         _keep_owner(stage, st)
@@ -1163,10 +1208,24 @@ class Executor:
         self.journal.write(ev="begin", job=self.job, profile=self.plan["profile"], unmounted=local)
         _record_job(self.job, profile=self.plan["profile"], started=time.time(), status="running")
         prof = self.plan["profile"]
-        self.rules = ex.load_rules(prof if prof != "default" else None)
+        self.rules = ex.load_rules(prof if prof != "default" else "")   # ("": never $TAGMENDER_PROFILE)
         counts = {}
         albums = self.plan["albums"]
         split_failed = set()
+        # the versions of one folder are split together: one applied without the others
+        # (Apply Selected, a ticked subset) would take the cover and log they share along and
+        # leave the others without them - none of them is applied then. (A version that only
+        # copies what they share takes nothing away: it may go alone - as the version that
+        # stays in the folder, unchanged, which Apply leaves out.)
+        have, want, takes = {}, {}, set()
+        for a in albums:
+            sp = a.get("split") or {}
+            if sp.get("of"):
+                have[sp["of"]] = have.get(sp["of"], 0) + 1
+                want[sp["of"]] = max(want.get(sp["of"], 1), int(sp.get("count") or 1))
+                if any(c.get("op") == "move" and c.get("shared") for c in a.get("companions") or []):
+                    takes.add(sp["of"])
+        split_short = {of for of in have if have[of] < want[of] and of in takes}
         for i, a in enumerate(albums):
             if self.cancel():
                 self.journal.write(ev="cancelled", album=i)
@@ -1175,7 +1234,10 @@ class Executor:
             self.progress(i, len(albums), a["source_dir"])
             of = (a.get("split") or {}).get("of")
             try:
-                if of and of in split_failed:
+                if of and of in split_short:
+                    status, label, detail = "conflict", "Changed", ("the other version of this folder is not "
+                                                                    "in this Apply; apply both together")
+                elif of and of in split_failed:
                     # (the versions of one folder are split together: one failed, the others wait)
                     status, label, detail = "conflict", "Changed", ("another version of this album could not be "
                                                                     "split; this one is left as it was")
@@ -1317,6 +1379,9 @@ class Executor:
         if op == "tag" and Path(src).is_symlink():
             raise StepError(f"refusing to write through a symbolic link: {src}")
         with file_lock(src):
+            # the file as this step finds it: another program saving it while its copy is
+            # written must not lose that edit (_still before it is replaced or removed)
+            pre = os.stat(src)
             src_digest = payload.digest(src)
             if src_digest is None and (changes or embed or fix) and not self.allow_unverified:
                 raise StepError(f"{src.name}: its audio data cannot be verified after writing tags "
@@ -1340,7 +1405,7 @@ class Executor:
                                digest=src_digest, backup=backup, changed=bool(changes or embed or fix))
             if linked:
                 self._relink_step(i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps,
-                                  fix=fix)
+                                  fix=fix, pre=pre)
                 return
             if op == "move" and not changes and not embed and not fix and _same_fs(src, dst.parent if dst.parent.exists()
                                                                        else self._existing(dst.parent)):
@@ -1362,6 +1427,7 @@ class Executor:
             _space_for(dst.parent, os.path.getsize(src))
             try:
                 room = _stage_track(src, stage, a, fe["dst"], bool(changes or embed or fix), src_digest)
+                mode = _writable(stage)          # (a read-only track: written, and read-only again)
                 if src_digest is None and not changes and not embed and not fix and \
                         payload.file_sha256(stage) != payload.file_sha256(src):
                     raise StepError(f"{src.name}: copy did not verify")
@@ -1384,6 +1450,7 @@ class Executor:
                         raise StepError(f"{src.name}: tag {k} did not read back as written")
                 with open(stage, "rb+") as fh:
                     os.fsync(fh.fileno())
+                _mode_back(stage, mode)
                 sst = os.stat(stage)             # identity of the verified stage, to recognise it at dst
             except BaseException:
                 stage.unlink(missing_ok=True)
@@ -1392,6 +1459,7 @@ class Executor:
             case_only = op == "move" and _case_only(src, dst)
             if op == "tag" or case_only:
                 try:
+                    _still(src, pre)
                     os.replace(stage, src)
                 except BaseException:
                     stage.unlink(missing_ok=True)
@@ -1403,6 +1471,7 @@ class Executor:
                     done_steps.pop()
             else:
                 try:
+                    _still(src, pre)
                     _place(stage, dst)
                 except Exception:
                     self.journal.write(ev="file", album=i, idx=j, state="place_failed")
@@ -1422,17 +1491,20 @@ class Executor:
                        (sst.st_dev, sst.st_ino, sst.st_size, sst.st_mtime_ns)
                 if src_digest is not None and not same and payload.digest(dst) != src_digest:
                     raise StepError(f"{dst.name}: new file did not verify; source kept")
+                _still(src, pre)
                 os.unlink(src)
                 _fsync_dir(src.parent)
                 self.journal.write(ev="file", album=i, idx=j, state="source_removed")
 
-    def _relink_step(self, i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps, fix=False):
+    def _relink_step(self, i, j, op, src, dst, changes, embed, a, backup, src_digest, done_steps, fix=False,
+                     pre=None):
         """The destination already is this file under another name (a hard link). A move
         just drops the source's name; new tags go to the destination as a new file."""
         if changes or embed or fix:
             stage = _stage_name(dst, self.job)
             try:
                 room = _stage_track(src, stage, a, str(dst), True, src_digest)
+                mode = _writable(stage)
                 _keep_owner(stage, os.stat(src))
                 if changes or fix:
                     tagio.write(stage, changes, **_write_extras(a["files"][j] if j < len(a.get("files") or []) else {}),
@@ -1453,12 +1525,24 @@ class Executor:
                         raise StepError(f"{src.name}: tag {k} did not read back as written")
                 with open(stage, "rb+") as fh:
                     os.fsync(fh.fileno())
+                _mode_back(stage, mode)
                 self.journal.write(ev="file", album=i, idx=j, state="staged", stage=str(stage))
+                if pre is not None:
+                    _still(src, pre)
                 os.replace(stage, dst)
             except BaseException:
                 stage.unlink(missing_ok=True)
                 raise
             _fsync_dir(dst.parent)
+            if pre is not None:
+                # (the old file has one name fewer now - its change time with it: what it is
+                # now is what must still be there when that name is dropped - if it is still the
+                # same file, unchanged, with exactly one link fewer)
+                now = os.stat(src)
+                if (now.st_size, now.st_mtime_ns) != (pre.st_size, pre.st_mtime_ns) or \
+                        now.st_nlink != pre.st_nlink - 1:
+                    raise StepError(f"{src.name} changed while it was being written; original kept")
+                pre = now
         st = os.stat(dst)
         self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
                            mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
@@ -1466,6 +1550,8 @@ class Executor:
         if op == "relink_copy":
             _record_copy(src, dst, self.job)
         if op == "relink_move":
+            if pre is not None:
+                _still(src, pre)
             os.unlink(src)
             _fsync_dir(src.parent)
             self.journal.write(ev="file", album=i, idx=j, state="source_removed")
@@ -1484,6 +1570,7 @@ class Executor:
             if op == "rewrite":
                 return
             ce = dict(ce, rewrite=None)                 # moved with the album as it is
+        pre = os.stat(src)                        # (as for a track: _still before it is replaced or removed)
         if op == "rewrite":                       # a cue sheet that stays, naming renamed files
             stage = _stage_name(src, self.job)
             self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
@@ -1497,6 +1584,7 @@ class Executor:
             self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="staged",
                                saved=str(saved))
             try:
+                _still(src, pre)
                 os.replace(stage, src)
             except BaseException:
                 stage.unlink(missing_ok=True)
@@ -1520,10 +1608,14 @@ class Executor:
                 try:
                     _write_rewrite(ce["rewrite"], src, stage)
                     _keep_owner(stage, os.stat(src))
+                    _still(src, pre)
                     os.replace(stage, src)
                 except BaseException:
                     stage.unlink(missing_ok=True)
                     raise
+                # (rewritten where it is: a crash before the rename is put back by recover)
+                self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst),
+                                   state="staged", saved=str(saved))
             try:
                 _rename_case(src, dst)
             except BaseException:
@@ -1579,6 +1671,7 @@ class Executor:
         self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="staged",
                            saved=str(saved) if saved else None)
         try:
+            _still(src, pre)
             _place(stage, dst)
         except Exception:
             self.journal.write(ev="companion", album=i, idx=j, state="place_failed")
@@ -1590,6 +1683,7 @@ class Executor:
                            mtime_ns=st.st_mtime_ns)
         done_steps.append(("companion", i, j, op, str(src), str(dst), saved, None))
         if op == "move":
+            _still(src, pre)
             os.unlink(src)
             self.journal.write(ev="companion", album=i, idx=j, state="source_removed")
 
@@ -2181,6 +2275,20 @@ def _recover(job, jd, journal, events):
                 (linked or (not had and ours_companion(a, j, csrc, cdst))):
             journal.write(ev="companion", album=a, idx=j, state="committed", recovered=True)
             c["state"] = "committed"
+    # a sheet rewritten where it is, its step cut short before it counted as done (a case-only
+    # rename on a share, the crash between the rewrite and the rename - as journalled by 0.8.1,
+    # or with its new name not there): the saved text back, when it still holds what the job wrote
+    for (a, j), c in sorted(comps.items()):
+        if a not in unfinished or c["state"] not in ("begin", "staged") or not c.get("saved"):
+            continue
+        csrc, saved = Path(c["src"]), Path(c["saved"])
+        try:
+            if saved.is_file() and csrc.is_file() and ours_companion(a, j, csrc, csrc) and \
+                    payload.file_sha256(csrc) != payload.file_sha256(saved):
+                _restore_text(saved, csrc)
+                done.append(f"put back the text of {csrc}")
+        except OSError as exc:
+            done.append(f"{csrc}: its text could not be put back ({exc})")
 
     # 3. unfinished albums are put back as they were
     for a in sorted(unfinished):

@@ -64,7 +64,7 @@ def outcome_text(pairs) -> str:
         names.append(f"{Path(str(folder)).name} ({w.lower()})" if len(set(dict(pairs).values())) > 1
                      else Path(str(folder)).name)
     head = ", ".join(f"{n} {w}" for w, n in counts.items())
-    shown = names[:6] + ([f"and {len(names) - 6} more"] if len(names) > 6 else [])
+    shown = names[:6] + ([tr("and {0} more").format(len(names) - 6)] if len(names) > 6 else [])
     return f"{head}: {', '.join(shown)}." if names else ""
 
 
@@ -118,7 +118,7 @@ class WatchDialog(QDialog):
         self.settle = QDoubleSpinBox()
         self.settle.setAccessibleName(tr("Wait until unchanged for, minutes"))
         self.settle.setRange(0, 1440)
-        self.settle.setDecimals(1)
+        self.settle.setDecimals(2)
         self.settle.setSuffix(tr(" min"))
         self.settle.setToolTip(tr("An album is left alone until nothing in it changed for this long\n"
                                   "(a copy or download still running)"))
@@ -214,6 +214,10 @@ class WatchDialog(QDialog):
         self.settle.setValue(p["watch"]["settle_minutes"])
         secs = p["watch"]["interval_seconds"]             # (a value set elsewhere: the nearest choice)
         self.every.setCurrentIndex(min(range(len(LOOK_EVERY)), key=lambda i: abs(LOOK_EVERY[i] - secs)))
+        # (as saved, and as the controls show it: what is not changed here is saved as it was,
+        # never as the nearest value the controls can show)
+        self.shown = {"settle": (p["watch"]["settle_minutes"], self.settle.value()),
+                      "every": (secs, self.every.currentIndex())}
         self.show_warnings()
 
     def problems(self):
@@ -279,8 +283,13 @@ class WatchDialog(QDialog):
             data["sources"] = [s for s in data["sources"] if not same(s)] + [
                 dict(had[0] if had else {}, path=folder, watch=True, recursive=self.deep.isChecked())]
             data["unattended"] = self.auto.isChecked()
-            data["watch"] = dict(data.get("watch") or {}, settle_minutes=self.settle.value(),
-                                 interval_seconds=int(self.every.currentData()))
+            shown = getattr(self, "shown", {})
+            settle, shown_settle = shown.get("settle", (None, None))
+            secs, shown_every = shown.get("every", (None, None))
+            data["watch"] = dict(data.get("watch") or {},
+                                 settle_minutes=settle if self.settle.value() == shown_settle else self.settle.value(),
+                                 interval_seconds=secs if self.every.currentIndex() == shown_every
+                                 else int(self.every.currentData()))
             target = pf.from_dict(data)
             others = []
             for n in pf.names():                     # a folder belongs to one profile
@@ -674,14 +683,18 @@ class Watched(QWidget):
         auto = [path for path, p in rows if p["unattended"]]
         if not auto:
             return True
-        names = ", ".join(Path(a).name or a for a in auto[:3]) + (f" and {len(auto) - 3} more" if len(auto) > 3 else "")
+        names = ", ".join(Path(a).name or a for a in auto[:3])
+        if len(auto) > 3:
+            names = tr("{0} and {1} more").format(names, len(auto) - 3)
         mins = max(1, round(self.interval_ms() / 60000))
+        # (a whole sentence for one folder and one for several: no English word put into either)
+        words = tr("1 watched folder is checked every {mins} min; albums in {names} identified for sure are "
+                   "filed automatically, without asking; any it is not sure of waits for your approval.") \
+            if len(rows) == 1 else \
+            tr("{n} watched folders are checked every {mins} min; albums in {names} identified for sure are "
+               "filed automatically, without asking; any it is not sure of waits for your approval.")
         return sheets.confirm(self, tr("Keep watching while TagMender is open?"),
-                              tr("{0} {1} checked "
-                                 "every {mins} min; albums in {names} identified for sure are filed automatically, without "
-                                 "asking; any it is not sure of waits for your approval.")
-                              .format(plural(len(rows), tr('watched folder'), tr('watched folders')),
-                                      'is' if len(rows) == 1 else 'are', mins=mins, names=names),
+                              words.format(n=len(rows), mins=mins, names=names),
                               tr("Every job can be undone from Jobs; untick this to stop."), tr("Start Watching"))
 
     def say(self, text):

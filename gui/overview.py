@@ -49,7 +49,8 @@ LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicB
 META_STORE: dict = {}
 
 
-RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "rate_limited", "missing_credentials"}
+RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "web_unavailable", "rate_limited",
+               "missing_credentials"}
 
 
 def _list_first() -> bool:
@@ -607,6 +608,9 @@ class Overview(QWidget):
         except pf.ProfileError as exc:
             sheets.warning(self, tr("The profile was not changed."), str(exc))
             return
+        if getattr(self, "plan_library", "") == self.library:
+            # (the preview went to this folder, now the profile's own: it still stands for Apply)
+            self.plan_library = ""
         self.reset_library()
         if "Profiles" in getattr(self.win, "pages", {}):
             self.win.pages["Profiles"].reload()
@@ -679,7 +683,9 @@ class Overview(QWidget):
         def work(w):
             e = engine.Engine(prof, ocr=True if ocr else None)
             e.edits = edits
-            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys, meta=META_STORE)
+            plan = e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys, meta=META_STORE)
+            # (cancelled: only the albums it reached replace their rows; the others stay as they were)
+            return plan, (set(getattr(e, "reached", keys)) & keys if w.cancelled else keys)
         self.busy(True)
         self.looked_with = self.sources_words(mode)
         self._lookup_n = len(keys)
@@ -687,9 +693,10 @@ class Overview(QWidget):
         self.summary.setText(self.lookup_words(0, ""))
         library = self.library
 
-        def found(plan):
+        def found(result):
+            plan, reached = result
             self.plan_library = library
-            self.looked_up(plan, keys, stamp)
+            self.looked_up(plan, reached, stamp)
         self.worker = start(self, work, found, self.progress, self.oops)
 
     def lookup_words(self, i, name) -> str:
@@ -708,9 +715,14 @@ class Overview(QWidget):
         import engine
         if stamp is None:
             return
+        import reasons
         for a in albums:
-            codes = set(a.get("reason_codes") or [])
-            if a.get("status") == "listed" or codes & RETRY_CODES or str(a.get("reason", "")).startswith("error:"):
+            # (a plan entry keeps them in its identification: the reason with its codes in front)
+            ident = a.get("identification") or {}
+            codes = set(a.get("reason_codes") or ident.get("reason_codes") or [])
+            words = reasons.parse(ident["reason"])[1] if ident.get("reason") else a.get("reason", "")
+            if a.get("status") == "listed" or codes & RETRY_CODES or str(words).startswith("error:") or \
+                    str(a.get("reason", "")).startswith("error:"):
                 continue
             self.looked[a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])] = stamp
 
@@ -759,7 +771,7 @@ class Overview(QWidget):
         if insp.edits:
             n = len(insp.edits)
             where = Path(str(self.path)).name or str(self.path) if self.path else tr("this preview")
-            if not sheets.confirm(self, tr("Discard your edits of {0}?").format('1 album' if n == 1 else f'{n} albums'),
+            if not sheets.confirm(self, tr("Discard your edits of {0}?").format(plural(n, tr("album"), tr("albums"))),
                                   tr("Your tag and cover edits of {where} are not kept when you preview another "
                                      "folder; nothing was written.").format(where=where),
                                   tr("Cancel keeps them: apply this preview first to write them."), tr("Discard Edits"),
@@ -904,7 +916,7 @@ class Overview(QWidget):
 
     def oops(self, msg):
         self.busy(False)
-        self.summary.setText("Stopped: " + msg.splitlines()[0])
+        self.summary.setText(tr("Stopped: {head}").format(head=(msg.splitlines() or [""])[0]))
         head, _, rest = msg.partition("\n")
         sheets.warning(self, tr("Stopped: {head}").format(head=head), rest.strip())
 
@@ -943,7 +955,7 @@ class Overview(QWidget):
             items = [f"{html.escape(album_words(a['source_dir']))}: {html.escape(outcome(a))}"
                      for a in albums[:APPLY_LISTED]]
         if n > APPLY_LISTED:
-            items.append(f"and {n - APPLY_LISTED} more")
+            items.append(html.escape(tr("and {0} more").format(n - APPLY_LISTED)))
         # (rich text: a wrapped line hangs under its words, not under the bullet)
         body = (f"<p>{html.escape(what)}</p><ul style='margin-left:-24px; margin-top:0'>"
                 + "".join(f"<li>{x}</li>" for x in items) + "</ul>")
@@ -953,7 +965,7 @@ class Overview(QWidget):
                        "inspector.</p>").format(plural(mine, tr("album"), tr("albums")))
         word = tr("Album") if n == 1 else tr("Albums")
         return (tr("Apply the preview to {n} {0}?").format(word.lower(), n=n), body,
-                tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), f"Apply {n} {word}")
+                tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), tr("Apply {n} {0}").format(word, n=n))
 
     def apply(self):
         n = self.actionable()

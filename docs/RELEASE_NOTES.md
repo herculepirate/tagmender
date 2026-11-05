@@ -1,5 +1,38 @@
 # Release notes
 
+## 0.8.2
+
+Bug fixes.
+
+**Your files**
+- If another program saves a track while TagMender is writing it, the album is put back and
+  that program's edit is kept (before, it could be lost without a word).
+- Read-only tracks are tagged and stay read-only (before, Apply always failed on them); undo
+  works on them too.
+- Applying one version of a folder that holds two no longer takes their shared cover and log
+  away from the other: apply both together.
+- A crash while a cue sheet's name changed only in letter case no longer leaves the rewritten
+  cue behind after recovery.
+
+**Watched folders**
+- An album you undid is not filed again just because the folder is watched by another profile.
+- Approving a waiting plan of several discs or versions remembers the one that failed, so it is
+  tried again.
+- Process Folder Again works for folders written with ~ (your home folder).
+- Saving a watched folder's settings without changing them no longer changes its timings.
+
+**Look-ups**
+- A profile's ignore and skip rules are never another profile's (the watcher and a Look Up
+  running at the same time, or a profile chosen on the command line).
+- When no web source answers, the album says so ("Web source unreachable") instead of "Not
+  found", and a Look Up asks again. Albums a database could not be asked about are looked up
+  again too, not skipped as done.
+- Refresh, Look Up and a new library folder no longer drop the rows of a set split per disc or a
+  folder split into versions; a cancelled Look Up keeps the albums it had not reached.
+- Needs attention never shows the previous folder's albums.
+- Apply is no longer refused after Make It the Profile's.
+- Some phrases are now translatable.
+
 ## 0.8.1
 
 **Faster**

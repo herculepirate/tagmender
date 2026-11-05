@@ -55,6 +55,28 @@ def watch_word(status):
     return tr(word), key, icon
 
 
+def match_text(m):
+    """(text, tooltip) of the Match column: the tier word and the scans' short text; empty for a row
+    recorded before this was kept."""
+    from .models import TIER_TIPS, scans_text, scans_tip
+    m = m or {}
+    tier = m.get("tier") or ""
+    word = {"exact": N_("Exact"), "album_only": N_("Album only"), "recording": N_("Recording"),
+            "partial": N_("Partial"), "unresolved": N_("Unresolved")}.get(tier)
+    parts = [tr(word)] if word else []
+    sc = m.get("scans")
+    if scans_text(sc):
+        parts.append(scans_text(sc))
+    tips = []
+    if word:
+        tips.append(tr(TIER_TIPS[tier]) if tier in TIER_TIPS else
+                    tr("Exact: the release and its pressing match") if tier == "exact" else
+                    tr("Unresolved: no release could be chosen"))
+    if scans_tip(sc):
+        tips.append(scans_tip(sc))
+    return " · ".join(parts), ". ".join(tips)
+
+
 def outcome_text(pairs) -> str:
     """[(album folder, status), ...] in the status words: "2 Done, 1 Failed: Ferry, Garden, Bark"."""
     counts, names = {}, []
@@ -422,7 +444,11 @@ class Watched(QWidget):
         self.fold_chosen = False                               # (the person opened or closed it)
         self.fold.clicked.connect(lambda: setattr(self, "fold_chosen", True))
         lay.addWidget(self.fold, 0, Qt.AlignLeft)
-        self.recent = _table([N_("When"), N_("Album"), N_("Outcome"), N_("Profile")], stretch=1, fit=(0, 2, 3))
+        self.recent = _table([N_("When"), N_("Album"), N_("Outcome"), N_("Match"), N_("Profile")], stretch=1,
+                              fit=(0, 2, 3, 4))
+        self.recent.activated.connect(lambda *_: self.review_recent())
+        self.recent.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.recent.customContextMenuRequested.connect(self.recent_menu)
         self.recent.setMinimumHeight(TABLE_MIN)
         self.recent.setAccessibleName(tr("Recently handled albums"))
         lay.addWidget(self.recent, 1)
@@ -485,6 +511,43 @@ class Watched(QWidget):
         self.recent.setVisible(on)
         self.recent_pane.setMaximumHeight(16777215 if on else self.recent_pane.sizeHint().height())
 
+    def recent_folder(self):
+        """The folder of the Recently row that is waiting for approval and selected, else ""."""
+        r = self.recent.currentRow()
+        it = self.recent.item(r, 2) if r >= 0 else None
+        f = self.recent.item(r, 1) if it else None
+        if it and f and it.data(Qt.AccessibleTextRole) == watch_word("planned")[0]:
+            return f.data(Qt.UserRole) or ""
+        return ""
+
+    def review_recent(self):
+        """The selected waiting album, in the list of plans waiting for approval on this page:
+        chosen there and its changes shown (Apply there approves it)."""
+        f = self.recent_folder()
+        if not f:
+            return
+        want = os.path.normpath(os.path.realpath(f))
+        for r in range(self.pending.rowCount()):
+            it = self.pending.item(r, 0)
+            src = (it.data(Qt.UserRole) if it else "") or ""
+            if src and os.path.normpath(os.path.realpath(src)) in (want,) or \
+                    (src and os.path.normpath(os.path.realpath(src)).startswith(want + os.sep)):
+                self.pending.setCurrentCell(r, 0)
+                self.pending.selectRow(r)
+                self.pending.scrollToItem(it)
+                self.pending.setFocus()
+                self.show_plan()
+                return
+        self.win.statusBar().showMessage(tr("{0} is no longer waiting for approval.").format(Path(f).name), 6000)
+
+    def recent_menu(self, pos):
+        if not self.recent_folder():
+            return
+        from PySide6.QtGui import QAction
+        a = QAction(tr("Review…"), self)
+        a.triggered.connect(self.review_recent)
+        popup_menu(self, self.recent, pos, [a])
+
     def menu_for(self, table, keys):
         """The table's context menu: the same commands as the Tools menu (the Menu key too)."""
         table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -540,13 +603,23 @@ class Watched(QWidget):
             self.pending.setRowCount(0)
         try:
             import watcher
-            recent = watcher.recent(40)
-            _fill(self.recent, [(time.strftime("%Y-%m-%d %H:%M", time.localtime(ts or 0)), f, st, pn)
-                                for f, pn, st, ts, _l in recent])
-            for r, (f, _pn, st, _ts, _l) in enumerate(recent):
+            recent = [tuple(x) + ({},) * (6 - len(x)) for x in watcher.recent(40)]     # (older rows: no match)
+            _fill(self.recent, [(time.strftime("%Y-%m-%d %H:%M", time.localtime(ts or 0)), f, st, "", pn)
+                                for f, pn, st, ts, _l, _m in recent])
+            for r, (f, _pn, st, _ts, _l, m) in enumerate(recent):
                 self.recent.setItem(r, 1, folder_item(f, album=True, root=watch_root(f, roots)))
                 word, colour, icon = watch_word(st)
-                self.recent.setItem(r, 2, status_cell(QTableWidgetItem(), colour, word, icon))
+                cell = status_cell(QTableWidgetItem(), colour, word, icon)
+                if st == "planned":                          # (waiting for you: it stands out, and can be reviewed)
+                    ft = cell.font()
+                    ft.setBold(True)
+                    cell.setFont(ft)
+                    cell.setToolTip(tr("Waiting for your approval: double-click to review it in Needs attention"))
+                self.recent.setItem(r, 2, cell)
+                text, tip = match_text(m)
+                mi = QTableWidgetItem(text)
+                mi.setToolTip(tip)
+                self.recent.setItem(r, 3, mi)
         except Exception:
             self.recent.setRowCount(0)
         self.win.set_badge("Watched folders", len(self.prow_plans))     # (albums waiting, as the list rows)

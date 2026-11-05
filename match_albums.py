@@ -6599,8 +6599,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 if not album["barcodes"] and sure:
                     album["barcodes"] = set(sure)        # as for barcodes decoded from the scans
 
+            seen_ids = _cand_ids(mb_res, dg_res)
             mb_res = _scored_again(mb_res, extra["mb"], "mb", album, cfg, text)
             dg_res = _scored_again(dg_res, extra["discogs"], "discogs", album, cfg, text)
+            _note_found(album, seen_ids, (mb_res, dg_res), "scan_search")
             final = _combine(mb_res, dg_res)
             ocr_txt = text
 
@@ -6608,8 +6610,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # it, searched by the shop's own title and artist. The shop agreeing is a clue, never
     # barcode proof for a release that does not list the barcode itself.
     shops_asked = set()
+    seen_ids = _cand_ids(mb_res, dg_res)
     mb_res, dg_res, final = shop_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, args, use_mb,
                                       use_discogs, out, source_notes, shops_asked)
+    _note_found(album, seen_ids, (mb_res, dg_res), "barcode_lookup")
     # a barcode on the scans that no release anywhere carries: a shop's sticker, perhaps
     # (match_core._shop_sticker); each candidate is scored again with it known
     if (final["status"] != "auto" and not album.get("unlisted_barcodes")
@@ -6651,7 +6655,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 if det:
                     new.append(mb_candidate(det))
             if (mb_res or {}).get("scored") or new:
+                seen_ids = _cand_ids(mb_res, dg_res)
                 mb_res = _scored_again(mb_res, new, "mb", album, cfg, ocr_txt)
+                _note_found(album, seen_ids, (mb_res, dg_res), "fingerprint")
                 final = _combine(mb_res, dg_res)
     # Still unsure: the album on Deezer, through its ISRCs, to the MusicBrainz release
     if final["status"] != "auto" and use_mb and not album.get("isrcs"):
@@ -6681,6 +6687,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # too) and, with a web search engine set up, the strongest three on the web.
     # An album with scans goes to a person only after all of that has failed.
     if use_ocr and getattr(args, "investigate", True) and _needs_investigation(final, album, ocr_txt, base):
+        seen_ids = _cand_ids(mb_res, dg_res)
         try:
             mb_res, dg_res, final, ocr_txt = investigate(
                 http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, source_notes,
@@ -6689,9 +6696,12 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             raise
         except Exception as exc:
             source_notes.append(f"investigation of the scans failed ({type(exc).__name__}: {exc})")
+        _note_found(album, seen_ids, (mb_res, dg_res), "scan_search")
         # a barcode only the deep reading found is asked of the shops too
+        seen_ids = _cand_ids(mb_res, dg_res)
         mb_res, dg_res, final = shop_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, args, use_mb,
                                           use_discogs, out, source_notes, shops_asked)
+        _note_found(album, seen_ids, (mb_res, dg_res), "barcode_lookup")
 
     # Last resort: the country preference, between pressings nothing else told apart
     if final["status"] != "auto" and full_cfg.get("preferred_countries"):
@@ -6769,6 +6779,13 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                margin=final.get("margin"), version=result_version(), checked=round(time.time()))
     note_barcode_sources(out, album)
     note_gnudb(out, album, final)
+    # (reporting only: what the scans showed about the pick, and how it was found)
+    if final.get("best"):
+        report = scans_report(final["best"], album, ocr_txt, (mb_res, dg_res),
+                              bool(use_ocr and (images or _has_pdf(base))))
+        if report:
+            out["scans"] = report
+        out["via"] = found_via(final["best"], album)
     if status == "auto" and getattr(args, "learn_scan_order", True):
         learn_scan_order(scan_log, final)
     mb_pick = (out.get("best") or {}).get("mb_id")
@@ -6792,6 +6809,115 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         if ao:
             out["album_only"] = ao              # the album is certain, its pressing is not
     return out
+
+
+# --- Reporting only: what the scans showed about the pick, and how it was found. Nothing
+# here is read by scoring or classification; a score is a heuristic, never proof.
+
+def _cand_ids(*results):
+    """"source:id" of every candidate scored in these results."""
+    return {f"{s['cand']['source']}:{s['cand']['id']}" for res in results
+            for s in (res or {}).get("scored") or ()}
+
+
+def _note_found(album, before, results, via):
+    """The candidates RESULTS hold that BEFORE did not: found by the step VIA ("scan_search",
+    "barcode_lookup", "fingerprint"), kept in album["found_via"] (the first step wins)."""
+    found = album.setdefault("found_via", {})
+    for key in _cand_ids(*results) - set(before):
+        found.setdefault(key, via)
+
+
+def _has_pdf(base):
+    return any(p.suffix.lower() == ".pdf" for p in album_documents(base))
+
+
+# a clue pressing_clues found on the scans -> the kind of thing read
+_SCAN_CLUE_KINDS = {"barcode": "barcode", "catalogue number": "catalogue_number", "label": "label",
+                    "country": "country", "matrix": "matrix", "sid code": "matrix", "label code": "matrix",
+                    "packaging": "format"}
+# a clue against that pressing_clues / file_clues took from the scans -> its kind
+_SCAN_AGAINST_KINDS = (("scans say made in ", "country"), ("disc ring reads ", "matrix"),
+                       ("your scans show a ", "format"))
+SCAN_STATES = ("proven", "agrees", "differs", "unread")
+
+
+def scans_report(best, album, ocr_txt, results, had_scans):
+    """What the album's scans (and the barcodes decoded off them) showed about BEST, the
+    scored pick: {"state", "found", "against"}, or None when the folder has no scans or
+    OCR did not run. state: "proven" (a barcode or catalogue number read on the scans is on
+    the pick), "agrees" (only weaker clues: label, country, matrix, packaging), "differs"
+    (the scans name another pressing), "unread" (nothing usable about the pick was read).
+    Reporting only: it decides nothing."""
+    if not had_scans or not best:
+        return None
+    cand = best.get("cand") or {}
+    clues = best.get("clues") or {}
+    found, against = [], []
+
+    def add(lst, kind):
+        if kind not in lst:
+            lst.append(kind)
+
+    for key, kind in _SCAN_CLUE_KINDS.items():
+        if key in clues:
+            add(found, kind)
+    code = str(best.get("code") or "")
+    if code == "barcode (OCR)":
+        add(found, "barcode")
+    elif code == "catalogue number (OCR)":
+        add(found, "catalogue_number")
+    have = {mc.barcode_key(b) for b in cand.get("barcodes") or ()} - {""}
+    # the barcodes read on the scans: decoded, or printed and read whole (not the notes'
+    # typed ones, nor a sticker no release carries)
+    printed = mc.codes_from_ocr_text(ocr_txt or "", limit=10)["barcodes"]
+    typed = {mc.barcode_key(b) for b in album.get("note_barcodes") or ()}
+    printed = [b for b in printed if mc.barcode_key(b) not in typed and not mc.typed_only_barcode(album, b)]
+    stickers = {mc.barcode_key(b) for b in album.get("unlisted_barcodes") or ()}
+    read = {mc.barcode_key(b) for b in sorted(album.get("ocr_barcodes") or ())
+            + mc.barcodes_read_whole(ocr_txt or "", printed)} - {""} - stickers
+    if read & have:
+        add(found, "barcode")
+    elif read:
+        add(against, "barcode")
+    # a catalogue number read on the scans that another scored pressing carries, not this one
+    if "catalogue_number" not in found and ocr_txt:
+        mine = [c for c in scan_catnos(mc.codes_from_ocr_text(ocr_txt)["catnos"]) if _distinctive(c)]
+        theirs = cand.get("catnos") or ()
+        others = [s["cand"].get("catnos") or () for res in results for s in (res or {}).get("scored") or ()
+                  if s.get("cand") is not cand and str(s["cand"].get("id")) != str(cand.get("id"))]
+        if any(not mc.catnos_agree([c], theirs) and any(mc.catnos_agree([c], o) for o in others) for c in mine):
+            add(against, "catalogue_number")
+    for words in best.get("clues_against") or ():
+        for prefix, kind in _SCAN_AGAINST_KINDS:
+            if str(words).startswith(prefix):
+                add(against, kind)
+    numbers = {"barcode", "catalogue_number"}
+    if set(found) & numbers and not set(against) & numbers:
+        state = "proven"
+    elif against:
+        state = "differs"
+    elif found:
+        state = "agrees"
+    else:
+        state = "unread"
+    return {"state": state, "found": found, "against": against}
+
+
+def found_via(best, album):
+    """How BEST was found, when not by the plain search: "disc_id" (the disc ID / TOC),
+    "link" (the files' shop or source link), "scan_search" (numbers read on the scans,
+    searched), "barcode_lookup" (a shop's barcode lookup), "fingerprint" (AcoustID); ""
+    otherwise. Reporting only."""
+    if not best:
+        return ""
+    clues = best.get("clues") or {}
+    if "disc TOC" in clues:
+        return "disc_id"
+    if "source link" in clues:
+        return "link"
+    cand = best.get("cand") or {}
+    return (album.get("found_via") or {}).get(f"{cand.get('source')}:{cand.get('id')}", "")
 
 
 def scans_confirmed(log, cand):

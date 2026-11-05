@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import companions
+import album_artist
 import compilations
 import credentials
 import requirements as rq
@@ -187,6 +188,26 @@ def evidence_of(out, best):
     out = out or {}
     return (list(best.get("notes") or []) + list(out.get("shop_notes") or []) + list(out.get("gnudb_notes") or [])
             + list(out.get("acoustid_notes") or []))
+
+
+def scans_of(prop, out):
+    """Reporting only: the matcher's account of the album's scans and of how its pick was
+    found (match_albums.scans_report / found_via), on PROP when PROP is about that pick: an
+    exact release it names, its album only or Partial tags from the matcher's candidates,
+    or the pick an unresolved album was left with for review. Decides nothing."""
+    out = out or {}
+    best = out.get("best") or {}
+    if not best or ("scans" not in out and "via" not in out):
+        return
+    tier = planmod.tier_of(prop)
+    if tier in ("ignored", "recording") or str(prop.provider or "").startswith(("web", "acoustid")):
+        return
+    if tier == "exact" and str(prop.release_id or "") not in {
+            str(best.get(k) or "") for k in ("id", "mb_id", "discogs_id")} - {""}:
+        return                     # another release than the matcher's pick (a version split ...)
+    if out.get("scans"):
+        prop.scans = dict(out["scans"])
+    prop.via = str(out.get("via") or "")
 
 
 def _with_deluxe(profile, groups, path, skip=()) -> list[Group]:
@@ -590,9 +611,12 @@ class Engine:
         prop = self._forced(self._chosen_files(g, choice), ref) if ref else self._identify(g)
         # the releases the matcher scored best, for the run report (one album as one folder only:
         # a set of discs or a split was matched disc by disc, version by version)
-        if not ref and not getattr(prop, "parts", None) and not getattr(prop, "split", None) \
-                and not getattr(prop, "candidates", None) and not str(prop.reason or "").startswith(MIXED_WORDS):
+        whole = not ref and not getattr(prop, "parts", None) and not getattr(prop, "split", None) \
+            and not str(prop.reason or "").startswith(MIXED_WORDS)
+        if whole and not getattr(prop, "candidates", None):
             prop.candidates = candidates_of(self._last_out)
+        if whole:
+            scans_of(prop, self._last_out)     # (reporting only)
         # (a set whose discs are different releases: each disc is its own album, _per_disc)
         for p in [prop] + list(getattr(prop, "parts", None) or []):
             self._finish(p, g)
@@ -2385,8 +2409,18 @@ class Engine:
             files = list(prop.files or [])
             prop.targets = [own_tag_choices(t, self.profile, files[i] if len(files) == len(prop.targets or []) else None)
                             for i, t in enumerate(prop.targets or [])]
+            if album_artist.enabled(self.profile):
+                # (the lead artist alone as album artist: album_artist.py; a band's members once each)
+                prop.targets = album_artist.apply(prop.targets, self.profile, self._band_members)
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
+
+    def _band_members(self, mbid):
+        """album_artist.band_members, asked once per artist in this run."""
+        memo = self.__dict__.setdefault("_members_memo", {})
+        if mbid not in memo:
+            memo[mbid] = album_artist.band_members(self.http, mbid, self.log) if self.http is not None else None
+        return memo[mbid]
 
     def proposals(self, path, progress=None, cancel=None, only=None):
         """The albums in PATH, each identified; only: the group_key()s of the albums to look up
@@ -2459,6 +2493,64 @@ class Engine:
         # (not kept in self.notes: those become every later album's provider errors)
         p["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
         return p
+
+    def plan_each(self, path, keys, emit, progress=None, cancel=None, meta=None) -> int:
+        """plan(PATH, only=KEYS) made an album at a time, KEYS in order: emit(key, plan) as soon
+        as one album is identified (a folder split per version, or a set planned per disc, comes
+        as several rows of one plan), then - the albums known together - emit(key, plan) again
+        for each from ONE plan of them all, which is what Apply uses: exactly Engine.plan's (an
+        album already in its place keeps it; a newcomer planned first never takes it). The
+        folder is scanned once. progress(i, folder): album i (0-based) is being looked up.
+        Cancelled: the albums not reached are not emitted; those reached are planned together.
+        Returns how many albums were looked up."""
+        root = Path(os.path.abspath(Path(path).expanduser()))
+        found = {}
+        prev = self.__dict__.get("albums_in")
+        scan = self.albums_in
+
+        def albums_in(p, skip=()):                       # (the same folder: its albums as found once)
+            k = (str(p), tuple(sorted(str(x) for x in skip)))
+            if k not in found:
+                found[k] = scan(p, skip)
+            return list(found[k])
+        self.albums_in = albums_in
+
+        def notes():
+            return {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
+
+        def planner():
+            return planmod.Planner(self.profile, self.job, extra_roots=[root], edits=getattr(self, "edits", None))
+        done = []                                        # (key, its proposals)
+        try:
+            for i, k in enumerate(keys):
+                if cancel and cancel():
+                    break
+                with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+                    props = self.proposals(path, (lambda _i, _n, what, i=i: progress(i, what)) if progress else None,
+                                           cancel, only={k})
+                if k not in getattr(self, "reached", ()) and cancel and cancel():
+                    break                                # (cancelled before it: its rows stay)
+                for q in props:                          # (as plan.build: absolute paths)
+                    q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
+                    q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
+                done.append((k, props))
+                out = planner().build(list(props))      # (shown at once; replaced below)
+                with_keys(out["albums"], props)
+                out["provider_notes"] = notes()
+                emit(k, out)
+        finally:
+            if prev is not None:
+                self.albums_in = prev
+            else:
+                self.__dict__.pop("albums_in", None)     # (the class's own again)
+        if len(done) > 1:
+            allp = [q for _k, ps in done for q in ps]
+            whole = planner().build(allp)
+            with_keys(whole["albums"], allp)
+            whole["provider_notes"] = notes()
+            for k, ps in done:
+                emit(k, dict(whole, albums=[a for a in whole["albums"] if a.get("key") == k]))
+        return len(done)
 
 
 def group_key(folder, files) -> str:

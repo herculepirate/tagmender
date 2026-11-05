@@ -518,7 +518,7 @@ class Shell(unittest.TestCase):
         for key in ("unchanged", "conflict"):
             self.assertNotIn(key, text)
         changes = [ov.model.data(ov.model.index(r, 4)) for r in range(ov.model.rowCount())]
-        self.assertIn("11 files", changes)
+        self.assertIn("11 tracks, stay in their folder", changes)          # (0.8.4: what Apply will do)
         self.assertFalse([c for c in changes if c and "(s)" in c])
         why = [ov.model.data(ov.model.index(r, 5)) for r in range(ov.model.rowCount())
                if ov.model.albums[r]["status"] == "unresolved"]

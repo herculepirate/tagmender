@@ -276,7 +276,7 @@
     </message>
     <message>
         <location line="+11"/>
-        <location filename="../../gui/watched.py" line="+147"/>
+        <location filename="../../gui/watched.py" line="+169"/>
         <source>Save Changes</source>
         <translation type="unfinished"></translation>
     </message>
@@ -358,7 +358,7 @@
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/models.py" line="+39"/>
+        <location filename="../../gui/models.py" line="+93"/>
         <source>Changes</source>
         <translation type="unfinished"></translation>
     </message>
@@ -579,6 +579,7 @@
     <message>
         <location filename="../../gui/dialogs/info.py" line="-6"/>
         <location line="+76"/>
+        <location filename="../../gui/models.py" line="-75"/>
         <location filename="../../gui/profiles.py" line="+2"/>
         <location filename="../../gui/search.py" line="+2"/>
         <location filename="../../gui/versions.py" line="+2"/>
@@ -601,14 +602,14 @@
         <location filename="../../gui/inspector.py" line="+944"/>
         <location line="+29"/>
         <location filename="../../gui/jobs.py" line="+89"/>
-        <location filename="../../gui/models.py" line="+0"/>
+        <location filename="../../gui/models.py" line="+75"/>
         <source>Status</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+0"/>
         <location filename="../../gui/preferences.py" line="-463"/>
-        <location filename="../../gui/profile_editor.py" line="+497"/>
+        <location filename="../../gui/profile_editor.py" line="+515"/>
         <location filename="../../gui/tagnames.py" line="-9"/>
         <source>AcoustID</source>
         <translation type="unfinished"></translation>
@@ -671,6 +672,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="+38"/>
         <location line="+8"/>
         <location filename="../../gui/manual_match.py" line="+373"/>
+        <location filename="../../gui/models.py" line="-23"/>
         <source>track</source>
         <translation type="unfinished"></translation>
     </message>
@@ -678,6 +680,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="-8"/>
         <location line="+8"/>
         <location filename="../../gui/manual_match.py" line="+0"/>
+        <location filename="../../gui/models.py" line="+0"/>
         <source>tracks</source>
         <translation type="unfinished"></translation>
     </message>
@@ -872,7 +875,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+67"/>
-        <location filename="../../gui/watched.py" line="+584"/>
+        <location filename="../../gui/watched.py" line="+635"/>
         <source>Checking…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1476,7 +1479,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/watched.py" line="-199"/>
+        <location filename="../../gui/watched.py" line="-250"/>
         <source>Apply the changes to every album waiting for your approval</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2042,7 +2045,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/attention.py" line="+20"/>
+        <location filename="../../gui/attention.py" line="+21"/>
         <source>Not found</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2149,9 +2152,9 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/overview.py" line="+238"/>
+        <location filename="../../gui/overview.py" line="+255"/>
         <location line="+44"/>
-        <location filename="../../gui/profile_editor.py" line="+934"/>
+        <location filename="../../gui/profile_editor.py" line="+945"/>
         <location filename="../../gui/rows.py" line="+208"/>
         <source>Choose…</source>
         <translation type="unfinished"></translation>
@@ -2183,12 +2186,12 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+8"/>
-        <location line="+177"/>
+        <location line="+202"/>
         <source>Nothing needs attention here.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-176"/>
+        <location line="-201"/>
         <source>Choose a folder and press Find Albums: albums an earlier run marked Unresolved are listed with the reason.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2199,7 +2202,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/models.py" line="+0"/>
+        <location filename="../../gui/models.py" line="+23"/>
         <source>Album folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2235,7 +2238,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+47"/>
+        <location line="+72"/>
         <source>Looking for albums that need attention…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2265,12 +2268,12 @@ The application key identifies TagMender, the user key identifies you; both are 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="+32"/>
         <location filename="../../gui/manual_match.py" line="-393"/>
-        <location filename="../../gui/overview.py" line="+215"/>
+        <location filename="../../gui/overview.py" line="+227"/>
         <location filename="../../gui/report.py" line="+80"/>
         <location filename="../../gui/search.py" line="-503"/>
-        <location filename="../../gui/window.py" line="+718"/>
+        <location filename="../../gui/window.py" line="+740"/>
         <source>Finish or cancel the current work first.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2394,8 +2397,8 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+6"/>
-        <location filename="../../gui/overview.py" line="-237"/>
-        <location line="+146"/>
+        <location filename="../../gui/overview.py" line="-249"/>
+        <location line="+148"/>
         <source>Look Up</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2896,7 +2899,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/inspector.py" line="-70"/>
-        <location filename="../../gui/profile_editor.py" line="-1348"/>
+        <location filename="../../gui/profile_editor.py" line="-1377"/>
         <source>Tags</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3100,7 +3103,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/rows.py" line="-58"/>
         <location line="+90"/>
         <location filename="../../gui/style.py" line="+43"/>
-        <location filename="../../gui/watched.py" line="-323"/>
+        <location filename="../../gui/watched.py" line="-345"/>
         <source>Done</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3174,8 +3177,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/inspector.py" line="-70"/>
         <location filename="../../gui/manual_match.py" line="+368"/>
         <location line="+2"/>
-        <location filename="../../gui/models.py" line="-18"/>
-        <location filename="../../gui/window.py" line="-275"/>
+        <location filename="../../gui/window.py" line="-286"/>
         <source>file</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3186,7 +3188,6 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location filename="../../gui/inspector.py" line="+0"/>
         <location filename="../../gui/manual_match.py" line="-2"/>
         <location line="+3"/>
-        <location filename="../../gui/models.py" line="+0"/>
         <location filename="../../gui/window.py" line="+0"/>
         <source>files</source>
         <translation type="unfinished"></translation>
@@ -3289,14 +3290,17 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="+3"/>
         <location line="+82"/>
         <location filename="../../gui/jobs.py" line="-9"/>
-        <location filename="../../gui/overview.py" line="+60"/>
-        <location line="+85"/>
-        <location line="+347"/>
-        <location line="+82"/>
-        <location line="+203"/>
+        <location filename="../../gui/overview.py" line="+61"/>
+        <location line="+95"/>
+        <location line="+385"/>
+        <location line="+24"/>
+        <location line="+5"/>
+        <location line="+102"/>
+        <location line="+244"/>
         <location line="+20"/>
-        <location line="+86"/>
-        <location filename="../../gui/watched.py" line="+777"/>
+        <location line="+100"/>
+        <location line="+19"/>
+        <location filename="../../gui/watched.py" line="+850"/>
         <location line="+57"/>
         <location line="+13"/>
         <location filename="../../gui/window.py" line="-54"/>
@@ -3308,13 +3312,16 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="-82"/>
         <location line="+83"/>
         <location filename="../../gui/jobs.py" line="+0"/>
-        <location filename="../../gui/overview.py" line="-823"/>
-        <location line="+85"/>
-        <location line="+347"/>
-        <location line="+82"/>
-        <location line="+203"/>
+        <location filename="../../gui/overview.py" line="-994"/>
+        <location line="+95"/>
+        <location line="+385"/>
+        <location line="+24"/>
+        <location line="+5"/>
+        <location line="+102"/>
+        <location line="+244"/>
         <location line="+20"/>
-        <location line="+86"/>
+        <location line="+100"/>
+        <location line="+19"/>
         <location filename="../../gui/watched.py" line="-70"/>
         <location line="+58"/>
         <location line="+13"/>
@@ -3485,7 +3492,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location filename="../../gui/history.py" line="-29"/>
-        <location filename="../../gui/window.py" line="-440"/>
+        <location filename="../../gui/window.py" line="-451"/>
         <source>History</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3497,7 +3504,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+2"/>
         <location filename="../../gui/profiles.py" line="-289"/>
-        <location filename="../../gui/watched.py" line="-449"/>
+        <location filename="../../gui/watched.py" line="-500"/>
         <source>When</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3571,7 +3578,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+14"/>
-        <location filename="../../gui/models.py" line="+18"/>
+        <location filename="../../gui/models.py" line="+0"/>
         <source>Score</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4054,7 +4061,7 @@ New: {after}
         <location line="+5"/>
         <location line="+26"/>
         <location line="+12"/>
-        <location filename="../../gui/profile_editor.py" line="+870"/>
+        <location filename="../../gui/profile_editor.py" line="+899"/>
         <location line="+285"/>
         <location line="+1"/>
         <location filename="../../gui/rows.py" line="+96"/>
@@ -4083,7 +4090,7 @@ New: {after}
     </message>
     <message>
         <location line="+0"/>
-        <location filename="../../gui/watched.py" line="-400"/>
+        <location filename="../../gui/watched.py" line="-422"/>
         <source>Ignored</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4125,7 +4132,7 @@ New: {after}
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/overview.py" line="-124"/>
+        <location filename="../../gui/overview.py" line="-157"/>
         <source>Stays in its folder, names unchanged</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4162,7 +4169,7 @@ New: {after}
     </message>
     <message>
         <location line="+4"/>
-        <location filename="../../gui/profile_editor.py" line="-1153"/>
+        <location filename="../../gui/profile_editor.py" line="-1182"/>
         <source>Artwork</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4177,6 +4184,7 @@ New: {after}
         <location filename="../../gui/report.py" line="+0"/>
         <location filename="../../gui/style.py" line="-2"/>
         <location filename="../../gui/watched.py" line="+2"/>
+        <location line="+38"/>
         <source>Unresolved</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4189,9 +4197,9 @@ New: {after}
         <location line="+439"/>
         <location filename="../../gui/report.py" line="-4"/>
         <location filename="../../gui/tagnames.py" line="-23"/>
-        <location filename="../../gui/watched.py" line="+359"/>
+        <location filename="../../gui/watched.py" line="+343"/>
         <location line="+39"/>
-        <location line="+451"/>
+        <location line="+502"/>
         <source>Album</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4265,7 +4273,7 @@ New: {after}
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/watched.py" line="-850"/>
+        <location filename="../../gui/watched.py" line="-923"/>
         <source>Undone</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4335,13 +4343,13 @@ New: {after}
     <message>
         <location line="+0"/>
         <location filename="../../gui/models.py" line="+0"/>
-        <location filename="../../gui/overview.py" line="-770"/>
-        <location filename="../../gui/watched.py" line="+76"/>
+        <location filename="../../gui/overview.py" line="-909"/>
+        <location filename="../../gui/watched.py" line="+98"/>
         <location line="+32"/>
         <location line="+209"/>
         <location line="+43"/>
         <location line="+39"/>
-        <location filename="../../gui/window.py" line="+45"/>
+        <location filename="../../gui/window.py" line="+56"/>
         <location line="+11"/>
         <source>Profile</source>
         <translation type="unfinished"></translation>
@@ -4400,7 +4408,7 @@ New: {after}
     </message>
     <message>
         <location line="-88"/>
-        <location filename="../../gui/work.py" line="+97"/>
+        <location filename="../../gui/work.py" line="+98"/>
         <source>That did not work.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4696,7 +4704,7 @@ New: {after}
     </message>
     <message>
         <location line="+38"/>
-        <location filename="../../gui/overview.py" line="+946"/>
+        <location filename="../../gui/overview.py" line="+1104"/>
         <source>That is not a MusicBrainz or Discogs release link.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4846,7 +4854,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/models.py" line="-28"/>
+        <location filename="../../gui/models.py" line="-82"/>
         <source>Partial: the release is known, but which pressing is not proven</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4861,17 +4869,127 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+26"/>
+        <location line="+4"/>
+        <source>Cat. no.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Matrix</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Your scans show the barcode and catalogue number of this release: the pressing is proven</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Your scans agree with this release, but do not prove which pressing it is</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Your scans name another pressing: decide in Needs attention</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Scans were read but no barcode or catalogue number was found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>disc ID</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>your files&apos; link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>web search of your scans</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>barcode lookup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>{0} {1} differs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>— Nothing read</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>Web</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+21"/>
+        <source>will move</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>{0} will move</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>will be copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>{0} will be copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>stay in their folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>stays in its folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>{0}, {1}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
         <source>Why</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+83"/>
+        <location line="+1"/>
+        <source>Scans</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+114"/>
         <source>rule “{0}”</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+22"/>
+        <location line="+30"/>
         <source>Profile {0}, chosen for this album</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4886,7 +5004,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-1286"/>
+        <location filename="../../gui/overview.py" line="-1458"/>
         <source>Profile&apos;s sources</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4897,20 +5015,30 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+79"/>
         <location line="+10"/>
-        <location line="+250"/>
+        <source>Waiting…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Looking up…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+73"/>
+        <location line="+10"/>
+        <location line="+260"/>
         <source>As Above ({0})</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-252"/>
+        <location line="-262"/>
         <source>Profile for this album</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+44"/>
-        <location filename="../../gui/window.py" line="-58"/>
+        <location line="+52"/>
+        <location filename="../../gui/window.py" line="-69"/>
         <source>Overview</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4951,13 +5079,13 @@ New: {after}
     </message>
     <message>
         <location line="+7"/>
-        <location line="+333"/>
-        <location filename="../../gui/profile_editor.py" line="+765"/>
+        <location line="+346"/>
+        <location filename="../../gui/profile_editor.py" line="+783"/>
         <source>Sources</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-326"/>
+        <location line="-339"/>
         <source>Sources to look up with</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4993,12 +5121,12 @@ New: {after}
     </message>
     <message>
         <location line="+22"/>
-        <location filename="../../gui/window.py" line="+116"/>
+        <location filename="../../gui/window.py" line="+127"/>
         <source>Online services</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+32"/>
+        <location line="+34"/>
         <source>Albums in the preview</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5008,7 +5136,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+62"/>
+        <location line="+63"/>
         <source>Apply Selected Albums…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5038,7 +5166,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+85"/>
+        <location line="+95"/>
         <source>{0} found, not looked up yet. Select the albums you want and press Look Up (none selected: all of them).</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5069,13 +5197,13 @@ New: {after}
     </message>
     <message>
         <location line="+1"/>
-        <location line="+181"/>
+        <location line="+188"/>
         <source>Save to Profile</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-174"/>
-        <location line="+184"/>
+        <location line="-181"/>
+        <location line="+191"/>
         <source>The profile was not changed.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5145,7 +5273,22 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+152"/>
+        <location line="+101"/>
+        <source>Cancelling; Look Up again when it has stopped.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
+        <source>{0} queued: looked up when this look-up ends.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+30"/>
+        <source> Then {0} queued.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+88"/>
         <source>Previewing {name} with the release you chose; nothing is written until you apply.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5210,7 +5353,17 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+6"/>
+        <source>Applying album {0} of {n}: {name}…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+17"/>
+        <source>Applying album {0} of {n}: {name} — file {1} of {m}: {file}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+36"/>
         <source>{0} ({1} folders)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5220,19 +5373,19 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-543"/>
-        <location line="+318"/>
-        <location line="+212"/>
+        <location line="-671"/>
+        <location line="+333"/>
+        <location line="+325"/>
         <source>This profile cannot be used.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-522"/>
+        <location line="-650"/>
         <source>Finding the albums… nothing is looked up yet.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+318"/>
+        <location line="+335"/>
         <source>{0} already looked up with {1}.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5257,7 +5410,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+37"/>
+        <location line="+82"/>
         <source>Looking up album {0} of {n} with {w}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5277,22 +5430,23 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location line="+3"/>
         <source> Nothing is changed while previewing.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+125"/>
+        <location line="+148"/>
         <source>{0} of {n}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+15"/>
         <source>Identifying album {0} of {n}: {name}… nothing is changed while previewing.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+67"/>
+        <location line="-107"/>
+        <location line="+207"/>
         <source>Preview finished</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5355,7 +5509,7 @@ New: {after}
     </message>
     <message>
         <location line="+2"/>
-        <location filename="../../gui/watched.py" line="+451"/>
+        <location filename="../../gui/watched.py" line="+502"/>
         <source>Albums</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5391,13 +5545,14 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+28"/>
+        <location line="-1269"/>
+        <location line="+1310"/>
         <location filename="../../gui/watched.py" line="-28"/>
         <source>Applying…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+28"/>
+        <location line="+29"/>
         <source>Your edit is still being applied to the preview. Apply again in a moment.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5427,8 +5582,13 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+13"/>
         <source>Cancelling after the current album…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source> The {0} queued are not looked up.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5452,7 +5612,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+26"/>
+        <location line="+27"/>
         <source>{0} files in {name}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5620,7 +5780,7 @@ New: {after}
     <message>
         <location filename="../../gui/preferences.py" line="-1180"/>
         <location line="+180"/>
-        <location filename="../../gui/profile_editor.py" line="-733"/>
+        <location filename="../../gui/profile_editor.py" line="-751"/>
         <source>General</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5655,7 +5815,7 @@ New: {after}
     <message>
         <location line="-330"/>
         <location line="+1025"/>
-        <location filename="../../gui/profile_editor.py" line="+1327"/>
+        <location filename="../../gui/profile_editor.py" line="+1356"/>
         <source>Advanced</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5782,7 +5942,7 @@ New: {after}
     </message>
     <message>
         <location line="+2"/>
-        <location filename="../../gui/profile_editor.py" line="-1325"/>
+        <location filename="../../gui/profile_editor.py" line="-1354"/>
         <source>Identification</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5867,7 +6027,7 @@ New: {after}
     <message>
         <location line="+28"/>
         <location line="+4"/>
-        <location filename="../../gui/watched.py" line="-482"/>
+        <location filename="../../gui/watched.py" line="-533"/>
         <location line="+1"/>
         <source>Keep watching while TagMender is open</source>
         <translation type="unfinished"></translation>
@@ -5875,8 +6035,8 @@ New: {after}
     <message>
         <location filename="../../gui/watched.py" line="-42"/>
         <location line="+26"/>
-        <location line="+392"/>
-        <location filename="../../gui/window.py" line="-114"/>
+        <location line="+443"/>
+        <location filename="../../gui/window.py" line="-125"/>
         <source>Watched folders</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6349,7 +6509,7 @@ New: {after}
     </message>
     <message>
         <location filename="../../gui/search.py" line="+682"/>
-        <location filename="../../gui/window.py" line="+584"/>
+        <location filename="../../gui/window.py" line="+595"/>
         <source>Select an album in Overview first.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6709,24 +6869,24 @@ This is not the application key under Keys.</source>
     <message>
         <location filename="../../gui/profile_editor.py" line="-40"/>
         <location line="+2"/>
-        <location line="+1022"/>
+        <location line="+1051"/>
         <source>Fix in place</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1024"/>
-        <location line="+1025"/>
+        <location line="-1053"/>
+        <location line="+1054"/>
         <source>Copy into the library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1024"/>
-        <location line="+1024"/>
+        <location line="-1053"/>
+        <location line="+1053"/>
         <source>Move into the library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1016"/>
+        <location line="-1045"/>
         <source>Short names (initials)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6763,12 +6923,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+0"/>
-        <location line="+748"/>
+        <location line="+766"/>
         <source>Move aside</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-747"/>
+        <location line="-765"/>
         <source>Basic</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6820,12 +6980,13 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-438"/>
+        <location filename="../../gui/profile_editor.py" line="+58"/>
+        <location filename="../../gui/profiles.py" line="-438"/>
         <source>Album artist</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location filename="../../gui/profiles.py" line="+1"/>
         <location filename="../../gui/tagnames.py" line="-2"/>
         <source>Genre</source>
         <translation type="unfinished"></translation>
@@ -6918,6 +7079,7 @@ This is not the application key under Keys.</source>
     <message>
         <location line="-211"/>
         <location line="+5"/>
+        <location filename="../../gui/watched.py" line="-369"/>
         <source>Match</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6989,7 +7151,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+6"/>
+        <location filename="../../gui/profile_editor.py" line="-52"/>
         <source>CoverUp, then Cover Art Archive, then Discogs</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7021,7 +7183,7 @@ This is not the application key under Keys.</source>
     <message>
         <location filename="../../gui/profiles.py" line="+43"/>
         <location line="+8"/>
-        <location filename="../../gui/window.py" line="-583"/>
+        <location filename="../../gui/window.py" line="-594"/>
         <source>Profiles</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7082,7 +7244,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+1050"/>
+        <location filename="../../gui/profile_editor.py" line="+1079"/>
         <source>Pictures folder name</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7108,22 +7270,22 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="-886"/>
-        <location filename="../../gui/profile_editor.py" line="-233"/>
+        <location filename="../../gui/profile_editor.py" line="-244"/>
         <location line="+5"/>
-        <location line="+324"/>
+        <location line="+335"/>
         <source>Never</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-257"/>
+        <location filename="../../gui/profile_editor.py" line="-268"/>
         <source>As credited on the release</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-830"/>
+        <location line="-848"/>
         <location line="+1"/>
-        <location line="+819"/>
-        <location line="+342"/>
+        <location line="+837"/>
+        <location line="+353"/>
         <location filename="../../gui/profiles.py" line="+42"/>
         <location filename="../../gui/script_editor.py" line="-48"/>
         <source>On</source>
@@ -7131,10 +7293,10 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="+171"/>
-        <location filename="../../gui/profile_editor.py" line="-1162"/>
+        <location filename="../../gui/profile_editor.py" line="-1191"/>
         <location line="+1"/>
-        <location line="+819"/>
-        <location line="+33"/>
+        <location line="+837"/>
+        <location line="+44"/>
         <location line="+38"/>
         <location line="+30"/>
         <location line="+48"/>
@@ -7168,31 +7330,31 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-829"/>
+        <location line="-855"/>
         <location filename="../../gui/tagnames.py" line="+4"/>
         <source>Lyrics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-47"/>
-        <location line="+770"/>
+        <location line="-50"/>
+        <location line="+788"/>
         <location line="+50"/>
         <location line="+10"/>
         <location line="+8"/>
-        <location line="+14"/>
+        <location line="+25"/>
         <location line="+82"/>
         <location line="+6"/>
         <source>Automatic</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-939"/>
-        <location line="+890"/>
+        <location line="-968"/>
+        <location line="+919"/>
         <source>At the Audiophile level</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-888"/>
+        <location line="-917"/>
         <source>Deezer</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7233,23 +7395,23 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+1061"/>
+        <location line="+1090"/>
         <source>Albums nothing identified</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1060"/>
+        <location line="-1089"/>
         <source>Watched folders: whether albums are filed without asking, how long to wait and how often to look are set on the Watched folders page. Notifications, and watching while TagMender is open, are in Preferences › General.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+7"/>
-        <location line="+694"/>
+        <location line="+712"/>
         <source>Audio files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-692"/>
+        <location line="-710"/>
         <source>Databases</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7289,13 +7451,18 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
-        <location line="+806"/>
+        <location line="+2"/>
+        <source>The Artist tag always keeps the whole credit; this changes the album artist and the folder it names.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <location line="+832"/>
         <source>Credits</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-805"/>
+        <location line="-831"/>
         <source>Dates and versions</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7474,12 +7641,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/profile_editor.py" line="+3"/>
-        <location line="+918"/>
+        <location line="+944"/>
         <source>Artist photos</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-918"/>
+        <location line="-944"/>
         <source>At the Enthusiast and Audiophile levels.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7495,17 +7662,17 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+969"/>
+        <location line="+995"/>
         <source>Files that go with the album</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-968"/>
+        <location line="-994"/>
         <source>When a file is already there</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+643"/>
+        <location line="+658"/>
         <source>Discogs needs a free personal token: Preferences › Keys.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7520,7 +7687,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/watched.py" line="-635"/>
+        <location filename="../../gui/watched.py" line="-317"/>
         <location line="+1"/>
         <source>Include subfolders</source>
         <translation type="unfinished"></translation>
@@ -7733,12 +7900,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+103"/>
+        <location line="+114"/>
         <source>Keep</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-484"/>
+        <location line="-495"/>
         <source>ReplayGain</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7748,7 +7915,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+442"/>
+        <location line="+453"/>
         <source>Album (Remaster 2024)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7818,8 +7985,8 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-1147"/>
-        <location line="+445"/>
+        <location filename="../../gui/overview.py" line="-1308"/>
+        <location line="+465"/>
         <location line="+18"/>
         <location filename="../../gui/profile_editor.py" line="+2"/>
         <source>Library folder</source>
@@ -8221,7 +8388,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="+435"/>
+        <location filename="../../gui/overview.py" line="+556"/>
         <location filename="../../gui/profile_editor.py" line="+5"/>
         <location filename="../../gui/watched.py" line="-42"/>
         <source>and {0} more</source>
@@ -8259,19 +8426,19 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="-152"/>
-        <location filename="../../gui/profile_editor.py" line="-1824"/>
+        <location filename="../../gui/profile_editor.py" line="-1853"/>
         <source>Standard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-1102"/>
-        <location line="+739"/>
+        <location filename="../../gui/overview.py" line="-1255"/>
+        <location line="+771"/>
         <location filename="../../gui/profile_editor.py" line="-6"/>
         <source>MusicBrainz only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-738"/>
+        <location line="-770"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>MusicBrainz preferred</source>
         <translation type="unfinished"></translation>
@@ -8284,13 +8451,13 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+737"/>
+        <location line="+769"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>Discogs only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+754"/>
+        <location filename="../../gui/profile_editor.py" line="+772"/>
         <source>A lossless file made from an MP3 or other lossy file. Move aside puts the album in the folder for albums nothing identified; a profile that copies holds it for review instead.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8390,7 +8557,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+88"/>
+        <location line="+99"/>
         <source>Genre, only when no other genre</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8420,7 +8587,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-91"/>
+        <location line="-102"/>
         <source>Fix spelling variations</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8435,7 +8602,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+93"/>
+        <location line="+104"/>
         <source>The name in your system language, when MusicBrainz knows one.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8495,7 +8662,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-838"/>
+        <location line="-864"/>
         <source>Retrying marked albums</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8505,7 +8672,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+233"/>
+        <location line="+248"/>
         <source>a database is off that the preferred one needs</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8716,7 +8883,43 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location line="+1"/>
+        <source>Lead artist only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Thomas Strønen &amp; Time Is a Blind Guide: the album artist is Thomas Strønen, and the album is filed in his folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Bands named after a member</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <location line="+4"/>
+        <source>With Lead artist only.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-3"/>
+        <source>Steve Morse Band, Pat Metheny Group, The Jimi Hendrix Experience: filed under that member, when MusicBrainz lists them as a member. Deep Purple stays Deep Purple.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Your own album artists</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>One per line, Credit = Album artist, such as Dregs = Dixie Dregs. Credit = Credit keeps one as credited, such as Ben Folds Five = Ben Folds Five.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+5"/>
         <source>Album and tracks</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8846,12 +9049,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-961"/>
+        <location line="-990"/>
         <source>Which files are read, and which are left alone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+964"/>
+        <location line="+993"/>
         <source>Save artist.jpg</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8961,12 +9164,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-373"/>
+        <location line="-384"/>
         <source>Description</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-730"/>
+        <location line="-748"/>
         <source>Cover Art Archive (MusicBrainz)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8987,14 +9190,14 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+13"/>
-        <location line="+819"/>
-        <location line="+42"/>
+        <location line="+837"/>
+        <location line="+53"/>
         <location line="+54"/>
         <source>Same as my existing tagger</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-904"/>
+        <location line="-933"/>
         <source>How each album is matched to a release in the music databases.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9044,7 +9247,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+12"/>
         <source>ReplayGain: volume tags that let players play every track equally loud. Measured at the Audiophile level.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9064,7 +9267,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+262"/>
+        <location line="+277"/>
         <source>Only at the Audiophile level, with ReplayGain on.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9099,7 +9302,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+89"/>
+        <location line="+100"/>
         <source>Discogs styles</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9174,7 +9377,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-425"/>
+        <location line="-436"/>
         <source>Performers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9199,7 +9402,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+440"/>
+        <location line="+451"/>
         <source>Find lyrics</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9319,7 +9522,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-213"/>
+        <location line="-224"/>
         <source>Tagging level</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9334,7 +9537,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+142"/>
+        <location line="+153"/>
         <source>Look for covers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10033,6 +10236,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     </message>
     <message>
         <location line="+1"/>
+        <location filename="../../gui/watched.py" line="-25"/>
         <source>Recording</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10049,14 +10253,15 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+0"/>
+        <location filename="../../gui/models.py" line="-222"/>
+        <location filename="../../gui/search.py" line="+0"/>
         <location line="+1"/>
         <location filename="../../gui/versions.py" line="+1"/>
         <source>Country</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1"/>
+        <location filename="../../gui/search.py" line="-1"/>
         <location filename="../../gui/versions.py" line="+2"/>
         <source>Tracks</source>
         <translation type="unfinished"></translation>
@@ -10195,8 +10400,8 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     <message>
         <location line="+6"/>
         <location line="+1"/>
-        <location filename="../../gui/window.py" line="+48"/>
-        <location line="+706"/>
+        <location filename="../../gui/window.py" line="+59"/>
+        <location line="+717"/>
         <source>Search</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10462,7 +10667,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-1826"/>
+        <location filename="../../gui/profile_editor.py" line="-1855"/>
         <location filename="../../gui/setup.py" line="-50"/>
         <location filename="../../gui/sheets.py" line="+74"/>
         <source>Copy</source>
@@ -10762,7 +10967,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     </message>
     <message>
         <location filename="../../gui/style.py" line="+2"/>
-        <location filename="../../gui/watched.py" line="-46"/>
+        <location filename="../../gui/watched.py" line="-43"/>
         <source>Up to date</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10790,9 +10995,10 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+877"/>
+        <location filename="../../gui/profile_editor.py" line="+906"/>
         <location filename="../../gui/report.py" line="-2"/>
         <location filename="../../gui/style.py" line="+5"/>
+        <location filename="../../gui/watched.py" line="+32"/>
         <source>Album only</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10804,6 +11010,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     <message>
         <location filename="../../gui/report.py" line="+0"/>
         <location filename="../../gui/style.py" line="+0"/>
+        <location filename="../../gui/watched.py" line="+1"/>
         <source>Partial</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10893,13 +11100,14 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location filename="../../gui/models.py" line="-1"/>
+        <location filename="../../gui/tagnames.py" line="+1"/>
         <location filename="../../gui/versions.py" line="-1"/>
         <source>Barcode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+1"/>
+        <location filename="../../gui/tagnames.py" line="+1"/>
         <source>Bits per sample</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11534,12 +11742,13 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location filename="../../gui/models.py" line="+0"/>
         <location filename="../../gui/versions.py" line="+0"/>
         <source>Label</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+0"/>
+        <location filename="../../gui/versions.py" line="+0"/>
         <source>Catalog #</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11744,7 +11953,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/watched.py" line="-10"/>
+        <location filename="../../gui/watched.py" line="-43"/>
         <source>Done · Partial</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11789,7 +11998,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+47"/>
+        <location line="+69"/>
         <source>Watched folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11868,7 +12077,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-92"/>
+        <location line="-114"/>
         <source>{0} min</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11883,7 +12092,22 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+61"/>
+        <location line="+15"/>
+        <source>Exact</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+9"/>
+        <source>Exact: the release and its pressing match</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Unresolved: no release could be chosen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+58"/>
         <source>Albums in folders inside this one are found too.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -11976,12 +12200,12 @@ This is a profile setting: it applies to every folder the profile watches.</sour
     </message>
     <message>
         <location line="+33"/>
-        <location line="+217"/>
+        <location line="+268"/>
         <source>Run in the Background…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-216"/>
+        <location line="-267"/>
         <source>Run in the background</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12031,12 +12255,22 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+2"/>
+        <location line="+6"/>
         <source>Recently handled albums</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+90"/>
+        <location line="+88"/>
+        <source>{0} is no longer waiting for approval.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+6"/>
+        <source>Review…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+33"/>
         <source>Automatically</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12056,7 +12290,12 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+47"/>
+        <location line="+23"/>
+        <source>Waiting for your approval: double-click to review it in Needs attention</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+34"/>
         <source>Yes</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12368,12 +12607,12 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/window.py" line="-758"/>
+        <location filename="../../gui/window.py" line="-780"/>
         <source>Library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-834"/>
+        <location filename="../../gui/profile_editor.py" line="-863"/>
         <location filename="../../gui/window.py" line="+3"/>
         <source>Automation</source>
         <translation type="unfinished"></translation>
@@ -12427,12 +12666,12 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+34"/>
+        <location line="+36"/>
         <source>Progress</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+13"/>
         <source>The profile the preview uses</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12502,7 +12741,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+61"/>
+        <location line="+72"/>
         <source>Report a problem?</source>
         <translation type="unfinished"></translation>
     </message>

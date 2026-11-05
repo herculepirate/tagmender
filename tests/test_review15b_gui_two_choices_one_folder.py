@@ -29,12 +29,19 @@ class _Page:
     """The Overview page's state choose_release() uses."""
     def __init__(self, a):
         self.a, self.forced = a, {}
+        self.sources = mock.Mock(currentData=lambda: "profile")
 
     def selected(self):
         return self.a
 
     def preview(self):
         pass
+
+    def look_up(self, *_a, **_k):              # (0.8.4: the album alone is looked up again)
+        pass
+
+    def with_versions(self, albums):
+        return list(albums)
 
 
 @unittest.skipIf(QInputDialog is None, "PySide6 not installed")

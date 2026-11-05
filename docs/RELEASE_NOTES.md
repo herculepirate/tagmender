@@ -1,5 +1,45 @@
 # Release notes
 
+## 0.8.4
+
+**Album artist: lead artist only** (a profile option, Tags › Album artist; off by default)
+- The album artist, and the folder it names, can be the lead artist alone, while Artist keeps
+  the whole credit: *Thomas Strønen & Time Is a Blind Guide* is filed as **Thomas Strønen**.
+- *Bands named after a member*: Steve Morse Band, Pat Metheny Group, The Jimi Hendrix
+  Experience, Glenn Miller and His Orchestra, Tom Petty and the Heartbreakers… are filed under
+  that member when MusicBrainz lists them as a member. Deep Purple stays Deep Purple, and so
+  do bands not named after a member (Electric Light Orchestra, The Marshall Tucker Band).
+- *Your own album artists*: one per line, `Credit = Album artist`; `Ben Folds Five = Ben Folds
+  Five` keeps one as credited.
+- The sort name and MusicBrainz ID follow the new album artist. When MusicBrainz cannot be
+  asked, an album already filed stays where it is.
+
+**Overview**
+- Look Up while another look-up runs: the albums are queued and looked up next (Cancel
+  clears the queue).
+- Each album's row shows its result as soon as it is matched, with *Waiting…* and *Looking
+  up…* on the others, instead of all at the end.
+- Apply shows the album and the file being written ("album 2 of 5 … file 3 of 12"), with
+  *Applying…* on its row.
+- The progress count beside the bar is readable again.
+- The Changes column says what Apply will do, before it is done: "10 tracks, will move",
+  "15 tracks, stay in their folder".
+- A **Scans** column says what your scans showed about the release: "✓ Barcode, Cat. no."
+  (the pressing is proven), "~ Label" (agrees, proves nothing), "✗ Cat. no. differs" (they name
+  another pressing), "— Nothing read". Never a percentage: a score is not proof.
+- **Source** says how the release was found when not by a plain search: "MusicBrainz · disc
+  ID", "· your files' link", "· web search of your scans", "· barcode lookup"; albums tagged
+  from store pages say "Web".
+
+**Watched folders**
+- *Recently* has a **Match** column: how sure the identification was ("Exact · ✓ Barcode",
+  "Album only", "Partial", "Unresolved"), for albums handled from this version on.
+- "Waiting for approval" stands out; Review… (right-click, or double-click) chooses that album
+  in the list of plans waiting for approval and shows its changes, to apply there.
+- Choosing another release for one album (Change Release, or the report's Apply This Release
+  for an album already listed) looks up that album alone; the other albums listed stay as they
+  are, instead of the whole list being looked up again.
+
 ## 0.8.3
 
 **A profile per album**

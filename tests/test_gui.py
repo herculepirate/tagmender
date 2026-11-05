@@ -107,16 +107,18 @@ class Gui(te.Base):
         a = ov.selected()
         link = "https://musicbrainz.org/release/0a8e97fd-4f6a-4bd7-8e4b-6d3a0b2ad2f1"
         with mock.patch.object(self.gui.sheets, "get_text", return_value=(link, True)), \
-                mock.patch.object(type(ov), "preview") as again:
-            ov.choose_release()
+                mock.patch.object(type(ov), "look_up") as again:
+            ov.choose_release()                  # (0.8.4: that album alone is looked up again with it)
         import engine
         self.assertEqual(ov.forced, {_os.path.realpath(a["source_dir"]): [{
             "ref": link, "files": engine.plan_entry_files(a)}]})
         self.assertTrue(set(engine.plan_entry_files(a)) >= {fe["src"] for fe in a["files"]})
         again.assert_called_once()
+        self.assertEqual([x is a for x in again.call_args.args[1]], [True])
+        self.assertTrue(again.call_args.kwargs.get("again"))
         with mock.patch.object(self.gui.sheets, "get_text", return_value=("not a link", True)), \
                 mock.patch.object(self.gui.sheets, "warning") as warned, \
-                mock.patch.object(type(ov), "preview") as again:
+                mock.patch.object(type(ov), "look_up") as again:
             ov.choose_release()
         warned.assert_called_once()
         again.assert_not_called()

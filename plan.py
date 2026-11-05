@@ -93,6 +93,12 @@ class Proposal:
     # the releases the matcher scored best, for the run report's suggestions (engine.candidates_of):
     # [{"source", "id", "url", "ref", "score", "title", "lengths"}]
     candidates: list = field(default_factory=list)
+    # reporting only (engine.scans_of): what the album's scans showed about the chosen
+    # release, {"state": proven|agrees|differs|unread, "found": [kinds], "against": [kinds]}
+    # (None: no scans, or OCR did not run), and how the release was found: "" (plain search),
+    # disc_id, link, scan_search, barcode_lookup or fingerprint (None: not known)
+    scans: dict | None = None
+    via: str | None = None
 
 
 def _fp(path):
@@ -1096,6 +1102,10 @@ class Planner:
                  # (every file of the album as found: for a release the user chooses for it)
                  "album_files": sorted({str(x) for x in (getattr(prop, "group_files", None) or prop.files or [])})}
         entry["notes"].extend(getattr(prop, "notes", None) or [])
+        if getattr(prop, "scans", None):
+            entry["identification"]["scans"] = dict(prop.scans)
+        if getattr(prop, "via", None) is not None:
+            entry["identification"]["via"] = prop.via
         partial = prop.status == "identified" and tier_of(prop) == "partial"
         # Album only (the album known, its pressing tied) is, like Partial, a release not proven
         # (levels.ALBUM_TIERS): marked TAGMENDER=Partial too, its reason "ambiguous_release:

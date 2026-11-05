@@ -23,6 +23,7 @@ planned and waits, as every album of a profile that is not `unattended` does: th
 from __future__ import annotations
 
 import errno
+import json
 import os
 import sqlite3
 import stat
@@ -83,7 +84,26 @@ def _db():
     db = sqlite3.connect(ex.STATE_DIR / "state.db", timeout=60)
     db.execute("CREATE TABLE IF NOT EXISTS processed (folder TEXT PRIMARY KEY, profile TEXT, signature TEXT,"
                " status TEXT, attempts INTEGER, next_try REAL, ts REAL, detail TEXT)")
+    # how each album was identified (match_of), for the Recently list: a table of its own, so
+    # the processed rows keep their eight columns (executor's undo record writes them by
+    # position); a row counts only while its ts is its processed row's (recent)
+    db.execute("CREATE TABLE IF NOT EXISTS processed_match (folder TEXT PRIMARY KEY, ts REAL, match TEXT)")
     return db
+
+
+def match_of(entry) -> dict | None:
+    """What identification said of a plan album, for the Recently list: {"tier", "confidence",
+    "provider", "scans", "via"}; None when the plan does not say (a listed folder, no tier)."""
+    ident = (entry or {}).get("identification") or {}
+    if not ident.get("tier"):
+        return None
+    conf = ident.get("confidence")
+    try:
+        conf = None if conf is None else float(conf)
+    except (TypeError, ValueError):
+        conf = None
+    return {"tier": ident.get("tier"), "confidence": conf, "provider": ident.get("provider") or "",
+            "scans": ident.get("scans") or None, "via": ident.get("via") or ""}
 
 
 def _files_key(folder, files) -> str:
@@ -365,7 +385,7 @@ class Watcher:
             return True, "retry"
         return False, status
 
-    def record(self, db, folder, prof, status, attempts, detail="", key=None, files=None, deep=True):
+    def record(self, db, folder, prof, status, attempts, detail="", key=None, files=None, deep=True, match=None):
         sig, _n, _p = snapshot(folder, files, deep) if Path(folder).exists() else ("gone", 0, False)
         if status in ("provider_error", "failed", "conflict", "blocked"):
             nxt = time.time() + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
@@ -373,9 +393,17 @@ class Watcher:
             nxt = time.time() + prof["retry"]["after_days"] * 86400
         else:
             nxt = 0
+        key, now = key or planmod.db_text(folder), time.time()
         db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
-                   (key or planmod.db_text(folder), prof.name, sig, status, attempts, nxt, time.time(),
-                    planmod.db_text(detail)))
+                   (key, prof.name, sig, status, attempts, nxt, now, planmod.db_text(detail)))
+        try:
+            if match:
+                db.execute("INSERT OR REPLACE INTO processed_match VALUES (?,?,?)",
+                           (key, now, json.dumps(match, ensure_ascii=False)))
+            else:
+                db.execute("DELETE FROM processed_match WHERE folder=?", (key,))
+        except sqlite3.Error:                # (a database without the table: the record stands)
+            pass
         db.commit()
 
     def _status_of(self, a, prop, outcome, prof):
@@ -420,7 +448,8 @@ class Watcher:
             folder = folder.parent
         if not all(p.exists() for p in dst):
             return
-        self.record(db, folder, prof, status, 1, entry.get("label", ""), key=album_key(folder, dst), files=dst)
+        self.record(db, folder, prof, status, 1, entry.get("label", ""), key=album_key(folder, dst), files=dst,
+                    match=match_of(entry))
 
     def tick(self):
         """One pass over every watched root. Returns {folder: what happened}. One pass at a
@@ -568,10 +597,14 @@ class Watcher:
                             dfiles = [Path(fe["src"]) for fe in x.get("files") or []
                                       if Path(fe["src"]).suffix.lower() in ex.AUDIO_EXT]
                             self.record(db, Path(x["source_dir"]), prof, st, attempts, x.get("label", ""),
-                                        key=album_key(Path(x["source_dir"]), dfiles), files=dfiles, deep=True)
+                                        key=album_key(Path(x["source_dir"]), dfiles), files=dfiles, deep=True,
+                                        match=match_of(x))
+                    # (the set: as the album it is remembered by)
+                    worst = next((x for x, _o, st in each if st == status), a)
                     self.record(db, g.folder, prof, status, attempts,
                                 ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
-                                key=k, files=scope, deep=deep)
+                                key=k, files=scope, deep=deep,
+                                match=None if status == "excluded" else match_of(worst))
                     if res is not None:
                         for x, out_i, _st in each:
                             self.filed(db, x, prof, out_i)
@@ -629,6 +662,7 @@ def forget(root) -> int:
         rows = [r[0] for r in db.execute("SELECT folder, status FROM processed").fetchall()
                 if r[1] != "undone" and (r[0] == root or r[0].startswith(root + "/") or r[0].startswith(root + "#"))]
         db.executemany("DELETE FROM processed WHERE folder=?", [(f,) for f in rows])
+        db.executemany("DELETE FROM processed_match WHERE folder=?", [(f,) for f in rows])
         db.commit()
     finally:
         db.close()
@@ -819,14 +853,15 @@ def apply_pending(path, log=None) -> dict:
                     "failed" if r["status"] == "failed" else "conflict"
                 if status in ("done", "unchanged") and _is_partial(a):
                     status = "partial"                    # (its release not proven: tried again later)
-                each.append((status, r.get("detail") or r.get("label", "")))
+                each.append((status, r.get("detail") or r.get("label", ""), a))
             if meta.get("key") and each:
                 # (the plan's albums - a set's discs - remembered by one key: as the one most in
                 # need of another look, as a pass remembers them, never as whichever ran last)
-                status = _worst([st for st, _d in each])
-                detail = next(d for st, d in each if st == status)
+                status = _worst([st for st, _d, _a in each])
+                detail, entry = next((d, x) for st, d, x in each if st == status)
                 w.record(db, planmod.db_path(meta["folder"]), prof, status, 1, detail, key=meta["key"],
-                         files=[planmod.db_path(f) for f in meta.get("files") or []], deep=meta.get("deep", True))
+                         files=[planmod.db_path(f) for f in meta.get("files") or []], deep=meta.get("deep", True),
+                         match=match_of(entry))
         finally:
             db.close()
     return res
@@ -848,21 +883,30 @@ def dismiss_pending(path, why="dismissed") -> Path:
 
 
 def recent(limit=50) -> list[tuple]:
-    """What the watcher did last: (folder, profile, status, when, label), newest first."""
+    """What the watcher did last: (folder, profile, status, when, label, match), newest first.
+    match: how the album was identified ({"tier", "confidence", "provider", "scans", "via"},
+    match_of), {} when not known (an older record, an error, an undo)."""
     try:
         db = _db()
-        rows = db.execute("SELECT folder, profile, status, ts, detail FROM processed ORDER BY ts DESC LIMIT ?",
-                          (limit,)).fetchall()
+        rows = db.execute("SELECT p.folder, p.profile, p.status, p.ts, p.detail, m.match FROM processed p"
+                          " LEFT JOIN processed_match m ON m.folder = p.folder AND m.ts = p.ts"
+                          " ORDER BY p.ts DESC LIMIT ?", (limit,)).fetchall()
         db.close()
     except sqlite3.Error:
         return []
     out = []
-    for key, prof, status, ts, detail in rows:
+    for key, prof, status, ts, detail, raw in rows:
+        try:
+            match = json.loads(raw) if raw else {}
+        except ValueError:
+            match = {}
+        if not isinstance(match, dict):
+            match = {}
         folder = str(planmod.db_path(key))
         if "#" in folder and len(folder.rsplit("#", 1)[1]) == 12:     # one album of a mixed folder
             folder = folder.rsplit("#", 1)[0]
         label = "" if status == "excluded" else (detail or "")         # (an excluded row holds a rules hash)
-        out.append((folder, prof, status, ts, label))
+        out.append((folder, prof, status, ts, label, match))
     return out
 
 

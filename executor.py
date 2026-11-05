@@ -1171,7 +1171,7 @@ def _put_back(data_from: Path, path: Path, owner_of=None):
 # executing
 # --------------------------------------------------------------------------
 class Executor:
-    def __init__(self, plan: dict, log=None, cancel=None, progress=None):
+    def __init__(self, plan: dict, log=None, cancel=None, progress=None, file_progress=None):
         self.plan = plan
         self.job = plan["job"]
         self.jd = job_dir(self.job)
@@ -1181,6 +1181,8 @@ class Executor:
         self.log = log or logsetup.setup("apply", job=self.job)
         self.cancel = cancel or (lambda: False)
         self.progress = progress or (lambda *a: None)
+        # (file_progress(album index, j, n, file): the j-th of the album's n files to write or move, next)
+        self.file_progress = file_progress or (lambda *a: None)
         self.rules = None
         self.results = []
         self.created = []
@@ -1333,10 +1335,10 @@ class Executor:
         done_steps = []
         self.created = []
         try:
-            for j, fe in enumerate(a["files"]):
-                if fe["op"] == "none" or Path(fe["src"]) in dec.excluded:
-                    continue
-                self.file_step(i, j, fe, a, done_steps)
+            todo = [j for j, fe in enumerate(a["files"]) if fe["op"] != "none" and Path(fe["src"]) not in dec.excluded]
+            for k, j in enumerate(todo):
+                self.file_progress(i, k, len(todo), a["files"][j]["src"])
+                self.file_step(i, j, a["files"][j], a, done_steps)
             if dec.excluded and a["companions"]:
                 self.journal.write(ev="note", album=i, text="a file of the album is excluded now; "
                                                             "its companion files stay where they are")

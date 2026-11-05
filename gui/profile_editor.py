@@ -109,6 +109,9 @@ GROUPS = {
                 N_("Automatic: what your existing tagger does, when its settings are used (Tags › Advanced), "
                    "else TagMender's default."), False),
     "compilations": ("tags", N_("Compilations"), "", False),
+    "album_artist": ("tags", N_("Album artist"),
+                     N_("The Artist tag always keeps the whole credit; this changes the album artist and the "
+                        "folder it names."), False),
     "credits": ("tags", N_("Credits"), "", False),
     "versions": ("tags", N_("Dates and versions"), "", False),
     "discogs": ("tags", N_("Discogs details"),
@@ -276,6 +279,21 @@ def _va_name_put(d, v, _vals):
         c["va_name"] = v.strip()
     else:
         c.pop("va_name", None)                   # (Automatic: the tagger's setting, as before)
+
+
+def _file_under_get(d):
+    """album_artist.file_under as list lines "Credit = Album artist"."""
+    return [f"{k} = {v}" for k, v in (dig(d, "album_artist.file_under") or {}).items()]
+
+
+def _file_under_put(d, v, _vals):
+    out = {}
+    for line in v or []:
+        k, sep, val = str(line).partition("=")
+        k, val = k.strip(), val.strip()
+        if k and sep:
+            out[k] = val or k                       # ("Band =": kept as credited)
+    d.setdefault("album_artist", {})["file_under"] = out
 
 
 def _id3_get(key):
@@ -915,6 +933,17 @@ SETTINGS = [
       foot=N_("Only when Grouping is empty; it never replaces yours.")),
     S("compilations.single_artist", N_("Also flag single-artist compilations"), "switch", "compilations",
       foot=N_("Best-ofs. Many players then list them under Various Artists.")),
+    S("album_artist.lead", N_("Lead artist only"), "switch", "album_artist",
+      foot=N_("Thomas Strønen & Time Is a Blind Guide: the album artist is Thomas Strønen, and the album is "
+              "filed in his folder.")),
+    S("album_artist.bands", N_("Bands named after a member"), "switch", "album_artist",
+      enable=_when(lambda v: bool(v.get("album_artist.lead")), N_("With Lead artist only.")),
+      foot=N_("Steve Morse Band, Pat Metheny Group, The Jimi Hendrix Experience: filed under that member, "
+              "when MusicBrainz lists them as a member. Deep Purple stays Deep Purple.")),
+    S("_file_under", N_("Your own album artists"), "list", "album_artist", get=_file_under_get,
+      put=_file_under_put, enable=_when(lambda v: bool(v.get("album_artist.lead")), N_("With Lead artist only.")),
+      foot=N_("One per line, Credit = Album artist, such as Dregs = Dixie Dregs. Credit = Credit keeps one as "
+              "credited, such as Ben Folds Five = Ben Folds Five.")),
     S("_credits", N_("Credits"), "popup", "credits", attr="pic_rel", get=_credits_get, put=_credits_put,
       covers=CREDIT_COVERS, show=_tagger_row("_credits"), note=_follow_note("_credits"),
       enable=_unless_basic,

@@ -529,6 +529,9 @@ albums), each row has a **Profile** drop-down: *As Above* uses the profile chose
 toolbar, or choose another for that album (several selected: right-click › Profile). Look Up and
 Preview plan each album with its own profile, and Apply runs one job per profile (each undone
 on its own from Jobs). Changing an album's profile after it was looked up looks it up again.
+Look Up while another look-up runs queues the albums; each row shows its result as soon as
+that album is matched (*Waiting…* and *Looking up…* on the others), and Apply shows the album
+and file it is writing.
 
 Its interactive tools each change only the preview; nothing reaches a music
 file until you apply it, through the same staged, verified and undoable path as everything else:

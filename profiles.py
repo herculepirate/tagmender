@@ -229,6 +229,10 @@ DEFAULTS = {
     # artist of a various-artists release) has no default here: unset, the tagger's own
     # setting is used, as before this group existed
     "compilations": {"extra_flags": False, "grouping": False, "single_artist": False},
+    # album artist as the lead artist alone (album_artist.py): lead - a joint credit's first
+    # artist, and (bands) a band named after a member filed under that member; file_under -
+    # your own names {"credit": "album artist"} (a name mapped to itself is kept as credited)
+    "album_artist": {"lead": False, "bands": True, "file_under": {}},
     # artwork: sources - where covers come from, in order (coverup: CoverUp with all its sources;
     #   caa: MusicBrainz's Cover Art Archive; discogs; web: shops and web image search via
     #   CoverUp; local: the album's own scans); when - "needed" (only for albums missing a cover
@@ -829,6 +833,16 @@ def _new_setting_problems(d: dict) -> list[str]:
         if not isinstance(v, bool) and v not in ("audiophile", "tagger"):
             p.append(f"discogs_details.{k} must be true, false, audiophile or tagger")
     _bool(p, d, "cleanup.clear_other_tags")
+    aa = d.get("album_artist")
+    if not isinstance(aa, dict):
+        p.append("album_artist must be an object")
+    else:
+        for k in ("lead", "bands"):
+            _bool(p, d, f"album_artist.{k}")
+        fu = aa.get("file_under")
+        if not isinstance(fu, dict) or not all(isinstance(k, str) and isinstance(v, str) and 0 < len(k) <= 200
+                                               and 0 < len(v) <= 200 for k, v in fu.items()):
+            p.append("album_artist.file_under must map names to names (up to 200 characters each)")
     comp = d.get("compilations")
     if not isinstance(comp, dict):
         p.append("compilations must be an object")

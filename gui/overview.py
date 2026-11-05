@@ -70,6 +70,11 @@ def merge_results(plans, run, cancelled=lambda: False) -> dict:
     return {"job": ", ".join(jobs), "status": "partial" if partial else "done", "counts": counts, "albums": albums}
 
 
+def plan_each(e, path, keys, emit, progress=None, cancel=None, meta=None) -> int:
+    """Engine E's plan of KEYS an album at a time (engine.Engine.plan_each)."""
+    return e.plan_each(path, keys, emit, progress=progress, cancel=cancel, meta=meta)
+
+
 # Look Up's sources (List first): the profile's, or one of them alone
 LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicBrainz only")),
            ("musicbrainz_preferred", N_("MusicBrainz preferred")), ("discogs_preferred", N_("Discogs preferred")),
@@ -80,6 +85,10 @@ LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicB
 # unchanged file is not opened again to find the albums. Handed to the engine explicitly (its
 # work runs on worker threads, where a context variable starts empty).
 META_STORE: dict = {}
+
+
+# what is being done with an album now, in its Status column (the page's, never the plan's)
+ROW_STATES = {"waiting": N_("Waiting…"), "looking": N_("Looking up…"), "applying": N_("Applying…")}
 
 
 RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "web_unavailable", "rate_limited",
@@ -203,6 +212,14 @@ class Overview(QWidget):
         self.headers = {}
         self.used_jobs = set()      # (jobs Apply ran: the next Apply of the same preview is a new job)
         self._lookup_n = 0
+        # Look Up while a look-up runs: album key -> (sources, again), looked up when it ends;
+        # and the albums the running look-up has (album key -> (profile, sources))
+        self.queue = {}
+        self.looking = {}
+        # what is being done with each album now (album key, or id() of a row Apply has): ROW_STATES
+        self.states = {}
+        self._lookup_order, self._applying = [], False
+        self._lookup_i, self._lookup_name = 0, ""
         lay = QVBoxLayout(self)
         lay.addLayout(heading(tr("Overview"),
                               tr("Choose music, pick a profile, preview what will change, then apply.")))
@@ -321,6 +338,7 @@ class Overview(QWidget):
         # each album's profile (two or more albums listed): a drop-down in its row
         self.model.profile_of = lambda a: (self.profile_of(a), bool(self.own_profile(a)))
         self.model.choose_profile = self.set_album_profile
+        self.model.state_of = self.state_of
         self.table.setItemDelegateForColumn(PlanModel.PROFILE, ProfileDelegate(self))
         self.table.setEditTriggers(QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
         self.table.clicked.connect(self.profile_clicked)
@@ -339,6 +357,7 @@ class Overview(QWidget):
             h.setSectionResizeMode(c, QHeaderView.Stretch if c in (1, 5) else QHeaderView.ResizeToContents)
         h.setSectionResizeMode(0, QHeaderView.Interactive)     # (fitted by fit_status: cut when narrow)
         h.moveSection(PlanModel.PROFILE, 2)               # (an album's profile: next to its name, in view)
+        h.moveSection(h.visualIndex(PlanModel.SCANS), h.visualIndex(2) + 1)   # (what the scans said: after Source)
         self.table.setAccessibleName(tr("Albums in the preview"))
         # (while the mouse drags a selection, the inspector waits: reading each album it passes
         # over - tags, covers, on a network share - kept the drag from following the mouse)
@@ -371,7 +390,7 @@ class Overview(QWidget):
 
     # page widths under which lower-priority columns give way (the inspector shows them all):
     # Why under 860 px (1280 px with the inspector open), Source and Score under 600 (960 px)
-    NARROW = {5: 860, 3: 600, 2: 420}                  # (Source stays longest: which database said it)
+    NARROW = {5: 860, 3: 600, 7: 520, 2: 420}                  # (Source stays longest: which database said it)
     STATUS_MOST = 150                                 # under 600 px the Status column is cut ("Changed sin…",
                                                       # the whole word in its tooltip): the artist stays in view
 
@@ -407,7 +426,7 @@ class Overview(QWidget):
             for mode, words in LOOK_UP:
                 act = look.addAction(tr(words))
                 act.triggered.connect(lambda _=False, m=mode: self.look_up(m))
-            look.setEnabled(not self.running)
+            look.setEnabled(not self.running or bool(self.looking))     # (while one runs: queued)
             mine = [look.menuAction()]
             # (the profile of the selected albums: theirs, or the one chosen above)
             if len(self.model.albums) >= 2:
@@ -418,7 +437,8 @@ class Overview(QWidget):
                 for name in profile_names():
                     act = pm.addAction(name)
                     act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
-                pm.setEnabled(not self.running and any(a.get("status") != "done" for a in chosen))
+                pm.setEnabled((not self.running or bool(self.looking)) and
+                              any(a.get("status") != "done" for a in chosen))
                 mine.append(pm.menuAction())
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
                                     self.apply_selected, any(can_apply(a) for a in chosen) and not self.running),
@@ -478,9 +498,18 @@ class Overview(QWidget):
         other folder can be chosen or dropped."""
         self.running = on
         if hasattr(self, "model"):
-            self.model.locked = on                            # (no profile chosen while work runs)
+            # (no profile chosen while work runs; during a look-up it is: that album is queued)
+            self.model.locked = on and not self.looking
         if not on:
             self._lookup_n = 0                                # (the next run says its own progress)
+            self._lookup_i, self._lookup_name = 0, ""
+            self._applying = False
+            if self.states:                                   # (done: each row says what it is)
+                self.states = {}
+                self.model.refresh_rows()
+        if hasattr(self, "proxy"):
+            # (while work runs the rows keep their places: a row is not moved as its state changes)
+            self.proxy.setDynamicSortFilter(not on)
         self.choose_btn.setEnabled(not on)
         self.drop.setEnabled(not on)
         self.btn_cancel.setEnabled(on)
@@ -502,6 +531,7 @@ class Overview(QWidget):
         self.forced = dict(forced or {})
         self.within = list(within or [])                     # (several folders dropped: only these)
         self.looked = {}                                     # (a new folder: nothing looked up yet)
+        self.queue = {}                                      # (nor waiting to be)
         self.album_profiles, self.planned_with, self.headers = {}, {}, {}
         self.plan_library = ""
         self.reset_sources()                                 # (a new folder: the profile's sources again)
@@ -663,7 +693,7 @@ class Overview(QWidget):
     def set_album_profile(self, albums, name):
         """Use profile NAME ("": the one chosen above) for ALBUMS; those already looked up are
         looked up again with it (their destinations and tags are that profile's)."""
-        if self.running:
+        if self.running and not self.looking:              # (during a look-up: looked up after it)
             return
         if name and name not in profile_names():
             return
@@ -680,7 +710,8 @@ class Overview(QWidget):
                 self.album_profiles[k] = name
             else:
                 self.album_profiles.pop(k, None)
-            if a.get("status") != "listed" and self.planned_with.get(k) != self.profile_of(a):
+            if (a.get("status") != "listed" or k in self.looking) and \
+                    self.planned_with.get(k) != self.profile_of(a):
                 again.append(a)
         self.model.refresh_rows()
         self.show_profile_column()
@@ -697,6 +728,12 @@ class Overview(QWidget):
         """The Profile column: shown when the list holds two or more albums."""
         if hasattr(self, "table"):
             self.table.setColumnHidden(PlanModel.PROFILE, len(self.model.albums) < 2)
+
+    def with_versions(self, albums) -> list:
+        """ALBUMS and the other versions of a folder split per version (looked up together)."""
+        ofs = {(a.get("split") or {}).get("of") for a in albums} - {None, ""}
+        return list(albums) + [x for x in (self.plan or {}).get("albums") or []
+                               if (x.get("split") or {}).get("of") in ofs and not any(x is y for y in albums)]
 
     def plan_for(self, albums) -> dict:
         """The plan of ALBUMS as their profile's preview made it (its job, rules and folders)."""
@@ -822,24 +859,32 @@ class Overview(QWidget):
 
     def reload(self):
         """Refresh (Ctrl+R): look the selected albums (none selected: all of them) up again, even
-        those already looked up the same way."""
-        if self.running or not self.plan:
+        those already looked up the same way (while a look-up runs: queued)."""
+        if (self.running and not self.looking) or not self.plan:
             return
         chosen = self.selected_albums() if self.table.selectionModel().hasSelection() else None
         self.look_up(self.sources.currentData() or "profile", chosen or list(self.plan["albums"]), again=True)
 
-    def look_up(self, mode="profile", albums=None, again=False):
+    def look_up(self, mode="profile", albums=None, again=False, queued=False):
         """Look up the selected albums (or ALBUMS) with the profile's sources, or only
-        MusicBrainz, only Discogs, or only the web; what they find replaces their rows.
-        An album already looked up the same way is skipped unless AGAIN (Refresh). Each album
-        is looked up with its own profile (its row's choice, else the one chosen above)."""
+        MusicBrainz, only Discogs, or only the web; what they find replaces their rows, each
+        album's as soon as it is found. An album already looked up the same way is skipped
+        unless AGAIN (Refresh). Each album is looked up with its own profile (its row's choice,
+        else the one chosen above). Asked while a look-up runs: queued, and looked up when it
+        ends (QUEUED: such a look-up, now started; it asks nothing)."""
         import engine
         chosen = albums if albums is not None else self.selected_albums()
-        if not chosen or self.running or not self.path:
+        if not chosen or not self.path:
             return
-        groups = {}                                         # profile name -> album keys
+        if self.running:
+            if self.looking:                                # (another look-up: this one waits for it)
+                self.enqueue(mode, chosen, again)
+            return
+        if self.plan is not None and self.plan.get("albums") is not self.model.albums:
+            self.model.set_plan(self.plan)                  # (the rows are the plan's own: replaced in place)
+        groups = {}                                         # profile name -> album keys, in the list's order
         for a in chosen:
-            groups.setdefault(self.profile_of(a), set()).add(self.album_key(a))
+            groups.setdefault(self.profile_of(a), {})[self.album_key(a)] = None
         profs, stamps = {}, {}
         for name in groups:
             try:
@@ -848,10 +893,12 @@ class Overview(QWidget):
                 sheets.warning(self, tr("This profile cannot be used."), str(exc))
                 return
             stamps[name] = self.lookup_stamp(profs[name], mode, name)
-        keys = set().union(*groups.values())
+        keys = {k for ks in groups.values() for k in ks}
         done = {k for name, ks in groups.items() for k in ks if self.looked.get(k) == stamps[name]} \
             if not again else set()
         if done and done == keys:
+            if queued:                                      # (asked when it was queued: nothing to do)
+                return
             n = len(keys)
             if not sheets.question(self, tr("{0} already looked up with {1}.").format(
                     tr("This album is") if n == 1 else tr("These {0} albums are").format(n),
@@ -860,25 +907,30 @@ class Overview(QWidget):
                     action=tr("Look Up Again")):
                 return
             done = set()
-        groups = {name: ks - done for name, ks in groups.items() if ks - done}
-        keys -= done
+        groups = {name: [k for k in ks if k not in done] for name, ks in groups.items()}
+        groups = {name: ks for name, ks in groups.items() if ks}
         skipped = len(done)
         path, ocr, edits = self.path, self.ocr.isChecked(), self.win.inspector.edits_for_preview()
-        total = len(keys)
+        forced = dict(self.forced)                           # (the releases you chose: kept, as Preview)
+        total = sum(len(ks) for ks in groups.values())
 
         def work(w):
-            out, off = [], 0
+            off = 0
             for name, ks in groups.items():
                 if w.cancelled:
                     break
                 e = engine.Engine(profs[name], ocr=True if ocr else None)
                 e.edits = edits
-                plan = e.plan(path, progress=lambda i, _n, what, o=off: w.progress.emit(o + i, total, what),
-                              cancel=lambda: w.cancelled, only=ks, meta=META_STORE)
-                # (cancelled: only the albums it reached replace their rows; the others stay as they were)
-                out.append((name, plan, set(getattr(e, "reached", ks)) & ks if w.cancelled else ks))
-                off += len(ks)
-            return out
+                e.force = forced
+                # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
+                off += plan_each(e, path, ks, lambda k, plan, name=name: w.partial.emit((name, k, plan)),
+                                 progress=lambda i, what, o=off: w.progress.emit(o + i, total, what),
+                                 cancel=lambda: w.cancelled, meta=META_STORE)
+            return off
+        self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
+        self._lookup_order = [k for ks in groups.values() for k in ks]
+        self.states = dict.fromkeys(self._lookup_order, "waiting")
+        self.model.refresh_rows()
         self.busy(True)
         self.looked_with = self.sources_words(mode)
         self._lookup_n = total
@@ -886,10 +938,50 @@ class Overview(QWidget):
         self.summary.setText(self.lookup_words(0, ""))
         library = self.library
 
-        def found(results):
+        def one(part):
             self.plan_library = library
-            self.looked_up_groups([(name, plan, reached, stamps[name]) for name, plan, reached in results])
-        self.worker = start(self, work, found, self.progress, self.oops)
+            self.looked_up_one(part[0], part[1], part[2], stamps[part[0]])
+        self.worker = start(self, work, lambda _n: self.look_up_ended(), self.progress, self.lookup_failed,
+                            partial=one)
+
+    def enqueue(self, mode, albums, again=False):
+        """Look Up asked while a look-up runs: the albums wait for it, with these sources (an
+        album it is looking up the same way, or already waiting, is not asked twice). After
+        Cancel, until the cancelled look-up ends, nothing is queued: Cancel stops it all."""
+        if self.worker is not None and getattr(self.worker, "cancelled", False):
+            self.win.statusBar().showMessage(tr("Cancelling; Look Up again when it has stopped."), 4000)
+            return 0
+        n = 0
+        for a in albums:
+            k = self.album_key(a)
+            if self.looking.get(k) == (self.profile_of(a), mode) and k not in self.queue:
+                continue
+            was = self.queue.pop(k, None)
+            self.queue[k] = (mode, again or bool(was and was[1]))
+            n += was is None
+        if n:
+            self.model.refresh_rows()                       # (their rows: Waiting…)
+            self.summary.setText(self.lookup_words(self._lookup_i, self._lookup_name))
+            self.win.statusBar().showMessage(tr("{0} queued: looked up when this look-up ends.").format(
+                plural(n, tr("album"), tr("albums"))), 5000)
+
+    def run_queue(self) -> bool:
+        """The look-ups queued while the last one ran: the albums with the same sources at once.
+        False when nothing more runs."""
+        while self.queue and not self.running:
+            mode, again = next(iter(self.queue.values()))
+            keys = [k for k, v in self.queue.items() if v == (mode, again)]
+            for k in keys:
+                self.queue.pop(k)
+            albums = [a for a in (self.plan or {}).get("albums") or [] if self.album_key(a) in keys]
+            seen, chosen = set(), []
+            for a in albums:                                 # (an album planned as several rows: once)
+                if self.album_key(a) not in seen:
+                    seen.add(self.album_key(a))
+                    chosen.append(a)
+            if chosen:
+                self.look_up(mode, chosen, again, queued=True)
+        return self.running
 
     def lookup_words(self, i, name) -> str:
         """The line under the list while albums are looked up: which one of how many."""
@@ -899,7 +991,9 @@ class Overview(QWidget):
         tail = tr(": {0}").format(name) if name else ""
         skipped = getattr(self, "_lookup_skipped", 0)
         note = tr(" ({0} already looked up, skipped)").format(skipped) if skipped else ""
-        return head + tail + "…" + note + tr(" Nothing is changed while previewing.")
+        queued = len(getattr(self, "queue", ()))
+        then = tr(" Then {0} queued.").format(plural(queued, tr("album"), tr("albums"))) if queued else ""
+        return head + tail + "…" + note + then + tr(" Nothing is changed while previewing.")
 
     def remember_looked(self, albums, stamp):
         """The albums found, as looked up with STAMP (cancelled: only those it reached); not one
@@ -918,38 +1012,51 @@ class Overview(QWidget):
                 continue
             self.looked[a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])] = stamp
 
-    def looked_up(self, new, keys, stamp=None):
-        """The albums looked up take the places of their rows; the others stay as they were."""
-        self.looked_up_groups([(new.get("profile") or self.profile.currentText(), new, keys, stamp)])
+    def looked_up_one(self, name, key, new, stamp=None):
+        """Album KEY looked up with profile NAME (NEW: its plan, its rows): they take the
+        places of the album's rows at once; the other rows stay as they were."""
+        self.headers[name] = {k: v for k, v in new.items() if k != "albums"}
+        self.states.pop(key, None)
+        found = list(new["albums"])
+        keys = {key} | {self.album_key(a) for a in found}
+        for a in found:
+            self.planned_with[self.album_key(a)] = name
+        self.remember_looked(found, stamp)
+        if self.plan is None:
+            self.plan = dict(self.headers[name], albums=self.model.albums)
+        head = self.headers.get(self.profile.currentText()) or self.headers[name]
+        self.plan.update(head, albums=self.model.albums)
+        was = self.selected()
+        rows = [r for r, a in enumerate(self.model.albums) if self.album_key(a) in keys]
+        mine = was is not None and any(was is self.model.albums[r] for r in rows)
+        at = self.model.replace_rows(rows, found)
+        self.plan["listed"] = any(a["status"] == "listed" for a in self.model.albums)
+        if mine:                                          # (the album shown: shown as found now)
+            if found and not self.table.selectionModel().hasSelection():
+                self.table.selectRow(self.proxy.mapFromSource(self.model.index(at, 0)).row())
+            self.show_detail()
+        self.win.update_album_actions()
 
-    def looked_up_groups(self, results):
-        """RESULTS: (profile name, plan, album keys looked up, stamp) per profile. The albums
-        found take the places of their rows; the others stay as they were."""
-        if not results:
-            self.busy(False)
-            self.show_counts()
+    def look_up_ended(self):
+        """The look-up ended (done or cancelled): the counts, then the look-ups queued meanwhile."""
+        self.looking = {}
+        self.show_profile_column()
+        self.fit_status()
+        self.table.sortByColumn(0, Qt.AscendingOrder)
+        self.show_counts()
+        self.refresh_overrides()
+        self.busy(False)
+        self.service_status(force=True)
+        if self.run_queue():                               # (the next one says what it does)
             return
-        found, keys = [], set()
-        for name, new, ks, stamp in results:
-            self.headers[name] = {k: v for k, v in new.items() if k != "albums"}
-            for a in new["albums"]:
-                self.planned_with[self.album_key(a)] = name
-            self.remember_looked(new["albums"], stamp)
-            found += list(new["albums"])
-            keys |= set(ks)
-        out, placed = [], False
-        for a in (self.plan or {}).get("albums") or []:
-            if self.album_key(a) in keys:
-                if not placed:                             # (where the first of them was)
-                    out += found
-                    placed = True
-                continue
-            out.append(a)
-        if not placed:
-            out += found
-        head = self.headers.get(self.profile.currentText()) or self.headers[results[-1][0]]
-        self.plan = dict(head, albums=out, listed=any(a["status"] == "listed" for a in out))
-        self.planned(self.plan)
+        notify(self.win, "finished", tr("Preview finished"), counts_by_label((self.plan or {}).get("albums") or []))
+        if self.proxy.rowCount() and not self.table.selectionModel().hasSelection():
+            self.table.selectRow(0)
+        self.win.refresh_attention_badge(self.path)
+
+    def lookup_failed(self, msg):
+        self.looking, self.queue = {}, {}                  # (nothing queued starts after a failure)
+        self.oops(msg)
 
     def preview_release(self, folder, ref, files=None, only=False) -> bool:
         """Preview the album in `folder` with the release `ref` (a MusicBrainz ID or
@@ -961,7 +1068,17 @@ class Overview(QWidget):
             return False
         key = os.path.realpath(str(folder))
         choice = [dict({"ref": ref, "files": list(files)}, **({"only": True} if only else {}))] if files else ref
-        if not self.set_path(str(folder), {key: choice}):
+        mine = {os.path.realpath(str(f)) for f in files or ()}
+        listed = [a for a in (self.plan or {}).get("albums") or []
+                  if os.path.realpath(a["source_dir"]) == key
+                  and (not mine or mine & {os.path.realpath(f) for f in engine.plan_entry_files(a)})]
+        if listed and self.path:
+            # (the album is in the list already: it alone is looked up again, the list stays)
+            self.forced[key] = choice
+            if self.win.stack.currentWidget() is not self:
+                self.win.go("Overview")
+            self.look_up(self.sources.currentData() or "profile", self.with_versions(listed), again=True)
+        elif not self.set_path(str(folder), {key: choice}):
             return False
         self.win.statusBar().showMessage(tr("Previewing {name} with the release you chose; nothing is written "
                                             "until you apply.").format(name=Path(str(folder)).name), 10000)
@@ -1024,15 +1141,56 @@ class Overview(QWidget):
         self.service_status()
         self.bar.setMaximum(max(n, 1))
         self.bar.setValue(i + 1)
-        self.bar.setFormat(tr("{0} of {n}").format(i + 1, n=n))
+        self.win.show_count(tr("{0} of {n}").format(i + 1, n=n))     # (beside the bar: it is too thin for words)
         words = tr("{0} of {n}: {name}").format(i + 1, n=n, name=Path(what).name)
         self.bar.setToolTip(words)
         self.bar.setAccessibleDescription(words)
-        if getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
+        if self._applying and self.running:                 # (Apply: which album; file_progress: which file)
+            self.applying_row(i)
+            self._apply_at = (i, n, Path(what).name)
+            self.summary.setText(tr("Applying album {0} of {n}: {name}…").format(i + 1, n=n, name=Path(what).name))
+        elif getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
+            self._lookup_i, self._lookup_name = i, Path(what).name
+            if i < len(self._lookup_order) and self.states.get(self._lookup_order[i]) == "waiting":
+                self.states[self._lookup_order[i]] = "looking"
+                self.model.refresh_rows()
             self.summary.setText(self.lookup_words(i, Path(what).name))
         elif self.running:
             self.summary.setText(tr("Identifying album {0} of {n}: {name}… nothing is changed while previewing.")
                                  .format(i + 1, n=n, name=Path(what).name))
+
+    def file_progress(self, i, j, n, path):
+        """Apply: file J (0-based) of the N its album I has to write or move, next."""
+        if not (self._applying and self.running):
+            return
+        self.applying_row(i)
+        _i, total, name = getattr(self, "_apply_at", (i, 0, ""))
+        words = tr("Applying album {0} of {n}: {name} — file {1} of {m}: {file}").format(
+            i + 1, j + 1, n=total, name=name, m=n, file=Path(path).name)
+        self.summary.setText(words)
+        self.bar.setToolTip(words)
+        self.bar.setAccessibleDescription(words)
+
+    def applying_row(self, i):
+        """Apply's album I (of the rows it was given) is the one being applied now."""
+        rows = getattr(self, "_applied_rows", None) or []
+        if not (0 <= i < len(rows) and self.plan and 0 <= rows[i] < len(self.plan["albums"])):
+            return
+        me = id(self.plan["albums"][rows[i]])
+        if self.states.get(me) != "applying":
+            self.states = {k: v for k, v in self.states.items() if v != "applying"}   # (the one before: done)
+            self.states[me] = "applying"
+            self.model.refresh_rows()
+
+    def state_of(self, a) -> str:
+        """What is being done with album A now (its Status column), or ""."""
+        if not self.states and not self.queue:
+            return ""
+        k = self.states.get(id(a))
+        if k is None:
+            key = self.album_key(a)
+            k = self.states.get(key) or ("waiting" if key in self.queue else None)
+        return tr(ROW_STATES[k]) if k else ""
 
     def set_folders(self, folders) -> bool:
         """Several folders dropped at once: every album in them listed together, under the folder
@@ -1221,14 +1379,28 @@ class Overview(QWidget):
             plan["job"] = self.fresh_job(plan.get("job") or "")
             plans.append(plan)
 
+        offs, total = [], 0                               # (album i of all the plans: counted on)
+        for p in plans:
+            offs.append(total)
+            total += len(p["albums"])
+
         def work(w):
             import executor
-            return merge_results(plans, lambda p: executor.Executor(p, cancel=lambda: w.cancelled,
-                                                                    progress=w.progress.emit).run(),
-                                 lambda: w.cancelled)
+            at = iter(offs)
+
+            def run(p):
+                o = next(at)
+                return executor.Executor(p, cancel=lambda: w.cancelled,
+                                         progress=lambda i, _n, what: w.progress.emit(o + i, total, what),
+                                         file_progress=lambda i, j, n, f: w.partial.emit((o + i, j, n, f))).run()
+            return merge_results(plans, run, lambda: w.cancelled)
+        self.states = {id(self.plan["albums"][i]): "waiting" for i in self._applied_rows}
+        self.model.refresh_rows()
         self.busy(True)
+        self._applying, self._apply_at = True, (0, total, "")
         self.summary.setText(tr("Applying…"))
-        self.worker = start(self, work, self.applied, self.progress, self.oops)
+        self.worker = start(self, work, self.applied, self.progress, self.oops,
+                            partial=lambda x: self.file_progress(*x))
 
     def fresh_job(self, job) -> str:
         """JOB, or (Apply ran it already: albums left out of it applied now) a new job named
@@ -1300,7 +1472,12 @@ class Overview(QWidget):
     def cancel(self):
         if self.worker:
             self.worker.cancelled = True
-            self.summary.setText(tr("Cancelling after the current album…"))
+            n = len(self.queue)
+            self.queue = {}                                # (nor is what waited for it looked up)
+            self.states = {k: v for k, v in self.states.items() if v != "waiting"}
+            self.model.refresh_rows()
+            self.summary.setText(tr("Cancelling after the current album…") + (tr(
+                " The {0} queued are not looked up.").format(plural(n, tr("album"), tr("albums"))) if n else ""))
 
     def selected(self):
         idx = self.table.currentIndex() if hasattr(self, "table") and self.table.selectionModel().hasSelection() \
@@ -1369,7 +1546,8 @@ class Overview(QWidget):
             self.forced[key] = choices
         else:
             self.forced.pop(key, None)
-        self.preview()
+        # (this album only - not every album listed - looked up again with the release chosen)
+        self.look_up(self.sources.currentData() or "profile", self.with_versions([a]), again=True)
 
     def process_anyway(self):
         a = self.selected()

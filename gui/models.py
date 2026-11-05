@@ -13,17 +13,71 @@ TIER_TIPS = {"partial": N_("Partial: the release is known, but which pressing is
              "recording": N_("Recording only: the recordings matched, but not one release")}
 
 
+# what a scan read from the sleeve, in a word (the kinds the plan names)
+SCAN_KINDS = {"barcode": N_("Barcode"), "catalogue_number": N_("Cat. no."), "label": N_("Label"),
+              "country": N_("Country"), "matrix": N_("Matrix"), "format": N_("Format")}
+SCAN_MARK = {"proven": "✓", "agrees": "~", "differs": "✗"}
+SCAN_TIPS = {"proven": N_("Your scans show the barcode and catalogue number of this release: the pressing is proven"),
+             "agrees": N_("Your scans agree with this release, but do not prove which pressing it is"),
+             "differs": N_("Your scans name another pressing: decide in Needs attention"),
+             "unread": N_("Scans were read but no barcode or catalogue number was found")}
+# how a source was reached, after the database's name
+VIA_WORDS = {"disc_id": N_("disc ID"), "link": N_("your files' link"), "scan_search": N_("web search of your scans"),
+             "barcode_lookup": N_("barcode lookup"), "fingerprint": N_("fingerprint")}
+
+
+def _kinds(kinds) -> str:
+    return ", ".join(tr(SCAN_KINDS[k]) if k in SCAN_KINDS else str(k) for k in kinds or [])
+
+
+def scans_text(sc) -> str:
+    """The short text of an album's scans result ("✓ Barcode, Cat. no."); "" when there is none."""
+    st = (sc or {}).get("state")
+    if st in ("proven", "agrees"):
+        return f"{SCAN_MARK[st]} {_kinds(sc.get('found'))}".rstrip()
+    if st == "differs":
+        return tr("{0} {1} differs").format(SCAN_MARK[st], _kinds(sc.get("against"))).replace("  ", " ")
+    if st == "unread":
+        return tr("— Nothing read")
+    return ""
+
+
+def scans_tip(sc) -> str:
+    st = (sc or {}).get("state")
+    return tr(SCAN_TIPS[st]) if st in SCAN_TIPS else ""
+
+
+def source_text(ident) -> str:
+    """The Source column: the database(s), and how it was reached ("MusicBrainz · disc ID")."""
+    prov = (ident.get("provider") or "")
+    if "web" in prov:
+        text = tr("Web")
+    else:
+        text = prov.replace("musicbrainz", "MusicBrainz").replace("discogs", "Discogs")
+    via = ident.get("via") or ""
+    if via in VIA_WORDS:
+        text = f"{text} · {tr(VIA_WORDS[via])}" if text else tr(VIA_WORDS[via])
+    return text
+
+
 def changes_text(files) -> str:
-    """'11 files', '8 files, all moved', '8 files, 3 copied' (nothing for an album left as it is)."""
+    """What Apply will do with the album's tracks, before it is done: "10 tracks, will move",
+    "8 tracks, 3 will be copied", "15 tracks, stay in their folder" (nothing for an album left
+    as it is)."""
     n = sum(1 for fe in files if fe["op"] != "none")
     if not n:
         return ""
-    out = plural(n, tr("file"), tr("files"))
-    for op, done in (("move", "moved"), ("copy", "copied")):
-        k = sum(1 for fe in files if fe["op"] == op)
-        if k:
-            out += f", all {done}" if k == n else f", {k} {done}"
-    return out
+    head = plural(n, tr("track"), tr("tracks"))
+    moved = sum(1 for fe in files if fe["op"] == "move")
+    copied = sum(1 for fe in files if fe["op"] == "copy")
+    parts = []
+    if moved:
+        parts.append(tr("will move") if moved == n else tr("{0} will move").format(moved))
+    if copied:
+        parts.append(tr("will be copied") if copied == n else tr("{0} will be copied").format(copied))
+    if not parts:
+        parts.append(tr("stay in their folder") if n > 1 else tr("stays in its folder"))
+    return tr("{0}, {1}").format(head, ", ".join(parts))
 
 
 # --------------------------------------------------------------------------
@@ -36,7 +90,9 @@ def can_apply(a) -> bool:
 
 
 class PlanModel(QAbstractTableModel):
-    COLS = (N_("Status"), N_("Album folder"), N_("Source"), N_("Score"), N_("Changes"), N_("Why"), N_("Profile"))
+    COLS = (N_("Status"), N_("Album folder"), N_("Source"), N_("Score"), N_("Changes"), N_("Why"), N_("Profile"),
+            N_("Scans"))
+    SCANS = 7
     PROFILE = 6                        # (the album's profile: its own, or the one chosen above)
     LEAVE_OUT = "_leave_out"           # (an album's own mark: unticked, so Apply leaves it as it is)
     ticked = Signal()
@@ -49,6 +105,9 @@ class PlanModel(QAbstractTableModel):
         self.profile_of = None
         self.choose_profile = None
         self.locked = False             # (busy: no profile is chosen while albums are looked up)
+        # set by the page: album -> what is being done with it now ("Waiting…", "Looking up…",
+        # "Applying…"; "": nothing), shown in its Status column until it is done (never in the plan)
+        self.state_of = None
 
     def flags(self, idx):
         f = super().flags(idx)
@@ -87,6 +146,27 @@ class PlanModel(QAbstractTableModel):
         self.albums = plan["albums"] if plan else []
         self.endResetModel()
 
+    def replace_rows(self, rows, new) -> int:
+        """The albums of ROWS (row numbers) replaced by NEW, put where the first of them was
+        (none: at the end); rows not removed keep their places, selection and sorting. The
+        row the first of NEW is in."""
+        rows = sorted(set(r for r in rows if 0 <= r < len(self.albums)))
+        new = list(new)
+        if rows and len(rows) == len(new) and rows == list(range(rows[0], rows[0] + len(rows))):
+            self.albums[rows[0]:rows[0] + len(rows)] = new        # (as many: in place)
+            self.dataChanged.emit(self.index(rows[0], 0), self.index(rows[-1], len(self.COLS) - 1))
+            return rows[0]
+        at = rows[0] if rows else len(self.albums)
+        for r in reversed(rows):
+            self.beginRemoveRows(QModelIndex(), r, r)
+            del self.albums[r]
+            self.endRemoveRows()
+        if new:
+            self.beginInsertRows(QModelIndex(), at, at + len(new) - 1)
+            self.albums[at:at] = new
+            self.endInsertRows()
+        return at
+
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.albums)
 
@@ -104,13 +184,19 @@ class PlanModel(QAbstractTableModel):
         a = self.albums[idx.row()]
         c = idx.column()
         ident = a["identification"]
+        now = self.state_of(a) if self.state_of and c == 0 and role in (
+            Qt.DisplayRole, Qt.ToolTipRole, Qt.AccessibleTextRole) else ""
+        if now:
+            return now
         if role == Qt.DisplayRole:
             if c == 0:
                 return label_for(a)[1]                        # (the icon is the DecorationRole)
             if c == 1:
                 return album_words(a["source_dir"])
             if c == 2:
-                return (ident.get("provider") or "").replace("musicbrainz", "MusicBrainz").replace("discogs", "Discogs")
+                return source_text(ident)
+            if c == self.SCANS:
+                return scans_text(ident.get("scans"))
             if c == 3:
                 return f"{ident['confidence']:.0f}" if ident.get("confidence") else ""
             if c == 4:
@@ -139,6 +225,14 @@ class PlanModel(QAbstractTableModel):
             return label_for(a)[1]                            # (the whole word when the column cuts it)
         if role == Qt.ToolTipRole and c == 1:
             return a["source_dir"]
+        if role == Qt.ToolTipRole and c == self.SCANS:
+            return scans_tip(ident.get("scans"))
+        if role == Qt.ForegroundRole and c == self.SCANS:
+            st = (ident.get("scans") or {}).get("state")
+            key = {"proven": "done", "differs": "unresolved"}.get(st)
+            return status_color(key) if key else (status_color("excluded") if st else None)
+        if role == Qt.AccessibleTextRole and c == self.SCANS:
+            return scans_text(ident.get("scans"))
         if role == Qt.ToolTipRole and c == self.PROFILE and self.profile_of:
             name, own = self.profile_of(a)
             return (tr("Profile {0}, chosen for this album").format(name) if own else

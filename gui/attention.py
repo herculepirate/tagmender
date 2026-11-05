@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton,
@@ -176,6 +177,31 @@ class Attention(QWidget):
         if again is not None and not self.scanning:
             self.scan(quiet=again)
 
+    def select_folder(self, path):
+        """Choose the album at PATH in the list (once the look in progress, or the one this asks for,
+        has ended): the folder it is in is looked in when this page's own does not hold it."""
+        self.want = os.path.normpath(str(path))
+        root = self.root.text().strip()
+        if not root or os.path.commonpath([os.path.normpath(root), self.want]) != os.path.normpath(root):
+            self.root.setText(str(Path(self.want).parent))
+            self.chosen = False
+        if self.scanning:
+            self.scan(quiet=True)                      # (queued: the folder may have changed since)
+        elif not self.pick():
+            self.scan(quiet=True)
+
+    def pick(self) -> bool:
+        want = getattr(self, "want", None)
+        if not want:
+            return False
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 1)
+            if it and os.path.normpath(str(it.data(Qt.UserRole))) == want:
+                self.table.selectRow(r)
+                self.want = None
+                return True
+        return False
+
     def count_under(self, path):
         """The badge after a preview or Apply: the albums marked Unresolved under the folder this
         page looks in - the folder previewed when none was chosen here. One rule for the badge on
@@ -249,6 +275,9 @@ class Attention(QWidget):
         self.views.setCurrentIndex(1 if rows else 0)
         self.report_btn.setEnabled(bool(rows))
         self.win.set_badge("Needs attention", len(rows))
+        if not self.scanning:
+            self.pick()
+            self.want = None                                     # (one try per look: no later one jumps)
 
     def row(self):
         r = self.table.currentRow()

@@ -13,9 +13,9 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QLabel, QLineEdit, QListView, QMainWindow,
-                               QMenu, QProgressBar, QSplitter, QStackedWidget, QStatusBar, QToolButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit,
+                               QListView, QMainWindow, QMenu, QProgressBar, QSplitter, QStackedWidget, QStatusBar,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from . import actions as actmod
 from . import account, dialogs, i18n, icons, search, sheets, style
@@ -83,10 +83,21 @@ class Main(QMainWindow):
         self.toolbar = actmod.build_toolbar(self, self.commands)
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
         self.setUnifiedTitleAndToolBarOnMac(True)
+        # the toolbar's progress: a thin bar (style.py draws it 6 px high, too low for words in
+        # it) and the count beside it ("3 of 16"; the album's name is below the list)
         self.progress = QProgressBar()
-        self.progress.setFixedWidth(140)
-        self.progress.setTextVisible(True)               # ("3 of 16"; the album's name is below the list)
+        self.progress.setFixedWidth(120)
+        self.progress.setTextVisible(False)
         self.progress.setAccessibleName(tr("Progress"))
+        self.progress_count = QLabel("")
+        self.progress_count.setProperty("role", "caption")
+        self.progress_count.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.progress_box = QWidget()
+        pl = QHBoxLayout(self.progress_box)
+        pl.setContentsMargins(6, 0, 6, 0)
+        pl.setSpacing(8)
+        pl.addWidget(self.progress, 0, Qt.AlignVCenter)
+        pl.addWidget(self.progress_count, 0, Qt.AlignVCenter)
         self.progress_action = None
         self.profile_box = QComboBox()
         self.profile_box.setAccessibleName(tr("Profile"))
@@ -100,10 +111,10 @@ class Main(QMainWindow):
         self.search_box.setMaximumWidth(200)
         self.search_box.setAcceptDrops(False)                 # (a folder dropped on it is previewed, not typed)
         self.search_box.textChanged.connect(self.search)
-        actmod.toolbar_end(self.toolbar, [self.progress, tr("Profile"), self.profile_box, self.search_box],
+        actmod.toolbar_end(self.toolbar, [self.progress_box, tr("Profile"), self.profile_box, self.search_box],
                            self.commands)
         self.progress_action = next(a for a in self.toolbar.actions()
-                                    if self.toolbar.widgetForAction(a) is self.progress)
+                                    if self.toolbar.widgetForAction(a) is self.progress_box)
         self.progress_action.setVisible(False)
         # the Profile label and pop-up: shown on Overview only (elsewhere they would pick nothing)
         at = [a for a in self.toolbar.actions() if self.toolbar.widgetForAction(a) is self.profile_box][0]
@@ -716,6 +727,17 @@ class Main(QMainWindow):
         """The toolbar's progress bar (a toolbar widget is shown and hidden through its action)."""
         if self.progress_action is not None:
             self.progress_action.setVisible(on)
+        if not on:
+            self.show_count("")                          # (the next run says its own count)
+
+    def show_count(self, text):
+        """The count beside the toolbar's progress bar ("3 of 16"), wide enough for the text."""
+        lb = getattr(self, "progress_count", None)
+        if lb is None:
+            return
+        lb.setText(text)
+        lb.setMinimumWidth(lb.fontMetrics().horizontalAdvance(text) + 2 if text else 0)
+        lb.setVisible(bool(text))
 
     def refresh(self):
         page = self.stack.currentWidget()

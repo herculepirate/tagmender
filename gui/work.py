@@ -16,6 +16,7 @@ from .i18n import tr
 # --------------------------------------------------------------------------
 class Worker(QObject):
     progress = Signal(int, int, str)
+    partial = Signal(object)                # (a part of the result, ready before the rest)
     finished = Signal(object)
     failed = Signal(str)
 
@@ -85,9 +86,9 @@ def collect_on_ui_thread():
     _gc_timer.start(500)
 
 
-def start(owner, fn, done, progress=None, failed=None):
-    """Run fn(worker) on a thread; done(result), failed(message) and progress(...) on the UI
-    thread."""
+def start(owner, fn, done, progress=None, failed=None, partial=None):
+    """Run fn(worker) on a thread; done(result), failed(message), progress(...) and partial(part)
+    (each worker.partial.emit(part) of fn, in order and before done) on the UI thread."""
     collect_on_ui_thread()
     th = QThread(owner)
     w = Worker(fn)
@@ -99,7 +100,10 @@ def start(owner, fn, done, progress=None, failed=None):
     w.failed.connect(relays[1].one)
     if progress:
         relays.append(_Relay(owner, progress))
-        w.progress.connect(relays[2].three)
+        w.progress.connect(relays[-1].three)
+    if partial:
+        relays.append(_Relay(owner, partial))
+        w.partial.connect(relays[-1].one)
     w._relays = relays                                  # (kept alive with the worker)
     for sig in (w.finished, w.failed):
         sig.connect(th.quit)

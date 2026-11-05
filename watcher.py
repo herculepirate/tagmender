@@ -219,6 +219,12 @@ class Watcher:
         return sorted(pairs, key=lambda rp: -len(str(rp[0])))
 
     @staticmethod
+    def shallow(root, prof) -> bool:
+        """The watched folder is set to look only at albums directly in it (no subfolders)."""
+        mine = [x for x in prof["sources"] if x.get("watch") and Path(x["path"]).expanduser() == root]
+        return bool(mine) and all(x.get("recursive", True) is False for x in mine)
+
+    @staticmethod
     def key(g) -> str:
         """What the watcher remembers an album by: its folder, and in a folder holding
         several albums, which files are this album's."""
@@ -394,10 +400,14 @@ class Watcher:
                 continue
             e = eng_mod.Engine(prof, log=self.log)
             libs = self.library_inside(root, prof)
+            flat = self.shallow(root, prof)
             for g in (e.albums_in(root, skip=libs) if libs else e.albums_in(root)):
                 if self.stop:
                     break
                 real = Path(os.path.realpath(g.folder))
+                top = Path(os.path.realpath(root))
+                if flat and real != top and real.parent != top:
+                    continue                               # (Include subfolders is off: only albums directly in it)
                 if any(real == lb or lb in real.parents for lb in libs):
                     continue                               # already in the library
                 key = (str(g.folder), tuple(sorted(map(str, g.files))))

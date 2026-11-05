@@ -78,7 +78,7 @@ CHOOSE = "__choose__"                                     # a pop-up's "Chooseâ€
 # ---- sections and groups (in reading order) ---------------------------------------------------
 SECTIONS = (
     ("general", N_("General"), ""),
-    ("source", N_("Source"), N_("Which folders are read, and which files in them.")),
+    ("source", N_("Source"), N_("Which files are read, and which are left alone.")),
     ("identification", N_("Identification"), N_("How each album is matched to a release in the music databases.")),
     ("tags", N_("Tags"), N_("What is written into the files' tags.")),
     ("artwork", N_("Artwork"), N_("Front covers and artist photos: where they come from and where they go.")),
@@ -91,7 +91,6 @@ SECTIONS = (
 # group id -> (section, title, footnote, advanced)
 GROUPS = {
     "general": ("general", "", "", False),
-    "folders": ("source", N_("Folders"), N_("Which of them are watched for new music is chosen on the Watched folders page."), False),
     "audio": ("source", N_("Audio files"), N_("Files in other formats are left where they are. Nothing is converted."), False),
     "source_adv": ("source", "", "", True),
     "databases": ("identification", N_("Databases"), N_("Partial: the album is known but not its exact release, so only the details that are certain "
@@ -308,38 +307,6 @@ def _art_when_put(d, v, _vals):
     plant(d, "artwork.replace", "larger_only" if v == "small" else "never")
 
 
-def _sources_get(d):
-    """Each folder with its own destination ("" = the profile's)."""
-    return [{"path": s.get("path", ""), "destination": s.get("destination") or ""}
-            for s in d.get("sources") or [] if isinstance(s, dict)]
-
-
-def _sources_put(d, v, vals):
-    was = {s.get("path"): s for s in d.get("sources") or [] if isinstance(s, dict)}
-    deep = vals.get("_recursive", True)
-    out = []
-    for item in v:
-        path, dest = (item.get("path", ""), item.get("destination") or "") if isinstance(item, dict) else (item, "")
-        s = dict(was.get(path) or {"path": path, "watch": False}, path=path, recursive=deep)
-        if dest:
-            s["destination"] = dest
-        else:
-            s.pop("destination", None)                    # (the profile's destination)
-        out.append(s)
-    d["sources"] = out
-
-
-def _recursive_get(d):
-    srcs = [s for s in d.get("sources") or [] if isinstance(s, dict)]
-    return all(s.get("recursive", True) for s in srcs) if srcs else True
-
-
-def _recursive_put(d, v, _vals):
-    for s in d.get("sources") or []:
-        if isinstance(s, dict):
-            s["recursive"] = v
-
-
 def _merge_get(d):
     return (d.get("discogs_enrichment") or {}).get("merge_mode", "")
 
@@ -429,11 +396,6 @@ WORD_PRESETS = tuple(k for k, t in naming.PRESETS.items() if "$words(%album%,5)"
 
 def _dest_reason(v):
     return None if v.get("_op") in ("copy", "move") else tr("Used when files are copied or moved.")
-
-
-def _recursive_reason(v):
-    # (the choice is kept on each folder: with none, there is nothing to keep it on yet)
-    return None if v.get("_sources") else tr("Add a folder first.")
 
 
 # ---- the derived controls: each reads the saved settings it covers, and writes them back -------
@@ -791,13 +753,6 @@ def _follow_note(key):
     return lambda v: tr(FOLLOW_NOTE) if not v.get("follow_tagger_settings") and _says_tagger(v.get(key)) else ""
 
 
-def _sources_note(v):
-    if v.get("_op") == "in_place" and any(isinstance(s, dict) and s.get("destination")
-                                                for s in v.get("_sources") or []):
-        return tr("A folder's own Moves to is not used when fixing in place.")
-    return ""
-
-
 def _quality_note(v):
     if v.get("_op") == "copy" and v.get("quality_action") == "move":
         return tr(REASON_COPY)
@@ -821,11 +776,6 @@ SETTINGS = [
     # General
     S("description", N_("Description"), "text", "general", personal=True, attr="desc"),
     # Source
-    S("_sources", N_("Folders this profile covers"), "list", "folders", get=_sources_get, put=_sources_put,
-      custom="sources", personal=True, note=_sources_note,
-      foot=N_("The music this profile looks after. A preview can still be run on any other folder.")),
-    S("_recursive", N_("Include subfolders"), "switch", "folders", get=_recursive_get, put=_recursive_put,
-      enable=_recursive_reason, foot=N_("Albums in folders inside these are found too.")),
     S("formats", N_("Audio files"), "popup", "audio", attr="formats", custom="check",
       choices=(([], N_("All formats")), (["lossless"], N_("Lossless only")), (["lossy"], N_("Lossy only"))),
       known=pf.LOSSLESS + pf.LOSSY, words=FORMAT_WORDS,
@@ -1215,8 +1165,7 @@ PRESET_KEEPS = ("operation", "rename_in_place", "unattended")
 PROBLEM_ROWS = (("operation '", "destination"), ("destination must", "destination"),
                 ("no provider", "source"), ("source is", "source"),
                 ("unresolved.action 'move'", "unresolved.move_to"), ("quality_action 'move'", "unresolved.move_to"),
-                ("thresholds.", "matching.extra_careful"), ("sources[", "_sources"),
-                ("providers.web.search", "_engines"), ("exclude_paths", "_skip"), ("skip_folders", "_skip"),
+                ("thresholds.", "matching.extra_careful"), ("providers.web.search", "_engines"), ("exclude_paths", "_skip"), ("skip_folders", "_skip"),
                 ("discogs_enrichment", "discogs_enrichment.merge_mode"), ("artwork.artist", "artwork.artist.enabled"),
                 ("subfolders.covers_name", "subfolders.covers_name"), ("subfolders.misc_name", "subfolders.misc_name"),
                 ("subfolders", "_subfolders"), ("filenames.fat", "filenames.fat"))
@@ -1422,7 +1371,7 @@ class ProfileEditor(QScrollArea):
                 self.picard_btn.setAutoDefault(False)
                 self.picard_btn.clicked.connect(self.open_script.emit)
                 g.add_widget(self.picard_btn).layout().setAlignment(self.picard_btn, Qt.AlignLeft)
-            if gid == "folders":
+            if gid == "audio":
                 rules = QPushButton(tr("Ignore and Skip Rulesâ€¦"))
                 rules.setAccessibleName(tr("Show the ignore and skip rules"))
                 rules.setAutoDefault(False)
@@ -1626,7 +1575,6 @@ class ProfileEditor(QScrollArea):
     def refresh(self):
         _READY.clear()                      # (asked again: a key or program may have been added)
         vals = self.values()
-        self.controls["_sources"].fallback = vals.get("destination") or ""   # (named in its Moves to column)
         for s in SETTINGS:
             row = self.rows[s.key]
             row.setVisible(bool(s.show(vals)) if s.show else True)

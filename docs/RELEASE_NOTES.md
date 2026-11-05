@@ -1,5 +1,24 @@
 # Release notes
 
+## 0.6.0
+
+**Library folder on the Overview**
+- Beside Sources, *Library folder* shows where copied or moved albums go. Choose another folder
+  for this preview and Apply only (marked ↺); albums already looked up are looked up again for
+  it, a release you chose is kept. *Make It the Profile's* saves it to the profile.
+- It goes back to the profile's folder when you open another folder or choose another profile.
+  Apply asks you to preview again when the preview was made for another folder.
+- Not offered for a profile that fixes files in place.
+
+**Profiles no longer list folders**
+- The profile editor no longer has *Folders this profile covers* and *Include subfolders*: any
+  folder can be previewed with any profile, and the Watched folders page is where a folder is
+  paired with a profile. *Ignore and Skip Rules…* is in the Source section.
+- Each watched folder has its own *Include subfolders*. Off, only albums directly in the folder
+  are filed.
+- Your profiles keep the folders they had: watching and the profile chosen for a folder work
+  as before.
+
 ## 0.5.0
 
 **Watched folders**

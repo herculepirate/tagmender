@@ -34,11 +34,6 @@ class EditorRows(Base):
             self.assertTrue(pe.BY_KEY[key].enable({"_op": "in_place"}), key)
             self.assertIsNone(pe.BY_KEY[key].enable({"_op": "copy"}), key)
 
-    def test_include_subfolders_waits_for_a_folder(self):
-        from gui import profile_editor as pe
-        self.assertTrue(pe.BY_KEY["_recursive"].enable({"_sources": []}))
-        self.assertIsNone(pe.BY_KEY["_recursive"].enable({"_sources": ["/srv/music"]}))
-
     def test_list_values_are_translated_in_the_change_sheets(self):
         from gui import profile_editor as pe
         with mock.patch.object(pe, "tr", side_effect=lambda t: "XX" + t):

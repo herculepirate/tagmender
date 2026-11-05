@@ -105,6 +105,10 @@ class WatchDialog(QDialog):
             self.prof.setCurrentText(profile)
         self.does = QLabel("")
         self.does.setWordWrap(True)
+        self.deep = QCheckBox(tr("Include subfolders"))
+        self.deep.setAccessibleName(tr("Include subfolders"))
+        self.deep.setToolTip(tr("Albums in folders inside this one are found too."))
+        self.deep.setChecked(True)
         self.auto = QCheckBox(tr("File albums without asking"))
         self.auto.setToolTip(tr("On: albums identified for sure (Ready) are filed; any it is not sure of waits under "
                                 "\"Waiting for your approval\".\n"
@@ -129,6 +133,7 @@ class WatchDialog(QDialog):
         form.addRow(tr("Folder"), row)
         form.addRow(tr("Profile"), self.prof)
         form.addRow(tr("What happens"), self.does)
+        form.addRow("", self.deep)
         form.addRow("", self.auto)
         form.addRow(tr("Wait until unchanged for"), self.settle)
         form.addRow(tr("Look every"), self.every)
@@ -150,7 +155,19 @@ class WatchDialog(QDialog):
         self.prof.currentTextChanged.connect(self.show_profile)
         self.path.textChanged.connect(lambda _t: (self.show_warnings(), self.ask_timer.start()))
         self.show_profile(self.prof.currentText())
+        self.load_deep()
         self.ask_timer.start()
+
+    def load_deep(self):
+        """Include subfolders as the folder's existing entry has it (ticked for a new one)."""
+        p = self.profile()
+        if p is None or not self.old_path:
+            return
+        old = os.path.abspath(os.path.expanduser(self.old_path))
+        for s in p["sources"]:
+            if os.path.abspath(os.path.expanduser(s.get("path", ""))) == old:
+                self.deep.setChecked(bool(s.get("recursive", True)))
+                return
 
     def folder(self):
         text = self.path.text().strip()
@@ -260,7 +277,7 @@ class WatchDialog(QDialog):
             data = self.profile().to_dict()
             had = [s for s in data["sources"] if same(s)]
             data["sources"] = [s for s in data["sources"] if not same(s)] + [
-                dict(had[0] if had else {"recursive": True}, path=folder, watch=True)]
+                dict(had[0] if had else {}, path=folder, watch=True, recursive=self.deep.isChecked())]
             data["unattended"] = self.auto.isChecked()
             data["watch"] = dict(data.get("watch") or {}, settle_minutes=self.settle.value(),
                                  interval_seconds=int(self.every.currentData()))

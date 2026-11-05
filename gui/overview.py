@@ -77,6 +77,20 @@ def profile_for(prof, mode):
     return pf.from_dict(d)
 
 
+def library_for(prof, folder):
+    """PROF with FOLDER as the library albums go to (this preview and Apply only): the profile's
+    destination and every source folder's own destination (which would win over it) replaced."""
+    if not folder:
+        return prof
+    import copy
+    d = copy.deepcopy(prof.data)
+    d["destination"] = folder
+    for s in d.get("sources") or []:
+        if isinstance(s, dict):
+            s.pop("destination", None)
+    return pf.from_dict(d)
+
+
 class Overview(QWidget):
     """The profile picker, search field, progress bar and Preview / Apply / Cancel live in the
     window's toolbar (the window makes them); the album actions (Change Release: a link, Search for
@@ -90,6 +104,7 @@ class Overview(QWidget):
         self.path = None
         self.worker = None
         self.forced = {}
+        self.library = ""           # the library folder chosen for this preview ("": the profile's)
         self.looked = {}            # album key -> how it was looked up (profile, sources): not again
         self._lookup_n = 0
         lay = QVBoxLayout(self)
@@ -161,7 +176,26 @@ class Overview(QWidget):
         look.addWidget(self.keep_link)
         look.addStretch(1)
         rl.addLayout(look)
+        # where copied or moved albums go: the profile's folder, or another for this preview and Apply
+        lib = QHBoxLayout()
+        lib.setContentsMargins(0, 0, 0, 0)
+        self.library_label = QLabel(tr("Library folder"))
+        lib.addWidget(self.library_label)
+        self.library_where = _Elided("")
+        lib.addWidget(self.library_where, 1)
+        self.library_btn = QPushButton(tr("Choose…"))
+        self.library_btn.setAccessibleName(tr("Choose another library folder"))
+        self.library_btn.clicked.connect(lambda: self.choose_library())
+        lib.addWidget(self.library_btn)
+        self.library_keep = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
+        self.library_keep.setTextFormat(Qt.RichText)
+        self.library_keep.setAccessibleName(tr("Make this library folder the profile's own"))
+        self.library_keep.linkActivated.connect(lambda _h: self.keep_library())
+        self.library_keep.hide()
+        lib.addWidget(self.library_keep)
+        rl.addLayout(lib)
         self.profile.currentTextChanged.connect(lambda _t: self.reset_sources())
+        self.profile.currentTextChanged.connect(lambda _t: self.reset_library())
         self.sources.currentIndexChanged.connect(lambda _i: self.show_sources_state())
         # what the preview did without, because a key, login or program is missing (Open Setup: its row)
         self.setup_note = QLabel("")
@@ -224,6 +258,7 @@ class Overview(QWidget):
         self.views.addWidget(self.results)
         self.detail = win.inspector.full                  # (the inspector's Evidence > Full preview)
         self.refresh_profiles()
+        self.show_library_state()
         self.busy(False)
 
     def filter(self, text):
@@ -349,7 +384,9 @@ class Overview(QWidget):
         self.forced = dict(forced or {})
         self.within = list(within or [])                     # (several folders dropped: only these)
         self.looked = {}                                     # (a new folder: nothing looked up yet)
+        self.plan_library = ""
         self.reset_sources()                                 # (a new folder: the profile's sources again)
+        self.reset_library()                                 # (and the profile's library folder)
         self.where.setText(path)
         self.views.setCurrentWidget(self.results)
         if self.win.stack.currentWidget() is not self:
@@ -448,6 +485,126 @@ class Overview(QWidget):
         if "Profiles" in getattr(self.win, "pages", {}):
             self.win.pages["Profiles"].reload()
 
+    # ---- Library folder: where copied or moved albums go, for this preview and Apply ----------
+    def covering_source(self, data):
+        """The profile's source entry holding the folder previewed (the deepest), or None."""
+        if not self.path:
+            return None
+        real = os.path.realpath(str(self.path))
+        best = None
+        for s in data.get("sources") or []:
+            if not isinstance(s, dict) or not s.get("path"):
+                continue
+            r = os.path.realpath(os.path.expanduser(s["path"])).rstrip(os.sep)
+            if (real == r or real.startswith(r + os.sep)) and (best is None or len(r) > len(best[0])):
+                best = (r, s)
+        return best[1] if best else None
+
+    def profile_destination(self) -> str:
+        """Where the profile files the folder previewed: the destination of the profile's folder
+        holding it, if that has its own, else the profile's."""
+        try:
+            data = load_profile(self.profile.currentText()).data
+        except Exception:
+            return ""
+        src = self.covering_source(data)
+        return (src or {}).get("destination") or data.get("destination") or ""
+
+    def in_place(self) -> bool:
+        try:
+            return load_profile(self.profile.currentText()).data.get("operation") == "in_place"
+        except Exception:
+            return False
+
+    def planning_profile(self, mode="profile"):
+        """The profile Preview, Look Up and (through the plan) Apply use: the Sources choice and
+        the library folder chosen here applied to the profile as saved."""
+        prof = load_profile(self.profile.currentText())
+        if self.library and not self.in_place():
+            prof = library_for(prof, self.library)
+        return profile_for(prof, mode)
+
+    def reset_library(self):
+        """Back to the profile's own library folder: a choice is for one preview only."""
+        self.library = ""
+        self.show_library_state()
+
+    def show_library_state(self):
+        if not hasattr(self, "library_label"):
+            return
+        name = self.profile.currentText()
+        mine = self.profile_destination()
+        other = bool(self.library) and self.library != mine
+        stays = self.in_place()
+        self.library_label.setText(tr("Library folder ↺") if other else tr("Library folder"))
+        shown = self.library or mine
+        self.library_where.setText(shown or tr("None chosen"))
+        if stays:
+            tip = tr("This profile does not move files, so it has no library folder.")
+        elif other:
+            tip = tr("For this preview and Apply only; the profile uses {0}.").format(mine or tr("no folder"))
+        else:
+            tip = tr("The folder copied or moved albums go to: the profile's own. Choose another for this "
+                     "preview and Apply; it goes back for the next folder.")
+        for w in (self.library_label, self.library_where, self.library_btn):
+            w.setToolTip(tip)
+            w.setEnabled(not stays)
+        self.library_keep.setVisible(other and not stays and name not in ("", "default"))
+
+    def choose_library(self):
+        if self.in_place() or getattr(self, "running", False):
+            return
+        folder = sheets.choose_folder(self, tr("Library folder"), self.library or self.profile_destination())
+        if not folder:
+            return
+        if not os.path.isdir(folder):
+            sheets.warning(self, tr("That folder does not exist."), tr("Library folder kept: {0}").format(
+                self.library or self.profile_destination() or tr("none")))
+            return
+        folder = os.path.abspath(folder)
+        if folder == (self.library or self.profile_destination()):
+            return
+        self.library = "" if folder == self.profile_destination() else folder
+        self.show_library_state()
+        self.replan_after_library()
+
+    def replan_after_library(self):
+        """The albums already looked up were planned for the other folder: look them up again."""
+        if not self.plan or not self.path:
+            return
+        if self.forced:                                    # (a release you chose: kept, so previewed again)
+            self.preview()
+            return
+        again = [a for a in self.plan.get("albums") or [] if a.get("status") not in ("listed", "done")]
+        if again:
+            self.look_up(self.sources.currentData() or "profile", again, again=True)
+            if self.running:
+                return
+        self.summary.setText(tr("Library folder changed: destinations change at the next Preview or Look Up."))
+
+    def keep_library(self):
+        """Save the chosen library folder as the profile's destination (after asking)."""
+        name = self.profile.currentText()
+        if not self.library or not name or name == "default":
+            return
+        if not sheets.question(self, tr("Make {0} the library folder of “{1}”?").format(self.library, name),
+                               tr("Every copy or move with this profile, and its watched folders, then go there."),
+                               action=tr("Save to Profile")):
+            return
+        try:
+            data = pf.rename_legacy(pf.raw(name))
+            data["destination"] = self.library
+            src = self.covering_source(data)
+            if src is not None:                            # (its own folder would win over it)
+                src.pop("destination", None)
+            pf.save(pf.from_dict(data))
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("The profile was not changed."), str(exc))
+            return
+        self.reset_library()
+        if "Profiles" in getattr(self.win, "pages", {}):
+            self.win.pages["Profiles"].reload()
+
     def name_profile_sources(self):
         """The first choice of Look up with says what the profile's sources are."""
         if hasattr(self, "sources"):
@@ -493,7 +650,7 @@ class Overview(QWidget):
         if not chosen or self.running or not self.path:
             return
         try:
-            prof = profile_for(load_profile(self.profile.currentText()), mode)
+            prof = self.planning_profile(mode)
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
@@ -522,7 +679,12 @@ class Overview(QWidget):
         self._lookup_n = len(keys)
         self._lookup_skipped = skipped
         self.summary.setText(self.lookup_words(0, ""))
-        self.worker = start(self, work, lambda plan: self.looked_up(plan, keys, stamp), self.progress, self.oops)
+        library = self.library
+
+        def found(plan):
+            self.plan_library = library
+            self.looked_up(plan, keys, stamp)
+        self.worker = start(self, work, found, self.progress, self.oops)
 
     def lookup_words(self, i, name) -> str:
         """The line under the list while albums are looked up: which one of how many."""
@@ -668,7 +830,7 @@ class Overview(QWidget):
             return
         mode = self.sources.currentData() or "profile"
         try:
-            prof = profile_for(load_profile(self.profile.currentText()), mode)   # (Look up with: its choice)
+            prof = self.planning_profile(mode)   # (Look up with: its choice)
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
@@ -686,8 +848,11 @@ class Overview(QWidget):
         self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))
         stamp = None if forced else self.lookup_stamp(prof, mode)    # (a release you chose: not the same)
 
+        library = self.library
+
         def done(plan):
             self.looked = {}
+            self.plan_library = library
             self.remember_looked(plan.get("albums") or [], stamp)
             self.planned(plan)
         self.worker = start(self, work, done, self.progress, self.oops)
@@ -787,6 +952,12 @@ class Overview(QWidget):
     def apply(self):
         n = self.actionable()
         if not n or self.running or self.edit_pending():
+            return
+        if getattr(self, "plan_library", "") != (self.library or ""):
+            # (the preview was made for another library folder: its files would go there)
+            sheets.information(self, tr("Preview again first."),
+                               tr("The library folder changed since this preview; its files would go to the "
+                                  "folder it was made for. Preview or Look Up again, then apply."))
             return
         # always asked here: the profile's "Apply without asking" is for its watched folders only
         if not sheets.confirm(self, *self.apply_words()) or self.edit_pending():

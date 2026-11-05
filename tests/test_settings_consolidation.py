@@ -249,12 +249,6 @@ class Merged(unittest.TestCase):
         ed = self.editor(operation="copy", quality_action="move", tag_level="audiophile")
         self.assertIn("copy leaves your originals", ed.rows["quality_action"].reason.text())
 
-    def test_sources_note_for_a_folders_own_destination_in_place(self):
-        ed = self.editor(sources=[{"path": "/srv/a", "destination": "/srv/lib"}])
-        self.assertIn("not used when fixing in place", ed.rows["_sources"].reason.text())
-        ed.set_value("operation", "copy")
-        self.assertEqual(ed.rows["_sources"].reason.text(), "")
-
     def test_following_a_tagger_is_explained_when_it_is_off(self):
         ed = self.editor()
         self.assertIn("not used", ed.rows["tagger.write_id3v23"].reason.text())

@@ -463,11 +463,10 @@ class ProfileManagement(Base):
         ed.fold_all(True)
         self.assertEqual(self.gui.common._gui_prefs()["profile_sections_folded"], [])
 
-    def test_a_folder_is_chosen_for_the_folders_a_profile_covers(self):
+    def test_a_folder_is_chosen_in_a_folder_list_sheet(self):
         from unittest import mock
         from gui.rows import ListSheet
         pr = self.page("Src")
-        self.assertTrue(pr.editor.controls["_sources"].folders)
         sheet = ListSheet(pr, "Folders", "", [], folders=True)
         with mock.patch.object(self.gui.sheets, "choose_folder", return_value=str(self.tmp)):
             sheet.add_chosen()

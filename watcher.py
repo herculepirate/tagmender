@@ -385,8 +385,13 @@ class Watcher:
         errs = prop.provider_errors or {}
         # (the web only adds evidence: an album only the web did not answer for keeps the
         # unresolved schedule - a blocked web source would use up every quick retry in a day)
+        # - unless the profile asks no database: then the web is all it has, and nobody answered)
+        try:
+            web_only = not any(prof.provider_on(n) for n in ("musicbrainz", "discogs"))
+        except Exception:
+            web_only = False
         retryable = prop.status == "unresolved" and any(
-            v in ("outage", "rate_limited", "invalid_response") for k, v in errs.items() if k != "web")
+            v in ("outage", "rate_limited", "invalid_response") for k, v in errs.items() if k != "web" or web_only)
         status = ("excluded" if a["status"] == "excluded" or outcome == "excluded" else
                   "provider_error" if retryable else
                   "blocked" if a["status"] == "blocked" or outcome == "blocked" else

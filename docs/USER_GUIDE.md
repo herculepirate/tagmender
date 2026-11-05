@@ -524,6 +524,12 @@ inspector on the right (Ctrl+Alt+I). Drop a music folder on the window or choose
 pick a profile, Preview (Ctrl+P), then Apply (Ctrl+Return); Edit > Undo Last Job (Ctrl+Alt+Z) puts
 it back. Every command is in the menu bar, and Ctrl+/ lists the shortcuts.
 
+With two or more albums listed (several folders dropped at once, or a folder holding several
+albums), each row has a **Profile** drop-down: *As Above* uses the profile chosen in the
+toolbar, or choose another for that album (several selected: right-click › Profile). Look Up and
+Preview plan each album with its own profile, and Apply runs one job per profile (each undone
+on its own from Jobs). Changing an album's profile after it was looked up looks it up again.
+
 Its interactive tools each change only the preview; nothing reaches a music
 file until you apply it, through the same staged, verified and undoable path as everything else:
 

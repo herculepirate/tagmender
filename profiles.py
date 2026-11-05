@@ -391,6 +391,11 @@ def rename_legacy(data: dict) -> dict:
         if old in data:
             value = data.pop(old)
             data.setdefault(new, value)
+    w = data.get("watch")
+    if isinstance(w, dict) and isinstance(w.get("interval_seconds"), (int, float)) and \
+            not isinstance(w["interval_seconds"], bool) and w["interval_seconds"] > 86400:
+        # (before 0.5.0 any interval was allowed: a longer one is a day now, the longest offered)
+        data["watch"] = dict(w, interval_seconds=86400)
     if "source" not in data:
         src = legacy_source(data)
         if src:

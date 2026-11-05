@@ -544,7 +544,9 @@ def barcode_key(value):
 # name or decides a tie.
 NOTES_BARCODE = "barcode (notes)"
 TAGS_BARCODE = "barcode (tags)"
-WEAK_BARCODES = (NOTES_BARCODE, TAGS_BARCODE)
+# likewise a catalogue number only another tagger wrote (it came from the release it picked)
+TAGS_CATNO = "catalogue number (tags)"
+WEAK_BARCODES = (NOTES_BARCODE, TAGS_BARCODE, TAGS_CATNO)
 
 
 def barcode_proves(s):
@@ -583,6 +585,15 @@ def tagger_barcode(album, keys):
         return False
     tags = _keys(album.get("tag_barcodes"))
     return keys <= tags and not keys & _keys(album.get("ocr_barcodes"))
+
+
+def tagger_catno(album, shared):
+    """True when the catalogue numbers agreeing (shared) came only from tags another tagger
+    wrote (as tagger_barcode), not from the folder name or the ripper's notes as well."""
+    if not album.get("tags_by_tagger") or not shared:
+        return False
+    tags = {norm_code(c) for c in album.get("tag_catnos") or ()}
+    return shared <= tags and not shared & set(album.get("catnos_from_folder") or ())
 
 
 def barcode_variants(value):
@@ -1205,18 +1216,18 @@ def unofficial_why(best):
     agreeing makes it your copy (R9: Kreator's Russian 8382890 for SPV 69848). Your files
     already tagged with that very release, which then fits like any other (Coroner - Death
     Cult, a4e8f7ab...), keep it when something of your copy backs those tags too (its
-    catalogue number, disc ID, a link, an ISRC or a fingerprint): a note says it is
-    unofficial. The tags alone are not evidence (an earlier tagger may have got them wrong).
-    ISRCs do not back them: a bootleg copies the official release's recordings, and an ISRC
-    names a recording, not a pressing. Nor does a barcode typed in notes or written by
-    another tagger (WEAK_BARCODES)."""
+    catalogue number, disc ID or a link): a note says it is unofficial. The tags alone are
+    not evidence (an earlier tagger may have got them wrong). ISRCs and fingerprints do not
+    back them: a bootleg copies the official release's recordings, and both name recordings,
+    not a pressing. Nor does a barcode typed in notes, or a barcode or catalogue number
+    another tagger wrote (WEAK_BARCODES)."""
     if not best["cand"].get("unofficial"):
         return []
     clues = best.get("clues") or {}
     if barcode_proves(best) or clues.get("matrix"):
         return []
-    backed = best["code"].startswith("catalogue number") or any(
-        k in clues for k in ("disc TOC", "source link", "fingerprint"))
+    backed = (best["code"].startswith("catalogue number") and best["code"] not in WEAK_BARCODES) or any(
+        k in clues for k in ("disc TOC", "source link"))
     if best.get("tagged") and backed:
         best["notes"] = best["notes"] + ["the release is an unofficial one (a bootleg); kept: your files "
                                          "are tagged with it"]
@@ -1726,6 +1737,7 @@ def _weigh(tied):
         # Nor does an ISRC: it is the recording's code, shared by every pressing that
         # carries the recording, and only lists which pressings someone submitted it for
         allc[id(s)].pop("isrc", None)
+        allc[id(s)].pop("fingerprint", None)        # (recordings, as an ISRC: every pressing's)
     # A disc code read for one pressing tells it apart only when every tied pressing lists
     # a code of that kind: an entry without one is unknown, not different (a label code is
     # the same on all the label's pressings, often entered for one of them only).
@@ -2007,7 +2019,8 @@ def _slots_why_not(album, s):
     by length (and by title where the files have titles)."""
     clues = s.get("clues") or {}
     proof = ("disc TOC" in clues or barcode_proves(s)
-             or (s["code"].startswith("catalogue number") and "matrix" in clues))
+             or (s["code"].startswith("catalogue number") and s["code"] not in WEAK_BARCODES
+                 and "matrix" in clues))
     if not proof:
         return "nothing but its name says it is this release"
     if s.get("conflict"):
@@ -2162,14 +2175,19 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             conflict = True      # a different product: never auto
             avail += cfg["w_code"]
             notes.append("barcode differs")
-    if not code and album["catnos"] and cand["catnos"]:
+    # (a number of your folder, notes or rip replaces another tagger's barcode: that barcode
+    # must not hide the folder's catalogue number, which the other pressings are weighed by)
+    if (not code or code == TAGS_BARCODE) and album["catnos"] and cand["catnos"]:
         shared = album["catnos"] & cand["catnos"]
-        if shared:
+        if shared and not (code and tagger_catno(album, shared)):
             code = ("catalogue number (folder name)"
-                    if shared <= set(album.get("catnos_from_folder") or ()) else "catalogue number")
+                    if shared <= set(album.get("catnos_from_folder") or ()) else
+                    TAGS_CATNO if tagger_catno(album, shared) else "catalogue number")
             if code.endswith("(folder name)") and shared <= set(album.get("catnos_typed") or ()):
                 typed_note = True               # typed in the ripper's notes or log, not the folder
-    if not code and ocr_text:
+    # (also when only another tagger's barcode or number agrees: printed on your scans too,
+    # it is your copy's own)
+    if (not code or code in (TAGS_BARCODE, TAGS_CATNO)) and ocr_text:
         hay = norm_code(ocr_text)
         for c in cand["catnos"]:
             # Only distinctive catalogue numbers (letters AND digits, 5+
@@ -2193,7 +2211,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                      else "barcode typed in your rip's notes or a saved page agrees (not proof of the pressing)"
                      if code == NOTES_BARCODE
                      else "barcode in the tags another tagger wrote agrees (not proof of the pressing)"
-                     if code == TAGS_BARCODE else f"{code} agrees")
+                     if code == TAGS_BARCODE
+                     else "catalogue number in the tags another tagger wrote agrees (not proof of the pressing)"
+                     if code == TAGS_CATNO else f"{code} agrees")
     elif (album["catnos"] - set(album.get("catnos_from_folder") or ())) and cand["catnos"]:
         # Only a catalogue number from the TAGS counts against a candidate. One
         # read from the folder name may not be a catalogue number at all
@@ -2395,7 +2415,7 @@ def _numbers_prove_album(s, cfg):
     clues = s.get("clues") or {}
     proof = (any(k in clues for k in ("disc TOC", "source link", "isrc", "fingerprint"))
              or s["code"] == "barcode" or s["code"].startswith("barcode")
-             or s["code"] in ("catalogue number", "catalogue number (folder name)"))
+             or s["code"] in ("catalogue number", "catalogue number (folder name)", TAGS_CATNO))
     return bool(proof and s.get("dur_frac") is not None and s["dur_frac"] >= cfg["auto_min_duration_frac"]
                 and not s.get("conflict"))
 
@@ -2602,7 +2622,7 @@ def classify(scored, cfg):
             # files' link, fingerprint, barcode) decides. Not ISRCs: every pressing of the
             # album shares its recordings, the unlisted one too.
             if unlisted:
-                hard = ("disc TOC", "source link", "fingerprint")
+                hard = ("disc TOC", "source link")      # (a fingerprint finds recordings: hard_proof)
                 own = next((x for s in scored for x in s.get("own_catnos") or ()), "")
                 scored = [s if (any(k in (s.get("clues") or {}) for k in hard) or barcode_proves(s))
                           else dict(s, media_why=f"catalogue number {own.upper()} from your folder/tags is on "
@@ -2757,7 +2777,7 @@ def classify(scored, cfg):
     if best["cand"].get("pregap_used") and not best["cand"].get("pregap_proven") and not _exact_toc(best):
         why.append("hidden track matched on its length only")
     py = best.get("pressing_year")
-    if (py and best["cand"].get("year") and not best["code"]
+    if (py and best["cand"].get("year") and not strong_code
             and abs(best["cand"]["year"] - py) > cfg.get("pressing_year_tolerance", 0)):
         why.append(f"folder name says this is the {py} edition; matched release is from "
                    f"{best['cand']['year']}")
@@ -2773,7 +2793,7 @@ def classify(scored, cfg):
     if exact:
         # chosen by its lengths, above; only pressing-level proof on it makes that automatic
         # (an ISRC names the recordings, which the other release may share: not pressing-level)
-        if not (best["code"] or (best.get("clues") or {}).keys() & {"disc TOC", "source link"}):
+        if not (strong_code or (best.get("clues") or {}).keys() & {"disc TOC", "source link"}):
             why.append(f"pressing chosen by track lengths alone; runner-up {runner['cand']['id']} scored "
                        f"{runner['confidence']} (likely another pressing)")
     elif scan_pick and abs(margin) < cfg["auto_min_margin"] and not (barcode_decided or catno_decided):
@@ -2942,7 +2962,7 @@ def same_pressing(a, b, sole_digital=False, disc_on_both=False):
 # (not "isrc": an ISRC names a recording, and only MusicBrainz candidates can carry the clue,
 # so it would always tell a MusicBrainz pick from a Discogs one without telling pressings
 # apart; not "disc TOC (fuzzy)": a CD of about these lengths)
-EVIDENCE_CLUES = ("disc TOC", "source link", "fingerprint", "catalogue number", "barcode",
+EVIDENCE_CLUES = ("disc TOC", "source link", "catalogue number", "barcode",
                   "label", "country", "format", "physical")
 
 
@@ -2952,7 +2972,7 @@ def _evidence(best):
     clues = {k: v for k, v in (best.get("clues") or {}).items() if k in EVIDENCE_CLUES}
     if best["cand"].get("source") == "discogs":
         clues.pop("disc TOC", None)            # linked from MusicBrainz, not your copy's evidence
-    if best.get("code"):
+    if best.get("code") and best["code"] not in WEAK_BARCODES:     # (notes or another tagger's: no evidence)
         clues["code"] = best["code"]
     if best.get("folder_catno_agrees"):
         clues["folder catalogue number"] = True
@@ -3224,7 +3244,8 @@ def _musicbrainz_decides(mb_result, dg_result):
 def _tagged_one(*results):
     """The one of two sure picks of different pressings your files are already tagged with
     (a note says so), or None when both or neither are."""
-    mine = [r for r in results if r["best"].get("tagged")]
+    # (another tagger's release IDs pick nothing: tagger_tagged, as choose_pressing)
+    mine = [r for r in results if r["best"].get("tagged") and not r["best"].get("tagger_tagged")]
     if len(mine) != 1:
         return None
     mine[0]["best"]["notes"] = mine[0]["best"]["notes"] + [

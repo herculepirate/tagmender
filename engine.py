@@ -2030,8 +2030,9 @@ class Engine:
             return None
         if failed:
             # a source that did not answer might have held a rival that makes the others
-            # refuse: no web tags from the rest this time. Recorded as an outage, not as "no
-            # candidate": the album is an error tried again later (watcher, Overview)
+            # refuse: no web tags from the rest this time. When none of them answered it is an
+            # outage, not "no candidate" (the album is tried again later: watcher, Overview);
+            # one source down for good must not make every album an outage (0.8.2)
             self.log.info("no web tags for %s: %s did not answer", base["source_dir"], ", ".join(failed))
             if len(set(failed)) >= len(web_tag.chosen_sources(self._web_sources())):
                 # (not one web source answered: an outage, not "no match")

@@ -1541,6 +1541,15 @@ class Executor:
                 now = os.stat(src)
                 if (now.st_size, now.st_mtime_ns) != (pre.st_size, pre.st_mtime_ns) or \
                         now.st_nlink != pre.st_nlink - 1:
+                    # (dst holds the new tags already: it is src's other name again, as it was -
+                    # with that program's edit - before the step fails; nothing is left unrecorded)
+                    back = _stage_name(dst, self.job)
+                    try:
+                        os.link(src, back)
+                        os.replace(back, dst)
+                        _fsync_dir(dst.parent)
+                    finally:
+                        back.unlink(missing_ok=True)
                     raise StepError(f"{src.name} changed while it was being written; original kept")
                 pre = now
         st = os.stat(dst)
@@ -1570,7 +1579,10 @@ class Executor:
             if op == "rewrite":
                 return
             ce = dict(ce, rewrite=None)                 # moved with the album as it is
-        pre = os.stat(src)                        # (as for a track: _still before it is replaced or removed)
+        try:
+            pre = os.stat(src)                    # (as for a track: _still before it is replaced or removed)
+        except FileNotFoundError:
+            raise StepError(f"{src.name} is gone since the preview; preview again") from None
         if op == "rewrite":                       # a cue sheet that stays, naming renamed files
             stage = _stage_name(src, self.job)
             self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",

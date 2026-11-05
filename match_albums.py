@@ -1625,6 +1625,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "catnos": ({mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}
                    | {mc.norm_code(h) for h in folder_match} | typed),
         "catnos_from_folder": {mc.norm_code(h) for h in folder_match} | typed,
+        # ... and those from the tags (mc.tagger_catno: another tagger's word only)
+        "tag_catnos": {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])},
         # ... of which the ripper typed in notes or a log (told apart from the folder's in the notes)
         "catnos_typed": typed - {mc.norm_code(h) for h in folder_match},
         "catnos_from_logs": sorted({mc.norm_code(c) for c in log_codes}),
@@ -6121,7 +6123,7 @@ def _needs_investigation(final, album, ocr_txt, base):
     read = {mc.barcode_key(b) for b in list(codes["barcodes"]) + sorted(album.get("ocr_barcodes") or ())}
     if read and not (read & have):
         return True                                # the scans name another pressing
-    if best.get("code"):
+    if best.get("code") and best["code"] not in mc.WEAK_BARCODES:
         return False                               # a number of yours is on the pick already
     # catalogue numbers read on the scans (distinctive ones: letters and digits, as
     # score_candidate counts them) or typed in the rip log's paths, on the pick not at all

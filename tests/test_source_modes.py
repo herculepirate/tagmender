@@ -223,9 +223,9 @@ class Modes(Base):
         self.assertIn("replaces your MusicBrainz release ID mb-old with mb-u", a["notes"])
         self.assertFalse(a["conflicts"])
 
-    def test_discogs_preferred_keeps_the_pressing_your_files_are_tagged_with(self):
-        # MusicBrainz is sure of another pressing, and the files are tagged with it: the
-        # preference only breaks a tie, and the files' own release is kept
+    def test_discogs_preferred_is_not_overruled_by_another_taggers_release_id(self):
+        # MusicBrainz is sure of another pressing, and the files are tagged with it by another
+        # tagger (not a TagMender job): those IDs pick nothing (0.8.3), so the preference decides
         MBV = "0b5e0c1e-1111-4222-8333-444455556666"               # (only a real MBID names a release)
         d = self.album("Band V", "Album V", MUSICBRAINZ_ALBUMID=MBV)
         http = FakeHttp(mb=[mb_release(MBV, "Band V", "Album V", catno="OTHER-1", country="US")],
@@ -233,10 +233,9 @@ class Modes(Base):
         eng = self.engine(http)
         eng.cfg["preferred_countries"] = ["US"]
         a = eng.plan(d)["albums"][0]
-        self.assertEqual((a["identification"]["provider"], a["identification"]["tier"]), ("musicbrainz", "exact"))
-        self.assertTrue(any("kept the release your files are tagged with" in n
-                            for n in a["identification"].get("evidence") or []), a["identification"])
-        self.assertNotIn("musicbrainz_albumid", a["files"][0]["changes"])
+        self.assertEqual((a["identification"]["provider"], a["identification"]["tier"]), ("discogs", "exact"))
+        self.assertFalse(any("kept the release your files are tagged with" in n
+                             for n in a["identification"].get("evidence") or []), a["identification"])
 
     def test_discogs_preferred_removes_a_musicbrainz_id_of_another_pressing_without_review(self):
         # MusicBrainz is sure of another pressing than the one your files name: Discogs decides,

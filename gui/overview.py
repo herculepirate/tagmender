@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import html
 import os
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
-                               QPushButton, QStackedWidget, QTableView, QVBoxLayout, QWidget)
+                               QPushButton, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
+                               QWidget)
 
 from . import icons, setup, sheets
 from .common import (album_words, counts_by_label, counts_text, ex, heading, left_header, load_profile, notify,
@@ -35,6 +37,37 @@ def run_report(plan, res):
         return None
     rep["job"], rep["started"] = res.get("job") or rep["job"], time.time()
     return rep
+
+
+def merge_results(plans, run, cancelled=lambda: False) -> dict:
+    """One Apply's result from running PLANS (one per profile, each a job of its own) in order:
+    the albums' indexes count on through them. A plan whose run cannot start (another job is
+    running or waits to be recovered) fails its albums; once cancelled, the rest wait."""
+    jobs, counts, albums, off, partial = [], {}, [], 0, False
+    for plan in plans:
+        n = len(plan["albums"])
+        if cancelled():
+            break
+        try:
+            res = run(plan)
+        except Exception as exc:
+            if len(plans) == 1:
+                raise
+            partial = True
+            for k, a in enumerate(plan["albums"]):
+                albums.append({"index": off + k, "album": a["source_dir"], "status": "failed",
+                               "label": "Failed", "detail": str(exc).splitlines()[0] if str(exc) else ""})
+            counts["failed"] = counts.get("failed", 0) + n
+            off += n
+            continue
+        jobs.append(res["job"])
+        partial = partial or res.get("status") != "done"
+        for k, v in (res.get("counts") or {}).items():
+            counts[k] = counts.get(k, 0) + v
+        for r in res.get("albums") or []:
+            albums.append(dict(r, index=off + r["index"]) if "index" in r else r)
+        off += n
+    return {"job": ", ".join(jobs), "status": "partial" if partial else "done", "counts": counts, "albums": albums}
 
 
 # Look Up's sources (List first): the profile's, or one of them alone
@@ -98,6 +131,55 @@ def library_for(prof, folder):
     return pf.from_dict(d)
 
 
+class ProfileDelegate(QStyledItemDelegate):
+    """An album's profile in its row: drawn as a drop-down, and one when clicked (the first
+    choice, As Above, is the profile chosen above the list)."""
+
+    ARROW = 22                                             # (room for the drop-down's arrow)
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if not index.flags() & Qt.ItemIsEditable:
+            return
+        from PySide6.QtWidgets import QStyle
+        painter.save()
+        selected = bool(option.state & QStyle.State_Selected)
+        painter.setPen(option.palette.highlightedText().color() if selected else option.palette.placeholderText().color())
+        r = option.rect.adjusted(option.rect.width() - self.ARROW, 0, -6, 0)
+        painter.drawText(r, int(Qt.AlignRight | Qt.AlignVCenter), "▾")
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        hint = super().sizeHint(option, index)
+        page = self.parent()
+        words = [tr("As Above ({0})").format(page.profile.currentText())] + list(profile_names())
+        widest = max(option.fontMetrics.horizontalAdvance(w) for w in words)
+        hint.setWidth(max(hint.width(), widest + 40) + self.ARROW)
+        return hint
+
+    def createEditor(self, parent, option, index):
+        from .rows import Popup
+        box = Popup(parent)
+        box.setAccessibleName(tr("Profile for this album"))
+        page = self.parent()
+        box.addItem(tr("As Above ({0})").format(page.profile.currentText()), "")
+        for name in profile_names():
+            box.addItem(name, name)
+        box.activated.connect(lambda _i, b=box: (self.commitData.emit(b), self.closeEditor.emit(b)))
+        return box
+
+    def setEditorData(self, editor, index):
+        i = editor.findData(index.data(Qt.EditRole) or "")
+        editor.setCurrentIndex(max(0, i))
+        QTimer.singleShot(0, editor.showPopup)
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentData() or "", Qt.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
 class Overview(QWidget):
     """The profile picker, search field, progress bar and Preview / Apply / Cancel live in the
     window's toolbar (the window makes them); the album actions (Change Release: a link, Search for
@@ -113,6 +195,13 @@ class Overview(QWidget):
         self.forced = {}
         self.library = ""           # the library folder chosen for this preview ("": the profile's)
         self.looked = {}            # album key -> how it was looked up (profile, sources): not again
+        # several albums, each with a profile of its own: the one chosen above unless you chose
+        # another in its row (album key -> profile name); the profile each album's preview was
+        # made with, and that preview's plan (without its albums) per profile, for Apply
+        self.album_profiles = {}
+        self.planned_with = {}
+        self.headers = {}
+        self.used_jobs = set()      # (jobs Apply ran: the next Apply of the same preview is a new job)
         self._lookup_n = 0
         lay = QVBoxLayout(self)
         lay.addLayout(heading(tr("Overview"),
@@ -203,6 +292,7 @@ class Overview(QWidget):
         rl.addLayout(lib)
         self.profile.currentTextChanged.connect(lambda _t: self.reset_sources())
         self.profile.currentTextChanged.connect(lambda _t: self.reset_library())
+        self.profile.currentTextChanged.connect(lambda _t: self.model.refresh_rows() if hasattr(self, "model") else None)
         self.sources.currentIndexChanged.connect(lambda _i: self.show_sources_state())
         # what the preview did without, because a key, login or program is missing (Open Setup: its row)
         self.setup_note = QLabel("")
@@ -228,6 +318,12 @@ class Overview(QWidget):
         self.proxy.setFilterKeyColumn(-1)
         self.table = QTableView()
         self.table.setModel(self.proxy)
+        # each album's profile (two or more albums listed): a drop-down in its row
+        self.model.profile_of = lambda a: (self.profile_of(a), bool(self.own_profile(a)))
+        self.model.choose_profile = self.set_album_profile
+        self.table.setItemDelegateForColumn(PlanModel.PROFILE, ProfileDelegate(self))
+        self.table.setEditTriggers(QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
+        self.table.clicked.connect(self.profile_clicked)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)   # (several: apply, leave out, remove)
@@ -242,6 +338,7 @@ class Overview(QWidget):
         for c in range(len(PlanModel.COLS)):          # the album folder and Why take what is left
             h.setSectionResizeMode(c, QHeaderView.Stretch if c in (1, 5) else QHeaderView.ResizeToContents)
         h.setSectionResizeMode(0, QHeaderView.Interactive)     # (fitted by fit_status: cut when narrow)
+        h.moveSection(PlanModel.PROFILE, 2)               # (an album's profile: next to its name, in view)
         self.table.setAccessibleName(tr("Albums in the preview"))
         # (while the mouse drags a selection, the inspector waits: reading each album it passes
         # over - tags, covers, on a network share - kept the drag from following the mouse)
@@ -253,6 +350,7 @@ class Overview(QWidget):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
         self.model.ticked.connect(self.win.update_album_actions)
+        self.show_profile_column()
         from PySide6.QtGui import QShortcut, QKeySequence
         rm = QShortcut(QKeySequence.Delete, self.table, context=Qt.WidgetShortcut)   # (the list's own Delete)
         rm.activated.connect(self.remove_selected)
@@ -311,6 +409,17 @@ class Overview(QWidget):
                 act.triggered.connect(lambda _=False, m=mode: self.look_up(m))
             look.setEnabled(not self.running)
             mine = [look.menuAction()]
+            # (the profile of the selected albums: theirs, or the one chosen above)
+            if len(self.model.albums) >= 2:
+                pm = QMenu(tr("Profile"), self)
+                above = pm.addAction(tr("As Above ({0})").format(self.profile.currentText()))
+                above.triggered.connect(lambda _=False, c=chosen: self.set_album_profile(c, ""))
+                pm.addSeparator()
+                for name in profile_names():
+                    act = pm.addAction(name)
+                    act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
+                pm.setEnabled(not self.running and any(a.get("status") != "done" for a in chosen))
+                mine.append(pm.menuAction())
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
                                     self.apply_selected, any(can_apply(a) for a in chosen) and not self.running),
                                    (tr("Leave Out of Apply"), lambda: self.leave_out(True),
@@ -368,6 +477,8 @@ class Overview(QWidget):
         """Preview and Apply are enabled by the window (on this page only); while work runs no
         other folder can be chosen or dropped."""
         self.running = on
+        if hasattr(self, "model"):
+            self.model.locked = on                            # (no profile chosen while work runs)
         if not on:
             self._lookup_n = 0                                # (the next run says its own progress)
         self.choose_btn.setEnabled(not on)
@@ -391,6 +502,7 @@ class Overview(QWidget):
         self.forced = dict(forced or {})
         self.within = list(within or [])                     # (several folders dropped: only these)
         self.looked = {}                                     # (a new folder: nothing looked up yet)
+        self.album_profiles, self.planned_with, self.headers = {}, {}, {}
         self.plan_library = ""
         self.reset_sources()                                 # (a new folder: the profile's sources again)
         self.reset_library()                                 # (and the profile's library folder)
@@ -431,6 +543,7 @@ class Overview(QWidget):
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
         self.model.set_plan(plan)
+        self.show_profile_column()
         self.fit_status()
         self.busy(False)
         n = len(plan["albums"])
@@ -517,19 +630,83 @@ class Overview(QWidget):
         src = self.covering_source(data)
         return (src or {}).get("destination") or data.get("destination") or ""
 
-    def in_place(self) -> bool:
+    def in_place(self, name=None) -> bool:
         try:
-            return load_profile(self.profile.currentText()).data.get("operation") == "in_place"
+            return load_profile(name or self.profile.currentText()).data.get("operation") == "in_place"
         except Exception:
             return False
 
-    def planning_profile(self, mode="profile"):
+    def planning_profile(self, mode="profile", name=None):
         """The profile Preview, Look Up and (through the plan) Apply use: the Sources choice and
-        the library folder chosen here applied to the profile as saved."""
-        prof = load_profile(self.profile.currentText())
-        if self.library and not self.in_place():
+        the library folder chosen here applied to the profile as saved (NAME: an album's own
+        profile; none: the one chosen above)."""
+        name = name or self.profile.currentText()
+        prof = load_profile(name)
+        if self.library and not self.in_place(name):
             prof = library_for(prof, self.library)
         return profile_for(prof, mode)
+
+    # ---- a profile per album ----------------------------------------------------------------
+    @staticmethod
+    def album_key(a) -> str:
+        import engine
+        return a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])
+
+    def profile_of(self, a) -> str:
+        """The profile this album is looked up and applied with: its own, or the one above."""
+        return self.album_profiles.get(self.album_key(a)) or self.profile.currentText()
+
+    def own_profile(self, a) -> str:
+        """The profile chosen in the album's own row ("": the one chosen above)."""
+        return self.album_profiles.get(self.album_key(a), "")
+
+    def set_album_profile(self, albums, name):
+        """Use profile NAME ("": the one chosen above) for ALBUMS; those already looked up are
+        looked up again with it (their destinations and tags are that profile's)."""
+        if self.running:
+            return
+        if name and name not in profile_names():
+            return
+        # (the versions of one folder are applied together: they share their profile)
+        ofs = {(a.get("split") or {}).get("of") for a in albums} - {None, ""}
+        albums = list(albums) + [x for x in self.model.albums if (x.get("split") or {}).get("of") in ofs
+                                 and not any(x is y for y in albums)]
+        again = []
+        for a in albums:
+            if a.get("status") == "done":                  # (applied already: as it was done)
+                continue
+            k = self.album_key(a)
+            if name:
+                self.album_profiles[k] = name
+            else:
+                self.album_profiles.pop(k, None)
+            if a.get("status") != "listed" and self.planned_with.get(k) != self.profile_of(a):
+                again.append(a)
+        self.model.refresh_rows()
+        self.show_profile_column()
+        if again:
+            self.look_up(self.sources.currentData() or "profile", again)
+
+    def profile_clicked(self, idx):
+        """A click on an album's profile opens its drop-down."""
+        if idx.isValid() and idx.column() == PlanModel.PROFILE and \
+                self.model.flags(self.proxy.mapToSource(idx)) & Qt.ItemIsEditable:
+            self.table.edit(idx)
+
+    def show_profile_column(self):
+        """The Profile column: shown when the list holds two or more albums."""
+        if hasattr(self, "table"):
+            self.table.setColumnHidden(PlanModel.PROFILE, len(self.model.albums) < 2)
+
+    def plan_for(self, albums) -> dict:
+        """The plan of ALBUMS as their profile's preview made it (its job, rules and folders)."""
+        name = self.planned_with.get(self.album_key(albums[0])) if albums else None
+        head = self.headers.get(name) or self.plan or {"job": "", "profile": "", "operation": ""}
+        return dict(head, albums=list(albums))
+
+    def stale_profiles(self, albums) -> list:
+        """ALBUMS whose preview was made with another profile than the one now chosen for them."""
+        return [a for a in albums if self.planned_with.get(self.album_key(a), self.profile_of(a)) != self.profile_of(a)]
 
     def reset_library(self):
         """Back to the profile's own library folder: a choice is for one preview only."""
@@ -636,11 +813,11 @@ class Overview(QWidget):
         return {"musicbrainz": tr("MusicBrainz only"), "discogs": tr("Discogs only"),
                 "web": tr("the web only (store and encyclopaedia pages)")}.get(mode, mode)
 
-    def lookup_stamp(self, prof, mode) -> str:
+    def lookup_stamp(self, prof, mode, name=None) -> str:
         """What a look-up depends on (the profile as it is now, and the sources): the same again
         finds the same, so it is not asked of the databases twice."""
         import json
-        return json.dumps([self.profile.currentText(), mode, self.ocr.isChecked(), prof], sort_keys=True,
+        return json.dumps([name or self.profile.currentText(), mode, self.ocr.isChecked(), prof], sort_keys=True,
                           default=str)
 
     def reload(self):
@@ -654,19 +831,26 @@ class Overview(QWidget):
     def look_up(self, mode="profile", albums=None, again=False):
         """Look up the selected albums (or ALBUMS) with the profile's sources, or only
         MusicBrainz, only Discogs, or only the web; what they find replaces their rows.
-        An album already looked up the same way is skipped unless AGAIN (Refresh)."""
+        An album already looked up the same way is skipped unless AGAIN (Refresh). Each album
+        is looked up with its own profile (its row's choice, else the one chosen above)."""
         import engine
         chosen = albums if albums is not None else self.selected_albums()
         if not chosen or self.running or not self.path:
             return
-        try:
-            prof = self.planning_profile(mode)
-        except pf.ProfileError as exc:
-            sheets.warning(self, tr("This profile cannot be used."), str(exc))
-            return
-        stamp = self.lookup_stamp(prof, mode)
-        keys = {a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or []) for a in chosen}
-        done = {k for k in keys if self.looked.get(k) == stamp} if not again else set()
+        groups = {}                                         # profile name -> album keys
+        for a in chosen:
+            groups.setdefault(self.profile_of(a), set()).add(self.album_key(a))
+        profs, stamps = {}, {}
+        for name in groups:
+            try:
+                profs[name] = self.planning_profile(mode, name)
+            except pf.ProfileError as exc:
+                sheets.warning(self, tr("This profile cannot be used."), str(exc))
+                return
+            stamps[name] = self.lookup_stamp(profs[name], mode, name)
+        keys = set().union(*groups.values())
+        done = {k for name, ks in groups.items() for k in ks if self.looked.get(k) == stamps[name]} \
+            if not again else set()
         if done and done == keys:
             n = len(keys)
             if not sheets.question(self, tr("{0} already looked up with {1}.").format(
@@ -676,27 +860,35 @@ class Overview(QWidget):
                     action=tr("Look Up Again")):
                 return
             done = set()
+        groups = {name: ks - done for name, ks in groups.items() if ks - done}
         keys -= done
         skipped = len(done)
         path, ocr, edits = self.path, self.ocr.isChecked(), self.win.inspector.edits_for_preview()
+        total = len(keys)
 
         def work(w):
-            e = engine.Engine(prof, ocr=True if ocr else None)
-            e.edits = edits
-            plan = e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys, meta=META_STORE)
-            # (cancelled: only the albums it reached replace their rows; the others stay as they were)
-            return plan, (set(getattr(e, "reached", keys)) & keys if w.cancelled else keys)
+            out, off = [], 0
+            for name, ks in groups.items():
+                if w.cancelled:
+                    break
+                e = engine.Engine(profs[name], ocr=True if ocr else None)
+                e.edits = edits
+                plan = e.plan(path, progress=lambda i, _n, what, o=off: w.progress.emit(o + i, total, what),
+                              cancel=lambda: w.cancelled, only=ks, meta=META_STORE)
+                # (cancelled: only the albums it reached replace their rows; the others stay as they were)
+                out.append((name, plan, set(getattr(e, "reached", ks)) & ks if w.cancelled else ks))
+                off += len(ks)
+            return out
         self.busy(True)
         self.looked_with = self.sources_words(mode)
-        self._lookup_n = len(keys)
+        self._lookup_n = total
         self._lookup_skipped = skipped
         self.summary.setText(self.lookup_words(0, ""))
         library = self.library
 
-        def found(result):
-            plan, reached = result
+        def found(results):
             self.plan_library = library
-            self.looked_up(plan, reached, stamp)
+            self.looked_up_groups([(name, plan, reached, stamps[name]) for name, plan, reached in results])
         self.worker = start(self, work, found, self.progress, self.oops)
 
     def lookup_words(self, i, name) -> str:
@@ -728,13 +920,26 @@ class Overview(QWidget):
 
     def looked_up(self, new, keys, stamp=None):
         """The albums looked up take the places of their rows; the others stay as they were."""
-        import engine
-        found = list(new["albums"])
-        self.remember_looked(found, stamp)
+        self.looked_up_groups([(new.get("profile") or self.profile.currentText(), new, keys, stamp)])
+
+    def looked_up_groups(self, results):
+        """RESULTS: (profile name, plan, album keys looked up, stamp) per profile. The albums
+        found take the places of their rows; the others stay as they were."""
+        if not results:
+            self.busy(False)
+            self.show_counts()
+            return
+        found, keys = [], set()
+        for name, new, ks, stamp in results:
+            self.headers[name] = {k: v for k, v in new.items() if k != "albums"}
+            for a in new["albums"]:
+                self.planned_with[self.album_key(a)] = name
+            self.remember_looked(new["albums"], stamp)
+            found += list(new["albums"])
+            keys |= set(ks)
         out, placed = [], False
         for a in (self.plan or {}).get("albums") or []:
-            k = a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])
-            if k in keys:
+            if self.album_key(a) in keys:
                 if not placed:                             # (where the first of them was)
                     out += found
                     placed = True
@@ -742,7 +947,8 @@ class Overview(QWidget):
             out.append(a)
         if not placed:
             out += found
-        self.plan = dict(new, albums=out, listed=any(a["status"] == "listed" for a in out))
+        head = self.headers.get(self.profile.currentText()) or self.headers[results[-1][0]]
+        self.plan = dict(head, albums=out, listed=any(a["status"] == "listed" for a in out))
         self.planned(self.plan)
 
     def preview_release(self, folder, ref, files=None, only=False) -> bool:
@@ -843,7 +1049,8 @@ class Overview(QWidget):
     def preview(self):
         if not self.path:
             return
-        if getattr(self, "within", None) and self.plan:      # (several folders: just the albums listed)
+        if (getattr(self, "within", None) or self.album_profiles) and self.plan:
+            # (several folders: just the albums listed; albums with a profile of their own: each with it)
             self.look_up(self.sources.currentData() or "profile", list(self.plan["albums"]))
             return
         mode = self.sources.currentData() or "profile"
@@ -867,9 +1074,13 @@ class Overview(QWidget):
         stamp = None if forced else self.lookup_stamp(prof, mode)    # (a release you chose: not the same)
 
         library = self.library
+        name = self.profile.currentText()
 
         def done(plan):
             self.looked = {}
+            self.album_profiles = {}                         # (every album previewed afresh: with the one above)
+            self.headers = {name: {k: v for k, v in plan.items() if k != "albums"}}
+            self.planned_with = {self.album_key(a): name for a in plan.get("albums") or []}
             self.plan_library = library
             self.remember_looked(plan.get("albums") or [], stamp)
             self.planned(plan)
@@ -880,6 +1091,7 @@ class Overview(QWidget):
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
         self.model.set_plan(plan)
+        self.show_profile_column()
         self.fit_status()
         self.table.sortByColumn(0, Qt.AscendingOrder)
         self.show_counts()
@@ -943,6 +1155,12 @@ class Overview(QWidget):
         def outcome(a):
             w = where_files_go(a) or tr("Stays in its folder, tags only")
             return w[:1].lower() + w[1:]
+        names = {self.profile_of(a) for a in albums}
+        if len(names) > 1:                            # (several profiles: each album says its own)
+            plain = outcome
+
+            def outcome(a):
+                return tr("{0} (profile {1})").format(plain(a), self.profile_of(a))
         outcomes = {outcome(a) for a in albums}
         stays = {w[:1].lower() + w[1:] for w in (tr("Stays in its folder, names unchanged"),
                                                   tr("Stays in its folder, tags only"))}
@@ -977,21 +1195,51 @@ class Overview(QWidget):
                                tr("The library folder changed since this preview; its files would go to the "
                                   "folder it was made for. Preview or Look Up again, then apply."))
             return
+        stale = self.stale_profiles(self.to_apply())
+        if stale:
+            # (previewed with another profile than the one now chosen for them)
+            sheets.information(self, tr("Preview again first."),
+                               tr("The profile of {0} changed since this preview. Preview or Look Up again, "
+                                  "then apply.").format(plural(len(stale), tr("album"), tr("albums"))))
+            return
         # always asked here: the profile's "Apply without asking" is for its watched folders only
         if not sheets.confirm(self, *self.apply_words()) or self.edit_pending():
             return
         chosen = self.to_apply()
         self.release_files()
-        # (only the ticked albums go to the executor; what it reports is mapped back to the list)
-        self._applied_rows = [i for i, a in enumerate(self.plan["albums"]) if any(a is c for c in chosen)]
-        plan = dict(self.plan, albums=[self.plan["albums"][i] for i in self._applied_rows])
+        # (only the ticked albums go to the executor, one job per profile they were previewed
+        # with; what it reports is mapped back to the list)
+        rows = [i for i, a in enumerate(self.plan["albums"]) if any(a is c for c in chosen)]
+        groups = {}
+        for i in rows:
+            a = self.plan["albums"][i]
+            groups.setdefault(self.planned_with.get(self.album_key(a)), []).append(i)
+        self._applied_rows = [i for g in groups.values() for i in g]
+        plans = []
+        for g in groups.values():
+            plan = self.plan_for([self.plan["albums"][i] for i in g])
+            plan["job"] = self.fresh_job(plan.get("job") or "")
+            plans.append(plan)
 
         def work(w):
             import executor
-            return executor.Executor(plan, cancel=lambda: w.cancelled, progress=w.progress.emit).run()
+            return merge_results(plans, lambda p: executor.Executor(p, cancel=lambda: w.cancelled,
+                                                                    progress=w.progress.emit).run(),
+                                 lambda: w.cancelled)
         self.busy(True)
         self.summary.setText(tr("Applying…"))
         self.worker = start(self, work, self.applied, self.progress, self.oops)
+
+    def fresh_job(self, job) -> str:
+        """JOB, or (Apply ran it already: albums left out of it applied now) a new job named
+        after it, which keeps the artwork the preview staged under that name."""
+        import executor
+        base, n = job, 1
+        while not job or job in self.used_jobs or (executor.job_dir(job) / "journal.jsonl").exists():
+            n += 1
+            job = f"{base}-{n}" if base else time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
+        self.used_jobs.add(job)
+        return job
 
     def release_files(self):
         """The player lets go of every file Apply is about to write, move or copy (a track playing
@@ -1015,7 +1263,10 @@ class Overview(QWidget):
         rows = getattr(self, "_applied_rows", None)
         if not isinstance(rows, list) or not rows:          # (the whole plan was given)
             rows = list(range(len(self.plan["albums"])))
-        rep = run_report(dict(self.plan, albums=[self.plan["albums"][i] for i in rows]), res)
+        done_albums = [self.plan["albums"][i] for i in rows]
+        names = [n for n in dict.fromkeys((getattr(self, "planned_with", None) or {}).get(Overview.album_key(x))
+                                          for x in done_albums) if isinstance(n, str) and n]
+        rep = run_report(dict(self.plan, albums=done_albums, **({"profile": ", ".join(names)} if names else {})), res)
         # (the executor's index is into the albums it was given: the list's own row here)
         by_index = {rows[r["index"]]: r for r in res["albums"] if "index" in r and r["index"] < len(rows)}
         by = {a["album"]: a for a in res["albums"]}
@@ -1028,7 +1279,10 @@ class Overview(QWidget):
                 if r.get("label") in ("Ignored", "Skipped"):
                     a["label"] = r["label"]
         self.model.set_plan(self.plan)
-        self.summary.setText(f"Job {res['job']}: " + counts_text(res["counts"]) + tr(". Undo it from Jobs."))
+        many = ", " in (res.get("job") or "")
+        self.summary.setText((tr("Jobs {0}: ").format(res["job"]) if many else f"Job {res['job']}: " if res.get("job")
+                              else "") + counts_text(res["counts"]) +
+                             (tr(". Undo them from Jobs.") if many else tr(". Undo it from Jobs.")))
         left = [a for a in self.plan["albums"] if can_apply(a)]
         if left:                                          # (albums left out stay, to apply later)
             self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(
@@ -1079,7 +1333,7 @@ class Overview(QWidget):
             self.detail.clear()
             self.win.inspector.clear()
         else:
-            one = dict(self.plan or {"job": "", "profile": "", "operation": ""}, albums=[a], summary={a["status"]: 1})
+            one = dict(self.plan_for([a]), summary={a["status"]: 1})
             self.detail.setPlainText(planmod.preview(one, verbose=False))
             self.win.inspector.show_album(a, self.plan)
         self.busy(bool(getattr(self, "running", False)))

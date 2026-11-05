@@ -36,21 +36,37 @@ def can_apply(a) -> bool:
 
 
 class PlanModel(QAbstractTableModel):
-    COLS = (N_("Status"), N_("Album folder"), N_("Source"), N_("Score"), N_("Changes"), N_("Why"))
+    COLS = (N_("Status"), N_("Album folder"), N_("Source"), N_("Score"), N_("Changes"), N_("Why"), N_("Profile"))
+    PROFILE = 6                        # (the album's profile: its own, or the one chosen above)
     LEAVE_OUT = "_leave_out"           # (an album's own mark: unticked, so Apply leaves it as it is)
     ticked = Signal()
 
     def __init__(self):
         super().__init__()
         self.albums = []
+        # set by the page that shows a Profile column: album -> (profile name, chosen for it),
+        # and (albums, name) for a profile chosen in a row ("": the one chosen above)
+        self.profile_of = None
+        self.choose_profile = None
+        self.locked = False             # (busy: no profile is chosen while albums are looked up)
 
     def flags(self, idx):
         f = super().flags(idx)
         if idx.isValid() and idx.column() == 1 and can_apply(self.albums[idx.row()]):
             f |= Qt.ItemIsUserCheckable                  # (ticked: applied; unticked: left out)
+        if idx.isValid() and idx.column() == self.PROFILE and self.choose_profile and not self.locked and \
+                self.albums[idx.row()].get("status") != "done":
+            f |= Qt.ItemIsEditable
         return f
 
+    def refresh_rows(self):
+        if self.albums:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self.albums) - 1, len(self.COLS) - 1))
+
     def setData(self, idx, value, role=Qt.EditRole):
+        if role == Qt.EditRole and idx.column() == self.PROFILE and self.choose_profile:
+            self.choose_profile([self.albums[idx.row()]], str(value or ""))
+            return True
         if role != Qt.CheckStateRole or idx.column() != 1:
             return False
         self.set_left_out([self.albums[idx.row()]], Qt.CheckState(value) != Qt.Checked)
@@ -99,6 +115,8 @@ class PlanModel(QAbstractTableModel):
                 return f"{ident['confidence']:.0f}" if ident.get("confidence") else ""
             if c == 4:
                 return changes_text(a["files"])
+            if c == self.PROFILE:
+                return self.profile_of(a)[0] if self.profile_of else ""
             if c == 5:
                 if a["status"] in ("excluded",):
                     return tr("rule “{0}”").format(a['rule']['name'])
@@ -121,6 +139,18 @@ class PlanModel(QAbstractTableModel):
             return label_for(a)[1]                            # (the whole word when the column cuts it)
         if role == Qt.ToolTipRole and c == 1:
             return a["source_dir"]
+        if role == Qt.ToolTipRole and c == self.PROFILE and self.profile_of:
+            name, own = self.profile_of(a)
+            return (tr("Profile {0}, chosen for this album").format(name) if own else
+                    tr("Profile {0}, the one chosen above").format(name)) + \
+                (tr(". Click to choose another for it.") if self.flags(idx) & Qt.ItemIsEditable else "")
+        if role == Qt.EditRole and c == self.PROFILE and self.profile_of:
+            return self.profile_of(a)[0] if self.profile_of(a)[1] else ""
+        if role == Qt.FontRole and c == self.PROFILE and self.profile_of and not self.profile_of(a)[1]:
+            from PySide6.QtGui import QFont
+            f = QFont()
+            f.setItalic(True)                             # (the one chosen above: it follows that choice)
+            return f
         if role == Qt.TextAlignmentRole and c == 3:
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.AccessibleTextRole and c == 0:

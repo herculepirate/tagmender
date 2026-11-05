@@ -1,5 +1,38 @@
 # Release notes
 
+## 0.8.3
+
+**A profile per album**
+- With several albums in the Overview, each row has a Profile drop-down: *As Above* (the
+  profile chosen in the toolbar) or one of your own for that album. Several selected:
+  right-click › Profile. Look Up plans each album with its profile, and Apply runs one job per
+  profile; an album whose profile changed after it was looked up is looked up again.
+- Albums left out of one Apply can be applied later (before, the second Apply was refused as
+  "already run").
+
+**Fewer wrong pressings**
+- A catalogue number written by another tagger now counts like its barcode: it fits the album
+  but proves no pressing (printed on your scans, it is your copy's own again).
+- Audio fingerprints identify the album, never the pressing: they no longer decide between
+  pressings, between MusicBrainz's and Discogs's picks, over your folder's catalogue number, or
+  for a bootleg.
+- Another tagger's release IDs no longer pick between MusicBrainz's and Discogs's pressings,
+  and a barcode from notes or another tagger no longer silences the folder name's year or makes
+  a pick by track lengths automatic.
+- Albums whose only number came from notes or another tagger have their scans read for a
+  number of their own.
+
+**Your files**
+- A track saved by another program while TagMender wrote its hard-linked copy is put back as
+  it was, that program's edit kept (before, the new copy could be left behind unrecorded).
+- A cover or log removed after the preview gives a plain message.
+
+**Watched folders**
+- A profile that uses only the web retries soon when no web source answers, instead of waiting
+  days as if nothing were found.
+- A profile saved with an interval over a day (older versions allowed it) is watched again,
+  daily.
+
 ## 0.8.2
 
 Bug fixes.

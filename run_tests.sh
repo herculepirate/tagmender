@@ -32,6 +32,8 @@ for t in tests/test_*.py; do
   if [ $rc -ne 0 ]; then
     fail=1
     printf '%s\n' "$out" | grep -E '^(FAIL|ERROR):' | head -10
+    # (and why: each failure's error line, so a failure seen only on another machine says what it was)
+    printf '%s\n' "$out" | grep -E '^[A-Za-z_.]*(Error|Exception)\b' | head -10 | sed 's/^/    /'
     # a suite that crashed says no FAIL or ERROR: show how it ended
     if ! printf '%s\n' "$out" | grep -qE '^(FAIL|ERROR):'; then
       printf '%s\n' "$out" | tail -15 | sed 's/^/    /'

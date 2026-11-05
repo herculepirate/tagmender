@@ -295,6 +295,20 @@ class WeakEvidence(unittest.TestCase):
                 self.assertTrue(any("durations agree" in w for w in r["why"]), r["why"])
                 self.assertFalse(any("track lengths not compared" in n for n in r["best"]["notes"]))
 
+    def test_a_weak_barcode_never_silences_the_folders_pressing_year(self):
+        # (0.8.3: the folder says the 2005 edition; a barcode only in notes or another tagger's
+        # tags agrees with the 1998 release: the folder's year still goes to review)
+        old = cand(id="old", year=1998, barcodes={EU_BARCODE})
+        for a, ocr in ((album(pressing_year=2005, note_barcodes=[EU_BARCODE]), NOTES),
+                       (album(pressing_year=2005, barcodes={EU_BARCODE}, tag_barcodes={EU_BARCODE},
+                              tag_release_mb={"old"}, tags_by_tagger=True), "")):
+            r = pick(a, old, ocr=ocr)
+            self.assertIn(r["best"]["code"], mc.WEAK_BARCODES)
+            self.assertNotEqual(r["status"], "auto", r["why"])
+            self.assertTrue(any("2005 edition" in w for w in r["why"]), r["why"])
+        r = pick(album(pressing_year=2005, barcodes={EU_BARCODE}), old)        # (your copy's own barcode)
+        self.assertFalse(any("2005 edition" in w for w in r["why"]), r["why"])
+
     def test_an_isrc_alone_picks_no_pressing(self):
         r = pick(album(isrc_releases={"a"}), cand(id="a", country="DE"), cand(id="b", country="GB"))
         self.assertEqual(r["status"], "review", r["why"])

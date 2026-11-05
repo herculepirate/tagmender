@@ -176,14 +176,15 @@ class Rescore(unittest.TestCase):
         self.assertIs(ma._rescored(r, [cand()], "mb", a, CFG), r)     # the whole release is not new
 
     def test_scored_again_after_fingerprints_keeps_the_missing_tracks(self):
-        # two pressings of the files' 3 of 5 tracks: unsure until fingerprints point at one
+        # two pressings of the files' 3 of 5 tracks: unsure; fingerprints pointing at one still
+        # leave it unsure (0.8.3: they name recordings, which both pressings carry)
         a = album([1, 3, 5], barcodes={"0801837013429"})
         scored = [mc.score_candidate(a, c, CFG) for c in (cand(), cand(id="x2", country="DE"))]
         r = dict(mc.classify(scored, CFG), scored=scored, source="mb")
         self.assertEqual((r["status"], r["best"].get("missing")), ("review", {1: [2, 4]}))
         a["fp_releases"] = {"x1"}
         r2 = ma._scored_again(r, [], "mb", a, CFG)
-        self.assertEqual((r2["status"], r2["best"].get("missing")), ("auto", {1: [2, 4]}))
+        self.assertEqual((r2["status"], r2["best"].get("missing")), ("review", {1: [2, 4]}))
         self.assertEqual(ma.summarize(r2).get("slots"), [0, 2, 4])
         self.assertEqual(len(ma._scored_again(r, [cand(id="x3", title="Zzz")], "mb", a, CFG)["scored"]), 3)
 

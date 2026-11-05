@@ -1,5 +1,30 @@
 # Release notes
 
+## 0.8.0
+
+**Surer about the pressing.** Each change below sends an album to review or tries it again later
+rather than picking a pressing on weak evidence.
+- When MusicBrainz is busy while the disc ID or the files' own release links are checked, an album
+  nothing else proves is tried again later instead of being picked from weaker clues. The release
+  your files already link to is kept when that lookup fails.
+- A barcode only typed in a notes, .nfo or saved web page counts as a clue, not as proof. A
+  barcode read off a scan, a booklet PDF or a cue sheet still is proof.
+- ISRCs identify recordings, which every pressing shares: they no longer decide the pressing.
+  Nor do audio fingerprints, nor a disc ID that only roughly fits.
+- When MusicBrainz links its release to a different Discogs release, the two are no longer taken
+  for the same pressing.
+- Tags another tagger wrote are not proof. When they name a release the folder name rules out,
+  the album waits for your review with both named. Tags TagMender wrote itself (it knows from its
+  job history, also after it moved the album) still count.
+- Expect more albums for review when you re-run over a library another tool tagged.
+
+**Faster**
+- While MusicBrainz or Discogs is down, a run stops asking for five minutes instead of waiting out
+  every request; the albums are tried again later.
+- Moving FLACs to a share: the cover no longer makes TagMender rewrite each file a second time
+  (about half the data written for a typical album).
+- Scans, logs and cue sheets moved within one disk are renamed instead of copied and checked.
+
 ## 0.7.1
 
 Faster, with the same results: nothing about what is identified or written changes.

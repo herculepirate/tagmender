@@ -1303,7 +1303,9 @@ class PressingEvidence(unittest.TestCase):
         return mc.classify([mc.score_candidate(a, c, CFG) for c in cands], CFG)
 
     def test_disc_id_picks_the_pressing(self):
-        r = self.pick(album(toc_releases={"b"}), cand(id="a", country="US"), cand(id="b", country="DE"))
+        # (an exact disc ID: attached to that very release; a fuzzy match decides nothing, v0.8.0)
+        r = self.pick(album(toc_releases={"b"}, exact_toc_releases={"b"}), cand(id="a", country="US"),
+                      cand(id="b", country="DE"))
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
         self.assertIn("disc ID", " ".join(r["best"]["notes"]))
 
@@ -1555,8 +1557,9 @@ class PressingEvidence(unittest.TestCase):
                          mc.score_candidate(a, cand(id="eu", source="discogs", country="Europe",
                                                     label="Nuclear Blast"), CFG_PREF)], CFG_PREF)
         self.assertNotEqual(r["best"]["cand"]["id"], "br", r["why"])
-        # a MusicBrainz disc ID still decides between MusicBrainz releases
-        r = self.pick(album(toc_releases={"b"}), cand(id="a", country="US"), cand(id="b", country="DE"))
+        # a MusicBrainz disc ID (attached to the release: exact) still decides between MusicBrainz releases
+        r = self.pick(album(toc_releases={"b"}, exact_toc_releases={"b"}), cand(id="a", country="US"),
+                      cand(id="b", country="DE"))
         self.assertEqual(r["best"]["cand"]["id"], "b")
 
     def test_self_released_album_is_one_release_on_both_databases(self):
@@ -1625,7 +1628,7 @@ class PressingEvidence(unittest.TestCase):
         r = mc.classify([mc.score_candidate(a, c, CFG)], CFG)
         self.assertNotEqual(r["status"], "auto")
         # with 3+ tracks the disc ID still proves the album (freeDB-style)
-        a3 = album(title="Wrong Title", toc_releases={"y"})
+        a3 = album(title="Wrong Title", toc_releases={"y"}, exact_toc_releases={"y"})
         r = mc.classify([mc.score_candidate(a3, cand(id="y", title="Real Title"), CFG)], CFG)
         self.assertEqual(r["status"], "auto", r["why"])
 
@@ -1663,7 +1666,7 @@ class PressingEvidence(unittest.TestCase):
                       cand(id="us", country="US", label="Noise International", catnos={"n01772"}))
         self.assertEqual(r["status"], "review")
         self.assertTrue(any("DCS4" in w for w in r["why"]), r["why"])
-        r = self.pick(dict(a, toc_releases={"re"}), cand(id="noise", country="DE", catnos={"n0177"}),
+        r = self.pick(dict(a, toc_releases={"re"}, exact_toc_releases={"re"}), cand(id="noise", country="DE", catnos={"n0177"}),
                       cand(id="re", country="DE", catnos={"n01772"}))
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "re"))   # a disc ID still decides
 
@@ -1983,7 +1986,7 @@ class PressingEvidence(unittest.TestCase):
                               catnos={mc.norm_code("RR 7119")}))
         self.assertEqual(r["status"], "auto", r["why"])
         self.assertIn("credited as the database does", " ".join(r["best"]["notes"]))
-        a = album(title="The Mediator", toc_releases={"x1"})
+        a = album(title="The Mediator", toc_releases={"x1"}, exact_toc_releases={"x1"})
         r = self.pick(a, cand(title="The Mediator Between Head and Hands Must Be the Heart"))
         self.assertEqual(r["status"], "auto", r["why"])
         self.assertIn("database title is used", " ".join(r["best"]["notes"]))

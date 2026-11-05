@@ -76,7 +76,9 @@ class B01_CompanionBeginStageLeftBehind(Base):
         p = pl.build([self.proposal()], self.profile(operation="move", destination=str(self.dest)))
 
         def child():
-            with mock.patch.object(executor.payload, "file_sha256", lambda *a: die()):
+            # (a companion is staged as a copy across filesystems; on one it is renamed since 0.8.0)
+            with mock.patch.object(executor.payload, "file_sha256", lambda *a: die()), \
+                    mock.patch.object(executor, "_same_fs", lambda a, b: False):
                 executor.Executor(p).run()
         self.assertEqual(in_child(child), 9)
         executor.recover(p["job"])

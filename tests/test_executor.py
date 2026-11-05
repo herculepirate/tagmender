@@ -365,11 +365,11 @@ class Safety(Base):
         real = tagio.write
         calls = []
 
-        def flaky(path, changes):
+        def flaky(path, changes, **k):
             calls.append(path)
             if len(calls) == 2:
                 raise OSError("disk went away")
-            return real(path, changes)
+            return real(path, changes, **k)
         with mock.patch.object(tagio, "write", flaky):
             res = executor.Executor(p).run()
         self.assertEqual(res["albums"][0]["status"], "failed")
@@ -390,8 +390,8 @@ class Safety(Base):
         p = pl.build([self.proposal()], self.profile())
         real = tagio.write
 
-        def corrupting(path, changes):
-            real(path, changes)
+        def corrupting(path, changes, **k):
+            real(path, changes, **k)
             data = bytearray(Path(path).read_bytes())
             data[-100] ^= 0xFF
             Path(path).write_bytes(bytes(data))

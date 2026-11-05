@@ -82,7 +82,8 @@ class DeluxeEdition(unittest.TestCase):
         lens = (200.0, 305.0, 410.0, 150.0, 260.0)
         album = {"artist": "Artist Alpha", "title": "First Light", "year": 2010, "discs": 1,
                  "tracks": [{"disc": 1, "num": n, "title": f"T{n}", "secs": lens[n - 1]} for n in (1, 2, 3)],
-                 "barcodes": set(), "catnos": set(), "toc_releases": {"orig", "deluxe"}}
+                 "barcodes": set(), "catnos": set(), "toc_releases": {"orig", "deluxe"},
+                 "exact_toc_releases": {"orig", "deluxe"}}
 
         def cand(rid, n):
             return {"source": "mb", "id": rid, "url": "u", "artist": "Artist Alpha", "title": "First Light",

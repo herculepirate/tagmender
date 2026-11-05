@@ -209,10 +209,14 @@ class ExactLengths(unittest.TestCase):
         self.assertNotIn("pressing chosen by track lengths alone", " ".join(r["why"]))
         a = album(BW, artist="Bell Witch", title="Demo 2011", year=2015)
         # (a disc ID is not counted here: these lengths are whole CD sectors, as a download's may be)
-        for clue in ({"isrc": "ISRC of your files"}, {"source link": "your files' link"}):
+        for clue in ({"source link": "your files' link"},):
             r = self.with_clues(a, self.releases(), {"3dc36a34": clue})
             self.assertEqual(r["best"]["cand"]["id"], "3dc36a34", clue)
             self.assertNotIn("pressing chosen by track lengths alone", " ".join(r["why"]), clue)
+        # an ISRC names the recordings, which both releases share: no pressing proof (v0.8.0)
+        r = self.with_clues(a, self.releases(), {"3dc36a34": {"isrc": "ISRC of your files"}})
+        self.assertEqual(r["best"]["cand"]["id"], "3dc36a34")
+        self.assertIn("pressing chosen by track lengths alone", " ".join(r["why"]))
 
     def test_the_edition_your_folder_names_keeps_the_pick(self):
         # the folder names the 2015 edition; the exact fit is the 2011 one and carries your

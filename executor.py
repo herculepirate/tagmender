@@ -497,6 +497,178 @@ def _copy_fsync(src: Path, dst: Path):
     shutil.copystat(src, dst)
 
 
+FLAC_PAD_RESERVE = 64 * 1024     # room left in a staged FLAC beyond the pictures planned for it
+FLAC_PAD_MAX = 102400            # most padding a FLAC this writes may keep once tagged
+
+
+class _FlacRoom:
+    """mutagen's padding= for the saves of a staged FLAC built with room for its pictures
+    (_stage_flac): the padding stays as it is - no save shifts the audio - while it is no
+    more than what the pictures still to be embedded take plus FLAC_PAD_MAX; else (too
+    little room, or more left than that) the next save makes it that plus FLAC_PAD_RESERVE.
+    pending: the bytes the pictures still to be written add (set before each save)."""
+
+    def __init__(self, front=0, artist=0):
+        self.front, self.artist = front, artist
+        self.pending = front + artist
+
+    def __call__(self, info):
+        pending = max(self.pending, 0)
+        if 0 <= info.padding <= pending + FLAC_PAD_MAX:
+            return info.padding
+        return pending + FLAC_PAD_RESERVE
+
+
+def _flac_layout(fh, size):
+    """([(block type, offset of its body, length)], where the audio begins) of a plain FLAC
+    file - "fLaC" first (no ID3 tag before it), STREAMINFO first and once, only the block
+    types the format defines, a SEEKTABLE, VORBIS_COMMENT and CUESHEET at most once, and an
+    audio frame where the metadata ends - or None for anything else."""
+    fh.seek(0)
+    if fh.read(4) != b"fLaC":
+        return None
+    pos, blocks = 4, []
+    while True:
+        hdr = fh.read(4)
+        if len(hdr) < 4 or len(blocks) >= 4096:
+            return None
+        code, n = hdr[0] & 0x7F, int.from_bytes(hdr[1:4], "big")
+        if pos + 4 + n > size:
+            return None
+        blocks.append((code, pos + 4, n))
+        pos += 4 + n
+        fh.seek(pos)
+        if hdr[0] & 0x80:
+            break
+    codes = [c for c, _o, _n in blocks]
+    if codes[0] != 0 or blocks[0][2] != 34 or codes.count(0) != 1 or any(c > 6 for c in codes) or \
+            any(codes.count(c) > 1 for c in (3, 4, 5)):
+        return None
+    sync = fh.read(2)
+    if len(sync) < 2 or sync[0] != 0xFF or (sync[1] & 0xFE) != 0xF8:
+        return None
+    return blocks, pos
+
+
+def _flac_picture_head(fh, off, n):
+    """(picture type, description) of a FLAC PICTURE block's body, None when unreadable."""
+    try:
+        fh.seek(off)
+        b = fh.read(8)
+        ptype, mlen = int.from_bytes(b[:4], "big"), int.from_bytes(b[4:8], "big")
+        if 8 + mlen + 4 > n:
+            return None
+        fh.seek(off + 8 + mlen)
+        dlen = int.from_bytes(fh.read(4), "big")
+        if 12 + mlen + dlen > n:
+            return None
+        return ptype, fh.read(dlen).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return None
+
+
+def _planned_room(fh, blocks, a: dict, dst) -> _FlacRoom | None:
+    """The bytes the pictures planned for this track add to its metadata (as _embed_all will
+    embed them: a front replacing the track's own, an artist photo only where it has none),
+    None when one of its pictures cannot be read."""
+    pics = []
+    for code, off, n in blocks:
+        if code == 6:
+            head = _flac_picture_head(fh, off, n)
+            if head is None:
+                return None
+            pics.append((head[0], head[1], 4 + n))
+    art = a.get("artwork") or {}
+    front = artist = 0
+    if art.get("front") and dst in (art.get("embed_into") or []):
+        img = _embed_image(art)
+        if img is not None:
+            front = 4 + 32 + len(img[1].encode()) + len(img[0])
+            if dst in (art.get("embed_replace") or []):
+                k = _front_index(t for t, _d, _s in pics)
+                if k is not None:
+                    front -= pics.pop(k)[2]
+    ap = a.get("artist_photo") or {}
+    if dst in (ap.get("embed_into") or []):
+        img = _artist_image(a)
+        if img is not None:
+            if dst in (ap.get("replace") or []):
+                artist -= sum(s for t, d, s in pics if t == ARTIST_TYPE and _ours(d))
+                pics = [x for x in pics if not (x[0] == ARTIST_TYPE and _ours(x[1]))]
+            if not any(t == ARTIST_TYPE for t, _d, _s in pics):
+                artist += 4 + 32 + len(img[1].encode()) + len((ap.get("mark") or "").encode("utf-8")) + len(img[0])
+    return _FlacRoom(front, artist)
+
+
+def _stage_flac(src: Path, stage: Path, a: dict, dst) -> _FlacRoom | None:
+    """The staging copy of a FLAC that gets tags or pictures, built with room for them so
+    that no save shifts its audio (on a share, a second write of the whole file): "fLaC",
+    the source's metadata blocks in their order without their padding, one padding block of
+    the planned pictures' bytes plus FLAC_PAD_RESERVE, then the audio byte for byte - as
+    mutagen would lay it out on a save. None (nothing written) for a file _flac_layout does
+    not take: the caller makes a plain copy then."""
+    with open(src, "rb") as a_:
+        size = os.fstat(a_.fileno()).st_size
+        layout = _flac_layout(a_, size)
+        if layout is None:
+            return None
+        blocks, audio = layout
+        room = _planned_room(a_, blocks, a, dst)
+        if room is None:
+            return None
+        pad = max(room.front + room.artist, 0) + FLAC_PAD_RESERVE
+        if pad > 0xFFFFFF:
+            return None
+        if os.path.lexists(stage):
+            os.unlink(stage)
+        with open(stage, "xb") as b:
+            b.write(b"fLaC")
+            for code, off, n in blocks:
+                if code == 1:
+                    continue
+                a_.seek(off)
+                body = a_.read(n)
+                if len(body) != n:
+                    raise StepError(f"{src.name}: could not be read whole")
+                b.write(bytes([code]) + n.to_bytes(3, "big") + body)
+            b.write(bytes([0x80 | 1]) + pad.to_bytes(3, "big") + bytes(pad))
+            a_.seek(audio)
+            shutil.copyfileobj(a_, b, 1 << 20)
+            b.flush()
+            os.fsync(b.fileno())
+    shutil.copystat(src, stage)
+    return room
+
+
+def _stage_track(src: Path, stage: Path, a: dict, dst, writes: bool, digest) -> _FlacRoom | None:
+    """The staging copy of a track: with room for its tags and pictures when it is a plain
+    FLAC that gets them (and its audio can be verified), else a plain copy (None)."""
+    if writes and digest is not None:
+        try:
+            room = _stage_flac(src, stage, a, dst)
+        except BaseException:
+            stage.unlink(missing_ok=True)
+            raise
+        if room is not None:
+            return room
+    _copy_fsync(src, stage)
+    return None
+
+
+def _room_kw(room) -> dict:
+    """tagio.write's padding= for a staged FLAC built with room (none for any other file)."""
+    return {"padding": room} if room is not None else {}
+
+
+def _flac_cap(stage: Path):
+    """No more than FLAC_PAD_MAX padding left in a staged FLAC once everything is written
+    (a picture planned for it that was not embedded after all): trimmed in one more save."""
+    from mutagen.flac import FLAC, Padding
+    f = FLAC(str(stage))
+    if sum(b.length for b in f.metadata_blocks if isinstance(b, Padding)) > FLAC_PAD_MAX:
+        f.save(padding=lambda info: FLAC_PAD_RESERVE)
+
+
 def _image_size(data: bytes) -> tuple[int, int]:
     """(width, height) of an image, (0, 0) when it cannot be read."""
     try:
@@ -664,14 +836,19 @@ def _embeds(a: dict, dst) -> bool:
     return front or artist
 
 
-def _embed_all(stage, a: dict, dst):
+def _embed_all(stage, a: dict, dst, room=None):
+    """room: the _FlacRoom of a staged FLAC built with room for these pictures."""
     art = a.get("artwork") or {}
     if art.get("front") and dst in (art.get("embed_into") or []) and _embed_image(art) is not None:
-        embed_front(stage, *_embed_image(art), replace=dst in (art.get("embed_replace") or []))
+        if room is not None:
+            room.pending = room.artist
+        embed_front(stage, *_embed_image(art), replace=dst in (art.get("embed_replace") or []), padding=room)
     if dst in ((a.get("artist_photo") or {}).get("embed_into") or []) and _artist_image(a) is not None:
         ap = a["artist_photo"]
+        if room is not None:
+            room.pending = 0
         embed_picture(stage, *_artist_image(a), ptype=ARTIST_TYPE, desc=ap.get("mark") or "",
-                      replace=dst in (ap.get("replace") or []))
+                      replace=dst in (ap.get("replace") or []), padding=room)
 
 
 def _ours(desc) -> bool:
@@ -679,7 +856,8 @@ def _ours(desc) -> bool:
     return str(desc or "").startswith(artwork.ARTIST_MARK)
 
 
-def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc="", replace=False):
+def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc="", replace=False,
+                  padding=None):
     """Add a picture of another type than the front (the artist photo) - never in place of one
     the track has: only to a track with no picture of that type. replace: in place of the
     artist picture TagMender embedded before (its description says so); one of the user's
@@ -740,6 +918,8 @@ def embed_picture(path, data: bytes, mime="image/jpeg", ptype=ARTIST_TYPE, desc=
         return
     if isinstance(getattr(f, "tags", None), ID3):
         tagio.save_id3(f, f.tags)                         # (a v2.3 tag stays valid v2.3)
+    elif isinstance(f, FLAC) and padding is not None:
+        f.save(padding=padding)
     else:
         f.save()
 
@@ -755,9 +935,9 @@ def _front_index(types) -> int | None:
     return None
 
 
-def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
+def embed_front(path, data: bytes, mime="image/jpeg", replace=False, padding=None):
     """Add the front cover; replace: in place of the track's own (smaller) front cover, every
-    other picture kept."""
+    other picture kept. padding: mutagen's padding= for a FLAC's save (a staged FLAC's room)."""
     import base64
     from mutagen.flac import FLAC, Picture
     from mutagen.id3 import APIC, ID3
@@ -821,6 +1001,8 @@ def embed_front(path, data: bytes, mime="image/jpeg", replace=False):
         raise tagio.Unsupported(f"no front-cover embedding for {type(f).__name__}")
     if isinstance(getattr(f, "tags", None), ID3):
         tagio.save_id3(f, f.tags)                         # an ID3v2.3 tag stays valid v2.3
+    elif isinstance(f, FLAC) and padding is not None:
+        f.save(padding=padding)
     else:
         f.save()
 
@@ -1179,16 +1361,18 @@ class Executor:
             stage = _stage_name(dst, self.job)
             _space_for(dst.parent, os.path.getsize(src))
             try:
-                _copy_fsync(src, stage)
+                room = _stage_track(src, stage, a, fe["dst"], bool(changes or embed or fix), src_digest)
                 if src_digest is None and not changes and not embed and not fix and \
                         payload.file_sha256(stage) != payload.file_sha256(src):
                     raise StepError(f"{src.name}: copy did not verify")
                 src_st = os.stat(src)
                 _keep_owner(stage, src_st)
                 if changes or fix:
-                    tagio.write(stage, changes, **_write_extras(fe))
+                    tagio.write(stage, changes, **_write_extras(fe), **_room_kw(room))
                 if embed:
-                    _embed_all(stage, a, fe["dst"])
+                    _embed_all(stage, a, fe["dst"], room)
+                if room is not None:
+                    _flac_cap(stage)
                 if self.preserve_times:
                     os.utime(stage, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
                 after = payload.digest(stage)
@@ -1248,12 +1432,15 @@ class Executor:
         if changes or embed or fix:
             stage = _stage_name(dst, self.job)
             try:
-                _copy_fsync(src, stage)
+                room = _stage_track(src, stage, a, str(dst), True, src_digest)
                 _keep_owner(stage, os.stat(src))
                 if changes or fix:
-                    tagio.write(stage, changes, **_write_extras(a["files"][j] if j < len(a.get("files") or []) else {}))
+                    tagio.write(stage, changes, **_write_extras(a["files"][j] if j < len(a.get("files") or []) else {}),
+                                **_room_kw(room))
                 if embed:
-                    _embed_all(stage, a, str(dst))
+                    _embed_all(stage, a, str(dst), room)
+                if room is not None:
+                    _flac_cap(stage)
                 if self.preserve_times:
                     st0 = os.stat(src)
                     os.utime(stage, ns=(st0.st_atime_ns, st0.st_mtime_ns))
@@ -1349,10 +1536,41 @@ class Executor:
             self.journal.write(ev="companion", album=i, idx=j, state="source_removed")
             done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved) if saved else None, None))
             return
+        renamed = False
+        if op == "move" and not ce.get("rewrite") and not src.is_symlink() and not os.path.lexists(dst) and \
+                _same_fs(src, dst.parent if dst.parent.exists() else self._existing(dst.parent)):
+            # same filesystem: a rename (by hard link, then unlink; a rename where there are no
+            # hard links), nothing copied - a crash in between leaves one file under two names,
+            # which _recover takes as moved ("by": "rename") and puts back as one
+            _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
+            self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
+                               by="rename")
+            try:
+                _place_move(src, dst)
+                renamed = True
+            except OSError:                       # (EXDEV: one disk under two mounts; a share refusing)
+                if src.exists() and dst.exists() and _same_file(src, dst):
+                    # (linked, and neither name could be removed: the rollback removes the new one)
+                    done_steps.append(("companion", i, j, op, str(src), str(dst), None, None))
+                    raise
+                if not os.path.lexists(dst) and src.exists():
+                    pass                          # nothing happened: copy it instead
+                elif dst.exists() and not os.path.lexists(src):
+                    renamed = True                # moved (only a later step complained)
+                else:
+                    raise
+            if renamed:
+                st = os.stat(dst)
+                self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
+                                   mtime_ns=st.st_mtime_ns, moved_by="rename")
+                done_steps.append(("companion", i, j, op, str(src), str(dst), None, None))
+                self.journal.write(ev="companion", album=i, idx=j, state="source_removed")
+                return
         _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
         stage = _stage_name(dst, self.job)
         saved = None
-        self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin")
+        self.journal.write(ev="companion", album=i, idx=j, op=op, src=str(src), dst=str(dst), state="begin",
+                           **({"by": "copy"} if op == "move" else {}))
         try:
             saved = self._stage_companion(i, j, ce, src, dst, stage)
         except BaseException:
@@ -1954,8 +2172,13 @@ def _recover(job, jd, journal, events):
         if a not in unfinished or c["state"] not in ("begin", "staged") or "dst" not in c:
             continue
         had, linked = cstate[(a, j)]
-        if c["state"] == "staged" and Path(c["dst"]).exists() and \
-                (linked or (not had and ours_companion(a, j, Path(c["src"]), Path(c["dst"])))):
+        csrc, cdst = Path(c["src"]), Path(c["dst"])
+        # a rename-move cut short: linked and not yet unlinked (one file, two names), or done
+        renamed = c["state"] == "begin" and c.get("by") == "rename" and c.get("op") == "move" and \
+            cdst.exists() and ((csrc.exists() and _same_file(csrc, cdst) and not _case_only(csrc, cdst))
+                               or not os.path.lexists(csrc))
+        if renamed or c["state"] == "staged" and cdst.exists() and \
+                (linked or (not had and ours_companion(a, j, csrc, cdst))):
             journal.write(ev="companion", album=a, idx=j, state="committed", recovered=True)
             c["state"] = "committed"
 

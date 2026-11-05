@@ -616,8 +616,24 @@ def shop_step(http, album, cfg, dm, mb_res, dg_res, final, text, args, use_mb, u
 def link_releases(http, album):
     """MusicBrainz releases the files' own tags point to: direct release links,
     shop pages MusicBrainz links to a release (Bandcamp, Deezer, Spotify,
-    Apple, Qobuz, Beatport), and the releases holding the files' ISRCs."""
+    Apple, Qobuz, Beatport), and the releases holding the files' ISRCs.
+
+    The files' own release links need no lookup: they are kept whatever MusicBrainz
+    answers. A failed /url or /isrc lookup is recorded in album["clue_failures"]
+    ("musicbrainz link lookup"), never read as "no release": the album is retried. When an
+    ISRC lookup failed, no ISRC evidence is used at all (the releases of fewer codes would
+    be a looser match than the releases of all of them)."""
     found = set(album.get("tag_mb_links") or ())
+    album["link_releases"] = set(found)          # (what stands if every lookup below fails)
+    album["isrc_releases"] = set()
+    failed = []
+
+    def mb_lookup(url):
+        try:
+            return http.get_json(url, "mb") or {}
+        except _CLUE_ERRORS as exc:             # a lead lost to MusicBrainz failing: reported
+            failed.append(exc)
+            return None
     for ref in sorted(album.get("store_tracks") or ())[:2]:
         shop, tid = ref.split(":", 1)
         if shop == "deezer":
@@ -631,19 +647,29 @@ def link_releases(http, album):
                 album["tag_urls"] = [url] + list(album.get("tag_urls") or [])
     for link in (album.get("tag_urls") or [])[:4]:
         for url in lookup_forms(link):
-            data = http.get_json("https://musicbrainz.org/ws/2/url?resource=" + q(url) + "&inc=release-rels&fmt=json",
-                                 "mb") or {}
+            data = mb_lookup("https://musicbrainz.org/ws/2/url?resource=" + q(url) + "&inc=release-rels&fmt=json")
+            if data is None:
+                continue                         # (this form failed: the next one may answer)
             rids = {(r.get("release") or {}).get("id") for r in data.get("relations") or []} - {None}
             found |= rids
             if rids:
                 break
-    isrc_rels = None
+    album["link_releases"] = set(found)
+    isrc_rels, isrc_failed = None, False
     for code in [c for c in album.get("isrcs") or [] if c][:3]:
-        data = http.get_json(f"https://musicbrainz.org/ws/2/isrc/{code}?inc=releases&fmt=json", "mb") or {}
+        data = mb_lookup(f"https://musicbrainz.org/ws/2/isrc/{code}?inc=releases&fmt=json")
+        if data is None:
+            isrc_failed = True
+            continue
         rels = {rel["id"] for rec in data.get("recordings") or [] for rel in rec.get("releases") or [] if rel.get("id")}
         if rels:
             isrc_rels = rels if isrc_rels is None else (isrc_rels & rels)
-    album["link_releases"] = found
+    if isrc_failed:
+        isrc_rels = None                         # a partial intersection is looser: none at all
+    if failed:
+        exc = failed[-1]
+        album.setdefault("clue_failures", {})["musicbrainz link lookup"] = (
+            _clue_error_text(exc), getattr(exc, "kind", "outage"))
     album["isrc_releases"] = isrc_rels or set()
     return found | (isrc_rels or set())
 
@@ -699,6 +725,134 @@ def _release_id(t, key, value):
         t["mb_albumid"] = value.lower()
     elif key == "discogsreleaseid" and value.isdigit():
         t["discogs_releaseid"] = value
+
+
+# TagMender's own jobs, parsed once per plan file: {job: (plan.json mtime, albums)}
+_OWN_JOBS = {}
+# the path index built from them: (signature of the job history, {path: (MusicBrainz ids, Discogs ids)})
+_OWN_INDEX = [None, {}]
+_OWN_LOCK = threading.Lock()
+
+
+def _own_job_files(job):
+    """[(source folder, exact, [(src, dst, op, MusicBrainz ids, Discogs ids)])] for each album
+    of a job's plan. The IDs are those the file holds afterwards that TagMender may own: the
+    ones it wrote of the release it identified exactly, or (no ID changed) any ID of that
+    release the file kept; never a preserved ID of another release. Cached per plan file."""
+    path = exclusions.STATE_DIR / "jobs" / str(job) / "plan.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return []
+    with _OWN_LOCK:
+        hit = _OWN_JOBS.get(job)
+        if hit and hit[0] == mtime:
+            return hit[1]
+    albums = []
+    try:
+        plan = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        plan = {}
+    for a in plan.get("albums") or ():
+        ident = a.get("identification") or {}
+        exact = ident.get("tier") == "exact"
+        rid = str(ident.get("release_id") or "").lower()
+        chosen = frozenset(({rid} | set(_MB_DISCOGS_RE.findall(str(ident.get("url") or "")))) - {""})
+        files = []
+        for fe in a.get("files") or ():
+            if not fe.get("dst"):
+                continue
+            after = {r.get("field"): str((r.get("after") or [""])[0] or "") for r in fe.get("diff") or ()
+                     if r.get("field") in ("musicbrainz_albumid", "discogs_release_id")}
+            ids = []
+            for field in ("musicbrainz_albumid", "discogs_release_id"):
+                if field in after:          # written: only an ID of the release it identified
+                    v = after[field].lower() if field == "musicbrainz_albumid" else after[field]
+                    ids.append(frozenset({v}) & chosen)
+                else:                       # kept: the file's own ID, when it is that release's
+                    ids.append(chosen)
+            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids))
+        albums.append((a.get("source_dir"), exact, files))
+    with _OWN_LOCK:
+        _OWN_JOBS[job] = (mtime, albums)
+    return albums
+
+
+def _own_index():
+    """{file path: (MusicBrainz ids, Discogs ids)} TagMender's jobs own, built once per process
+    and again only when the job history changed (state.db, its WAL, its job rows)."""
+    db_path = exclusions.STATE_DIR / "state.db"
+    try:
+        st = db_path.stat()
+    except OSError:
+        return {}
+    try:
+        wal = os.stat(str(db_path) + "-wal")
+        wal = (wal.st_mtime_ns, wal.st_size)
+    except OSError:
+        wal = None
+    try:
+        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+        try:
+            # the newest job and album row (job_albums is only ever appended to: its newest
+            # rowid is enough), and how many jobs were undone (jobs: one row per job, few)
+            sig = (str(db_path), st.st_mtime_ns, st.st_size, wal,
+                   db.execute("SELECT MAX(rowid), COUNT(*), SUM(status LIKE 'undone%') FROM jobs").fetchone(),
+                   db.execute("SELECT MAX(rowid) FROM job_albums").fetchone())
+            with _OWN_LOCK:
+                if _OWN_INDEX[0] == sig:
+                    return _OWN_INDEX[1]
+            rows = db.execute("SELECT a.job, a.album FROM job_albums a JOIN jobs j ON j.job = a.job "
+                              "WHERE a.status IN ('done', 'unchanged') AND COALESCE(j.status, '') NOT LIKE 'undone%' "
+                              "ORDER BY a.ts").fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return {}
+    done, last = {}, {}
+    for i, (job, folder) in enumerate(rows):
+        done.setdefault(job, set()).add(folder)
+        last[job] = i
+    owned = {}
+    # Jobs in order: a file a job moved carries what was owned at its old path to the new one
+    # (a copy to both); an album identified exactly owns the IDs that job left in its files.
+    for job in sorted(done, key=last.get):
+        for folder, exact, files in _own_job_files(job):
+            if folder not in done[job]:
+                continue
+            for src, dst, op, mb, dg in files:
+                carried = owned.get(src)
+                if src != dst and carried is not None:
+                    if op != "copy":
+                        owned.pop(src, None)
+                    owned[dst] = carried
+                if exact and (mb or dg):
+                    owned[dst] = (mb, dg)
+    with _OWN_LOCK:
+        _OWN_INDEX[:] = [sig, owned]
+    return owned
+
+
+def tagmender_wrote(files):
+    """True when TagMender itself wrote the release IDs these files carry: for every file
+    [(path, MusicBrainz id, Discogs id)], a job of TagMender's (not undone) that ended done
+    or unchanged identified that release exactly and left that very ID in that file (written,
+    or kept as it was), and every later job of TagMender's that moved the file carried it to
+    this path. Read from the state database's job history and the jobs' plans (read only).
+    Re-processing such an album (a watched folder given a profile that moves it) keeps its
+    tags' barcode and the rest as the copy's own: TagMender chose them on evidence then.
+    False when any file's IDs are not TagMender's (another tagger, or edited since), or the
+    history is gone (pruned jobs, the album moved by hand since)."""
+    if not files:
+        return False
+    owned = _own_index()
+    if not owned:
+        return False
+    for path, mb, dg in files:
+        own = owned.get(str(path)) or owned.get(os.path.realpath(str(path)))
+        if not own or not (mb or dg) or (mb and str(mb).lower() not in own[0]) or (dg and str(dg) not in own[1]):
+            return False
+    return True
 
 
 def tag_release_ids(infos):
@@ -1401,7 +1555,17 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tocs = merge_tocs(infos, log_toc, cue_tocs(album_dir, infos), tag_tocs(infos))
     hint, hint_from = _media_hint(album_dir, album_folder, files, infos, top("artist") or artist_folder,
                                   bool(log_toc))
+    # The files name a release in their ID tags, and TagMender did not write them: another
+    # tagger did (Picard, an older tool, the shop). Their barcode, ISRCs, country, date and
+    # label came FROM that release and only confirm it; they never outrank the folder name
+    # (match_core: TAGS_BARCODE, classify's "tags name" review). Tags TagMender wrote itself
+    # (tagmender_wrote: its job history) keep counting as the copy's own (an album tagged in
+    # place, re-processed when its watched folder is given a profile that moves it).
+    id_files = [(p, i["mb_albumid"], i["discogs_releaseid"]) for p, i in infos
+                if i.get("mb_albumid") or i.get("discogs_releaseid")]
+    by_tagger = bool(id_files) and not blind and not tagmender_wrote(id_files)
     return {
+        "tags_by_tagger": by_tagger,
         "artist": top("artist") or artist_folder, "title": title,
         "year": year or None, "discs": n_discs,
         "dropped_formats": dropped_formats, "dropped_tracks": dropped_tracks,
@@ -2093,8 +2257,7 @@ def toc_releases(http, album):
         did = mb_discid(toc)
         failed = False
         try:
-            data = http.get_json(f"https://musicbrainz.org/ws/2/discid/{did}?toc={toc.replace(' ', '+')}"
-                                 f"&cdstubs=no&fmt=json", "mb")
+            data = http.get_json(_discid_url(did, toc), "mb")
         except _CLUE_ERRORS as exc:          # the other discs, and CTDB, may still answer
             album.setdefault("clue_failures", {})["musicbrainz disc ID"] = (
                 _clue_error_text(exc), getattr(exc, "kind", "outage"))
@@ -2103,14 +2266,7 @@ def toc_releases(http, album):
         # (not "no such disc ID": no attach link is offered for it)
         exact = None if failed else bool(data and data.get("id") == did)
         discids.append((did, toc, exact))
-        for r in (data or {}).get("releases", []):
-            if r.get("id"):
-                found.add(r["id"])
-                if exact:
-                    exact_found.add(r["id"])     # this very disc ID is attached to it
-                    for m in r.get("media") or ():
-                        if any(d.get("id") == did for d in m.get("discs") or ()) and m.get("position"):
-                            media.setdefault(r["id"], set()).add(int(m["position"]))
+        _discid_releases(data, did, exact, found, exact_found, media)
         get_text = getattr(http, "get_text", None)
         if get_text:
             try:
@@ -2132,21 +2288,89 @@ def toc_releases(http, album):
     return found
 
 
+def _discid_url(did, toc):
+    return f"https://musicbrainz.org/ws/2/discid/{did}?toc={toc.replace(' ', '+')}&cdstubs=no&fmt=json"
+
+
+def _discid_releases(data, did, exact, found, exact_found, media):
+    """Add the releases of a disc ID answer to found / exact_found / media (toc_releases)."""
+    for r in (data or {}).get("releases", []):
+        if r.get("id"):
+            found.add(r["id"])
+            if exact:
+                exact_found.add(r["id"])     # this very disc ID is attached to it
+                for m in r.get("media") or ():
+                    if any(d.get("id") == did for d in m.get("discs") or ()) and m.get("position"):
+                        media.setdefault(r["id"], set()).add(int(m["position"]))
+
+
+def retry_disc_ids(http, album):
+    """Ask MusicBrainz once more for the disc IDs whose lookup failed (toc_releases), a single
+    try each (no 503 retry ladder: by now the request pace has adapted, and a short burst
+    has usually cleared). Only when every failed disc ID answers now are the answers used
+    and the failure cleared; True then. False (nothing changed) otherwise."""
+    fails = album.get("clue_failures") or {}
+    discids = list(album.get("discids") or ())
+    if "musicbrainz disc ID" not in fails or not any(e is None for _d, _t, e in discids):
+        return False
+    found = set(album.get("toc_releases") or ())
+    exact_found = set(album.get("exact_toc_releases") or ())
+    media = {k: set(v) for k, v in (album.get("exact_toc_media") or {}).items()}
+    answered = []
+    for did, toc, exact in discids:
+        if exact is not None:
+            answered.append((did, toc, exact))
+            continue
+        try:
+            if isinstance(http, Http):
+                data = http.get_json(_discid_url(did, toc), "mb", attempts=1)
+            else:
+                data = http.get_json(_discid_url(did, toc), "mb")
+        except _CLUE_ERRORS as exc:          # still failing: the album keeps its failure (retried)
+            fails["musicbrainz disc ID"] = (_clue_error_text(exc), getattr(exc, "kind", "outage"))
+            return False
+        exact = bool(data and data.get("id") == did)
+        answered.append((did, toc, exact))
+        _discid_releases(data, did, exact, found, exact_found, media)
+    del fails["musicbrainz disc ID"]
+    album.update(discids=answered, toc_releases=found, exact_toc_releases=exact_found, exact_toc_media=media)
+    return True
+
+
+def hard_proof(best):
+    """The pick rests on something only your copy's own pressing has: its exact disc ID
+    attached in MusicBrainz, the files' own link to it, or a barcode. (Not a barcode only typed
+    in notes or written by another tagger: mc.WEAK_BARCODES. Not audio fingerprints: they find
+    the recordings, which every pressing of the album shares.)"""
+    if not best:
+        return False
+    clues = best.get("clues") or {}
+    return mc._exact_toc(best) or "source link" in clues or mc.barcode_proves(best)
+
+
 _CLUE_FAILED = {"ctdb": "CUETools DB lookup of the disc failed ({msg}); its MusicBrainz/Discogs links were not used",
-                "musicbrainz disc ID": "MusicBrainz disc ID lookup failed ({msg}); the disc ID was not checked"}
+                "musicbrainz disc ID": "MusicBrainz disc ID lookup failed ({msg}); the disc ID was not checked",
+                "musicbrainz link lookup": "MusicBrainz lookup of the files' links or ISRCs failed ({msg}); "
+                                           "their releases were not checked"}
+# the lookups whose failure counts as MusicBrainz's (a source note: the album is retried)
+MB_CLUES = ("musicbrainz disc ID", "musicbrainz link lookup")
 
 
 def clue_failure_notes(album, provider_errors=None):
     """A note for each disc lookup that failed (toc_releases' "clue_failures"), so a failure
     is never read as "no release has this disc". CTDB is a clue: recorded as an outage in
     provider_errors, which engine._unresolved does not turn into a reason code; a
-    MusicBrainz disc ID failure counts as MusicBrainz's, as a failed search does."""
+    MusicBrainz disc ID or link lookup failure counts as MusicBrainz's, as a failed search
+    does (an error MusicBrainz's search already recorded is kept)."""
     notes = []
     for what, (msg, kind) in (album.get("clue_failures") or {}).items():
         notes.append(_CLUE_FAILED.get(what, what + " failed ({msg})").format(msg=msg))
-        if provider_errors is not None and what in ("musicbrainz disc ID", "ctdb"):
-            provider_errors["musicbrainz" if what == "musicbrainz disc ID" else what] = (
-                kind if what == "musicbrainz disc ID" else "outage")
+        if provider_errors is None:
+            continue
+        if what in MB_CLUES:
+            provider_errors.setdefault("musicbrainz", kind)
+        elif what == "ctdb":
+            provider_errors["ctdb"] = "outage"
     return notes
 
 
@@ -2588,8 +2812,8 @@ class Http:
         except Exception:      # (an old cache file, a locked db) a record never stops a lookup
             pass
 
-    def get_json(self, url, host):
-        body = self.get_text(url, host)
+    def get_json(self, url, host, attempts=None):
+        body = self.get_text(url, host, attempts=attempts)
         if body is None:
             return None
         try:
@@ -2685,16 +2909,84 @@ class Http:
         self.db.commit()
         return data
 
-    def get_text(self, url, host, key=None, headers=None):
+    # MusicBrainz and Discogs: after a request gave up because the host does not answer
+    # (kind "outage": every attempt a network error or a 5xx that is no request to slow
+    # down), the host's requests that miss the cache fail at once for BREAKER_S seconds,
+    # instead of each sitting through its own 6-try ladder (about 10 minutes); then one real
+    # request is the trial. Never after "rate_limited": that is the host asking us to slow
+    # down, which the pacing does. A request skipped so is still that provider's outage:
+    # the album is an error, retried later, never a no match.
+    BREAKER_HOSTS = ("mb", "discogs")
+    BREAKER_S = 300
+
+    def _breaker(self):
+        """(state, lock): state is {host: [open until, trial request under way]}."""
+        lock = self.__dict__.get("_breaker_lock")
+        if lock is None:
+            lock = self.__dict__.setdefault("_breaker_lock", threading.Lock())
+        return self.__dict__.setdefault("_breaker_state", {}), lock
+
+    def _breaker_gate(self, host):
+        """Raise ProviderUnavailable while the host's breaker is open; True when this request
+        is the one trial after the window (asked once), False for an ordinary request."""
+        if host not in self.BREAKER_HOSTS:
+            return False
+        state, lock = self._breaker()
+        with lock:
+            st = state.get(host)
+            if not st:
+                return False
+            until, trial = st
+            if until > time.time() or trial:          # (another thread is making the trial)
+                left = max(0, int(until - time.time()))
+                raise ProviderUnavailable(host, "outage", "skipped: it gave up on an earlier request; "
+                                          + (f"asked again in {left} s" if left else "a trial request is under way"))
+            st[1] = True
+            return True
+
+    def _breaker_trip(self, host):
+        if host not in self.BREAKER_HOSTS:
+            return
+        state, lock = self._breaker()
+        with lock:
+            state[host] = [time.time() + self.BREAKER_S, False]
+        print(f"    {host} is not answering: its uncached requests are skipped for "
+              f"{self.BREAKER_S // 60} minutes, then tried again", file=sys.stderr)
+
+    def _breaker_trial_done(self, host):
+        """The trial request finished: closed, unless it gave up again (re-tripped)."""
+        state, lock = self._breaker()
+        with lock:
+            st = state.get(host)
+            if st and st[0] <= time.time():
+                del state[host]
+            elif st:
+                st[1] = False
+
+    def get_text(self, url, host, key=None, headers=None, attempts=None):
         """The answer to a GET, cached under `key` (default: the URL; a key lets what must not
         be stored, such as gnudb's registered address, stay out of the cache). `headers` are
-        sent as well (an API key), never part of the cache key."""
-        extra = headers
+        sent as well (an API key), never part of the cache key. attempts: at most this many
+        tries (a single-try re-ask) instead of the host's own number."""
         key = key or url
         row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (key,)).fetchone()
         if row and not (self.max_age and time.time() - float(row[1] or 0) > self.max_age):
             return row[0]
+        trial = self._breaker_gate(host)
+        try:
+            return self._fetch(url, host, key, headers, 1 if trial else attempts, trial)
+        finally:
+            if trial:
+                self._breaker_trial_done(host)
+
+    def _fetch(self, url, host, key, extra, at_most, trial):
+        """get_text's live request, with the host's retries (at_most: fewer)."""
         attempts, timeout, max_fail, pause_s = self.OPTIONAL_HOSTS.get(host, (6, 60, 0, 0))
+        # only the host's full ladder (or the breaker's own trial) giving up shows the host is
+        # down; a single-try re-ask (retry_disc_ids) failing once does not open the breaker
+        full_ladder = trial or not at_most or at_most >= attempts
+        if at_most:
+            attempts = max(1, min(attempts, at_most))
         down = getattr(self, "down", None)
         if down is None:
             down = self.down = {}
@@ -2779,11 +3071,15 @@ class Http:
                 last_err = f"{type(e).__name__}: {e}"
                 if host in self.OPTIONAL_HOSTS:
                     self.host_failed(host)
+                if trial:                                   # the trial got no answer: open again
+                    self._breaker_trip(host)
                 self._health(host, last_err)
                 raise ProviderUnavailable(host, "outage", f"giving up on {url.split('?')[0]}"
                                           f" ({last_err})") from None
         if host in self.OPTIONAL_HOSTS:
             self.host_failed(host)
+        if last_kind == "outage" and full_ladder:           # (never "rate_limited")
+            self._breaker_trip(host)
         self._health(host, last_err or last_kind)
         raise ProviderUnavailable(host, last_kind, f"giving up on {url.split('?')[0]}"
                                   + (f" ({last_err})" if last_err else ""))
@@ -2840,17 +3136,26 @@ def mb_group_types(group):
             if t and str(t).strip()]
 
 
-def mb_linked_discogs_id(rel):
-    """The Discogs RELEASE id MusicBrainz links this release to, if any - the
-    same rule as the plugin's discogs_release_id_from_mb(). Master links are
-    ignored: a master is the work, not a pressing."""
+def mb_linked_discogs_ids(rel):
+    """Every Discogs RELEASE id MusicBrainz links this release to, in the order listed
+    (several when Discogs lists the pressing twice). Master links are ignored: a master is
+    the work, not a pressing. match_core.same_pressing reads them all: a Discogs release
+    not among them is another pressing for MusicBrainz."""
+    out = []
     for r in rel.get("relations") or []:
         if r.get("target-type") != "url":
             continue
         m = _MB_DISCOGS_RE.search((r.get("url") or {}).get("resource") or "")
-        if m:
-            return m.group(1)
-    return ""
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
+def mb_linked_discogs_id(rel):
+    """The (first) Discogs RELEASE id MusicBrainz links this release to, if any - the
+    same rule as the plugin's discogs_release_id_from_mb(); mb_linked_discogs_ids has all."""
+    ids = mb_linked_discogs_ids(rel)
+    return ids[0] if ids else ""
 
 
 _MB_VIDEO_FORMATS = ("dvd-video", "blu-ray", "dvd", "vhs", "hd-dvd", "vcd", "svcd")
@@ -2888,6 +3193,7 @@ def mb_candidate(rel):
     return {
         "source": "mb", "id": rel["id"], "url": f"https://musicbrainz.org/release/{rel['id']}",
         "discogs_id": mb_linked_discogs_id(rel),
+        "discogs_ids": mb_linked_discogs_ids(rel),       # every one linked (same_pressing)
         # the album (release group), its types and its Discogs master: what tells pressings of
         # one album from other albums (match_core.same_album, Picard's preferred types/formats)
         "release_group": str(group.get("id") or ""), "release_types": mb_group_types(group),
@@ -5299,6 +5605,23 @@ def _is_code(name):
     return any(mc.norm_code(c) == mc.norm_code(name) for c in codes["catnos"] + codes["barcodes"])
 
 
+# Documents someone TYPED (a ripper's notes, an .nfo, a saved web page): a barcode found only
+# in them is perhaps copied from another edition's page, so it never proves the pressing
+# (match_core.typed_only_barcode). Rip logs, cue sheets (CATALOG: the disc's own MCN), PDF
+# and Word booklets are the copy's own print.
+TYPED_DOC_EXT = {".txt", ".nfo", ".info", ".md", ".htm", ".html", ".xml", ".json", ".csv", ".rtf"}
+
+
+def split_documents(docs_txt):
+    """(typed, printed): documents_text's sections by kind of document (TYPED_DOC_EXT)."""
+    typed, printed = [], []
+    parts = re.split(r"(?m)^\(([^\n]*)\)\n", docs_txt or "")
+    printed.append(parts[0])
+    for name, body in zip(parts[1::2], parts[2::2]):
+        (typed if Path(name).suffix.lower() in TYPED_DOC_EXT else printed).append(body)
+    return "\n".join(typed), "\n".join(printed)
+
+
 def drop_file_name_lines(text, album_dir):
     """The text without its lines that are a file's name: a document's "(name.cue)" heading,
     a screenshot's title bar ("Terrestrials (2014, SUNN200, side A).wv - iZotope RX 7") or
@@ -5512,7 +5835,8 @@ def _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final, text, 
                                 f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
             if det:
                 found["mb"].append(mb_candidate(det))
-    sure = mc.barcodes_read_whole(text, new_b)
+    # (a barcode only typed in the notes or a saved page is searched, never your copy's own)
+    sure = [b for b in mc.barcodes_read_whole(text, new_b) if not mc.typed_only_barcode(album, b)]
     if sure and not album["barcodes"]:
         album["barcodes"] = set(sure)
     state["found"] += len(found["mb"]) + len(found["discogs"])
@@ -5615,15 +5939,15 @@ def _process(row, http, cfg, dm, args, full_cfg):
         except Exception as exc:          # a clue: its failure never costs the album its match
             album["toc_releases"] = set()
             album.setdefault("clue_failures", {})["disc lookup"] = (f"{type(exc).__name__}: {exc}", "outage")
-        if album["toc_releases"]:
-            out["toc_releases"] = len(album["toc_releases"])
-        for what, note in zip(album.get("clue_failures") or {}, clue_failure_notes(album, provider_errors)):
-            (source_notes if what == "musicbrainz disc ID" else clue_notes).append(note)
     if album.get("tag_mb_links") or album.get("tag_urls") or album.get("isrcs") or album.get("store_tracks"):
         try:
             link_releases(http, album)
-        except Exception:
-            album["link_releases"], album["isrc_releases"] = set(), set()
+        except Exception as exc:          # (link_releases catches the lookups' own failures)
+            # the files' own release links need no lookup: they stand
+            album.setdefault("link_releases", set(album.get("tag_mb_links") or ()))
+            album["isrc_releases"] = set()
+            album.setdefault("clue_failures", {})["musicbrainz link lookup"] = (
+                f"{type(exc).__name__}: {exc}", "outage")
     use_mb = getattr(args, "use_mb", True)
     use_discogs = getattr(args, "use_discogs", True) and dm is not None
     if use_mb:
@@ -5636,8 +5960,28 @@ def _process(row, http, cfg, dm, args, full_cfg):
             source_notes.append(f"MusicBrainz lookup failed ({exc}); result is Discogs-only")
             if provider_errors is not None:
                 provider_errors["musicbrainz"] = exc.kind
+        # the disc ID lookup failed (a 503 burst): asked once more now; when it answers, the
+        # MusicBrainz candidates are scored again with it (what was fetched is cached)
+        if mb_res is not None and retry_disc_ids(http, album):
+            if album["toc_releases"]:
+                out["toc_releases"] = len(album["toc_releases"])
+            try:
+                mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
+            except ProviderUnavailable as exc:
+                if not use_discogs:
+                    raise
+                mb_res = None
+                source_notes.append(f"MusicBrainz lookup failed ({exc}); result is Discogs-only")
+                if provider_errors is not None:
+                    provider_errors["musicbrainz"] = exc.kind
     else:
         mb_res = None
+    # each failed disc or link lookup: a note (a MusicBrainz one is a source note, the
+    # album retried; CTDB's a clue note), ahead of the searches' own notes
+    mb_clue_notes = []
+    for what, note in zip(album.get("clue_failures") or {}, clue_failure_notes(album, provider_errors)):
+        (mb_clue_notes if what in MB_CLUES else clue_notes).append(note)
+    source_notes[:0] = mb_clue_notes
     dg_res = None
     # Discogs is asked too, also when MusicBrainz is sure: your pressing may be listed
     # only there (Kreator Endorama, Art Music AMG 099), and its catalogue number then
@@ -5677,23 +6021,31 @@ def _process(row, http, cfg, dm, args, full_cfg):
         text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log))
         # a file's name (a document's heading, a screenshot's title bar) is not print on the
         # copy: "SUNN200" in an RX window's title is no "catalogue number (OCR)" (R12)
+        # which barcodes were only typed (notes, .nfo, saved pages) and which printed on the
+        # copy (scans, booklets, a cue's CATALOG): score_candidate weighs them apart (Q3)
+        typed_docs, printed_docs = split_documents(docs_txt)
+        album["typed_text"] = typed_docs
+        album["printed_text"] = printed_docs + "\n" + text
         text = drop_file_name_lines(docs_txt + "\n" + text, base).strip()
         # spreads are read sideways too
         spines = _joined(each_scan(db, "spines" if ocr_langs() == "eng" else f"spines-{ocr_langs()}",
                                    page_scans, lambda p: ocr_spines([p]), scan_log))
         if spines.strip():
             text = text + "\n" + spines
+            album["printed_text"] += "\n" + spines
         if not album["barcodes"] and scans:
             # the digit band read alone, the first digit completed (15 scans, 2 minutes)
             digits = _joined(each_scan(db, "barcode-digits", scans[:15], lambda p: ocr_barcode_digits([p]),
                                        scan_log, budget_s=120.0))
             if digits.strip():
                 text = text + "\n" + digits
+                album["printed_text"] += "\n" + digits
         # every disc read, also when the barcode settled it: a matrix that differs is told only here
         rings = _joined(each_scan(db, "disc-rings", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
                                   budget_s=60.0))
         if rings.strip():
             text = text + "\n" + rings
+            album["printed_text"] += "\n" + rings
             album["ring_text"] = rings                 # matrix codes: a conflict is told only here
         if text.strip() or cover_txt.strip():
             # Barcodes and catalogue numbers printed on the scans are SEARCHED, not only
@@ -5744,10 +6096,9 @@ def _process(row, http, cfg, dm, args, full_cfg):
                     source_notes.append(f"Discogs lookup of codes read from scans failed ({exc})")
                 # a barcode the ripper's notes typed is searched, never your copy's own (R3): it
                 # may be copied from another edition's page; decoded off the scans, it is
-                typed = {mc.barcode_key(b) for b in album.get("note_barcodes") or ()}
-                decoded = {mc.barcode_key(b) for b in album.get("ocr_barcodes") or ()}
+                # (a saved web page or .nfo typing it is no more your copy's than the notes)
                 sure = [b for b in mc.barcodes_read_whole(text, new_b)
-                        if mc.barcode_key(b) not in typed - decoded]
+                        if not mc.typed_only_barcode(album, b)]
                 if not album["barcodes"] and sure:
                     album["barcodes"] = set(sure)        # as for barcodes decoded from the scans
 
@@ -5885,6 +6236,17 @@ def _process(row, http, cfg, dm, args, full_cfg):
         out["media_hint"] = f"{album['media_hint']} ({album['media_hint_from']})"
     if source_notes and status == "nomatch":
         status = "error"      # not a real "no match": must be retried, not filed
+    # (a disc lookup that failed as a whole, "disc lookup", lost the MusicBrainz disc ID too)
+    lost = [what for what in MB_CLUES + ("disc lookup",) if what in (album.get("clue_failures") or {})
+            and (what != "musicbrainz disc ID" or album.get("tocs"))]
+    if status == "auto" and lost and not hard_proof(final.get("best")):
+        # MusicBrainz could not be asked for your copy's disc ID (or its links/ISRCs), which
+        # may have pointed at another pressing, and nothing else proves this one: retried
+        # once MusicBrainz answers, never filed on the weaker clues
+        status = "error"
+        why.append(f"{' and '.join(lost).replace('musicbrainz', 'MusicBrainz')} failed and nothing "
+                   "else proves this pressing (exact disc ID, the files' own link, barcode): "
+                   "tried again later")
     if row.get("Status") == "partial" and status == "auto":
         status = "review"
         why.append("album is partially tagged already")

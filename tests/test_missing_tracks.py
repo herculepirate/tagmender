@@ -83,7 +83,7 @@ class Matching(unittest.TestCase):
         self.assertEqual((summary["slots"], summary["missing"], summary["release_tracks"]), ([0, 2, 4], {"1": [2, 4]}, 5))
 
     def test_disc_toc_proves_it_too(self):
-        a = album([1, 3, 5], toc_releases={"x1"})
+        a = album([1, 3, 5], toc_releases={"x1"}, exact_toc_releases={"x1"})   # (exact: a fuzzy one proves nothing)
         r = decide(a, [cand(barcodes=set())])
         self.assertEqual(r["status"], "auto", r["why"])
 

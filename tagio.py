@@ -1420,7 +1420,7 @@ def fragmented(path) -> bool:
 
 def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None,
           names: dict | None = None, first: dict | None = None, keep=(), license_count=None,
-          fix_pictures=False) -> None:
+          fix_pictures=False, padding=None) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then). fmt: file_options() - what else saving the file does, as
     Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed). names: {field:
@@ -1431,7 +1431,8 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
     license_count: how many licenses the release has (WCOP for one URL, as Picard). "~rating":
     your stars (["4"], None removes them), saved as Picard saves ratings (mb_account.write_rating)
     and read back here - a rating that does not read back raises (the executor's read-back has
-    no "~rating" to compare; plan.apply_edits marks it lenient there)."""
+    no "~rating" to compare; plan.apply_edits marks it lenient there). padding: mutagen's
+    padding= for a FLAC's save (the executor's staged FLAC keeps the room it was built with)."""
     names = {field_name(k): v for k, v in (names or {}).items()}
     if fix_pictures and not fragmented(path):
         fix_opus_pictures(path)
@@ -1579,7 +1580,9 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
         if fmt.get("fix_seektable") and f.seektable is not None and not f.seektable.seekpoints:
             f.metadata_blocks = [b for b in f.metadata_blocks if b is not f.seektable]
             f.seektable = None
-        f.save(deleteid3=bool(fmt.get("strip_id3")))
+        f.save(deleteid3=bool(fmt.get("strip_id3")), padding=padding)
+    elif type(f).__name__ == "FLAC" and padding is not None:
+        f.save(padding=padding)
     else:
         f.save()
     if rated and not mb_account.rating_reads_back(path, rating):

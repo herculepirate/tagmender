@@ -103,10 +103,12 @@ class ExactDiscId(unittest.TestCase):
         us_s = next(s for s in r["scored"] if s["cand"]["id"] == "us")
         self.assertNotIn("disc TOC", us_s["clues"])          # found by CTDB only: another disc
 
-    def test_without_an_exact_hit_fuzzy_disc_ids_still_count(self):
+    def test_without_an_exact_hit_fuzzy_disc_ids_are_told_but_prove_nothing(self):
+        # (v0.8.0: a fuzzy match is "a CD of about these lengths", weight 1, never proof)
         a = album(toc_releases={"us"}, rip_log_toc=True, audio=CD_AUDIO)
         s = mc.score_candidate(a, cand(id="us"), CFG)
-        self.assertEqual(s["clues"]["disc TOC"], mc.TOC_CLUE)
+        self.assertNotIn("disc TOC", s["clues"])
+        self.assertEqual(s["clues"]["disc TOC (fuzzy)"], mc.FUZZY_TOC_CLUE)
 
     def test_musicbrainz_exact_disc_id_overrules_a_discogs_country_pick(self):
         a, jp, us = self.incubus()

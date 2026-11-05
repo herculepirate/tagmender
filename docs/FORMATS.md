@@ -22,6 +22,12 @@ it back, and proves the audio data unchanged.
 | TrueAudio | ID3 | no | yes | yes | not embedded | ffmpeg |
 | raw AAC (ADTS) | none | — | — | — | — | — (read only) |
 
+A FLAC that is moved or copied is staged with room in its metadata for the tags and pictures
+it gets, so writing the cover does not rewrite the audio again on the destination. At most
+100 KB of padding is left afterwards. A FLAC with an unusual layout is copied as it is. Scans,
+logs, cue sheets and other files moved with the music within one filesystem are renamed, not
+copied.
+
 Field names and their storage follow the MusicBrainz tag mapping, so files read the same in
 other taggers and players: e.g. the recording ID is `UFID:http://musicbrainz.org` in ID3,
 `MUSICBRAINZ_TRACKID` in Vorbis and `MusicBrainz Track Id` in MP4; the release-track ID is

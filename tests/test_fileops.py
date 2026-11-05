@@ -374,7 +374,9 @@ class Review(Base):
 
     def test_crash_while_staging_a_companion(self):
         p = pl.build([self.proposal()], self.profile(operation="move", destination=str(self.dest)))
-        with mock.patch.object(payload, "file_sha256", side_effect=Crash):
+        # (a companion is staged as a copy across filesystems; on one it is renamed since 0.8.0)
+        with mock.patch.object(payload, "file_sha256", side_effect=Crash), \
+                mock.patch.object(executor, "_same_fs", lambda a, b: False):
             with self.assertRaises(Crash):
                 executor.Executor(p).run()
         executor.recover(p["job"])

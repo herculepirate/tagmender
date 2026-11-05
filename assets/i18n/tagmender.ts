@@ -551,7 +551,7 @@
         <location line="+1"/>
         <location filename="../../gui/profiles.py" line="-375"/>
         <location filename="../../gui/tagnames.py" line="+22"/>
-        <location filename="../../gui/versions.py" line="+27"/>
+        <location filename="../../gui/versions.py" line="+26"/>
         <source>Title</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2144,7 +2144,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     </message>
     <message>
         <location line="+1"/>
-        <location filename="../../gui/overview.py" line="+142"/>
+        <location filename="../../gui/overview.py" line="+148"/>
         <location line="+44"/>
         <location filename="../../gui/profile_editor.py" line="+934"/>
         <location filename="../../gui/rows.py" line="+208"/>
@@ -4845,7 +4845,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-1047"/>
+        <location filename="../../gui/overview.py" line="-1053"/>
         <source>Profile&apos;s sources</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4856,7 +4856,7 @@ New: {after}
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+68"/>
+        <location line="+74"/>
         <location filename="../../gui/window.py" line="-58"/>
         <source>Overview</source>
         <translation type="unfinished"></translation>
@@ -8182,14 +8182,14 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/overview.py" line="-516"/>
-        <location line="+585"/>
+        <location filename="../../gui/overview.py" line="-522"/>
+        <location line="+591"/>
         <location filename="../../gui/profile_editor.py" line="-6"/>
         <source>MusicBrainz only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-584"/>
+        <location line="-590"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>MusicBrainz preferred</source>
         <translation type="unfinished"></translation>
@@ -8202,7 +8202,7 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+583"/>
+        <location line="+589"/>
         <location filename="../../gui/profile_editor.py" line="+0"/>
         <source>Discogs only</source>
         <translation type="unfinished"></translation>
@@ -11507,7 +11507,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+105"/>
+        <location line="+94"/>
         <source>Unknown</source>
         <translation type="unfinished"></translation>
     </message>

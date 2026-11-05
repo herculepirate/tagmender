@@ -1,5 +1,29 @@
 # Release notes
 
+## 0.8.1
+
+**Faster**
+- MusicBrainz and Discogs are searched at the same time, and scans are read while they are
+  searched (one album's look-up takes noticeably less time; MusicBrainz still gets at most one
+  request a second, now shared by every part of TagMender).
+- The watched folders: tags of files that did not change are not read again on every check, and
+  each file is looked at once per check instead of three times.
+- Look Up after listing a folder reads only the albums you chose.
+- Audiophile loudness and dynamic range are measured four tracks at a time, each track read once.
+
+**Surer about the pressing** (only stricter, except hidden tracks below)
+- A MusicBrainz or Discogs release link another tagger wrote into the tags is a lead, not proof.
+  Nor are that tagger's country, date or label.
+- When one database is sure but your barcode or disc ID is on a different pressing in the other,
+  the album waits for your review.
+- A blank field in one database entry no longer picks the other pressing.
+- A cue sheet from another rip no longer proves anything; your own rip's cue still does (gaps
+  appended or prepended, with a hidden track or without).
+- A hidden track before track 1 (a "00" file) is the disc's pregap: with the disc ID or the rip
+  log proving the release, the album is tagged automatically, the hidden track included; on track
+  lengths alone it waits for your review.
+- Label lines in Russian notes ("Лейбл:", "Издатель (лейбл):") are searched too.
+
 ## 0.8.0
 
 **Surer about the pressing.** Each change below sends an album to review or tries it again later

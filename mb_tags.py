@@ -632,7 +632,10 @@ _TRACK_SETS = {"title", "artist", "artistsort", "artists", "musicbrainz_artistid
 DATA_TRACK_TITLE, SILENCE_TRACK_TITLE = "[data track]", "[silence]"
 
 
-def release_tags(rel, settings=None) -> list[dict]:
+def release_tags(rel, settings=None, pregap=False) -> list[dict]:
+    """pregap=True: a medium's hidden track before track 1 (its "pregap", numbered 0) is one
+    of the album's audio files too (a rip that has it as a file numbered 0), first on its
+    disc, as Picard lists it."""
     s = _settings(settings)
     per_medium = {}
     common = album_tags(rel, s, per_medium)
@@ -663,7 +666,7 @@ def release_tags(rel, settings=None) -> list[dict]:
             if (tt.get("musicbrainz_artistid") or []) == [VARIOUS_ARTISTS_ID]:
                 who = s["va_name"]
             artists.add(_asciipunct(who) if s["convert_punctuation"] and isinstance(who, str) else who)
-            if kind != "track" or id(m) not in audio or rec.get("video"):
+            if (kind != "track" and not (pregap and kind == "pregap")) or id(m) not in audio or rec.get("video"):
                 continue                      # (a pregap, data or video track: no audio file of the album's)
             d = {k: list(v) for k, v in common.items()}
             for k, v in (per_medium.get(m.get("position") or disc) or {}).items():

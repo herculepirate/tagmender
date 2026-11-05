@@ -28,6 +28,7 @@ Missing credentials, an outage or throttling at one provider is recorded on the 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import sqlite3
@@ -161,6 +162,15 @@ def _slots_of(album, cand, sc):
         return {}
     return {"slots": list(view["slots"]), "missing": dict(view["missing"]),
             "release_tracks": view.get("full_tracks") or len(cand.get("tracks") or [])}
+
+
+def _has_htoa(album):
+    """A disc of the album has its hidden track before track 1 as a file numbered 0
+    (match_albums.htoa_file)."""
+    discs = {}
+    for t in album.get("tracks") or ():
+        discs.setdefault(t.get("disc") or 1, []).append(t)
+    return any(ma.htoa_file(tracks) is not None for tracks in discs.values())
 
 
 def _missing_of(best):
@@ -358,7 +368,9 @@ class Engine:
         if http is None:
             ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
             db = sqlite3.connect(cache or (ex.STATE_DIR / "cache.sqlite"), timeout=60)
-            http = ma.Http(db, cfg, token)
+            # (one pace per host for the whole process: the app's searches and versions sheet,
+            # the watcher in the app, every Engine; match_albums.share_pace)
+            http = ma.share_pace(ma.Http(db, cfg, token))
             days = _refresh_days()
             if days:
                 # (a saved lookup older than this is asked again when its album is processed
@@ -443,10 +455,24 @@ class Engine:
         if hasattr(self.profile, "skip_paths"):          # (where unidentified albums are moved to)
             skip |= self.profile.skip_paths()
         skips = self.profile.folder_skipper() if hasattr(self.profile, "folder_skipper") else _skips_folder
+        real_of = {}                                     # (each folder's real path, resolved once)
+
+        def skipped(dirpath, d):
+            if not skip:
+                return False
+            child = os.path.join(dirpath, d)
+            if os.path.islink(child):
+                real = os.path.realpath(child)
+            else:                                        # (its folder's real path and its own name)
+                top = real_of.get(dirpath)
+                if top is None:
+                    top = real_of[dirpath] = os.path.realpath(dirpath)
+                real = os.path.join(top, d)
+            real_of[child] = real
+            return real in skip
         for dirpath, dirs, names in os.walk(path):
             # (the profile's Skip These Folders, hidden folders, TagMender's own folders)
-            dirs[:] = sorted(d for d in dirs if not skips(d)
-                             and os.path.realpath(os.path.join(dirpath, d)) not in skip)
+            dirs[:] = sorted(d for d in dirs if not skips(d) and not skipped(dirpath, d))
             d = Path(dirpath)
             audio = sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
             if audio:
@@ -1155,6 +1181,12 @@ class Engine:
             tags_mb = [tags_mb[k] for k in slots] if tags_mb and len(tags_mb) == full else None
             if dparts and dparts[1] is not None:
                 dparts = (dparts[0], [dparts[1][k] for k in slots] if len(dparts[1]) == full else None, dparts[2])
+        if (tags_mb and not slots and len(tags_mb) != n and rel and _has_htoa(album)
+                and any(m.get("pregap") for m in rel.get("media") or ())):
+            # a rip with the hidden track before track 1 as a file numbered 0: the release's
+            # pregap track is that file's (match_core.with_pregap matched it)
+            with_gap = mb_tags.release_tags(rel, ps, pregap=True)
+            tags_mb = with_gap if len(with_gap) == n else tags_mb
         tags_mb = tags_mb if tags_mb and len(tags_mb) == n else None
         if dparts and (dparts[1] is None or len(dparts[1]) != n):
             dparts = None if not tags_mb else (dparts[0], None, dparts[2])
@@ -2378,15 +2410,19 @@ class Engine:
                                             status="unresolved", reason=f"error: {exc}", reason_codes=["other"]))
         return out
 
-    def listing(self, path, within=None) -> dict:
+    def listing(self, path, within=None, meta=None) -> dict:
         """The albums PATH holds, not looked up yet (List first): a plan whose albums are
         "listed" - nothing is asked of any database and nothing can be applied. within: only
         the albums inside these folders (several folders dropped at once, listed under the folder
-        that holds them)."""
+        that holds them). meta: a dict kept by the caller, in which the files' metadata is
+        remembered for the next listing or look up (ex.meta_memo; what this listing did not
+        read again is dropped from it)."""
         roots = [os.path.realpath(str(w)) for w in within or ()]
         albums = []
-        for g in self.albums_in(path):
-            here = os.path.realpath(str(g.folder))
+        with ex.meta_memo(meta, True) if meta is not None else contextlib.nullcontext():
+            groups = self.albums_in(path)
+        for g in groups:
+            here = os.path.realpath(str(g.folder)) if roots else ""
             if roots and not any(here == r or here.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
                 continue
             files = sorted(str(f) for f in g.files)
@@ -2397,8 +2433,11 @@ class Engine:
         return {"job": self.job, "profile": getattr(self.profile, "name", ""),
                 "operation": self.profile["operation"], "listed": True, "albums": albums, "provider_notes": {}}
 
-    def plan(self, path, progress=None, cancel=None, only=None) -> dict:
-        props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
+    def plan(self, path, progress=None, cancel=None, only=None, meta=None) -> dict:
+        """meta: a dict kept by the caller (see listing): files whose metadata it remembers, unchanged,
+        are not opened again to find the albums (a plan of every album drops what it did not read)."""
+        with ex.meta_memo(meta, only is None) if meta is not None else contextlib.nullcontext():
+            props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))],
                           edits=getattr(self, "edits", None))

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 import subprocess
@@ -173,17 +174,28 @@ class Cache:
             self.db = sqlite3.connect(str(path), timeout=60)
             self.db.execute("CREATE TABLE IF NOT EXISTS analysis (key TEXT PRIMARY KEY, value TEXT)")
 
-    def get(self, kind, path, compute):
-        key = f"{kind}:{_audio_key(path)}"
-        if self.db is not None:
-            row = self.db.execute("SELECT value FROM analysis WHERE key=?", (key,)).fetchone()
-            if row:
-                return json.loads(row[0])
+    def get(self, kind, path, compute, audio_key=None):
+        """audio_key: the file's _audio_key, when the caller has it already."""
+        audio_key = audio_key or _audio_key(path)
+        hit, value = self.cached(kind, audio_key)
+        if hit:
+            return value
         value = compute()
-        if self.db is not None and value is not None:
-            self.db.execute("INSERT OR REPLACE INTO analysis VALUES (?, ?)", (key, json.dumps(value)))
-            self.db.commit()
+        self.put(kind, audio_key, value)
         return value
+
+    def cached(self, kind, audio_key):
+        """(True, the value) when a measurement is kept for this audio, else (False, None)."""
+        if self.db is not None:
+            row = self.db.execute("SELECT value FROM analysis WHERE key=?", (f"{kind}:{audio_key}",)).fetchone()
+            if row:
+                return True, json.loads(row[0])
+        return False, None
+
+    def put(self, kind, audio_key, value):
+        if self.db is not None and value is not None:
+            self.db.execute("INSERT OR REPLACE INTO analysis VALUES (?, ?)", (f"{kind}:{audio_key}", json.dumps(value)))
+            self.db.commit()
 
     def close(self):
         if self.db is not None:
@@ -200,6 +212,57 @@ def _audio_key(path):
         return d
     st = Path(path).stat()
     return f"{path}|{st.st_size}|{st.st_mtime_ns}"
+
+
+class _AudioKeys:
+    """_audio_key of each file, worked out once for one album's measurements (it reads the whole
+    audio): by the file's path, size, time and inode, so a file changed meanwhile is read again."""
+    def __init__(self):
+        self.known = {}
+
+    def __call__(self, path):
+        try:
+            st = os.stat(path)
+        except OSError:
+            return _audio_key(path)
+        stamp = (str(path), st.st_size, st.st_mtime_ns, st.st_ino)
+        if stamp not in self.known:
+            self.known[stamp] = _audio_key(path)
+        return self.known[stamp]
+
+
+def measure_workers() -> int:
+    """How many measurements (each an ffmpeg process) run at once."""
+    return min(4, max(1, (os.cpu_count() or 2) - 1))
+
+
+def _measured(cache, kind, measure, files, key_of) -> list:
+    """measure(f) for each file, as cache.get would give it: a kept value, or measured - the
+    files not measured yet side by side (measure_workers), each value kept by this thread."""
+    out = [None] * len(files)
+    todo = []
+    for i, f in enumerate(files):
+        hit, value = cache.cached(kind, key_of(f))
+        if hit:
+            out[i] = value
+        else:
+            todo.append(i)
+    workers = min(measure_workers(), len(todo))
+    if workers <= 1:
+        for i in todo:
+            out[i] = measure(files[i])
+            cache.put(kind, key_of(files[i]), out[i])
+        return out
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(workers, thread_name_prefix="tagmender-measure")
+    futures = [(i, pool.submit(measure, files[i])) for i in todo]
+    try:
+        for i, fut in futures:                   # (in the files' order, as measured one by one)
+            out[i] = fut.result()
+            cache.put(kind, key_of(files[i]), out[i])
+    finally:                                     # (a failure: what has not started never does)
+        pool.shutdown(wait=True, cancel_futures=True)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -473,11 +536,11 @@ def audiophile(prop, profile, http, cache: Cache, log=None) -> list[str]:
             have.append({})
     notes = []
     extra = [dict() for _ in files]
+    key_of = _AudioKeys()                     # (each file's audio read once for its cache keys)
 
     if on.get("replaygain"):
         measured = {}
-        for f in files:
-            m = cache.get("loudness", f, lambda f=f: loudness(f))
+        for f, m in zip(files, _measured(cache, "loudness", loudness, files, key_of)):
             if m:
                 measured[str(f)] = m
         if len(measured) == len(files):
@@ -489,7 +552,7 @@ def audiophile(prop, profile, http, cache: Cache, log=None) -> list[str]:
                          "ReplayGain not written: ffmpeg could not measure every track")
 
     if on.get("quality"):
-        drs = [cache.get("dr", f, lambda f=f: dynamic_range(f)) for f in files]
+        drs = _measured(cache, "dr", dynamic_range, files, key_of)
         if all(d is not None for d in drs):
             album_dr = int(round(sum(drs) / len(drs)))
             for i, d in enumerate(drs):
@@ -505,7 +568,8 @@ def audiophile(prop, profile, http, cache: Cache, log=None) -> list[str]:
             if enrich.spectrum_tools():
                 # "lossy-check", not "quality": older runs cached "" for albums they could not
                 # measure. quality() gives None then, which the cache never stores.
-                finding = cache.get("lossy-check", lossless[0], lambda: enrich.quality(lossless))
+                finding = cache.get("lossy-check", lossless[0], lambda: enrich.quality(lossless),
+                                    audio_key=key_of(lossless[0]))
                 if finding is None:
                     notes.append("lossy-source check skipped: a track could not be measured")
                 finding = finding or ""
@@ -532,7 +596,8 @@ def audiophile(prop, profile, http, cache: Cache, log=None) -> list[str]:
             for i, f in enumerate(files):
                 rec = (prop.targets[i].get("musicbrainz_recordingid") or [""])[0]
                 if rec:
-                    aid = cache.get(f"acoustid-{rec}", f, lambda f=f, rec=rec: acoustid_for(http, f, rec, http.db))
+                    aid = cache.get(f"acoustid-{rec}", f, lambda f=f, rec=rec: acoustid_for(http, f, rec, http.db),
+                                    audio_key=key_of(f))
                     if aid:
                         extra[i]["acoustid_id"] = aid
 

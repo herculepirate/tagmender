@@ -22,8 +22,10 @@ planned and waits, as every album of a profile that is not `unattended` does: th
 """
 from __future__ import annotations
 
+import errno
 import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -139,12 +141,62 @@ def shape_in(folder: Path, files, signature) -> bool:
                 for sc in (True, "deferred", False) for z in (True, False)))
 
 
+def _listed(folder, deep):
+    """The entries below FOLDER as Path.rglob("*") (deep) or Path.iterdir() gives them, in that
+    order, as os.DirEntry: one directory read each, no stat of its own. Like rglob, a folder is
+    looked into only when it is a folder itself (a symlink to one is listed, not followed), and
+    one that cannot be read is passed over."""
+    def entries(d):
+        try:
+            with os.scandir(d) as it:
+                return list(it)
+        except OSError:
+            return None
+
+    def subdirs(listed):
+        out = []
+        for e in listed:
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    out.append(e.path)
+            except OSError:
+                pass
+        return out
+    top = entries(folder)
+    if top is None:
+        if not deep:
+            raise OSError(f"cannot read {folder}")
+        return
+    yield from top
+    if not deep:
+        return
+    # (rglob's order: each folder listed as its parent's walk reaches it - its parent's
+    # subfolders one after the other - and the walk itself depth first)
+    under = {}                                    # folder: its subfolders, from its own listing
+    under[str(folder)] = subdirs(top)
+    stack = [str(folder)]
+    while stack:
+        d = stack.pop()
+        kids = under.pop(d, None)
+        if kids is None:                           # (a folder that could not be read)
+            continue
+        for k in kids:
+            listed = entries(k)
+            if listed is None:
+                continue
+            under[k] = subdirs(listed)
+            yield from listed
+        stack += reversed(kids)
+
+
 def snapshot(folder: Path, files=None, deep=True):
     """(signature, newest mtime, has a partial file) of a folder, or only of `files` (an album
     is judged by its own files: loose tracks at a watched root not by everything below the
     root, one album of a mixed folder not by the other). A download in progress is looked
-    for in the folder - below it too when deep (an album folder; not a watched root)."""
+    for in the folder - below it too when deep (an album folder; not a watched root).
+    Each entry is stat-ed once; the files' own stats make the signature."""
     entries, newest, partial = [], 0.0, False
+    stats = {}                            # path: os.stat_result (links followed) of a regular file
     if files is not None:                # (anything new in the folder is "still changing" too)
         if deep:                          # (an album folder; a watched root's time is everyone's)
             try:
@@ -152,43 +204,59 @@ def snapshot(folder: Path, files=None, deep=True):
             except OSError:
                 pass
         try:
-            around = Path(folder).rglob("*") if deep else Path(folder).iterdir()
-            for p in around:
-                n = p.name.lower()
+            for e in _listed(folder, deep):
+                n = e.name.lower()
                 if executor.STAGE_TAG in n:
                     continue
-                if _partial(p.name):
+                if _partial(e.name):
                     partial = True
                     break
                 try:
                     # a file, or a folder: a copy that keeps the files' own times (cp -a,
                     # rsync -a, file managers) still changes the folder's time as files arrive
-                    if deep and (p.is_file() or p.is_dir()):
-                        newest = max(newest, _changed_at(p.stat()))
-                    elif not deep and p.suffix.lower() in ex.AUDIO_EXT and p.is_file():
+                    if deep:
+                        st = e.stat()
+                        if stat.S_ISREG(st.st_mode):
+                            stats[e.path] = st
+                        elif not stat.S_ISDIR(st.st_mode):
+                            continue
+                        newest = max(newest, _changed_at(st))
+                    elif Path(e.name).suffix.lower() in ex.AUDIO_EXT:
                         # (loose tracks at a watched root: one still being copied - its tags not
                         # readable yet, grouped on its own - holds the others back too)
-                        newest = max(newest, _changed_at(p.stat()))
+                        st = e.stat()
+                        if stat.S_ISREG(st.st_mode):
+                            stats[e.path] = st
+                            newest = max(newest, _changed_at(st))
                 except OSError:
                     pass
         except OSError:
             pass
     for p in sorted(Path(x) for x in files) if files is not None else sorted(Path(folder).rglob("*")):
-        if not p.is_file():
-            continue
+        st = stats.get(str(p))
+        if st is None:
+            try:
+                st = p.stat()
+            except OSError as exc:
+                if exc.errno not in _GONE:            # (as Path.is_file: anything else is raised)
+                    raise
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
         name = p.name.lower()
         if executor.STAGE_TAG in name:                     # TagMender's own staging files
             continue
         if _partial(p.name):
             partial = True
             continue
-        try:
-            st = p.stat()
-        except FileNotFoundError:
-            continue
+        stats[str(p)] = st
         entries.append(p)
         newest = max(newest, _changed_at(st))
-    return ex.signature(entries), newest, partial
+    return ex.signature(entries, stats), newest, partial
+
+
+# (errors Path.is_file takes for "not a file")
+_GONE = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
 
 
 class Watcher:
@@ -390,6 +458,16 @@ class Watcher:
                 self.log.info("job %s: %s", job, exc)
                 db.close()
                 return done
+        # the files' metadata, kept from pass to pass (ex.meta_memo): an unchanged file is not
+        # opened again to find the albums; what a pass did not ask for is dropped
+        if getattr(self, "_meta", None) is None:
+            self._meta = {}
+        with ex.meta_memo(self._meta, True):
+            self._pass(db, done)
+        db.close()
+        return done
+
+    def _pass(self, db, done):
         seen = set()
         self.stop_pass = False
         for root, prof in self.roots():
@@ -401,11 +479,11 @@ class Watcher:
             e = eng_mod.Engine(prof, log=self.log)
             libs = self.library_inside(root, prof)
             flat = self.shallow(root, prof)
+            top = Path(os.path.realpath(root))
             for g in (e.albums_in(root, skip=libs) if libs else e.albums_in(root)):
                 if self.stop:
                     break
                 real = Path(os.path.realpath(g.folder))
-                top = Path(os.path.realpath(root))
                 if flat and real != top and real.parent != top:
                     continue                               # (Include subfolders is off: only albums directly in it)
                 if any(real == lb or lb in real.parents for lb in libs):
@@ -415,7 +493,7 @@ class Watcher:
                     continue
                 seen.add(key)
                 k = self.key(g)
-                deep = os.path.realpath(g.folder) != os.path.realpath(root)
+                deep = real != top
                 scope = g.files                            # the album's own files (see snapshot)
                 try:
                     go, why = self.due(g.folder, prof, db, k, scope, g.files, deep)
@@ -495,8 +573,6 @@ class Watcher:
                     self.log.exception("watch: %s failed", g.folder)
                     self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k, files=scope, deep=deep)
                     done[str(g.folder)] = "error"
-        db.close()
-        return done
 
     def run(self):
         """Watch until stopped. One watching process at a time (the app's background

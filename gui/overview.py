@@ -43,6 +43,12 @@ LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicB
            ("discogs_only", N_("Discogs only")), ("web", N_("Web only")))
 
 
+# The files' metadata as List first, Look Up and Preview last read it (ex.meta_memo): an
+# unchanged file is not opened again to find the albums. Handed to the engine explicitly (its
+# work runs on worker threads, where a context variable starts empty).
+META_STORE: dict = {}
+
+
 RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "rate_limited", "missing_credentials"}
 
 
@@ -414,7 +420,7 @@ class Overview(QWidget):
 
         def work(_w):
             import engine
-            return engine.Engine(prof).listing(path, within=within or None)
+            return engine.Engine(prof).listing(path, within=within or None, meta=META_STORE)
         self.busy(True)
         self.summary.setText(tr("Finding the albums… nothing is looked up yet."))
         self.worker = start(self, work, self.listed, self.progress, self.oops)
@@ -673,7 +679,7 @@ class Overview(QWidget):
         def work(w):
             e = engine.Engine(prof, ocr=True if ocr else None)
             e.edits = edits
-            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys)
+            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, only=keys, meta=META_STORE)
         self.busy(True)
         self.looked_with = self.sources_words(mode)
         self._lookup_n = len(keys)
@@ -843,7 +849,7 @@ class Overview(QWidget):
             e = engine.Engine(prof, ocr=True if ocr else None)    # unticked: the profile's "ocr"
             e.force = forced
             e.edits = edits
-            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled)
+            return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, meta=META_STORE)
         self.busy(True)
         self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))
         stamp = None if forced else self.lookup_stamp(prof, mode)    # (a release you chose: not the same)

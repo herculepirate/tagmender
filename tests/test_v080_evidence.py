@@ -250,6 +250,17 @@ class TaggerTags(unittest.TestCase):
     def test_tags_tagmender_wrote_still_count(self):
         r = pick(self.tagged(False), *self.releases())
         self.assertEqual(outcome(r), ("auto", "eu"), r["why"])
+
+    def test_another_taggers_pressing_tags_break_no_tie(self):
+        # (0.8.1, the auditor's p1: the country, date, label and media another tagger wrote
+        # came FROM the release it chose, and picked it among tied pressings)
+        rel = (cand(id="de", country="DE", date="2010-02-01", label="Alpha"),
+               cand(id="gb", country="GB", date="2010-03-01", label="Beta"))
+        for kw in (dict(tag_country="GB"), dict(tag_date="2010-03-01"), dict(tag_label="Beta")):
+            r = pick(album(tag_release_mb={"gb"}, tags_by_tagger=True, **kw), *rel)
+            self.assertEqual(r["status"], "review", (kw, r["why"]))
+            r = pick(album(tag_release_mb={"gb"}, tags_by_tagger=False, **kw), *rel)
+            self.assertEqual(outcome(r), ("auto", "gb"), (kw, r["why"]))
         # Mekong Delta - 1989 - Toccata [Aaarrg! Records, Germany, AAARRG 17], tagged by TagMender as
         # the Austrian CD: re-processed (a watched folder given a moving profile), it stays automatic
         a = album(folder="1989-Toccata [Germany]", barcodes={EU_BARCODE}, tag_barcodes={EU_BARCODE},

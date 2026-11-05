@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import threading
 from collections import Counter
 from pathlib import Path
 
@@ -68,28 +67,17 @@ class Lookup:
 
 # Every lookup of the app shares one pace per host: a new search or versions sheet makes a new
 # Http, whose own last-call times would start empty, and searches started in quick succession
-# (switching tabs) would ask MusicBrainz at the same moment, past its one request a second.
-_LAST: dict = {}                     # host -> when it was last asked, as Http.last
-_LOCKS: dict = {}
-_LOCKS_LOCK = threading.Lock()
-
-
-def _host_lock(host):
-    with _LOCKS_LOCK:
-        return _LOCKS.setdefault(ma.Http.SAME_LIMIT.get(host, host), threading.Lock())
+# (switching tabs, the versions sheet open during a Look Up) would ask MusicBrainz at the same
+# moment, past its one request a second. The pace is the process's own (match_albums.share_pace),
+# which every Engine's Http shares too: one pace per host however many look-ups run.
+_LAST: dict = ma._SHARED_LAST        # host -> when it was last asked, as Http.last
 
 
 def paced(http):
-    """`http` (a match_albums.Http) sharing the app's last-call times, its requests to a host
-    taken one at a time across every lookup (cached answers too: they come back at once)."""
-    http.last = _LAST
-    get_text = http.get_text
-
-    def one_at_a_time(url, host, *args, **kw):
-        with _host_lock(host):
-            return get_text(url, host, *args, **kw)
-    http.get_text = one_at_a_time
-    return http
+    """`http` (a match_albums.Http) sharing the process's last-call times and per-host locks
+    (match_albums.share_pace): its live requests to a host are taken one at a time, spaced by
+    the host's delay, across every lookup and Engine of the app."""
+    return ma.share_pace(http)
 
 
 def make_lookup(profile_name="default") -> Lookup:

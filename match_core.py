@@ -1286,17 +1286,24 @@ def file_clues(album, cand, clues, against, cfg=None):
             clues["disc TOC"] = EXACT_TOC_CLUE if exact else TOC_CLUE
         else:
             clues["disc TOC (fuzzy)"] = FUZZY_TOC_CLUE
-    if ((cand.get("source") == "mb" and cand.get("id") in (album.get("link_releases") or ()))
-            or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("tag_discogs_links") or ()))):
-        clues["source link"] = "the files' own tags link to this release"
+    # The shop page the files were bought from (Bandcamp, Deezer...: its link in the tags),
+    # which MusicBrainz ties to this release (match_albums.link_releases). A MusicBrainz or
+    # Discogs release link in the tags is not this: whoever tagged the files wrote it, like a
+    # release ID tag (a candidate, tag_release_mb / tag_release_discogs), never proof.
+    if cand.get("source") == "mb" and cand.get("id") in (album.get("link_releases") or ()):
+        clues["source link"] = "the shop page your files' tags link to is this release"
     if cand.get("source") == "mb" and cand.get("id") in (album.get("isrc_releases") or ()):
         clues["isrc"] = "the files' ISRC codes are on this release"
     if cand.get("source") == "mb" and cand.get("id") in (album.get("fp_releases") or ()):
         clues["fingerprint"] = "audio fingerprints (AcoustID) are on this release"
     cover_clue(album.get("cover_text"), cand, clues)
     enhanced_clue(album, cand, clues)
-    # tags written by whoever ripped or bought it
-    label = album.get("tag_label")
+    # tags written by whoever ripped or bought it. Not when another tagger wrote them (the
+    # files name a release in their ID tags or links, and TagMender did not write them): their
+    # label, country, date and media came FROM that release and only confirm it, never tell
+    # its pressings apart (match_albums.read_album "tags_by_tagger").
+    by_tagger = bool(album.get("tags_by_tagger"))
+    label = None if by_tagger else album.get("tag_label")
     if label:
         mine = [w for w in fold(label).split() if w not in _LABEL_FILLER]
         theirs = [" ".join(w for w in fold(x).split() if w not in _LABEL_FILLER)
@@ -1304,14 +1311,14 @@ def file_clues(album, cand, clues, against, cfg=None):
         if mine and any(" ".join(mine) == x or (x and (" ".join(mine) in x or x in " ".join(mine)))
                         for x in theirs):
             clues.setdefault("label", f"label {label} in the tags")
-    tc = country_code(album.get("tag_country"))
+    tc = None if by_tagger else country_code(album.get("tag_country"))
     cc = country_code(cand.get("country"))
     if tc and cc:
         if tc == cc:
             clues.setdefault("country", f"release country {_readable_country(tc)} in the tags")
         elif "XW" not in (tc, cc):
             against.append(f"tags say {tc}, this pressing is from {cand.get('country')}")
-    tm = album.get("tag_media")
+    tm = None if by_tagger else album.get("tag_media")
     if tm and formats:
         if tm in formats:
             clues.setdefault("format", f"{tm} in the tags")
@@ -1334,7 +1341,7 @@ def file_clues(album, cand, clues, against, cfg=None):
                            f"{cand.get('country')}")
     if cand.get("script") == "Latn" and not re.search(r"[^\x00-\u024f\s\W\d]", str(album.get("title") or "")):
         clues.setdefault("script", "listed in Latin script, like your tags")
-    td, cd = str(album.get("tag_date") or ""), str(cand.get("date") or "")
+    td, cd = "" if by_tagger else str(album.get("tag_date") or ""), str(cand.get("date") or "")
     if len(td) >= 7 and len(cd) >= 7 and td[:len(cd)] == cd[:len(td)]:
         clues.setdefault("date", f"release date {cd} in the tags")
     # folder name: "[Century Media, 9976158, Germany]"
@@ -1724,12 +1731,16 @@ def _weigh(tied):
     # the same on all the label's pressings, often entered for one of them only).
     listed = {k for k in set(MATRIX_KINDS.values())
               if all(any(c == k for c, _v in cand_matrices(s["cand"])) for s in tied)}
+    # Likewise the script a pressing is listed in: an entry without one (a Discogs entry,
+    # a MusicBrainz release nobody set it on) is unknown, not in another script.
+    scripted = all(s["cand"].get("script") for s in tied)
     scored = []
     for s in tied:
         mine = allc[id(s)]
         telling = {k: v for k, v in mine.items()
                    if not all(allc[id(o)].get(k) == v for o in tied)
-                   and (k not in MATRIX_KINDS.values() or k in listed)}
+                   and (k not in MATRIX_KINDS.values() or k in listed)
+                   and (k != "script" or scripted)}
         # "cover" weighs 0: the embedded front cover is often the art a tagger fetched for
         # the release it guessed, so it never picks a pressing, only shows beside clues that do
         weight = sum(CLUE_WEIGHTS.get(k, 1) for k in telling)
@@ -2039,11 +2050,50 @@ def _shop_sticker(album, cand, a_codes, c_codes, ocr_text=""):
     return ", ".join(shown) if agrees else ""
 
 
+def with_pregap(album, cand):
+    """The candidate with its discs' hidden tracks before track 1 (a MusicBrainz medium's
+    "pregap", match_albums.mb_candidate "pregap_tracks") as their discs' first tracks, where
+    the files have that track: one file numbered 0, first on its disc, every other file of
+    the disc numbered from 1, about as long as the pregap. Else the candidate as it is: a
+    rip without that file is compared with the release's tracks alone, as before.
+    pregap_proven: a rip log's or CDTOC tag's TOC that fits the disc has that file in its first
+    pregap (album "htoa_toc_discs"), for every disc whose pregap is used; without it (or the
+    exact disc ID) the hidden track matched on its length only, which classify never takes
+    automatically."""
+    pregaps = cand.get("pregap_tracks") or ()
+    if not pregaps:
+        return cand
+    discs = {}
+    for t in album.get("tracks") or ():
+        discs.setdefault(t.get("disc") or 1, []).append(t)
+    used = []
+    for p in pregaps:
+        files = discs.get(p.get("disc") or 1) or []
+        zero = [t for t in files if not t.get("num")]
+        if (len(files) < 2 or len(zero) != 1 or files[0] is not zero[0]
+                or any((t.get("num") or 0) < 1 for t in files[1:])):
+            continue
+        if p.get("secs") and abs((zero[0].get("secs") or 0) - p["secs"]) > 2:
+            continue
+        used.append(p)
+    if not used:
+        return cand
+    tracks = []
+    for t in cand.get("tracks") or ():
+        tracks += [p for p in used if p.get("disc") == t.get("disc") and p not in tracks]
+        tracks.append(t)
+    proven = set(album.get("htoa_toc_discs") or ())
+    return dict(cand, tracks=tracks, pregap_used=True,
+                pregap_proven=all((p.get("disc") or 1) in proven for p in used))
+
+
 def score_candidate(album, cand, cfg, ocr_text=""):
     """Score one candidate against one album. Returns a dict with the
     confidence (0-100), the evidence for it and every gate that failed."""
     pts = avail = 0.0
     notes = []
+    # the hidden track before track 1, where the files have it as a file numbered 0
+    cand = with_pregap(album, cand)
 
     a_sim = max(artist_sim(album["artist"], cand["artist"]),
                 artist_sim(album["artist"], cand.get("artist_alt") or ""),
@@ -2618,7 +2668,7 @@ def classify(scored, cfg):
     # (freeDB-style): "The Mediator" is "The Mediator Between Head and Hands
     # Must Be the Heart"; an album filed under Death is credited to Control Denied.
     proof = ("disc ID" if (best.get("clues") or {}).get("disc TOC") else
-             "the files' own link" if (best.get("clues") or {}).get("source link") else
+             "the files' shop link" if (best.get("clues") or {}).get("source link") else
              "ISRC" if (best.get("clues") or {}).get("isrc") else
              "audio fingerprint" if (best.get("clues") or {}).get("fingerprint") else
              "barcode" if best["code"] == "barcode" else
@@ -2664,7 +2714,7 @@ def classify(scored, cfg):
                          and best["title_sim"] >= cfg["auto_min_title"] and not best.get("conflict"))
               else f"{strong_code} points to this release" if strong_code
               else "disc ID points to this release" if (best.get("clues") or {}).get("disc TOC")
-              else "your files' own tags link to this release" if (best.get("clues") or {}).get("source link")
+              else "the shop page your files' tags link to is this release" if (best.get("clues") or {}).get("source link")
               else "vinyl rip of a vinyl release (a manual rip's lengths differ)" if vinyl else "")
     lengths_excused = False
     if not barcode_decides:
@@ -2701,6 +2751,11 @@ def classify(scored, cfg):
     # matched to the only CD listed).
     why += [x for x in format_contradictions(best) if not any(x in w for w in why)]
     why += unofficial_why(best)
+    # A file numbered 0 as long as the release's hidden track before track 1 is no proof that
+    # the files are that disc: only the exact disc ID or a fitting rip log's or CDTOC tag's TOC
+    # with the track in its pregap is (with_pregap). On its length alone, a person confirms.
+    if best["cand"].get("pregap_used") and not best["cand"].get("pregap_proven") and not _exact_toc(best):
+        why.append("hidden track matched on its length only")
     py = best.get("pressing_year")
     if (py and best["cand"].get("year") and not best["code"]
             and abs(best["cand"]["year"] - py) > cfg.get("pressing_year_tolerance", 0)):
@@ -3178,6 +3233,40 @@ def _tagged_one(*results):
     return mine[0]
 
 
+def _proof_left_unsure(mb_result, dg_result):
+    """One database is sure, the other is not, and the unsure one's pick carries proof read
+    off your copy (its barcode, or your exact disc ID where the disc ID cannot be a
+    download's) while the sure pick has nothing of your copy that it lacks: the two
+    contradict each other, and a person decides (the unsure side is often unsure only
+    because two of its entries share that proof: a Japanese CD with and without obi).
+    Never when the two are one pressing (same_pressing, mb_twins). Returns the review, or
+    None."""
+    for sure, other in ((dg_result, mb_result), (mb_result, dg_result)):
+        if not (sure and sure.get("status") == "auto" and sure.get("best")
+                and other and other.get("status") != "auto" and other.get("best")):
+            continue
+        sb, ob = sure["best"], other["best"]
+        mb_best, dg_best = (ob, sb) if sure is dg_result else (sb, ob)
+        if barcode_proves(ob):
+            proof = "barcode"
+        elif _exact_toc(ob) and not _toc_maybe_download(mb_best, dg_best, mb_result, dg_result):
+            proof = "exact disc ID"
+        else:
+            continue
+        if same_pressing(mb_best["cand"], dg_best["cand"]) or any(s is mb_best for s in mb_twins(mb_result, dg_result)):
+            continue
+        if has_evidence(sb, ob):
+            continue
+        name = {"mb": "MusicBrainz", "discogs": "Discogs"}
+        return _disputed(sure, other,
+                         f"{name.get(ob['cand'].get('source'), 'the other database')}'s "
+                         f"{ob['cand']['id']} carries your copy's {proof} but is not sure "
+                         f"({'; '.join(other.get('why') or []) or other.get('status')}); "
+                         f"{name.get(sb['cand'].get('source'), 'the other database')}'s sure pick "
+                         f"{sb['cand']['id']} has nothing of your copy behind it")
+    return None
+
+
 def combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
@@ -3194,6 +3283,10 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     release your files are already tagged with is kept; only then does the preferred
     database's pick stand, in place of a guess. Neither: as above."""
     prefer = preferred_source(mb_result, dg_result)
+    # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
+    disputed = _proof_left_unsure(mb_result, dg_result)
+    if disputed:
+        return disputed
     if prefer == "musicbrainz" and mb_result and mb_result["status"] == "auto" and mb_result.get("best"):
         return _musicbrainz_decides(mb_result, dg_result)
     if dg_result and dg_result["status"] == "auto":

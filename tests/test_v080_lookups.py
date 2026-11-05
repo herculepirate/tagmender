@@ -41,11 +41,12 @@ class LinkLookups(unittest.TestCase):
                 return {"relations": [{"release": {"id": "shop-rel"}}]}
             return {}
 
-    def test_a_failed_isrc_lookup_keeps_the_files_own_link_and_is_reported(self):
-        # (the audit's link_demo: the link was lost and nothing was said)
+    def test_a_failed_isrc_lookup_is_reported(self):
+        # (the audit's link_demo: the failure was not said.) 0.8.1: the files' own MusicBrainz
+        # link is another tagger's word, a candidate (tag_release_mb), never in link_releases
         album = {"tag_mb_links": {TAG_LINK}, "isrcs": ["GBAAA0000001"], "tag_urls": []}
         ma.link_releases(self.H(fail_isrc={"GBAAA0000001"}), album)
-        self.assertEqual(album["link_releases"], {TAG_LINK})
+        self.assertEqual(album["link_releases"], set())
         self.assertEqual(album["isrc_releases"], set())
         self.assertEqual(album["clue_failures"]["musicbrainz link lookup"][1], "rate_limited")
         errors = {}
@@ -53,10 +54,11 @@ class LinkLookups(unittest.TestCase):
         self.assertIn("links or ISRCs failed", notes[0])
         self.assertEqual(errors, {"musicbrainz": "rate_limited"})
 
-    def test_a_failed_url_lookup_keeps_the_other_links(self):
+    def test_a_failed_url_lookup_is_reported(self):
+        # (0.8.1: the tags' own MusicBrainz link is no "source link": not kept here either)
         album = {"tag_mb_links": {TAG_LINK}, "tag_urls": ["https://x.bandcamp.com/album/y"], "isrcs": []}
         ma.link_releases(self.H(fail_url=True), album)
-        self.assertEqual(album["link_releases"], {TAG_LINK})
+        self.assertEqual(album["link_releases"], set())
         self.assertIn("musicbrainz link lookup", album["clue_failures"])
 
     def test_isrcs_failing_partway_give_no_isrc_evidence(self):
@@ -84,14 +86,17 @@ class IsrcDownHttp(te.FakeHttp):
 
 
 class LinkLookupsInTheEngine(te.Base):
-    def test_the_files_own_link_still_identifies_and_the_failure_is_noted(self):
+    def test_the_files_own_link_is_no_proof_and_the_album_is_retried(self):
+        # 0.8.1: a MusicBrainz release link in the tags is another tagger's word (a candidate,
+        # never "source link"), so with the ISRC lookup lost nothing proves the pressing:
+        # retried, as without the link (0.8.0 filed it on the link)
         d = self.album("Band K", "Album K", comment=f"https://musicbrainz.org/release/{TAG_LINK}",
                        isrc="DEXX05000000")
         eng = self.engine(IsrcDownHttp(mb=[te.mb_release(TAG_LINK, "Band K", "Album K")]))
         p = eng.identify(eng.albums_in(d)[0])
-        self.assertEqual((p.status, p.release_id), ("identified", TAG_LINK), p.reason)
+        self.assertEqual(p.status, "unresolved", p.reason)
         self.assertEqual(p.provider_errors.get("musicbrainz"), "rate_limited")
-        self.assertTrue(any("links or ISRCs failed" in w for w in p.why or []), p.why)
+        self.assertIn("nothing else proves this pressing", p.reason)
 
     def test_without_hard_proof_the_album_is_retried_not_filed(self):
         d = self.album("Band L", "Album L", isrc="DEXX05000000")

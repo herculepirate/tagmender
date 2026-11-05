@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -239,19 +240,63 @@ _MP4 = {"\xa9alb": "album", "\xa9nam": "title", "\xa9ART": "artist", "aART": "al
 # file's metadata by (path, size, mtime, inode, ctime): the gates, the album keys and the
 # planner ask for the same unchanged file over and over, each a full metadata read; a file
 # edited meanwhile has other stamps and is read again.
+# meta_memo(store) keeps them in STORE, a dict that outlives the block (the watcher's passes,
+# the app's List first then Look Up): an unchanged file is not opened again on the next pass.
+# A file whose metadata is large (its pictures as text) is only remembered for one inner
+# meta_memo() block (one identification), never in the long-lived store. prune: on leaving
+# the block, what it never asked for (files gone or changed) is dropped from the store.
+# The stamps miss some edits: on FAT/exFAT the ctime does not change when a file is written,
+# and a tool that keeps the mtime and the size leaves every stamp as it was. So an entry of
+# the long-lived store is trusted for META_STORE_AGE only, then the file is read again: a
+# watcher pass comes every few seconds to minutes and an app session lasts hours, so half an
+# hour bounds how long such an edit goes unseen while an unchanged library is still opened at
+# most twice an hour (instead of on every pass). And the store holds META_STORE_CAP files at
+# most (the ones stored longest ago are dropped): a few kB each, tens of MB at the cap.
 _META_MEMO = contextvars.ContextVar("tagmender_meta_memo", default=None)
+META_STORE_MAX = 64 * 1024              # (characters of one file's metadata kept in a store)
+META_STORE_AGE = 30 * 60.0              # (seconds an entry of a long-lived store is trusted)
+META_STORE_CAP = 50_000                 # (files a long-lived store holds at most)
+_META_STORE_LOCK = threading.Lock()     # (the app's store is shared by its worker threads)
+
+
+class _Memo:
+    __slots__ = ("store", "local", "seen")
+
+    def __init__(self, store, local, seen):
+        self.store, self.local, self.seen = store, local, seen
+
+
+def _meta_size(meta) -> int:
+    return sum(len(k) + sum(len(v) for v in vals) for k, vals in meta.items())
 
 
 @contextmanager
-def meta_memo():
-    if _META_MEMO.get() is not None:                 # (nested: the outer block's memo)
-        yield
+def meta_memo(store=None, prune=False):
+    cur = _META_MEMO.get()
+    if cur is not None and (store is None or cur.store is store):
+        if store is None and cur.local is None:      # (one identification inside a long-lived store)
+            token = _META_MEMO.set(_Memo(cur.store, {}, cur.seen))
+            try:
+                yield
+            finally:
+                _META_MEMO.reset(token)
+            return
+        yield                                        # (nested: the outer block's memo)
         return
-    token = _META_MEMO.set({})
+    if store is None:
+        memo = _Memo(None, {}, None)
+    else:
+        memo = _Memo(store, None, set())
+    token = _META_MEMO.set(memo)
     try:
         yield
     finally:
         _META_MEMO.reset(token)
+        if store is not None and prune:
+            with _META_STORE_LOCK:
+                for k in list(store):
+                    if k not in memo.seen:
+                        store.pop(k, None)
 
 
 def read_meta(path):
@@ -265,9 +310,33 @@ def read_meta(path):
         key = (str(path), st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns)
     except OSError:
         return _read_meta(path)
-    if key not in memo:
-        memo[key] = _read_meta(path)
-    return {k: list(v) for k, v in memo[key].items()}       # (a copy: callers may change theirs)
+    if memo.seen is not None:
+        memo.seen.add(key)
+    meta = None
+    if memo.store is not None:
+        # (stored as (when, meta); one stored longer than META_STORE_AGE is read again)
+        entry = memo.store.get(key)
+        if entry is not None and time.monotonic() - entry[0] <= META_STORE_AGE:
+            meta = entry[1]
+    if meta is None and memo.local is not None:
+        meta = memo.local.get(key)
+    if meta is None:
+        meta = _read_meta(path)
+        if memo.store is not None and _meta_size(meta) <= META_STORE_MAX:
+            _store_meta(memo.store, key, meta)
+        elif memo.local is not None:
+            memo.local[key] = meta
+    return {k: list(v) for k, v in meta.items()}       # (a copy: callers may change theirs)
+
+
+def _store_meta(store, key, meta):
+    """Keep META in a long-lived store, as stored now (last in its order), dropping the
+    entries stored longest ago beyond META_STORE_CAP."""
+    with _META_STORE_LOCK:
+        store.pop(key, None)
+        store[key] = (time.monotonic(), meta)
+        while len(store) > META_STORE_CAP:
+            store.pop(next(iter(store)))
 
 
 def _read_meta(path):
@@ -448,12 +517,14 @@ def check_folder(folder, rules=None, release=None, overrides=None):
 # --------------------------------------------------------------------------
 # Remembered ignores and "process anyway"
 # --------------------------------------------------------------------------
-def signature(paths):
-    """Changes when any file is added, removed, rewritten or retagged."""
+def signature(paths, stats=None):
+    """Changes when any file is added, removed, rewritten or retagged. stats: {path: os.stat
+    result} already taken of these files (not taken again)."""
     h = hashlib.sha1()
+    stats = stats or {}
     for p in sorted(str(x) for x in paths):
         try:
-            st = os.stat(p)
+            st = stats.get(p) or os.stat(p)
             h.update(f"{p}|{st.st_size}|{int(st.st_mtime)}\n".encode("utf-8", "surrogateescape"))
         except OSError:
             h.update(f"{p}|gone\n".encode("utf-8", "surrogateescape"))

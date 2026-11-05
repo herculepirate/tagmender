@@ -21,6 +21,7 @@ Optional OCR (barcodes + printed text on back/disc scans):
   ... --ocr
 """
 import argparse
+import copy
 import csv
 import json
 import os
@@ -175,7 +176,9 @@ def labels_from_text(text, limit=3):
     "Record label = X", a cue sheet's REM LABEL "X"). Searched with the catalogue number;
     never evidence by themselves."""
     out = []
-    for m in _LABEL_LINE.finditer(text or ""):
+    found = sorted(list(_LABEL_LINE.finditer(text or "")) + list(_LABEL_CAT_LINE.finditer(text or "")),
+                   key=lambda m: m.start())
+    for m in found:
         for name in re.split(r"\s+/\s+|\s*;\s*", m.group(1)):
             name = name.strip(" \t\"'.,")
             if 2 <= len(name) <= 60 and re.search(r"[^\W\d_]", name) and name not in out:
@@ -183,7 +186,16 @@ def labels_from_text(text, limit=3):
     return out[:limit]
 
 
-_LABEL_LINE = re.compile(r"(?im)^[ \t]*(?:REM[ \t]+)?(?:record[ \t]+)?label[ \t]*(?:[:=][ \t]*|[ \t]+(?=\"))(.+?)[ \t]*$")
+# "Label:", "Record label =", a cue's REM LABEL "X", and the Russian trackers' "Лейбл:",
+# "Издатель (лейбл):"
+_LABEL_WORD = r"(?:(?:record[ \t]+)?label|лейбл|издатель(?:[ \t]*\(лейбл\))?)"
+_LABEL_LINE = re.compile(r"(?im)^[ \t]*(?:REM[ \t]+)?" + _LABEL_WORD +
+                         r"[ \t]*(?:[:=][ \t]*|[ \t]+(?=\"))(.+?)[ \t]*$")
+# the label and catalogue number on one line: "Label / Cat#: Century Media / 77587-2",
+# "Лейбл / Номер по каталогу: Century Media / 77587-2" (the label is the part before the " / ")
+_LABEL_CAT_LINE = re.compile(
+    r"(?im)^[ \t]*" + _LABEL_WORD + r"[ \t]*/[ \t]*(?:cat(?:alog(?:ue)?)?\.?[ \t]*(?:#|no\.?|number)"
+    r"|номер[ \t]+по[ \t]+каталогу|каталожный[ \t]+номер|кат\.?[ \t]*номер)[ \t]*[:=][ \t]*(.+?)[ \t]+/[ \t]+\S.*$")
 
 
 def search_labels(tag_label, text=""):
@@ -614,17 +626,18 @@ def shop_step(http, album, cfg, dm, mb_res, dg_res, final, text, args, use_mb, u
 
 
 def link_releases(http, album):
-    """MusicBrainz releases the files' own tags point to: direct release links,
-    shop pages MusicBrainz links to a release (Bandcamp, Deezer, Spotify,
-    Apple, Qobuz, Beatport), and the releases holding the files' ISRCs.
+    """MusicBrainz releases the files' shop pages lead to (Bandcamp, Deezer, Spotify,
+    Apple, Qobuz, Beatport: MusicBrainz's /url lookup of the page the files were bought
+    from), and the releases holding the files' ISRCs.
 
-    The files' own release links need no lookup: they are kept whatever MusicBrainz
-    answers. A failed /url or /isrc lookup is recorded in album["clue_failures"]
+    A MusicBrainz or Discogs release link in the tags is not read here: whoever tagged the
+    files wrote it (like a release ID tag), so it is a candidate to fetch and score
+    (album["tag_release_mb"] / ["tag_release_discogs"]), never proof. A failed /url or /isrc lookup is recorded in album["clue_failures"]
     ("musicbrainz link lookup"), never read as "no release": the album is retried. When an
     ISRC lookup failed, no ISRC evidence is used at all (the releases of fewer codes would
     be a looser match than the releases of all of them)."""
-    found = set(album.get("tag_mb_links") or ())
-    album["link_releases"] = set(found)          # (what stands if every lookup below fails)
+    found = set()
+    album["link_releases"] = set()               # (what stands if every lookup below fails)
     album["isrc_releases"] = set()
     failed = []
 
@@ -703,6 +716,8 @@ def names_from_files(infos):
             num = sides.index(num) + 1                     # vinyl sides A1, A2, B1 ... in order
         if not i.get("num") and num:
             i["num"] = num
+        elif not i.get("num") and num == 0 and _NAME_NUM.match(Path(p).stem):
+            i["num0"] = True                               # "00 - Hidden": numbered 0
         if not i.get("disc") and disc:
             i["disc"] = disc
         if not i.get("title") and title:
@@ -896,7 +911,10 @@ def read_file(path):
                 elif k == "aART": t["artist"] = _names(v)
                 elif k == "\xa9ART" and not t["artist"]: t["artist"] = _txt(v)
                 elif k == "\xa9day": t["year"] = _int(v[0] if v else "")
-                elif k == "trkn" and v: t["num"], t["tracktotal"] = v[0][0], (v[0][1] if len(v[0]) > 1 else 0)
+                elif k == "trkn" and v:
+                    t["num"], t["tracktotal"] = v[0][0], (v[0][1] if len(v[0]) > 1 else 0)
+                    # (trkn (0, N) is the total alone, no number: a file numbered 0 only when
+                    # its name says 00 too, names_from_files)
                 elif k == "disk" and v: t["disc"] = v[0][0]
                 elif _plain_key(nk) in _BARCODE_KEYS + _ASIN_KEYS: _code_tag(t, nk, _txt(v))
                 elif nk in _CATNO_KEYS and not t["catno"]: t["catno"] = _txt(v)
@@ -937,6 +955,7 @@ def read_file(path):
                 elif nk == "tagmenderreason": _write_failed(t, _txt(frame.text))
                 elif nk == "cdtoc": t["cdtoc"] = _txt(frame.text)
             t["tracktotal"] = _total(fr("TRCK"))
+            t["num0"] = _numbered_zero(fr("TRCK"))
             return t
         low = {}
         for k, v in tags.items():
@@ -955,6 +974,7 @@ def read_file(path):
                  country=g("releasecountry"), media=g("media"), date=g("date"),
                  credit=" ".join(g(k) for k in ("artist", "copyright", "composer", "performer", "conductor")))
         t["tracktotal"] = _int(g("tracktotal") or g("totaltracks")) or _total(g("tracknumber"))
+        t["num0"] = _numbered_zero(g("tracknumber"))
         _write_failed(t, g("tagmenderreason"))
         t["cdtoc"] = g("cdtoc")
         for k, v in low.items():                     # UPC / EAN / ASIN under their other names
@@ -963,6 +983,12 @@ def read_file(path):
     except Exception as exc:
         t["_error"] = str(exc)
     return t
+
+
+def _numbered_zero(number):
+    """A track number of 0 written out ("0", "00", "0/12"): the hidden track before track 1
+    (HTOA), as Picard numbers a release's pregap track. Not a missing number."""
+    return bool(re.fullmatch(r"\s*0+\s*(?:/\s*\d*\s*)?", str(number or "")))
 
 
 def _total(number):
@@ -1518,7 +1544,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     folder_disc = {d: i + 1 for i, d in enumerate(folders)} if len(folders) > 1 else {}
     for p, i in infos:
         i["disc_eff"] = i["disc"] or folder_disc.get(p.parent, 1)
-    infos.sort(key=lambda x: (x[1]["disc_eff"], x[1]["num"] or 9999, _natural_key(rel(x[0]))))
+    # (a file numbered 0, "00 - Hidden.flac": the hidden track before track 1, first on its disc)
+    infos.sort(key=lambda x: (x[1]["disc_eff"], x[1]["num"] or (0 if x[1].get("num0") else 9999),
+                              _natural_key(rel(x[0]))))
 
     def top(key):
         c = Counter(i[key] for _p, i in infos if i[key])
@@ -1552,7 +1580,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     typed_search = [c for c in note_catnos + log_codes if c not in folder_hints]
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
     headers = [log["header"] for log in ripped if log.get("header")]
-    tocs = merge_tocs(infos, log_toc, cue_tocs(album_dir, infos), tag_tocs(infos))
+    cdtocs = tag_tocs(infos)
+    tocs = merge_tocs(infos, log_toc, cue_tocs(album_dir, infos), cdtocs)
     hint, hint_from = _media_hint(album_dir, album_folder, files, infos, top("artist") or artist_folder,
                                   bool(log_toc))
     # The files name a release in their ID tags, and TagMender did not write them: another
@@ -1561,9 +1590,20 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # (match_core: TAGS_BARCODE, classify's "tags name" review). Tags TagMender wrote itself
     # (tagmender_wrote: its job history) keep counting as the copy's own (an album tagged in
     # place, re-processed when its watched folder is given a profile that moves it).
-    id_files = [(p, i["mb_albumid"], i["discogs_releaseid"]) for p, i in infos
-                if i.get("mb_albumid") or i.get("discogs_releaseid")]
-    by_tagger = bool(id_files) and not blind and not tagmender_wrote(id_files)
+    # A MusicBrainz or Discogs release link in the tags (a comment, a URL tag) names a
+    # release the same way: whoever tagged the files wrote it.
+    id_files, foreign_ids = [], False
+    for p, i in infos:
+        link_mb, link_dg, _urls = source_links([i])
+        mbs = ({i["mb_albumid"]} if i.get("mb_albumid") else set()) | link_mb
+        dgs = ({i["discogs_releaseid"]} if i.get("discogs_releaseid") else set()) | link_dg
+        if len(mbs) > 1 or len(dgs) > 1:
+            foreign_ids = True             # links to another release than its ID tag: not TagMender's
+        if mbs or dgs:
+            id_files.append((p, min(mbs) if mbs else "", min(dgs) if dgs else ""))
+    by_tagger = bool(id_files) and not blind and (foreign_ids or not tagmender_wrote(id_files))
+    tag_mb_links, tag_discogs_links, tag_urls = source_links([i for _p, i in infos])
+    tag_release_mb, tag_release_discogs = tag_release_ids([i for _p, i in infos])
     return {
         "tags_by_tagger": by_tagger,
         "artist": top("artist") or artist_folder, "title": title,
@@ -1596,6 +1636,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # searched too when the folder's title finds nothing sure (one disc of a box)
         "log_titles": [h for h in headers if mc.fold(h[1]) != mc.fold(title)],
         "foreign_logs": [Path(log["path"]).name for log in foreign_logs],
+        # cue sheets whose tracks fit no disc of the files: their CATALOG is typed, not print
+        "foreign_cues": foreign_cues(album_dir, infos),
         "enhanced": enhanced_marks(album_dir, logs),
         "tracktotal": _track_total(infos),
         "folder": album_folder, "artist_folder": artist_folder,
@@ -1608,14 +1650,21 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # of an Enhanced CD), then a cue sheet's, then the one rebuilt from the tracks' lengths
         "tocs": tocs,
         "rip_log_toc": bool(log_toc),
+        # discs whose hidden track before track 1 (a file numbered 0) a rip log's or CDTOC tag's
+        # TOC shows in its first pregap: the disc itself has it (match_core.with_pregap)
+        "htoa_toc_discs": htoa_toc_discs(infos, list(log_toc.values()) + list(cdtocs.values())),
         "scans": scan_evidence(album_dir),
         "packaging": packaging_evidence(album_dir),
         "isrcs": [i.get("isrc") for _p, i in infos if i.get("isrc")],
         "store_tracks": sorted({i["store_track"] for _p, i in infos if i.get("store_track")}),
         "credit_text": " ".join(sorted({i.get("credit") or "" for _p, i in infos})) + " " + notes,
-        **dict(zip(("tag_mb_links", "tag_discogs_links", "tag_urls"), source_links([i for _p, i in infos]))),
-        # release IDs the files were tagged with: fetched and scored, not evidence
-        **dict(zip(("tag_release_mb", "tag_release_discogs"), tag_release_ids([i for _p, i in infos]))),
+        # shop pages the files came from: MusicBrainz's /url lookup ties them to a release
+        # (link_releases: "source link")
+        "tag_mb_links": tag_mb_links, "tag_discogs_links": tag_discogs_links, "tag_urls": tag_urls,
+        # release IDs the files were tagged with, and the release links in their tags (another
+        # tagger's word, like the ID tags): fetched and scored, not evidence
+        "tag_release_mb": tag_release_mb | tag_mb_links,
+        "tag_release_discogs": tag_release_discogs | tag_discogs_links,
         "total_releases": total_releases,
     }
 
@@ -1757,6 +1806,11 @@ def disc_tocs(infos):
                    and i["samples"] % CD_FRAME == 0 for i in tracks):
             continue
         offsets, pos = [], 150
+        hidden = htoa_file(tracks)
+        if hidden is not None:
+            # a hidden track before track 1 (a file numbered 0): the first track's pregap
+            pos += hidden["samples"] // CD_FRAME
+            tracks = [i for i in tracks if i is not hidden]
         for i in tracks:
             offsets.append(pos)
             pos += i["samples"] // CD_FRAME
@@ -1793,6 +1847,11 @@ def merge_tocs(infos, *sources):
                 # a disc whose files fit their own tracks of it, the rest missing (the TOC
                 # rebuilt from those files is no disc's)
                 disc = next((d for d in free if toc_fits_slots(toc, per_disc[d])), None)
+            if disc is None:
+                # a disc with a hidden track before track 1 ripped to a file numbered 0: the
+                # TOC lists one track fewer (without_htoa)
+                disc = next((d for d in free if counts[d] == n + 1 and htoa_file(per_disc[d]) is not None
+                             and toc_fits_disc(toc, per_disc[d])), None)
             if disc is None:
                 disc = next((d for d in free if d not in out), None)
             if disc is not None:
@@ -2002,9 +2061,52 @@ def toc_fits_slots(toc, tracks):
     return True
 
 
+def htoa_file(tracks):
+    """The disc's hidden track before track 1 (HTOA: the first track's pregap, ripped to a
+    file of its own numbered 0), or None: the one file numbered 0, first on the disc, every
+    other file numbered from 1. (read_album puts a file numbered 0 by its tags or its name,
+    "00 - ...", first on its disc, and one without a number last: that is never one.)"""
+    zero = [i for i in tracks if not i.get("num")]
+    if (len(zero) != 1 or tracks[0] is not zero[0] or len(tracks) < 2
+            or any((i.get("num") or 0) < 1 for i in tracks[1:])):
+        return None
+    return zero[0]
+
+
+def without_htoa(toc, tracks):
+    """The disc's files without its hidden track before track 1 (htoa_file) when that file
+    fits in the TOC's first pregap (its length at most the first track's offset less the
+    150-sector lead-in): a TOC lists no track 0. Else the files as they are."""
+    first = htoa_file(tracks) if toc else None
+    if first is None:
+        return tracks
+    try:
+        pregap = (int(toc.split()[3]) - 150) / 75
+    except (IndexError, ValueError):
+        return tracks
+    if pregap <= 0 or (first.get("secs") or 0) > pregap + 0.1:
+        return tracks
+    return [i for i in tracks if i is not first]
+
+
+def htoa_toc_discs(infos, tocs):
+    """The discs whose hidden track before track 1 (htoa_file) is in the first pregap of one
+    of these TOCs (a rip log's, a CDTOC tag's) that fits the disc: the disc was read with that
+    pregap, so the track is the disc's own, not just a file as long as a release's pregap."""
+    discs = {}
+    for _p, i in infos:
+        discs.setdefault(i.get("disc_eff", 1), []).append(i)
+    return sorted(d for d, tracks in discs.items()
+                  if htoa_file(tracks) is not None
+                  and any(toc and len(without_htoa(toc, tracks)) < len(tracks) and toc_fits_disc(toc, tracks)
+                          for toc in tocs))
+
+
 def toc_fits_disc(toc, tracks):
     """The TOC is this disc's: every track there (toc_fits_audio), or the files there fit
-    their own tracks of it (toc_fits_slots)."""
+    their own tracks of it (toc_fits_slots). A hidden track before track 1 ripped to a file
+    numbered 0 is left out when it fits the TOC's first pregap (without_htoa)."""
+    tracks = without_htoa(toc, tracks)
     return toc_fits_audio(toc, tracks) or toc_fits_slots(toc, tracks)
 
 
@@ -2339,7 +2441,8 @@ def retry_disc_ids(http, album):
 
 def hard_proof(best):
     """The pick rests on something only your copy's own pressing has: its exact disc ID
-    attached in MusicBrainz, the files' own link to it, or a barcode. (Not a barcode only typed
+    attached in MusicBrainz, the shop page the files link to (MusicBrainz ties it to this
+    release: never a MusicBrainz/Discogs release link in the tags, another tagger's word), or a barcode. (Not a barcode only typed
     in notes or written by another tagger: mc.WEAK_BARCODES. Not audio fingerprints: they find
     the recordings, which every pressing of the album shares.)"""
     if not best:
@@ -2418,6 +2521,101 @@ def cue_tocs(album_dir, infos):
             if toc not in out:
                 out.append(toc)
     return {i + 1: toc for i, toc in enumerate(out)}
+
+
+def cue_fits(cue, infos):
+    """Is this cue sheet of these files? True when every file it names is a file of the
+    folder (the rip's own cue, an image's), or its tracks' lengths (from its INDEX lines, and
+    the length of a file of the folder it names) fit one disc of the files, or it names some
+    of their files but gives no length to compare; False when it gives lengths and they fit no
+    disc (another edition's cue, a downloaded one); None when there is nothing to compare
+    (no audio read, or nothing of it known): unverifiable. A track's length is taken each
+    way a rip is split: the gap before the next track (INDEX 00) appended to it, left out,
+    or prepended to the next track (the track then starts at its own INDEX 00 too). A hidden
+    track before track 1 ripped to a file numbered 0 (htoa_file; the cue lists no track 0)
+    is left out of the comparison, and fits when it is as long as track 1's pregap (its
+    INDEX 01 less its INDEX 00)."""
+    try:
+        text = _read_log(cue)
+    except OSError:
+        return None
+    secs_by_name = {Path(p).name.casefold(): i.get("secs") for p, i in infos if p is not None}
+    files, current, pending_gap = [], None, None
+    for line in text.splitlines():
+        m = re.match(r'\s*FILE\s+"?(.+?)"?\s+(WAVE|FLAC|MP3|AIFF|BINARY)?\s*$', line, re.I)
+        if m:
+            current = {"name": m.group(1), "starts": [], "gaps": []}
+            files.append(current)
+            continue
+        m = re.match(r"\s*INDEX\s+(00|01)\s+(\d+):(\d+):(\d+)", line)
+        if m and current is not None:
+            at = int(m.group(2)) * 4500 + int(m.group(3)) * 75 + int(m.group(4))
+            if m.group(1) == "00":
+                pending_gap = (current, at)
+            else:
+                current["starts"].append(at)
+                current["gaps"].append(pending_gap[1] if pending_gap and pending_gap[0] is current else None)
+                pending_gap = None
+    if not files or not any(f["starts"] for f in files):
+        return None
+    if all(Path(f["name"]).name.casefold() in secs_by_name for f in files):
+        return True                 # it names the folder's own files (an image and its cue)
+    # [(lengths in seconds it may have)] per track, [] when unknown
+    lengths, named = [], False
+    for f in files:
+        file_secs = secs_by_name.get(Path(f["name"]).name.casefold())
+        named = named or file_secs is not None
+        for k, start in enumerate(f["starts"]):
+            own = f["gaps"][k]
+            if k + 1 < len(f["starts"]):
+                nxt = f["starts"][k + 1]
+                gap = f["gaps"][k + 1]
+                opts = {(nxt - start) / 75}
+                if gap is not None:
+                    opts.add((gap - start) / 75)
+                    if own is not None:
+                        opts.add((gap - own) / 75)            # gaps prepended
+                lengths.append(opts)
+            elif file_secs:
+                lengths.append({file_secs - start / 75} | ({file_secs - own / 75} if own is not None else set()))
+            else:
+                lengths.append(set())
+    # track 1's pregap in the cue (seconds), for a hidden track ripped to a file of its own
+    first = next((f for f in files if f["starts"]), None)
+    pregap = (first["starts"][0] - (first["gaps"][0] or 0)) / 75 if first else 0
+    if not any(lengths):
+        return True if named else None
+    discs = {}
+    for _p, i in infos:
+        if i.get("secs"):
+            discs.setdefault(i.get("disc_eff", 1), []).append(i)
+    if not discs:
+        return None
+
+    def near(secs, options):
+        return not options or any(abs(secs - o) <= 0.5 for o in options)
+    for tracks in discs.values():
+        hidden = htoa_file(tracks)
+        if hidden is not None and len(tracks) == len(lengths) + 1:
+            if pregap <= 0 or abs(hidden["secs"] - pregap) > 0.5:
+                continue
+            tracks = [i for i in tracks if i is not hidden]
+        if len(tracks) == len(lengths):
+            if all(near(i["secs"], opt) for i, opt in zip(tracks, lengths)):
+                return True
+        elif len(tracks) < len(lengths):
+            nums = [i.get("num") or 0 for i in tracks]
+            if (len(set(nums)) == len(nums) and all(1 <= n <= len(lengths) for n in nums)
+                    and all(near(i["secs"], lengths[n - 1]) for i, n in zip(tracks, nums))):
+                return True
+    return False
+
+
+def foreign_cues(album_dir, infos):
+    """The names of the cue sheets in the folder that fit no disc of the files (cue_fits
+    False): another edition's or a downloaded cue, whose CATALOG is no print of this copy."""
+    return sorted({cue.name for cue in Path(album_dir).rglob("*.cue")
+                   if not cue.name.startswith(".") and cue_fits(cue, infos) is False})
 
 
 # --------------------------------------------------------------------------
@@ -2773,6 +2971,25 @@ def post_cache_key(url, payload):
     return f"POST {url} {json.dumps(payload, sort_keys=True)}"
 
 
+# One pace per host for the whole process (share_pace): every Http the app, the watcher and
+# the command line make for their look-ups (engine.Engine, the app's search and versions
+# sheet, match_albums' own run) takes the last-call times and the per-host locks from here,
+# so two look-ups at once (a versions sheet open during a Look Up) never ask a host faster
+# than its delay between them. (An Http made on its own keeps its own, as a test's does.)
+_SHARED_LAST: dict = {}              # host (SAME_LIMIT name) -> when it was last asked
+_SHARED_HOST_LOCKS: dict = {}        # host (SAME_LIMIT name) -> its lock, held across pacing and request
+_HOST_LOCKS_GUARD = threading.Lock()
+
+
+def share_pace(http):
+    """`http` (an Http) pacing its requests with every other shared Http of this process:
+    their last-call times and per-host locks are the process's (_SHARED_LAST,
+    _SHARED_HOST_LOCKS). Its thread clones share them too. Returns http."""
+    http.last = _SHARED_LAST
+    http._host_locks = _SHARED_HOST_LOCKS
+    return http
+
+
 class Http:
     def __init__(self, db, cfg, discogs_token):
         self.db, self.cfg, self.token = db, cfg, discogs_token
@@ -2969,6 +3186,7 @@ class Http:
         sent as well (an API key), never part of the cache key. attempts: at most this many
         tries (a single-try re-ask) instead of the host's own number."""
         key = key or url
+        self._check_stop(host)
         row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (key,)).fetchone()
         if row and not (self.max_age and time.time() - float(row[1] or 0) > self.max_age):
             return row[0]
@@ -2979,7 +3197,79 @@ class Http:
             if trial:
                 self._breaker_trial_done(host)
 
+    # A clone for one more thread (thread_clone): it shares the pacing (last request times),
+    # the down/breaker state and the run's health records with the Http it came from, and has
+    # its own SQLite connection to the same cache. A host's live requests are taken one at a
+    # time across the clones (_host_lock), so a host's limit is never multiplied.
+    def _host_lock(self, host):
+        with _HOST_LOCKS_GUARD:
+            locks = self.__dict__.setdefault("_host_locks", {})
+            return locks.setdefault(self.SAME_LIMIT.get(host, host), threading.RLock())
+
+    def _pause(self, seconds):
+        """Sleep, but a clone whose look-up was given up (_stop) wakes at once and raises."""
+        stop = self.__dict__.get("_stop")
+        if stop is None:
+            time.sleep(seconds)
+            return
+        stop.wait(max(0.0, seconds))
+
+    def _check_stop(self, host):
+        stop = self.__dict__.get("_stop")
+        if stop is not None and stop.is_set():
+            raise ProviderUnavailable(host, "outage", "stopped: the look-up was given up")
+
+    def thread_clone(self):
+        """A shallow clone of this Http for one worker thread (see _host_lock), or None when
+        this one cannot be cloned safely: its cache is not a file another connection can open,
+        or its requests are wrapped on the instance (a test's stand-in). Close it with its
+        close_clone() on any thread once the worker is done."""
+        if any(k in self.__dict__ for k in ("get_text", "get_json", "post_json", "_fetch")):
+            return None
+        try:
+            files = [r[2] for r in self.db.execute("PRAGMA database_list") if r[1] == "main"]
+        except Exception:
+            return None
+        path = files[0] if files else ""
+        if not path:                                   # an in-memory cache: nothing to share
+            return None
+        if getattr(self.db, "in_transaction", False):  # (its writes would wait for this one)
+            return None
+        # the state every clone shares, made now (each is created lazily otherwise)
+        self._breaker()
+        with _HOST_LOCKS_GUARD:
+            self.__dict__.setdefault("_host_locks", {})
+        with self._breaker()[1]:
+            if getattr(self, "down", None) is None:
+                self.down = {}
+        clone = copy.copy(self)
+        # own connection (journal_mode delete: a writer waits for the other, up to 60 s)
+        clone.db = sqlite3.connect(path, timeout=60, check_same_thread=False)
+        clone._stop = threading.Event()
+        return clone
+
+    def close_clone(self):
+        try:
+            self.db.close()
+        except Exception:
+            pass
+
     def _fetch(self, url, host, key, extra, at_most, trial):
+        """_fetch_paced, the host's live requests one at a time across this Http's clones (and,
+        shared, every Http of the process: share_pace). A clone whose look-up is given up while
+        it waits for the host stops waiting."""
+        lock = self._host_lock(host)
+        if self.__dict__.get("_stop") is None:
+            with lock:
+                return self._fetch_paced(url, host, key, extra, at_most, trial)
+        while not lock.acquire(timeout=0.25):
+            self._check_stop(host)
+        try:
+            return self._fetch_paced(url, host, key, extra, at_most, trial)
+        finally:
+            lock.release()
+
+    def _fetch_paced(self, url, host, key, extra, at_most, trial):
         """get_text's live request, with the host's retries (at_most: fewer)."""
         attempts, timeout, max_fail, pause_s = self.OPTIONAL_HOSTS.get(host, (6, 60, 0, 0))
         # only the host's full ladder (or the breaker's own trial) giving up shows the host is
@@ -3005,9 +3295,12 @@ class Http:
         last_kind, last_err = "outage", ""
         limit = self.SAME_LIMIT.get(host, host)
         for attempt in range(attempts):
+            if attempt:
+                self._check_stop(host)                   # (a clone whose look-up was given up)
             wait = delay - (time.time() - self.last.get(limit, 0))
             if wait > 0:
-                time.sleep(wait)
+                self._pause(wait)
+                self._check_stop(host)
             self.last[limit] = time.time()
             try:
                 with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
@@ -3052,7 +3345,7 @@ class Http:
                         self.last[limit] = max(self.last.get(limit, 0), time.time() + pause - delay)
                         break
                     print(f"    {host} HTTP {e.code}, waiting {pause:.0f}s", file=sys.stderr)
-                    time.sleep(pause)
+                    self._pause(pause)                      # (a given-up clone: stops at once)
                     continue
                 # another refusal (400, 403, 410): no retry, but the failure is recorded
                 # so outage_notes and doctor see it and an optional host backs off
@@ -3065,7 +3358,7 @@ class Http:
                 if attempt == attempts - 1:
                     break                                   # giving up: no sleep first
                 print(f"    {host} network error {e}, retrying", file=sys.stderr)
-                time.sleep(10 * (attempt + 1) + random.uniform(0, 1))
+                self._pause(10 * (attempt + 1) + random.uniform(0, 1))
             except (OSError, _HTTPException, ValueError) as e:
                 # a broken answer (connection reset, incomplete read, SSL error, not UTF-8)
                 last_err = f"{type(e).__name__}: {e}"
@@ -3173,11 +3466,17 @@ def mb_candidate(rel):
                    if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
     kinds = {mc.media_kind(m.get("format")) for m in audio_media} - {""}
     mixed_vinyl = bool(kinds & {"vinyl", "cassette"}) and bool(kinds & {"cd", "digital"})
-    disc_titles = {}
+    disc_titles, pregaps = {}, []
     for mi, media in enumerate(audio_media, 1):
         if media.get("title"):
             disc_titles[mi] = media["title"]       # a box set's discs: "The Legacy", "The New Order"
         box_vinyl = mixed_vinyl and mc.media_kind(media.get("format")) in ("vinyl", "cassette")
+        pregap = media.get("pregap")
+        if pregap and not (pregap.get("recording") or {}).get("video"):
+            # the hidden track before track 1 (HTOA), numbered 0: compared only with a rip
+            # that has it as a file numbered 0 (match_core.with_pregap)
+            pregaps.append({"disc": mi, "title": pregap.get("title", ""), "num": 0, "pregap": True,
+                            "secs": (pregap.get("length") or 0) / 1000.0})
         for t in media.get("tracks", []):
             if (t.get("recording") or {}).get("video"):
                 continue                               # an enhanced CD's video, never an audio file
@@ -3210,7 +3509,7 @@ def mb_candidate(rel):
         "catnos": {mc.norm_code(i.get("catalog-number")) for i in infos if i.get("catalog-number")},
         "barcodes": {mc.norm_code(rel["barcode"])} if rel.get("barcode") else set(),
         "disc_count": len([m for m in audio_media if m.get("tracks")]) or len(audio_media) or 1,
-        "tracks": tracks, "disc_titles": disc_titles, "packaging": mc.packaging_kind(rel.get("packaging")),
+        "tracks": tracks, "pregap_tracks": pregaps, "disc_titles": disc_titles, "packaging": mc.packaging_kind(rel.get("packaging")),
         "formats": {k for k in (mc.media_kind(m.get("format")) for m in audio_media) if k},
         "hires_media": mc.hires_media(m.get("format") for m in audio_media),
         "enhanced": any("enhanced" in str(m.get("format") or "").casefold() for m in rel.get("media") or []),
@@ -4018,11 +4317,13 @@ def new_scan_log():
     return {"read": set(), "text": {}, "barcodes": {}, "no_bars": set()}
 
 
-def each_scan(db, kind, images, read, log=None, budget_s=None):
+def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
     """read(path) for each scan, cached per scan (its contents and the OCR version, so a
     scan read once is not read again wherever it is in the list), several at once.
     Returns the readings in the order of IMAGES; a scan not started within budget_s
-    reads as "". The scans read now (not from the cache) go to log["read"]."""
+    reads as "". The scans read now (not from the cache) go to log["read"].
+    ahead: a _ScanReads that may have read some of them already (the same reading,
+    and its own budget for the kind); the others are read here."""
     images = [str(p) for p in images]
     keys = [f"{kind}:{scan_key(p)}" for p in images]
     vals = [None] * len(images)
@@ -4042,7 +4343,12 @@ def each_scan(db, kind, images, read, log=None, budget_s=None):
             return read(images[i]) or ""
         except Exception:
             return ""
-    for i, v in zip(todo, _pmap(one, todo)):
+    got = ahead.take(kind, [images[i] for i in todo]) if ahead is not None and todo else {}
+    rest = [i for i in todo if images[i] not in got]
+    started = time.time()                              # (the budget of what is read here)
+    done = dict(zip(rest, _pmap(one, rest)))
+    for i in todo:
+        v = got[images[i]] if images[i] in got else done[i]
         if v is None:
             vals[i] = ""                               # over the time budget: not read
             continue
@@ -4058,6 +4364,153 @@ def each_scan(db, kind, images, read, log=None, budget_s=None):
             if v:
                 log["text"].setdefault(p, []).append(v)
     return vals
+
+
+class _ScanReads:
+    """The scans' readings (each_scan's text, spines, barcode digits and disc rings) made on
+    a background pool while the databases are searched. Each reading is read the way
+    each_scan reads it, so taking it from here gives the same readings - unless a time budget
+    runs out under load: the barcode digits' and disc rings' budgets (BUDGETS, as each_scan's
+    budget_s) start here when the kind's first reading does, not when each_scan asks, so on a
+    busy machine a different set of scans may be left unread ("") than in turn. Only
+    each_scan writes the cache and the album's scan log, and only for the scans it uses: a
+    reading made ahead and not used (the decoded barcode settled the album: page text of
+    three scans) is dropped, as never read.
+
+    Its own read-only connection to the cache (so a scan read before is not read again)."""
+
+    BUDGETS = {"barcode-digits": 120.0, "disc-rings": 60.0}
+
+    @classmethod
+    def start(cls, db, images, want_digits):
+        conn = None
+        if db is not None:
+            try:
+                files = [r[2] for r in db.execute("PRAGMA database_list") if r[1] == "main"]
+            except Exception:
+                return None
+            if not files or not files[0]:
+                return None                            # an in-memory cache: read in turn
+            try:
+                conn = sqlite3.connect(Path(files[0]).resolve().as_uri() + "?mode=ro", uri=True,
+                                       timeout=60, check_same_thread=False)
+            except sqlite3.Error:
+                return None
+        return cls(conn, [str(p) for p in images], want_digits)
+
+    def __init__(self, conn, images, want_digits):
+        from concurrent.futures import ThreadPoolExecutor
+        self.conn, self.lock, self.closed = conn, threading.Lock(), False
+        self.started = {}
+        self.futures = {}
+        langs = ocr_langs()
+        text = "text" if langs == "eng" else f"text-{langs}"
+        spines = "spines" if langs == "eng" else f"spines-{langs}"
+        reads = {text: lambda p: ocr_text([p]), spines: lambda p: ocr_spines([p]),
+                 "barcode-digits": lambda p: ocr_barcode_digits([p]),
+                 "disc-rings": lambda p: ocr_disc_rings([p])}
+        # what _process reads for sure first (the first three scans' page text, which is all
+        # it reads when the decoded barcode settles the album, every disc), the rest after
+        order = [(text, p) for p in images[:3]] + [(spines, p) for p in images[:3]]
+        order += [("disc-rings", p) for p in images[:40]]
+        if want_digits:
+            order += [("barcode-digits", p) for p in images[:15]]
+        order += [(text, p) for p in images[3:]] + [(spines, p) for p in images[3:]]
+        self.pool = ThreadPoolExecutor(max_workers=ocr_workers(), thread_name_prefix="scan-reads")
+        for kind, p in order:
+            self.futures[(kind, p)] = self.pool.submit(self._one, kind, p, reads[kind])
+
+    def _one(self, kind, path, read):
+        with self.lock:
+            if self.closed:
+                return None
+            began = self.started.setdefault(kind, time.time())
+            if self.conn is not None:
+                try:
+                    row = self.conn.execute("SELECT value FROM ocr_cache WHERE key=?",
+                                            (f"{kind}:{scan_key(path)}",)).fetchone()
+                except sqlite3.Error:
+                    row = None
+                if row:
+                    return json.loads(row[0])
+        budget = self.BUDGETS.get(kind)
+        if budget is not None and time.time() - began > budget:
+            return None
+        _POOL.inside = True                            # (no pool inside this pool)
+        try:
+            return read(path) or ""
+        except Exception:
+            return ""
+        finally:
+            _POOL.inside = False
+
+    def take(self, kind, paths):
+        """{path: reading (None: over the kind's budget)} for the paths read here."""
+        out = {}
+        for p in paths:
+            fut = self.futures.get((kind, str(p)))
+            if fut is None or fut.cancelled():
+                continue
+            try:
+                out[str(p)] = fut.result()
+            except Exception:                          # (cancelled meanwhile)
+                continue
+        return out
+
+    def close(self, wait=False):
+        """Readings not started are dropped; one under way finishes on its own (never kept).
+        Not waited for (wait=False, the album's normal end): those readings, at most one scan
+        per pool worker, may still run while the next album's reads start, briefly using more
+        OCR workers than ocr_workers(); they write nothing. abort() waits for them."""
+        with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            if self.conn is not None:
+                self.conn.close()
+        self.pool.shutdown(wait=wait, cancel_futures=True)
+
+    def abort(self):
+        """The look-up was given up: nothing left running once this returns."""
+        self.close(wait=True)
+        self.pool.shutdown(wait=True)
+
+
+class _DiscogsAhead:
+    """discogs_search(http, album, ...) on one worker thread, with a clone of the Http
+    (Http.thread_clone: the pacing, down and breaker state shared, its own connection to the
+    cache). result() waits for it and returns its candidates or raises what it raised."""
+
+    @classmethod
+    def start(cls, http, album, cfg, dm):
+        # (an Http: a test's stand-in has no thread_clone and is searched in turn)
+        clone = http.thread_clone() if callable(getattr(http, "thread_clone", None)) else None
+        return cls(clone, album, cfg, dm) if clone is not None else None
+
+    def __init__(self, clone, album, cfg, dm):
+        self.clone, self.value, self.error = clone, None, None
+        self.thread = threading.Thread(target=self._run, args=(album, cfg, dm), name="discogs-search", daemon=True)
+        self.thread.start()
+
+    def _run(self, album, cfg, dm):
+        try:
+            self.value = discogs_search(self.clone, album, cfg, dm)
+        except BaseException as exc:
+            self.error = exc
+
+    def result(self):
+        self.thread.join()
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+    def abort(self):
+        self.clone._stop.set()                         # its next request is not made
+        self.thread.join()
+
+    def close(self):
+        self.thread.join()
+        self.clone.close_clone()
 
 
 def decoded_barcodes(db, images, log=None):
@@ -5612,13 +6065,17 @@ def _is_code(name):
 TYPED_DOC_EXT = {".txt", ".nfo", ".info", ".md", ".htm", ".html", ".xml", ".json", ".csv", ".rtf"}
 
 
-def split_documents(docs_txt):
-    """(typed, printed): documents_text's sections by kind of document (TYPED_DOC_EXT)."""
+def split_documents(docs_txt, foreign=()):
+    """(typed, printed): documents_text's sections by kind of document (TYPED_DOC_EXT).
+    foreign: the names of cue sheets that fit no disc of the files (foreign_cues): their
+    CATALOG is not this copy's, so they go with the typed text (a cue sheet that cannot be
+    checked stays printed)."""
     typed, printed = [], []
+    foreign = set(foreign or ())
     parts = re.split(r"(?m)^\(([^\n]*)\)\n", docs_txt or "")
     printed.append(parts[0])
     for name, body in zip(parts[1::2], parts[2::2]):
-        (typed if Path(name).suffix.lower() in TYPED_DOC_EXT else printed).append(body)
+        (typed if Path(name).suffix.lower() in TYPED_DOC_EXT or name in foreign else printed).append(body)
     return "\n".join(typed), "\n".join(printed)
 
 
@@ -5856,7 +6313,28 @@ def process(row, http, cfg, dm, args):
     return out
 
 
+# The Discogs search runs on a worker thread while MusicBrainz is searched (each host on one
+# thread, its pacing shared: Http.thread_clone), and the scans are read while the databases
+# are searched (_ScanReads). Only the order of the work changes, never the result; False
+# runs everything in turn (tests compare the two).
+CONCURRENT_SOURCES = True
+CONCURRENT_SCANS = True
+
+
 def _process(row, http, cfg, dm, args, full_cfg):
+    started = []                    # the worker threads and pools this album started
+    try:
+        return _process_album(row, http, cfg, dm, args, full_cfg, started)
+    except BaseException:
+        for w in started:           # given up (an error, a cancel): nothing left running
+            w.abort()
+        raise
+    finally:
+        for w in started:
+            w.close()
+
+
+def _process_album(row, http, cfg, dm, args, full_cfg, started):
     base = Path(row["FullPath"])
     if not base.is_dir():
         # Moved or renamed since the audit (Picard moves a folder when it tags the album).
@@ -5897,6 +6375,7 @@ def _process(row, http, cfg, dm, args, full_cfg):
         out["dropped_tracks"] = album["dropped_tracks"]
 
     images, img_key = [], ""
+    scans_ahead = None
     db = getattr(http, "db", None)
     scan_log = album["scan_log"] = new_scan_log()     # what each scan gave (ocr_order.record)
     # --ocr / the profile's "ocr": on, off, or auto (only folders with scans or a PDF)
@@ -5909,6 +6388,12 @@ def _process(row, http, cfg, dm, args, full_cfg):
             if found and not album["barcodes"]:
                 album["barcodes"] = found
                 out["barcodes_from_ocr"] = ";".join(sorted(found))
+            if CONCURRENT_SCANS:
+                # read while the databases are searched; what each_scan reads below is taken
+                # from here (the scans _process would read, in the order it needs them)
+                scans_ahead = _ScanReads.start(db, images, not album["barcodes"])
+                if scans_ahead is not None:
+                    started.append(scans_ahead)
         elif not getattr(args, "blind", False) and ocr_mode(getattr(args, "ocr", False)) == "on":
             # No scans: the front cover embedded in the files is read instead, for a
             # catalogue number or label (a clue and codes to search). Only with OCR on
@@ -5939,17 +6424,22 @@ def _process(row, http, cfg, dm, args, full_cfg):
         except Exception as exc:          # a clue: its failure never costs the album its match
             album["toc_releases"] = set()
             album.setdefault("clue_failures", {})["disc lookup"] = (f"{type(exc).__name__}: {exc}", "outage")
-    if album.get("tag_mb_links") or album.get("tag_urls") or album.get("isrcs") or album.get("store_tracks"):
+    if album.get("tag_urls") or album.get("isrcs") or album.get("store_tracks"):
         try:
             link_releases(http, album)
         except Exception as exc:          # (link_releases catches the lookups' own failures)
-            # the files' own release links need no lookup: they stand
-            album.setdefault("link_releases", set(album.get("tag_mb_links") or ()))
+            # (the tags' own release links are candidates, tag_release_mb: never proof)
+            album.setdefault("link_releases", set())
             album["isrc_releases"] = set()
             album.setdefault("clue_failures", {})["musicbrainz link lookup"] = (
                 f"{type(exc).__name__}: {exc}", "outage")
     use_mb = getattr(args, "use_mb", True)
     use_discogs = getattr(args, "use_discogs", True) and dm is not None
+    # Discogs searched on a worker while MusicBrainz is (its result used below, where the
+    # search ran before: the notes and errors in the same order)
+    dg_ahead = _DiscogsAhead.start(http, album, cfg, dm) if (CONCURRENT_SOURCES and use_mb and use_discogs) else None
+    if dg_ahead is not None:
+        started.append(dg_ahead)
     if use_mb:
         try:
             mb_res = run_source("mb", lambda: mb_search(http, album, cfg), album, cfg)
@@ -5988,7 +6478,8 @@ def _process(row, http, cfg, dm, args, full_cfg):
     # outranks a MusicBrainz release that contradicts the folder name.
     if use_discogs:
         try:
-            dg_res = run_source("discogs", lambda: discogs_search(http, album, cfg, dm), album, cfg)
+            dg_res = run_source("discogs", dg_ahead.result if dg_ahead is not None
+                                else lambda: discogs_search(http, album, cfg, dm), album, cfg)
         except AuthError:
             raise
         except Exception as exc:     # keep what MusicBrainz found
@@ -6018,31 +6509,33 @@ def _process(row, http, cfg, dm, args, full_cfg):
             out["scans_read"] = f"{len(page_scans)} of {len(scans)} (the decoded barcode found the release)"
         # cached per scan and language set: installing a language pack reads the scans again
         kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
-        text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log))
+        text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log, ahead=scans_ahead))
         # a file's name (a document's heading, a screenshot's title bar) is not print on the
         # copy: "SUNN200" in an RX window's title is no "catalogue number (OCR)" (R12)
         # which barcodes were only typed (notes, .nfo, saved pages) and which printed on the
         # copy (scans, booklets, a cue's CATALOG): score_candidate weighs them apart (Q3)
-        typed_docs, printed_docs = split_documents(docs_txt)
+        typed_docs, printed_docs = split_documents(docs_txt, album.get("foreign_cues"))
         album["typed_text"] = typed_docs
         album["printed_text"] = printed_docs + "\n" + text
         text = drop_file_name_lines(docs_txt + "\n" + text, base).strip()
         # spreads are read sideways too
         spines = _joined(each_scan(db, "spines" if ocr_langs() == "eng" else f"spines-{ocr_langs()}",
-                                   page_scans, lambda p: ocr_spines([p]), scan_log))
+                                   page_scans, lambda p: ocr_spines([p]), scan_log, ahead=scans_ahead))
         if spines.strip():
             text = text + "\n" + spines
             album["printed_text"] += "\n" + spines
         if not album["barcodes"] and scans:
             # the digit band read alone, the first digit completed (15 scans, 2 minutes)
             digits = _joined(each_scan(db, "barcode-digits", scans[:15], lambda p: ocr_barcode_digits([p]),
-                                       scan_log, budget_s=120.0))
+                                       scan_log, budget_s=120.0, ahead=scans_ahead))
             if digits.strip():
                 text = text + "\n" + digits
                 album["printed_text"] += "\n" + digits
         # every disc read, also when the barcode settled it: a matrix that differs is told only here
         rings = _joined(each_scan(db, "disc-rings", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
-                                  budget_s=60.0))
+                                  budget_s=60.0, ahead=scans_ahead))
+        if scans_ahead is not None:
+            scans_ahead.close()                        # what was read ahead and not needed: dropped
         if rings.strip():
             text = text + "\n" + rings
             album["printed_text"] += "\n" + rings
@@ -6245,7 +6738,7 @@ def _process(row, http, cfg, dm, args, full_cfg):
         # once MusicBrainz answers, never filed on the weaker clues
         status = "error"
         why.append(f"{' and '.join(lost).replace('musicbrainz', 'MusicBrainz')} failed and nothing "
-                   "else proves this pressing (exact disc ID, the files' own link, barcode): "
+                   "else proves this pressing (exact disc ID, the files' shop link, barcode): "
                    "tried again later")
     if row.get("Status") == "partial" and status == "auto":
         status = "review"
@@ -6602,7 +7095,7 @@ def main():
     if redo:
         print(f"Re-evaluating {len(redo)} albums ("
               + ", ".join(f"{n} {s}" for s, n in sorted(Counter(redo.values()).items())) + ")")
-    http = Http(db, cfg, token)
+    http = share_pace(Http(db, cfg, token))
     if args.recheck_days:
         http.max_age = args.recheck_days * 86400        # older lookups are fetched again
 

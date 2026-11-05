@@ -135,7 +135,7 @@ class Gui(te.Base):
                 asked.append(kw.get("ocr", "not given"))
                 self.notes = {}
 
-            def plan(self, path, progress=None, cancel=None):
+            def plan(self, path, progress=None, cancel=None, **_kw):
                 return {"albums": [], "summary": {}}
         ov = self.win.pages["Overview"]
         ov.refresh_profiles()

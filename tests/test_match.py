@@ -2651,6 +2651,138 @@ class RealWorldCases(unittest.TestCase):
         self.assertLessEqual(max(sleeps), 5)               # not a 15 s pause
         self.assertGreater(cfg["mb_delay"], CFG["mb_delay"])  # and slower from now on
 
+    # ---- Http retry and pacing policy ------------------------------------------------------
+    def _http_run(self, script, requests, cfg=None, http=None):
+        """Runs `requests` ((url, host) pairs) through a real Http on a simulated clock.
+        script(url, n) returns a body, or raises; returns (http, sleeps, opens, results)."""
+        import io
+        cfg = dict(CFG) if cfg is None else cfg
+        http = http or ma.Http(sqlite3.connect(":memory:"), cfg, "t")
+        clock, sleeps, opens, results = [1000.0], [], [], []
+
+        class Resp(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def fake_open(req, timeout=0):
+            opens.append((req.full_url, clock[0], timeout))
+            return Resp(script(req.full_url, len(opens)).encode())
+
+        def fake_sleep(sec):
+            sleeps.append(sec)
+            clock[0] += sec
+        saved = ma.urllib.request.urlopen, ma.time.sleep, ma.time.time, ma.random.uniform
+        ma.urllib.request.urlopen, ma.time.sleep, ma.time.time = fake_open, fake_sleep, lambda: clock[0]
+        ma.random.uniform = lambda a, b: 0.0
+        try:
+            for url, host in requests:
+                try:
+                    results.append(http.get_text(url, host))
+                except ma.ProviderUnavailable as exc:
+                    results.append(exc)
+        finally:
+            ma.urllib.request.urlopen, ma.time.sleep, ma.time.time, ma.random.uniform = saved
+        return http, sleeps, opens, results
+
+    def test_web_fallback_hosts_give_up_after_one_attempt_and_are_skipped_while_paused(self):
+        import urllib.error
+
+        def boom(url, n):
+            raise urllib.error.URLError("timed out")
+        for host, tries in (("itunes", 1), ("bandcamp", 1), ("wikipedia", 1), ("deezer", 2)):
+            reqs = [(f"https://x.test/{host}/{i}", host) for i in range(5)]
+            http, sleeps, opens, res = self._http_run(boom, reqs)
+            self.assertTrue(all(isinstance(r, ma.ProviderUnavailable) for r in res), host)
+            self.assertTrue(all(o[2] == 20 for o in opens), host)           # short timeout
+            self.assertEqual(len(opens), 3 * tries, host)       # 3 failures, then the pause: no more asks
+            self.assertTrue(http.host_down(host) or http.down[host][1] > 0, host)
+
+    def test_pacing_is_per_host_and_a_musicbrainz_503_slows_only_musicbrainz(self):
+        import urllib.error
+        cfg = dict(CFG, mb_delay=1.1)
+        _h, _s, opens, _r = self._http_run(lambda u, n: "{}", [("https://api.deezer.com/a", "deezer"),
+                                                              ("https://api.deezer.com/b", "deezer"),
+                                                              ("https://musicbrainz.org/a", "mb"),
+                                                              ("https://musicbrainz.org/b", "mb")], cfg)
+        self.assertAlmostEqual(opens[1][1] - opens[0][1], 0.2)
+        self.assertAlmostEqual(opens[3][1] - opens[2][1], 1.1)
+
+        def busy_once(url, n):
+            if n == 1:
+                raise urllib.error.HTTPError(url, 503, "busy", {}, None)
+            return "{}"
+        cfg = dict(CFG, mb_delay=1.1)
+        _h, _s, opens, _r = self._http_run(busy_once, [("https://musicbrainz.org/a", "mb"),
+                                                       ("https://api.deezer.com/a", "deezer"),
+                                                       ("https://api.deezer.com/b", "deezer")], cfg)
+        self.assertGreater(cfg["mb_delay"], 1.1)
+        self.assertAlmostEqual(opens[-1][1] - opens[-2][1], 0.2)           # deezer unchanged
+
+    def test_a_deezer_error_reply_is_not_kept_as_no_results(self):
+        # (Deezer answers its quota error with HTTP 200 and {"error": ...}: not an answer)
+        def reply(url, n):
+            if "quota" in url:
+                return '{"error": {"code": 4, "message": "Quota limit exceeded"}}'
+            return '{"error": {"code": 800, "message": "no data"}}'
+        quota, nodata = "https://api.deezer.com/search/album?q=quota", "https://api.deezer.com/album/nodata"
+        http, _s, _o, _r = self._http_run(reply, [(quota, "deezer"), (nodata, "deezer")])   # (cached as text)
+        with self.assertRaises(ma.ProviderUnavailable) as raised:
+            http.get_json(quota, "deezer")
+        self.assertEqual(raised.exception.kind, "rate_limited")
+        self.assertEqual(http.db.execute("SELECT COUNT(*) FROM http_cache WHERE url=?", (quota,)).fetchone()[0], 0)
+        self.assertEqual(http.get_json(nodata, "deezer"), {"error": {"code": 800, "message": "no data"}})
+
+    def test_no_sleep_after_the_final_attempt_on_a_network_error(self):
+        import urllib.error
+
+        def boom(url, n):
+            raise urllib.error.URLError("down")
+        _h, sleeps, opens, res = self._http_run(boom, [("https://musicbrainz.org/a", "mb")])
+        self.assertEqual(len(opens), 6)
+        self.assertIsInstance(res[0], ma.ProviderUnavailable)
+        self.assertEqual([round(x) for x in sleeps if x >= 10], [10, 20, 30, 40, 50])
+        self.assertLess(max(sleeps), 55)                        # no 60 s sleep after the 6th attempt
+
+    def test_final_429_does_not_sleep_but_the_next_request_waits_out_retry_after(self):
+        import urllib.error
+
+        def limited(url, n):
+            if "limited" in url:
+                raise urllib.error.HTTPError(url, 429, "slow down", {"Retry-After": "40"}, None)
+            return "{}"
+        http, sleeps, opens, res = self._http_run(limited, [("https://api.discogs.com/limited", "discogs"),
+                                                            ("https://api.discogs.com/next", "discogs")])
+        tried = [o for o in opens if "limited" in o[0]]
+        self.assertEqual(len(tried), 6)
+        self.assertIsInstance(res[0], ma.ProviderUnavailable)
+        self.assertEqual(res[1], "{}")
+        self.assertEqual([round(x) for x in sleeps if x >= 40], [40] * 6)   # 5 between attempts, 1 before the next
+        self.assertGreaterEqual(opens[-1][1] - tried[-1][1], 40.0)      # and before the next request
+
+    def test_mb_delay_recovers_after_twenty_successes_but_never_below_its_base(self):
+        import urllib.error
+
+        def busy_first(url, n):
+            if n == 1:
+                raise urllib.error.HTTPError(url, 503, "busy", {}, None)
+            return "{}"
+        cfg = dict(CFG, mb_delay=1.1)
+        reqs = [(f"https://musicbrainz.org/{i}", "mb") for i in range(120)]
+        http, _s, _o, _r = self._http_run(busy_first, reqs[:1], cfg)
+        raised = cfg["mb_delay"]
+        self.assertGreater(raised, 1.1)
+        ok = lambda u, n: "{}"
+        self._http_run(ok, reqs[1:19], http=http)                  # 19 answers since the 503 (its retry was the first)
+        self.assertEqual(cfg["mb_delay"], raised)
+        self._http_run(ok, reqs[19:20], http=http)
+        self.assertLess(cfg["mb_delay"], raised)
+        self._http_run(ok, reqs[20:], http=http)
+        self.assertEqual(cfg["mb_delay"], 1.1)                     # back to its base, not under it
+        low = dict(CFG, mb_delay=0.2)                              # (a configured value under 1 s)
+        h2, _s, _o, _r = self._http_run(ok, reqs[:45], low)
+        self.assertEqual(h2._mb_base, 1.0)
+        self.assertEqual(low["mb_delay"], 0.2)                     # decay never lowers it past the base
+
     def test_credit_listing_composers_still_matches_performers(self):
         self.assertGreaterEqual(
             mc.artist_sim("Vanessa Wagner & Wilhem Latchoumia",

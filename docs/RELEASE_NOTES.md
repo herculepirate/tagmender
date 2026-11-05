@@ -1,5 +1,26 @@
 # Release notes
 
+## 0.7.1
+
+Faster, with the same results: nothing about what is identified or written changes.
+
+- **Slow or unreachable web sources no longer stall a run.** Deezer, iTunes, Bandcamp and
+  Wikipedia are asked once or twice with a short wait, and left alone for 30 minutes after
+  failing again and again (before: six tries of up to a minute each, for every album). When one
+  of them did not answer, no web tags are taken from the others for that album; it is tried
+  again later.
+- **Each website is paced on its own.** MusicBrainz keeps its one request a second, and slowing
+  down after MusicBrainz says it is busy no longer slows the others; it comes back to normal
+  after a while. Deezer's "too many requests" replies are no longer kept as "no results".
+- **No pointless wait after the last try** of a request that failed.
+- **Web results whose track count rules them out** are not fetched in detail.
+- **Preview of a move** no longer reads every audio file in full when nothing at the destination
+  needs it (about twice as fast to plan).
+- **Apply** reads each moved file twice instead of three times; the audio check before the file
+  goes into place stays.
+- **Each file's tags are read once per album** instead of up to eleven times: much less reading
+  over network shares.
+
 ## 0.7.0
 
 **Compilations** (a new group in the profile's Tags section)

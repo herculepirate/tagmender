@@ -78,7 +78,17 @@ def _cand(source, cid, url, artist, title, date, label="", barcode="", genre="",
             "genre": genre_list(genre), "cover": cover or ""}
 
 
-def deezer(http, artist, title):
+def _count_off(n_tracks, count):
+    """True when a hit's track count is known and differs from the files' by more than 3
+    (engine._established refuses such an album, so its details need not be fetched)."""
+    try:
+        count = int(count or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(n_tracks) and count > 0 and abs(count - n_tracks) > 3
+
+
+def deezer(http, artist, title, n_tracks=None):
     query = 'artist:"%s" album:"%s"' % (artist, title)
     data = http.get_json(f"https://api.deezer.com/search/album?q={q(query)}&limit=10", "deezer")
     hits = (data or {}).get("data") or []
@@ -87,6 +97,8 @@ def deezer(http, artist, title):
         hits = (data or {}).get("data") or []
     out = []
     for h in hits[:4]:
+        if _count_off(n_tracks, h.get("nb_tracks")):
+            continue
         al = http.get_json(f"https://api.deezer.com/album/{h['id']}", "deezer") or {}
         tr = http.get_json(f"https://api.deezer.com/album/{h['id']}/tracks?limit=300", "deezer") or {}
         if not al or al.get("error"):
@@ -103,13 +115,13 @@ def deezer(http, artist, title):
     return out
 
 
-def itunes(http, artist, title):
+def itunes(http, artist, title, n_tracks=None):
     data = http.get_json(f"https://itunes.apple.com/search?term={q(artist + ' ' + title)}&entity=album&limit=10",
                          "itunes")
     out = []
     for h in ((data or {}).get("results") or [])[:4]:
         cid = h.get("collectionId")
-        if not cid:
+        if not cid or _count_off(n_tracks, h.get("trackCount")):
             continue
         look = http.get_json(f"https://itunes.apple.com/lookup?id={cid}&entity=song", "itunes") or {}
         songs = [r for r in look.get("results") or [] if r.get("wrapperType") == "track"]
@@ -247,6 +259,7 @@ def wikipedia(http, artist, title):
 
 
 SOURCES = (("Deezer", deezer), ("iTunes", itunes), ("Bandcamp", bandcamp), ("Wikipedia", wikipedia))
+_COUNTED = (deezer, itunes)                    # the sources that can skip hits by track count
 
 
 def wikidata_artist_ids(http, name, cache):
@@ -675,11 +688,13 @@ def chosen_sources(names=None):
     return [by_key[k] for k in dict.fromkeys(str(x).lower() for x in names) if k in by_key]
 
 
-def album_candidates(http, album, log=None, sources=None):
+def album_candidates(http, album, log=None, sources=None, n_tracks=None, failed=None):
     """[(source name, candidate)] of the web sources for the album (the Bandcamp page the
     files' tags link first, when Bandcamp is one of them), in source order. sources: the
-    profile's providers.web.sources (None: every one). A source that cannot be reached is
-    left out (and logged): the others still count."""
+    profile's providers.web.sources (None: every one). n_tracks: skip the Deezer and iTunes
+    hits whose track count is known and more than 3 off (only a caller that refuses such
+    albums passes it). A source that cannot be reached is left out (and logged): the
+    others still count. failed: a list the names of those sources are added to."""
     artist = mc.artist_parts(album["artist"])[0]
     title = mc.search_title(album["title"])
     linked = [u for u in album.get("tag_urls") or [] if ".bandcamp.com/album/" in u]
@@ -690,10 +705,13 @@ def album_candidates(http, album, log=None, sources=None):
     out = []
     for name, fetch in sources:
         try:
-            cands = fetch(http, artist, title) or []
+            cands = (fetch(http, artist, title, n_tracks=n_tracks) if n_tracks and fetch in _COUNTED
+                     else fetch(http, artist, title)) or []
         except Exception as exc:                               # one source down: the others count
             if log:
                 log.warning("%s lookup failed: %s", name, exc, extra={"provider": "web"})
+            if failed is not None:
+                failed.append(name)
             continue
         out += [(name, c) for c in cands]
     return out

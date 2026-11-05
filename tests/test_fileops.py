@@ -143,7 +143,14 @@ class FailedVerification(Base):
         def digest(path):
             d = real(path)
             return ("bad" + str(d)) if str(path) in dests else d
-        with mock.patch.object(executor.payload, "digest", digest):
+        place = executor._place
+
+        def replaced(stage, dst):                 # (the stage's own inode at dst is not hashed again)
+            place(stage, dst)
+            data = Path(dst).read_bytes()
+            os.unlink(dst)
+            Path(dst).write_bytes(data)
+        with mock.patch.object(executor.payload, "digest", digest), mock.patch.object(executor, "_place", replaced):
             res = executor.Executor(p).run()
         self.assertEqual(res["counts"], {"failed": 1})
         self.assertNotIn("rollback problems", res["albums"][0]["detail"])

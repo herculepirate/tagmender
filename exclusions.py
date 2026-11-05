@@ -26,6 +26,7 @@ and "process anyway" overrides live in ~/.local/state/tagmender/state.db.
 """
 from __future__ import annotations
 
+import contextvars
 import fnmatch
 import hashlib
 import json
@@ -33,6 +34,7 @@ import os
 import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -233,9 +235,42 @@ _MP4 = {"\xa9alb": "album", "\xa9nam": "title", "\xa9ART": "artist", "aART": "al
         "trkn": "tracknumber", "disk": "discnumber", "cpil": "compilation"}
 
 
+# While meta_memo() is active (one identification, one album's plan) read_meta remembers each
+# file's metadata by (path, size, mtime, inode, ctime): the gates, the album keys and the
+# planner ask for the same unchanged file over and over, each a full metadata read; a file
+# edited meanwhile has other stamps and is read again.
+_META_MEMO = contextvars.ContextVar("tagmender_meta_memo", default=None)
+
+
+@contextmanager
+def meta_memo():
+    if _META_MEMO.get() is not None:                 # (nested: the outer block's memo)
+        yield
+        return
+    token = _META_MEMO.set({})
+    try:
+        yield
+    finally:
+        _META_MEMO.reset(token)
+
+
 def read_meta(path):
     """{field: [values]} for one file: its tags (all of them, lower-case names)
     plus filename, folder, path and format. Never raises."""
+    memo = _META_MEMO.get()
+    if memo is None:
+        return _read_meta(path)
+    try:
+        st = os.stat(path)
+        key = (str(path), st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns)
+    except OSError:
+        return _read_meta(path)
+    if key not in memo:
+        memo[key] = _read_meta(path)
+    return {k: list(v) for k, v in memo[key].items()}       # (a copy: callers may change theirs)
+
+
+def _read_meta(path):
     p = Path(path)
     meta = {"filename": [p.name], "folder": [p.parent.name], "path": [str(p)],
             "format": [p.suffix.lower().lstrip(".")]}
@@ -365,6 +400,8 @@ def evaluate(paths, rules=None, release=None, overrides=None, metas=None):
     overrides = overrides or set()
     metas = metas or {}
     paths = [Path(p) for p in paths]
+    if not any(r.enabled for r in rules):            # (nothing can exclude: no file is opened)
+        return Decision(kept=paths)
     meta = {p: metas.get(p) or read_meta(p) for p in paths}
     dec = Decision()
     groups = {}

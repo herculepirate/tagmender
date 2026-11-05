@@ -282,10 +282,12 @@ class CachedAndOffline(unittest.TestCase):
         waits = [c.args[0] for c in slept.call_args_list if c.args]
         self.assertTrue(waits and 2.5 < max(waits) <= 3.0, waits)
 
-    def test_itunes_search_keeps_its_retries_and_shares_the_limit(self):
-        """The barcode lookup has a host name of its own: web_tag's iTunes searches keep their
-        retries and are not paused by a barcode outage, but both are spaced as one service."""
-        self.assertNotIn("itunes", ma.Http.OPTIONAL_HOSTS)
+    def test_itunes_search_and_barcode_lookup_share_the_limit(self):
+        """The barcode lookup has a host name of its own, so a barcode outage pauses only it;
+        both are spaced as one service. (Since 0.7.1 the web fallback's iTunes searches fail
+        fast too: a web source only adds evidence, and an album whose web source did not answer
+        gets no web tags - engine._web.)"""
+        self.assertIn("itunes", ma.Http.OPTIONAL_HOSTS)
         self.assertIn("itunes-upc", ma.Http.OPTIONAL_HOSTS)
         http = self.http()
         with self.answers({"resultCount": 0, "results": []}), mock.patch.object(ma.time, "sleep") as slept:

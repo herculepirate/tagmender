@@ -243,10 +243,12 @@ def _ids_of(tags: dict) -> set:
     return out
 
 
-def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
+def _other_release_there(album_dir: Path, me: frozenset, ignore: set, digests=None) -> bool:
     """album_dir already holds music explicitly tagged as a different release: files that
     carry release IDs and share none with this album. Files of this plan (moving away or
-    this album's own, under any name) and untagged files never count."""
+    this album's own, under any name) and untagged files never count. digests: optional
+    callable giving the audio digests of this album's own files, called only once a file
+    tagged as another release is found."""
     if not album_dir.is_dir():
         return False
     for dirpath, dirs, names in os.walk(album_dir):
@@ -267,6 +269,9 @@ def _other_release_there(album_dir: Path, me: frozenset, ignore: set) -> bool:
                 continue
             if ids and not (ids & me):
                 try:
+                    if digests is not None:
+                        ignore = ignore | digests()
+                        digests = None
                     if ("digest", payload.digest(p)) in ignore:
                         continue                         # an earlier copy of this album's own audio
                 except Exception:
@@ -1073,6 +1078,11 @@ class Planner:
 
     # ---- the plan for one album -------------------------------------------
     def album(self, prop: Proposal) -> dict:
+        """The plan for one album. Its files are opened once for all the reads below (tagio.reading)."""
+        with tagio.reading(), ex.meta_memo():
+            return self._album(prop)
+
+    def _album(self, prop: Proposal) -> dict:
         self._win_album = f"{prop.source_dir}#{sorted(map(str, prop.files))}"   # (one of several albums of a folder)
         p = self.profile
         files = [Path(f) for f in prop.files]
@@ -2188,9 +2198,10 @@ class Planner:
             title = str(((prop.targets or [{}])[0].get("album") or [""])[0])
             as_named = fnm.safe_component(title, self.profile["filenames"].get("compat", "windows")) if title else ""
             shared = len(prop.files) == 1 and not (as_named and fnm.fold(as_named)[:12] in fnm.fold(album_dir.name))
-            ignore = self._planned | self._digests_of(own_files)
+            ignore = self._planned
             clash = not shared and ((owner is not None and not (owner & me)) or
-                                    (owner is None and _other_release_there(album_dir, me, ignore)))
+                                    (owner is None and _other_release_there(album_dir, me, ignore,
+                                                              lambda: self._digests_of(own_files))))
             new = album_dir
             if clash:
                 tag = fnm.collision_suffix(" ".join(sorted(me)))

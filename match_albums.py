@@ -42,6 +42,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import match_core as mc  # noqa: E402
 import exclusions  # noqa: E402
+import tagio  # noqa: E402
 import ocr_order  # noqa: E402
 import requirements  # noqa: E402
 import companions  # noqa: E402
@@ -214,7 +215,7 @@ def _source_clues(path, t):
     source_links() to read (Bandcamp/iTunes/Qobuz/Deezer/Spotify/Beatport pages,
     MusicBrainz and Discogs release links)."""
     try:
-        f = mutagen.File(path)
+        f = tagio.read_only_mutagen_file(path)
     except Exception:
         return
     tags = getattr(f, "tags", None)
@@ -299,8 +300,8 @@ def deezer_isrc_releases(http, album):
     artist = mc.artist_parts(album["artist"])[0]
     title = mc.search_title(album["title"])
     query = 'artist:"%s" album:"%s"' % (artist, title)
-    data = http.get_json(f"https://api.deezer.com/search/album?q={q(query)}&limit=5", "deezer") or {}
-    n = len(album["tracks"])
+    data = http.get_json(f"https://api.deezer.com/search/album?q={q(query)}&limit=10", "deezer") or {}
+    n = len(album["tracks"])        # (limit 10, read as [:3]: web_tag's identical search is a cache hit)
     for hit in (data.get("data") or [])[:3]:
         if int(hit.get("nb_tracks") or 0) != n:
             continue
@@ -748,7 +749,7 @@ def read_file(path):
                 elif nk in _ID_KEYS: _release_id(t, nk, _txt(v))
                 if k in ("\xa9ART", "cprt", "\xa9wrt"): t["credit"] += " " + _txt(v)
             return t
-        f = mutagen.File(path)
+        f = tagio.read_only_mutagen_file(path)
         if f is None:
             return t
         t["secs"] = getattr(f.info, "length", 0.0) or 0.0
@@ -2563,6 +2564,8 @@ class Http:
         db.commit()
         self.max_age = None
         self.run_failures, self.run_ok, self.run_errors = Counter(), set(), {}
+        self._mb_base = max(1.0, float(cfg.get("mb_delay") or 1.0))  # mb_delay recovers toward this
+        self._mb_ok = 0                                   # MusicBrainz answers in a row since the last 503
 
     def _health(self, host, error=None):
         """Record a live call's outcome: error=None for an answer, else what went wrong
@@ -2590,11 +2593,22 @@ class Http:
         if body is None:
             return None
         try:
-            return json.loads(body)
+            data = json.loads(body)
         except ValueError:
             self.db.execute("DELETE FROM http_cache WHERE url=?", (url,))
             self.db.commit()
             raise ProviderUnavailable(host, "invalid_response", f"not JSON from {url.split('?')[0]}") from None
+        error = data.get("error") if host == "deezer" and isinstance(data, dict) else None
+        if error:
+            # Deezer answers every error with HTTP 200 (deezer_upc_album): only "no data" (800) is
+            # an answer; a quota (4) or busy (700) reply is not kept as "no results"
+            code_no = error.get("code") if isinstance(error, dict) else None
+            if code_no != DEEZER_NO_DATA:
+                self.db.execute("DELETE FROM http_cache WHERE url=?", (url,))
+                self.db.commit()
+                raise ProviderUnavailable(host, "rate_limited" if code_no == 4 else "outage",
+                                          f"Deezer error {code_no}")
+        return data
 
     # Hosts that only add evidence (the web search of an investigation): asked once with a
     # short timeout, and left alone for a while after failing, so an unreachable search
@@ -2606,11 +2620,17 @@ class Http:
                       "deezer-upc": (1, 20, 3, 1800),    # the shops' barcode lookups
                       "itunes-upc": (1, 20, 3, 1800),
                       "gnudb": (1, 20, 3, 1800),         # a clue from a disc's TOC
+                      "deezer": (2, 20, 3, 1800),        # the web fallback (and Deezer's track and ISRC leads)
+                      "itunes": (1, 20, 3, 1800),
+                      "bandcamp": (1, 20, 3, 1800),
+                      "wikipedia": (1, 20, 3, 1800),
                       "ctdb": (2, 20, 3, 1800)}          # likewise: CUETools DB's links from the TOC
     # Seconds between requests to a host with its own limit (iTunes: about 20 a minute)
-    HOST_DELAYS = {"itunes": 3.0, "itunes-upc": 3.0, "gnudb": 2.0}
+    # (mb and discogs have their own settings, mb_delay and discogs_delay; any other host: 1 s)
+    HOST_DELAYS = {"itunes": 3.0, "itunes-upc": 3.0, "gnudb": 2.0, "deezer": 0.2, "deezer-upc": 0.2,
+                   "acoustid": 0.4, "wikipedia": 0.5, "ctdb": 1.0, "bandcamp": 1.0}
     # Hosts that are one service under two names: their requests are spaced as one
-    SAME_LIMIT = {"itunes-upc": "itunes"}
+    SAME_LIMIT = {"itunes-upc": "itunes", "deezer-upc": "deezer"}
     # Hosts that can answer with a refusal (gnudb: an address it does not accept): a reply
     # is not yet a success, so their failures are cleared by the caller (host_ok) once the
     # reply is read as a real answer
@@ -2680,8 +2700,12 @@ class Http:
             down = self.down = {}
         if host in self.OPTIONAL_HOSTS and down.get(host, (0, 0))[1] > time.time():
             raise ProviderUnavailable(host, "outage", "skipped: failed repeatedly, trying again later")
-        delay = self.cfg["discogs_delay"] if host == "discogs" else self.cfg["mb_delay"]
-        delay = max(delay, self.HOST_DELAYS.get(host, 0))
+        if host == "mb":
+            delay = self.cfg["mb_delay"]
+        elif host == "discogs":
+            delay = self.cfg["discogs_delay"]
+        else:
+            delay = self.HOST_DELAYS.get(host, 1.0)
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         if host == "discogs":
             headers["Authorization"] = f"Discogs token={self.token}"
@@ -2699,6 +2723,13 @@ class Http:
                     body = r.read().decode("utf-8")
                 if host not in self.ANSWER_CHECKED:
                     down.pop(host, None)
+                if host == "mb":                           # a calm spell: the 503 slow-down wears off
+                    self._mb_ok = getattr(self, "_mb_ok", 0) + 1
+                    if self._mb_ok >= 20:
+                        self._mb_ok = 0
+                        base = getattr(self, "_mb_base", 1.0)
+                        if self.cfg["mb_delay"] > base:
+                            self.cfg["mb_delay"] = max(base, self.cfg["mb_delay"] / 1.1)
                 self._health(host)
                 self.db.execute("INSERT OR REPLACE INTO http_cache (url, body, ts) VALUES (?,?,?)",
                                 (key, body, time.time()))
@@ -2718,10 +2749,16 @@ class Http:
                         # slow down for the rest of the run, and retry soon.
                         self.cfg["mb_delay"] = min(3.0, self.cfg["mb_delay"] * 1.2)
                         delay = self.cfg["mb_delay"]
+                        self._mb_ok = 0
                         pause = int(e.headers.get("Retry-After") or 0) or 3 * (attempt + 1)
                     else:
                         pause = int(e.headers.get("Retry-After") or 0) or 15 * (attempt + 1)
                     pause += random.uniform(0, 1)                   # jitter: parallel runs do not retry in step
+                    if attempt == attempts - 1:
+                        # giving up: no sleep now, but the host's next request still waits the
+                        # pause out (the pacing wait is delay - (now - last))
+                        self.last[limit] = max(self.last.get(limit, 0), time.time() + pause - delay)
+                        break
                     print(f"    {host} HTTP {e.code}, waiting {pause:.0f}s", file=sys.stderr)
                     time.sleep(pause)
                     continue
@@ -2733,8 +2770,8 @@ class Http:
                 raise
             except (urllib.error.URLError, TimeoutError) as e:
                 last_err = f"{type(e).__name__}: {getattr(e, 'reason', '') or e}"
-                if attempts == 1:
-                    break
+                if attempt == attempts - 1:
+                    break                                   # giving up: no sleep first
                 print(f"    {host} network error {e}, retrying", file=sys.stderr)
                 time.sleep(10 * (attempt + 1) + random.uniform(0, 1))
             except (OSError, _HTTPException, ValueError) as e:

@@ -1200,6 +1200,7 @@ class Executor:
                         raise StepError(f"{src.name}: tag {k} did not read back as written")
                 with open(stage, "rb+") as fh:
                     os.fsync(fh.fileno())
+                sst = os.stat(stage)             # identity of the verified stage, to recognise it at dst
             except BaseException:
                 stage.unlink(missing_ok=True)
                 raise
@@ -1230,7 +1231,12 @@ class Executor:
             if op == "copy":
                 _record_copy(src, dst, self.job)
             if op == "move" and not case_only:
-                if src_digest is not None and payload.digest(dst) != src_digest:
+                # dst is the verified stage placed by link or rename (metadata only): the same
+                # device, inode, size and mtime need no second read; anything else is hashed
+                # (a filesystem that gives every file inode 0 - some FUSE/SMB mounts - proves nothing)
+                same = sst.st_ino != 0 and (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) == \
+                       (sst.st_dev, sst.st_ino, sst.st_size, sst.st_mtime_ns)
+                if src_digest is not None and not same and payload.digest(dst) != src_digest:
                     raise StepError(f"{dst.name}: new file did not verify; source kept")
                 os.unlink(src)
                 _fsync_dir(src.parent)

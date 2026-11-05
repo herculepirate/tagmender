@@ -314,7 +314,7 @@ class Identify(Base):
         d = self.album("Band W", "Album W")
         eng = self.engine(FakeHttp(), providers={"web": {"enabled": True}})
         seen = []
-        with mock.patch("web_tag.album_candidates", side_effect=lambda h, a, log=None, sources=None: seen.append(a["title"]) or []):
+        with mock.patch("web_tag.album_candidates", side_effect=lambda h, a, log=None, sources=None, n_tracks=None, failed=None: seen.append(a["title"]) or []):
             p = eng.identify(eng.albums_in(d)[0])
         self.assertEqual(seen, ["Album W"])
         self.assertEqual(p.status, "unresolved")

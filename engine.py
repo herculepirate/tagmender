@@ -45,6 +45,7 @@ import match_albums as ma
 import match_core as mc
 import mb_tags
 import tagger_settings
+import tagio
 import plan as planmod
 import reasons
 
@@ -92,14 +93,14 @@ def _one_compilation(files, metas, title, folder) -> bool:
     return len(set(nums)) == len(nums) and len(totals) == 1 and "" not in totals
 
 
-def album_keys(files, folder) -> dict:
+def album_keys(files, folder, metas=None) -> dict:
     """{file: which album it belongs to} for the audio files of one folder (with its disc
     folders): exclusions.album_key, with the disc left out of the title ("Album (Disc 1)"
     and "Album (Disc Two)" are one album). Within one title, tracks without an album artist
     join the album artist the others have; with no album artist at all, tracks by different
     artists are one compilation only when they look like one (_one_compilation) - otherwise
     "Greatest Hits" by Queen and by ABBA stay two albums."""
-    metas = {f: ex.read_meta(f) for f in files}
+    metas = {f: (metas or {}).get(f) or ex.read_meta(f) for f in files}
     out, by_title = {}, {}
     for f in files:
         k = ex.album_key(metas[f])
@@ -459,7 +460,8 @@ class Engine:
         own_key = {}
         for d in found:
             own_key.setdefault(owner_of[d], []).extend(found[d])
-        own_key = {o: set(album_keys(fs, o).values()) for o, fs in own_key.items()}
+        metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}      # (each file opened once)
+        own_key = {o: set(album_keys(fs, o, metas).values()) for o, fs in own_key.items()}
         folders = {}
         for d in sorted(found):
             owner = owner_of[d]
@@ -476,7 +478,7 @@ class Engine:
             if self.profile.excluded_path(folder, named=[path]):
                 continue
             by_album = {}
-            keys = album_keys(files, folder)
+            keys = album_keys(files, folder, metas)
             for f in files:
                 by_album.setdefault(keys[f], []).append(f)
             tagged = [k for k in by_album if k[0] == "tags"]
@@ -600,7 +602,12 @@ class Engine:
 
     def _identify(self, g: Group, names=None) -> planmod.Proposal:
         """names: (artist folder, album folder) the album is read with, when they are not
-        its folder's own (one disc of a set, identified alone: _per_disc)."""
+        its folder's own (one disc of a set, identified alone: _per_disc). Its files' tags
+        and rule metadata are read once (ex.meta_memo, tagio.reading)."""
+        with ex.meta_memo(), tagio.reading():
+            return self._identify_album(g, names)
+
+    def _identify_album(self, g: Group, names=None) -> planmod.Proposal:
         artist_folder, album_folder = names or (g.folder.parent.name, g.folder.name)
         self._last_out = None
         # OCR and gnudb are not providers an album needs: their notes are told once for the
@@ -1984,10 +1991,17 @@ class Engine:
         label, country, media or a pressing's date (a shop's album ID is no release's ID).
         None when no web album is established, or two different ones are."""
         import web_tag
+        failed = []
         try:
-            found = web_tag.album_candidates(self.http, album, self.log, self._web_sources())
+            found = web_tag.album_candidates(self.http, album, self.log, self._web_sources(),
+                                             n_tracks=len(album.get("tracks") or ()), failed=failed)
         except Exception as exc:
             self.log.warning("web lookup failed: %s", exc, extra={"provider": "web"})
+            return None
+        if failed:
+            # a source that did not answer might have held a rival that makes the others
+            # refuse: no web tags from the rest this time (the album is tried again later)
+            self.log.info("no web tags for %s: %s did not answer", base["source_dir"], ", ".join(failed))
             return None
         pick, why = self._web_album(album, found)
         if pick and by_lengths and pick[2].get("mode") != "lengths":

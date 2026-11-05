@@ -19,7 +19,10 @@ that with payload.digest() before and after every write.
 """
 from __future__ import annotations
 
+import contextvars
+import os
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 import mutagen
@@ -327,6 +330,61 @@ def open_file(path):
     return f
 
 
+# A read-only memo of opened files, for the planner: one album's plan asks about the same
+# unchanged file a dozen times (read, canonical, file_vars, ...), each a fresh mutagen.File
+# (a metadata read, covers included). Only the read-only helpers below go through
+# _read_only_open; open_file itself never does, so write, fix_opus_pictures, edit_id3 and the
+# executor can never be handed a cached (shared) object. Outside reading() it is open_file.
+_READ_MEMO = contextvars.ContextVar("tagmender_read_memo", default=None)
+
+
+@contextmanager
+def reading():
+    """Within the block the read-only helpers open each unchanged file once."""
+    if _READ_MEMO.get() is not None:                 # (nested: the outer block's memo)
+        yield
+        return
+    token = _READ_MEMO.set({})
+    try:
+        yield
+    finally:
+        _READ_MEMO.reset(token)
+
+
+def _read_only_open(path):
+    """open_file(path), remembered while reading() is active. The key is the file's identity
+    and stamps (realpath, size, mtime, inode, ctime): a file changed meanwhile is read again.
+    The object is for reading only."""
+    memo = _READ_MEMO.get()
+    if memo is None:
+        return open_file(path)
+    try:
+        st = os.stat(path)
+        key = (os.path.realpath(path), st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns)
+    except OSError:
+        return open_file(path)
+    hit = memo.get(key)
+    if hit is None:
+        hit = memo[key] = open_file(path)
+    return hit
+
+
+def read_only_mutagen_file(path):
+    """mutagen.File(path) (None for a file mutagen does not know), remembered like
+    _read_only_open while reading() is active. For code that only reads the tags and info."""
+    memo = _READ_MEMO.get()
+    if memo is None:
+        return mutagen.File(path)
+    try:
+        st = os.stat(path)
+        key = ("mutagen.File", os.path.realpath(path), st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns)
+    except OSError:
+        return mutagen.File(path)
+    if key not in memo:
+        memo[key] = mutagen.File(path)
+    return memo[key]
+
+
 def family(f) -> str:
     if isinstance(f, MP4):
         return "mp4"
@@ -426,7 +484,7 @@ def read(path, legacy=False, mp4_zero=True, split_custom=True) -> dict[str, list
     before 609b541 (no described comments or lyrics), 2: 609b541 to b1f0b98 (described by
     their description only)."""
     legacy = 1 if legacy is True else (legacy or 0)
-    f = open_file(path)
+    f = _read_only_open(path)
     fam = family(f)
     tags = f.tags
     out: dict[str, list[str]] = {}
@@ -664,7 +722,7 @@ def riff_info(path) -> dict:
 def riff_only(path) -> set:
     """The fields a WAV file has only in its RIFF INFO (none in its ID3 tag)."""
     try:
-        if type(open_file(path)).__name__ != "WAVE":
+        if type(_read_only_open(path)).__name__ != "WAVE":
             return set()
         return set(riff_info(path)) - set(read(path, split_custom="deferred"))
     except Exception:
@@ -795,7 +853,7 @@ def file_options(path, settings: dict | None) -> dict:
     a frame the file has is put into it. {}: the file keeps all of that as it is."""
     s = settings or {}
     try:
-        f = open_file(path)
+        f = _read_only_open(path)
         fam = family(f)
     except Unsupported:
         return {}
@@ -870,7 +928,7 @@ def file_vars(path) -> dict:
     except OSError:
         pass
     try:
-        f = open_file(path)
+        f = _read_only_open(path)
     except Unsupported:
         return out
     info = getattr(f, "info", None)
@@ -904,7 +962,7 @@ def canonical(path, k: str) -> str:
     """A field's name as read() gives it back for this file ("comment:ripper" is an ID3
     file's "comment::ripper", as Picard 3 names a described comment)."""
     try:
-        fam = family(open_file(path))
+        fam = family(_read_only_open(path))
     except Unsupported:
         return k
     if not (k.startswith("comment:") or k.startswith("lyrics:")):
@@ -948,7 +1006,7 @@ def stored(path, target: dict, fmt: dict | None = None) -> dict:
     fmt = fmt or {}
     join = fmt.get("join") or "/"
     try:
-        f = open_file(path)
+        f = _read_only_open(path)
         fam = family(f)
         v23 = fam == "id3" and (fmt["v2"] == 3 if fmt.get("v2") in (3, 4) else _own_version(f.tags) == 3)
     except Unsupported:
@@ -1084,7 +1142,7 @@ def opus_pictures_need_fix(path) -> bool:
     """An Opus file's picture has a size but no colour depth (as an earlier TagMender wrote
     it): libopusfile players refuse it and show no cover."""
     try:
-        f = open_file(path)
+        f = _read_only_open(path)
     except Exception:
         return False
     return type(f).__name__ == "OggOpus" and _opus_bad_pictures(f)
@@ -1253,7 +1311,7 @@ def vorbis_totals(path) -> tuple[set, set]:
     their two names only - TRACKTOTAL, as EAC and Mp3tag write it): Picard reads the first as
     no total, and writes both names of every total it saves."""
     try:
-        f = open_file(path)
+        f = _read_only_open(path)
     except Exception:
         return set(), set()
     if family(f) != "vorbis" or f.tags is None:
@@ -1283,7 +1341,7 @@ def combined_pairs(path) -> tuple:
     movement's MVIN), APEv2 and WMA's disc, trkn (5, 9) in MP4; none in Vorbis, whose totals
     are fields of their own (as are MP4's and APEv2's movement totals)."""
     try:
-        fam = family(open_file(path))
+        fam = family(_read_only_open(path))
     except Exception:
         return ()
     return ID3_PAIRS if fam == "id3" else (() if fam == "vorbis" else NUMBER_PAIRS)

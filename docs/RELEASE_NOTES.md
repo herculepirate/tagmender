@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.5
+
+- The profile chosen in the toolbar is remembered: the app starts with the one you used last
+  (Preferences' default profile "last", as it always said). A renamed profile is followed.
+- Folders whose albums you took out of the list (Remove from List) can be dropped again: they
+  are listed again instead of "Already in the preview".
+
 ## 0.8.4
 
 **Album artist: lead artist only** (a profile option, Tags › Album artist; off by default)

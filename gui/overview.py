@@ -204,6 +204,7 @@ class Overview(QWidget):
         self.forced = {}
         self.library = ""           # the library folder chosen for this preview ("": the profile's)
         self.looked = {}            # album key -> how it was looked up (profile, sources): not again
+        self.removed = set()        # folders of albums taken out of the list (Remove from List)
         # several albums, each with a profile of its own: the one chosen above unless you chose
         # another in its row (album key -> profile name); the profile each album's preview was
         # made with, and that preview's plan (without its albums) per profile, for Apply
@@ -307,6 +308,7 @@ class Overview(QWidget):
         self.library_keep.hide()
         lib.addWidget(self.library_keep)
         rl.addLayout(lib)
+        self.profile.currentTextChanged.connect(self.remember_profile)
         self.profile.currentTextChanged.connect(lambda _t: self.reset_sources())
         self.profile.currentTextChanged.connect(lambda _t: self.reset_library())
         self.profile.currentTextChanged.connect(lambda _t: self.model.refresh_rows() if hasattr(self, "model") else None)
@@ -481,17 +483,46 @@ class Overview(QWidget):
             return
         ids = {id(a) for a in chosen}
         self.plan["albums"] = [a for a in self.plan["albums"] if id(a) not in ids]
+        self.removed |= {os.path.realpath(a["source_dir"]) for a in chosen}    # (dropped again: listed again)
         self.model.set_plan(self.plan)
         self.summary.setText(tr("{0} taken out of this preview; nothing on disk changed.")
                              .format(plural(len(chosen), tr("album"), tr("albums"))))
         self.win.update_album_actions()
 
     def refresh_profiles(self):
-        cur = self.profile.currentText()
-        self.profile.clear()
-        self.profile.addItems(profile_names())
-        if cur:
-            self.profile.setCurrentText(cur)
+        cur = self.profile.currentText() or self.starting_profile()
+        self._filling = True                          # (filling the list is no choice of yours)
+        try:
+            self.profile.clear()
+            self.profile.addItems(profile_names())
+            if cur and self.profile.findText(cur) >= 0:
+                self.profile.setCurrentText(cur)
+        finally:
+            self._filling = False
+
+    @staticmethod
+    def starting_profile() -> str:
+        """The profile the app starts with (Preferences › default profile): the one last chosen
+        ("last"), the built-in one ("builtin"), or a profile named there."""
+        try:
+            import app_settings
+            want = app_settings.get("default_profile") or "last"
+            if want == "last":
+                return app_settings.get("last_profile") or ""
+            return "default" if want == "builtin" else str(want)
+        except Exception:
+            return ""
+
+    def remember_profile(self, name):
+        """The profile you chose: the one the app starts with next time (default_profile last)."""
+        if getattr(self, "_filling", False) or not name:
+            return
+        try:
+            import app_settings
+            if app_settings.get("last_profile") != name:
+                app_settings.set_value("last_profile", name)
+        except Exception:
+            pass
 
     def busy(self, on):
         """Preview and Apply are enabled by the window (on this page only); while work runs no
@@ -533,6 +564,7 @@ class Overview(QWidget):
         self.looked = {}                                     # (a new folder: nothing looked up yet)
         self.queue = {}                                      # (nor waiting to be)
         self.album_profiles, self.planned_with, self.headers = {}, {}, {}
+        self.removed = set()                                 # (albums taken out of this list: their folders)
         self.plan_library = ""
         self.reset_sources()                                 # (a new folder: the profile's sources again)
         self.reset_library()                                 # (and the profile's library folder)

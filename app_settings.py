@@ -57,6 +57,7 @@ DEFAULTS = {
     # General
     "library_folder": "",             # "" = the system Music folder
     "default_profile": "last",        # last | builtin | a profile's name
+    "last_profile": "",               # the profile last chosen in the app's toolbar (default_profile last)
     # a folder added (dropped, Add Folder): look its albums up at once, or list them first and
     # look up the ones you choose (Look Up)
     "add_folder": "list",             # list | look_up

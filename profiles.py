@@ -1349,6 +1349,8 @@ def _rename_references(old: str, new: str | None):
         import app_settings
         if app_settings.get("default_profile") == old:
             app_settings.set_value("default_profile", new or "last")
+        if app_settings.get("last_profile") == old:
+            app_settings.set_value("last_profile", new or "")
     except Exception:                       # (an unreadable settings file stays as it is)
         pass
     if new is None:

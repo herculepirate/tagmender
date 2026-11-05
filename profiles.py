@@ -223,6 +223,12 @@ DEFAULTS = {
     # (bracket) or in its own tags only (tags_only); extra_tags: ALBUMVERSION, RELEASECOMMENT
     "versions": {"style": "paren", "extra_tags": True},
     "loudness": {"replace_existing": False, "album_gain": True, "opus_r128": True},
+    # compilations (compilations.py): extra_flags - also ITUNESCOMPILATION and COMP in files with
+    # free-form text keys (FLAC, Ogg, APE ...); grouping - GROUPING "Compilation" where empty;
+    # single_artist - also flag a single artist's compilation (a best-of). va_name (the album
+    # artist of a various-artists release) has no default here: unset, the tagger's own
+    # setting is used, as before this group existed
+    "compilations": {"extra_flags": False, "grouping": False, "single_artist": False},
     # artwork: sources - where covers come from, in order (coverup: CoverUp with all its sources;
     #   caa: MusicBrainz's Cover Art Archive; discogs; web: shops and web image search via
     #   CoverUp; local: the album's own scans); when - "needed" (only for albums missing a cover
@@ -818,6 +824,15 @@ def _new_setting_problems(d: dict) -> list[str]:
         if not isinstance(v, bool) and v not in ("audiophile", "tagger"):
             p.append(f"discogs_details.{k} must be true, false, audiophile or tagger")
     _bool(p, d, "cleanup.clear_other_tags")
+    comp = d.get("compilations")
+    if not isinstance(comp, dict):
+        p.append("compilations must be an object")
+    else:
+        for k in ("extra_flags", "grouping", "single_artist"):
+            _bool(p, d, f"compilations.{k}")
+        if "va_name" in comp and not (isinstance(comp["va_name"], str) and comp["va_name"].strip()
+                                      and len(comp["va_name"]) <= 100):
+            p.append("compilations.va_name must be a name of up to 100 characters")
     keep = d["cleanup"].get("preserved_tags")
     if not isinstance(keep, list) or not all(isinstance(x, str) for x in keep):
         p.append("cleanup.preserved_tags must be a list of tag names")
@@ -984,6 +999,8 @@ class Profile:
         low = fld.lower()
         if low in fields:
             return fields[low]
+        if low == "grouping" and (self.data.get("compilations") or {}).get("grouping"):
+            return "fill_missing"          # (compilations.grouping: never replaces a Grouping that is there)
         if low in self.picard_preserved():
             return "fill_missing"
         return pol.get("default", "replace")

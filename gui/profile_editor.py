@@ -23,7 +23,7 @@ import html
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QRadioButton,
+from PySide6.QtWidgets import (QComboBox, QDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 import naming
@@ -108,6 +108,7 @@ GROUPS = {
     "artists": ("tags", N_("Artists and languages"),
                 N_("Automatic: what your existing tagger does, when its settings are used (Tags › Advanced), "
                    "else TagMender's default."), False),
+    "compilations": ("tags", N_("Compilations"), "", False),
     "credits": ("tags", N_("Credits"), "", False),
     "versions": ("tags", N_("Dates and versions"), "", False),
     "discogs": ("tags", N_("Discogs details"),
@@ -267,6 +268,14 @@ def _tagger_put(key):
         else:
             t[key] = v
     return put
+
+
+def _va_name_put(d, v, _vals):
+    c = d.setdefault("compilations", {})
+    if isinstance(v, str) and v.strip():
+        c["va_name"] = v.strip()
+    else:
+        c.pop("va_name", None)                   # (Automatic: the tagger's setting, as before)
 
 
 def _id3_get(key):
@@ -893,6 +902,19 @@ SETTINGS = [
       show=_tagger_row("tagger.standardize_artist_names"), note=_follow_note("tagger.standardize_artist_names"),
       foot=N_("The standard name is the one MusicBrainz lists for the artist. Always: also for releases "
               "made under a former name.")),
+    S("compilations.va_name", N_("Various artists name"), "popup", "compilations", custom="text",
+      get=lambda d: dig(d, "compilations.va_name"), put=_va_name_put,
+      choices=((None, N_("Automatic")), ("Various Artists", N_("Various Artists")), ("Various", N_("Various")),
+               ("VA", N_("VA"))),
+      foot=N_("The album artist of a compilation by different artists. Track artists stay as credited. "
+              "Automatic: what your existing tagger does, else Various Artists.")),
+    S("compilations.extra_flags", N_("Also write ITUNESCOMPILATION and COMP"), "switch", "compilations",
+      foot=N_("For FLAC, Ogg and APE files; some players look for these. The usual compilation flag is "
+              "always written.")),
+    S("compilations.grouping", N_("Set Grouping to Compilation"), "switch", "compilations",
+      foot=N_("Only when Grouping is empty; it never replaces yours.")),
+    S("compilations.single_artist", N_("Also flag single-artist compilations"), "switch", "compilations",
+      foot=N_("Best-ofs. Many players then list them under Various Artists.")),
     S("_credits", N_("Credits"), "popup", "credits", attr="pic_rel", get=_credits_get, put=_credits_put,
       covers=CREDIT_COVERS, show=_tagger_row("_credits"), note=_follow_note("_credits"),
       enable=_unless_basic,
@@ -1406,7 +1428,7 @@ class ProfileEditor(QScrollArea):
             for v, w in spec.choices:
                 c.addItem(tr(w), v)
             if spec.custom:
-                c.addItem(tr("Choose…"), CHOOSE)
+                c.addItem(tr("Custom…") if spec.custom == "text" else tr("Choose…"), CHOOSE)
             if spec.kind == "popup":
                 c.setSizeAdjustPolicy(QComboBox.AdjustToContents)
                 c.setMaximumWidth(320)                          # (longer words are cut, never the window)
@@ -1447,6 +1469,15 @@ class ProfileEditor(QScrollArea):
             return
         was = box.property("was") if box.property("was") is not None else 0
         cur = box.itemData(was)
+        if spec.custom == "text":                           # (Custom…: a name typed in)
+            text, ok = QInputDialog.getText(self, tr(spec.label), tr(spec.label),
+                                            text=cur if isinstance(cur, str) else "")
+            if ok and text.strip():
+                self._set(spec, text.strip()[:100])
+                self._changed()
+            else:
+                box.setCurrentIndex(was)
+            return
         dlg = ListSheet(self, tr(spec.label), tr(spec.foot) if spec.foot else "",
                         cur if isinstance(cur, list) else [], checkable=spec.custom == "check",
                         known=list(spec.known), words={k: tr(w) for k, w in spec.words.items()})

@@ -106,11 +106,17 @@ def _lyrics(k: str) -> bool:
     return k == "lyrics" or k.startswith("lyrics:")
 
 
+def _compilation_fields(profile) -> set:
+    """What the profile's compilations options write (compilations.py): kept at every level."""
+    import compilations
+    return compilations.written_fields(profile)
+
+
 def partial_field(name: str, profile) -> bool:
     """Whether a Partial album writes this field at the profile's level (lyrics: they are only
     there when the level or the profile looks them up)."""
     k = name.lower()
-    if k in ALWAYS or _lyrics(k):
+    if k in ALWAYS or _lyrics(k) or k in _compilation_fields(profile):
         return True
     return any(k == f or (f.endswith(":") and k.startswith(f)) for f in PARTIAL_FIELDS[level(profile)])
 
@@ -139,7 +145,7 @@ def restrict(target: dict, profile, tier: str = "") -> dict:
     lf = profile.get("level_fields") or {}
     drop = {f.lower() for f in lf.get("drop") or []}
     if level(profile) == "basic":
-        keep = set(BASIC_FIELDS) | set(ALWAYS) | {f.lower() for f in lf.get("add") or []}
+        keep = set(BASIC_FIELDS) | set(ALWAYS) | {f.lower() for f in lf.get("add") or []} | _compilation_fields(profile)
         lyr = bool(items(profile).get("lyrics"))   # (looked up at Basic too when the profile says so)
         out = {k: v for k, v in target.items() if (k.lower() in keep and k.lower() not in NEVER_AT_BASIC)
                or (lyr and _lyrics(k.lower()))

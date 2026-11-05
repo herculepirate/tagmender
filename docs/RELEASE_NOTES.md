@@ -1,5 +1,23 @@
 # Release notes
 
+## 0.7.0
+
+**Compilations** (a new group in the profile's Tags section)
+- *Various artists name*: Various Artists, Various, VA or your own, written as the album artist
+  of a various-artists release whichever database identified it. *Automatic* (the default)
+  keeps what TagMender wrote before.
+- Various-artists albums identified from Discogs or the web now get the compilation flag too,
+  not only those from MusicBrainz. Track artists stay as credited.
+- A database's own artist ID decides: a DJ mix credited to the DJ, or a band called "V.A.", is
+  not taken for a compilation.
+- *Also write ITUNESCOMPILATION and COMP* (off by default): for FLAC, Ogg and APE files, for
+  players that look for these. MP3, M4A and WMA keep their own compilation flag.
+- *Set Grouping to Compilation* (off by default): only where Grouping is empty; yours is never
+  replaced.
+- *Also flag single-artist compilations* (off by default): best-ofs get the compilation flag,
+  their artist unchanged.
+- Existing profiles behave as before until you change these.
+
 ## 0.6.0
 
 **Library folder on the Overview**

@@ -140,7 +140,8 @@ APE = {"albumartist": "Album Artist", "albumartists": "ALBUMARTISTS", "remixer":
        "replaygain_album_range": "REPLAYGAIN_ALBUM_RANGE", "replaygain_track_gain": "REPLAYGAIN_TRACK_GAIN",
        "replaygain_track_peak": "REPLAYGAIN_TRACK_PEAK", "replaygain_track_range": "REPLAYGAIN_TRACK_RANGE",
        "replaygain_reference_loudness": "REPLAYGAIN_REFERENCE_LOUDNESS", "tagmender": "TAGMENDER", "tagmender_reason": "TAGMENDER_REASON",
-       "tagmender_source": "TAGMENDER_SOURCE", "tagmender_missing": "TAGMENDER_MISSING"}
+       "tagmender_source": "TAGMENDER_SOURCE", "tagmender_missing": "TAGMENDER_MISSING",
+       "itunescompilation": "ITUNESCOMPILATION", "comp": "COMP"}
 _APE_R = {v.lower(): k for k, v in APE.items()}
 # what Picard never writes to an APEv2 tag (picard/formats/apev2.py UNSUPPORTED_TAGS)
 APE_UNSUPPORTED = {"gapless", "musicip_fingerprint", "podcast", "podcasturl", "show", "showsort", "syncedlyrics",

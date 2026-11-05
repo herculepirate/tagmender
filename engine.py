@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import companions
+import compilations
 import credentials
 import requirements as rq
 import exclusions as ex
@@ -258,12 +259,14 @@ def styles_into_genre(t: dict, most: int = 5) -> dict:
     return t
 
 
-def own_tag_choices(t: dict, profile) -> dict:
+def own_tag_choices(t: dict, profile, path=None) -> dict:
     """One track's tags with the profile's own tag choices applied, whichever database gave
     them: Discogs styles into an empty Genre (genres.discogs_styles genre_if_none), Date
     holding the first release's date (dates.date_tag original; Original Date holds it too),
-    the files' comments taken off (cleanup.comments remove)."""
-    t = dict(t)
+    the files' comments taken off (cleanup.comments remove), and the compilations group
+    (compilations.apply: the various-artists name, the compilation flag and its extras; path
+    is the file the tags are for)."""
+    t = compilations.apply(dict(t), profile, path)
     if getattr(profile, "styles_fill_genre", None) and profile.styles_fill_genre():
         styles_into_genre(t, (profile.get("genres") or {}).get("max", 5))
     if getattr(profile, "date_holds_original", None) and profile.date_holds_original():
@@ -1185,6 +1188,7 @@ class Engine:
             if not self.profile["mark_resolved"]:
                 merged.pop("tagmender", None)
             hidden = {k: v for k, v in (tags_mb[i] if tags_mb else {}).items() if k.startswith("~")}
+            hidden.update(compilations.discogs_hints(det if dparts else None))   # (Various / Compilation on Discogs)
             remove = list(hidden.pop("~remove", []))
             if remove:
                 merged["~remove"] = list(dict.fromkeys(remove))
@@ -2326,7 +2330,9 @@ class Engine:
             prop.targets = [{} for _ in prop.files]
             prop.quality_move = True
         if prop.status == "identified":
-            prop.targets = [own_tag_choices(t, self.profile) for t in prop.targets or []]
+            files = list(prop.files or [])
+            prop.targets = [own_tag_choices(t, self.profile, files[i] if len(files) == len(prop.targets or []) else None)
+                            for i, t in enumerate(prop.targets or [])]
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
 

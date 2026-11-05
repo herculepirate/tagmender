@@ -608,7 +608,7 @@
     <message>
         <location line="+0"/>
         <location filename="../../gui/preferences.py" line="-463"/>
-        <location filename="../../gui/profile_editor.py" line="+488"/>
+        <location filename="../../gui/profile_editor.py" line="+497"/>
         <location filename="../../gui/tagnames.py" line="-9"/>
         <source>AcoustID</source>
         <translation type="unfinished"></translation>
@@ -2146,7 +2146,7 @@ The application key identifies TagMender, the user key identifies you; both are 
         <location line="+1"/>
         <location filename="../../gui/overview.py" line="+142"/>
         <location line="+44"/>
-        <location filename="../../gui/profile_editor.py" line="+921"/>
+        <location filename="../../gui/profile_editor.py" line="+934"/>
         <location filename="../../gui/rows.py" line="+208"/>
         <source>Choose…</source>
         <translation type="unfinished"></translation>
@@ -2876,7 +2876,7 @@ The application key identifies TagMender, the user key identifies you; both are 
     <message>
         <location line="+1"/>
         <location filename="../../gui/inspector.py" line="-70"/>
-        <location filename="../../gui/profile_editor.py" line="-1326"/>
+        <location filename="../../gui/profile_editor.py" line="-1348"/>
         <source>Tags</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4030,7 +4030,7 @@ New: {after}
         <location line="+5"/>
         <location line="+26"/>
         <location line="+12"/>
-        <location filename="../../gui/profile_editor.py" line="+848"/>
+        <location filename="../../gui/profile_editor.py" line="+870"/>
         <location line="+285"/>
         <location line="+1"/>
         <location filename="../../gui/rows.py" line="+96"/>
@@ -4138,7 +4138,7 @@ New: {after}
     </message>
     <message>
         <location line="+4"/>
-        <location filename="../../gui/profile_editor.py" line="-1131"/>
+        <location filename="../../gui/profile_editor.py" line="-1153"/>
         <source>Artwork</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4899,7 +4899,7 @@ New: {after}
     <message>
         <location line="+7"/>
         <location line="+309"/>
-        <location filename="../../gui/profile_editor.py" line="+756"/>
+        <location filename="../../gui/profile_editor.py" line="+765"/>
         <source>Sources</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5540,7 +5540,7 @@ New: {after}
     <message>
         <location filename="../../gui/preferences.py" line="-1180"/>
         <location line="+180"/>
-        <location filename="../../gui/profile_editor.py" line="-724"/>
+        <location filename="../../gui/profile_editor.py" line="-733"/>
         <source>General</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5575,7 +5575,7 @@ New: {after}
     <message>
         <location line="-330"/>
         <location line="+1025"/>
-        <location filename="../../gui/profile_editor.py" line="+1305"/>
+        <location filename="../../gui/profile_editor.py" line="+1327"/>
         <source>Advanced</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5702,7 +5702,7 @@ New: {after}
     </message>
     <message>
         <location line="+2"/>
-        <location filename="../../gui/profile_editor.py" line="-1303"/>
+        <location filename="../../gui/profile_editor.py" line="-1325"/>
         <source>Identification</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6629,24 +6629,24 @@ This is not the application key under Keys.</source>
     <message>
         <location filename="../../gui/profile_editor.py" line="-40"/>
         <location line="+2"/>
-        <location line="+1000"/>
+        <location line="+1022"/>
         <source>Fix in place</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1002"/>
-        <location line="+1003"/>
+        <location line="-1024"/>
+        <location line="+1025"/>
         <source>Copy into the library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1002"/>
-        <location line="+1002"/>
+        <location line="-1024"/>
+        <location line="+1024"/>
         <source>Move into the library</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-994"/>
+        <location line="-1016"/>
         <source>Short names (initials)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6683,12 +6683,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+0"/>
-        <location line="+739"/>
+        <location line="+748"/>
         <source>Move aside</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-738"/>
+        <location line="-747"/>
         <source>Basic</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7002,7 +7002,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+1028"/>
+        <location filename="../../gui/profile_editor.py" line="+1050"/>
         <source>Pictures folder name</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7028,22 +7028,22 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="-886"/>
-        <location filename="../../gui/profile_editor.py" line="-220"/>
+        <location filename="../../gui/profile_editor.py" line="-233"/>
         <location line="+5"/>
-        <location line="+311"/>
+        <location line="+324"/>
         <source>Never</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-244"/>
+        <location filename="../../gui/profile_editor.py" line="-257"/>
         <source>As credited on the release</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-821"/>
+        <location line="-830"/>
         <location line="+1"/>
-        <location line="+810"/>
-        <location line="+329"/>
+        <location line="+819"/>
+        <location line="+342"/>
         <location filename="../../gui/profiles.py" line="+42"/>
         <location filename="../../gui/script_editor.py" line="-48"/>
         <source>On</source>
@@ -7051,10 +7051,10 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="+171"/>
-        <location filename="../../gui/profile_editor.py" line="-1140"/>
+        <location filename="../../gui/profile_editor.py" line="-1162"/>
         <location line="+1"/>
-        <location line="+810"/>
-        <location line="+20"/>
+        <location line="+819"/>
+        <location line="+33"/>
         <location line="+38"/>
         <location line="+30"/>
         <location line="+48"/>
@@ -7088,30 +7088,31 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-808"/>
+        <location line="-829"/>
         <location filename="../../gui/tagnames.py" line="+4"/>
         <source>Lyrics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-46"/>
-        <location line="+761"/>
+        <location line="-47"/>
+        <location line="+770"/>
         <location line="+50"/>
         <location line="+10"/>
-        <location line="+9"/>
+        <location line="+8"/>
+        <location line="+14"/>
         <location line="+82"/>
         <location line="+6"/>
         <source>Automatic</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-917"/>
-        <location line="+868"/>
+        <location line="-939"/>
+        <location line="+890"/>
         <source>At the Audiophile level</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-866"/>
+        <location line="-888"/>
         <source>Deezer</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7152,23 +7153,23 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+1039"/>
+        <location line="+1061"/>
         <source>Albums nothing identified</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1038"/>
+        <location line="-1060"/>
         <source>Watched folders: whether albums are filed without asking, how long to wait and how often to look are set on the Watched folders page. Notifications, and watching while TagMender is open, are in Preferences › General.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+7"/>
-        <location line="+685"/>
+        <location line="+694"/>
         <source>Audio files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-683"/>
+        <location line="-692"/>
         <source>Databases</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7204,12 +7205,17 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+3"/>
-        <location line="+785"/>
+        <source>Compilations</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <location line="+806"/>
         <source>Credits</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-784"/>
+        <location line="-805"/>
         <source>Dates and versions</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7388,12 +7394,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/profile_editor.py" line="+3"/>
-        <location line="+897"/>
+        <location line="+918"/>
         <source>Artist photos</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-897"/>
+        <location line="-918"/>
         <source>At the Enthusiast and Audiophile levels.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7409,17 +7415,17 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+948"/>
+        <location line="+969"/>
         <source>Files that go with the album</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-947"/>
+        <location line="-968"/>
         <source>When a file is already there</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+635"/>
+        <location line="+643"/>
         <source>Discogs needs a free personal token: Preferences › Keys.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7647,12 +7653,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+90"/>
+        <location line="+103"/>
         <source>Keep</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-471"/>
+        <location line="-484"/>
         <source>ReplayGain</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7662,7 +7668,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+429"/>
+        <location line="+442"/>
         <source>Album (Remaster 2024)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8003,12 +8009,12 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+538"/>
+        <location line="+547"/>
         <source>Start from a preset</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-535"/>
+        <location line="-544"/>
         <source>Restore Defaults…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8078,13 +8084,18 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="+17"/>
+        <source>Custom…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
         <location filename="../../gui/rows.py" line="-280"/>
         <source>Choose: {0}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+189"/>
+        <location line="+198"/>
         <source>&lt;a href=&quot;setup&quot;&gt;Set Up…&lt;/a&gt;</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8166,7 +8177,7 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location filename="../../gui/preferences.py" line="-152"/>
-        <location filename="../../gui/profile_editor.py" line="-1793"/>
+        <location filename="../../gui/profile_editor.py" line="-1824"/>
         <source>Standard</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8197,7 +8208,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+745"/>
+        <location filename="../../gui/profile_editor.py" line="+754"/>
         <source>A lossless file made from an MP3 or other lossy file. Move aside puts the album in the folder for albums nothing identified; a profile that copies holds it for review instead.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8297,7 +8308,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+75"/>
+        <location line="+88"/>
         <source>Genre, only when no other genre</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8327,7 +8338,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-78"/>
+        <location line="-91"/>
         <source>Fix spelling variations</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8342,7 +8353,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+80"/>
+        <location line="+93"/>
         <source>The name in your system language, when MusicBrainz knows one.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8402,7 +8413,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-817"/>
+        <location line="-838"/>
         <source>Retrying marked albums</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8412,7 +8423,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+225"/>
+        <location line="+233"/>
         <source>a database is off that the preferred one needs</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8568,7 +8579,62 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="+20"/>
+        <source>Various artists name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Various Artists</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+0"/>
+        <source>Various</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>VA</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The album artist of a compilation by different artists. Track artists stay as credited. Automatic: what your existing tagger does, else Various Artists.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Also write ITUNESCOMPILATION and COMP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>For FLAC, Ogg and APE files; some players look for these. The usual compilation flag is always written.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Set Grouping to Compilation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Only when Grouping is empty; it never replaces yours.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Also flag single-artist compilations</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Best-ofs. Many players then list them under Various Artists.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+4"/>
         <source>Album and tracks</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8698,12 +8764,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-939"/>
+        <location line="-961"/>
         <source>Which files are read, and which are left alone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+942"/>
+        <location line="+964"/>
         <source>Save artist.jpg</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8813,12 +8879,12 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-360"/>
+        <location line="-373"/>
         <source>Description</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-721"/>
+        <location line="-730"/>
         <source>Cover Art Archive (MusicBrainz)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8839,14 +8905,14 @@ This is not the application key under Keys.</source>
     </message>
     <message>
         <location line="+13"/>
-        <location line="+810"/>
-        <location line="+29"/>
+        <location line="+819"/>
+        <location line="+42"/>
         <location line="+54"/>
         <source>Same as my existing tagger</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-882"/>
+        <location line="-904"/>
         <source>How each album is matched to a release in the music databases.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8896,7 +8962,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+8"/>
+        <location line="+9"/>
         <source>ReplayGain: volume tags that let players play every track equally loud. Measured at the Audiophile level.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8916,7 +8982,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+254"/>
+        <location line="+262"/>
         <source>Only at the Audiophile level, with ReplayGain on.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8951,7 +9017,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+76"/>
+        <location line="+89"/>
         <source>Discogs styles</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9026,7 +9092,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-412"/>
+        <location line="-425"/>
         <source>Performers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9051,7 +9117,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+427"/>
+        <location line="+440"/>
         <source>Find lyrics</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9171,7 +9237,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-200"/>
+        <location line="-213"/>
         <source>Tagging level</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9186,7 +9252,7 @@ This is not the application key under Keys.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+129"/>
+        <location line="+142"/>
         <source>Look for covers</source>
         <translation type="unfinished"></translation>
     </message>
@@ -10202,7 +10268,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
     <message>
         <location filename="../../gui/account.py" line="-229"/>
         <location filename="../../gui/profile_editor.py" line="+21"/>
-        <location line="+566"/>
+        <location line="+575"/>
         <location filename="../../gui/sheets.py" line="+108"/>
         <location line="+28"/>
         <location line="+58"/>
@@ -10314,7 +10380,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-1795"/>
+        <location filename="../../gui/profile_editor.py" line="-1826"/>
         <location filename="../../gui/setup.py" line="-50"/>
         <location filename="../../gui/sheets.py" line="+74"/>
         <source>Copy</source>
@@ -10642,7 +10708,7 @@ Save the old ones as the profile “{name}” to keep working as before. You can
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="+855"/>
+        <location filename="../../gui/profile_editor.py" line="+877"/>
         <location filename="../../gui/report.py" line="-2"/>
         <location filename="../../gui/style.py" line="+5"/>
         <source>Album only</source>
@@ -12225,7 +12291,7 @@ This is a profile setting: it applies to every folder the profile watches.</sour
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../gui/profile_editor.py" line="-812"/>
+        <location filename="../../gui/profile_editor.py" line="-834"/>
         <location filename="../../gui/window.py" line="+3"/>
         <source>Automation</source>
         <translation type="unfinished"></translation>

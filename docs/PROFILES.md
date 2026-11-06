@@ -97,7 +97,9 @@ only when its file lists it in `own_settings` (the editor's *Only This Profile*)
 value that differs from the shared one; a listed key it leaves unset keeps its default
 (Automatic). A file without the list (from before the shared settings, or put back from a
 backup or another computer) works as it always did: each shared key whose value would change
-counts as its own, and the app marks it so at its next start. Profiles are resolved when they are read, so the app, the CLI and the watcher see the same
+counts as its own, and the app marks it so at its next start. **Apply to All Profiles…** (in the
+menu beside each setting in the editor) writes one setting, shared or not, into every profile,
+and takes it out of their `own_settings`. Profiles are resolved when they are read, so the app, the CLI and the watcher see the same
 values. The first time the app starts with this version, a value two or more profiles all hold
 (unlike the default) becomes the shared one, and each profile file is rewritten to state only
 the shared settings it keeps its own of (the file as it was is kept once as `NAME.json.bak-shared`); what any profile does is unchanged; whatever a file leaves to the tagger's settings still
@@ -149,7 +151,7 @@ The built-in settings (no profile chosen) are not a file, so they do change. The
 to save the earlier ones as a profile; the command line and the watcher say so once, and
 `tagmender profiles save-previous-builtin` saves them as the profile "Built-in (previous)".
 
-A profile never names code to run: the plugin folder and another tagger's command are this
+A profile never names code to run: which plugins are on and another tagger's command are this
 computer's settings only.
 
 ## This computer's settings
@@ -166,6 +168,7 @@ read as what the machine started as (`started_as`: `new` or `earlier`). The comm
 | `backups.keep_days` | 30 | how long Undo works: a job's backups are kept this many days (0: for ever); `tagmender jobs prune` uses it unless `--days` is given |
 | `backups.auto_clean` | on (off on an earlier install) | after each apply, backups older than `keep_days` are deleted and those jobs can no longer be undone |
 | `backups.location` | the state folder | never on a library's share, inside a library folder or in a folder that is not mounted; stored for future use, nothing reads it yet |
+| `duplicates.dispose` | `folder` | where the duplicate tools put a second copy: `folder` (the duplicates folder below) or `trash` (the Trash of the drive it is on, as a file manager does; `--undo` takes it back out) |
 | `duplicates.folder_name` | `_Duplicates` (`2delete` on an earlier install) | where the duplicate tools set a second copy aside, at the library's top; always skipped when looking for albums, and so are the names it had before (`duplicates.previous_names`, kept when you rename it) and both built-in names |
 | `duplicates.dispose`, `duplicates.keep` | `folder`, `best` (`newest` on an earlier install) | stored for future use, nothing reads them yet |
 | `skip_folders` | the NAS recycle bins (.Trash\*, .recycle, #recycle, @Recycle, @eaDir, $RECYCLE.BIN, lost+found); `_*` and `2delete` on an earlier install | folders the whole-library tools never look into |
@@ -176,13 +179,14 @@ read as what the machine started as (`started_as`: `new` or `earlier`). The comm
 | `ocr.languages` | `[]` (`["eng", "rus", "jpn"]` on an earlier install) | `[]`: English plus your system language, of the Tesseract packs installed; or a list such as `["eng", "jpn"]` |
 | `ocr.effort` | `standard` | scans read for an album: `quick` 8, `standard` 15, `thorough` 40 |
 | `diagnostics.hide_names` | on (off on an earlier install) | the diagnostics export replaces folder and file names with short codes (Preferences > Advanced) |
-| `plugins.folder` | `""` | the folder holding the Discogs Enrichment and CoverUp code (`""`: the environment, then the settings folder, then the bundled copy). Code runs from there, so a profile can never name it |
+| `plugins.enabled` | `[]` | the installed plugins switched on (Preferences › Plugins) |
+| `plugins.builtin_off` | `[]` | the built-in plugins switched off: `discogs` (albums identified with MusicBrainz only, no Discogs covers), `coverup` (no cover looked for through CoverUp; covers already there are kept) |
 | `network.offline`, `network.store_country`, `network.wikipedia_language`, `default_profile`, `appearance`, `permissions.new_folders`, `media_server.rescan`, `logs` (`max_mb` 10; 100 on an earlier install), `tagger_command` | | stored for future use, nothing reads them yet |
 
 In the app: Preferences > General sets the music folder, Skip by and the notifications; Network &
 Privacy the saved lookups and reading scans, with Test Connection; File Safety the backups and the
-duplicates folder (shortening the backups names the jobs that would lose Undo first); Advanced the
-plugin folder and whether diagnostics hide names.
+duplicates folder (shortening the backups names the jobs that would lose Undo first); Plugins which
+plugins are on; Advanced whether diagnostics hide names.
 
 ## Identification tiers
 

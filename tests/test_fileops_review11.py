@@ -1,7 +1,7 @@
 # Eleventh independent review of TagMender's file operations (code at afcc0ef). Each test
 # asserts the correct behaviour and fails at afcc0ef.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # R11_01.test_case_insensitive_share needs FUSE (/dev/fuse, fusermount3) and mfusepy (in
 # tests/pylib/, or the folder $TM_FUSE_PYLIB names: pip install --target DIR mfusepy; it is
 # skipped otherwise); this file then serves a

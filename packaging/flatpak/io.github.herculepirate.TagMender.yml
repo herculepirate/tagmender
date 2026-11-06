@@ -55,17 +55,14 @@ modules:
   - name: tagmender
     buildsystem: simple
     build-commands:
-      - mkdir -p ${FLATPAK_DEST}/lib/tagmender/vendor
-      # the same files as build_deb.sh and build_appimage.sh (git ls-files '*.py' 'coverup_fonts/*'
-      # 'assets/icons/lucide/*' 'assets/i18n/*', without tests/ and tools/): the source below is the
-      # git checkout, so only tracked files are here, and find goes into every gui/ subpackage
-      - find . \( -name '*.py' -o -path './coverup_fonts/*' -o -path './assets/icons/lucide/*'
-        -o -path './assets/i18n/*' \) -type f -not -path './tests/*' -not -path './tools/*'
-        -not -path './vendor/*' -not -path './.git/*' -exec install -Dm644 {} "${FLATPAK_DEST}/lib/tagmender/{}" \;
-      - echo f0f875ec2ea58c650419cc85426029562ffc2dc3 > vendor/picard-discogs-enrichment/VENDORED_COMMIT
-      - echo f8f4199b5471eddb934d874bcb67f342c67e6490 > vendor/picard-coverup/VENDORED_COMMIT
-      - for d in picard-discogs-enrichment picard-coverup; do rm -rf "vendor/$d/tests" "vendor/$d/.git";
-        cp -r "vendor/$d" ${FLATPAK_DEST}/lib/tagmender/vendor/; done
+      - mkdir -p ${FLATPAK_DEST}/lib/tagmender
+      # the same files as build_deb.sh and build_appimage.sh (git ls-files '*.py' 'plugins_builtin/*'
+      # 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*', without tests/ and tools/): the
+      # source below is the git checkout, so only tracked files are here, and find goes into every
+      # gui/ subpackage
+      - find . \( -name '*.py' -o -path './plugins_builtin/*' -o -path './coverup_fonts/*'
+        -o -path './assets/icons/lucide/*' -o -path './assets/i18n/*' \) -type f -not -path './tests/*'
+        -not -path './tools/*' -not -path './.git/*' -exec install -Dm644 {} "${FLATPAK_DEST}/lib/tagmender/{}" \;
       - install -Dm755 packaging/flatpak/tagmender.sh ${FLATPAK_DEST}/bin/tagmender
       - install -Dm644 packaging/io.github.herculepirate.TagMender.desktop
         ${FLATPAK_DEST}/share/applications/io.github.herculepirate.TagMender.desktop
@@ -80,11 +77,3 @@ modules:
       - type: git
         path: ../..
         branch: main
-      - type: git
-        url: https://github.com/herculepirate/picard-discogs-enrichment
-        commit: f0f875ec2ea58c650419cc85426029562ffc2dc3
-        dest: vendor/picard-discogs-enrichment
-      - type: git
-        url: https://github.com/herculepirate/picard-coverup
-        commit: f8f4199b5471eddb934d874bcb67f342c67e6490
-        dest: vendor/picard-coverup

@@ -251,6 +251,7 @@ class Profiles(QWidget):
         tl.setSpacing(8)
         self.editor = ProfileEditor(self)
         self.editor.edited.connect(self.changed)
+        self.editor.apply_all.connect(self.apply_to_all)
         self.editor.open_rules.connect(lambda: self.tabs.setCurrentIndex(1))
         self.editor.open_script.connect(self.edit_script)     # (Script Editor: editable, a live preview)
         tl.addWidget(self.editor, 1)
@@ -397,6 +398,20 @@ class Profiles(QWidget):
         if self.win is not None:
             self.win.setWindowModified(d)                     # (the title shows "TagMender*")
 
+
+    def reload_shown(self):
+        """The profile shown, as its file says (what was changed and not saved is gone)."""
+        name = self.shown_name
+        if name:
+            try:
+                raw = pf.raw(name)
+                self.editor.load(pf.rename_legacy(raw), pf.from_dict(raw, check=False).data,
+                                 pf.from_dict({"name": name}, check=False).data)
+            except pf.ProfileError:
+                pass
+        self.saved_values = self.values()
+        self.changed()
+
     def may_leave(self) -> bool:
         """Before another profile is shown or the window closes: save, discard or stay. Offscreen
         (tests) the changes are discarded, as before."""
@@ -408,9 +423,8 @@ class Profiles(QWidget):
                          offscreen=tr("Don't Save"))
         if ans == tr("Save"):
             return self.save()
-        if ans == tr("Don't Save"):
-            self.saved_values = self.values()
-            self.changed()
+        if ans == tr("Don't Save"):                       # (the form back to the file: the page lives on
+            self.reload_shown()                           #  in Preferences after it closes)
             return True
         return False
 
@@ -776,6 +790,7 @@ class Profiles(QWidget):
             pf.save(pf.from_dict(data))
             if self.win is not None:
                 self.win.statusBar().showMessage(tr("Saved profile {name}").format(name=name), 4000)
+                self._tell_overview()
         except pf.ProfileError as exc:
             sheets.warning(self, tr("The profile “{name}” was not saved.").format(name=name), str(exc))
             return False
@@ -784,6 +799,91 @@ class Profiles(QWidget):
         self.saved_values = self.values()
         self.changed()
         return True
+
+
+    def apply_to_all(self, key) -> bool:
+        """Apply to All Profiles…: this setting, as the form shows it, into every profile. Only
+        that setting changes in them; a profile keeping its own value of a shared setting follows
+        the shared one again. This profile's unsaved changes are saved first; nothing is written
+        when any profile could not take it (True when applied)."""
+        from .profile_editor import BY_KEY, SHARED_ROWS, ProfileEditor, words_of
+        name = self.shown_name
+        if not name:
+            return False
+        spec, value = BY_KEY[key], self.editor.value(key)
+        label, words = tr(spec.label), words_of(spec, value)
+        others = [n for n in pf.names() if n != name]
+        if not others:
+            sheets.information(self, tr("There are no other profiles."),
+                               tr("“{setting}” is set in this profile only because it is the only one.")
+                               .format(setting=label))
+            return False
+        body = tr("{setting}: {value}, in {n} other profiles ({names}). Only this setting changes in them; "
+                  "a profile that kept its own value gets this one.").format(
+            setting=label, value=words, n=len(others), names=", ".join(others))
+        if self.dirty():
+            body += "\n\n" + tr("Your other changes to “{name}” are saved first.").format(name=name)
+        if not sheets.confirm(self, tr("Use “{setting}: {value}” in all profiles?").format(setting=label, value=words),
+                              body, tr("Each profile's settings can be changed back here."),
+                              tr("Apply to All Profiles")):
+            return False
+        if self.dirty() and not self.save():
+            return False
+        work = ProfileEditor(self)                            # (each profile as the form would save it)
+        work.hide()
+        datas, shared, broken = {}, {}, []
+        try:
+            for n in [name] + others:
+                try:
+                    raw = pf.raw(n)
+                    work.load(pf.rename_legacy(raw), pf.from_dict(raw, check=False).data,
+                              pf.from_dict({"name": n}, check=False).data)
+                    if key in SHARED_ROWS and work.is_own(key):
+                        work.set_scope(key, False)
+                    work.set_value(key, value)
+                    data = work.write(pf.with_shared(pf.upgrade(pf.raw(n))))
+                    problems = pf.check_template(pf.from_dict(data).data)
+                    if problems:
+                        raise pf.ProfileError("; ".join(problems))
+                    shared.update(work.shared_changes(data))
+                    datas[n] = data
+                except Exception as exc:                      # (one that cannot be read: named, nothing written)
+                    broken.append(f"{n}: {exc}")
+        finally:
+            work.deleteLater()
+        if broken:
+            sheets.warning(self, tr("“{setting}” was not applied to any profile.").format(setting=label),
+                           tr("These profiles could not take it:") + "\n\n" + "\n".join(broken))
+            return False
+        done, failed = [], None
+        try:
+            if shared:
+                pf.adopt_shared()
+                pf.set_shared(shared)
+            for n, data in datas.items():
+                pf.save(pf.from_dict(data))
+                done.append(n)
+        except (pf.ProfileError, OSError) as exc:              # (a disk full or read-only part-way)
+            failed = exc
+        self.reload_shown()
+        if failed is not None:
+            left = [n for n in datas if n not in done]
+            said = str(failed) + "\n\n" + tr("Not changed: {names}").format(names=", ".join(left))
+            if shared:                                         # (the shared value itself was changed)
+                said += "\n" + tr("The value shared by all profiles was changed; those profiles follow it "
+                                   "unless they keep their own.")
+            sheets.warning(self, tr("“{setting}” was not applied to every profile.").format(setting=label), said)
+            return False
+        if self.win is not None:
+            self.win.statusBar().showMessage(tr("“{setting}” applied to all profiles").format(setting=label), 4000)
+        self._tell_overview()
+        return True
+
+    def _tell_overview(self):
+        """A profile changed: the Overview says which albums were looked up with its old settings."""
+        ov = (getattr(self.win, "pages", None) or {}).get("Overview")
+        if ov is not None and hasattr(ov, "check_stale"):
+            ov.check_stale()
 
 
 def offer_previous_builtin(win) -> bool:

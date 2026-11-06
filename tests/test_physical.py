@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 PLUGIN = Path(_os.environ.get("TAGMENDER_DISCOGS_PLUGIN") or
               (sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else
-               "../picard-discogs-enrichment")).expanduser()
+               "plugins_builtin/discogs")).expanduser()
 if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
     sys.argv.pop(1)
 _os.environ["TAGMENDER_DISCOGS_PLUGIN"] = str(PLUGIN)

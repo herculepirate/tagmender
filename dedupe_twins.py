@@ -6,7 +6,9 @@ of the library.
 
 Nothing is deleted. Older copies are MOVED to <music root>/<duplicates folder>/... (the
 folder name set on this computer, Preferences > File Safety; "_Duplicates"), keeping
-the library/artist/album folders, and every move is logged so it can be undone.
+the library/artist/album folders, or - with "The Trash" chosen there (duplicates.dispose,
+or --trash) - to the Trash of the drive each file is on, as a file manager does. Every move
+is logged so it can be undone.
 
   1. Dry run (changes nothing, writes a plan):
        python3 dedupe_twins.py --list ~/Downloads/suspected_twin_albums.csv
@@ -238,12 +240,95 @@ def trash_path(path, music_root):
     return Path(music_root) / DUPES / rel
 
 
+def trash_dir(path) -> Path:
+    """The Trash for PATH (the freedesktop.org Trash specification): the home Trash for a file
+    on the same drive as it, else <drive top>/.Trash/<uid> when that is a shared Trash folder
+    (sticky, not a link), else <drive top>/.Trash-<uid>. Never one on another drive: a move
+    there would be a copy."""
+    path = Path(path).absolute()
+    home = Path(os.environ.get("XDG_DATA_HOME") or "~/.local/share").expanduser() / "Trash"
+    dev = path.stat().st_dev
+    try:
+        home_dev = (home if home.exists() else home.parent).stat().st_dev
+    except OSError:
+        home_dev = None
+    if home_dev == dev:
+        return home
+    top = path
+    while top.parent != top and top.parent.stat().st_dev == dev:
+        top = top.parent
+    shared = top / ".Trash"
+    try:
+        st = shared.lstat()
+        if not shared.is_symlink() and shared.is_dir() and st.st_mode & 0o1000:
+            return shared / str(os.getuid())
+    except OSError:
+        pass
+    return top / f".Trash-{os.getuid()}"
+
+
+def to_trash(src) -> Path:
+    """Move SRC into its Trash (trash_dir), with the .trashinfo file managers read to put it
+    back; the name made unique there, never over another. Returns where it went."""
+    from urllib.parse import quote
+    src = Path(src).absolute()
+    base = trash_dir(src)
+    files, info = base / "files", base / "info"
+    for d in (base, files, info):
+        d.mkdir(mode=0o700, exist_ok=True)
+    stem, n = src.name, 1
+    while True:
+        name = stem if n == 1 else f"{Path(stem).stem}.{n}{Path(stem).suffix}"
+        try:                                  # (the .trashinfo first, exclusively: it claims the name)
+            fd = os.open(info / f"{name}.trashinfo", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            n += 1
+            continue
+        if (files / name).exists():
+            os.close(fd)
+            os.unlink(info / f"{name}.trashinfo")
+            n += 1
+            continue
+        break
+    # (Path= the name's own bytes, percent-encoded - a Latin-1 name too; relative to the drive's
+    # top in a drive's Trash, absolute in the home one, as the specification asks)
+    top = _trash_top(base)
+    where = os.fsencode(src.relative_to(top) if top is not None else src)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"[Trash Info]\nPath={quote(where)}\n"
+                     f"DeletionDate={datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}\n")
+        os.rename(src, files / name)          # (the same drive: a rename)
+    except BaseException:
+        Path(info / f"{name}.trashinfo").unlink(missing_ok=True)
+        raise
+    return files / name
+
+
+def _trash_top(base: Path) -> Path | None:
+    """The drive top a drive's Trash belongs to (<top>/.Trash-<uid>, <top>/.Trash/<uid>); None for
+    the home Trash."""
+    if base.name == f".Trash-{os.getuid()}":
+        return base.parent
+    if base.name == str(os.getuid()) and base.parent.name == ".Trash":
+        return base.parent.parent
+    return None
+
+
+def _trash_info(moved: Path) -> Path | None:
+    """The .trashinfo of a file moved into a Trash's files/ folder (None for any other place)."""
+    if moved.parent.name != "files":
+        return None
+    info = moved.parent.parent / "info" / f"{moved.name}.trashinfo"
+    return info if info.exists() else None
+
+
 def folders_from_args(args):
     """Album folders to check. --root follows the library layout
     <root>/<Album Artist>/<Date - Album>/ (subfolders belong to the album)."""
     out = []
     if args.list:
-        with open(Path(args.list).expanduser(), encoding="utf-8") as fh:
+        with open(Path(args.list).expanduser(), encoding="utf-8", errors="surrogateescape") as fh:
             for r in csv.DictReader(fh):
                 out.append(Path(r["FullPath"]))
     for root in args.root or []:
@@ -260,12 +345,15 @@ def folders_from_args(args):
 
 def undo(log_path):
     restored = missing = 0
-    with open(Path(log_path).expanduser(), encoding="utf-8") as fh:
+    with open(Path(log_path).expanduser(), encoding="utf-8", errors="surrogateescape") as fh:
         for r in csv.DictReader(fh):
             src, dst = Path(r["moved_to"]), Path(r["original"])
             if src.exists() and not dst.exists():
+                info = _trash_info(src)
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(src), str(dst))
+                if info is not None:          # (out of the Trash: its entry there goes too)
+                    info.unlink(missing_ok=True)
                 restored += 1
             else:
                 missing += 1
@@ -274,6 +362,11 @@ def undo(log_path):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):           # (a Latin-1 file name printed, never a crash)
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", help="CSV with a FullPath column (e.g. suspected_twin_albums.csv)")
@@ -285,8 +378,11 @@ def main():
     ap.add_argument("--prefer-tagged", action="store_true",
                     help="where exactly one copy of each track carries MusicBrainz/Discogs IDs, "
                          "keep that copy regardless of dates")
+    ap.add_argument("--trash", action="store_true",
+                    help="move the older copies to the Trash instead (default: the File Safety setting)")
     ap.add_argument("--undo", help="move files back using a twin_moves_*.csv log")
     args = ap.parse_args()
+    trash = args.trash or app_settings.get("duplicates.dispose") == "trash"
 
     if args.undo:
         undo(args.undo)
@@ -321,7 +417,7 @@ def main():
     plan_path = Path(args.plan).expanduser()
     cols = ["status", "folder", "reason", "move", "why", "move_date", "keep", "keep_date",
             "same_audio", "move_has_ids", "keep_has_ids"]
-    with open(plan_path, "w", newline="", encoding="utf-8") as fh:
+    with open(plan_path, "w", newline="", encoding="utf-8", errors="surrogateescape") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(plan_rows)
@@ -337,7 +433,7 @@ def main():
 
     log_path = plan_path.parent / f"twin_moves_{time.strftime('%Y%m%d-%H%M%S')}.csv"
     moved = 0
-    with open(log_path, "w", newline="", encoding="utf-8") as fh:
+    with open(log_path, "w", newline="", encoding="utf-8", errors="surrogateescape") as fh:
         w = csv.writer(fh)
         w.writerow(["original", "moved_to", "kept_twin"])
         for folder, rows in ready:
@@ -346,6 +442,16 @@ def main():
                 keep = folder / r["keep"] if r["keep"] else folder
                 if not src.exists() or not keep.exists():
                     print(f"  skipped (file changed since planning): {src}")
+                    continue
+                if trash:
+                    try:
+                        dst = to_trash(src)
+                    except (OSError, ValueError) as exc:
+                        print(f"  skipped (could not be moved to the Trash: {exc}): {src}")
+                        continue
+                    w.writerow([str(src), str(dst), str(keep)])
+                    fh.flush()
+                    moved += 1
                     continue
                 try:
                     dst = trash_path(src, args.music_root)
@@ -360,7 +466,7 @@ def main():
                 w.writerow([str(src), str(dst), str(keep)])
                 fh.flush()
                 moved += 1
-    print(f"\nMoved {moved} older file(s) to {Path(args.music_root) / DUPES}")
+    print(f"\nMoved {moved} older file(s) to " + ("the Trash" if trash else str(Path(args.music_root) / DUPES)))
     print(f"Undo log: {log_path}")
     print("Re-run audit_untagged.py afterwards: these albums should no longer show as 'partial'.")
 

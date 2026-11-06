@@ -1279,6 +1279,10 @@ def _index_of(box, value) -> int:
     return -1
 
 
+# settings Apply to All Profiles… is not offered for (what tells one profile from another)
+NOT_FOR_ALL = {"description"}
+
+
 def _word(spec, x) -> str:
     """One item of a list value in the words its control shows (translated)."""
     return tr(spec.words[x]) if isinstance(x, str) and x in spec.words else str(x)
@@ -1368,6 +1372,7 @@ class PresetSheet(QDialog):
 class ProfileEditor(QScrollArea):
     """Every setting of one profile, in sections of grouped inset lists."""
     edited = Signal()
+    apply_all = Signal(str)          # Apply to All Profiles… of one setting (its key): the page does it
     open_rules = Signal()
     open_script = Signal()
 
@@ -1740,6 +1745,8 @@ class ProfileEditor(QScrollArea):
             row.set_changed(not s.personal and not same(vals[s.key], self.defaults.get(s.key)))
             if s.key in SHARED_ROWS:
                 row.set_scope(self.is_own(s.key), lambda own, k=s.key: self.set_scope(k, own))
+            if s.key not in NOT_FOR_ALL:
+                row.set_apply_all(lambda k=s.key: self.apply_all.emit(k))
         for g in self.groups.values():
             g.tidy()
         self.show_preview(vals)

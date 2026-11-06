@@ -80,9 +80,9 @@ DEFAULTS = {
     # Advanced
     "logs": {"detailed": False, "max_mb": 10},
     "diagnostics": {"hide_names": True},
-    # folder: where the Discogs Enrichment and CoverUp code is ("" = the copies that come with
-    # TagMender); enabled: the plugins switched on (plugins.py), settings: {plugin id: {key: value}}
-    "plugins": {"folder": "", "enabled": [], "settings": {}},
+    # enabled: the installed plugins switched on (plugins.py); builtin_off: the plugins that come
+    # with TagMender (Discogs, CoverUp) switched off; settings: {plugin id: {key: value}}
+    "plugins": {"enabled": [], "builtin_off": [], "settings": {}},
     "tagger_command": "",             # "" = found on PATH, then the Flatpak
     # one-time notices already shown (a new install has nothing to be told about)
     "notices": {"builtin_defaults": True},
@@ -350,16 +350,13 @@ def validate(data: dict, libraries=None) -> list[str]:
     if not isinstance(langs, list) or not all(isinstance(x, str) and re.fullmatch(r"[A-Za-z]{3}(_[A-Za-z]+)?", x)
                                               for x in langs):
         p.append("ocr.languages must be a list of language codes (eng, deu, ...), or [] for automatic")
-    for name in ("library_folder", "plugins.folder"):
-        v = _value(d, name)
-        if not isinstance(v, str) or (v and not os.path.isabs(os.path.expanduser(v))):
-            p.append(f"{name} must be an absolute path, or empty")
-    folder = _value(d, "plugins.folder")
-    if isinstance(folder, str) and folder and not os.path.isdir(os.path.expanduser(folder)):
-        p.append(f"plugins.folder does not exist ({folder})")
-    on = _value(d, "plugins.enabled")
-    if not isinstance(on, list) or not all(isinstance(x, str) for x in on):
-        p.append("plugins.enabled must be a list of plugin ids")
+    v = _value(d, "library_folder")
+    if not isinstance(v, str) or (v and not os.path.isabs(os.path.expanduser(v))):
+        p.append("library_folder must be an absolute path, or empty")
+    for name in ("plugins.enabled", "plugins.builtin_off"):
+        on = _value(d, name)
+        if not isinstance(on, list) or not all(isinstance(x, str) for x in on):
+            p.append(f"{name} must be a list of plugin ids")
     if not isinstance(_value(d, "plugins.settings"), dict):
         p.append("plugins.settings must be an object: {plugin id: {setting: value}}")
     if not isinstance(d.get("tagger_command"), str):

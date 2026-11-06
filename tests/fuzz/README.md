@@ -8,8 +8,8 @@ link/unlink/rename/replace/mkdir/rmdir, journal write or copy. Then `recover`, `
 second `undo` must bring the library back exactly, with no hidden `.tm-*` file left.
 `fuzz_recover.py` also kills `recover` itself at every point.
 
-    TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment python3 -W ignore tests/fuzz/fuzz_crash.py
-    TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment python3 -W ignore tests/fuzz/fuzz_recover.py
+    python3 -W ignore tests/fuzz/fuzz_crash.py
+    python3 -W ignore tests/fuzz/fuzz_recover.py
 
 `fuzz_multi.py` does the same for plans whose albums interact (one album moving into
 another's folder, one album's destination being another's source, one album failing in

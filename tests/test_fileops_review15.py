@@ -1,7 +1,7 @@
 # Fifteenth independent review of TagMender's file operations (code at f2eaf39). Each test
 # asserts the correct behaviour and fails at f2eaf39.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # The repository is the folder above tests/. R15_04 needs root
 # (bind mounts); it is skipped otherwise.
 import os as _os, tempfile as _tempfile

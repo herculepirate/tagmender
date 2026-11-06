@@ -32,7 +32,7 @@ Everything else is optional and can wait. Keys stay on your computer, readable o
 
 ## 3. Choose a profile
 
-A profile says what happens to your albums. Open **Profiles** in the sidebar, **New Profile…**,
+A profile says what happens to your albums. Open **Preferences › Profiles** (Ctrl+,), **New Profile…**,
 and start from one of:
 
 - **Keep My Files as They Are**: tags fixed where the files are; nothing renamed or moved. The

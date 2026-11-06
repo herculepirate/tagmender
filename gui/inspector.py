@@ -56,6 +56,7 @@ MIN_SIDE = 100                                       # a cover you choose: at le
 COVER_NAMES = ("cover", "folder", "front", "album", "albumart")
 PAD = 16                                             # the inspector's content margins (the 8-pt grid)
 TAG_COL = 130                                        # the Tag column's widest (names past it are elided)
+TAG_COL_WIDE = 220                                   # ... in a wide inspector: a quarter of it, at most this
 VALUE_MIN = 120                                      # stacked, the values' column keeps at least this
 WRAP_UNDER = 340                                     # narrower than this, values wrap instead of being cut
 ROW_AIR = 8                                          # added to a wrapped row: its lines breathe (the 8-pt grid)
@@ -657,7 +658,8 @@ class TagsView(QWidget):
         # (stacked, in a narrow inspector: the values keep most of the room, the name is elided first)
         # (but the name whole when the values keep VALUE_MIN: they wrap, a name is cut)
         room = max(int((t.viewport().width() - 28) * 0.45), t.viewport().width() - 28 - VALUE_MIN)
-        cap = TAG_COL if not getattr(self, "stacked", False) else min(TAG_COL, max(80, room))
+        side = max(TAG_COL, min(TAG_COL_WIDE, (t.viewport().width() - 28) // 4))   # (wider: whole names)
+        cap = side if not getattr(self, "stacked", False) else min(TAG_COL, max(80, room))
         t.horizontalHeader().resizeSection(1, min(cap, max(56, t.columnWidth(1))))
         self.fit_rows()
         self.row_timer.start()                               # (again once the columns have their widths)

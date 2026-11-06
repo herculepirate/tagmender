@@ -201,7 +201,8 @@ def genres_for(http, files):
         d = http.get_json(f"https://musicbrainz.org/ws/2/release-group/{rg}?inc=genres&fmt=json", "mb") or {}
         names = [g["name"] for g in sorted(d.get("genres") or [], key=lambda g: -g.get("count", 0))]
     if not names:
-        did = get(f0, "DISCOGS_RELEASE_ID")
+        import companions
+        did = get(f0, "DISCOGS_RELEASE_ID") if companions.discogs_on() else ""
         if did:
             d = http.get_json(f"https://api.discogs.com/releases/{did}", "discogs") or {}
             names = (d.get("styles") or []) + (d.get("genres") or [])
@@ -616,7 +617,8 @@ def main(argv=None):
         return 0
 
     db = sqlite3.connect(Path(args.cache_db).expanduser(), timeout=60)
-    http = ma.Http(db, dict(mc.DEFAULT_CFG), ma._discogs_token())
+    import companions
+    http = ma.Http(db, dict(mc.DEFAULT_CFG), ma._discogs_token() if companions.discogs_on() else "")
     run_dir = blob_dir = None
     if args.apply:
         run_dir = out_dir / f"run-enrich-{time.strftime('%Y%m%d-%H%M%S')}"

@@ -36,7 +36,7 @@ from .i18n import N_, tr
 
 rq.translate = tr                                       # (notices for the app: in the language chosen)
 
-PAGE = "Setup"                                          # the page's name in the window
+PAGE = "Setup"                                          # the page's name (a tab of Preferences)
 FIRST_RUN_PREF = "setup_seen"                          # gui.json: Setup was shown once, or skipped
 OPEN = N_("Open Setup")
 LATER = N_("Set Up Later")
@@ -183,10 +183,7 @@ def open_setup(win, id=None) -> bool:
         if callable(getattr(win, "preferences", None)):
             win.preferences()
         return False
-    main.go(PAGE)
-    main.showNormal() if main.isMinimized() else None
-    main.raise_()
-    main.activateWindow()
+    main.go(PAGE)                                        # (a tab of Preferences: it comes to the front)
     if id:
         main.pages[PAGE].show_row(id)
     return True
@@ -460,6 +457,14 @@ class Setup(QWidget):
                                              "is for, what stops without it and where to get it. Keys are kept "
                                              "only on this computer, readable by you alone, and never shown "
                                              "again.")))
+        # (a search field over the rows, as on Profiles: in Preferences there is no toolbar search)
+        self.find = QLineEdit()
+        self.find.setPlaceholderText(tr("Search setup"))
+        self.find.setAccessibleName(tr("Search setup"))
+        self.find.setClearButtonEnabled(True)
+        self.find.setMaximumWidth(320)
+        self.find.textChanged.connect(self.filter)
+        lay.addWidget(self.find)
         # the welcome line of the first start
         self.banner = QFrame()
         self.banner.setProperty("role", "panel")
@@ -564,7 +569,7 @@ class Setup(QWidget):
             w.setFocus(Qt.OtherFocusReason)
 
     def filter(self, text):
-        """The window's search field: rows whose words hold the text (a section with none is hidden)."""
+        """Its search field: rows whose words hold the text (a section with none is hidden)."""
         text = (text or "").casefold().strip()
         for head, rows in self.heads:
             shown = 0

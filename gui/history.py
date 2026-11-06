@@ -7,8 +7,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from . import sheets
 from .common import ex, filter_table, folder_item, heading, left_header, status_cell
-from .i18n import tr
+from .i18n import N_, tr
+
+# Clear History…: (days kept back, words); None clears everything
+CLEAR_CHOICES = ((None, N_("Everything")), (1, N_("Older Than 1 Day")), (5, N_("Older Than 5 Days")),
+                 (10, N_("Older Than 10 Days")))
 
 
 class History(QWidget):
@@ -39,8 +44,33 @@ class History(QWidget):
         b.setAccessibleName(tr("Refresh"))
         b.setToolTip(tr("Refresh (Ctrl+R)"))
         b.clicked.connect(self.reload)
-        lay.addWidget(b, 0, Qt.AlignLeft)
+        from PySide6.QtWidgets import QHBoxLayout, QMenu
+        line = QHBoxLayout()
+        line.addWidget(b)
+        self.clear_btn = QPushButton(tr("Clear History…"))
+        self.clear_btn.setAccessibleName(tr("Clear History"))
+        self.clear_btn.setToolTip(tr("Forget what was excluded: all of it, or what is older than a few days"))
+        m = QMenu(self.clear_btn)
+        for days, words in CLEAR_CHOICES:
+            m.addAction(tr(words)).triggered.connect(lambda _=False, d=days: self.clear(d))
+        self.clear_btn.setMenu(m)
+        line.addWidget(self.clear_btn)
+        line.addStretch(1)
+        lay.addLayout(line)
         self.reload()
+
+    def clear(self, days) -> int:
+        """Clear History… (asked first): everything, or what is older than DAYS days."""
+        what = (tr("Clear the whole history?") if days is None else
+                tr("Clear the history older than {n} days?").format(n=days) if days != 1 else
+                tr("Clear the history older than 1 day?"))
+        if not sheets.confirm(self, what, tr("The list of what the rules excluded is cleared. The rules, and "
+                                             "what they leave alone, stay as they are."),
+                              tr("This cannot be undone."), tr("Clear History"), destructive=True):
+            return 0
+        n = ex.State().clear_history(days)
+        self.reload()
+        return n
 
     def reload(self):
         rows = ex.State().history(500)

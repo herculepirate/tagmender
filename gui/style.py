@@ -13,7 +13,7 @@ from .i18n import N_
 SPACE = {"xs": 4, "s": 8, "m": 16, "l": 24}
 MARGIN = 20                         # page content margins
 SIDEBAR = (220, 180, 320)           # width, min, max
-INSPECTOR = (320, 280, 480)
+INSPECTOR = (320, 280, 960)          # width, min, max (drag it wider to see whole values)
 TOOLBAR = 44
 ROW = 28
 CORNER = 8
@@ -209,6 +209,8 @@ def stylesheet():
     QToolButton#settingScope {{ color: {muted}; font-size: 11px; border: none; padding: 0 2px; }}
     QToolButton#settingScope[own="true"] {{ color: {accent}; font-weight: 600; }}
     QToolButton#settingScope::menu-indicator {{ image: none; width: 0; }}
+    QToolButton#settingMore {{ color: {muted}; border: none; padding: 0 4px; }}
+    QToolButton#settingMore::menu-indicator {{ image: none; width: 0; }}
     QLabel[role="headline"] {{ font-size: 13px; font-weight: 600; color: {ink}; }}
     QLabel[role="hint"], QLabel[role="caption"] {{ color: {muted}; }}
     QLabel[role="caption"] {{ font-size: 11px; }}

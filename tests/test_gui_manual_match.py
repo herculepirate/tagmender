@@ -27,7 +27,7 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 PLUGIN = Path(sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-")
-              else Path("../picard-discogs-enrichment")).expanduser()
+              else Path("plugins_builtin/discogs")).expanduser()
 import exclusions as ex  # noqa: E402
 import executor  # noqa: E402
 import logsetup  # noqa: E402

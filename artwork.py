@@ -2,7 +2,7 @@
 
 Providers, tried in order until one gives a cover:
 
-  coverup   CoverUp's own pipeline (herculepirate/picard-coverup), headless: your CoverUp
+  coverup   the built-in CoverUp plugin's pipeline (plugins_builtin/coverup), headless: your CoverUp
             settings from Picard.ini (or CoverUp's defaults), its sources, release matching,
             visual consensus and "local scans first" rule - with the identified release IDs.
   caa       Cover Art Archive, for a MusicBrainz release (or release group) ID: the front,
@@ -157,7 +157,8 @@ class CoverUp:
             found = tagger_settings.ini_path()
             ini = str(found) if found else cb.DEFAULT_INI
         self.s, self.plugin, _ = cb.batch_settings(ini, "full")
-        self.http = HttpClient(version="tagmender", cache_dir=ex.STATE_DIR / "coverup_cache",
+        import version as _v
+        self.http = HttpClient(version=_v.VERSION, cache_dir=ex.STATE_DIR / "coverup_cache",
                                cache_hours=float(self.s["http_cache_hours"]))
         if only == "web":
             self.name = "web"
@@ -165,6 +166,8 @@ class CoverUp:
         elif only == "local":
             self.name = "local"
             self.s = self.s.with_(providers_enabled=["local"])
+        if not companions.discogs_on():                     # (the Discogs plugin off: CoverUp asks it nothing)
+            self.s = self.s.with_(providers_enabled=[p for p in self.s["providers_enabled"] or () if p != "discogs"])
         import coverup_batch
         self.args = argparse.Namespace(local_min=local_min, low_res_floor=LOW_RES_FLOOR, allow_template=False,
                                        title_font=None, fonts_dir=str(Path(coverup_batch.__file__).parent /
@@ -567,7 +570,7 @@ def embed_cap(profile=None) -> int:
     own = profile_embed_side(profile["artwork"]) if profile is not None else EMBED_MAX_SIDE
     if own != EMBED_MAX_SIDE:
         return own or 100_000                 # (the profile's own size; 0: as found)
-    if not any(x in srcs for x in ("coverup", "web", "local")):
+    if not any(x in srcs for x in ("coverup", "web", "local")) or not companions.coverup_on():
         return EMBED_MAX_SIDE                 # (Cover Art Archive and Discogs covers embed at TagMender's size)
     if _CAP:
         return _CAP[0]
@@ -1492,6 +1495,11 @@ def chain(profile, staging: Path, http=None, token="", log=None) -> list:
     limit = int(art.get("max_bytes") or MAX_BYTES)
     out = []
     for name in sources_of(art):
+        off = {"coverup": "CoverUp", "web": "CoverUp", "local": "CoverUp", "discogs": "Discogs"}.get(name)
+        if off and not (companions.coverup_on() if off == "CoverUp" else companions.discogs_on()):
+            if log:
+                log.info("artwork: the %s plugin is switched off (Preferences › Plugins)", off)
+            continue
         try:
             if name in ("coverup", "web", "local"):
                 out.append(CoverUp(staging, only=None if name == "coverup" else name))

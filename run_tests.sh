@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Run every test suite. Needs ffmpeg, and the two plugin clones (defaults: next to this folder, ../picard-...).
+# Run every test suite. Needs ffmpeg. The built-in Discogs and CoverUp plugins are in plugins_builtin/.
 #   ./run_tests.sh                       with python3
 #   PYTHON=/path/to/python3 ./run_tests.sh
 # Tests never touch your settings or music: each uses temporary folders and its own XDG dirs.
 set -u
 cd "$(dirname "$0")"
 PY=${PYTHON:-python3}
-export TAGMENDER_DISCOGS_PLUGIN=${TAGMENDER_DISCOGS_PLUGIN:-$PWD/../picard-discogs-enrichment}
-export TAGMENDER_COVERUP_DIR=${TAGMENDER_COVERUP_DIR:-$PWD/../picard-coverup}
+export TAGMENDER_DISCOGS_PLUGIN=${TAGMENDER_DISCOGS_PLUGIN:-$PWD/plugins_builtin/discogs}
+export TAGMENDER_COVERUP_DIR=${TAGMENDER_COVERUP_DIR:-$PWD/plugins_builtin/coverup}
 export QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-offscreen}
 # never your own tagger settings (Flatpak or native): tests that need some set their own
 export TAGMENDER_TAGGER_INI=${TAGMENDER_TAGGER_INI_FOR_TESTS:-/nonexistent/tagger.ini}
@@ -23,7 +23,7 @@ for t in tests/test_*.py; do
     tests/test_match.py) args=("$TAGMENDER_DISCOGS_PLUGIN");;
     tests/test_coverup_batch.py) args=("$TAGMENDER_COVERUP_DIR");;
   esac
-  out=$(XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) "$PY" -W ignore "$t" "${args[@]}" 2>&1)
+  out=$(XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) XDG_DATA_HOME=$(mktemp -d) "$PY" -W ignore "$t" "${args[@]}" 2>&1)
   rc=$?
   ran=$(printf '%s\n' "$out" | grep -oE '^Ran [0-9]+' | grep -oE '[0-9]+' || echo 0)
   total=$((total + ran))

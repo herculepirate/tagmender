@@ -11,8 +11,8 @@ Nothing you use today stops working. The batch tools keep their options, output 
 - **Discogs token**: `DISCOGS_TOKEN` still works. `tagmender setup` can store it in
   `~/.config/tagmender/discogs_token` (mode 600), so the systemd service needs no `EnvironmentFile`.
 - **AcoustID key**: `~/.config/tagmender/acoustid_key` is read as before.
-- **Plugin clones**: found next to the TagMender folder; `TAGMENDER_DISCOGS_PLUGIN` and
-  `TAGMENDER_COVERUP_DIR` override; installed packages carry their own copies.
+- **Discogs and CoverUp code**: built in since 0.8.9 (`plugins_builtin/`); no clones are needed.
+  `TAGMENDER_DISCOGS_PLUGIN` and `TAGMENDER_COVERUP_DIR` still name a development copy to use instead.
 
 ## Behaviour that changed
 - `TAGMENDER_REASON` now starts with reason codes: `incomplete_album: review: track count

@@ -1,6 +1,6 @@
 # Ninth independent review of TagMender's file operations (code at 72671d5). Each test asserts
 # the correct behaviour and fails at 72671d5.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
 #     python3 -W ignore <this file>
 import os as _os, tempfile as _tempfile
 _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")

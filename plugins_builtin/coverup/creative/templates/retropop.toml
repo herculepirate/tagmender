@@ -1,0 +1,9 @@
+# CoverUp style template. Edit freely or copy to make your own (any *.toml in this folder).
+title = "Retro pop"
+# {album}, {artist}, {year}, {genre}, {era} are filled in automatically
+prompt = "Album cover artwork for \"{album}\" by {artist}: a retro pop-art poster, halftone dots, bold outlines, bright saturated colours. {genre} {era} No text, no letters, no logos."
+negative = "text, letters, words, typography, watermark, logo, signature, frame, border, low quality, blurry"
+procedural = "halftone"   # style used when no AI backend is used: gradient, nebula, rings, grid, minimal, bauhaus, halftone, waves, brush
+palette = ['#ffbe0b', '#fb5607', '#ff006e', '#3a86ff']
+overlay_logo = true
+overlay_title = true

@@ -163,7 +163,13 @@ class Shell(unittest.TestCase):
             self.assertIn(key, self.win.commands)
         prefs = self.win.preferences()
         self.assertEqual(list(prefs.panes), ["General", "Keys", "Account", "Network", "Files", "Advanced",
-                                             "Plugins"])
+                                             "Plugins", "Profiles", "Setup"])
+        self.assertEqual([n for n, _l, _i in self.gui.preferences.PANES][:3], ["General", "Profiles", "Setup"])
+        self.win.go("Profiles")                                          # (a tab of Preferences now)
+        self.assertIs(prefs.stack.currentWidget(), self.win.pages["Profiles"])
+        for name in ("Profiles", "Setup"):                                # (not in the sidebar)
+            with self.assertRaises(StopIteration):
+                self.win.nav.row_of(name)
         self.assertTrue(prefs.fields and prefs.checks is not None and prefs.anon is not None)
 
     def test_the_toolbar_has_one_prominent_button_and_it_is_apply(self):
@@ -197,7 +203,7 @@ class Shell(unittest.TestCase):
     def test_sidebar_headers_are_not_selectable_and_arrows_pass_over_them(self):
         nav = self.win.nav
         headers = [nav.item(i) for i in range(nav.count()) if nav.item(i).data(Qt.UserRole + 1)]
-        self.assertEqual([h.text() for h in headers], ["Library", "Automation", "Setup"])
+        self.assertEqual([h.text() for h in headers], ["Library", "Automation"])   # (Profiles, Setup: Preferences)
         for h in headers:
             self.assertFalse(h.flags() & Qt.ItemIsSelectable)
         self.win.go("History")
@@ -630,10 +636,6 @@ class Shell(unittest.TestCase):
         self.assertEqual(pf.load("Alpha")["description"], "changed")
         self.assertEqual(pr.desc.text(), "b")
         self.assertFalse(self.win.isWindowModified())
-        self.win.search_box.setText("alp")
-        self.assertTrue(pr.list.item(names.index("Beta")).isHidden())
-        self.assertFalse(pr.list.item(names.index("Alpha")).isHidden())
-        self.win.search_box.setText("")
         self.assertEqual(pr.op.currentText(), "Fix in place")             # words, the key behind them
         self.assertEqual(pr.op.currentData(), "in_place")
 
@@ -683,7 +685,7 @@ class Shell(unittest.TestCase):
         self.assertIn(keys.fields["discogs"].placeholderText(), ("Not set", "Saved on this computer",
                                                                 "Set by the environment"))
 
-    def test_the_last_page_and_inspector_tab_come_back(self):
+    def test_a_new_session_opens_on_the_overview_with_the_last_inspector_tab(self):
         self.win.go("Jobs")
         self.win.go("Overview")
         self.win.inspector.show_tab("Evidence")
@@ -691,7 +693,7 @@ class Shell(unittest.TestCase):
         settle(self.app)
         again = self.gui.Main()
         try:
-            self.assertIs(again.stack.currentWidget(), again.pages["History"])
+            self.assertIs(again.stack.currentWidget(), again.pages["Overview"])   # (never the last page)
             self.assertEqual(again.inspector.tabs.currentIndex(), self.gui.inspector.TABS.index("Evidence"))
         finally:
             again.close()

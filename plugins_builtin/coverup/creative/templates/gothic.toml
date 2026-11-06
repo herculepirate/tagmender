@@ -1,0 +1,9 @@
+# CoverUp style template. Edit freely or copy to make your own (any *.toml in this folder).
+title = "Dark / Gothic"
+# {album}, {artist}, {year}, {genre}, {era} are filled in automatically
+prompt = "Album cover artwork for \"{album}\" by {artist}: a dark gothic scene, cathedral shadows, candlelight, ornate details, dramatic contrast. {genre} {era} No text, no letters, no logos."
+negative = "text, letters, words, typography, watermark, logo, signature, frame, border, low quality, blurry"
+procedural = "nebula"   # style used when no AI backend is used: gradient, nebula, rings, grid, minimal, bauhaus, halftone, waves, brush
+palette = ['#0d0d0d', '#5c0a0a', '#a4a4a4', '#2e1a47']
+overlay_logo = true
+overlay_title = true

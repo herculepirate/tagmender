@@ -103,7 +103,10 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None):
     mine = {fold(k): str(v).strip() for k, v in (c.get("file_under") or {}).items()
             if str(k).strip() and str(v).strip()}
     names, ids = _list(t, "albumartists"), _list(t, "musicbrainz_albumartistid")
-    sorts, dg = _list(t, "~albumartists_sort"), _list(t, "discogs_albumartist_id")
+    # (the Discogs ID: a Partial album's tag, or the credited Discogs artists the engine passes
+    # along unwritten for a release tagged from Discogs)
+    sorts = _list(t, "~albumartists_sort")
+    dg = _list(t, "discogs_albumartist_id") or _list(t, "~discogs_albumartist_id")
 
     def mapped(name):
         """Your own name for NAME: (name, keep) - keep when you mapped it to itself."""
@@ -174,6 +177,7 @@ def apply(targets: list, profile, members_of=None, discogs_members_of=None) -> l
     out = []
     for t in targets:
         t = dict(t)
+        t.pop("~discogs_albumartist_id", None)          # (the whole credit's: not the lead's)
         remove = [str(x) for x in t.get("~remove") or []]
         t["albumartist"] = t["albumartists"] = t["~albumartists"] = [name]
         for key, value in (("albumartistsort", sort), ("musicbrainz_albumartistid", mbid),

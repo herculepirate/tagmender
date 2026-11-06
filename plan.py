@@ -1010,7 +1010,8 @@ class Planner:
         import plugins
         if plugins.has_tag_processors():          # (then the plugins' tag changes: shown in the plan as any)
             was = set(out)
-            out = plugins.process_tags(out, {"file": str(f), "album_folder": str(Path(f).parent),
+            out = plugins.process_tags(out, {"file": str(f),   # (the album's folder: CD1/ CD2/ in it too)
+                                             "album_folder": str(getattr(self, "_album_dir", None) or Path(f).parent),
                                              "profile": getattr(self.profile, "name", "")})
             gone = list(gone) + [k for k in was if k not in out and k not in gone]
         back = {v: k for k, v in spell.items()}
@@ -1221,17 +1222,41 @@ class Planner:
             full = getattr(prop, "full_targets", None)
             full = {Path(f): t for f, t in zip(files, full)} if full and len(full) == len(files) else targets
             import engine as _engine
+            # (what each file is given, copied first: full may be targets itself, which this fills)
+            given = {f: dict(full.get(f) or targets.get(f) or {}) for f in kept}
+            self._album_dir = getattr(prop, "source_dir", None)
+            was_working = plugins.working()
             try:
-                for f in kept:
-                    try:
-                        before_s = tagio.read(f)
-                    except tagio.Unsupported:
-                        continue
-                    targets[f] = self._scripted(f, before_s, dict(full.get(f) or targets.get(f) or {}))
+                for _round in (1, 2):
+                    for f in kept:
+                        try:
+                            before_s = tagio.read(f)
+                        except tagio.Unsupported:
+                            continue
+                        targets[f] = self._scripted(f, before_s, dict(given.get(f) or {}))
+                    failed = plugins.broken_since(was_working)
+                    if _round == 2:
+                        late = [pid for pid, _w in failed if pid not in noted]
+                        if late:                  # (another plugin failed in the second pass too)
+                            entry["conflicts"].append("the plugin " + ", ".join(late) + " failed while this "
+                                                      "album was planned and is switched off; preview it again")
+                            entry["status"] = "blocked"
+                            return entry
+                        break
+                    if not failed:
+                        break
+                    noted = {pid for pid, _w in failed}
+                    # (a plugin failed part-way: it is off now, so every file again without it -
+                    # never an album with its changes on some tracks only - and the plan says so)
+                    entry["notes"].append("the plugin " + ", ".join(dict.fromkeys(pid for pid, _w in failed)) +
+                                          " failed and is switched off: its tag changes are left out ("
+                                          + failed[0][1] + ")")
             except _engine.TaggerScriptError as exc:
                 entry["conflicts"].append(f"a tagger script failed on {f.name}: {exc}")
                 entry["status"] = "blocked"
                 return entry
+            finally:
+                self._album_dir = None                       # (this album's only)
         # 3. destination root (never created: an unmounted share must not fill the local disk)
         dest_root = None
         if flat:
@@ -1303,6 +1328,7 @@ class Planner:
             entry["notes"].append("Partial identification on files that already name a release: only empty "
                                   "fields filled, their release tags and TagMender mark left as they are")
         win_split, split = {}, False
+        naming_with = plugins.working()                   # (a $function of a plugin failing while naming)
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -1740,6 +1766,11 @@ class Planner:
             entry["conflicts"].append("the album's folders are too long for Windows' path length and could not be "
                                       "shortened alike for all its tracks; shorten the names (profile "
                                       "abbreviations) or set tagger.windows_long_paths")
+        late = plugins.broken_since(naming_with)
+        if late:                                  # (some tracks named with its function, the rest without)
+            entry["conflicts"].append("the plugin " + ", ".join(dict.fromkeys(pid for pid, _w in late)) +
+                                      " failed while this album's files were named and is switched off; "
+                                      "preview it again for names made without it (" + late[0][1] + ")")
         if entry["conflicts"]:
             entry["status"] = "blocked"
             return entry

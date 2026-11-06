@@ -158,6 +158,9 @@ def main(argv=None):
     out_dir = Path(args.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     args.db = out_dir / "match_state.db"
+    import companions
+    if not companions.discogs_on():
+        sys.exit("This tool identifies with Discogs. The Discogs plugin is switched off (Preferences › Plugins, or: tagmender plugins enable discogs).")
     token = ma._discogs_token()
     if not token:
         import requirements

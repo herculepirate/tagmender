@@ -111,8 +111,13 @@ class CoverChooser(QDialog):
         start(self, lambda _w: covers_find.own(folder, files), done, failed=self._failed)
 
     def search(self):
+        import companions
         import covers_find
         if self.searching:
+            return
+        if not companions.coverup_on():                      # (the online search is CoverUp's)
+            self.status.setText(tr("Searching online uses the CoverUp plugin, which is switched off "
+                                   "(Preferences › Plugins)."))
             return
         self.searching = True
         self.more.setEnabled(False)

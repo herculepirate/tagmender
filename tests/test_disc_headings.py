@@ -2,7 +2,7 @@
 (a 2-CD album listed "CD 1 - Album", "SIDE A", "SIDE B", "CD 2 - Instrumentals").
 
 Run:  python3 tests/test_disc_headings.py   (offline; needs the Discogs plugin clone,
-TAGMENDER_DISCOGS_PLUGIN or ../picard-discogs-enrichment)
+TAGMENDER_DISCOGS_PLUGIN or plugins_builtin/discogs)
 """
 import os
 import sys
@@ -16,7 +16,7 @@ os.environ["TAGMENDER_TAGGER_INI"] = "/nonexistent/Picard.ini"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import match_albums as ma  # noqa: E402
 
-PLUGIN = os.environ.get("TAGMENDER_DISCOGS_PLUGIN", "../picard-discogs-enrichment")
+PLUGIN = os.environ.get("TAGMENDER_DISCOGS_PLUGIN", "plugins_builtin/discogs")
 
 
 def heading(title):

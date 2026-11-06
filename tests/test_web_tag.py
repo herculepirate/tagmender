@@ -249,7 +249,7 @@ class WebTag(Base):
 
     def _plugin_or_skip(self):
         sys.path.insert(0, _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
-                        or str(HERE / "herculepirate" / "picard-discogs-enrichment"))
+                        or str(Path(__file__).resolve().parent.parent / "plugins_builtin" / "discogs"))
         try:
             import discogs_mapping
         except ImportError:
@@ -451,7 +451,7 @@ class WebTag(Base):
 
     def test_discogs_only_match_is_tagged_from_its_release(self):
         sys.path.insert(0, _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
-                        or str(HERE / "herculepirate" / "picard-discogs-enrichment"))
+                        or str(Path(__file__).resolve().parent.parent / "plugins_builtin" / "discogs"))
         try:
             import discogs_mapping
         except ImportError:

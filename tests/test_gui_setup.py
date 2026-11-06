@@ -124,7 +124,7 @@ class SetupPage(unittest.TestCase):
         self.assertIn("setup", help_menu)
         self.win.go("Overview")
         self.win.act("setup").trigger()
-        self.assertIs(self.win.stack.currentWidget(), self.page)
+        self.assertTrue(self.win.showing("Setup"))
 
     def test_statuses(self):
         r = self.page.rows
@@ -191,7 +191,7 @@ class SetupPage(unittest.TestCase):
         self.win.go("Overview")
         self.assertTrue(rq.nothing_set_up())
         self.assertTrue(self.win.first_run())
-        self.assertIs(self.win.stack.currentWidget(), self.page)
+        self.assertTrue(self.win.showing("Setup"))
         self.assertFalse(self.page.banner.isHidden())
         self.assertIn("Welcome to TagMender", self.page.welcome_text.text())
         self.page.later.click()
@@ -230,10 +230,11 @@ class SetupPage(unittest.TestCase):
         self.assertIn(rq.notice("acoustid", "app"), body)
         self.assertIn(rq.notice("acoustid_user", "app"), body)
         self.assertIn("Open Setup", ask.call_args.args[3])
-        self.assertIs(self.win.stack.currentWidget(), self.page)               # (Open Setup: the page)
+        self.assertTrue(self.win.showing("Setup"))               # (Open Setup: the page)
         first = next(i for i in acoustid_submit.NEEDS if rq.problem(i))
         r = self.page.rows[first]
-        self.assertTrue((r.field or r.copy).hasFocus() or self.app.focusWidget() is None)
+        # (Preferences' own focus: offscreen, the window itself does not become the active one)
+        self.assertIs(self.win.prefs_window.focusWidget(), r.field or r.button or r.copy)
 
     def test_collections_without_a_login_say_what_is_missing(self):
         from gui import account
@@ -251,7 +252,7 @@ class SetupPage(unittest.TestCase):
         body = ask.call_args.args[2]
         self.assertIn("you are not logged in to MusicBrainz", body)
         self.assertNotIn("client ID", body)
-        self.assertIs(self.win.stack.currentWidget(), self.page)
+        self.assertTrue(self.win.showing("Setup"))
         self.assertNotIn(SECRET, texts(self.win))
 
     def test_play_without_qt_multimedia_says_so(self):
@@ -278,7 +279,7 @@ class SetupPage(unittest.TestCase):
             self.assertIn("Open Setup", dlg.no_drive.text())
             dlg.no_drive.linkActivated.emit("setup:discid")
         settle(self.app)
-        self.assertIs(self.win.stack.currentWidget(), self.page)
+        self.assertTrue(self.win.showing("Setup"))
         self.assertNotIn("pip", browser.NO_DISCID)
 
     # ---- notices after a preview, in the inspector and in Checks -----------------
@@ -298,7 +299,7 @@ class SetupPage(unittest.TestCase):
         self.assertNotIn("missing_credentials", ov.summary.text())
         self.assertIn("musicbrainz: rate limited", ov.summary.text())          # (other notes stay there)
         ov.setup_note.linkActivated.emit("setup:discogs")
-        self.assertIs(self.win.stack.currentWidget(), self.page)
+        self.assertTrue(self.win.showing("Setup"))
         # a key saved since: the next preview has no banner
         rq.store("discogs", SECRET)
         self.win.go("Overview")
@@ -329,7 +330,7 @@ class SetupPage(unittest.TestCase):
         links = [lb for lb in prefs.checks.findChildren(QLabel) if 'href="setup"' in lb.text()]
         self.assertEqual(len(links), 1)
         links[0].linkActivated.emit("setup")
-        self.assertIs(self.win.stack.currentWidget(), self.page)
+        self.assertTrue(self.win.showing("Setup"))
 
     # ---- closing ------------------------------------------------------------------
     def test_closing_with_a_key_typed_asks(self):
@@ -350,11 +351,13 @@ class SetupPage(unittest.TestCase):
         settle(self.app, 20)
         self.assertEqual((self.win.width(), self.win.height()), (960, 600))
         for w in self.page.findChildren(QAbstractButton) + self.page.findChildren(QLineEdit):
+            if isinstance(w.parentWidget(), QLineEdit):
+                continue                                    # (a search field's own clear button)
             self.assertTrue(w.accessibleName() or w.text(), w)
-        self.win.search_box.setText("fingerprint")
+        self.page.find.setText("fingerprint")
         self.assertFalse(self.page.rows["acoustid_user"].isHidden())
         self.assertTrue(self.page.rows["gnudb"].isHidden())
-        self.win.search_box.clear()
+        self.page.find.clear()
         self.assertFalse(self.page.rows["gnudb"].isHidden())
 
 

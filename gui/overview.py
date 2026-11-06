@@ -285,6 +285,15 @@ class Overview(QWidget):
                                     "the sources chosen beside it. Nothing is written until you apply."))
         self.look_btn.clicked.connect(self.look_up_clicked)
         look.addWidget(self.look_btn)
+        # (Refresh: the selected albums - none selected: all - looked up again with the profile as
+        # it is now, after you changed a setting; what was found before is replaced)
+        self.refresh_btn = QPushButton(tr("Refresh"))
+        self.refresh_btn.setAccessibleName(tr("Look up the selected albums again with the current settings"))
+        self.refresh_btn.setToolTip(tr("Looks up the selected albums again (every album when none is selected) "
+                                       "with the profile as it is now, after you changed a setting (Ctrl+R). "
+                                       "Nothing is written until you apply."))
+        self.refresh_btn.clicked.connect(self.reload)
+        look.addWidget(self.refresh_btn)
         # (a choice other than the profile's is for this look-up only; this saves it into the profile)
         self.keep_link = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
         self.keep_link.setTextFormat(Qt.RichText)
@@ -294,6 +303,13 @@ class Overview(QWidget):
         look.addWidget(self.keep_link)
         look.addStretch(1)
         rl.addLayout(look)
+        self.stale_note = QLabel("")                         # (settings changed since the look-up)
+        self.stale_note.setProperty("role", "attention")
+        self.stale_note.setTextFormat(Qt.RichText)
+        self.stale_note.setWordWrap(True)
+        self.stale_note.linkActivated.connect(lambda _h: self.refresh_stale())
+        self.stale_note.hide()
+        rl.addWidget(self.stale_note)
         # where copied or moved albums go: the profile's folder, or another for this preview and Apply
         lib = QHBoxLayout()
         lib.setContentsMargins(0, 0, 0, 0)
@@ -520,6 +536,10 @@ class Overview(QWidget):
                 act.triggered.connect(lambda _=False, m=mode: self.look_up(m))
             look.setEnabled(not self.running or bool(self.looking))     # (while one runs: queued)
             mine = [look.menuAction()]
+            again = QAction(tr("Refresh with Current Settings"), self)   # (the profile as it is now)
+            again.triggered.connect(self.reload)
+            again.setEnabled(not self.running or bool(self.looking))
+            mine.append(again)
             # (the profile of the selected albums: theirs, or the one chosen above)
             if len(self.model.albums) >= 2:
                 pm = QMenu(tr("Profile"), self)
@@ -979,8 +999,50 @@ class Overview(QWidget):
         """What a look-up depends on (the profile as it is now, and the sources): the same again
         finds the same, so it is not asked of the databases twice."""
         import json
-        return json.dumps([name or self.profile.currentText(), mode, self.ocr.isChecked(), prof], sort_keys=True,
-                          default=str)
+        # (the profile's settings themselves: a changed setting is a new look-up)
+        import companions
+        settings = prof.to_dict() if hasattr(prof, "to_dict") else prof
+        # (and the built-in plugins' switches: Discogs or CoverUp switched on or off is a new look-up)
+        return json.dumps([name or self.profile.currentText(), mode, self.ocr.isChecked(), settings,
+                           companions.discogs_on(), companions.coverup_on()], sort_keys=True, default=str)
+
+    def stale_albums(self) -> list:
+        """The albums looked up before their profile (or the sources, or reading scans) changed:
+        Refresh looks them up again with the profile as it is now."""
+        if not self.plan or not self.looked:
+            return []
+        mode = self.sources.currentData() or "profile"
+        now, out = {}, []
+        for a in self.plan.get("albums") or []:
+            k = self.album_key(a)
+            if k not in self.looked or a.get("status") == "done":
+                continue
+            name = self.profile_of(a)
+            if name not in now:
+                try:
+                    now[name] = self.lookup_stamp(self.planning_profile(mode, name), mode, name)
+                except pf.ProfileError:
+                    now[name] = None
+            if now[name] is not None and self.looked[k] != now[name]:
+                out.append(a)
+        return out
+
+    def check_stale(self):
+        """Say when albums were looked up with settings since changed, with Refresh for them."""
+        if not hasattr(self, "stale_note"):
+            return
+        n = 0 if self.running else len(self.stale_albums())
+        if n:
+            self.stale_note.setText(tr("{0} looked up before the profile's settings changed. "
+                                       '<a href="refresh">Refresh with the new settings</a>')
+                                    .format(tr("1 album was") if n == 1 else tr("{0} albums were").format(n)))
+        self.stale_note.setVisible(bool(n))
+
+    def refresh_stale(self):
+        """The albums looked up with settings since changed, looked up again with the new ones."""
+        stale = self.stale_albums()
+        if stale:
+            self.look_up(self.sources.currentData() or "profile", stale, again=True)
 
     def reload(self):
         """Refresh (Ctrl+R): look the selected albums (none selected: all of them) up again, even
@@ -1183,6 +1245,7 @@ class Overview(QWidget):
         self.looking = {}
         self.show_profile_column()
         self.fit_status()
+        self.check_stale()
         self.table.sortByColumn(0, Qt.AscendingOrder)
         self.show_counts()
         self.refresh_overrides()

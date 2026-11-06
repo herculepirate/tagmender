@@ -108,16 +108,13 @@ class KeepDaysCarriedOver(Base):
 
 
 class OneBadValue(Base):
-    def test_a_plugin_folder_since_removed_blocks_no_other_change(self):
-        app_settings.save(dict(app_settings.DEFAULTS))
-        folder = self.tmp / "plugins"
-        folder.mkdir()
-        app_settings.set_value("plugins.folder", str(folder))
-        folder.rmdir()
+    def test_an_old_code_folder_setting_blocks_no_change(self):
+        old = dict(app_settings.DEFAULTS, plugins={"folder": str(self.tmp / "nowhere"), "enabled": [],
+                                                   "settings": {}})       # (before 0.8.9; folder gone)
+        app_settings.save(old)
         app_settings.set_value("notifications.finished", False)
         self.assertFalse(app_settings.get("notifications.finished"))
-        with self.assertRaises(ValueError):                    # (the folder itself: still checked)
-            app_settings.set_value("plugins.folder", str(self.tmp / "nowhere"))
+        self.assertEqual(app_settings.get("plugins.builtin_off"), [])
 
     def test_tesseract_packs_with_an_underscore(self):
         app_settings.save(dict(app_settings.DEFAULTS))

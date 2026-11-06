@@ -619,6 +619,17 @@ class State:
         return self.db.execute("SELECT ts, job, item, label, rule_name, detail FROM history ORDER BY ts DESC LIMIT ?",
                                (limit,)).fetchall()
 
+    def clear_history(self, older_than_days=None) -> int:
+        """Forget the exclusion history: all of it (None), or what is older than that many days.
+        Only the log: what the rules remember (ignored items, overrides) stays. Returns how many."""
+        if older_than_days is None:
+            n = self.db.execute("DELETE FROM history").rowcount
+        else:
+            n = self.db.execute("DELETE FROM history WHERE ts < ?",
+                                (time.time() - float(older_than_days) * 86400,)).rowcount
+        self.db.commit()
+        return n
+
 
 def gate(folder_or_files, job, rules=None, release=None, process_anyway=False, state=None):
     """The one check every tool runs before touching an album (and again with

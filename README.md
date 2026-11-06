@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.8.8" src="https://img.shields.io/badge/version-0.8.8-0f7b7b">
+  <img alt="Version 0.8.9" src="https://img.shields.io/badge/version-0.8.9-0f7b7b">
   <img alt="Licence GPL-2.0-or-later" src="https://img.shields.io/badge/licence-GPL--2.0--or--later-blue">
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
@@ -164,9 +164,8 @@ what it enables, where to get it, and whether it is set. Keys are stored in
 |---|---|
 | Discogs token, AcoustID key, fpcalc, ffmpeg | MusicBrainz login (collections, ratings), AcoustID user key (submitting), gnudb e-mail, fanart.tv / TheAudioDB / Last.fm keys, web search (off by default), Tesseract and pyzbar (scans), python-discid (CD drive), Qt Multimedia (player) |
 
-All the services are free. From a clone, Discogs data and artwork also need
-[Discogs Enrichment](https://github.com/herculepirate/picard-discogs-enrichment) and
-[CoverUp](https://github.com/herculepirate/picard-coverup). The packages include both.
+All the services are free. Discogs matching and cover art come with TagMender as two built-in
+plugins, Discogs and CoverUp, on from the start; switch either off in Preferences › Plugins.
 Step by step: [Setup](docs/SETUP.md).
 
 **Building the packages yourself:** `packaging/` builds the .deb, the AppImage and the

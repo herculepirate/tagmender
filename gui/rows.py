@@ -559,6 +559,7 @@ class Row(QFrame):
         self.scope.hide()
         head.addWidget(self.scope, 0, Qt.AlignVCenter)
         head.addStretch(1)
+        self._head = head
         left.addLayout(head)
         self.foot = caption(footnote)
         self.foot.setVisible(bool(footnote))
@@ -611,6 +612,32 @@ class Row(QFrame):
             self._scope_actions[0].setChecked(not own)
             self._scope_actions[1].setChecked(bool(own))
         self.scope.show()
+
+    def set_apply_all(self, apply):
+        """A profile's setting: "Apply to All Profiles…" calls apply(). In the scope menu of a
+        shared setting (after set_scope), else in a small ⋯ menu of the row's own. Once."""
+        if getattr(self, "_apply_all", None) is not None:
+            return
+        from PySide6.QtWidgets import QMenu
+        self._apply_all = apply
+        text = tr("Apply to All Profiles…")
+        if self.scope.menu() is not None:
+            self.scope.menu().addSeparator()
+            self.scope.menu().addAction(text).triggered.connect(lambda: apply())
+            return
+        more = QToolButton()
+        more.setObjectName("settingMore")
+        more.setText("⋯")
+        more.setAutoRaise(True)
+        more.setPopupMode(QToolButton.InstantPopup)
+        more.setCursor(Qt.PointingHandCursor)
+        more.setToolTip(tr("Apply this setting to all profiles"))
+        more.setAccessibleName(tr("More for {0}").format(self.label_text))
+        m = QMenu(more)
+        m.addAction(text).triggered.connect(lambda: apply())
+        more.setMenu(m)
+        self.more = more
+        self._head.insertWidget(self._head.count() - 1, more, 0, Qt.AlignVCenter)
 
     def changed(self) -> bool:
         return not self.dot.isHidden()

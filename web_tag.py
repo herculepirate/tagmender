@@ -1082,14 +1082,19 @@ def main(argv=None):
         return undo(out_dir, args.undo)
 
     cfg = dict(mc.DEFAULT_CFG)
-    token = ma._discogs_token()
-    if not token:                        # (said once; Discogs artist IDs are then left out)
+    import companions
+    token = ma._discogs_token() if companions.discogs_on() else ""
+    if not companions.discogs_on():      # (the Discogs plugin off: Discogs is asked nothing)
+        print("Note: the Discogs plugin is switched off (Preferences › Plugins): albums matched on Discogs "
+              "are left out, and so are Discogs artist IDs.", file=sys.stderr)
+    elif not token:                      # (said once; Discogs artist IDs are then left out)
         import requirements
         print(f"Note: {requirements.notice('discogs', 'cli', requirements.NOT_SET)}", file=sys.stderr)
     db = sqlite3.connect(Path(args.matches_db).expanduser(), timeout=60)
     http = ma.Http(db, cfg, "")
     ma.USER_AGENT = USER_AGENT
-    albums = unresolved(args.matches_db, args.only, args.include_review, not args.no_discogs)
+    albums = unresolved(args.matches_db, args.only, args.include_review,
+                        not args.no_discogs and companions.discogs_on())
     rules = exclusions.load_rules()
     print(f"{len(albums)} album(s) without a MusicBrainz/Discogs match")
     run_dir = blob_dir = None

@@ -1,7 +1,7 @@
 # Sixteenth independent review of TagMender's file operations (code at 7498e42 = 6c02ef6 plus
 # tests/fuzz/fuzz_bind.py). Each test asserts the correct behaviour and fails at that HEAD.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # The repository is the folder above tests/.
 # Picard reference for R16_05: metabrainz/picard master, picard/script/functions.py func_initials:
 #     return ''.join(a[:1] for a in text.split(" ") if a[:1].isalpha())

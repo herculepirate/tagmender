@@ -88,7 +88,7 @@ AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv",
              ".ape", ".wav", ".aif", ".aiff", ".dsf", ".dff", ".wma", ".mpc"}
 from version import VERSION as _VERSION  # noqa: E402
 USER_AGENT = f"TagMender/{_VERSION} ( https://github.com/herculepirate/tagmender )"   # MusicBrainz asks for app/version ( contact )
-DEFAULT_PLUGIN_DIR = str(companions.discogs_dir())   # env, settings, bundled, or a clone next to TagMender
+DEFAULT_PLUGIN_DIR = str(companions.discogs_dir())   # the built-in Discogs plugin (or $TAGMENDER_DISCOGS_PLUGIN)
 
 
 # --------------------------------------------------------------------------
@@ -7047,9 +7047,7 @@ def export(db, out_dir):
 def load_plugin(plugin_dir):
     d = Path(plugin_dir).expanduser()
     if not (d / "discogs_mapping.py").exists():
-        sys.exit(f"discogs_mapping.py not found in {d}\n"
-                 "Use --plugin-dir, or clone https://github.com/herculepirate/"
-                 "picard-discogs-enrichment next to the TagMender folder")
+        sys.exit(f"discogs_mapping.py not found in {d}: reinstall TagMender, or name a copy with --plugin-dir")
     sys.path.insert(0, str(d))
     import discogs_mapping
     return discogs_mapping
@@ -7158,6 +7156,8 @@ def main():
             print(f"Note: {requirements.problem(need, 'cli')}", file=sys.stderr)
     if args.use_gnudb and gnudb_problem():
         print(f"Note: {gnudb_problem()}", file=sys.stderr)
+    if not companions.discogs_on():
+        sys.exit("This tool identifies with Discogs. The Discogs plugin is switched off (Preferences › Plugins, or: tagmender plugins enable discogs).")
     token = _discogs_token()
     if not token:
         sys.exit("This tool needs a Discogs token. " + requirements.notice("discogs", "cli", requirements.NOT_SET))

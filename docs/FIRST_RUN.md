@@ -22,7 +22,7 @@ plugin, TagMender finds those settings automatically and uses them. It never cha
 
 A profile says what happens to an album: tagged where it is, copied into a library, or moved
 into one; how folders and files are named; where covers come from. In the app: **File > New
-Profile…** (Ctrl+N), or the **New Profile…** button under Profiles in the sidebar. To start, choose
+Profile…** (Ctrl+N), or the **New Profile…** button under Preferences › Profiles. To start, choose
 **What happens to files: Fix in place** (nothing is moved, only tags and covers are written) or
 **Copy into the library** with a scratch folder - not **Move into the library** for your real library yet.
 

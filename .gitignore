@@ -5,7 +5,7 @@ __pycache__/
 *.db
 *.log
 *-plan.json
-matching/
+/matching/
 covers/
 test_before/
 test_after/

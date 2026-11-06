@@ -1,7 +1,7 @@
 # Tenth independent review of TagMender's file operations (code at 6659aaa). Each test
 # asserts the correct behaviour and fails at 6659aaa.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 import os as _os, tempfile as _tempfile
 _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
 _os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")

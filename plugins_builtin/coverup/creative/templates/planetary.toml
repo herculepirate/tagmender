@@ -1,0 +1,9 @@
+# CoverUp style template. Edit freely or copy to make your own (any *.toml in this folder).
+title = "Planetary / Space"
+# {album}, {artist}, {year}, {genre}, {era} are filled in automatically
+prompt = "Album cover artwork for \"{album}\" by {artist}: a vast cosmic scene, planets and nebulae, deep space, cinematic lighting. {genre} {era} No text, no letters, no logos."
+negative = "text, letters, words, typography, watermark, logo, signature, frame, border, low quality, blurry"
+procedural = "nebula"   # style used when no AI backend is used: gradient, nebula, rings, grid, minimal, bauhaus, halftone, waves, brush
+palette = ['#03071e', '#6a00f4', '#f72585', '#4cc9f0']
+overlay_logo = true
+overlay_title = true

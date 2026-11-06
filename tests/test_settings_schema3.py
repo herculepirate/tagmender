@@ -18,7 +18,7 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
-PLUGIN = Path(_os.environ.get("TAGMENDER_DISCOGS_PLUGIN") or "../picard-discogs-enrichment").expanduser()
+PLUGIN = Path(_os.environ.get("TAGMENDER_DISCOGS_PLUGIN") or "plugins_builtin/discogs").expanduser()
 _os.environ["TAGMENDER_DISCOGS_PLUGIN"] = str(PLUGIN)
 
 import app_settings  # noqa: E402
@@ -416,7 +416,7 @@ class AppSettings(Base):
 
     def test_bad_values_are_refused(self):
         for name, value in (("backups.keep_days", 45), ("duplicates.folder_name", "a/b"),
-                            ("skip_folders", ["*"]), ("ocr.effort", "max"), ("plugins.folder", "relative")):
+                            ("skip_folders", ["*"]), ("ocr.effort", "max"), ("plugins.builtin_off", "coverup")):
             with self.assertRaises(ValueError, msg=name):
                 app_settings.set_value(name, value)
         app_settings.set_value("duplicates.folder_name", "Dupes")

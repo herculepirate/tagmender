@@ -27,7 +27,7 @@ from mutagen.mp4 import MP4, MP4FreeForm  # noqa: E402
 from mutagen.apev2 import APEv2  # noqa: E402
 
 PLUGIN_DIR = (sys.argv[1] if len(sys.argv) > 1 else
-              os.environ.get("TAGMENDER_DISCOGS_PLUGIN", "../picard-discogs-enrichment"))
+              os.environ.get("TAGMENDER_DISCOGS_PLUGIN", "plugins_builtin/discogs"))
 CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])
 UPC = "724384260927"            # a real check digit (UPC-A)
 EAN = "0724384260927"           # the same code as EAN-13

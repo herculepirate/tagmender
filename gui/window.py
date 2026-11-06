@@ -44,10 +44,14 @@ from .history import History
 SECTIONS = ((N_("Library"),
              ((N_("Overview"), Overview, "library"), (N_("Needs attention"), Attention, "triangle-alert"),
                          (N_("History"), History, "history"))),
-            (N_("Automation"), ((N_("Watched folders"), Watched, "folder-sync"), (N_("Jobs"), Jobs, "list-checks"))),
-            (N_("Setup"), ((N_("Profiles"), Profiles, "sliders-horizontal"), (N_("Setup"), setup_mod.Setup, "key-round"))))
-PAGES = tuple((name, cls) for _s, rows in SECTIONS for name, cls, _i in rows)
+            (N_("Automation"), ((N_("Watched folders"), Watched, "folder-sync"), (N_("Jobs"), Jobs, "list-checks"))))
+# pages shown in Preferences (its Profiles and Setup tabs), not in the sidebar: go() opens them there
+PREF_PAGES = ((N_("Profiles"), Profiles, "sliders-horizontal"), (N_("Setup"), setup_mod.Setup, "key-round"))
+PAGES = tuple((name, cls) for _s, rows in SECTIONS for name, cls, _i in rows) + \
+    tuple((name, cls) for name, cls, _i in PREF_PAGES)
+IN_PREFERENCES = tuple(name for name, _c, _i in PREF_PAGES)
 ICONS = {name: icon for _s, rows in SECTIONS for name, _c, icon in rows}
+ICONS.update({name: icon for name, _c, icon in PREF_PAGES})
 SEARCH_HINT = {"Overview": N_("Search albums"), "Needs attention": N_("Search reasons, folders"),
                "History": N_("Search exclusions"), "Watched folders": N_("Search folders"), "Jobs": N_("Search jobs"),
                "Profiles": N_("Search profiles"), "Setup": N_("Search setup")}
@@ -165,7 +169,11 @@ class Main(QMainWindow):
             page.layout().setContentsMargins(style.MARGIN, style.MARGIN, style.MARGIN, 16)
             page.layout().setSpacing(16)
             self.pages[name] = page
-            self.stack.addWidget(page)
+            if name not in IN_PREFERENCES:
+                self.stack.addWidget(page)
+            else:                                             # (a tab of Preferences once it opens; till
+                page.setParent(self)                          #  then the window's, hidden: deleted with it)
+                page.hide()
         # an online service busy or down during a run: said on every page, beside the status line
         self.service_badge = QLabel("")
         self.service_badge.setProperty("role", "attention")
@@ -525,7 +533,7 @@ class Main(QMainWindow):
         None) elsewhere."""
         page = self.stack.currentWidget() if hasattr(self, "stack") else None
         pr, ov = self.pages.get("Profiles"), self.pages.get("Overview")
-        if pr is not None and page is pr:
+        if pr is not None and self.showing("Profiles"):
             name = pr.scope() if pr.list.currentItem() else "global"
             return (name, None) if name and name != "global" else (None, None)
         if ov is not None and page is ov and self.profile_box.currentText():
@@ -578,7 +586,7 @@ class Main(QMainWindow):
             self.commands["recover"].setEnabled(idle and not j.working)
         pr = self.pages.get("Profiles")
         if pr is not None:
-            on_pr = page is pr
+            on_pr = self.showing("Profiles")
             self.commands["new_rule"].setEnabled(on_pr)
             # (on the rules tab only: Del on the settings tab must not remove a rule out of sight;
             # a global rule shown greyed in a profile is changed under Global rules)
@@ -610,7 +618,7 @@ class Main(QMainWindow):
         self.inspector.buttons["release"].setEnabled(kind == "overview" and idle)
         for k in ("open", "web"):
             self.inspector.buttons[k].setEnabled(bool(kind))
-        on_profiles = self.stack.currentWidget() is self.pages.get("Profiles")
+        on_profiles = self.showing("Profiles")
         self.commands["save_profile"].setEnabled(on_profiles)
         self.commands["tagscript"].setEnabled(on_profiles)
         self.commands["edit_scripts"].setEnabled(self.scripts_target()[0] is not None)
@@ -806,7 +814,19 @@ class Main(QMainWindow):
 
     # ---- the sidebar, pages and search -------------------------------------
     def go(self, name):
+        if name in IN_PREFERENCES:                           # (Profiles and Setup: tabs of Preferences)
+            self.preferences().show_tab(name)
+            return
         self.nav.setCurrentRow(self.nav.row_of(name))
+
+    def showing(self, name) -> bool:
+        """The page NAME is the one in view: the window's current page, or for Profiles and Setup,
+        Preferences open on its tab."""
+        page = self.pages.get(name)
+        if name in IN_PREFERENCES:
+            p = self.prefs_window
+            return page is not None and p is not None and p.isVisible() and p.stack.currentWidget() is page
+        return page is not None and hasattr(self, "stack") and self.stack.currentWidget() is page
 
     def nav_changed(self, row):
         it = self.nav.item(row)
@@ -946,9 +966,12 @@ class Main(QMainWindow):
         from .preferences import Preferences
         if self.prefs_window is None:
             self.prefs_window = Preferences(self)
+            # (it holds the Profiles and Setup pages: deleted with this window, never left behind)
+            self.destroyed.connect(self.prefs_window.deleteLater)
         self.prefs_window.show()
         self.prefs_window.raise_()
         self.prefs_window.activateWindow()
+        self.update_album_actions()                          # (Save Profile and the rules, on its Profiles tab)
         return self.prefs_window
 
     def first_run(self) -> bool:
@@ -959,8 +982,7 @@ class Main(QMainWindow):
     def restore(self):
         d = _gui_prefs()
         self.split.setSizes([int(d.get("sidebar_width", style.SIDEBAR[0])), 900])
-        page = d.get("page", "Overview")
-        self.go(page if page in self.pages else "Overview")
+        self.go("Overview")                      # (a new session always opens on the Overview)
         tab = d.get("inspector_tab", "Tags")
         self.inspector.tabs.setCurrentIndex(TABS.index(tab) if tab in TABS else 0)
         self.inspector_wanted = bool(d.get("inspector", True))
@@ -1060,7 +1082,8 @@ class Main(QMainWindow):
         # (and every other part's work - the player, Test Connection, the account, the browser
         # button: each thread belongs to a widget inside this window, deleted with it)
         from PySide6.QtCore import QThread
-        return found + [th for th in self.findChildren(QThread) if th not in found and _alive(th)]
+        inside = self.findChildren(QThread) + (self.prefs_window.findChildren(QThread) if self.prefs_window else [])
+        return found + [th for th in inside if th not in found and _alive(th)]
 
     def closeEvent(self, event):
         """Never end the program under a running job or watcher pass (the thread would be

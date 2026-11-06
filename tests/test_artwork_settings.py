@@ -15,7 +15,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tests"))
-os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("../picard-coverup")))
+os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("plugins_builtin/coverup")))
 import artwork  # noqa: E402
 import engine as eng_mod  # noqa: E402
 import profiles as pf  # noqa: E402

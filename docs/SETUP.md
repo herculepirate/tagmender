@@ -24,8 +24,8 @@ You can download these from [Releases](https://github.com/herculepirate/tagmende
 
 | Package | Install | Notes |
 |---|---|---|
-| **AppImage** (any distro) | `chmod +x TagMender-*-x86_64.AppImage`, then run it | Includes Python, the desktop app and the Discogs Enrichment and CoverUp code. The player is included only in a `--with-player` build. Ubuntu and Mint 22+ also need `sudo apt install libfuse2t64`. |
-| **.deb** (Debian 12+, Ubuntu 24.04+, Mint 22+) | `sudo apt install ./tagmender_*_all.deb` | Uses the system Python and includes the Discogs Enrichment and CoverUp code. The desktop app also needs `pip install --user --break-system-packages PySide6-Essentials`. |
+| **AppImage** (any distro) | `chmod +x TagMender-*-x86_64.AppImage`, then run it | Includes Python, the desktop app and the built-in Discogs and CoverUp plugins. The player is included only in a `--with-player` build. Ubuntu and Mint 22+ also need `sudo apt install libfuse2t64`. |
+| **.deb** (Debian 12+, Ubuntu 24.04+, Mint 22+) | `sudo apt install ./tagmender_*_all.deb` | Uses the system Python; the Discogs and CoverUp plugins are built in. The desktop app also needs `pip install --user --break-system-packages PySide6-Essentials`. |
 | **Flatpak** | see [Building the packages](USER_GUIDE.md#building-the-packages) | |
 
 Reading a CD in the drive works in every package: the AppImage and the Flatpak include
@@ -52,17 +52,8 @@ desktop app also needs PySide6.
 If pip stops with "externally-managed-environment", either add `--break-system-packages` or
 install into a virtual environment (`python3 -m venv ~/.venvs/tagmender`).
 
-You also need the **Discogs data and artwork code** (the packages already include it). Clone both
-next to TagMender:
-
-```bash
-git clone https://github.com/herculepirate/picard-discogs-enrichment ../picard-discogs-enrichment
-git clone https://github.com/herculepirate/picard-coverup ../picard-coverup
-```
-
-These are [Discogs Enrichment](https://github.com/herculepirate/picard-discogs-enrichment) and
-[CoverUp](https://github.com/herculepirate/picard-coverup). If you keep them somewhere else, set
-`TAGMENDER_DISCOGS_PLUGIN` and `TAGMENDER_COVERUP_DIR` to their folders.
+Discogs matching and cover art are built in (the Discogs and CoverUp plugins, in
+`plugins_builtin/`): nothing else to download. Switch either off in Preferences › Plugins.
 
 From a clone, use `python3 tagmender.py` wherever this guide says `tagmender`.
 
@@ -91,8 +82,8 @@ TagMender does not use it.
 ## 2. Open Setup
 
 **In the app** (`tagmender gui`): the first time you start it, with nothing set up yet, the app
-opens on its **Setup** page with a welcome line. You can open the page any time from the sidebar
-(under Setup, after Profiles), with **View > Setup** (Alt+7) or with **Help > Set Up TagMender…**.
+opens **Preferences › Setup** with a welcome line. You can open it any time from Preferences
+(Ctrl+,), with **View > Setup** (Alt+7) or with **Help > Set Up TagMender…**.
 If you choose **Set Up Later**, the app goes to Overview and doesn't open Setup on its own again.
 
 The page has these sections:
@@ -460,7 +451,8 @@ On Ubuntu 24.04 and later the zbar library package is called `libzbar0t64`. Inst
 | "The player is not available." | Install Qt Multimedia (`PySide6-Addons` from pip, the same version as PySide6-Essentials). |
 | "… the file holding your … can be read by other users. Run: chmod 600 '…'." / Setup shows **Fix permissions** | Run the `chmod 600` command shown, then click Check Again. |
 | Setup says "Set by the environment variable …" | The variable wins over a key saved in Setup. Unset it (or change it) in your shell profile, then start TagMender again. |
-| `tagmender doctor`: "Discogs Enrichment" or "CoverUp" not found | Clone it to the folder shown (doctor prints the `git clone` command), or set `TAGMENDER_DISCOGS_PLUGIN` / `TAGMENDER_COVERUP_DIR`. |
+| `tagmender doctor`: "Discogs plugin" or "CoverUp plugin" switched off | Switch it on in Preferences › Plugins (or `tagmender plugins enable discogs` / `coverup`). |
+| `tagmender doctor`: a plugin's code is missing | The installation is incomplete: reinstall TagMender (from a clone, `git checkout plugins_builtin`). |
 | `tagmender doctor`: "no tagger settings were found, so the defaults are used" | This is fine: the defaults are used. To use the settings file of another tagger, set `TAGMENDER_TAGGER_INI` to that file. |
 | "setup is interactive; for scripts use: echo TOKEN \| tagmender setup --stdin discogs" | Run `tagmender setup` in a terminal, or pipe the value to `--stdin NAME`. |
 

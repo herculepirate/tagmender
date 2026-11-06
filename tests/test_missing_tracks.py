@@ -3,7 +3,7 @@ the CD's 32), a shop's barcode sticker on the scans, and a TOC from a rip log or
 whose disc the folder holds only part of.
 
 Run:  python3 tests/test_missing_tracks.py   (offline; needs ffmpeg and the Discogs plugin clone,
-TAGMENDER_DISCOGS_PLUGIN or ../picard-discogs-enrichment)
+TAGMENDER_DISCOGS_PLUGIN or plugins_builtin/discogs)
 """
 import os
 import sys

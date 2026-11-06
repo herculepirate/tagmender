@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
-PLUGIN_DIR = _os.environ.get("TAGMENDER_DISCOGS_PLUGIN", "../picard-discogs-enrichment")
+PLUGIN_DIR = _os.environ.get("TAGMENDER_DISCOGS_PLUGIN", "plugins_builtin/discogs")
 if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
     PLUGIN_DIR = sys.argv.pop(1)      # the plugin folder (discogs_candidate reads a release with it)
 

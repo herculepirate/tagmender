@@ -1,7 +1,7 @@
 # Thirteenth independent review of TagMender's file operations (code at 87f5fa2). Each test
 # asserts the correct behaviour and fails at 87f5fa2.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # The repository is the folder above tests/. R13_04 and R13_08 need
 # root (mounting tmpfs; giving files away to nobody:users as on an Unraid share), R13_06
 # needs PySide6 (run offscreen); they are skipped otherwise.

@@ -53,7 +53,7 @@ import companions  # noqa: E402
 import coverup_loader  # noqa: E402
 import coverup_pil_render as R  # noqa: E402
 
-DEFAULT_COVERUP = str(companions.coverup_dir())      # env, settings, bundled, or a clone next to TagMender
+DEFAULT_COVERUP = str(companions.coverup_dir())      # the built-in CoverUp plugin (or $TAGMENDER_COVERUP_DIR)
 DEFAULT_INI = "~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"
 COVERUP_UUID = "be95dccc-b521-488a-843f-4af29033de41"
 LIST_KEYS = {"apply_types", "embed_types", "providers_enabled", "provider_order", "artist_types",
@@ -1128,7 +1128,8 @@ def main():
     s, plugin, picard = batch_settings(args.picard_ini, args.pass_name)
     if not plugin:
         print("Note: no CoverUp settings found in your tagger settings; using CoverUp defaults.")
-    http = HttpClient(version="batch", cache_dir=out_dir / "http_cache", cache_hours=float(s["http_cache_hours"]))
+    import version as _v
+    http = HttpClient(version=_v.VERSION, cache_dir=out_dir / "http_cache", cache_hours=float(s["http_cache_hours"]))
     mdb_path = Path(args.matches_db).expanduser()
     match_db = sqlite3.connect(mdb_path) if mdb_path.exists() else None
 

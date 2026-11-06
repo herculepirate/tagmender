@@ -1,0 +1,9 @@
+# CoverUp style template. Edit freely or copy to make your own (any *.toml in this folder).
+title = "Cyberpunk / Neon"
+# {album}, {artist}, {year}, {genre}, {era} are filled in automatically
+prompt = "Album cover artwork for \"{album}\" by {artist}: a neon-lit futuristic city at night, rain reflections, synthwave colours. {genre} {era} No text, no letters, no logos."
+negative = "text, letters, words, typography, watermark, logo, signature, frame, border, low quality, blurry"
+procedural = "grid"   # style used when no AI backend is used: gradient, nebula, rings, grid, minimal, bauhaus, halftone, waves, brush
+palette = ['#0b0033', '#ff00a0', '#00f0ff', '#ffe600']
+overlay_logo = true
+overlay_title = true

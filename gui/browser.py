@@ -227,8 +227,10 @@ class CdSheet(search._Base):
         """(MusicBrainz on, Discogs on) in the page's profile, for what Look Up says it sends (both
         on when the profile cannot be read: the sheet then says more, never less)."""
         try:
+            import companions
             prof = load_profile(search._profile(self.page))
-            return bool(prof.provider_on("musicbrainz")), bool(prof.provider_on("discogs"))
+            return (bool(prof.provider_on("musicbrainz")),
+                    bool(prof.provider_on("discogs")) and companions.discogs_on())
         except Exception:
             return True, True
 

@@ -17,7 +17,7 @@ _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
 _os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
-COVERUP = sys.argv[1] if len(sys.argv) > 1 else "../picard-coverup"
+COVERUP = sys.argv[1] if len(sys.argv) > 1 else "plugins_builtin/coverup"
 INI = sys.argv[2] if len(sys.argv) > 2 else "~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"
 import coverup_loader  # noqa: E402
 coverup_loader.load_coverup(COVERUP)

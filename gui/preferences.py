@@ -25,20 +25,25 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, Q
                                QWidget)
 
 from . import i18n, icons, sheets, style
-from .common import _gui_prefs, _set_gui_pref, heading, plural, section, separator
+from .common import _gui_prefs, _set_gui_pref, heading, pf, plural, section, separator
 from .i18n import N_, tr
 from .rows import FolderField, Group, ListField, Popup, Row, Segmented, StatusLight, Switch
 from .work import start
 
 # (key, the tab's words, icon); the key is what show_tab() takes ("Checks" still opens Advanced)
-PANES = (("General", N_("General"), "settings-2"), ("Keys", N_("Keys"), "key-round"),
+PANES = (("General", N_("General"), "settings-2"), ("Profiles", N_("Profiles"), "sliders-horizontal"),
+         ("Setup", N_("Setup"), "list-checks"), ("Keys", N_("Keys"), "key-round"),
          ("Account", N_("Account"), "circle-user-round"), ("Network", N_("Network & Privacy"), "globe"),
          ("Files", N_("File Safety"), "history"), ("Advanced", N_("Advanced"), "stethoscope"),
          ("Plugins", N_("Plugins"), "puzzle"))
 GUIDE = "https://github.com/herculepirate/tagmender/blob/main/docs/PLUGINS.md"
 PANE_ALIASES = {"Checks": "Advanced"}
+# the main window's pages shown here as tabs (built by the window, gui/window.PREF_PAGES); wider
+WIDE_PANES = ("Profiles", "Setup")
+WIDE = (1180, 780)
 # Keep Undo Backups For: (days, words); 0 is for ever
 KEEP_CHOICES = ((7, N_("1 Week")), (30, N_("30 Days")), (90, N_("90 Days")), (0, N_("Forever")))
+DISPOSE_CHOICES = (("folder", N_("The duplicates folder")), ("trash", N_("The Trash")))
 # each key: a short name beside the field, and under it what it is for and where to get it
 KEYS = {"discogs": (N_("Discogs token"), N_("Lets TagMender look albums up on Discogs. At "
                                              "discogs.com/settings/developers, choose Generate new token and paste "
@@ -382,15 +387,27 @@ class FilesPane(SettingsPane):
         self.lay.addWidget(undo)
         dup = Group(tr("Duplicates"), tr("When two copies of the same tracks are found, the one not kept is moved "
                                          "out of the way. Nothing is ever deleted."))
+        self.dispose = _popup(tr("Duplicate copies go to"), DISPOSE_CHOICES, data["duplicates"].get("dispose", "folder"))
+        self.dispose.currentIndexChanged.connect(self.set_dispose)
+        dup.add(Row(tr("Duplicate copies go to"), self.dispose,
+                    tr("The duplicates folder in the library, or the Trash of the drive they are on (empty it, or "
+                       "put a copy back, from your file manager). Undo puts them back either way.")))
         self.dupes = QLineEdit(str(data["duplicates"]["folder_name"]))
         self.dupes.setAccessibleName(tr("Duplicate copies folder"))
         self.dupes.setMinimumWidth(160)
         self.dupes.editingFinished.connect(self.set_dupes)
-        dup.add(Row(tr("Duplicates folder"), self.dupes,
-                    tr("Duplicate copies are moved into a folder of this name at the top of the library, keeping "
-                       "their artist and album folders. Look through it and empty it yourself.")))
+        self.dupes_row = Row(tr("Duplicates folder"), self.dupes,
+                             tr("Duplicate copies are moved into a folder of this name at the top of the library, "
+                                "keeping their artist and album folders (a name such as 2delete, or that folder "
+                                "chosen at the top of a library). Look through it and empty it yourself."))
+        dup.add(self.dupes_row)
+        self.dupes_row.setVisible(self.dispose.currentData() != "trash")
         self.lay.addWidget(dup)
         self.finish()
+
+    def set_dispose(self, _i):
+        if self.save("duplicates.dispose", self.dispose.currentData(), self.dispose):
+            self.dupes_row.setVisible(self.dispose.currentData() != "trash")
 
     def _losing(self, days, auto) -> list:
         """The jobs whose Undo would end at once with these settings."""
@@ -430,10 +447,46 @@ class FilesPane(SettingsPane):
     def set_dupes(self):
         import app_settings
         name = self.dupes.text().strip()
+        if "/" in name:                                     # (a folder chosen by its path: at a library's top)
+            name = self._at_library_top(name)
+            if name is None:
+                self.dupes.setText(app_settings.duplicates_folder())
+                return
+            self.dupes.setText(name)
         if name == app_settings.duplicates_folder():
             return
         if not self.save("duplicates.folder_name", name):
             self.dupes.setText(app_settings.duplicates_folder())
+
+    def _at_library_top(self, text):
+        """The folder name of TEXT, a path, when it is a folder at the top of a library (this
+        computer's music folder or a profile's library folder); None, having said why, if not."""
+        import os
+        import app_settings
+        from .common import music_folder
+
+        def real(p):
+            return os.path.realpath(os.path.expanduser(p)) if p else ""
+        path = os.path.normpath(os.path.expanduser(text))
+        # (this computer's music folder - the system Music folder when none is set - each profile's
+        # libraries, and where the duplicate tools look by default)
+        mf = music_folder()
+        tops = {real(app_settings.get("library_folder") or ""),
+                real(mf) if os.path.realpath(mf) != os.path.realpath(os.path.expanduser("~")) else "",
+                real(os.environ.get("TAGMENDER_MUSIC_ROOT", "~/Music"))}
+        for n in pf.names():
+            try:
+                tops.update(real(r) for r in pf.filing_roots(pf.load(n).data))
+            except Exception:                               # (a profile that cannot be read says nothing here)
+                pass
+        tops.discard("")
+        parent, name = os.path.dirname(path), os.path.basename(path)
+        if name and real(parent) in tops:
+            return name
+        sheets.warning(self, tr("That setting could not be saved."),
+                       tr("The duplicates folder is made at the top of each library, so it takes a folder name "
+                          "such as 2delete. {path} is not at the top of a library.").format(path=text))
+        return None
 
 
 class PluginsPane(SettingsPane):
@@ -441,10 +494,14 @@ class PluginsPane(SettingsPane):
     installed plugin with its light and switch, its settings, Remove; Install from File…."""
 
     def __init__(self):
-        super().__init__(tr("Plugins"), tr("Plugins add script functions and tag changes written by other people. "
-                                           "A plugin runs with your permissions: install only ones you trust."))
+        super().__init__(tr("Plugins"), tr("Switch on the plugins you want to use. Discogs and CoverUp come with "
+                                           "TagMender. Plugins you install add script functions and tag changes "
+                                           "written by other people: a plugin runs with your permissions, so "
+                                           "install only ones you trust."))
         tools = QHBoxLayout()
         for text, name, slot in ((tr("Install from File…"), tr("Install a plugin from its .zip file"), self.install),
+                                 (tr("Install from Folder…"), tr("Install a plugin from its folder"),
+                                  self.install_folder),
                                  (tr("Open Plugins Folder"), tr("Show the folder plugins are kept in"), self.open_folder),
                                  (tr("Plugin Guide"), tr("How plugins work and how to write one (online)"),
                                   lambda: self._open_url(GUIDE))):
@@ -481,17 +538,16 @@ class PluginsPane(SettingsPane):
             if w is not None:
                 w.deleteLater()
         rows = plugins.installed()
-        if not rows:
-            g = Group(tr("Installed"), tr("No plugins installed. Install from File… adds one; the Plugin Guide "
-                                          "says how to write your own."))
-            self.holder.addWidget(g)
-            return
         for pl in rows:
             self.holder.addWidget(self._group(pl))
+        if not any(not pl.builtin for pl in rows):
+            g = Group(tr("Installed"), tr("No other plugins installed. Install from File… adds one; the Plugin "
+                                          "Guide says how to write your own."))
+            self.holder.addWidget(g)
 
     def _group(self, pl):
         import plugins
-        g = Group(pl.name, pl.manifest.get("description", ""))
+        g = Group(pl.name, tr(pl.manifest.get("description", "")) if pl.builtin else pl.manifest.get("description", ""))
         if pl.error:
             state, words = "error", tr("Not working: {0}").format(pl.error)
         elif pl.enabled and pl.loaded:
@@ -505,15 +561,20 @@ class PluginsPane(SettingsPane):
         h.setContentsMargins(0, 0, 0, 0)
         sw = Switch(tr("Use {0}").format(pl.name))
         sw.setChecked(pl.enabled)
-        sw.setEnabled(not pl.manifest == {})                # (a folder that is no plugin cannot be switched on)
+        # (a folder that is no plugin cannot be switched on, nor one using a built-in plugin's id)
+        # (one switched on that cannot be read can still be switched off)
+        # (never one using a built-in plugin's id: its switch would be the built-in one's)
+        sw.setEnabled((pl.builtin or pl.id not in plugins.BUILTIN) and (pl.enabled or not pl.manifest == {}))
         sw.clicked.connect(lambda on, pid=pl.id: self.switch(pid, on))
         h.addWidget(sw)
-        rm = QPushButton(tr("Remove…"))
-        rm.setAccessibleName(tr("Remove {0}").format(pl.name))
-        rm.setAutoDefault(False)
-        rm.clicked.connect(lambda _=False, p_=pl: self.remove(p_))
-        h.addWidget(rm)
-        bits = [f"{tr('Version')} {pl.version}"] + ([pl.manifest["author"]] if pl.manifest.get("author") else [])
+        if not pl.builtin:                                   # (one that comes with TagMender is switched off, not removed)
+            rm = QPushButton(tr("Remove…"))
+            rm.setAccessibleName(tr("Remove {0}").format(pl.name))
+            rm.setAutoDefault(False)
+            rm.clicked.connect(lambda _=False, p_=pl: self.remove(p_))
+            h.addWidget(rm)
+        bits = [f"{tr('Version')} {pl.version}"] + ([tr("Comes with TagMender")] if pl.builtin else
+                                                    [pl.manifest["author"]] if pl.manifest.get("author") else [])
         g.add(Row(pl.name, line, " · ".join(bits)))
         light = StatusLight(state, words)                    # (its own line: an error's words can be long)
         light.setWordWrap(True)
@@ -542,6 +603,16 @@ class PluginsPane(SettingsPane):
                 c.setEchoMode(QLineEdit.Password)
                 c.setPlaceholderText(tr("Saved on this computer") if value else tr("Not set"))
                 c.editingFinished.connect(lambda e=c, pid=pl.id, k=key: self.set_secret(pid, k, e))
+                box = QWidget()                              # (the field, and Forget beside it)
+                hb = QHBoxLayout(box)
+                hb.setContentsMargins(0, 0, 0, 0)
+                hb.addWidget(c, 1)
+                forget = QPushButton(tr("Forget"))
+                forget.setAccessibleName(tr("Forget {0}").format(spec["label"]))
+                forget.setAutoDefault(False)
+                forget.clicked.connect(lambda _=False, e=c, pid=pl.id, k=key: self.forget_secret(pid, k, e))
+                hb.addWidget(forget)
+                c = box
             else:
                 c.editingFinished.connect(lambda e=c, pid=pl.id, k=key: self.set_value(pid, k, e.text().strip()))
         row = Row(spec["label"], c, spec.get("help", ""))
@@ -552,9 +623,14 @@ class PluginsPane(SettingsPane):
     def switch(self, pid, on):
         import plugins
         plugins.set_enabled(pid, on)
-        if on:
+        if on and pid not in plugins.BUILTIN:
+            plugins.forget(pid)                              # (one that failed earlier: tried again now)
             plugins.load_enabled()                           # (on now; off takes effect at the next start)
-        self.said.setText(tr("Switched on.") if on else tr("Switched off: it stops the next time TagMender opens."))
+        if pid in plugins.BUILTIN:                           # (asked each time: the next look-up follows it)
+            self.said.setText(tr("Switched on: used from the next look-up.") if on else
+                              tr("Switched off: not used from the next look-up."))
+        else:
+            self.said.setText(tr("Switched on.") if on else tr("Switched off: it stops the next time TagMender opens."))
         self.reload()
 
     def set_value(self, pid, key, value):
@@ -567,16 +643,32 @@ class PluginsPane(SettingsPane):
         import plugins
         text = edit.text().strip()
         if text:
-            plugins.store_secret(pid, key, text)
+            try:
+                plugins.store_secret(pid, key, text)
+            except OSError as exc:
+                sheets.warning(self, tr("That setting could not be saved."), str(exc))
+                return
             edit.clear()
             edit.setPlaceholderText(tr("Saved on this computer"))
             self.said.setText(tr("Saved."))
 
-    def install(self):
+    def forget_secret(self, pid, key, edit):
+        import plugins
+        try:
+            gone = plugins.forget_secret(pid, key)
+        except OSError as exc:
+            sheets.warning(self, tr("That setting could not be removed."), str(exc))
+            return
+        edit.clear()
+        edit.setPlaceholderText(tr("Not set"))
+        self.said.setText(tr("Forgotten.") if gone else tr("Nothing was saved."))
+
+    def install(self, path=None):
         import plugins
         from PySide6.QtWidgets import QFileDialog
-        path, _f = QFileDialog.getOpenFileName(self, tr("Install a plugin"), str(Path.home()),
-                                               tr("Plugins (*.zip)"))
+        if not path:
+            path, _f = QFileDialog.getOpenFileName(self, tr("Install a plugin"), str(Path.home()),
+                                                   tr("Plugins (*.zip)"))
         if not path:
             return
         try:
@@ -584,8 +676,19 @@ class PluginsPane(SettingsPane):
         except (plugins.PluginError, OSError) as exc:
             sheets.warning(self, tr("The plugin was not installed."), str(exc))
             return
-        self.said.setText(tr("Installed {0}. It is off until you switch it on.").format(pl.name))
+        if pl.enabled:                                       # (an update of one switched on: loaded again)
+            plugins.forget(pl.id)
+            plugins.load_enabled()
+            self.said.setText(tr("Updated {0}.").format(pl.name))
+        else:
+            self.said.setText(tr("Installed {0}. It is off until you switch it on.").format(pl.name))
         self.reload()
+
+    def install_folder(self):
+        from PySide6.QtWidgets import QFileDialog
+        path = QFileDialog.getExistingDirectory(self, tr("Install a plugin from its folder"), str(Path.home()))
+        if path:
+            self.install(path)
 
     def remove(self, pl):
         import plugins
@@ -974,7 +1077,7 @@ class ChecksPane(QWidget):
         self.owner = owner
         lay = QVBoxLayout(self)
         lay.setContentsMargins(style.MARGIN, style.MARGIN, style.MARGIN, style.MARGIN)
-        lay.addLayout(heading(tr("Checks"), tr("What TagMender needs (ffmpeg, the Discogs Enrichment and CoverUp code, keys, folders) and "
+        lay.addLayout(heading(tr("Checks"), tr("What TagMender needs (ffmpeg, its plugins, keys, folders) and "
                                         "whether it is there.")))
         self.checks = CheckList(lambda: owner.show_tab("Keys") if hasattr(owner, "show_tab") else None,
                                 self.open_setup)
@@ -1050,8 +1153,7 @@ class ChecksPane(QWidget):
 
 
 class AdvancedPane(ChecksPane):
-    """Advanced: the plugin folder (code that runs inside TagMender, so this computer's own
-    setting, never a profile's), then TagMender's checks and the diagnostics export."""
+    """Advanced: TagMender's checks and the diagnostics export."""
 
     def __init__(self, owner):
         super().__init__(owner)
@@ -1059,42 +1161,20 @@ class AdvancedPane(ChecksPane):
         lay = self.layout()
         head = lay.itemAt(0).layout()
         head.itemAt(0).widget().setText(tr("Advanced"))
-        head.itemAt(1).widget().setText(tr("Where the Discogs Enrichment and CoverUp code comes from, and "
-                                           "TagMender's checks: what it needs (ffmpeg, that code, keys, folders) "
+        head.itemAt(1).widget().setText(tr("TagMender's checks: what it needs (ffmpeg, its plugins, keys, folders) "
                                            "and whether it is there."))
-        group = Group(tr("Discogs Enrichment and CoverUp code"),
-                      tr("Leave it empty: TagMender uses the copies that come with it. Only for a newer copy of that "
-                         "code of your own. Code there runs inside TagMender with your rights. Plugins are not "
-                         "here: see the Plugins tab."))
-        self.plugins = FolderField(tr("Code folder"), tr("Choose the folder holding that code"))
-        self.plugins.setText(str(app_settings.get("plugins.folder") or ""))
-        self.plugins.edit.setPlaceholderText(tr("The copies that come with TagMender"))
-        self.plugins.edit.editingFinished.connect(self.set_plugins)
-        self.plugins.button.clicked.connect(self.set_plugins)
-        group.add(Row(tr("Code folder"), self.plugins,
-                      tr("A folder holding picard-discogs-enrichment and picard-coverup, each in a folder of its "
-                         "own.")))
-        lay.insertWidget(1, group)
         self.said = QLabel("")
         self.said.setProperty("role", "hint")
-        lay.insertWidget(2, self.said)
+        lay.insertWidget(1, self.said)
         checks = QLabel(tr("Checks").upper())
         checks.setProperty("role", "grouptitle")
         checks.setAccessibleName(tr("Checks"))
-        lay.insertWidget(3, checks)
+        lay.insertWidget(2, checks)
         self.anon.setChecked(bool(app_settings.get("diagnostics.hide_names", True)))
         self.anon.toggled.connect(lambda on: self.save("diagnostics.hide_names", bool(on), self.anon))
 
     def save(self, name, value, control=None) -> bool:
         return _save_setting(self, name, value, control)
-
-    def set_plugins(self):
-        import app_settings
-        text = self.plugins.text().strip()
-        if text == (app_settings.get("plugins.folder") or ""):
-            return
-        if not self.save("plugins.folder", text):
-            self.plugins.setText(app_settings.get("plugins.folder") or "")
 
 
 class Preferences(QMainWindow):
@@ -1125,10 +1205,14 @@ class Preferences(QMainWindow):
         self.panes = {"General": self.general, "Keys": self.keys, "Account": self.account,
                       "Network": self.network, "Files": self.files, "Advanced": self.checks_pane,
                       "Plugins": self.plugins}
+        for name in WIDE_PANES:                              # (the window's Profiles and Setup pages)
+            page = (getattr(win, "pages", None) or {}).get(name)
+            if page is not None:
+                self.panes[name] = page
         group = QActionGroup(self)
         group.setExclusive(True)
         self.tabs = {}
-        for i, (name, label, icon) in enumerate(PANES):
+        for i, (name, label, icon) in enumerate(p for p in PANES if p[0] in self.panes):
             a = QAction(icons.icon(icon, "ink", 24), tr(label).replace("&", "&&"), self)   # (no mnemonic)
             a.setCheckable(True)
             a.setShortcut(QKeySequence(f"Ctrl+{i + 1}"))
@@ -1146,8 +1230,10 @@ class Preferences(QMainWindow):
         close.triggered.connect(self.close)
         self.addAction(close)
         if win is not None:                                  # (Ctrl+Q and the other app-wide keys work here too)
-            for key in ("quit", "preferences", "help", "shortcuts"):
-                self.addAction(win.commands[key])
+            for key in ("quit", "preferences", "help", "shortcuts", "save_profile", "new_profile", "new_rule",
+                        "edit_rule", "delete_rule", "toggle_rule"):   # (and the Profiles tab's own)
+                if key in win.commands:
+                    self.addAction(win.commands[key])
         self.setCentralWidget(self.stack)
         last = PANE_ALIASES.get(_gui_prefs().get("preferences_tab", "General"),
                                 _gui_prefs().get("preferences_tab", "General"))
@@ -1185,6 +1271,8 @@ class Preferences(QMainWindow):
         self.setWindowTitle(tr(PREFS_TITLE).format(tr(next(lb for n, lb, _i in PANES if n == name))))
         self.fit_pane(name)
         _set_gui_pref("preferences_tab", name)
+        if self.win is not None and hasattr(self.win, "update_album_actions"):
+            self.win.update_album_actions()                  # (Save Profile and the rules: on that tab only)
         first = getattr(self.panes[name], "first", None)
         if first is not None:
             first.setFocus()
@@ -1192,8 +1280,16 @@ class Preferences(QMainWindow):
     TALL = 600                                              # every pane scrolls inside this height
 
     def fit_pane(self, name):
-        """The panes scroll, so the window keeps one height; the width stays the person's."""
+        """The panes scroll, so the window keeps one height; the width stays the person's.
+        Profiles and Setup open it wider and taller (within the screen)."""
         self.setMinimumHeight(320)
+        if name in WIDE_PANES:
+            w, h = WIDE
+            screen = self.screen().availableGeometry() if self.screen() else None
+            if screen is not None:
+                w, h = min(w, screen.width() - 40), min(h, screen.height() - 40)
+            self.resize(max(self.width(), w), max(self.height(), h))
+            return
         self.resize(max(self.width(), 640), self.TALL)
 
     def current_tab(self):
@@ -1201,7 +1297,8 @@ class Preferences(QMainWindow):
 
     def retint(self):
         for name, _label, icon in PANES:
-            self.tabs[name].setIcon(icons.icon(icon, "ink", 24))
+            if name in self.tabs:
+                self.tabs[name].setIcon(icons.icon(icon, "ink", 24))
 
     def closeEvent(self, e):
         """A key typed and not saved is never dropped without a word: Save, Don't Save or stay."""
@@ -1220,5 +1317,13 @@ class Preferences(QMainWindow):
             else:
                 e.ignore()
                 return
+        for name in WIDE_PANES:                              # (a profile not saved, keys typed on Setup)
+            page = self.panes.get(name)
+            if page is not None and hasattr(page, "may_leave") and not page.may_leave():
+                e.ignore()
+                return
         e.accept()
+        if self.win is not None and hasattr(self.win, "update_album_actions"):
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.win, self.win.update_album_actions)
 

@@ -62,9 +62,9 @@ from Discogs Enrichment and CoverUp's code, and settings imported from an existi
 installation are found automatically; every change is staged, verified, journaled and undoable.
 
 **A Mac-style desktop app** (`tagmender gui`): a sidebar of pages (Overview, Needs attention,
-History, Watched folders, Jobs, Profiles), a toolbar, an inspector (tags original and new, artwork,
-evidence) and Preferences (Ctrl+,: General, Keys, Account, Network & Privacy, File Safety,
-Advanced). Its interactive tools:
+History, Watched folders, Jobs), a toolbar, an inspector (tags original and new, artwork,
+evidence) and Preferences (Ctrl+,: General, Profiles, Setup, Keys, Account, Network & Privacy,
+File Safety, Advanced, Plugins). Its interactive tools:
 search MusicBrainz and Discogs, other versions and a pressing chooser for albums whose pressing is
 not proven, the script editor, tags from file names, match files manually, look up a CD, the
 musicbrainz.org browser buttons, your MusicBrainz account (log in, collections, ratings), AcoustID
@@ -108,8 +108,8 @@ Linux, x86_64. Download from [Releases](https://github.com/herculepirate/tagmend
 | **From a clone** | `git clone https://github.com/herculepirate/tagmender` | `python3 tagmender.py ...`; see Requirements below |
 
 Optional, for everything to work: `sudo apt install ffmpeg libchromaprint-tools tesseract-ocr`
-(audio checks of unusual formats, AcoustID fingerprints, reading scans). The Discogs Enrichment
-and CoverUp plugin code comes with the AppImage and the .deb. Then the app's Setup page (or `tagmender setup`) stores your own keys in `~/.config/tagmender/`, readable only by you:
+(audio checks of unusual formats, AcoustID fingerprints, reading scans). The Discogs
+and CoverUp plugins are built in (Preferences › Plugins). Then the app's Setup page (or `tagmender setup`) stores your own keys in `~/.config/tagmender/`, readable only by you:
 see [Your own keys](#your-own-keys).
 
 **First time? Read [First run](FIRST_RUN.md)**: preview first, try one folder, undo once.
@@ -130,7 +130,7 @@ listed here have their own `-h`.
 | Tool | Does | Writes to your music? |
 | --- | --- | --- |
 | `audit_untagged.py` | Lists every album folder and whether its files carry MusicBrainz and/or Discogs release IDs (untagged, partial, tagged). | No — writes a CSV |
-| `dedupe_twins.py` | Finds duplicate copies of the same tracks in an album folder (same audio checksum, or same title and length), keeps the preferred one (FLAC over Opus, the tagged copy, the newer rip) and moves the others, with their `.log`/`.cue` from the same rip, to `<library>/_Duplicates/` (the duplicates folder: Preferences > File Safety). | Moves files, only with `--apply`; `--undo` puts them back |
+| `dedupe_twins.py` | Finds duplicate copies of the same tracks in an album folder (same audio checksum, or same title and length), keeps the preferred one (FLAC over Opus, the tagged copy, the newer rip) and moves the others, with their `.log`/`.cue` from the same rip, to `<library>/_Duplicates/` (the duplicates folder: Preferences > File Safety), or to the Trash when File Safety says so (or `--trash`). | Moves files, only with `--apply`; `--undo` puts them back |
 | `match_albums.py` | Identifies each untagged album: MusicBrainz first, then Discogs, scored on artist, title, every track length, disc and track counts, year, barcode and catalogue number (including ones read by OCR from scans in the folder, and ones written in folder names such as `[DOMO 71063-2]`). Each album is filed as **auto** (confident), **review** (a person should decide — with the reason) or **nomatch**. | No — writes CSVs and a state database |
 | `match_loop.sh` | Keeps `match_albums.py` running over a whole library, and restarts it automatically when the matcher is updated, so a fix reaches every album already decided. | No |
 | `web_tag.py` | The last resort for albums MusicBrainz and Discogs do not have: searches Deezer, Apple iTunes, Bandcamp (its own search; no search engine's page is scraped) and Wikipedia; accepts a result only on the same proof as the matcher (artist, title, track count, track lengths; a different credited artist also needs the scans to name it, or a code, disc ID or fingerprint to agree), writes album, artists and contributing artists, titles, numbers, date, label, barcode and genre, with artist IDs from MusicBrainz (same-name artists told apart by their releases), Wikidata or Discogs, and files the album by TagMender's own scheme (the `tagmender` naming preset). `TAGMENDER=Resolved` with the source, or `Unresolved` with the reason when nothing was found. | Writes tags and moves the album folder (and `cover.jpg` only into folders with no image), only with `--apply`; `--undo` restores; `--keep-folders` tags in place |
@@ -158,9 +158,8 @@ listed here have their own `-h`.
   `(Disc 1)`), release types (`Garbage EP` is listed as *Garbage*),
   catalogue numbers in any bracket (`{Japan BRC-657}`), and letters people
   type without accents (`ae3o` for `æ³o`).
-- **Discogs data is read with the Discogs Enrichment plugin's own code**, so
-  credits, disc counts and multi-artist handling are exactly what the
-  plugin writes.
+- **Discogs data is read with the built-in Discogs plugin**, so credits,
+  disc counts and multi-artist handling are the same each time.
 
 ## How an album is identified
 
@@ -461,10 +460,8 @@ spreadsheet (Export as Web Page…, Export as CSV…).
 - Python 3.10+, and `pip install mutagen Pillow fonttools`
   (on Debian/Ubuntu/Mint: `sudo apt install python3-mutagen python3-pil python3-fonttools`)
 - Your own keys (a Discogs token and an AcoustID application key give the best results): see [Setup](SETUP.md)
-- A clone of [Discogs Enrichment](https://github.com/herculepirate/picard-discogs-enrichment)
-  (by default a clone next to the TagMender folder, or pass `--plugin-dir`)
-- For artwork: a clone of [CoverUp](https://github.com/herculepirate/picard-coverup)
-  (`--coverup-dir`). When settings imported from an existing tagger installation are found
+- Discogs and artwork: the built-in Discogs and CoverUp plugins (included; Preferences › Plugins
+  switches them off and on). When settings imported from an existing tagger installation are found
   (automatically; `TAGMENDER_TAGGER_INI` names another file), your CoverUp settings come from
   there, and so do the Cover Art Archive options (image types and types to leave out, size,
   approved only, release / release group order) and the cover file name
@@ -519,7 +516,7 @@ was not automatic.
 ## The desktop app
 
 `tagmender gui` (or `python3 -m gui`) opens the same engine in a window: a sidebar of pages
-(Overview, Needs attention, History, Watched folders, Jobs, Profiles), the page, and an
+(Overview, Needs attention, History, Watched folders, Jobs), the page, and an
 inspector on the right (Ctrl+Alt+I). Drop a music folder on the window or choose one (Ctrl+O),
 pick a profile, Preview (Ctrl+P), then Apply (Ctrl+Return); Edit > Undo Last Job (Ctrl+Alt+Z) puts
 it back. Every command is in the menu bar, and Ctrl+/ lists the shortcuts.
@@ -560,7 +557,8 @@ file until you apply it, through the same staged, verified and undoable path as 
 | Preferences > General | Appearance, language, reduce motion; where folder choosers open (Folder choosers open in); how far Skip Forward and Back go; keep watching while open; notifications (only while TagMender is in the background) |
 | Preferences > Network & Privacy | Test Connection (MusicBrainz, Discogs, AcoustID, the Cover Art Archive); the proxy (the `http_proxy` and `https_proxy` environment variables); how long saved lookups are kept before an album processed again asks again; the languages and effort for reading scans |
 | Preferences > File Safety | How long Undo works (backups kept 1 week, 30 or 90 days, or for ever), cleaning old backups after each apply (a sheet names the jobs that would lose Undo first), the folder duplicate copies go into |
-| Preferences > Advanced | The plugin folder (code that runs inside TagMender: this computer's setting, never a profile's), TagMender's checks and the diagnostics export (folder and file names hidden unless you untick it) |
+| Preferences > Plugins | The built-in Discogs and CoverUp plugins and any you install, each with its switch (this computer's setting, never a profile's) |
+| Preferences > Advanced | TagMender's checks and the diagnostics export (folder and file names hidden unless you untick it) |
 | Preferences > Account | Your own MusicBrainz application (client ID and secret), Log In / Log Out, your collections; your AcoustID user key; browser integration (musicbrainz.org's tagger buttons, off by default, 127.0.0.1 only) and its port; the CD drive |
 
 The table's context menu (right-click, or the Menu key) and the inspector's Change Release
@@ -576,7 +574,7 @@ choice for one album, after a sheet that says exactly what will be sent.
 
 ### Profile settings in the app
 
-The Profiles page shows the chosen profile's settings as grouped lists, in the order the work
+Preferences › Profiles shows the chosen profile's settings as grouped lists, in the order the work
 happens: **Source** (the folders it covers, folders to skip, which audio files, a separate folder
 for lossy files), **Identification** (the preferred database, which albums are tagged, the lookups
 used as evidence, preferred releases), **Tags**, **Artwork**, **Target** (what happens to files,
@@ -869,7 +867,7 @@ key `exclusions`); remembered ignores and history in `~/.local/state/tagmender/s
 ## Tests
 
 ```bash
-./run_tests.sh                     # every suite; needs ffmpeg and the two plugin clones
+./run_tests.sh                     # every suite; needs ffmpeg
 PYTHON=/path/to/python3 ./run_tests.sh
 ```
 
@@ -893,7 +891,7 @@ with `--device=all`.
 
 ## Licence
 
-GPL-2.0-or-later, the same as the Discogs Enrichment and CoverUp code it uses. See
+GPL-2.0-or-later, including its built-in Discogs and CoverUp plugins. See
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 The fonts in `coverup_fonts/` are under the SIL Open Font License; see
 `coverup_fonts/licenses/`.

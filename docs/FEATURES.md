@@ -48,7 +48,7 @@ TagMender has no setting of its own (`TAGMENDER_TAGGER_INI` names another file);
 | Standardized instrument / vocal credits | Full | on by default |
 | Genres from MusicBrainz (min usage, max, filter, album artist genres, folksonomy tags, join) | Full | on by default (`genres.musicbrainz`: automatic, at most 5), or as your tagger settings say when the profile follows them (`text_util.py` filter); "only my genres" needs a MusicBrainz login and writes none |
 | Ratings (POPM / RATING) | Full | the inspector's Rating row (0-5 stars) is an edit of the preview, written on Apply: ID3 POPM with the rating e-mail (`rating_user_email`, default users@musicbrainz.org; 0-255), Vorbis `RATING:<e-mail>` (0.0-1.0), WMA WM/SharedUserRating (0-99), read back after writing; staged, verified and undoable as every edit. MP4 and APEv2 hold none. Album > Submit Ratings… sends them to MusicBrainz (see "MusicBrainz account features") |
-| Discogs data | Full | the Discogs Enrichment code and its settings |
+| Discogs data | Full | the built-in Discogs plugin and its settings |
 | ReplayGain | Full | Audiophile level, EBU R128 |
 | Lyrics | Full | Audiophile level, LRCLIB, synced `.lrc` and embedded plain |
 | Work / movement tags (movement, movementnumber, movementtotal, showmovement) | Full | read and written as a file has them (MVNM/MVIN, Vorbis MOVEMENT/MOVEMENTNAME, MP4 ©mvn/©mvi/©mvc/shwm, APEv2), Partial albums too; none are made up from MusicBrainz (only `work`, the recording's work) |
@@ -104,7 +104,7 @@ TagMender has no setting of its own (`TAGMENDER_TAGGER_INI` names another file);
 | Overwrite existing files | Not planned | an existing file is never overwritten (a rule of every write: staged, verified, undoable) |
 | Naming script language | Full | the tagging script language (`tagscript/`): 82 functions, plus `$words`; naming presets `tagmender`, `standard` and others ([profiles](PROFILES.md#naming-presets)) |
 | Tagger scripts (change tags with a script) | Full | TagMender scripts from your tagger settings or a profile's `tagger.list_of_scripts`, run on each track after the Discogs data is applied, with the usual hidden variables; `$delete` removes the tag; names are case-sensitive, but for the fields TagMender writes: `$set(GENRE,Jazz)` sets the genre. A track or disc number a script writes as "N/total" is written as the number and its total |
-| Plugins in general | Not planned | only Discogs Enrichment and CoverUp |
+| Plugins in general | Full | Preferences › Plugins: the built-in Discogs and CoverUp, and plugins you install (docs/PLUGINS.md) |
 
 ## The app
 

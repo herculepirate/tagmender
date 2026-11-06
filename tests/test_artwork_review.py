@@ -1,7 +1,7 @@
 # Review 16a: the ARTWORK / CoverUp path of TagMender (code at af304ca). Each test asserts
 # the correct behaviour and fails at af304ca (and at 7498e42). Line numbers are af304ca's.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # The repository is the folder above tests/. No network: CoverUp
 # runs with only its local-files source, and HTTP is stubbed (any real connection fails).
 import os as _os, tempfile as _tempfile
@@ -19,7 +19,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tests"))
-os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("../picard-coverup")))
+os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("plugins_builtin/coverup")))
 import artwork  # noqa: E402
 import engine as eng_mod  # noqa: E402
 import executor  # noqa: E402

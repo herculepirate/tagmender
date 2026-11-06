@@ -91,13 +91,16 @@ def checks() -> list[Check]:
         out.append(Check(mod, "ok" if ver else ("fail" if need else "warn"),
                          str(ver) if ver else "not installed", "" if ver else fix))
     out += registry_checks()
-    for label, repo, d, marker in (
-            ("Discogs Enrichment", "picard-discogs-enrichment", companions.discogs_dir(), "discogs_mapping.py"),
-            ("CoverUp", "picard-coverup", companions.coverup_dir(), "pipeline.py")):
+    for label, d, marker, on in (
+            ("Discogs plugin", companions.discogs_dir(), "discogs_mapping.py", companions.discogs_on()),
+            ("CoverUp plugin", companions.coverup_dir(), "pipeline.py", companions.coverup_on())):
         found = (d / marker).exists()
-        out.append(Check(label, "ok" if found else "fail",
-                         f"{d} ({companions.version_of(d)})" if found else f"not found at {d}",
-                         "" if found else f"git clone https://github.com/herculepirate/{repo} {d}"))
+        if not on:
+            out.append(Check(label, "warn", "switched off", "switch it on in Preferences > Plugins"))
+        else:
+            out.append(Check(label, "ok" if found else "fail",
+                             f"{companions.version_of(d)} ({d})" if found else f"its code is missing from {d}",
+                             "" if found else "reinstall TagMender"))
     try:
         ex.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         probe = ex.CONFIG_DIR / f".probe-{os.getpid()}"
@@ -146,7 +149,7 @@ def checks() -> list[Check]:
         import tagger_settings
         s = tagger_settings.enrichment()
         src = tagger_settings.source_label()
-        out.append(Check("Discogs Enrichment settings", "ok" if tagger_settings.from_ini() else "warn",
+        out.append(Check("Discogs settings", "ok" if tagger_settings.from_ini() else "warn",
                          f"styles {s['style_mode']}, marketplace "
                          f"{'on' if s['marketplace'] else 'off'} (from {src}); the merge mode follows "
                          "each profile's Sources setting",
@@ -154,7 +157,7 @@ def checks() -> list[Check]:
                          "no tagger settings were found, so the defaults are used; to use your own, "
                          "set TAGMENDER_TAGGER_INI to your tagger's settings file"))
     except Exception as exc:
-        out.append(Check("Discogs Enrichment settings", "warn", f"could not read: {exc}"))
+        out.append(Check("Discogs settings", "warn", f"could not read: {exc}"))
     try:
         import tagger_settings
         t = tagger_settings.tag_settings()

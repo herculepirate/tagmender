@@ -1,7 +1,7 @@
 # Fifth review of TagMender's file operations: planner / grouping / CLI cases the crash
 # fuzzers cannot reach. Each test asserts the correct behaviour and fails at 69e21bf.
 #
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
 #     python3 -W ignore <this file>
 import os as _os, tempfile as _tempfile
 _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")

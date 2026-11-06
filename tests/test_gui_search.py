@@ -25,7 +25,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "tests"))
 PLUGIN = Path(sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-")
-              else Path("../picard-discogs-enrichment")).expanduser()
+              else Path("plugins_builtin/discogs")).expanduser()
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest

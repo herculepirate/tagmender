@@ -1,0 +1,9 @@
+# CoverUp style template. Edit freely or copy to make your own (any *.toml in this folder).
+title = "Photographic / Cinematic"
+# {album}, {artist}, {year}, {genre}, {era} are filled in automatically
+prompt = "Album cover artwork for \"{album}\" by {artist}: a cinematic photograph with shallow depth of field, moody film grain. {genre} {era} No text, no letters, no logos."
+negative = "text, letters, words, typography, watermark, logo, signature, frame, border, low quality, blurry"
+procedural = "gradient"   # style used when no AI backend is used: gradient, nebula, rings, grid, minimal, bauhaus, halftone, waves, brush
+palette = ['#14213d', '#fca311', '#e5e5e5', '#000000']
+overlay_logo = true
+overlay_title = true

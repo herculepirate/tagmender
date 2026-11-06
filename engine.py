@@ -364,7 +364,9 @@ class Engine:
         # the Sources setting: a database it leaves out is not asked to identify at all
         self.source = profile.source()
         self.use_mb = profile.provider_on("musicbrainz") and profile.identifies_with("musicbrainz")
-        self.use_discogs = profile.provider_on("discogs") and profile.identifies_with("discogs")
+        # (the Discogs plugin switched off: as if the profile left Discogs out; not an album's error)
+        self.use_discogs = (companions.discogs_on() and profile.provider_on("discogs")
+                            and profile.identifies_with("discogs"))
         token = ""
         if self.use_discogs:
             try:
@@ -380,7 +382,7 @@ class Engine:
             try:
                 dm = ma.load_plugin(str(companions.discogs_dir()))
             except SystemExit as exc:
-                self.notes["discogs"] = f"discogs-enrichment code not found: {exc}"
+                self.notes["discogs"] = f"Discogs plugin code not found: {exc}"
                 self.use_discogs = False
         self.dm = dm
         if http is None:
@@ -1249,6 +1251,11 @@ class Engine:
                 merged.pop("tagmender", None)
             hidden = {k: v for k, v in (tags_mb[i] if tags_mb else {}).items() if k.startswith("~")}
             hidden.update(compilations.discogs_hints(det if dparts else None))   # (Various / Compilation on Discogs)
+            if dparts and det:                     # (the credited Discogs artists: album_artist asks a
+                dg_ids = [str(a["id"]) for a in det.get("artists") or []   # band's members by them)
+                          if isinstance(a, dict) and a.get("id")]
+                if dg_ids:
+                    hidden["~discogs_albumartist_id"] = dg_ids
             remove = list(hidden.pop("~remove", []))
             if remove:
                 merged["~remove"] = list(dict.fromkeys(remove))
@@ -2286,7 +2293,7 @@ class Engine:
             cache[key] = by_dir[real_dir]           # another album of this artist folder, this run
         if key not in cache:
             known, got = artwork.cached_artist_photo(key) if lasting else (False, None)
-            if not known:
+            if not known and companions.coverup_on():         # (CoverUp off: no photo looked for)
                 cu = next((p for p in (self._art or []) if isinstance(p, artwork.CoverUp)), None)
                 if cu is None:
                     cu = self.__dict__.get("_artist_cu")
@@ -2428,8 +2435,8 @@ class Engine:
         profile asks Discogs)."""
         memo = self.__dict__.setdefault("_dg_members_memo", {})
         if dgid not in memo:
-            asks = self.http is not None and bool(((self.profile.get("providers") or {}).get("discogs") or {})
-                                                   .get("enabled", True))
+            asks = self.http is not None and companions.discogs_on() and \
+                bool(((self.profile.get("providers") or {}).get("discogs") or {}).get("enabled", True))
             memo[dgid] = album_artist.discogs_members(self.http, dgid, self.log) if asks else []
         return memo[dgid]
 

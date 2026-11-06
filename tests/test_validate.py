@@ -23,7 +23,7 @@ MBID = "88d4d59b-d5da-4540-b095-6f51980f6f21"
 # The Discogs Enrichment plugin, as tests/test_match.py takes it: the first argument, else
 # TAGMENDER_DISCOGS_PLUGIN, else the usual clone
 PLUGIN_DIR = (sys.argv[1] if len(sys.argv) > 1 else _os.environ.get("TAGMENDER_DISCOGS_PLUGIN")
-              or "../picard-discogs-enrichment")
+              or "plugins_builtin/discogs")
 
 
 def audio(p, freq=440, duration=1, **tags):

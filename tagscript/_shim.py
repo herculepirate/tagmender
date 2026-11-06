@@ -181,7 +181,8 @@ class script_functions:                     # (the module the parser imports, as
 
 def register_script_function(function, name=None, eval_args=True, check_argcount=True, documentation=None,
                              signature=None):
-    argspec = getfullargspec(function)
+    import inspect
+    argspec = getfullargspec(inspect.unwrap(function))   # (a plugin's guarded function: its own arguments)
     args = len(argspec.args) - 1
     varargs = argspec.varargs is not None
     defaults = len(argspec.defaults) if argspec.defaults else 0

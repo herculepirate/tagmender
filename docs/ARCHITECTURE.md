@@ -5,12 +5,12 @@
 | Concern | Module |
 |---|---|
 | Audio discovery, album grouping | `engine.Engine.albums_in` (disc folders joined, mixed folders split by album tags) |
-| Providers | `match_albums` (MusicBrainz, Discogs, CTDB, AcoustID, ISRC, links), `web_tag` (web), `mb_tags` (MB release → tags), Discogs Enrichment's `discogs_mapping` (Discogs release → tags) |
+| Providers | `match_albums` (MusicBrainz, Discogs, CTDB, AcoustID, ISRC, links), `web_tag` (web), `mb_tags` (MB release → tags), the built-in Discogs plugin's `discogs_mapping` (Discogs release → tags) |
 | Fingerprints | `match_albums.fingerprint` (fpcalc, read-only) |
 | Candidates and scoring | `match_core.score_candidate`, `classify`, `combine` |
 | Reconciliation | `engine.Engine._identified` + `engine.enrich` (same pressing only; MusicBrainz base, Discogs applied as the Discogs Enrichment plugin applies it, settings from `tagger_settings`) |
 | Profiles | `profiles` (schema version, defaults, validation, migration) |
-| This computer's settings | `app_settings` (`settings.json`: backups, duplicates folder, skipped folders, saved lookups, scans, plugin folder; read by the CLI, the watcher and the app) |
+| This computer's settings | `app_settings` (`settings.json`: backups, duplicates folder, skipped folders, saved lookups, scans, plugins switched on; read by the CLI, the watcher and the app) |
 | Rules | `exclusions` |
 | Naming | `naming` (template language), `filenames` (safety, limits, shortening) |
 | Planning | `plan` (diffs, policies, paths, companions, artwork, conflicts, preview) |
@@ -37,9 +37,9 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys, settin
 2. **Write tags itself** with the MusicBrainz tag mapping for each format (ID3, Vorbis, MP4,
    APEv2, ASF; see THIRD_PARTY_NOTICES.md for the reference code followed), so files read the
    same in other taggers and players. No other tagger is needed.
-3. **Discogs tags come from the Discogs Enrichment plugin's own code**, so a Discogs-only album is
-   tagged as the plugin would tag it. No copy of the plugin is kept in the repo; packages bundle
-   a stamped copy (GPL-2.0-or-later).
+3. **Discogs tags come from the built-in Discogs plugin** (`plugins_builtin/discogs`), the same
+   code another tagger's Discogs Enrichment plugin uses, so a Discogs-only album is tagged as that
+   plugin would tag it (GPL-2.0-or-later).
 4. **Same pressing or nothing.** MusicBrainz and Discogs data are merged only when the matcher
    proved they describe the same pressing (link or twin). Otherwise the deciding provider's
    release stands alone. No MusicBrainz ID is ever created for a Discogs release.
@@ -83,8 +83,8 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys, settin
 | Discogs developers | discogs.com/developers (checked 2026-10-24) | 60/min with token, image auth, User-Agent |
 | AcoustID web service | acoustid.org/webservice (checked 2026-10-24) | 3 req/s, non-commercial, meta parameters |
 | mutagen | 1.48.1 | all tag I/O |
-| [Discogs Enrichment](https://github.com/herculepirate/picard-discogs-enrichment) | 3dc00512 (v0.3.7) | Discogs extraction |
-| [CoverUp](https://github.com/herculepirate/picard-coverup) | d1d36d14 | artwork pipeline |
+| Discogs plugin (`plugins_builtin/discogs`, built in) | 0.3.8 | Discogs extraction |
+| CoverUp plugin (`plugins_builtin/coverup`, built in) | 0.6.1 | artwork pipeline |
 | AppImage tooling | appimagetool (continuous), python-build-standalone CPython 3.12.13 via uv | portable build |
 
 File operations (2026-10-25): the file naming options of open-source taggers and foobar2000's

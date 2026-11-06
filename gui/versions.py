@@ -53,7 +53,7 @@ class Lookup:
         self.use_mb, self.use_discogs = use_mb, use_discogs and dm is not None
         self.notes = dict(notes or {})
         if use_discogs and dm is None:
-            self.notes.setdefault("discogs", tr("the Discogs Enrichment code was not found"))
+            self.notes.setdefault("discogs", tr("the Discogs plugin code was not found"))
 
     def close(self):
         """Close the cache connection make_lookup opened (on the thread that made it)."""
@@ -97,6 +97,9 @@ def make_lookup(profile_name="default") -> Lookup:
         pass
     notes, token, dm = {}, "", None
     use_mb, use_discogs = prof.provider_on("musicbrainz"), prof.provider_on("discogs")
+    if use_discogs and not companions.discogs_on():
+        notes["discogs"] = tr("the Discogs plugin is switched off (Preferences › Plugins)")
+        use_discogs = False
     if use_discogs:
         try:
             token = credentials.get("discogs")

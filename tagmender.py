@@ -26,6 +26,7 @@
                                             the batch tools, with their own options (-h)
 
   --profile NAME (before the command, or as an option) picks the profile.
+  --no-plugins (before the command) runs without the plugins you installed (docs/PLUGINS.md).
   --json on reading commands prints JSON on standard output; messages go to standard error.
 Exit codes: 0 ok; 1 error; 2 bad usage; 3 not applied (needs --yes or confirmation);
 4 done, but some albums failed or were in conflict (report: some albums need your decision or
@@ -1291,12 +1292,13 @@ def main(argv=None):
         import version
         print(f"tagmender {version.VERSION}")
         return 0
-    if argv[:1] == ["--no-plugins"]:                 # (a run without any plugin: docs/PLUGINS.md)
-        os.environ["TAGMENDER_NO_PLUGINS"] = "1"
-        argv = argv[1:]
-    if argv[:1] == ["--profile"] and len(argv) > 1:
-        profile, argv = argv[1], argv[2:]
-        os.environ["TAGMENDER_PROFILE"] = profile
+    while argv[:1] == ["--no-plugins"] or (argv[:1] == ["--profile"] and len(argv) > 1):   # (in either order)
+        if argv[0] == "--no-plugins":              # (a run without any plugin: docs/PLUGINS.md)
+            os.environ["TAGMENDER_NO_PLUGINS"] = "1"
+            argv = argv[1:]
+        else:
+            profile, argv = argv[1], argv[2:]
+            os.environ["TAGMENDER_PROFILE"] = profile
     if argv and argv[0] in TOOLS:
         script = HERE / TOOLS[argv[0]]
         sys.argv = [str(script)] + argv[1:]
@@ -1338,6 +1340,7 @@ def main(argv=None):
     if args.cmd == "ocr":
         return cmd_ocr(args)
     if args.cmd == "profiles":
+        _load_plugins()                            # (a naming template using a plugin's $function is checked)
         try:
             return cmd_profiles(args)
         except pf.ProfileError as exc:

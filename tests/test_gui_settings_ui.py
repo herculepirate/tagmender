@@ -260,17 +260,17 @@ class Editor(Base):
     def test_search_shows_matching_rows_and_opens_advanced(self):
         pr = self.page("Srch")
         ed = pr.editor
-        self.win.search_box.setText("fingerprint")
+        pr.find.setText("fingerprint")
         settle(self.app, 3)
         shown = [k for k, r in ed.rows.items() if r.isVisibleTo(ed)]
         self.assertIn("acoustid", shown)
         self.assertNotIn("artwork.min_px", shown)
         self.assertFalse(ed.sections["artwork"].isVisibleTo(ed))
-        self.win.search_box.setText("MP3 tag")                      # (an Advanced row: its disclosure opens)
+        pr.find.setText("MP3 tag")                      # (an Advanced row: its disclosure opens)
         settle(self.app, 3)
         self.assertTrue(ed.rows["tagger.write_id3v23"].isVisibleTo(ed))
         self.assertTrue(ed.advanced["tags"].isChecked())
-        self.win.search_box.setText("")
+        pr.find.setText("")
         settle(self.app, 3)
         self.assertTrue(ed.rows["tag_level"].isVisibleTo(ed))
         self.assertTrue(ed.sections["artwork"].isVisibleTo(ed))
@@ -396,19 +396,13 @@ class PreferencesPanes(Base):
         pane.langs.changed.emit()
         self.assertEqual(app_settings.get("ocr.languages"), ["eng", "deu"])
 
-    def test_advanced_pane_plugin_folder_and_names_in_the_export(self):
+    def test_advanced_pane_names_in_the_export(self):
         import app_settings
         prefs = self.win.preferences()
         prefs.show_tab("Checks")                                    # (the older name opens Advanced)
         pane = prefs.checks_pane
         self.assertIs(prefs.stack.currentWidget(), pane)
-        pane.plugins.setText(str(self.tmp / "missing"))
-        pane.set_plugins()
-        self.assertEqual(app_settings.get("plugins.folder"), "")    # (a folder that is not there: refused)
-        self.assertEqual(pane.plugins.text(), "")
-        pane.plugins.setText(str(self.tmp))
-        pane.set_plugins()
-        self.assertEqual(app_settings.get("plugins.folder"), str(self.tmp))
+        self.assertFalse(hasattr(pane, "plugins"))                  # (no code folder: the plugins come with it)
         self.assertTrue(pane.anon.isChecked())                      # (names hidden by default)
         pane.anon.setChecked(False)
         self.assertFalse(app_settings.get("diagnostics.hide_names"))

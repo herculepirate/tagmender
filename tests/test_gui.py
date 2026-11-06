@@ -569,7 +569,7 @@ class Gui(te.Base):
     def test_every_page_has_a_keyboard_route_and_accessible_names(self):
         for i, (name, _c) in enumerate(self.gui.PAGES):
             self.win.go(name)
-            self.assertEqual(self.win.stack.currentWidget(), self.win.pages[name])
+            self.assertTrue(self.win.showing(name), name)              # (Profiles, Setup: in Preferences)
         ov = self.win.pages["Overview"]
         for w in (ov.drop, ov.table, ov.search, ov.profile, ov.detail):
             self.assertTrue(w.accessibleName(), w)

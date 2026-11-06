@@ -89,7 +89,7 @@ class Install(Base):
         plugins.install(EXAMPLE)
         plugins.set_enabled("roman-numerals", True)
         kept = plugins.remove("roman-numerals")
-        self.assertEqual(plugins.installed(), [])
+        self.assertEqual([p for p in plugins.installed() if not p.builtin], [])
         self.assertNotIn("roman-numerals", plugins.enabled_ids())
         self.assertEqual(kept.parent.name, ".removed")
 
@@ -214,8 +214,8 @@ class PreferencesPane(Base):
         pane.switch("roman-numerals", False)
         self.assertEqual(plugins.status("roman-numerals"), "off")
         with mock.patch.object(sheets, "confirm", return_value=True):
-            pane.remove(plugins.installed()[0])
-        self.assertEqual(plugins.installed(), [])
+            pane.remove([p for p in plugins.installed() if not p.builtin][0])
+        self.assertEqual([p for p in plugins.installed() if not p.builtin], [])
 
 
 if __name__ == "__main__":

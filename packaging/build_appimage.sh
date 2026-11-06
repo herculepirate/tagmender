@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build TagMender-<version>-x86_64.AppImage: a portable desktop + command-line build with its own
 # Python (python-build-standalone, via uv), mutagen, Pillow, fonttools and PySide6, and the
-# Discogs Enrichment and CoverUp plugin code. No system Python packages needed.
+# built-in Discogs and CoverUp plugins. No system Python packages needed.
 #
-#   packaging/build_appimage.sh [--discogs DIR] [--coverup DIR] [--python DIR] [--out DIR] [--with-player]
+#   packaging/build_appimage.sh [--python DIR] [--out DIR] [--with-player]
 #
 # --with-player also bundles Qt Multimedia (from PySide6-Addons, the same version; adds its FFmpeg
 # libraries) so the app's player plays; without it the player's controls say there is no sound
@@ -21,15 +21,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC=$PWD
-DISCOGS=${TAGMENDER_DISCOGS_PLUGIN:-$SRC/../picard-discogs-enrichment}
-COVERUP=${TAGMENDER_COVERUP_DIR:-$SRC/../picard-coverup}
 OUT=$SRC/dist
 PYDIR=""
 PLAYER=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --discogs) DISCOGS=$2; shift 2;;
-    --coverup) COVERUP=$2; shift 2;;
     --python) PYDIR=$2; shift 2;;
     --out) OUT=$2; shift 2;;
     --with-player) PLAYER=1; shift;;
@@ -51,7 +47,7 @@ fi
 
 APPDIR=$(mktemp -d)/TagMender.AppDir
 trap 'rm -rf "$(dirname "$APPDIR")"' EXIT
-mkdir -p "$APPDIR/usr/lib/tagmender/vendor"
+mkdir -p "$APPDIR/usr/lib/tagmender"
 cp -a "$PYDIR" "$APPDIR/usr/python"
 rm -f "$APPDIR"/usr/python/lib/python3.*/EXTERNALLY-MANAGED     # our own private copy: pip may install into it
 "$APPDIR/usr/python/bin/python3" -m pip install --quiet --no-warn-script-location --disable-pip-version-check \
@@ -84,18 +80,12 @@ else
   echo "warning: libdiscid.so.0 not found (sudo apt install libdiscid0): the AppImage will not read a CD in the drive" >&2
 fi
 
-# TagMender: the tracked Python files (gui/ and tagscript/ included), the fonts, the app's icons
-# (Lucide, with its LICENSE) and translations; not tests/ or the developer tools in tools/
-git ls-files '*.py' 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*' | grep -v -e '^tests/' -e '^tools/' | while read -r f; do
+# TagMender: the tracked Python files (gui/ and tagscript/ included), the built-in plugins, the
+# fonts, the app's icons (Lucide, with its LICENSE) and translations; not tests/ or the developer
+# tools in tools/
+git ls-files '*.py' 'plugins_builtin/*' 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*' | grep -v -e '^tests/' -e '^tools/' | while read -r f; do
   install -D -m 0644 "$f" "$APPDIR/usr/lib/tagmender/$f"
 done
-vendor() {
-  local from=$1 to=$2
-  ( cd "$from" && git ls-files ) | grep -v '^tests/' | while read -r f; do install -D -m 0644 "$from/$f" "$to/$f"; done
-  git -C "$from" rev-parse HEAD > "$to/VENDORED_COMMIT"
-}
-vendor "$DISCOGS" "$APPDIR/usr/lib/tagmender/vendor/picard-discogs-enrichment"
-vendor "$COVERUP" "$APPDIR/usr/lib/tagmender/vendor/picard-coverup"
 
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh

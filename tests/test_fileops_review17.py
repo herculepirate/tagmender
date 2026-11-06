@@ -1,7 +1,7 @@
 # Seventeenth independent review of TagMender's file operations (code at a259687). Each test
 # asserts the correct behaviour and fails at a259687.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # The repository is the folder above tests/.
 # Picard references (metabrainz/picard master):
 #   picard/util/emptydir.py   PROTECTED_DIRECTORIES = every QStandardPaths location (home, Music,

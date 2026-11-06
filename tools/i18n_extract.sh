@@ -9,7 +9,7 @@
 #   tools/i18n_extract.sh --release   then compile each tagmender_<lang>.ts to the .qm the app loads
 #
 # Needs pyside6-lupdate (and pyside6-lrelease for --release), which come with PySide6; set
-# LUPDATE / LRELEASE to use other ones. Reads gui/ and requirements.py; writes only under
+# LUPDATE / LRELEASE to use other ones. Reads gui/, requirements.py and plugins.py; writes only under
 # assets/i18n/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -31,6 +31,7 @@ mkdir -p "$OUT"
 mapfile -t sources < <(find gui -name '*.py' -not -path '*/__pycache__/*' | sort)
 # the Setup page's items and notices, shown through tr()
 [ -f requirements.py ] && sources+=(requirements.py)
+[ -f plugins.py ] && sources+=(plugins.py)                   # (the built-in plugins' descriptions)
 # tr("text") is Qt's tr() in the context "" (gui/i18n.py); N_("text") only marks a table's text
 args=(-tr-function-alias "QT_TR_NOOP+=N_" -locations relative -source-language en)
 

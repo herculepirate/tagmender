@@ -1,52 +1,36 @@
 #!/usr/bin/env bash
 # Build tagmender_<version>_all.deb (Debian 12+, Ubuntu 24.04+, Linux Mint 22+).
 #
-#   packaging/build_deb.sh [--discogs DIR] [--coverup DIR] [--out DIR]
+#   packaging/build_deb.sh [--out DIR]
 #
-# The Discogs Enrichment and CoverUp plugin code (GPL-2.0-or-later, like TagMender) is bundled
-# under /usr/lib/tagmender/vendor/ so the package works without clones; they are read from
-# next to this folder (../picard-discogs-enrichment, ../picard-coverup), --discogs / --coverup,
-# or $TAGMENDER_DISCOGS_PLUGIN / $TAGMENDER_COVERUP_DIR.
+# The built-in Discogs and CoverUp plugins (plugins_builtin/) are part of the tracked files.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC=$PWD
-DISCOGS=${TAGMENDER_DISCOGS_PLUGIN:-$SRC/../picard-discogs-enrichment}
-COVERUP=${TAGMENDER_COVERUP_DIR:-$SRC/../picard-coverup}
 OUT=$SRC/dist
 while [ $# -gt 0 ]; do
   case "$1" in
-    --discogs) DISCOGS=$2; shift 2;;
-    --coverup) COVERUP=$2; shift 2;;
     --out) OUT=$2; shift 2;;
     *) echo "unknown option $1" >&2; exit 2;;
   esac
 done
 VERSION=$(python3 -c "import sys; sys.path.insert(0, '.'); import version; print(version.VERSION)")
-[ -f "$DISCOGS/discogs_mapping.py" ] || { echo "Discogs Enrichment not found at $DISCOGS" >&2; exit 1; }
-[ -f "$COVERUP/pipeline.py" ] || { echo "CoverUp not found at $COVERUP" >&2; exit 1; }
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 LIB=$STAGE/usr/lib/tagmender
-mkdir -p "$LIB/vendor" "$STAGE/usr/bin" "$STAGE/DEBIAN" "$STAGE/usr/share/applications" \
+mkdir -p "$LIB" "$STAGE/usr/bin" "$STAGE/DEBIAN" "$STAGE/usr/share/applications" \
          "$STAGE/usr/share/icons/hicolor/scalable/apps" "$STAGE/usr/lib/systemd/user" \
          "$STAGE/usr/share/doc/tagmender"
 
-# TagMender itself: the tracked Python files (gui/ and tagscript/ included), the fonts, the
-# app's icons (Lucide, with its LICENSE) and translations; not tests/ or the developer tools in tools/
-git ls-files '*.py' 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*' | grep -v -e '^tests/' -e '^tools/' | while read -r f; do
+# TagMender itself: the tracked Python files (gui/ and tagscript/ included), the built-in plugins,
+# the fonts, the app's icons (Lucide, with its LICENSE) and translations; not tests/ or the
+# developer tools in tools/
+git ls-files '*.py' 'plugins_builtin/*' 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*' | grep -v -e '^tests/' -e '^tools/' | while read -r f; do
   install -D -m 0644 "$f" "$LIB/$f"
 done
 chmod 0755 "$LIB/tagmender.py"
 
-vendor() {   # copy a plugin's tracked files (no tests, no .git) and stamp its commit
-  local from=$1 to=$2
-  ( cd "$from" && git ls-files 2>/dev/null || find . -type f -not -path './.git/*' ) | grep -v '^tests/' |
-    while read -r f; do install -D -m 0644 "$from/$f" "$to/$f"; done
-  git -C "$from" rev-parse HEAD > "$to/VENDORED_COMMIT" 2>/dev/null || echo unknown > "$to/VENDORED_COMMIT"
-}
-vendor "$DISCOGS" "$LIB/vendor/picard-discogs-enrichment"
-vendor "$COVERUP" "$LIB/vendor/picard-coverup"
 
 # python-discid (pure Python; reads a CD in the drive through libdiscid0): next to tagmender.py,
 # so it imports without pip. The wheel is kept in .cache/wheels, so later builds work offline.

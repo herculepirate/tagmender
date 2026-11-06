@@ -1,5 +1,78 @@
 # Release notes
 
+## 0.8.9
+
+**Discogs and CoverUp are built-in plugins**
+- TagMender now carries the Discogs and CoverUp code itself (`plugins_builtin/`): nothing else to
+  download or clone, from a package or from source.
+- Both are listed in Preferences › Plugins, switched on, each with its own switch (they can be
+  switched off, not removed). The change applies from the next look-up. With Discogs off, albums
+  are identified with MusicBrainz only; with CoverUp off, covers come from the Cover Art Archive
+  and Discogs, and covers already there are kept. `tagmender plugins disable discogs` does the same
+  on the command line, and `tagmender doctor` says when one is off. With Discogs off,
+  `tagmender inbox` and `tagmender match` stop and say so; `tagmender web` and `tagmender enrich`
+  leave Discogs out.
+- Preferences › Advanced › Code folder is gone; a folder set there before is no longer read.
+- With Discogs off, CoverUp asks Discogs nothing either, and band members are not looked up there;
+  with CoverUp off, no artist photo is looked for and Find Covers… does not search online.
+- What CoverUp sends to cover sites now names TagMender.
+
+**Preferences**
+- Profiles and Setup are now tabs of Preferences (Ctrl+,), not pages of the main window's
+  sidebar. View › Profiles and View › Setup, File › New Profile… and Help › Set Up TagMender…
+  open them there, and the first start opens Setup there. Closing Preferences asks about a
+  profile not saved.
+- **Apply to All Profiles…** on every setting of a profile (in the ⋯ menu beside it, or the All
+  profiles ▾ menu of a shared one): that setting, as shown, goes into every profile, also one
+  that kept its own value. Only that setting changes in them; nothing is written if any profile
+  could not take it, and the profile shown is saved first.
+- File Safety › **Duplicate copies go to**: the duplicates folder, or **the Trash** (the Trash of
+  the drive the copy is on, as a file manager does; `tagmender dedupe --undo` still puts them back).
+- The duplicates folder can be given as its path at the top of a library
+  (`/music/2delete` is taken as `2delete`) instead of being refused.
+
+**Overview**
+- **Refresh** (beside Look Up, Ctrl+R, and Refresh with Current Settings when you right-click
+  albums) looks the selected albums up again with the profile as it is now, every album when none
+  is selected. After you change and save a profile, the Overview says how many albums were looked up
+  with its old settings, with a link that refreshes just those.
+- An album looked up again with the same settings is no longer asked of the databases twice (the
+  check compared the profile in memory, not its settings).
+
+**Album artist**
+- *Lead artist only* now files a band named after a member under that member also for an album
+  tagged from Discogs alone ("Jason Bieler and The Baron Von Bielski Orchestra" → Jason Bieler): the
+  band's members were asked of Discogs only when the files already held its Discogs artist ID.
+
+**Plugin API**
+- A script function given the wrong number of arguments is the script's error ("Wrong number of
+  arguments"), no longer switching the whole plugin off; one that returns something other than
+  text is switched off instead of stopping the album.
+- A tag processor that fails part-way through an album: the album is planned again without it and
+  the plan says so, never with the change on some tracks only; a script function failing while an
+  album's files are named holds that album back with a note, never with mixed names. `album_folder` is the album's folder
+  also for albums in CD1/CD2 folders.
+- `requires = ["pkg.sub"]` with `pkg` missing no longer stops every plugin from loading;
+  `plugins check` takes a plugin in several files; a damaged zip is refused with a message.
+- Python 3.10: plugins work with the `tomli` module, and a plugin switched on that cannot be read
+  says why. `tagmender profiles set/check` know plugins' script functions. `--no-plugins` and
+  `--profile` in either order.
+- Preferences › Plugins › Install from Folder…; installing a newer copy keeps a plugin on;
+  switching a failed plugin off and on tries it again; a secret setting can be forgotten.
+- `plugins new` names its example function after the plugin and quotes its name; `plugins check`
+  refuses the built-in plugins' ids; a switch setting's default must be true or false.
+- docs/PLUGINS.md: the Python requirement, every manifest field, the script function and tag
+  processor contracts, settings and secrets, and what happens when a plugin fails.
+
+**History**
+- **Clear History…**: everything, or what is older than 1, 5 or 10 days. Only the list goes; the
+  rules, and what they leave alone, stay.
+
+**Window**
+- A new session always opens on the Overview.
+- The inspector can be dragged wider (up to 960 points instead of 480), so long tag values show
+  whole; the Tag column widens with it.
+
 ## 0.8.8
 
 - *Start from a preset* lets you pick one preset only (all three could be selected at once).

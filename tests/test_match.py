@@ -36,7 +36,7 @@ for _name in list(_credentials.ENV.values()) + ["TAGMENDER_PROFILE", "TAGMENDER_
 import match_core as mc  # noqa: E402
 import match_albums as ma  # noqa: E402
 
-PLUGIN_DIR = sys.argv[1] if len(sys.argv) > 1 else "../picard-discogs-enrichment"
+PLUGIN_DIR = sys.argv[1] if len(sys.argv) > 1 else "plugins_builtin/discogs"
 CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])   # tie rules tested without the country preference
 CFG_PREF = dict(mc.DEFAULT_CFG)
 

@@ -1,8 +1,8 @@
 # Review 18a: the ARTWORK / CoverUp path of TagMender (code at 6e11c18, after the two artwork
 # reviews in tests/test_artwork_review.py and tests/test_artwork_review2.py). Each test asserts
 # the correct behaviour and fails at 6e11c18. Line numbers are 6e11c18's.
-#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=../picard-discogs-enrichment \
-#     TAGMENDER_COVERUP_DIR=../picard-coverup python3 -W ignore <this file>
+#   cd <repo> && TAGMENDER_DISCOGS_PLUGIN=plugins_builtin/discogs \
+#     TAGMENDER_COVERUP_DIR=plugins_builtin/coverup python3 -W ignore <this file>
 # The repository is the folder above tests/. No network: CoverUp
 # runs with only its local-files source, and every real connection fails
 # (socket.create_connection is patched by tests/test_artwork_review.ArtBase).
@@ -22,7 +22,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tests"))
-os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("../picard-coverup")))
+os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("plugins_builtin/coverup")))
 import artwork  # noqa: E402
 import engine as eng_mod  # noqa: E402
 import executor  # noqa: E402

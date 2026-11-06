@@ -72,7 +72,12 @@ def isolate(scale=1):
     import credentials                                  # (no key of the person's own: Setup shows "Not set")
     for var in credentials.ENV.values():
         os.environ.pop(var, None)
-    os.environ.update(QT_QPA_PLATFORM="offscreen", TAGMENDER_TAGGER_INI="/nonexistent",
+    # (a screen large enough for the biggest window at this scale: Qt's offscreen screen is
+    # otherwise 800x800, and a window larger than its screen is cut to it)
+    screen = tmp / "offscreen.json"
+    screen.write_text(json.dumps({"screens": [{"name": "shots", "x": 0, "y": 0, "width": 4000, "height": 3000,
+                                               "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}))
+    os.environ.update(QT_QPA_PLATFORM=f"offscreen:configfile={screen}", TAGMENDER_TAGGER_INI="/nonexistent",
                       PYTHONDONTWRITEBYTECODE="1", QT_ACCESSIBILITY="1")
     sys.dont_write_bytecode = True
 
@@ -469,8 +474,8 @@ def run(out, only):
 def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPainter, Qt):
     import copy
     win = gui.Main()
-    win.resize(*size)
     win.show()
+    win.resize(*size)                                   # (after show: the window first fits itself, 1180x760)
     win.inspector_wanted = True                         # (wanted: it steps aside on the empty Overview)
     win.place_inspector()
     sh.settle(20)
@@ -678,8 +683,8 @@ def shoot_m7(sh, gui, plan, wav, theme, size, QPoint, QColor, QPainter, Qt):
     import copy
     from gui import dialogs, search
     win = gui.Main()
-    win.resize(*size)
     win.show()
+    win.resize(*size)                                   # (after show: the window first fits itself, 1180x760)
     win.inspector_wanted = True
     win.place_inspector()
     sh.settle(20)
@@ -849,8 +854,8 @@ def shoot_m8(sh, gui, plan, found, wav, theme, size, QPoint, QColor, QPainter, Q
     from gui import account, browser, manual_match
     from gui import acoustid_submit as gacs
     win = gui.Main()
-    win.resize(*size)
     win.show()
+    win.resize(*size)                                   # (after show: the window first fits itself, 1180x760)
     win.inspector_wanted = True
     win.place_inspector()
     sh.settle(20)

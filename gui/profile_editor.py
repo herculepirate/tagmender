@@ -24,8 +24,8 @@ import html
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton,
-                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QInputDialog, QLabel, QLineEdit, QPushButton,
+                               QRadioButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 import naming
 import profiles as pf
@@ -1337,6 +1337,10 @@ class PresetSheet(QDialog):
             lay.addWidget(self.name)
             lay.addWidget(caption(tr("Start from:"), "hint"))
         self.cards = {}
+        # (one choice: each button sits in its own card, so they are grouped - Qt makes radio
+        # buttons exclusive only among those with the same parent)
+        self.choice = QButtonGroup(self)
+        self.choice.setExclusive(True)
         for key, (title, about, _v) in PRESETS.items():
             card = QWidget()
             v = QVBoxLayout(card)
@@ -1350,6 +1354,7 @@ class PresetSheet(QDialog):
             note.setContentsMargins(24, 0, 0, 0)
             v.addWidget(note)
             lay.addWidget(card)
+            self.choice.addButton(rb)
             self.cards[key] = rb
         self.cards["typical"].setChecked(True)
         lay.addStretch(1)

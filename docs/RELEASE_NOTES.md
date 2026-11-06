@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.8.8
+
+- *Start from a preset* lets you pick one preset only (all three could be selected at once).
+- Overview: the columns fit the list instead of running past its edge. The widest (album
+  folder, changes, profile) give way first, cut and shown whole when pointed at, and Why, Score,
+  Scans and Source make room in that order as the window narrows, so the Score stays in view
+  at common window sizes. The columns are fitted again when the inspector opens or closes.
+- The README's screenshots show this version.
+
 ## 0.8.7
 
 Fixes to the 0.8.6 changes.

@@ -367,6 +367,7 @@ class Overview(QWidget):
         self._sized_by_you, self._fitting, self._header_held = set(), False, False
         h.sectionResized.connect(self.column_resized)
         h.viewport().installEventFilter(self)             # (a drag is yours only when it starts on the header)
+        self.table.viewport().installEventFilter(self)    # (the list narrower or wider: fitted to the room)
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(0)
@@ -405,9 +406,10 @@ class Overview(QWidget):
     def filter(self, text):
         self.proxy.setFilterFixedString(text)
 
-    # page widths under which lower-priority columns give way (the inspector shows them all):
-    # Why under 860 px (1280 px with the inspector open), Source and Score under 600 (960 px)
-    NARROW = {5: 860, 3: 600, 7: 520, 2: 420}                  # (Source stays longest: which database said it)
+    # page widths under which lower-priority columns give way (the inspector shows them all), so
+    # the others fit their text without scrolling sideways: Why first, then Score, the scans and
+    # Source (which database said it stays longest)
+    NARROW = {5: 1040, 3: 895, 7: 815, 2: 735}            # (each: the narrowest the rest fit in)
     STATUS_MOST = 150                                 # under 600 px the Status column is cut ("Changed sin…",
                                                       # the whole word in its tooltip): the artist stays in view
 
@@ -422,10 +424,16 @@ class Overview(QWidget):
         self.fit_status()
 
     COLUMN_MOST = {1: 340, 4: 260, 2: 300, 7: 300}       # (fitted, at most: drag for more)
+    # when the fitted columns are wider than the list: these give way first, down to this much
+    # (the album folder and the changes are cut and shown whole when pointed at)
+    COLUMN_LEAST = ((1, 180), (4, 140), (6, 110), (2, 110), (7, 90))
+    LAST_LEAST = 120                                     # (the last column - Why - keeps this much)
 
     def eventFilter(self, obj, e):
         from PySide6.QtCore import QEvent
-        if hasattr(self, "table") and obj is self.table.horizontalHeader().viewport():
+        if hasattr(self, "_fit_timer") and obj is self.table.viewport() and e.type() == QEvent.Resize:
+            self._fit_timer.start()
+        elif hasattr(self, "table") and obj is self.table.horizontalHeader().viewport():
             if e.type() == QEvent.MouseButtonPress and e.button() == Qt.LeftButton:
                 self._header_held = True
             elif e.type() == QEvent.MouseButtonRelease and e.button() == Qt.LeftButton:
@@ -454,11 +462,26 @@ class Overview(QWidget):
         last = self.last_visible_column()
         self._fitting = True
         try:
+            wants = {}
             for c in range(1, len(PlanModel.COLS)):
                 if c in self._sized_by_you or c == last or self.table.isColumnHidden(c):
                     continue
                 want = max(self.table.sizeHintForColumn(c), h.sectionSizeHint(c))
-                want = min(want, self.COLUMN_MOST.get(c, want))
+                wants[c] = min(want, self.COLUMN_MOST.get(c, want))
+            # (all in view where they can be: the widest give way before the list scrolls - while
+            # the list is shown, so measured; it is fitted again when its room changes)
+            room = self.table.viewport().width() if self.table.isVisible() else 0
+            used = sum(wants.get(c, self.table.columnWidth(c)) for c in range(len(PlanModel.COLS))
+                       if c != last and not self.table.isColumnHidden(c))
+            over = used + self.LAST_LEAST - room if room else 0
+            for c, least in self.COLUMN_LEAST:
+                if over <= 0:
+                    break
+                if c in wants and wants[c] > least:
+                    give = min(over, wants[c] - least)
+                    wants[c] -= give
+                    over -= give
+            for c, want in wants.items():
                 if self.table.columnWidth(c) != want:
                     h.resizeSection(c, want)
         finally:

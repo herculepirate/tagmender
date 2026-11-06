@@ -64,6 +64,15 @@ class SharedEditor(tg.Gui):
         self.assertTrue(p.save())
         self.assertEqual(pf.load("A").data["genres"]["max"], default)
 
+    def test_only_one_preset_can_be_chosen(self):
+        from gui.profile_editor import PresetSheet
+        dlg = PresetSheet(self.win, "Start from a preset")
+        dlg.cards["collector"].click()
+        dlg.cards["keep"].click()
+        self.assertEqual([k for k, rb in dlg.cards.items() if rb.isChecked()], ["keep"])
+        self.assertEqual(dlg.preset(), "keep")
+        dlg.deleteLater()
+
     def test_a_preset_changes_only_this_profile(self):
         p = self.page("A")
         before = pf.load("B").data["artwork"]["enlarge"]

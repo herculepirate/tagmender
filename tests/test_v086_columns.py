@@ -17,7 +17,7 @@ def album(folder, why=(), conflicts=()):
 class V086Columns(tg.Gui):
     def test_every_column_can_be_resized_and_a_drag_is_kept(self):
         from gui.models import PlanModel
-        self.win.resize(1500, 800)
+        self.win.resize(2400, 800)                                # (room for every column's text)
         self.win.inspector.hide()
         self.app.processEvents()
         ov = self.win.pages["Overview"]
@@ -72,6 +72,19 @@ class V086Columns(tg.Gui):
         ov.table.horizontalHeader().resizeSection(5, 400)        # (the last column: Qt's, not yours)
         ov._header_held = False
         self.assertEqual(ov._sized_by_you, set())
+
+    def test_columns_give_way_before_the_list_scrolls(self):
+        self.win.resize(1440, 900)                                # (the inspector open: a mid-size page)
+        self.win.inspector.show()
+        self.app.processEvents()
+        ov = self.win.pages["Overview"]
+        ov.model.set_plan({"job": "j", "profile": "p", "operation": "in_place",
+                           "albums": [album("/m/Some Band With A Long Name/An Album With A Long Title", why=["x"])]})
+        ov.views.setCurrentWidget(ov.results)
+        self.win.go("Overview")
+        for _ in range(5):
+            self.app.processEvents()
+        self.assertLessEqual(ov.table.horizontalHeader().length(), ov.table.viewport().width())
 
 
 if __name__ == "__main__":

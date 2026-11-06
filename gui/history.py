@@ -20,7 +20,7 @@ class History(QWidget):
     def __init__(self, win):
         super().__init__()
         lay = QVBoxLayout(self)
-        lay.addLayout(heading(tr("History"), tr("What the rules excluded, and why. Job results are under Jobs.")))
+        lay.addLayout(heading(tr("History"), tr("What your rules left alone, and why.")))
         self.table = QTableWidget(0, 4)                     # (the job: in the When cell's tooltip)
         self.table.setHorizontalHeaderLabels([tr("When"), tr("Excluded as"), tr("Rule"), tr("Item")])
         h = self.table.horizontalHeader()

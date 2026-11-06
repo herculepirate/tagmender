@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.8.9" src="https://img.shields.io/badge/version-0.8.9-0f7b7b">
+  <img alt="Version 0.8.10" src="https://img.shields.io/badge/version-0.8.10-0f7b7b">
   <img alt="Licence GPL-2.0-or-later" src="https://img.shields.io/badge/licence-GPL--2.0--or--later-blue">
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
@@ -57,7 +57,8 @@ tells you why.
 **Organise**
 - Renames and moves albums with naming scripts or presets. Cover art, scans, logs and cue sheets
   move with their album.
-- Keeps lossless and lossy files in separate libraries if you want, and sets duplicates aside.
+- Keeps lossless and lossy files in separate libraries if you want. Duplicate copies go to a
+  folder you name or to the Trash, and can be put back.
 
 **Stay safe**
 - Nothing changes without a preview.
@@ -68,9 +69,16 @@ tells you why.
 **Work your way**
 - A desktop app, a command line and watched folders that run unattended.
 - Profiles hold every setting: source, target, audio formats and file operations. Presets and
-  plain-language defaults are included.
+  plain-language defaults are included. One setting can be copied to every profile at once.
+- Changed a setting after looking albums up? Refresh looks them up again with the new one, before
+  anything is applied.
 - A report after every run lists what needs your decision, with a link to each album folder.
   You can export it as a web page or CSV.
+
+**Extend it**
+- Discogs and CoverUp (cover art) are built-in plugins you can switch off. Your own plugins add
+  script functions and tag changes, and every change they make shows in the preview.
+  [Writing a plugin →](docs/PLUGINS.md)
 
 **Free services, your own keys**
 - Uses official free APIs: MusicBrainz, Discogs, Cover Art Archive, AcoustID, the CUETools
@@ -107,7 +115,7 @@ themes, a shortcut for every command, and translations.
     <td><img src="docs/screenshots/preferences-network-dark.png" alt="Preferences, Network: Test Connection for MusicBrainz, Discogs, AcoustID and the Cover Art Archive"></td>
   </tr>
   <tr>
-    <td><b>Profiles.</b> Plain sections, presets, a live naming example, and Restore Defaults.</td>
+    <td><b>Profiles</b> (in Preferences). Plain sections, presets, a live naming example, and Apply to All Profiles on each setting.</td>
     <td><b>Test Connection.</b> Whether each service answers, is busy, or refuses a key.</td>
   </tr>
 </table>
@@ -156,7 +164,7 @@ New to it? Start with the [Quick start](docs/QUICK_START.md) (ten minutes), then
 
 ## Keys and requirements
 
-Nothing is bundled or shared. The app's **Setup** page, or `tagmender setup`, lists each item:
+Nothing is bundled or shared. **Preferences › Setup** in the app, or `tagmender setup`, lists each item:
 what it enables, where to get it, and whether it is set. Keys are stored in
 `~/.config/tagmender/` with mode 600 and are never logged.
 
@@ -185,6 +193,7 @@ Flatpak. See [Building the packages](docs/USER_GUIDE.md#building-the-packages).
 | [Features](docs/FEATURES.md) | Every feature and its status |
 | [Upgrading](docs/MIGRATION.md) | Coming from the 0.1 batch tools |
 | [Scripting guide](docs/SCRIPTING.md) | The naming and tagging script language: every function, with recipes |
+| [Plugins](docs/PLUGINS.md) | The built-in plugins, installing others, and writing your own |
 | [Release notes](docs/RELEASE_NOTES.md) · [Roadmap](docs/ROADMAP.md) | What changed, what comes next |
 | [Architecture](docs/ARCHITECTURE.md) · [Translating](docs/TRANSLATING.md) | For contributors |
 

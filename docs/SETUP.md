@@ -130,7 +130,7 @@ for each missing item. It says where a key comes from (environment or file), nev
 
 ### Test Connection
 
-The Setup page's **Test Connection** (and `tagmender doctor --connection`) sends one small
+**Test Connection** in Preferences › Setup (and `tagmender doctor --connection`) sends one small
 request to each of MusicBrainz, Discogs, AcoustID and the Cover Art Archive, with a short timeout,
 and says for each: answered in N ms, busy (it limits requests or is overloaded: try later),
 unreachable (no network, a proxy or firewall, or the service is down) or key refused (set the key
@@ -147,7 +147,7 @@ says so in the plan's notes; albums only MusicBrainz could prove are left to try
 
 For each key, TagMender looks first for its environment variable, then for its file in
 `~/.config/tagmender/` (or `$XDG_CONFIG_HOME/tagmender/`). An environment variable wins over a
-saved file. The Setup page says when a variable is in use.
+saved file. Preferences › Setup says when a variable is in use.
 
 TagMender refuses a file that other users can read. To make a file readable only by you:
 
@@ -169,7 +169,7 @@ Then paste the key into the file with a text editor.
 
 Each section gives:
 
-- **Setup name:** the row on the Setup page and the name for `tagmender setup NAME`
+- **Setup name:** the row in Preferences › Setup and the name for `tagmender setup NAME`
 - **Variable:** the environment variable
 - **File:** the file in `~/.config/tagmender/`, mode 600
 - **Notice:** the text you see when the item is missing
@@ -325,7 +325,7 @@ and a login.
 - **Enables:** your MusicBrainz account: collections, and sending your ratings.
 - **Without it:** Collections and Submit Ratings aren't available. Looking albums up still works.
 - **Log in:**
-  1. Click **Log In…** on the login row of the Setup page. This opens Preferences > Account.
+  1. Click **Log In…** on the login row of Preferences › Setup. This opens Preferences > Account.
   2. Click **Log In…** there. Your browser opens MusicBrainz's page asking you to allow access.
   3. Allow it, then copy the code the page shows and paste it into TagMender.
 
@@ -390,7 +390,7 @@ later replaces it.
 ### Programs and modules
 
 [Optional programs](#optional-programs) has the install command for each distro. After
-installing, click **Check Again** on the Setup page or run `tagmender doctor`.
+installing, click **Check Again** in Preferences › Setup or run `tagmender doctor`.
 
 | Item | Enables | Without it | Notice |
 |---|---|---|---|
@@ -437,7 +437,7 @@ On Ubuntu 24.04 and later the zbar library package is called `libzbar0t64`. Inst
 | "Submitting fingerprints is not available: no AcoustID user key." | Copy your key from <https://acoustid.org/api-key> and add it in Setup (`tagmender setup acoustid_user`). |
 | "AcoustID refused the submission: … Check the AcoustID application key in Setup." / "… user key in Setup." | The key named is wrong or was revoked. Copy it again from AcoustID and save it. |
 | "MusicBrainz login is not available: no MusicBrainz client ID." (or client secret) | Register an "Installed application" at <https://musicbrainz.org/account/applications> and enter its client ID and secret in Setup. |
-| "Collections and ratings are not available: you are not logged in to MusicBrainz." | Click Log In… on the Setup page's login row and paste the code MusicBrainz shows. |
+| "Collections and ratings are not available: you are not logged in to MusicBrainz." | Click Log In… on the login row of Preferences › Setup and paste the code MusicBrainz shows. |
 | "Log in to MusicBrainz first." | Choose Open Setup in that sheet. It goes to whatever is missing: the client ID, the secret or the login. |
 | "gnudb lookups are not used: no gnudb e-mail." | Register an address at <https://gnudb.org> and add it in Setup (`tagmender setup gnudb`). |
 | "gnudb refused the lookup (…): check the e-mail address" | Enter the exact address you registered at gnudb.org. |

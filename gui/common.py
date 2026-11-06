@@ -136,9 +136,9 @@ class TitleLabel(QLabel):
         self.setContentsMargins(0, 0, 0, 0)
 
     def branded(self) -> bool:
-        """The main window's pages only: Preferences and dialogs keep a plain title (their
-        window already says what they are)."""
-        return type(self.window()).__name__ == "Main"
+        """Every screen's title: the main window's pages, Preferences (Profiles and Setup among
+        them) and the dialogs with a page title."""
+        return True
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -198,7 +198,7 @@ def section(text):
     """A section headline with a hairline above it."""
     box = QVBoxLayout()
     box.setContentsMargins(0, 8, 0, 0)
-    box.setSpacing(6)
+    box.setSpacing(8)
     box.addWidget(separator())
     t = QLabel(text)
     t.setProperty("role", "headline")

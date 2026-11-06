@@ -12,7 +12,7 @@ engine's own messages (reason codes, check results) stay in English for now.
   marked with `N_()` where it is defined and passed through `tr()` where it is shown. Only the
   words are translated: the table's keys, and the page and menu names the code looks things up
   by, stay English.
-- The Setup page's items (what each key or program is for, what stops without it) and the
+- Preferences › Setup's items (what each key or program is for, what stops without it) and the
   "not used: no ... key" notices are defined in `requirements.py`, outside `gui/`, and marked
   with `N_()` there too; `tools/i18n_extract.sh` reads that file with `gui/`. In a terminal
   (`tagmender doctor`, `tagmender setup`) they stay English.

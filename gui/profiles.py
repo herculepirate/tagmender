@@ -193,8 +193,7 @@ class Profiles(QWidget):
         super().__init__()
         self.win = win
         outer = QVBoxLayout(self)
-        outer.addLayout(heading(tr("Profiles"), tr("How each profile identifies, tags, names and files music, and the "
-                                                   "rules that leave things alone.")))
+        outer.addLayout(heading(tr("Profiles"), tr("How each profile tags, names and files music.")))
         lay = QHBoxLayout()
         lay.setSpacing(16)
         outer.addLayout(lay, 1)
@@ -229,7 +228,7 @@ class Profiles(QWidget):
         self.dup_btn.clicked.connect(self.duplicate)
         left.addWidget(self.dup_btn)
         manage = QHBoxLayout()                               # (rename and delete the profile shown)
-        manage.setSpacing(6)
+        manage.setSpacing(8)
         self.rename_btn = QPushButton(tr("Rename…"))
         self.rename_btn.setAccessibleName(tr("Rename the profile shown"))
         self.rename_btn.clicked.connect(self.rename)

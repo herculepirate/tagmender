@@ -1,5 +1,38 @@
 # Release notes
 
+## 0.8.10
+
+- The packaged app (.deb, AppImage, Flatpak) shows the TagMender logo beside each page's title
+  again: the logo file was not in the packages, only in the source. The scan-reading order that
+  comes with TagMender (`assets/ocr_order.json`) was left out the same way and is now included.
+- The logo and the green-to-red line are on every screen's title: Preferences (Profiles and Setup
+  among its tabs since 0.8.9) and the dialogs with a page title, not only the main window's pages.
+- Preferences opens wide enough to show all nine tabs (since 0.8.9 the last ones were cut off).
+
+**Overview: what matters first**
+- "N albums ready to apply" in bold under the list, the other counts beside it in grey.
+- Colour only where it asks for you: a status is coloured only when it stops Apply (Blocked,
+  Failed, Changed since preview) - its icon still says the rest; the Score cell is tinted only
+  when it is worth a look or needs investigation, and says its band to a screen reader.
+- No subtitle under the title; Sources and Library folder are quiet labels; Look Up and Refresh
+  are plain text buttons, Apply in the toolbar the one prominent one. The 0.8.9 Refresh button
+  made the page too wide for a 960-point window; it fits again.
+
+**Look and feel**
+- One type scale: page titles 22, section headings 15 (a profile's sections were as large as the
+  page's title), text 13, small print 12 (was 11).
+- Buttons, fields and pop-ups have an edge you can see (3:1 against the window, light and dark),
+  and a visible focus ring when you move with the keyboard.
+- Spacing on one scale (2, 4, 8, 12, 16, 24).
+- Shorter page subtitles (Setup's was 37 words).
+- A setting that cannot be saved is named as on screen ("Duplicate copies folder must be a plain
+  folder name, such as 2delete"), not by its internal key.
+
+**Loading**
+- Search and Change Release show the rows' shape while the databases answer (a soft pulse; still
+  with Reduce motion or the desktop's animations off), say so when it is slow, offer Stop when it
+  takes much longer, and on a failure say what happened with Try Again - never a blank list.
+
 ## 0.8.9
 
 **Discogs and CoverUp are built-in plugins**

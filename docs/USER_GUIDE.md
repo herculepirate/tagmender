@@ -109,7 +109,7 @@ Linux, x86_64. Download from [Releases](https://github.com/herculepirate/tagmend
 
 Optional, for everything to work: `sudo apt install ffmpeg libchromaprint-tools tesseract-ocr`
 (audio checks of unusual formats, AcoustID fingerprints, reading scans). The Discogs
-and CoverUp plugins are built in (Preferences › Plugins). Then the app's Setup page (or `tagmender setup`) stores your own keys in `~/.config/tagmender/`, readable only by you:
+and CoverUp plugins are built in (Preferences › Plugins). Then Preferences › Setup in the app (or `tagmender setup`) stores your own keys in `~/.config/tagmender/`, readable only by you:
 see [Your own keys](#your-own-keys).
 
 **First time? Read [First run](FIRST_RUN.md)**: preview first, try one folder, undo once.
@@ -550,7 +550,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 | File > Look Up CD… (Ctrl+K) | Find the release of a CD in the drive, a rip log or a pasted table of contents; the sheet says what is sent before Look Up sends it |
 | Album > Collections… | Your MusicBrainz collections, ticked where they hold the album's release; each change is listed before it is sent (needs your login) |
 | Album > Submit Ratings… | Send the stars you gave in the inspector's Rating row to MusicBrainz (needs your login); Apply also writes them into the files (not MP4 or APEv2, which hold none) |
-| Help > Set Up TagMender… | The Setup page: every key, login and optional program, what each enables, where to get it and whether it is set; enter keys there (it opens by itself on first run) |
+| Help > Set Up TagMender… | Preferences › Setup: every key, login and optional program, what each enables, where to get it and whether it is set; enter keys there (it opens by itself on first run) |
 | Album > Submit AcoustIDs… | Send the album's fingerprints to AcoustID with your user key, after a sheet lists every track |
 | Controls > Play/Pause (Space) | Play the selected album in the player bar under the pages; Next, Previous, Stop. It lets go of the files before Apply or Undo |
 | Profiles > Settings | Every setting of the profile in sections (Source, Identification, Tags, Artwork, Target, Albums nothing identified, Automation); see [Profile settings in the app](#profile-settings-in-the-app) |
@@ -568,7 +568,7 @@ the window: the first one the preview does not hold yet is previewed, and the st
 what became of the others.
 
 Nothing is bundled for the account features: you bring your own MusicBrainz application and
-AcoustID user key (the Setup page; [Setup](SETUP.md#your-musicbrainz-account) has the steps), kept 0600 in
+AcoustID user key (Preferences › Setup; [Setup](SETUP.md#your-musicbrainz-account) has the steps), kept 0600 in
 `~/.config/tagmender` and never shown again. Anything sent to MusicBrainz or AcoustID is your
 choice for one album, after a sheet that says exactly what will be sent.
 
@@ -765,7 +765,7 @@ order improves for everyone. Nothing is sent automatically.
 
 ### Sources: which database decides
 
-A profile's **Sources** setting (`source`; the app's Profiles page, "Sources"; `--source` on
+A profile's **Sources** setting (`source`; Preferences › Profiles in the app, "Sources"; `--source` on
 `plan` and `run` for one run) says which database identifies the release and whose tags win:
 
 | Sources | Identifies | Tags written | IDs already in your files |

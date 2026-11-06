@@ -83,7 +83,7 @@ class SleeveDrop(QFrame):
         ty = y + side + 24                                                  # under the sleeve
         p.setPen(self.palette().color(QPalette.WindowText))
         head_font = style.font("headline")                                  # (below the page title in size)
-        head_font.setPixelSize(17)
+        head_font.setPixelSize(style.TYPE["headline"][0])
         p.setFont(head_font)
         flags = Qt.AlignHCenter | Qt.TextWordWrap
         head = p.fontMetrics().boundingRect(QRect(0, 0, width, 1000), flags, tr(self.HEADLINE))

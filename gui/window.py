@@ -554,6 +554,8 @@ class Main(QMainWindow):
         kind, x = self.album()
         ov = self.pages.get("Overview")
         idle = not getattr(ov, "running", False)
+        if ov is not None and hasattr(ov, "show_ready"):
+            ov.show_ready()                                  # (ticked, highlighted, applied: the count now)
         page = self.stack.currentWidget()
         on_ov = ov is not None and page is ov
         self.commands["add_folder"].setEnabled(idle)            # (no folder picker while a run goes on)

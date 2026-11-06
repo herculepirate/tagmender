@@ -10,7 +10,7 @@ from .i18n import N_
 
 
 # ---- spacing (an 8-pt grid) and sizes -------------------------------------
-SPACE = {"xs": 4, "s": 8, "m": 16, "l": 24}
+SPACE = {"xxs": 2, "xs": 4, "s": 8, "sm": 12, "m": 16, "l": 24}   # (every gap is one of these)
 MARGIN = 20                         # page content margins
 SIDEBAR = (220, 180, 320)           # width, min, max
 INSPECTOR = (320, 280, 960)          # width, min, max (drag it wider to see whole values)
@@ -20,8 +20,10 @@ CORNER = 8
 CONTROL = 6
 
 # ---- type (the system UI font) -------------------------------------------
-TYPE = {"title": (20, 600), "headline": (13, 600), "body": (13, 400), "caption": (11, 400),
-        "glyph": (16, 400)}         # (symbols set as text: the rating stars)
+# four steps, each told apart by size and weight: a page's title, a section's heading, the text,
+# the small print (notes, captions, group titles); "glyph" is for symbols set as text (rating stars)
+TYPE = {"title": (22, 600), "headline": (15, 600), "body": (13, 400), "caption": (12, 400),
+        "glyph": (16, 400)}
 
 # ---- colour: every text pair is at least 4.5:1 ----------------------------
 # selection: a selected row (deeper than the accent in dark, as Music and Finder do, so it never
@@ -31,13 +33,15 @@ LIGHT = {"window": "#F6F7F9", "base": "#FFFFFF", "alt": "#F2F4F7", "sidebar": "#
          "accent": "#1D7F3F", "on_accent": "#FFFFFF", "identified": "#2E7D4F", "attention": "#925F11",
          "ignored": "#5D6B7A", "error": "#B3261E", "raised": "#FFFFFF", "disabled": "#9AA4AF",
          "selection": "#1D7F3F", "on_selection": "#FFFFFF", "focus_ring": "#FFFFFF",
-         "brand_green": "rgba(48,209,88,0.55)", "brand_red": "rgba(255,59,48,0.45)"}
+         "brand_green": "rgba(48,209,88,0.55)", "brand_red": "rgba(255,59,48,0.45)",
+         "field": "#858F9B"}        # field: a control's own edge (buttons, fields, pop-ups): 3:1 at least
 DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1C222A", "ink": "#E6EAF0",
         "muted": "#9AA5B1", "faint": "#4A535E", "separator": "rgba(255,255,255,0.10)", "line": "#323943",
         "accent": "#4CC777", "on_accent": "#0B2014", "identified": "#6CC08E", "attention": "#E3B25C",
         "ignored": "#9AA5B1", "error": "#F08A80", "raised": "#262B32", "disabled": "#6B7480",
         "selection": "#1F6B3C", "on_selection": "#FFFFFF", "focus_ring": "#0B2014",
-        "brand_green": "rgba(48,209,88,0.70)", "brand_red": "rgba(255,69,58,0.60)"}
+        "brand_green": "rgba(48,209,88,0.70)", "brand_red": "rgba(255,69,58,0.60)",
+        "field": "#6E7782"}
 
 # status -> (symbol, word, light colour, dark colour, icon)
 STATUS = {
@@ -169,7 +173,8 @@ def stylesheet():
     arrows, up, down = icons.file("chevrons-up-down", "muted", 12), icons.file("chevron-up", "muted", 10, 2.5), \
         icons.file("chevron-down", "muted", 10, 2.5)
     arrows_off = icons.file("chevrons-up-down", "disabled", 12)  # (a dimmed pop-up keeps its chevron)
-    err = t["error"]
+    err, field = t["error"], t["field"]
+    title_px, head_px, small_px = TYPE["title"][0], TYPE["headline"][0], TYPE["caption"][0]
     return f"""
     QMainWindow, QDialog {{ background: {win}; }}
     QDialog[sheet="true"] {{ background: {raised}; border: 1px solid {line}; }}
@@ -205,27 +210,35 @@ def stylesheet():
     QDockWidget#inspector {{ color: {ink}; }}
     QMainWindow::separator {{ background: {line}; width: 1px; height: 1px; }}
     QWidget#inspectorBody {{ background: {base}; border-left: 1px solid {line}; }}
-    QLabel[role="title"] {{ font-size: 20px; font-weight: 600; color: {ink}; }}
-    QToolButton#settingScope {{ color: {muted}; font-size: 11px; border: none; padding: 0 2px; }}
+    QLabel[role="title"] {{ font-size: {title_px}px; font-weight: 600; color: {ink}; }}
+    QToolButton#settingScope {{ color: {muted}; font-size: {small_px}px; border: none; padding: 0 2px; }}
     QToolButton#settingScope[own="true"] {{ color: {accent}; font-weight: 600; }}
     QToolButton#settingScope::menu-indicator {{ image: none; width: 0; }}
     QToolButton#settingMore {{ color: {muted}; border: none; padding: 0 4px; }}
     QToolButton#settingMore::menu-indicator {{ image: none; width: 0; }}
-    QLabel[role="headline"] {{ font-size: 13px; font-weight: 600; color: {ink}; }}
+    QLabel[role="headline"] {{ font-size: {head_px}px; font-weight: 600; color: {ink}; }}
     QLabel[role="hint"], QLabel[role="caption"] {{ color: {muted}; }}
-    QLabel[role="caption"] {{ font-size: 11px; }}
+    QLabel[role="caption"] {{ font-size: {small_px}px; }}
     QLabel[role="mono"], QComboBox[role="mono"], QComboBox[role="mono"] QLineEdit {{ font-family: monospace; }}
     QFrame[role="separator"] {{ background: {line}; border: none; max-height: 1px; min-height: 1px; }}
     QFrame#strip {{ background: transparent; border: none; }}
-    QPushButton {{ background: {base}; color: {ink}; border: 1px solid {line}; border-radius: {CONTROL}px;
+    QPushButton {{ background: {base}; color: {ink}; border: 1px solid {field}; border-radius: {CONTROL}px;
                    padding: 5px 12px; min-height: 18px; }}
-    QPushButton:hover {{ border-color: {faint}; }}
+    QPushButton:hover {{ border-color: {ink}; }}
+    QPushButton:flat {{ background: transparent; border: 1px solid transparent; color: {accent}; padding: 5px 6px; }}
+    QPushButton:focus {{ border: 2px solid {accent}; padding: 4px 11px; }}
+    QPushButton:flat:focus {{ padding: 4px 5px; }}
+    QPushButton[role="primary"]:focus {{ border: 2px solid {ring}; }}
+    QComboBox:focus, QLineEdit:focus {{ border: 2px solid {accent}; padding: 2px 7px; }}
+    QComboBox:focus {{ padding-right: 23px; }}
+    QAbstractSpinBox:focus {{ border: 2px solid {accent}; padding: 2px 21px 2px 7px; }}
+    QPushButton:flat:hover {{ background: {line}; }}
     QPushButton:disabled {{ color: {faint}; }}
     QPushButton[role="primary"] {{ background: {accent}; color: {on}; border: 1px solid {accent};
                                   font-weight: 600; }}
     QPushButton[role="primary"]:disabled {{ background: {line}; color: {off}; border: 1px solid {line}; }}
     QPushButton[role="destructive"] {{ color: {err}; }}
-    QComboBox, QLineEdit {{ background: {base}; color: {ink}; border: 1px solid {line};
+    QComboBox, QLineEdit {{ background: {base}; color: {ink}; border: 1px solid {field};
                    border-radius: {CONTROL}px; padding: 3px 8px; min-height: 18px; }}
     QComboBox {{ padding-right: 24px; }}
     QComboBox:disabled, QLineEdit:disabled, QAbstractSpinBox:disabled {{ color: {off}; }}
@@ -235,8 +248,9 @@ def stylesheet():
     QComboBox::down-arrow:disabled {{ image: url({arrows_off}); }}
     QComboBox[role="tool"] {{ background: transparent; border: 1px solid transparent; padding: 3px 16px 3px 6px; }}
     QComboBox[role="tool"]:hover {{ background: {line}; }}
+    QComboBox[role="tool"]:focus {{ border: 2px solid {accent}; padding: 2px 15px 2px 5px; }}
     QComboBox[role="tool"]::drop-down {{ width: 14px; }}
-    QAbstractSpinBox {{ background: {base}; color: {ink}; border: 1px solid {line}; border-radius: {CONTROL}px;
+    QAbstractSpinBox {{ background: {base}; color: {ink}; border: 1px solid {field}; border-radius: {CONTROL}px;
                         padding: 3px 22px 3px 8px; min-height: 18px; }}
     QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ subcontrol-origin: border; width: 20px;
                                                                   border: none; background: transparent; }}
@@ -256,9 +270,9 @@ def stylesheet():
     QFrame[role="group"] {{ background: {base}; border: 1px solid {line}; border-radius: {CORNER}px; }}
     QFrame[role="group"] QFrame {{ background: transparent; border: none; }}
     QFrame[role="group"] QFrame[role="separator"] {{ background: {line}; margin-left: 16px; }}
-    QLabel[role="grouptitle"] {{ font-size: 11px; font-weight: 600; color: {muted}; }}
-    QLabel[role="error"] {{ font-size: 11px; color: {err}; }}
-    QLabel[role="warn"] {{ font-size: 11px; color: {t["attention"]}; }}
+    QLabel[role="grouptitle"] {{ font-size: {small_px}px; font-weight: 600; color: {muted}; }}
+    QLabel[role="error"] {{ font-size: {small_px}px; color: {err}; }}
+    QLabel[role="warn"] {{ font-size: {small_px}px; color: {t["attention"]}; }}
     QLabel[role="attention"] {{ color: {t["attention"]}; }}
     QLabel[role="changed"] {{ font-size: 9px; color: {accent}; }}
     QPushButton[role="segment"] {{ border-radius: 0; padding: 4px 12px; margin: 0; }}
@@ -269,11 +283,12 @@ def stylesheet():
     QPushButton[role="segment"][pos="middle"] {{ border-left: none; }}
     QPushButton[role="segment"][pos="only"] {{ border-radius: {CONTROL}px; }}
     QPushButton[role="segment"]:checked {{ background: {accent}; color: {on}; border-color: {accent}; }}
+    QPushButton[role="segment"]:focus {{ padding: 3px 11px; }}
     QToolButton[role="disclosure"] {{ border: 1px solid transparent; border-radius: {CONTROL}px; padding: 3px 6px;
                                       color: {muted}; font-weight: 600; }}
     QToolButton[role="disclosure"]:hover {{ background: {line}; }}
     QToolButton[role="sectionfold"] {{ border: 1px solid transparent; border-radius: {CONTROL}px; padding: 2px 6px 2px 0;
-                                       font-size: 20px; font-weight: 600; color: {ink}; }}
+                                       font-size: {head_px}px; font-weight: 600; color: {ink}; }}
     QToolButton[role="sectionfold"]:hover {{ background: {line}; }}
     QToolButton[role="sectionfold"]:focus {{ border: 2px solid {accent}; }}
     QToolButton[role="disclosure"]:focus {{ border: 2px solid {accent}; padding: 2px 5px; }}

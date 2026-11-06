@@ -1116,7 +1116,7 @@ class Inspector(QDockWidget):
         head = QWidget()
         hl = QVBoxLayout(head)
         hl.setContentsMargins(PAD, 12, PAD, 8)
-        hl.setSpacing(6)
+        hl.setSpacing(8)
         self.name = _label("", "headline")                  # (named with its text: say())
         hl.addWidget(self.name)
         st = QHBoxLayout()

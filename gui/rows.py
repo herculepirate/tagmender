@@ -534,7 +534,7 @@ class Row(QFrame):
         left = QVBoxLayout()
         left.setSpacing(1)
         head = QHBoxLayout()
-        head.setSpacing(6)
+        head.setSpacing(8)
         self.label = QLabel(label)
         # (only a long name wraps: a wrapping label is squeezed to its minimum width, measured
         # before the stylesheet's font applies, so short names broke onto two lines)

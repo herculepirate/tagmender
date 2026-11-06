@@ -46,8 +46,7 @@ class Attention(QWidget):
         self.rows = []
         lay = QVBoxLayout(self)
         lay.addLayout(heading(tr("Needs attention"),
-                              tr("Albums marked Unresolved, with the reason. Retry looks them up "
-                                                 "again; anything excluded by a rule is not listed here.")))
+                              tr("Albums that could not be identified. Retry looks them up again.")))
         row = QHBoxLayout()                                 # the folder, as Overview shows its own
         self.folder_icon = QLabel()
         self.folder_icon.setPixmap(icons.icon("folder-open", "muted").pixmap(16, 16))

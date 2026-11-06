@@ -250,11 +250,11 @@ class Row(QFrame):
         e = self.e
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 6, 0, 6)
-        lay.setSpacing(10)
+        lay.setSpacing(8)
         self.pic = QLabel()
         lay.addWidget(self.pic, 0, Qt.AlignTop)
         col = QVBoxLayout()
-        col.setSpacing(3)
+        col.setSpacing(4)
         top = QHBoxLayout()
         self.title = QLabel(tr(e.title))
         self.title.setProperty("role", "headline")
@@ -453,10 +453,8 @@ class Setup(QWidget):
         super().__init__()
         self.win = win
         lay = QVBoxLayout(self)
-        lay.addLayout(heading(tr("Setup"), tr("Every key, login and optional program TagMender can use: what each "
-                                             "is for, what stops without it and where to get it. Keys are kept "
-                                             "only on this computer, readable by you alone, and never shown "
-                                             "again.")))
+        lay.addLayout(heading(tr("Setup"), tr("The keys, logins and programs TagMender can use. Keys stay on this "
+                                             "computer.")))
         # (a search field over the rows, as on Profiles: in Preferences there is no toolbar search)
         self.find = QLineEdit()
         self.find.setPlaceholderText(tr("Search setup"))

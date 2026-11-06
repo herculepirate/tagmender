@@ -345,8 +345,7 @@ class Watched(QWidget):
         self.plans, self.prow_plans = [], []
         self.svc_state = None
         outer = QVBoxLayout(self)
-        outer.addLayout(heading(tr("Watched folders"), tr("Music dropped into these folders is identified, tagged and "
-                                                   "filed by the folder's profile once it has settled.")))
+        outer.addLayout(heading(tr("Watched folders"), tr("New music in these folders is tagged and filed on its own.")))
         # three lists, one above the other, each scrolling on its own (no page scroll around them)
         split = QSplitter(Qt.Vertical)
         split.setObjectName("pageSplit")
@@ -358,7 +357,7 @@ class Watched(QWidget):
             w = QWidget()
             v = QVBoxLayout(w)
             v.setContentsMargins(0, 0, 0, 2)
-            v.setSpacing(6)
+            v.setSpacing(8)
             split.addWidget(w)
             return v
         lay = pane()

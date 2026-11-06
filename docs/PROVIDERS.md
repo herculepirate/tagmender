@@ -8,7 +8,7 @@ key, login and optional program, step by step, with the notice shown when it is 
 
 Every user brings their own keys; nothing is bundled. Each key is read from its environment
 variable first, then from its file in `~/.config/tagmender/` (mode 600; a file others can read is
-refused). Enter one on the app's Setup page, with `tagmender setup NAME`, or for scripts with
+refused). Enter one in the app's Preferences › Setup, with `tagmender setup NAME`, or for scripts with
 `tagmender setup --stdin NAME` (the value read from standard input). `tagmender doctor` shows where
 each key comes from, never the key.
 

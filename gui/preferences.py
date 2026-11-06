@@ -149,6 +149,8 @@ def _show_stored(control, name):
             control.set_value(v if isinstance(v, list) else [])
         elif hasattr(control, "findData"):
             control.setCurrentIndex(max(0, control.findData(v)))
+        elif isinstance(control, QLineEdit):
+            control.setText("" if v is None else str(v))
     finally:
         control.blockSignals(False)
 
@@ -159,7 +161,14 @@ def _save_setting(pane, name, value, control=None) -> bool:
     try:
         app_settings.set_value(name, value)
     except (OSError, ValueError) as exc:
-        sheets.warning(pane, tr("That setting could not be saved."), str(exc))
+        said = str(exc)
+        # (in the words on screen, not the setting's own name: "Duplicate copies folder must be a
+        # plain folder name", never "duplicates.folder_name must be ...")
+        for line in said.splitlines():
+            if line.startswith(name + " ") or line.startswith(name + ":"):
+                label = (control.accessibleName() if control is not None else "") or name
+                said = said.replace(line, label[:1].upper() + label[1:] + line[len(name):], 1)
+        sheets.warning(pane, tr("That setting could not be saved."), said)
         if control is not None:
             _show_stored(control, name)
         return False
@@ -455,7 +464,7 @@ class FilesPane(SettingsPane):
             self.dupes.setText(name)
         if name == app_settings.duplicates_folder():
             return
-        if not self.save("duplicates.folder_name", name):
+        if not self.save("duplicates.folder_name", name, self.dupes):
             self.dupes.setText(app_settings.duplicates_folder())
 
     def _at_library_top(self, text):
@@ -1288,9 +1297,15 @@ class Preferences(QMainWindow):
             screen = self.screen().availableGeometry() if self.screen() else None
             if screen is not None:
                 w, h = min(w, screen.width() - 40), min(h, screen.height() - 40)
-            self.resize(max(self.width(), w), max(self.height(), h))
+            self.resize(max(self.width(), w, self.tabs_width()), max(self.height(), h))
             return
-        self.resize(max(self.width(), 640), self.TALL)
+        self.resize(max(self.width(), 640, self.tabs_width()), self.TALL)
+
+    def tabs_width(self) -> int:
+        """Wide enough for every tab of the toolbar (nine since Profiles and Setup came here: none
+        behind the toolbar's » button)."""
+        bar = getattr(self, "bar", None)
+        return bar.sizeHint().width() + 16 if bar is not None else 640
 
     def current_tab(self):
         return next(n for n, p in self.panes.items() if p is self.stack.currentWidget())

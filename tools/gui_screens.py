@@ -521,10 +521,12 @@ def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPa
             if p == "Jobs":
                 win.pages["Jobs"].reload()
                 win.pages["Jobs"].table.selectRow(0)
-            if p == "Profiles":
+            if p == "Profiles":                       # (a tab of Preferences since 0.8.9: that window)
                 pr = win.pages["Profiles"]
                 pr.reload()
                 pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Library"))
+                win.prefs_window.resize(*size)
+                return win.prefs_window.grab
             return win.grab
         sh.take(theme, size, nn, name, page, go)
 
@@ -534,17 +536,18 @@ def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPa
         pr = win.pages["Profiles"]
         pr.reload()
         pr.list.setCurrentRow([pr.list.item(i).text() for i in range(pr.list.count())].index("Library"))
-        win.search_box.setText(search)
+        win.prefs_window.resize(*size)
+        pr.find.setText(search)                      # (the page's own search field, in Preferences)
         sh.settle(4)
         row = pr.editor.rows[key]
         pr.editor.verticalScrollBar().setValue(max(0, row.mapTo(pr.editor.widget(), row.rect().topLeft()).y()
                                                    - (34 if TIDY["on"] else 60)))
-        return win.grab
+        return win.prefs_window.grab
     sh.take(theme, size, 30, "profiles-names", "Profiles, names and the example",
             lambda: profile_part("naming.preset"))
     sh.take(theme, size, 31, "profiles-search", "Profiles, searching the settings",
             lambda: profile_part("acoustid", "fingerprint"))
-    win.search_box.setText("")
+    win.pages["Profiles"].find.setText("")
     import requirements as rq
     setup = win.pages["Setup"]
 
@@ -552,7 +555,8 @@ def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPa
         win.go("Setup")
         setup.welcome(welcome)
         setup.scroll.verticalScrollBar().setValue(0)
-        return win.grab
+        win.prefs_window.resize(*size)
+        return win.prefs_window.grab
     sh.take(theme, size, 17, "setup", "Setup", lambda: setup_page(False))
     sh.take(theme, size, 18, "setup-welcome", "Setup, first start", lambda: setup_page(True))
     setup.welcome(False)

@@ -61,7 +61,8 @@ modules:
       # source below is the git checkout, so only tracked files are here, and find goes into every
       # gui/ subpackage
       - find . \( -name '*.py' -o -path './plugins_builtin/*' -o -path './coverup_fonts/*'
-        -o -path './assets/icons/lucide/*' -o -path './assets/i18n/*' \) -type f -not -path './tests/*'
+        -o -path './assets/icons/lucide/*' -o -path './assets/i18n/*' -o -path './assets/icon/tagmender-icon.svg'
+        -o -path './assets/ocr_order.json' \) -type f -not -path './tests/*'
         -not -path './tools/*' -not -path './.git/*' -exec install -Dm644 {} "${FLATPAK_DEST}/lib/tagmender/{}" \;
       - install -Dm755 packaging/flatpak/tagmender.sh ${FLATPAK_DEST}/bin/tagmender
       - install -Dm644 packaging/io.github.herculepirate.TagMender.desktop

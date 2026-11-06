@@ -244,8 +244,8 @@ class PlanModel(QAbstractTableModel):
                     text = "; ".join(reasons.describe(c) for c in codes if c != "other") or words
                     return text[:1].upper() + text[1:]
                 return "; ".join(ident.get("why") or [])[:120]
-        if role == Qt.ForegroundRole and c == 0:
-            return status_color(a["status"])
+        if role == Qt.ForegroundRole and c == 0 and a["status"] in ("blocked", "failed", "conflict"):
+            return status_color(a["status"])               # (only what stops Apply in colour; the icon says the rest)
         if role == Qt.DecorationRole and c == 0:
             from . import icons
             return icons.icon(status_icon(a["status"]), a["status"], 14)
@@ -300,8 +300,13 @@ class PlanModel(QAbstractTableModel):
                                                            "probability.")
             from PySide6.QtGui import QBrush, QColor
             from .style import is_dark
+            if band in ("excellent", "good"):                # (a fit to trust: plain, so the doubtful stand out)
+                return None
             r, g, b = SCORE_BANDS[band][0]
             return QBrush(QColor(r, g, b, 90 if is_dark() else 60))
+        if role == Qt.AccessibleTextRole and c == 3 and score_band(a):
+            # (the band in words too: its tint alone says nothing to a screen reader)
+            return f"{self.data(idx, Qt.DisplayRole) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"
         if role == Qt.AccessibleTextRole and c == 0:
             return label_for(a)[1]
         if role == Qt.CheckStateRole and c == 1 and can_apply(a):

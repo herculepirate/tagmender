@@ -493,6 +493,15 @@ class _Base(QDialog):
         self.stop()
         self.say(busy_text)
         profile = _profile(self.page)
+        from .skeleton import Skeleton
+        self._last_run = (fn, done, busy_text)
+        sk = Skeleton.over(self.table)
+        if not self.model.rowCount():                  # (an empty list: the rows' shape while they load)
+            sk.start(cancel=self.stop_waiting)
+
+        def finished(r):
+            sk.stop()
+            done(r)
 
         def work(w):
             if w.cancelled:                            # (replaced before it began: ask nothing)
@@ -506,7 +515,7 @@ class _Base(QDialog):
 
         def current():                                 # (an older run, answered late, is dropped)
             return me is not None and me is self.worker
-        me = self.worker = start(self, work, lambda r: current() and r is not None and done(r),
+        me = self.worker = start(self, work, lambda r: current() and r is not None and finished(r),
                                  lambda *a: current() and self.progress(*a),
                                  lambda msg: current() and self.failed(msg))
 
@@ -518,6 +527,22 @@ class _Base(QDialog):
 
     def failed(self, msg):
         self.say(f"{lookup_error(msg)} {tr(self.AGAIN)}")
+        from .skeleton import Skeleton
+        if not self.model.rowCount():                  # (no bars left standing: what failed, and Try Again)
+            Skeleton.over(self.table).fail(lookup_error(msg), retry=self.run_again)
+
+    def run_again(self):
+        """Try Again on the list: the sheet's own way of asking (a search: what the field says now)."""
+        if getattr(self, "_last_run", None):
+            self.run(*self._last_run)
+
+    def stop_waiting(self):
+        """Stop, from the skeleton of a look-up that is taking long: the empty list says so, and
+        the answer, if it still comes, is dropped (not shown as found)."""
+        self.stop()
+        self.worker = None
+        from .skeleton import Skeleton
+        Skeleton.over(self.table).fail(tr("Stopped. Nothing was changed."), retry=self.run_again)
 
     def stop(self):
         if self.worker is not None:
@@ -618,11 +643,16 @@ class SearchSheet(_Base):
         self.model.set_rows([], self.cols(kind))
         self.update_buttons()
         if not text:
+            from .skeleton import Skeleton
+            Skeleton.over(self.table).stop()               # (no earlier failure's words left over the list)
             self.say(tr("Type what to search for, then press Return."))
             return
         where = "Discogs" if kind == "discogs" else "MusicBrainz"
         self.run(lambda lk, w: dict(versions.search(lk, kind, text), kind=kind, text=text),
                  self.found, tr("Searching {where}…").format(where=where))
+
+    def run_again(self):
+        self.search()                                      # (what the field and the tab say now)
 
     def found(self, res):
         if res.get("kind") != self.kind() or res.get("text") != self.search_text():
@@ -726,6 +756,9 @@ class VersionsSheet(_Base):
     def failed(self, msg):
         super().failed(msg)
         self.again.show()
+
+    def run_again(self):
+        self.reload()
 
     def reload(self):
         album = self.album

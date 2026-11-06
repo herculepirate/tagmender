@@ -84,7 +84,7 @@ class Jobs(QWidget):
         self.working = False                                 # an undo or a recovery runs on a worker
         lay = QVBoxLayout(self)
         lay.addLayout(heading(tr("Jobs"),
-                              tr("Everything TagMender changed, newest first. Undo puts a job back as it was.")))
+                              tr("Every change, newest first. Undo puts a job back.")))
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels([tr("Started"), tr("Status"), tr("Profile"), tr("Result")])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)

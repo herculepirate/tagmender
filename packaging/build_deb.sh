@@ -26,7 +26,7 @@ mkdir -p "$LIB" "$STAGE/usr/bin" "$STAGE/DEBIAN" "$STAGE/usr/share/applications"
 # TagMender itself: the tracked Python files (gui/ and tagscript/ included), the built-in plugins,
 # the fonts, the app's icons (Lucide, with its LICENSE) and translations; not tests/ or the
 # developer tools in tools/
-git ls-files '*.py' 'plugins_builtin/*' 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*' | grep -v -e '^tests/' -e '^tools/' | while read -r f; do
+git ls-files '*.py' 'plugins_builtin/*' 'coverup_fonts/*' 'assets/icons/lucide/*' 'assets/i18n/*' 'assets/icon/tagmender-icon.svg' 'assets/ocr_order.json' | grep -v -e '^tests/' -e '^tools/' | while read -r f; do
   install -D -m 0644 "$f" "$LIB/$f"
 done
 chmod 0755 "$LIB/tagmender.py"

@@ -26,15 +26,19 @@ class MacLook(tg.Gui):
         self.win.go("Watched folders")
         self.assertTrue(self.win.windowTitle().startswith("Watched folders — TagMender"))
 
-    def test_the_logo_only_on_the_main_windows_pages(self):
+    def test_the_logo_on_every_screen(self):
         from gui.common import TitleLabel
         self.win.go("Overview")
         self.app.processEvents()
         t = self.win.pages["Overview"].findChildren(TitleLabel)[0]
         self.assertTrue(t.branded())
-        prefs = self.win.preferences()
-        self.app.processEvents()
-        self.assertFalse(any(x.branded() for x in prefs.findChildren(TitleLabel)))
+        prefs = self.win.preferences()                                   # (0.8.10: Preferences too, with
+        for name in ("General", "Profiles", "Setup", "Plugins"):         #  Profiles and Setup in it)
+            prefs.show_tab(name)
+            self.app.processEvents()
+            shown = [x for x in prefs.stack.currentWidget().findChildren(TitleLabel) if x.isVisible()]
+            self.assertTrue(shown and all(x.branded() for x in shown), name)
+            self.assertGreater(shown[0].contentsMargins().left(), 0, name)    # (room for the logo)
         prefs.close()
 
     def test_setup_sections_are_cards(self):

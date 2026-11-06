@@ -222,8 +222,7 @@ class Overview(QWidget):
         self._lookup_order, self._applying = [], False
         self._lookup_i, self._lookup_name = 0, ""
         lay = QVBoxLayout(self)
-        lay.addLayout(heading(tr("Overview"),
-                              tr("Choose music, pick a profile, preview what will change, then apply.")))
+        lay.addLayout(heading(tr("Overview")))              # (what to do is the list and Apply: no subtitle)
         self.profile = win.profile_box
         self.search = win.search_box
         self.bar = win.progress
@@ -267,12 +266,19 @@ class Overview(QWidget):
         look = QHBoxLayout()
         look.setContentsMargins(0, 0, 0, 0)
         self.sources_label = QLabel(tr("Sources"))
+        self.sources_label.setProperty("role", "hint")       # (a label for the control beside it: quiet)
         look.addWidget(self.sources_label)
         from .rows import Popup
         from PySide6.QtWidgets import QComboBox
-        self.sources = Popup()
-        self.sources.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.sources.setMinimumContentsLength(14)            # (a narrow window: the words cut, the list whole)
+
+        class _Sources(Popup):
+            """Its whole words when there is room; in a narrow window it gives way to 10 letters."""
+            def minimumSizeHint(self):
+                hint = super().minimumSizeHint()
+                hint.setWidth(min(hint.width(), self.fontMetrics().averageCharWidth() * 10 + 48))
+                return hint
+        self.sources = _Sources()
+        self.sources.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.sources.setAccessibleName(tr("Sources to look up with"))
         self.sources.setToolTip(tr("Which databases Look Up and Preview ask: the profile's own choice, or "
                                    "MusicBrainz, Discogs or the web (store and encyclopaedia pages) alone"))
@@ -284,6 +290,7 @@ class Overview(QWidget):
         self.look_btn.setToolTip(tr("Looks up the selected albums, or every album when none is selected, with "
                                     "the sources chosen beside it. Nothing is written until you apply."))
         self.look_btn.clicked.connect(self.look_up_clicked)
+        self.look_btn.setFlat(True)                          # (secondary: Apply, in the toolbar, is the action)
         look.addWidget(self.look_btn)
         # (Refresh: the selected albums - none selected: all - looked up again with the profile as
         # it is now, after you changed a setting; what was found before is replaced)
@@ -293,6 +300,7 @@ class Overview(QWidget):
                                        "with the profile as it is now, after you changed a setting (Ctrl+R). "
                                        "Nothing is written until you apply."))
         self.refresh_btn.clicked.connect(self.reload)
+        self.refresh_btn.setFlat(True)
         look.addWidget(self.refresh_btn)
         # (a choice other than the profile's is for this look-up only; this saves it into the profile)
         self.keep_link = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
@@ -314,6 +322,7 @@ class Overview(QWidget):
         lib = QHBoxLayout()
         lib.setContentsMargins(0, 0, 0, 0)
         self.library_label = QLabel(tr("Library folder"))
+        self.library_label.setProperty("role", "hint")
         lib.addWidget(self.library_label)
         self.library_where = _Elided("")
         lib.addWidget(self.library_where, 1)
@@ -407,12 +416,21 @@ class Overview(QWidget):
         from PySide6.QtGui import QShortcut, QKeySequence
         rm = QShortcut(QKeySequence.Delete, self.table, context=Qt.WidgetShortcut)   # (the list's own Delete)
         rm.activated.connect(self.remove_selected)
+        rl.addSpacing(8)                                     # (the controls above, then the list: two groups)
         rl.addWidget(self.table, 1)
+        foot = QHBoxLayout()                                 # (what is ready, strong; the other counts, quiet)
+        foot.setContentsMargins(0, 0, 0, 0)
+        foot.setSpacing(16)
+        self.ready_line = QLabel("")
+        self.ready_line.setProperty("role", "headline")
+        self.ready_line.hide()
+        foot.addWidget(self.ready_line, 0, Qt.AlignTop)
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
         self.summary.setProperty("role", "hint")
         self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the counts are what is read)
-        rl.addWidget(self.summary)
+        foot.addWidget(self.summary, 1)
+        rl.addLayout(foot)
         self.views.addWidget(self.results)
         self.detail = win.inspector.full                  # (the inspector's Evidence > Full preview)
         self.refresh_profiles()
@@ -641,6 +659,7 @@ class Overview(QWidget):
         """Preview and Apply are enabled by the window (on this page only); while work runs no
         other folder can be chosen or dropped."""
         self.running = on
+        self.show_ready()
         if hasattr(self, "model"):
             # (no profile chosen while work runs; during a look-up it is: that album is queued)
             self.model.locked = on and not self.looking
@@ -688,6 +707,7 @@ class Overview(QWidget):
         self.win.place_inspector()                          # (something to inspect now)
         self.plan = None
         self.model.set_plan(None)
+        self.show_ready()                                    # (the folder before's count: gone)
         self.detail.clear()
         self.busy(False)
         if not self.forced and (_list_first() or self.within):
@@ -1486,6 +1506,21 @@ class Overview(QWidget):
         said_with = getattr(self, "looked_with", "")
         self.summary.setText(counts_by_label(plan["albums"]) + (f"   ({notes})" if notes else "") +
                              (tr(" Looked up with {0}.").format(said_with) if said_with else ""))
+        self.show_ready()
+
+    def show_ready(self):
+        """The bold line under the list: how many albums Apply would carry out now (the ticked
+        ones, or of two or more highlighted rows those), nothing while work runs or no list shows."""
+        if not hasattr(self, "ready_line"):
+            return
+        albums = (self.plan or {}).get("albums") or []
+        if not albums or self.running:
+            self.ready_line.hide()
+            return
+        n = len(self.to_apply())
+        self.ready_line.setText(tr("1 album ready to apply") if n == 1 else
+                                tr("{0} albums ready to apply").format(n) if n else tr("Nothing to apply yet"))
+        self.ready_line.show()
 
     def edited(self, album):
         """Your edit in the inspector changed an album of the preview: its row, the counts and Apply."""
@@ -1705,6 +1740,7 @@ class Overview(QWidget):
                 plural(len(left), tr("album"), tr("albums"))))
         elif not self.queue:
             self.plan = None
+            self.show_ready()
         self.busy(False)
         self.service_status(force=True)
         notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))

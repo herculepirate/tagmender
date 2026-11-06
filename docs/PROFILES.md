@@ -17,7 +17,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `sources` | `[]` | `[{"path", "recursive", "watch", "destination"}]`; the folders a profile watches are chosen on the Watched folders page (the Profiles page does not edit them; **Include subfolders** there is `recursive`, and off means only albums directly in the folder are filed), or from the command line with `tagmender watch --add FOLDER --profile NAME`. Saving a profile on the Profiles page leaves `sources` as it is; the deepest profile wins where roots overlap. A source's own `destination` (absolute; empty = the profile's) is where a copy or move files the albums found in that folder, so one profile can send `/inbox/ambient` to `/music/ambient` and `/inbox/extreme` to `/music/extreme`. An all-lossy album still goes to `destinations.lossy` when one is set |
+| `sources` | `[]` | `[{"path", "recursive", "watch", "destination"}]`; the folders a profile watches are chosen on the Watched folders page (Preferences › Profiles does not edit them; **Include subfolders** there is `recursive`, and off means only albums directly in the folder are filed), or from the command line with `tagmender watch --add FOLDER --profile NAME`. Saving a profile in Preferences › Profiles leaves `sources` as it is; the deepest profile wins where roots overlap. A source's own `destination` (absolute; empty = the profile's) is where a copy or move files the albums found in that folder, so one profile can send `/inbox/ambient` to `/music/ambient` and `/inbox/extreme` to `/music/extreme`. An all-lossy album still goes to `destinations.lossy` when one is set |
 | `exclude_paths` | _unresolved, .Trash | globs on the full path, never processed; a pattern matching the profile's own source or destination, or everything (`*`), is refused |
 | `skip_folders` | .Trash\*, .recycle, #recycle, @Recycle, @eaDir, $RECYCLE.BIN, lost+found | folder names (patterns allowed, e.g. `_*`) never looked into; hidden folders, TagMender's own unidentified folder and the duplicates folder are always skipped; `*` is refused |
 | `grouping` | `{"join_deluxe_folders": true}` | a sibling "(Deluxe Edition)" folder holding only the bonus tracks is read with its album |
@@ -105,9 +105,9 @@ values. The first time the app starts with this version, a value two or more pro
 the shared settings it keeps its own of (the file as it was is kept once as `NAME.json.bak-shared`); what any profile does is unchanged; whatever a file leaves to the tagger's settings still
 follows them. A shared change that would stop another profile from working is refused. A whole profile kept elsewhere (a plan's) states every value and is never changed by the shared ones.
 
-## How the Profiles page shows these settings
+## How Preferences › Profiles shows these settings
 
-Every key above stays as it is in the file. Some rows of the Profiles page merge several keys into
+Every key above stays as it is in the file. Some rows of Preferences › Profiles merge several keys into
 one choice; each reads the keys it covers, and writes the same keys when you change it. A saved
 combination a row cannot say exactly is shown as "As saved (...)" and is never rewritten until you
 choose something else.

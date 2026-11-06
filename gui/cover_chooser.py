@@ -42,7 +42,7 @@ class CoverChooser(QDialog):
         self.grid.setResizeMode(QListView.Adjust)
         self.grid.setMovement(QListView.Static)
         self.grid.setWordWrap(True)
-        self.grid.setSpacing(6)
+        self.grid.setSpacing(8)
         self.grid.setAccessibleName(tr("Covers"))
         self.grid.itemDoubleClicked.connect(lambda _it: self.use())
         self.grid.currentItemChanged.connect(lambda *_: self._enable())

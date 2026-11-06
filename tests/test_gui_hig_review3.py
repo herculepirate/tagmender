@@ -272,9 +272,9 @@ class Review3(unittest.TestCase):
 
     # ---- layout at 960 x 600 -----------------------------------------------------
     def test_profiles_form_fits_at_960(self):
-        self.win.resize(960, 600)
         self.win.go("Profiles")
-        pr = self.win.pages["Profiles"]
+        self.win.prefs_window.resize(740, 600)          # (Profiles is in Preferences: the page as narrow as
+        pr = self.win.pages["Profiles"]                  #  it was beside a 960-point window's sidebar)
         names = [pr.list.item(i).data(Qt.UserRole) for i in range(pr.list.count())]
         import profiles as pf
         if "R3" not in names:

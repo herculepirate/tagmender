@@ -337,7 +337,7 @@ def validate(data: dict, libraries=None) -> list[str]:
             p.append(f"{name} must be true or false")
     name = str(_value(d, "duplicates.folder_name") or "")
     if not _plain_name(name):
-        p.append("duplicates.folder_name must be a plain folder name")
+        p.append("duplicates.folder_name must be a plain folder name, such as 2delete (no slashes)")
     was = _value(d, "duplicates.previous_names")
     if not isinstance(was, list) or not all(isinstance(x, str) and _plain_name(x) for x in was):
         p.append("duplicates.previous_names must be a list of folder names")

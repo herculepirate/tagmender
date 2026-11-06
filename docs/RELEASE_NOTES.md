@@ -1,5 +1,50 @@
 # Release notes
 
+## 0.8.6
+
+**Settings shared by all profiles**
+- Matters of taste and of your system are now set once for every profile: various artists
+  and compilations, album artist, artist names and credits, genres, preferred releases, MP3
+  tag versions and stray tags, comments, file-name safety, picture and log folder names, cover
+  sources and sizes, web lookups, file safety, skipped folders, retries, the TagMender notes,
+  lyrics and loudness. Each such setting says *All profiles ▾* in the profile editor; choose
+  *Only This Profile* to keep a different value in one profile.
+- The first time the app starts, a setting your profiles all hold the same value of becomes
+  that shared value; one that differs stays as it was in each profile (marked *This profile
+  only*). Nothing any profile does changes.
+
+**Profiles**
+- The tagging level (Basic, Enthusiast, Audiophile) is the first setting of a profile, and
+  only the settings that matter at that level are shown.
+- A *Search settings* field above the profile list.
+
+**Overview**
+- Apply while albums are still being looked up: the look-up stops after the album it is on,
+  Apply asks as usual, and the albums not reached are looked up afterwards.
+- The Score is coloured by how far the match can be trusted, from the score *and* its
+  evidence: green (excellent: the pressing is proven, or an almost perfect fit), blue (good),
+  amber (worth a look: the album is known but not its pressing, or a weaker fit), red (needs
+  investigation: unresolved, a conflict, or scans naming another pressing).
+- Every column can be resized and keeps the width you give it; a cut cell shows its whole
+  text (the whole Why) when pointed at.
+- Read scans and Choose… are gone from the folder line: the profile's *Read scans and
+  booklets* decides, and Add Folder or a drop chooses the folder.
+
+**Album artist**
+- A band named after a member is also filed under that member when Discogs lists the member
+  and MusicBrainz does not (or the album came from Discogs alone): *Jason Bieler and The Baron
+  Von Bielski Orchestra* → **Jason Bieler**. The band's name may run six words past the
+  member's.
+
+**Look (closer to a Mac app)**
+- Each page's title carries the TagMender logo with a thin rule in its green and red, and the
+  accent colour is the logo's green. Preferences and dialogs keep a plain title.
+- The sidebar's selection is a soft green tint with the page's name in bold, grey when the
+  sidebar is not focused.
+- Empty lists say so (Jobs, History, Watched folders), with what fills them.
+- The window's title names the page shown ("Overview — TagMender").
+- Setup's sections are inset cards, as in Preferences and Profiles.
+
 ## 0.8.5
 
 - The profile chosen in the toolbar is remembered: the app starts with the one you used last

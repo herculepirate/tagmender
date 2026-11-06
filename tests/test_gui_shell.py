@@ -523,7 +523,8 @@ class Shell(unittest.TestCase):
         why = [ov.model.data(ov.model.index(r, 5)) for r in range(ov.model.rowCount())
                if ov.model.albums[r]["status"] == "unresolved"]
         self.assertTrue(why and "_" not in why[0], why)                    # no reason codes
-        self.assertEqual(ov.table.horizontalScrollBarPolicy(), Qt.ScrollBarAlwaysOff)
+        # (0.8.6: a column you drag wider than the list can be scrolled to)
+        self.assertEqual(ov.table.horizontalScrollBarPolicy(), Qt.ScrollBarAsNeeded)
 
     def test_needs_attention_names_reasons_and_folders_plainly(self):
         att = self.win.pages["Needs attention"]

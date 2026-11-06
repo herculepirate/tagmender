@@ -494,10 +494,20 @@ class Setup(QWidget):
             head.setLayout(hl)
             self.body.addWidget(head)
             mine = []
-            for i in ids:
+            # (each section's entries in one inset card, as Preferences and Profiles show theirs)
+            card = QFrame()
+            card.setProperty("role", "group")
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(16, 4, 16, 4)
+            cl.setSpacing(0)
+            for n, i in enumerate(ids):
+                if n:
+                    cl.addWidget(separator())
                 r = self.rows[i] = Row(self, i)
-                self.body.addWidget(r)
+                cl.addWidget(r)
                 mine.append(r)
+            self.body.addWidget(card)
+            head.card = card
             self.heads.append((head, mine))
         self.body.addStretch(1)
         self.scroll = QScrollArea()
@@ -563,6 +573,8 @@ class Setup(QWidget):
                 r.setVisible(on)
                 shown += on
             head.setVisible(bool(shown))
+            if getattr(head, "card", None) is not None:
+                head.card.setVisible(bool(shown))
 
     def say(self, text):
         self.saved.setText(text)

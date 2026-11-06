@@ -120,10 +120,60 @@ def music_paths(mime) -> list:
     return out
 
 
+LOGO = Path(__file__).resolve().parent.parent / "assets" / "icon" / "tagmender-icon.svg"
+LOGO_PX, RULE_W = 26, 220
+
+
+class TitleLabel(QLabel):
+    """A page's title with the TagMender logo before it and a thin rule under it in the logo's
+    green and red (drawn, so the title stays one label: its text can still be set)."""
+
+    _logo = None
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self._brand = None
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def branded(self) -> bool:
+        """The main window's pages only: Preferences and dialogs keep a plain title (their
+        window already says what they are)."""
+        return type(self.window()).__name__ == "Main"
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        on = self.branded()
+        if on != self._brand:
+            self._brand = on
+            self.setContentsMargins(LOGO_PX + 10, 0, 0, 7) if on else self.setContentsMargins(0, 0, 0, 0)
+            self.setMinimumHeight(LOGO_PX + 7 if on else 0)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if not self._brand:
+            return
+        from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter
+        from .style import tokens
+        p = QPainter(self)
+        if TitleLabel._logo is None:
+            TitleLabel._logo = QIcon(str(LOGO)) if LOGO.exists() else False
+        h = self.height() - 7
+        if TitleLabel._logo:
+            p.drawPixmap(0, max(0, (h - LOGO_PX) // 2), TitleLabel._logo.pixmap(LOGO_PX, LOGO_PX))
+        t = tokens()
+        g = QLinearGradient(0, 0, RULE_W, 0)
+        for at, key in ((0.0, "brand_green"), (1.0, "brand_red")):
+            r, gr, b, alpha = (float(x) for x in t[key].strip("rgba() ").split(","))
+            g.setColorAt(at, QColor.fromRgbF(r / 255, gr / 255, b / 255, alpha))
+        p.fillRect(0, self.height() - 3, min(RULE_W, self.width()), 3, g)
+        p.end()
+
+
 def heading(text, hint=""):
+    """A page's title (the logo before it, the green-to-red rule under it), then its hint."""
     box = QVBoxLayout()
     box.setSpacing(4)
-    t = QLabel(text)
+    t = TitleLabel(text)
     t.setProperty("role", "title")
     t.setAccessibleName(text)
     box.addWidget(t)

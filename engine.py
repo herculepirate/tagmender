@@ -2411,7 +2411,8 @@ class Engine:
                             for i, t in enumerate(prop.targets or [])]
             if album_artist.enabled(self.profile):
                 # (the lead artist alone as album artist: album_artist.py; a band's members once each)
-                prop.targets = album_artist.apply(prop.targets, self.profile, self._band_members)
+                prop.targets = album_artist.apply(prop.targets, self.profile, self._band_members,
+                                                  self._discogs_band_members)
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
 
@@ -2421,6 +2422,16 @@ class Engine:
         if mbid not in memo:
             memo[mbid] = album_artist.band_members(self.http, mbid, self.log) if self.http is not None else None
         return memo[mbid]
+
+    def _discogs_band_members(self, dgid):
+        """album_artist.discogs_members, asked once per artist in this run (only when the
+        profile asks Discogs)."""
+        memo = self.__dict__.setdefault("_dg_members_memo", {})
+        if dgid not in memo:
+            asks = self.http is not None and bool(((self.profile.get("providers") or {}).get("discogs") or {})
+                                                   .get("enabled", True))
+            memo[dgid] = album_artist.discogs_members(self.http, dgid, self.log) if asks else []
+        return memo[dgid]
 
     def proposals(self, path, progress=None, cancel=None, only=None):
         """The albums in PATH, each identified; only: the group_key()s of the albums to look up

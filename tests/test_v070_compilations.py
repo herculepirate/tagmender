@@ -136,6 +136,9 @@ class Single(unittest.TestCase):
     BESTOF = {"albumartist": ["Some Band"], "albumartistsort": ["Band, Some"], "~secondaryreleasetype": ["compilation"],
               "~remove": ["compilation"]}
 
+    def setUp(self):
+        pf.shared_file().unlink(missing_ok=True)      # (a setting shared by all profiles, left by a test before)
+
     def test_off_leaves_a_best_of_alone(self):
         t = engine.own_tag_choices(dict(self.BESTOF), prof_of(va_name="VA"))
         self.assertNotIn("compilation", t)

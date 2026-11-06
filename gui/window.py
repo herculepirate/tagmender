@@ -556,7 +556,7 @@ class Main(QMainWindow):
             for a in getattr(self, "profile_actions", ()):     # (and is not shown where it picks nothing)
                 a.setVisible(on_ov)
             self.commands["preview"].setEnabled(on_ov and idle and bool(ov.path))
-            self.commands["apply"].setEnabled(on_ov and idle and bool(ov.plan) and ov.actionable() > 0)
+            self.commands["apply"].setEnabled(on_ov and ov.may_apply_now() and bool(ov.plan) and ov.actionable() > 0)
             self.commands["exclude_again"].setEnabled(kind == "overview" and idle and bool(ov.overridden(x)))
         w = self.pages.get("Watched folders")
         if w is not None:
@@ -818,6 +818,8 @@ class Main(QMainWindow):
             old.filter("")
         page = self.pages[name]
         self.stack.setCurrentWidget(page)
+        # (as a Mac window: what it shows in its title - "Overview — TagMender")
+        self.setWindowTitle(tr("{page} — {app}").format(page=tr(name), app=APP) + "[*]")
         self.search_box.blockSignals(True)
         self.search_box.clear()
         self.search_box.blockSignals(False)
@@ -1112,6 +1114,12 @@ def main(argv=None):
     except Exception:
         import logging
         logging.getLogger("tagmender.plugins").exception("plugins were not loaded")
+    try:                       # (0.8.6, once: what all profiles agree on becomes shared by them)
+        import profiles as _pf
+        _pf.adopt_shared()
+    except Exception:
+        import logging
+        logging.getLogger("tagmender.profiles").exception("shared settings not set up")
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setApplicationName(APP)
     app.setDesktopFileName("io.github.herculepirate.TagMender")

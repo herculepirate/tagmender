@@ -14,6 +14,7 @@ from . import actions, icons, sheets, style
 from .common import (STATUS, _fill, _gui_prefs, filter_table, folder_item, heading, path_column, pf,
                      planmod, plural, popup_menu, section, _set_gui_pref, _table, notify, status_cell, watch_does)
 from .i18n import N_, tr
+from .widgets import EmptyOverlay
 from .work import start
 
 # what the watcher did with an album, as the Recently list says it: (word, STATUS colour key, icon)
@@ -370,6 +371,9 @@ class Watched(QWidget):
         path_column(self.table, 0)                             # (a whole path: its start and its end in view)
         self.table.activated.connect(lambda *_: self.change())  # (Return, or a double click)
         self.table.setMinimumHeight(TABLE_MIN)
+        self._empty_folders = EmptyOverlay(self.table, "folder-plus", tr("No watched folders."),
+                                           tr("Click + to watch a folder: music dropped into it is identified, "
+                                              "tagged and filed by its profile."))
         self.table.setAccessibleName(tr("Watched folders"))
         self.table.itemSelectionChanged.connect(self.update_buttons)
         self.menu_for(self.table, ("change_watch", "process_again", "stop_watch", None, "check_now"))
@@ -409,6 +413,8 @@ class Watched(QWidget):
         self.pending.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.pending.horizontalHeader().resizeSection(0, 260)
         path_column(self.pending, 1)
+        self._empty_pending = EmptyOverlay(self.pending, "circle-check", tr("Nothing is waiting for you."),
+                                           tr("Albums a watched folder's profile asks you to approve wait here."))
         self.pending.activated.connect(lambda *_: self.show_plan())
         self.pending.setMinimumHeight(TABLE_MIN)
         self.pending.setAccessibleName(tr("Albums waiting for your approval"))
@@ -451,6 +457,8 @@ class Watched(QWidget):
         self.recent.customContextMenuRequested.connect(self.recent_menu)
         self.recent.setMinimumHeight(TABLE_MIN)
         self.recent.setAccessibleName(tr("Recently handled albums"))
+        self._empty_recent = EmptyOverlay(self.recent, "history", tr("Nothing handled yet."),
+                                          tr("What the watched folders did lately is listed here."))
         lay.addWidget(self.recent, 1)
         self.out = QLabel("")
         self.out.setWordWrap(True)

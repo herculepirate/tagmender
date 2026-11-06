@@ -51,6 +51,7 @@ class Base(unittest.TestCase):
         app_settings.save(dict(app_settings.DEFAULTS))
         for f in pf.profiles_dir().glob("*.json") if pf.profiles_dir().exists() else []:
             f.unlink()
+        pf.shared_file().unlink(missing_ok=True)          # (and the settings shared by all profiles)
         self.gui.common._set_gui_pref("reduce_motion", True)
         self.gui.sheets.shown.clear()
         self.tmp = Path(tempfile.mkdtemp(prefix="tm-ui-"))

@@ -1257,7 +1257,9 @@ def _picard_defaults(base: dict) -> dict:
 
 
 def from_dict(data: dict, *, check=True) -> Profile:
-    data = upgrade(data)
+    # (the shared settings in place of those it does not state or keep its own of: a whole
+    # profile, such as a plan's, states every one and stays exactly as it is)
+    data = with_shared(upgrade(data))
     base = _picard_defaults(DEFAULTS) if data.get("follow_tagger_settings",
                                                   DEFAULTS["follow_tagger_settings"]) else DEFAULTS
     full = _merge(base, data)
@@ -1368,7 +1370,219 @@ def _rename_references(old: str, new: str | None):
         pass
 
 
-def raw(name: str) -> dict:
+# ---- settings shared by all profiles ----------------------------------------------------------
+# Matters of taste and of your system rather than of one job: one value for every profile,
+# kept in shared_settings.json ({dotted path: value}; a path not there has its default). A
+# profile keeps its own value only for the paths in its "own_settings" (Only This Profile);
+# a file without that list counts a shared setting as its own when it states a value that
+# differs from the shared one (a profile from before 0.8.6, or written by hand). Resolved
+# when a profile file is read (raw), so the engine, watcher and CLI see one ordinary profile.
+SHARED_SETTINGS = (
+    "compilations.va_name", "compilations.extra_flags", "compilations.grouping", "compilations.single_artist",
+    "album_artist",
+    "tagger.standardize_artist_names", "tagger.translate_artist_names", "tagger.convert_punctuation",
+    "tagger.standardize_instruments", "tagger.release_ars", "tagger.track_ars",
+    "genres.musicbrainz", "genres.max", "genres.discogs_styles", "genres.web",
+    "matching.preferred_countries", "matching.preferred_release_types", "matching.discouraged_release_types",
+    "matching.preferred_formats",
+    "tagger.write_id3v23", "tagger.write_id3v1", "tagger.remove_id3_from_flac", "tagger.remove_ape_from_mp3",
+    "cleanup.comments",
+    "filenames.fat", "tagger.ascii_filenames", "tagger.replace_spaces_with_underscores", "filenames.max_name_bytes",
+    "subfolders.covers_name", "subfolders.misc_name",
+    "artwork.sources", "artwork.min_px", "artwork.enlarge", "artwork.generate",
+    "providers.web.search", "providers.web.gnudb", "providers.web.shops", "providers.web.sources",
+    "on_unwritable", "destinations.mounted_only", "allow_unverified_writes", "preserve_timestamps",
+    "exclude_paths", "skip_folders", "grouping.join_deluxe_folders", "retry", "mark_resolved",
+    "lyrics.sidecar", "lyrics.embed", "lyrics.synced", "loudness",
+)
+OWN_KEY = "own_settings"
+_MISSING = object()
+
+
+def shared_file() -> Path:
+    return ex.CONFIG_DIR / "shared_settings.json"
+
+
+def _get(d, path):
+    for k in path.split("."):
+        if not isinstance(d, dict) or k not in d:
+            return _MISSING
+        d = d[k]
+    return d
+
+
+def _put(d, path, value):
+    *head, last = path.split(".")
+    for k in head:
+        if not isinstance(d.get(k), dict):
+            d[k] = {}
+        d = d[k]
+    d[last] = copy.deepcopy(value)
+
+
+def _drop(d, path):
+    *head, last = path.split(".")
+    for k in head:
+        d = d.get(k) if isinstance(d, dict) else None
+        if not isinstance(d, dict):
+            return
+    d.pop(last, None)
+
+
+def is_shared(path: str) -> bool:
+    """PATH (dotted) is a shared setting or inside one."""
+    return shared_root(path) is not None
+
+
+def shared_root(path: str):
+    """The shared setting PATH is or is inside ("album_artist" for "album_artist.lead"), or None."""
+    for p in SHARED_SETTINGS:
+        if path == p or path.startswith(p + "."):
+            return p
+    return None
+
+
+_shared_cache = [None, None]                    # (file stamp, values)
+
+
+def shared_values() -> dict:
+    """{path: value} of the shared settings set (the others have their defaults)."""
+    f = shared_file()
+    try:
+        st = f.stat()
+        stamp = (st.st_mtime_ns, st.st_size, st.st_ino, str(f))
+    except OSError:
+        return {}
+    if _shared_cache[0] != stamp:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        _shared_cache[:] = [stamp, {k: v for k, v in (data.get("values") or {}).items()
+                                    if k in SHARED_SETTINGS} if isinstance(data, dict) else {}]
+    return copy.deepcopy(_shared_cache[1])
+
+
+def _base_defaults() -> dict:
+    """The defaults as a profile of today has them (no shared values)."""
+    return Profile(_merge(DEFAULTS, {"name": "_", "version": SCHEMA_VERSION})).data
+
+
+def own_of(data: dict, sv=None) -> set:
+    """The shared settings a profile (in today's form) keeps its own value of: those its
+    own_settings names, and those it states a value of unlike the shared one (or, when that is
+    not set, the default)."""
+    sv = shared_values() if sv is None else sv
+    own = {p for p in data.get(OWN_KEY) or [] if p in SHARED_SETTINGS} \
+        if isinstance(data.get(OWN_KEY), list) else set()
+    base = None
+    for p in SHARED_SETTINGS:
+        v = _get(data, p)
+        if v is _MISSING or p in own:
+            continue
+        if p in sv:
+            if v != sv[p]:
+                own.add(p)
+            continue
+        if base is None:
+            base = _base_defaults()
+        if v != _get(base, p):
+            own.add(p)
+    return own
+
+
+def with_shared(data: dict, sv=None) -> dict:
+    """DATA (a profile in today's form) with the shared values filled in where it states none.
+    What it states stays as it is - a whole profile (a plan's) is unchanged - and a profile file
+    states only the shared settings it keeps its own of (minimal, _stamp_profiles)."""
+    sv = shared_values() if sv is None else sv
+    out = copy.deepcopy(data)
+    for p, v in sv.items():
+        if _get(out, p) is _MISSING:
+            _put(out, p, v)
+    return out
+
+
+def _write_json(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    if path == shared_file():
+        _shared_cache[:] = [None, None]
+
+
+def _stamp_profiles(sv):
+    """Each profile file rewritten in today's form, stating its own shared settings
+    (own_settings) and no others, so a shared value changed later reaches every profile that
+    does not keep its own. What each profile does stays as it was (against SV, the shared
+    values until now). The file as it was is kept once as NAME.json.bak-shared."""
+    for name in names():
+        path = path_of(name)
+        try:
+            data = raw_file(name)
+        except ProfileError:
+            continue
+        if isinstance(data.get(OWN_KEY), list):
+            continue
+        try:
+            prof = from_dict(with_shared(upgrade(data), sv), check=False)
+        except ProfileError:
+            continue
+        backup = path.with_name(f"{path.name}.bak-shared")
+        if not backup.exists():
+            shutil.copy2(path, backup)
+        _write_json(path, minimal(prof, sv=sv, mark=True))
+
+
+def set_shared(changes: dict):
+    """Set shared settings for every profile: {path: value} (_MISSING: back to the default).
+    Profiles not yet stating their own are stamped first, as they were."""
+    for p in changes:
+        if p not in SHARED_SETTINGS:
+            raise ProfileError(f"{p!r} is not a setting shared by all profiles")
+    sv = shared_values()
+    _stamp_profiles(sv)
+    base = None
+    for p, v in changes.items():
+        if v is _MISSING:
+            sv.pop(p, None)
+            continue
+        if isinstance(v, dict):                       # (a group, such as loudness: kept whole)
+            base = _base_defaults() if base is None else base
+            d = _get(base, p)
+            v = _merge(d, v) if isinstance(d, dict) else v
+        sv[p] = copy.deepcopy(v)
+    _write_json(shared_file(), {"version": 1, "values": sv})
+
+
+def adopt_shared() -> bool:
+    """Once (no shared_settings.json yet): a setting two or more profiles all hold the same
+    value of, unlike the default, becomes that shared value; every profile is stamped with its
+    own (what differs keeps differing). Nothing any profile does changes. True when written."""
+    if shared_file().exists():
+        return False
+    fulls = []
+    for name in names():
+        try:
+            fulls.append(from_dict(raw_file(name), check=False).data)
+        except ProfileError:
+            continue
+    sv = {}
+    if len(fulls) >= 2:
+        base = _base_defaults()
+        for p in SHARED_SETTINGS:
+            vals = [_get(f, p) for f in fulls]
+            first = vals[0]
+            if first is not _MISSING and all(v == first for v in vals) and first != _get(base, p):
+                sv[p] = first
+    _stamp_profiles(sv)
+    _write_json(shared_file(), {"version": 1, "values": sv})
+    return True
+
+
+def raw_file(name: str) -> dict:
+    """A profile's file as it is (older names read), without the shared settings resolved."""
     path = path_of(name)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -1382,6 +1596,11 @@ def raw(name: str) -> dict:
     return older_behaviour(data)
 
 
+def raw(name: str) -> dict:
+    """A profile's file (from_dict fills in the shared settings it does not state)."""
+    return raw_file(name)
+
+
 def load(name: str) -> Profile:
     return from_dict(raw(name))
 
@@ -1392,7 +1611,7 @@ PREVIOUS_BUILTIN_NAME = "Built-in (previous)"
 
 def default() -> Profile:
     """The settings used when no profile is chosen: in place, nothing moved."""
-    return from_dict(BUILTIN)
+    return from_dict(dict(BUILTIN))
 
 
 def previous_builtin() -> Profile:
@@ -1439,7 +1658,7 @@ def builtin_changed_note() -> str:
             "tagmender profiles save-previous-builtin")
 
 
-def minimal(profile: Profile) -> dict:
+def minimal(profile: Profile, *, sv=None, mark=False) -> dict:
     """Only what differs from the defaults (what is written to disk)."""
     def diff(full, base, keep_none=False):
         out = {}
@@ -1453,11 +1672,25 @@ def minimal(profile: Profile) -> dict:
             elif base.get(k) != v or (keep_none and k not in base):
                 out[k] = v          # (picard: a setting null says "as each file has it", not "as Picard")
         return out
-    out = {"version": SCHEMA_VERSION, "name": profile.name, **diff(profile.data, DEFAULTS)}
+    data = {k: v for k, v in profile.data.items() if k != OWN_KEY}
+    out = {"version": SCHEMA_VERSION, "name": profile.name, **diff(data, DEFAULTS)}
     # (a profile saved keeps its file names and empty-folder setting whatever Picard says later;
     # only one that never says follows Picard's)
     out.setdefault("filenames", {})["compat"] = profile.data["filenames"]["compat"]
     out["remove_empty_dirs"] = profile.data["remove_empty_dirs"]
+    # the shared settings: only those it keeps its own value of (Only This Profile, or a value
+    # unlike the shared one, which it keeps rather than lose)
+    own = own_of(profile.data, shared_values() if sv is None else sv)
+    for p in SHARED_SETTINGS:
+        _drop(out, p)
+    for p in sorted(own):
+        v = _get(data, p)
+        if v is not _MISSING:
+            _put(out, p, v)
+    for k in [k for k, v in out.items() if v == {} and isinstance(DEFAULTS.get(k), dict)]:
+        out.pop(k)
+    if own and (mark or shared_file().exists()):     # (before the shared settings exist: as before)
+        out[OWN_KEY] = sorted(own)
     return out
 
 

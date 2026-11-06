@@ -2,7 +2,7 @@
 empty states."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QLabel, QLayout, QListWidget,
                                QListWidgetItem, QStyle, QStyledItemDelegate, QVBoxLayout)
@@ -172,15 +172,20 @@ class SourceDelegate(QStyledItemDelegate):
         focused = bool(option.state & QStyle.State_HasFocus) or (option.widget and option.widget.hasFocus())
         box = QRectF(r).adjusted(0, 1, 0, -1)
         if sel:
+            # (a soft tint of the accent, its text in ink, as a Mac sidebar; grey when the list
+            # is not focused)
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(style.color("selection" if focused else "line")))
+            tint = QColor(style.color("accent"))
+            tint.setAlphaF(0.30 if style.is_dark() else 0.16)
+            p.setBrush(tint if focused else QColor(style.color("line")))
             p.drawRoundedRect(box, style.CONTROL, style.CONTROL)
-        on_sel = sel and focused
-        ink = style.color("on_selection" if on_sel else "ink")
+        on_sel = False                                    # (ink on the tint: no white text)
+        ink = style.color("ink")
         name = index.data(ICON)
         if name:
-            icons.icon(name, "on_selection" if on_sel else "accent", 16).paint(
+            icons.icon(name, "accent", 16).paint(
                 p, QRect(r.left() + 10, r.center().y() - 8, 16, 16))
+
         n = index.data(BADGE) or 0
         right = r.right() - 8
         if n:
@@ -195,6 +200,10 @@ class SourceDelegate(QStyledItemDelegate):
             p.drawText(pill, Qt.AlignCenter, text)
             right = int(pill.left()) - 6
         p.setFont(option.font)
+        if sel and focused:
+            f = QFont(option.font)
+            f.setWeight(QFont.DemiBold)
+            p.setFont(f)
         p.setPen(QColor(ink))
         p.drawText(QRect(r.left() + 34, r.top(), right - r.left() - 34, r.height()), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(index.data(Qt.DisplayRole), Qt.ElideRight, right - r.left() - 34))
@@ -285,6 +294,48 @@ class EmptyState(QFrame):
 
     def retint(self):
         self.pic.setPixmap(icons.icon(self.icon_name, "faint" if not style.is_dark() else "muted", 40).pixmap(40, 40))
+
+
+class EmptyOverlay(QObject):
+    """An empty list says so, centred in it (an icon, a headline and a hint), as a Mac list
+    does; it goes as soon as the list has a row."""
+
+    def __init__(self, view, icon, headline, hint=""):
+        super().__init__(view)
+        self.view = view
+        self.state = EmptyState(icon, headline, hint)
+        self.state.setParent(view.viewport())
+        self.state.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.state.setStyleSheet("background: transparent;")
+        view.viewport().installEventFilter(self)
+        m = view.model()
+        for sig in (m.rowsInserted, m.rowsRemoved, m.modelReset, m.layoutChanged):
+            sig.connect(self.update)
+        self.update()
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.Resize:
+            try:
+                self.fit()
+            except RuntimeError:                              # (the list is being closed)
+                pass
+        return False
+
+    def fit(self):
+        """A short list: the words alone (no icon), or the headline alone."""
+        r = self.view.viewport().rect()
+        self.state.setGeometry(r)
+        self.state.pic.setVisible(r.height() >= 150)
+        self.state.hint.setVisible(r.height() >= 56)
+        self.state.layout().setContentsMargins(8, 2 if r.height() < 150 else 8, 8, 2 if r.height() < 150 else 8)
+
+    def update(self, *_):
+        try:
+            empty = self.view.model().rowCount() == 0
+            self.fit()
+            self.state.setVisible(empty)
+        except RuntimeError:                                  # (the list was closed: nothing to show)
+            pass
 
 
 class FlowLayout(QLayout):

@@ -31,6 +31,9 @@ class History(QWidget):
         self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAccessibleName(tr("What the rules excluded"))
+        from .widgets import EmptyOverlay
+        self._empty = EmptyOverlay(self.table, "history", tr("Nothing excluded yet."),
+                                   tr("Albums and files your Ignore and Skip rules leave alone are listed here."))
         lay.addWidget(self.table, 1)
         b = QPushButton(tr("Refresh"))
         b.setAccessibleName(tr("Refresh"))

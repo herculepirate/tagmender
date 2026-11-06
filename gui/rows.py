@@ -549,6 +549,15 @@ class Row(QFrame):
         self.dot.setToolTip(tr("Changed from the default"))
         self.dot.hide()
         head.addWidget(self.dot, 0, Qt.AlignVCenter)
+        # (a setting shared by all profiles: says so, and whether this profile keeps its own)
+        self.scope = QToolButton()
+        self.scope.setObjectName("settingScope")
+        self.scope.setAutoRaise(True)
+        self.scope.setPopupMode(QToolButton.InstantPopup)
+        self.scope.setCursor(Qt.PointingHandCursor)
+        self.scope.setAccessibleName(tr("Scope: {0}").format(tr("All profiles")))
+        self.scope.hide()
+        head.addWidget(self.scope, 0, Qt.AlignVCenter)
         head.addStretch(1)
         left.addLayout(head)
         self.foot = caption(footnote)
@@ -572,6 +581,36 @@ class Row(QFrame):
 
     def set_changed(self, on):
         self.dot.setVisible(bool(on))
+
+    def set_scope(self, own, choose=None):
+        """A shared setting: "All profiles", or "This profile only" (own); choose(own) is called
+        with the one picked from its menu. own None: not a shared setting (nothing shown)."""
+        if own is None:
+            self.scope.hide()
+            return
+        from PySide6.QtWidgets import QMenu
+        self.scope.setText((tr("This profile only") if own else tr("All profiles")) + " ▾")
+        self.scope.setProperty("own", bool(own))
+        self.scope.style().unpolish(self.scope)
+        self.scope.style().polish(self.scope)
+        self.scope.setToolTip(tr("This profile keeps its own value; the other profiles share theirs.") if own else
+                              tr("Shared by all profiles: a change here changes it for every profile that "
+                                 "does not keep its own."))
+        self.scope.setAccessibleName(tr("Scope: {0}").format(tr("This profile only") if own else tr("All profiles")))
+        if choose is not None and self.scope.menu() is None:
+            m = QMenu(self.scope)
+            a_all = m.addAction(tr("All Profiles"))
+            a_own = m.addAction(tr("Only This Profile"))
+            for act in (a_all, a_own):
+                act.setCheckable(True)
+            a_all.triggered.connect(lambda: choose(False))
+            a_own.triggered.connect(lambda: choose(True))
+            self.scope.setMenu(m)
+            self._scope_actions = (a_all, a_own)
+        if getattr(self, "_scope_actions", None):
+            self._scope_actions[0].setChecked(not own)
+            self._scope_actions[1].setChecked(bool(own))
+        self.scope.show()
 
     def changed(self) -> bool:
         return not self.dot.isHidden()

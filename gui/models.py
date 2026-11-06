@@ -83,6 +83,37 @@ def changes_text(files) -> str:
 # --------------------------------------------------------------------------
 # the plan as a table
 # --------------------------------------------------------------------------
+# the Score cell's colour: how far to trust the match, from the score AND what proved it (the
+# score alone is how well it fits, not a probability: a 90 that the scans contradict is red)
+SCORE_BANDS = {
+    "excellent": ((48, 209, 88), N_("Excellent: the release fits and its pressing is proven (disc ID, your "
+                                     "files' own link, or the scans), or it fits almost perfectly.")),
+    "good": ((10, 132, 255), N_("Good: the release fits well; nothing proves the pressing, nothing argues against it.")),
+    "check": ((255, 159, 10), N_("Worth a look: the album is known but not its exact pressing, or the fit is weaker.")),
+    "investigate": ((255, 59, 48), N_("Needs investigation: nothing identified it for sure, or the evidence "
+                                       "disagrees (the scans name another pressing, or a conflict).")),
+}
+
+
+def score_band(a):
+    """"excellent", "good", "check" or "investigate" for album a, or None while it has no
+    match to judge (not looked up yet, left alone by a rule)."""
+    ident = a.get("identification") or {}
+    status, tier = a.get("status"), ident.get("tier")
+    conf = float(ident.get("confidence") or 0)
+    scans = (ident.get("scans") or {}).get("state")
+    if status in ("listed", "excluded", "skipped") or (not conf and status not in ("unresolved", "failed")):
+        return None
+    if status in ("unresolved", "failed", "conflict") or a.get("conflicts") or scans == "differs" or \
+            tier in ("unresolved",) or conf < 70:
+        return "investigate"
+    if tier in ("album_only", "partial", "recording") or conf < 85:
+        return "check"
+    if tier == "exact" and (scans == "proven" or ident.get("via") in ("disc_id", "link") or conf >= 95):
+        return "excellent"
+    return "good"
+
+
 def can_apply(a) -> bool:
     """The album has changes Apply would make (ready, or Unresolved with its notes)."""
     import plan as planmod
@@ -225,6 +256,19 @@ class PlanModel(QAbstractTableModel):
             return label_for(a)[1]                            # (the whole word when the column cuts it)
         if role == Qt.ToolTipRole and c == 1:
             return a["source_dir"]
+        if role == Qt.ToolTipRole and c in (2, 4, 5):
+            # (the whole text, wrapped, when the column cuts it: Why in full, every conflict)
+            if c == 5 and a["status"] not in ("excluded",) and not a["conflicts"] and \
+                    ident.get("status") != "unresolved":
+                text = "; ".join(ident.get("why") or [])
+            elif c == 5 and len(a["conflicts"]) > 1:
+                text = "\n".join(a["conflicts"])
+            else:
+                text = self.data(idx, Qt.DisplayRole) or ""
+            if not text:
+                return ""
+            import html as _h
+            return "<p style='white-space:pre-wrap'>" + _h.escape(text) + "</p>"
         if role == Qt.ToolTipRole and c == self.SCANS:
             return scans_tip(ident.get("scans"))
         if role == Qt.ForegroundRole and c == self.SCANS:
@@ -247,6 +291,17 @@ class PlanModel(QAbstractTableModel):
             return f
         if role == Qt.TextAlignmentRole and c == 3:
             return int(Qt.AlignRight | Qt.AlignVCenter)
+        if c == 3 and role in (Qt.BackgroundRole, Qt.ToolTipRole):
+            band = score_band(a)
+            if band is None:
+                return None
+            if role == Qt.ToolTipRole:
+                return tr(SCORE_BANDS[band][1]) + " " + tr("The score is how well the release fits, not a "
+                                                           "probability.")
+            from PySide6.QtGui import QBrush, QColor
+            from .style import is_dark
+            r, g, b = SCORE_BANDS[band][0]
+            return QBrush(QColor(r, g, b, 90 if is_dark() else 60))
         if role == Qt.AccessibleTextRole and c == 0:
             return label_for(a)[1]
         if role == Qt.CheckStateRole and c == 1 and can_apply(a):

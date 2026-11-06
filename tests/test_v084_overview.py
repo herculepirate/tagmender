@@ -124,7 +124,7 @@ class V084Overview(tg.Gui):
         self.assertEqual(self.row("Album H")["status"], "listed")
         self.assertIs(ov.selected(), self.row("Album G"))
         self.assertIs(self.win.inspector.album, self.row("Album G"))
-        self.assertFalse(self.win.commands["apply"].isEnabled())         # (Apply waits for the end)
+        self.assertTrue(self.win.commands["apply"].isEnabled())          # (0.8.6: Apply pauses the look-up)
         self.assertEqual(ov.planned_with[ov.album_key(self.row("Album G"))], "Auto")
         h.set()
         self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())

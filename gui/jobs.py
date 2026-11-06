@@ -100,6 +100,9 @@ class Jobs(QWidget):
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
         self.table.setAccessibleName(tr("Jobs"))
+        from .widgets import EmptyOverlay
+        self._empty = EmptyOverlay(self.table, "list-checks", tr("No jobs yet."),
+                                   tr("Each Apply is a job. It is listed here and can be undone."))
         self.table.itemSelectionChanged.connect(self.selection_changed)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)

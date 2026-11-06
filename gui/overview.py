@@ -258,6 +258,10 @@ class Overview(QWidget):
         ch.setToolTip(tr("Choose another folder (Ctrl+O)"))
         ch.clicked.connect(lambda: self.drop.choose())
         sl.addWidget(ch)
+        # (0.8.6: neither is shown - the profile's "Read scans and booklets" decides which albums'
+        # scans are read, and Add Folder (Ctrl+O) or a drop chooses the folder)
+        self.ocr.setVisible(False)
+        ch.setVisible(False)
         rl.addWidget(strip)
         # which databases to ask, and the button that asks them (nothing is looked up on a drop)
         look = QHBoxLayout()
@@ -350,14 +354,24 @@ class Overview(QWidget):
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)   # (a column widened past the edge)
         self.table.setTextElideMode(Qt.ElideRight)        # (the album's name first, its artist after)
         h = self.table.horizontalHeader()
         left_header(self.table)
         h.setMinimumSectionSize(48)
-        for c in range(len(PlanModel.COLS)):          # the album folder and Why take what is left
-            h.setSectionResizeMode(c, QHeaderView.Stretch if c in (1, 5) else QHeaderView.ResizeToContents)
-        h.setSectionResizeMode(0, QHeaderView.Interactive)     # (fitted by fit_status: cut when narrow)
+        # every column can be dragged wider or narrower; each is fitted to its text until you do
+        # (Why, the last, takes what is left); a cut cell shows its whole text when pointed at
+        for c in range(len(PlanModel.COLS)):
+            h.setSectionResizeMode(c, QHeaderView.Interactive)
+        h.setStretchLastSection(True)
+        self._sized_by_you, self._fitting = set(), False
+        h.sectionResized.connect(self.column_resized)
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(0)
+        self._fit_timer.timeout.connect(self.fit_columns)
+        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.dataChanged):
+            sig.connect(lambda *_: self._fit_timer.start())
         h.moveSection(PlanModel.PROFILE, 2)               # (an album's profile: next to its name, in view)
         h.moveSection(h.visualIndex(PlanModel.SCANS), h.visualIndex(2) + 1)   # (what the scans said: after Source)
         self.table.setAccessibleName(tr("Albums in the preview"))
@@ -402,14 +416,48 @@ class Overview(QWidget):
             hide = self.width() < w
             if self.table.isColumnHidden(c) != hide:
                 self.table.setColumnHidden(c, hide)
+                if not hide and hasattr(self, "_fit_timer"):
+                    self._fit_timer.start()           # (shown again: fitted to its text)
+        self.fit_status()
+
+    COLUMN_MOST = {1: 340, 4: 260, 2: 300, 7: 300}       # (fitted, at most: drag for more)
+
+    def column_resized(self, c, _old, _new):
+        from PySide6.QtWidgets import QApplication
+        # (dragged by you, the mouse button down on the header: left as you made it; Qt's own
+        # sizing - the last column taking what is left - is not yours)
+        if not self._fitting and QApplication.mouseButtons() & Qt.LeftButton:
+            self._sized_by_you.add(c)
+
+    def fit_columns(self):
+        """Each column not sized by you: as wide as its text, up to COLUMN_MOST (Why: the rest)."""
+        h = self.table.horizontalHeader()
+        last = h.logicalIndex(h.count() - 1)
+        self._fitting = True
+        try:
+            for c in range(1, len(PlanModel.COLS)):
+                if c in self._sized_by_you or c == last or self.table.isColumnHidden(c):
+                    continue
+                want = max(self.table.sizeHintForColumn(c), h.sectionSizeHint(c))
+                want = min(want, self.COLUMN_MOST.get(c, want))
+                if self.table.columnWidth(c) != want:
+                    h.resizeSection(c, want)
+        finally:
+            self._fitting = False
         self.fit_status()
 
     def fit_status(self):
+        if 0 in getattr(self, "_sized_by_you", ()):
+            return
         want = max(self.table.sizeHintForColumn(0), self.table.horizontalHeader().sectionSizeHint(0))
         if self.width() < 600:
             want = min(want, self.STATUS_MOST)
         if self.table.columnWidth(0) != want:
-            self.table.horizontalHeader().resizeSection(0, want)
+            self._fitting = True
+            try:
+                self.table.horizontalHeader().resizeSection(0, want)
+            finally:
+                self._fitting = False
 
     def context_menu(self, pos):
         keys = ("@release", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
@@ -443,7 +491,7 @@ class Overview(QWidget):
                               any(a.get("status") != "done" for a in chosen))
                 mine.append(pm.menuAction())
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
-                                    self.apply_selected, any(can_apply(a) for a in chosen) and not self.running),
+                                    self.apply_selected, any(can_apply(a) for a in chosen) and self.may_apply_now()),
                                    (tr("Leave Out of Apply"), lambda: self.leave_out(True),
                                     any(can_apply(a) and not a.get(PlanModel.LEAVE_OUT) for a in chosen)),
                                    (tr("Include in Apply"), lambda: self.leave_out(False),
@@ -960,6 +1008,7 @@ class Overview(QWidget):
                                  cancel=lambda: w.cancelled, meta=META_STORE)
             return off
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
+        self._lookup_again = again                         # (Refresh: so is what Apply interrupts)
         self._lookup_order = [k for ks in groups.values() for k in ks]
         self.states = dict.fromkeys(self._lookup_order, "waiting")
         self.model.refresh_rows()
@@ -1060,6 +1109,10 @@ class Overview(QWidget):
         self.plan.update(head, albums=self.model.albums)
         was = self.selected()
         rows = [r for r, a in enumerate(self.model.albums) if self.album_key(a) in keys]
+        out = {self.album_key(self.model.albums[r]) for r in rows if self.model.albums[r].get(PlanModel.LEAVE_OUT)}
+        for a in found:
+            if self.album_key(a) in out:
+                a[PlanModel.LEAVE_OUT] = True
         mine = was is not None and any(was is self.model.albums[r] for r in rows)
         at = self.model.replace_rows(rows, found)
         self.plan["listed"] = any(a["status"] == "listed" for a in self.model.albums)
@@ -1070,7 +1123,17 @@ class Overview(QWidget):
         self.win.update_album_actions()
 
     def look_up_ended(self):
-        """The look-up ended (done or cancelled): the counts, then the look-ups queued meanwhile."""
+        """The look-up ended (done or cancelled): the counts, then the look-ups queued meanwhile
+        (stopped for Apply: the albums it did not reach wait, and Apply asks first)."""
+        apply_next, self._apply_next = getattr(self, "_apply_next", False), False
+        if apply_next:
+            left = [k for k in getattr(self, "_lookup_order", []) if k in self.states and k in self.looking]
+            again = bool(getattr(self, "_lookup_again", False))
+            ahead = dict(self.queue)
+            self.queue = {k: (self.looking[k][1], again) for k in left}
+            for k, (mode, ag) in ahead.items():          # (asked meanwhile: theirs wins, Refresh kept)
+                was = self.queue.pop(k, None)
+                self.queue[k] = (mode, ag or bool(was and was[1]))
         self.looking = {}
         self.show_profile_column()
         self.fit_status()
@@ -1079,6 +1142,13 @@ class Overview(QWidget):
         self.refresh_overrides()
         self.busy(False)
         self.service_status(force=True)
+        if apply_next:
+            self.model.refresh_rows()                     # (the albums not reached: Waiting…)
+            if self.actionable():
+                self.apply()
+            if not self.running:                           # (Apply not asked after all: on with the look-up)
+                self.run_queue()
+            return
         if self.run_queue():                               # (the next one says what it does)
             return
         notify(self.win, "finished", tr("Preview finished"), counts_by_label((self.plan or {}).get("albums") or []))
@@ -1087,6 +1157,7 @@ class Overview(QWidget):
         self.win.refresh_attention_badge(self.path)
 
     def lookup_failed(self, msg):
+        self._apply_next = False
         self.looking, self.queue = {}, {}                  # (nothing queued starts after a failure)
         self.oops(msg)
 
@@ -1375,9 +1446,32 @@ class Overview(QWidget):
         return (tr("Apply the preview to {n} {0}?").format(word.lower(), n=n), body,
                 tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), tr("Apply {n} {0}").format(word, n=n))
 
+    def may_apply_now(self) -> bool:
+        """Apply can be asked: nothing runs, or a look-up does (it stops after its album first)."""
+        if not self.running:
+            return True
+        w = self.worker
+        return bool(self.looking) and not getattr(self, "_apply_next", False) and \
+            not (w is not None and getattr(w, "cancelled", False))
+
+    def apply_during_look_up(self) -> bool:
+        """Apply asked while albums are looked up: the look-up stops after the album it is on;
+        the albums not reached wait (queued), Apply asks as usual, then they are looked up."""
+        if not self.may_apply_now() or not self.running:
+            return False
+        self._apply_next = True
+        self.worker.cancelled = True
+        self.summary.setText(tr("Stopping the look-up after the current album to apply; the albums not yet "
+                                "looked up are looked up afterwards."))
+        self.win.update_album_actions()
+        return True
+
     def apply(self):
         n = self.actionable()
-        if not n or self.running or self.edit_pending():
+        if not n or self.edit_pending():
+            return
+        if self.running:
+            self.apply_during_look_up()
             return
         if getattr(self, "plan_library", "") != (self.library or ""):
             # (the preview was made for another library folder: its files would go there)
@@ -1431,8 +1525,15 @@ class Overview(QWidget):
         self.busy(True)
         self._applying, self._apply_at = True, (0, total, "")
         self.summary.setText(tr("Applying…"))
-        self.worker = start(self, work, self.applied, self.progress, self.oops,
+        self.worker = start(self, work, self.applied, self.progress, self.apply_failed,
                             partial=lambda x: self.file_progress(*x))
+
+    def apply_failed(self, msg):
+        """Apply stopped with an error: said as any failure; the albums a look-up was
+        interrupted for (Apply during a look-up) are looked up still."""
+        self.oops(msg)
+        if self.queue and not self.running:
+            self.run_queue()
 
     def fresh_job(self, job) -> str:
         """JOB, or (Apply ran it already: albums left out of it applied now) a new job named
@@ -1491,7 +1592,7 @@ class Overview(QWidget):
         if left:                                          # (albums left out stay, to apply later)
             self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(
                 plural(len(left), tr("album"), tr("albums"))))
-        else:
+        elif not self.queue:
             self.plan = None
         self.busy(False)
         self.service_status(force=True)
@@ -1500,10 +1601,13 @@ class Overview(QWidget):
         self.win.refresh_attention_badge(self.path)          # (Apply marks albums Unresolved on disk)
         if rep is not None:
             self.win.show_run_report(rep)                  # (what was done, what is left for you)
+        if self.queue:                                     # (stopped for this Apply: on with the look-up)
+            self.run_queue()
 
     def cancel(self):
         if self.worker:
             self.worker.cancelled = True
+            self._apply_next = False                       # (Cancel stops it all, Apply too)
             n = len(self.queue)
             self.queue = {}                                # (nor is what waited for it looked up)
             self.states = {k: v for k, v in self.states.items() if v != "waiting"}

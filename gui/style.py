@@ -28,14 +28,16 @@ TYPE = {"title": (20, 600), "headline": (13, 600), "body": (13, 400), "caption":
 # outshines the content); focus_ring: the ring inside a focused accent button (at least 3:1 on it)
 LIGHT = {"window": "#F6F7F9", "base": "#FFFFFF", "alt": "#F2F4F7", "sidebar": "#EEF0F3", "ink": "#1C2430",
          "muted": "#5D6B7A", "faint": "#B9C1CA", "separator": "rgba(0,0,0,0.10)", "line": "#DDE1E6",
-         "accent": "#0F7C80", "on_accent": "#FFFFFF", "identified": "#2E7D4F", "attention": "#925F11",
+         "accent": "#1D7F3F", "on_accent": "#FFFFFF", "identified": "#2E7D4F", "attention": "#925F11",
          "ignored": "#5D6B7A", "error": "#B3261E", "raised": "#FFFFFF", "disabled": "#9AA4AF",
-         "selection": "#0F7C80", "on_selection": "#FFFFFF", "focus_ring": "#FFFFFF"}
+         "selection": "#1D7F3F", "on_selection": "#FFFFFF", "focus_ring": "#FFFFFF",
+         "brand_green": "rgba(48,209,88,0.55)", "brand_red": "rgba(255,59,48,0.45)"}
 DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1C222A", "ink": "#E6EAF0",
         "muted": "#9AA5B1", "faint": "#4A535E", "separator": "rgba(255,255,255,0.10)", "line": "#323943",
-        "accent": "#4FB3B5", "on_accent": "#0B1F20", "identified": "#6CC08E", "attention": "#E3B25C",
+        "accent": "#4CC777", "on_accent": "#0B2014", "identified": "#6CC08E", "attention": "#E3B25C",
         "ignored": "#9AA5B1", "error": "#F08A80", "raised": "#262B32", "disabled": "#6B7480",
-        "selection": "#1F6F72", "on_selection": "#FFFFFF", "focus_ring": "#0B1F20"}
+        "selection": "#1F6B3C", "on_selection": "#FFFFFF", "focus_ring": "#0B2014",
+        "brand_green": "rgba(48,209,88,0.70)", "brand_red": "rgba(255,69,58,0.60)"}
 
 # status -> (symbol, word, light colour, dark colour, icon)
 STATUS = {
@@ -204,6 +206,9 @@ def stylesheet():
     QMainWindow::separator {{ background: {line}; width: 1px; height: 1px; }}
     QWidget#inspectorBody {{ background: {base}; border-left: 1px solid {line}; }}
     QLabel[role="title"] {{ font-size: 20px; font-weight: 600; color: {ink}; }}
+    QToolButton#settingScope {{ color: {muted}; font-size: 11px; border: none; padding: 0 2px; }}
+    QToolButton#settingScope[own="true"] {{ color: {accent}; font-weight: 600; }}
+    QToolButton#settingScope::menu-indicator {{ image: none; width: 0; }}
     QLabel[role="headline"] {{ font-size: 13px; font-weight: 600; color: {ink}; }}
     QLabel[role="hint"], QLabel[role="caption"] {{ color: {muted}; }}
     QLabel[role="caption"] {{ font-size: 11px; }}

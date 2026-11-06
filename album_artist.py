@@ -9,7 +9,10 @@ names) as the lead artist alone, while the Artist tag keeps the whole credit.
                ("Pat Metheny Group", "The Jimi Hendrix Experience", "Tom Petty and the
                Heartbreakers", "Glenn Miller and His Orchestra") is filed under that member.
                MusicBrainz decides: the band's members (its "member of band" relationships)
-               must hold a person whose name the band's name starts with. So "Deep Purple"
+               must hold a person whose name the band's name starts with; when MusicBrainz
+               lists none (or the album came from Discogs alone), the members Discogs lists
+               for the band's Discogs artist do ("Jason Bieler and The Baron Von Bielski
+               Orchestra": Jason Bieler). So "Deep Purple"
                (Steve Morse a member) or "The Marshall Tucker Band" (no member of that name)
                stay as they are.
   file_under   with lead: your own names, {"credit": "album artist"}, over the rules above:
@@ -32,8 +35,9 @@ import compilations
 # already hold stays (a re-run during an outage neither renames nor moves a settled album)
 UNKNOWN = ("",)
 
-# the most words after the member's name ("and His Orchestra", "& The Silver Bullet Band")
-MAX_TAIL_WORDS = 5
+# the most words after the member's name ("and His Orchestra", "& The Silver Bullet Band",
+# "and The Baron Von Bielski Orchestra")
+MAX_TAIL_WORDS = 6
 
 
 def settings(profile) -> dict:
@@ -85,9 +89,11 @@ def _list(t, key) -> list:
     return [str(x) for x in (v if isinstance(v, list) else [v] if v else [])]
 
 
-def choose(t: dict, profile, members_of=None):
+def choose(t: dict, profile, members_of=None, discogs_members_of=None):
     """(name, sort name, MusicBrainz ID, Discogs ID) of the album artist for tags t, or None to
-    keep the credit. members_of(mbid) -> [(name, sort, id), ...] of a band (None: unknown)."""
+    keep the credit. members_of(mbid) -> [(name, sort, id), ...] of a band (None: unknown);
+    discogs_members_of(discogs id) -> [(name, "", "", discogs id), ...], asked when MusicBrainz
+    names no leader (or the band has no MusicBrainz ID)."""
     c = settings(profile)
     if not c.get("lead") or compilations.is_various(t):
         return None
@@ -122,13 +128,23 @@ def choose(t: dict, profile, members_of=None):
         return lead if fold(lead[0]) != fold(credit) else None
     if to:
         return _found(to, [lead[2]] if lead[2] else [], members_of)
-    if c.get("bands", True) and lead[2] and members_of:
-        members = members_of(lead[2])
-        if members is None:
-            return UNKNOWN
-        hit = leader_of(lead[0], members) if members else None
+    if c.get("bands", True):
+        # (MusicBrainz first; Discogs when MusicBrainz names no such member or has no ID for the
+        # band. Unknown - the credit kept as the files hold it - only when no database that
+        # was asked could answer: MusicBrainz's answer stands when Discogs cannot be reached)
+        hit, unknown = None, {}
+        for which, some_id, ask in (("mb", lead[2], members_of), ("dg", lead[3], discogs_members_of)):
+            if hit or not some_id or not ask:
+                continue
+            members = ask(some_id)
+            unknown[which] = members is None
+            hit = leader_of(lead[0], members) if members else None
+        # (MusicBrainz not reached, or the band known only to Discogs and it not reached)
+        unknown = unknown.get("mb") or ("mb" not in unknown and unknown.get("dg"))
         if hit:
-            lead = (hit[0], hit[1] or "", hit[2] or "", "")
+            lead = (hit[0], hit[1] or "", hit[2] or "", hit[3] if len(hit) > 3 else "")
+        elif unknown:
+            return UNKNOWN
     return lead if fold(lead[0]) != fold(credit) else None
 
 
@@ -142,12 +158,12 @@ def _found(name, ids, members_of):
     return (name, "", "", "")
 
 
-def apply(targets: list, profile, members_of=None) -> list:
+def apply(targets: list, profile, members_of=None, discogs_members_of=None) -> list:
     """Every track's tags with the album artist chosen (choose, from the first track's: the
     album artist is the album's)."""
     if not targets or not enabled(profile):
         return targets
-    lead = choose(targets[0], profile, members_of)
+    lead = choose(targets[0], profile, members_of, discogs_members_of)
     if lead == UNKNOWN:
         keys = ("albumartist", "albumartists", "albumartistsort", "musicbrainz_albumartistid",
                 "discogs_albumartist_id", "~albumartists", "~albumartists_sort")
@@ -195,4 +211,24 @@ def band_members(http, mbid, log=None):
         a = r.get("artist") or {}
         if r.get("type") == "member of band" and r.get("direction") == "backward" and a.get("name"):
             out.append((a["name"], a.get("sort-name") or "", a.get("id") or ""))
+    return out
+
+
+def discogs_members(http, dgid, log=None):
+    """[(name, "", "", Discogs ID)] of the members Discogs lists for its artist DGID (none for a
+    person or a band without them; Discogs' "(2)" name suffix dropped); None when Discogs could
+    not be asked."""
+    try:
+        det = http.get_json(f"https://api.discogs.com/artists/{int(dgid)}", "discogs")
+    except (TypeError, ValueError):
+        return []
+    except Exception as exc:                             # (an outage or no key: the credit stays)
+        if log:
+            log.info("album artist: Discogs members of %s not read: %s", dgid, exc)
+        return None
+    out = []
+    for m in (det or {}).get("members") or [] if isinstance(det, dict) else []:
+        name = re.sub(r"\s*\(\d+\)$", "", str(m.get("name") or "")).strip()
+        if name:
+            out.append((name, "", "", str(m.get("id") or "")))
     return out

@@ -19,6 +19,7 @@ works from that one list.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import html
 from dataclasses import dataclass, field
 
@@ -887,10 +888,11 @@ SETTINGS = [
     S("singles.identify", N_("Identify loose tracks"), "switch", "ident_adv",
       foot=N_("A track on its own, not part of an album, is matched to its recording by its fingerprint.")),
     # Tags
-    S("tag_level", N_("Tagging level"), "popup", "written", attr="level",
+    S("tag_level", N_("Tagging level"), "popup", "general", attr="level",
       choices=tuple((k, LEVEL_WORDS[k]) for k in ("basic", "enthusiast", "audiophile")),
       foot=N_("Basic: names, numbers, date, genre. Enthusiast: everything the databases give. "
-              "Audiophile: also loudness, lyrics, fingerprints, rip log, dynamic range.")),
+              "Audiophile: also loudness, lyrics, fingerprints, rip log, dynamic range. Only the settings "
+              "that matter at the level chosen are shown.")),
     S("field_policy.default", N_("Existing tags"), "popup", "written",
       choices=(("replace", N_("Replace")), ("fill_missing", N_("Fill in missing only")),
                ("preserve", N_("Keep"))),
@@ -1187,7 +1189,37 @@ SETTINGS = [
     S("retry.max_attempts", N_("Up to"), "stepper", "retry_adv", rng=(1, 20), suffix=N_(" tries"),
       show=lambda v: v.get("retry.after_days") != 0, foot=N_("Per album. Then it is left for you.")),
 ]
+# groups that do nothing below a tagging level: their rows are hidden there (the level is the
+# profile's first choice, in General; a saved value is kept, and counts again at that level)
+LEVEL_GROUPS = {"audiophile": ("audiophile",), "loudness": ("audiophile",),
+                "credits": ("enthusiast", "audiophile"), "discogs": ("enthusiast", "audiophile"),
+                "artist_photos": ("enthusiast", "audiophile")}
+
+
+def _at_levels(levels, show=None):
+    return lambda v: (v.get("tag_level") or "enthusiast") in levels and (show is None or bool(show(v)))
+
+
+LEVEL_KEYS = {"versions.extra_tags": ("enthusiast", "audiophile"), "quality_action": ("audiophile",)}
+SETTINGS = [dataclasses.replace(s, show=_at_levels(LEVEL_GROUPS.get(s.group) or LEVEL_KEYS[s.key], s.show))
+            if s.group in LEVEL_GROUPS or s.key in LEVEL_KEYS else s for s in SETTINGS]
 BY_KEY = {s.key: s for s in SETTINGS}
+
+# the profile's settings behind a row (shared by all profiles when all of them are: pf.SHARED_SETTINGS)
+ROW_PATHS = {"_skip": ("exclude_paths", "skip_folders"), "_engines": ("providers.web.search",),
+             "_file_under": ("album_artist.file_under",)}
+
+
+def row_paths(s) -> tuple:
+    return ROW_PATHS.get(s.key) or tuple(s.covers) or ((s.key,) if not s.key.startswith("_") else ())
+
+
+def shared_roots(s) -> set:
+    """The shared settings (pf.SHARED_SETTINGS) behind row S ("loudness" for its switches)."""
+    return {pf.shared_root(p) for p in row_paths(s)}
+
+
+SHARED_ROWS = {s.key for s in SETTINGS if row_paths(s) and None not in shared_roots(s)}
 
 # ---- presets: what each one sets on top of the defaults --------------------------------------
 PRESETS = {
@@ -1595,6 +1627,12 @@ class ProfileEditor(QScrollArea):
         self.raw = copy.deepcopy(raw)
         self.full, self.default_full = copy.deepcopy(full), copy.deepcopy(defaults)
         self.loaded = {s.key: s.value_of(full) for s in SETTINGS}
+        # own_chosen: Only This Profile (the file's own_settings); own: those and the ones whose
+        # value differs from the shared one - shown as this profile's, edited for it alone. On
+        # saving, only the chosen ones are kept own whatever their value (a value set back to
+        # the shared or default one follows the shared one again)
+        self.own_chosen = {p for p in full.get(pf.OWN_KEY) or [] if p in pf.SHARED_SETTINGS}
+        self.own = pf.own_of(full) | self.own_chosen
         self.defaults = {s.key: s.value_of(defaults) for s in SETTINGS}
         for s in SETTINGS:
             self._set(s, self.loaded[s.key])
@@ -1610,10 +1648,51 @@ class ProfileEditor(QScrollArea):
         vals = self.values()
         for key in self.changed_keys():
             _write_value(BY_KEY[key], data, vals[key], vals)
+        own = sorted(getattr(self, "own_chosen", ()))
+        if own:
+            data[pf.OWN_KEY] = own
+        else:
+            data.pop(pf.OWN_KEY, None)
         return data
 
     def snapshot(self) -> list:
-        return [repr(self.value(k)) for k in self.controls]
+        return [repr(self.value(k)) for k in self.controls] + [repr(sorted(getattr(self, "own_chosen", ())))]
+
+    # ---- settings shared by all profiles ----------------------------------------------------
+    def is_own(self, key) -> bool:
+        return bool(shared_roots(BY_KEY[key]) & self.own)
+
+    def set_scope(self, key, own):
+        """Only This Profile (own) or All Profiles: then every row of that setting shows the
+        shared value again."""
+        roots = shared_roots(BY_KEY[key])
+        if own:
+            self.own |= roots
+            self.own_chosen |= roots
+        else:
+            self.own -= roots
+            self.own_chosen -= roots
+            shared = pf.from_dict({"name": "_", "version": pf.SCHEMA_VERSION}, check=False).data
+            self._loading = True
+            try:
+                for s in SETTINGS:
+                    if s.key in SHARED_ROWS and shared_roots(s) & roots:
+                        self._set(s, s.value_of(shared))
+            finally:
+                self._loading = False
+        self.refresh()
+        self.edited.emit()
+
+    def shared_changes(self, data) -> dict:
+        """{shared setting: value} changed here for every profile (written by write() into
+        data, whole: "loudness" for one of its switches); a row this profile keeps its own
+        of is not among them."""
+        out = {}
+        for key in self.changed_keys():
+            if key in SHARED_ROWS and not self.is_own(key):
+                for root in shared_roots(BY_KEY[key]):
+                    out[root] = pf._get(data, root)
+        return out
 
     # ---- reacting ---------------------------------------------------------------------------
     def _changed(self, *_):
@@ -1652,6 +1731,8 @@ class ProfileEditor(QScrollArea):
                 row.reason.setText(note)
                 row.reason.setVisible(bool(note))
             row.set_changed(not s.personal and not same(vals[s.key], self.defaults.get(s.key)))
+            if s.key in SHARED_ROWS:
+                row.set_scope(self.is_own(s.key), lambda own, k=s.key: self.set_scope(k, own))
         for g in self.groups.values():
             g.tidy()
         self.show_preview(vals)

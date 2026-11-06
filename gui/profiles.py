@@ -199,6 +199,15 @@ class Profiles(QWidget):
         lay.setSpacing(16)
         outer.addLayout(lay, 1)
         left = QVBoxLayout()
+        # (a search field over the list, as in System Settings: it finds a setting in the
+        # profile shown - and profiles by name - like the toolbar's search on this page)
+        self.find = QLineEdit()
+        self.find.setPlaceholderText(tr("Search settings"))
+        self.find.setAccessibleName(tr("Search settings"))
+        self.find.setClearButtonEnabled(True)
+        self.find.setMaximumWidth(self.LIST_WIDE)
+        self.find.textChanged.connect(self.filter)
+        left.addWidget(self.find)
         self.list = QListWidget()                             # (a source list, as the sidebar)
         self.list.setObjectName("profileList")
         self.list.setAccessibleName(tr("Profiles"))
@@ -321,6 +330,7 @@ class Profiles(QWidget):
         cap = self.LIST_NARROW if self.width() < self.NARROW else self.LIST_WIDE
         if self.list.maximumWidth() != cap:
             self.list.setMaximumWidth(cap)
+            self.find.setMaximumWidth(cap)
 
     def filter(self, text):
         """The toolbar search: the profiles whose name holds the text (all of them when no name
@@ -743,8 +753,20 @@ class Profiles(QWidget):
         name = self.shown_name
         if not name:
             return False
-        data = self.editor.write(pf.rename_legacy(pf.raw(name)))   # (older setting names in today's form)
+        # (in today's form, the shared values filled in: a change of one switch of a shared
+        # setting keeps the rest of it)
+        data = self.editor.write(pf.with_shared(pf.upgrade(pf.raw(name))))
         try:
+            checked = pf.from_dict(data)                     # (checked before anything is written)
+            problems = pf.check_template(checked.data)
+            if problems:
+                raise pf.ProfileError("; ".join(problems))
+            # (from the edited data: the shared values were filled in before the edit, so a
+            # setting set back to Automatic - not stated - is no longer there)
+            shared = self.editor.shared_changes(data)
+            if shared:                                       # (for every profile not keeping its own)
+                pf.adopt_shared()
+                pf.set_shared(shared)
             pf.save(pf.from_dict(data))
             if self.win is not None:
                 self.win.statusBar().showMessage(tr("Saved profile {name}").format(name=name), 4000)

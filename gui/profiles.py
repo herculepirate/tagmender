@@ -765,6 +765,12 @@ class Profiles(QWidget):
             # setting set back to Automatic - not stated - is no longer there)
             shared = self.editor.shared_changes(data)
             if shared:                                       # (for every profile not keeping its own)
+                broken = pf.shared_problems(shared, but=name)
+                if broken:                                   # (nothing written: another would stop working)
+                    raise pf.ProfileError(
+                        tr("This change applies to every profile, and another would stop working with "
+                           "it. Choose Only This Profile for it, or change that profile first.")
+                        + "\n\n" + "\n".join(broken))
                 pf.adopt_shared()
                 pf.set_shared(shared)
             pf.save(pf.from_dict(data))

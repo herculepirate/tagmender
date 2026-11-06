@@ -15,9 +15,9 @@ def use():
         return
     plain = pf.from_dict
 
-    def from_dict(data, *, check=True):
+    def from_dict(data, *, check=True, **kw):
         if int((data or {}).get("version") or 0) < 3:
             data = pf.keep_v2_behaviour(data)
-        return plain(data, check=check)
+        return plain(data, check=check, **kw)
     from_dict.v2_defaults = True
     pf.from_dict = from_dict

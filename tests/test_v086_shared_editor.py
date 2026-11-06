@@ -50,5 +50,44 @@ class SharedEditor(tg.Gui):
         self.assertEqual(pf.load("A").data["genres"]["max"], pf.load("B").data["genres"]["max"])
 
 
+    def test_only_this_profile_kept_before_any_shared_value(self):
+        pf.shared_file().unlink(missing_ok=True)
+        p = self.page("A")
+        default = p.editor.value("genres.max")
+        p.editor.set_scope("genres.max", True)
+        p.editor.set_value("genres.max", default)
+        self.assertTrue(p.save())
+        self.assertIn("genres.max", pf.raw("A")["own_settings"])
+        p.show("B")
+        self.app.processEvents()
+        p.editor.set_value("genres.max", default + 3)
+        self.assertTrue(p.save())
+        self.assertEqual(pf.load("A").data["genres"]["max"], default)
+
+    def test_a_preset_changes_only_this_profile(self):
+        p = self.page("A")
+        before = pf.load("B").data["artwork"]["enlarge"]
+        p.editor.apply_preset("keep" if before else "collector")
+        self.assertTrue(p.editor.is_own("artwork.enlarge"))
+        self.assertTrue(p.save())
+        self.assertEqual(pf.load("B").data["artwork"]["enlarge"], before)
+        self.assertNotEqual(pf.load("A").data["artwork"]["enlarge"], before)
+
+    def test_a_shared_change_that_would_break_another_profile_is_refused(self):
+        p = self.page("A")
+        d = pf.raw("B")
+        pf._put(d, "subfolders.misc_name", "Notes")
+        pf.save(pf.from_dict(d))
+        p.show("A")
+        self.app.processEvents()
+        p.editor.set_value("subfolders.covers_name", "Notes")
+        from unittest import mock
+        with mock.patch.object(self.gui.sheets, "warning") as warned:
+            self.assertFalse(p.save())
+        warned.assert_called_once()
+        self.assertIn("every profile", warned.call_args[0][2])
+        self.assertEqual(pf.load("B").data["subfolders"]["misc_name"], "Notes")
+
+
 if __name__ == "__main__":
     unittest.main()

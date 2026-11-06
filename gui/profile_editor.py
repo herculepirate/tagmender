@@ -1649,7 +1649,9 @@ class ProfileEditor(QScrollArea):
         for key in self.changed_keys():
             _write_value(BY_KEY[key], data, vals[key], vals)
         own = sorted(getattr(self, "own_chosen", ()))
-        if own:
+        # (marked - profiles.is_marked - once there is something to say: an Only This Profile,
+        # a file already marked, or the shared settings in use; saved unedited, a file is unchanged)
+        if own or pf.is_marked(data) or pf.shared_file().exists():
             data[pf.OWN_KEY] = own
         else:
             data.pop(pf.OWN_KEY, None)
@@ -1941,7 +1943,15 @@ class ProfileEditor(QScrollArea):
                 if not BY_KEY[k].personal and not set(BY_KEY[k].covers or (k,)) & set(PRESET_KEEPS) and
                 (section is None or GROUPS[BY_KEY[k].group][0] == section)}
 
-    def apply(self, target: dict):
+    def apply(self, target: dict, *, own=False):
+        """Set TARGET's values; OWN (a preset): a shared setting it changes becomes this
+        profile's own (Only This Profile), so a preset chosen for one profile changes no other."""
+        if own:
+            for key, v in target.items():
+                if key in SHARED_ROWS and not same(self.value(key), v):
+                    roots = shared_roots(BY_KEY[key])
+                    self.own |= roots
+                    self.own_chosen |= roots
         self._loading = True
         for key, v in target.items():
             self._set(BY_KEY[key], v)
@@ -1949,7 +1959,7 @@ class ProfileEditor(QScrollArea):
         self._changed()
 
     def apply_preset(self, preset):
-        self.apply(self.preset_values(preset))
+        self.apply(self.preset_values(preset), own=True)
 
     def restore_defaults(self, section=None):
         self.apply(self.defaults_for(section))
@@ -1983,7 +1993,7 @@ class ProfileEditor(QScrollArea):
         key = dlg.preset()
         target = self.preset_values(key)
         if self._ask_changes(tr("Start from “{0}”?").format(tr(PRESETS[key][0])), target, tr("Use These Settings")):
-            self.apply(target)
+            self.apply(target, own=True)
 
     def label_of(self, key) -> str:
         return self.rows[key].label.text()

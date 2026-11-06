@@ -364,8 +364,9 @@ class Overview(QWidget):
         for c in range(len(PlanModel.COLS)):
             h.setSectionResizeMode(c, QHeaderView.Interactive)
         h.setStretchLastSection(True)
-        self._sized_by_you, self._fitting = set(), False
+        self._sized_by_you, self._fitting, self._header_held = set(), False, False
         h.sectionResized.connect(self.column_resized)
+        h.viewport().installEventFilter(self)             # (a drag is yours only when it starts on the header)
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(0)
@@ -422,17 +423,35 @@ class Overview(QWidget):
 
     COLUMN_MOST = {1: 340, 4: 260, 2: 300, 7: 300}       # (fitted, at most: drag for more)
 
-    def column_resized(self, c, _old, _new):
-        from PySide6.QtWidgets import QApplication
-        # (dragged by you, the mouse button down on the header: left as you made it; Qt's own
-        # sizing - the last column taking what is left - is not yours)
-        if not self._fitting and QApplication.mouseButtons() & Qt.LeftButton:
-            self._sized_by_you.add(c)
+    def eventFilter(self, obj, e):
+        from PySide6.QtCore import QEvent
+        if hasattr(self, "table") and obj is self.table.horizontalHeader().viewport():
+            if e.type() == QEvent.MouseButtonPress and e.button() == Qt.LeftButton:
+                self._header_held = True
+            elif e.type() == QEvent.MouseButtonRelease and e.button() == Qt.LeftButton:
+                self._header_held = False
+        return super().eventFilter(obj, e)
+
+    def last_visible_column(self) -> int:
+        h = self.table.horizontalHeader()
+        for v in range(h.count() - 1, -1, -1):
+            c = h.logicalIndex(v)
+            if not self.table.isColumnHidden(c):
+                return c
+        return -1
+
+    def column_resized(self, c, old, new):
+        # (dragged by you, the mouse pressed on the header: left as you made it. Qt's own sizing
+        # is not yours - the last column taking what is left, a column hidden or shown while you
+        # drag the inspector's edge)
+        if self._fitting or not self._header_held or not old or not new or c == self.last_visible_column():
+            return
+        self._sized_by_you.add(c)
 
     def fit_columns(self):
         """Each column not sized by you: as wide as its text, up to COLUMN_MOST (Why: the rest)."""
         h = self.table.horizontalHeader()
-        last = h.logicalIndex(h.count() - 1)
+        last = self.last_visible_column()
         self._fitting = True
         try:
             for c in range(1, len(PlanModel.COLS)):
@@ -522,6 +541,9 @@ class Overview(QWidget):
         ids = {id(a) for a in chosen}
         self.model.set_left_out([a for a in self.model.albums if id(a) not in ids], True)
         self.model.set_left_out(chosen, False)
+        if self.running and self.may_apply_now():
+            # (an album the look-up brings in meanwhile is not among them: left out when it ends)
+            self._apply_only = {self.album_key(a) for a in chosen}
         self.apply()
 
     def remove_selected(self):
@@ -1126,6 +1148,7 @@ class Overview(QWidget):
         """The look-up ended (done or cancelled): the counts, then the look-ups queued meanwhile
         (stopped for Apply: the albums it did not reach wait, and Apply asks first)."""
         apply_next, self._apply_next = getattr(self, "_apply_next", False), False
+        only, self._apply_only = getattr(self, "_apply_only", None), None
         if apply_next:
             left = [k for k in getattr(self, "_lookup_order", []) if k in self.states and k in self.looking]
             again = bool(getattr(self, "_lookup_again", False))
@@ -1144,6 +1167,8 @@ class Overview(QWidget):
         self.service_status(force=True)
         if apply_next:
             self.model.refresh_rows()                     # (the albums not reached: Waiting…)
+            if only is not None:                           # (Apply Selected: only the albums chosen)
+                self.model.set_left_out([a for a in self.model.albums if self.album_key(a) not in only], True)
             if self.actionable():
                 self.apply()
             if not self.running:                           # (Apply not asked after all: on with the look-up)
@@ -1157,7 +1182,7 @@ class Overview(QWidget):
         self.win.refresh_attention_badge(self.path)
 
     def lookup_failed(self, msg):
-        self._apply_next = False
+        self._apply_next, self._apply_only = False, None
         self.looking, self.queue = {}, {}                  # (nothing queued starts after a failure)
         self.oops(msg)
 
@@ -1607,7 +1632,7 @@ class Overview(QWidget):
     def cancel(self):
         if self.worker:
             self.worker.cancelled = True
-            self._apply_next = False                       # (Cancel stops it all, Apply too)
+            self._apply_next, self._apply_only = False, None   # (Cancel stops it all, Apply too)
             n = len(self.queue)
             self.queue = {}                                # (nor is what waited for it looked up)
             self.states = {k: v for k, v in self.states.items() if v != "waiting"}

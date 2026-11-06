@@ -27,10 +27,9 @@ class V086Columns(tg.Gui):
         self.assertTrue(h.stretchLastSection())
         ov.model.set_plan({"albums": [album("/m/Band/One", why=["x" * 300])]})
         self.app.processEvents()
-        from unittest import mock
-        from PySide6.QtWidgets import QApplication
-        with mock.patch.object(QApplication, "mouseButtons", return_value=tg.Qt.LeftButton):
-            h.resizeSection(1, 77)                                # (you drag the Album folder wider)
+        ov._header_held = True                                    # (pressed on the header)
+        h.resizeSection(1, 77)                                    # (you drag the Album folder wider)
+        ov._header_held = False
         ov.model.set_plan({"albums": [album("/m/Band/A much longer folder name than before")]})
         self.app.processEvents()
         self.assertEqual(ov.table.columnWidth(1), 77)
@@ -53,6 +52,26 @@ class V086Columns(tg.Gui):
         self.assertIn("second problem", tip)
         m.albums[0]["identification"]["why"] = ["a <b> tag"]
         self.assertIn("a &lt;b&gt; tag", m.data(m.index(0, 5), tg.Qt.ToolTipRole))   # (shown as written)
+
+
+    def test_qt_resizing_while_you_drag_elsewhere_is_not_yours(self):
+        self.win.resize(1500, 800)
+        self.win.inspector.hide()
+        self.app.processEvents()
+        ov = self.win.pages["Overview"]
+        ov.model.set_plan({"job": "j", "profile": "p", "operation": "in_place", "albums": [album("/m/Band/One")]})
+        self.app.processEvents()
+        from unittest import mock
+        from PySide6.QtWidgets import QApplication
+        with mock.patch.object(QApplication, "mouseButtons", return_value=tg.Qt.LeftButton):
+            ov.table.setColumnHidden(5, True)                     # (the inspector's edge dragged: Why gives way)
+            ov.table.horizontalHeader().resizeSection(4, 500)
+            ov.table.setColumnHidden(5, False)
+        self.assertEqual(ov._sized_by_you, set())
+        ov._header_held = True
+        ov.table.horizontalHeader().resizeSection(5, 400)        # (the last column: Qt's, not yours)
+        ov._header_held = False
+        self.assertEqual(ov._sized_by_you, set())
 
 
 if __name__ == "__main__":

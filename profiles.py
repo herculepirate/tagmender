@@ -1256,10 +1256,10 @@ def _picard_defaults(base: dict) -> dict:
     return out
 
 
-def from_dict(data: dict, *, check=True) -> Profile:
+def from_dict(data: dict, *, check=True, sv=None) -> Profile:
     # (the shared settings in place of those it does not state or keep its own of: a whole
     # profile, such as a plan's, states every one and stays exactly as it is)
-    data = with_shared(upgrade(data))
+    data = with_shared(upgrade(data), sv)          # (SV: these shared values instead - {} for none)
     base = _picard_defaults(DEFAULTS) if data.get("follow_tagger_settings",
                                                   DEFAULTS["follow_tagger_settings"]) else DEFAULTS
     full = _merge(base, data)
@@ -1497,8 +1497,9 @@ def with_shared(data: dict, sv=None) -> dict:
     states only the shared settings it keeps its own of (minimal, _stamp_profiles)."""
     sv = shared_values() if sv is None else sv
     out = copy.deepcopy(data)
+    own = set(out.get(OWN_KEY) or []) if isinstance(out.get(OWN_KEY), list) else set()
     for p, v in sv.items():
-        if _get(out, p) is _MISSING:
+        if p not in own and _get(out, p) is _MISSING:   # (its own, unset: Automatic, not the shared one)
             _put(out, p, v)
     return out
 
@@ -1512,37 +1513,65 @@ def _write_json(path: Path, data):
         _shared_cache[:] = [None, None]
 
 
-def _stamp_profiles(sv):
-    """Each profile file rewritten in today's form, stating its own shared settings
-    (own_settings) and no others, so a shared value changed later reaches every profile that
-    does not keep its own. What each profile does stays as it was (against SV, the shared
-    values until now). The file as it was is kept once as NAME.json.bak-shared."""
+def is_marked(data: dict) -> bool:
+    """DATA (a profile's file) says which shared settings it keeps its own of (own_settings):
+    written since the shared settings exist. One that does not (from before them, or put back
+    from elsewhere) works as it always did (raw), and is stamped at the app's next start."""
+    return isinstance(data.get(OWN_KEY), list)
+
+
+def _stamp_profiles(sv, *, marked=False):
+    """Each profile file not yet marked (is_marked) given its own shared settings (own_settings)
+    and no others, so a shared value changed later reaches every profile that does not keep its
+    own. What each profile does stays as it was: a setting whose value with SV (the shared
+    values until now) would differ from what it had becomes its own. Nothing else in the file
+    changes - what it leaves to the tagger's settings still follows them. The file as it was is
+    kept once as NAME.json.bak-shared. MARKED: the marked ones too (the first time: adopt_shared)."""
     for name in names():
         path = path_of(name)
         try:
             data = raw_file(name)
         except ProfileError:
             continue
-        if isinstance(data.get(OWN_KEY), list):
+        if is_marked(data) and not marked:
             continue
         try:
-            prof = from_dict(with_shared(upgrade(data), sv), check=False)
-        except ProfileError:
-            continue
+            out = _stamped(data, sv)
+            if out == upgrade(copy.deepcopy(data)):
+                continue                                # (nothing to change)
+        except (ProfileError, TypeError, ValueError, AttributeError):
+            continue                                    # (one that cannot be read is left as it is)
         backup = path.with_name(f"{path.name}.bak-shared")
         if not backup.exists():
             shutil.copy2(path, backup)
-        _write_json(path, minimal(prof, sv=sv, mark=True))
+        _write_json(path, out)
 
 
-def set_shared(changes: dict):
-    """Set shared settings for every profile: {path: value} (_MISSING: back to the default).
-    Profiles not yet stating their own are stamped first, as they were."""
-    for p in changes:
-        if p not in SHARED_SETTINGS:
-            raise ProfileError(f"{p!r} is not a setting shared by all profiles")
-    sv = shared_values()
-    _stamp_profiles(sv)
+def _stamped(data: dict, sv: dict) -> dict:
+    """DATA (a profile file) marked against the shared values SV (_stamp_profiles); what a
+    marked one lists stays its own."""
+    up = upgrade(copy.deepcopy(data))
+    chosen = [p for p in up.get(OWN_KEY) or [] if p in SHARED_SETTINGS] if is_marked(up) else []
+    # (as it works now: an unmarked one with no shared value; a marked one with SV - stamped
+    # again, as when the first time was stopped half-way, it stays as it is)
+    was = from_dict(up, check=False, sv=sv if is_marked(up) else {}).data
+    out = copy.deepcopy(up)
+    for p in SHARED_SETTINGS:
+        _drop(out, p)
+    now = from_dict(out, check=False, sv=sv).data
+    own = sorted(set(chosen) | {p for p in SHARED_SETTINGS if _get(was, p) != _get(now, p)})
+    for p in own:
+        v = _get(was, p)
+        if v is not _MISSING:                           # (unset - Automatic: kept unset, as its own)
+            _put(out, p, v)
+    for k in [k for k, v in out.items() if v == {} and isinstance(DEFAULTS.get(k), dict)]:
+        out.pop(k)
+    out[OWN_KEY] = own
+    return out
+
+
+def _with_changes(sv: dict, changes: dict) -> dict:
+    sv = copy.deepcopy(sv)
     base = None
     for p, v in changes.items():
         if v is _MISSING:
@@ -1553,19 +1582,62 @@ def set_shared(changes: dict):
             d = _get(base, p)
             v = _merge(d, v) if isinstance(d, dict) else v
         sv[p] = copy.deepcopy(v)
-    _write_json(shared_file(), {"version": 1, "values": sv})
+    return sv
+
+
+def shared_problems(changes: dict, *, but=None) -> list[str]:
+    """What the shared CHANGES ({path: value}) would stop working: each other profile (BUT, the
+    one being saved, is checked on its own) that loads now and would not with them."""
+    for p in changes:
+        if p not in SHARED_SETTINGS:
+            raise ProfileError(f"{p!r} is not a setting shared by all profiles")
+    sv = _with_changes(shared_values(), changes)
+    out = []
+    for name in names():
+        if name == but:
+            continue
+        try:
+            data = raw(name)
+            from_dict(data)
+        except ProfileError:
+            continue                                    # (not working now: not this change's doing)
+        try:
+            from_dict(data, sv=sv)
+        except ProfileError as exc:
+            out.append(str(exc))
+    return out
+
+
+def set_shared(changes: dict):
+    """Set shared settings for every profile: {path: value} (_MISSING: back to the default).
+    Profiles not yet stating their own are stamped first, as they were."""
+    for p in changes:
+        if p not in SHARED_SETTINGS:
+            raise ProfileError(f"{p!r} is not a setting shared by all profiles")
+    sv = shared_values()
+    _stamp_profiles(sv)
+    _write_json(shared_file(), {"version": 1, "values": _with_changes(sv, changes)})
 
 
 def adopt_shared() -> bool:
     """Once (no shared_settings.json yet): a setting two or more profiles all hold the same
     value of, unlike the default, becomes that shared value; every profile is stamped with its
-    own (what differs keeps differing). Nothing any profile does changes. True when written."""
+    own (what differs keeps differing). Nothing any profile does changes. True when written.
+    At each later start, a profile file put back unmarked (is_marked) is stamped."""
     if shared_file().exists():
+        try:
+            unfinished = json.loads(shared_file().read_text(encoding="utf-8")).get("stamping")
+        except (OSError, ValueError, AttributeError):
+            unfinished = False
+        sv = shared_values()
+        _stamp_profiles(sv, marked=bool(unfinished))  # (the first time stopped half-way: finished)
+        if unfinished:
+            _write_json(shared_file(), {"version": 1, "values": sv})
         return False
     fulls = []
     for name in names():
         try:
-            fulls.append(from_dict(raw_file(name), check=False).data)
+            fulls.append(from_dict(raw_file(name), check=False, sv={}).data)
         except ProfileError:
             continue
     sv = {}
@@ -1576,7 +1648,13 @@ def adopt_shared() -> bool:
             first = vals[0]
             if first is not _MISSING and all(v == first for v in vals) and first != _get(base, p):
                 sv[p] = first
-    _stamp_profiles(sv)
+    # (marked ones too: one saved from the editor before now states its values; one all agree
+    # on follows the shared value unless chosen Only This Profile)
+    # (the shared values written first, the stamping flagged until done: stopped in between,
+    # no profile loses a value - each still states it, or is stamped when read - and the next
+    # start finishes it)
+    _write_json(shared_file(), {"version": 1, "values": sv, "stamping": True})
+    _stamp_profiles(sv, marked=True)
     _write_json(shared_file(), {"version": 1, "values": sv})
     return True
 
@@ -1597,8 +1675,17 @@ def raw_file(name: str) -> dict:
 
 
 def raw(name: str) -> dict:
-    """A profile's file (from_dict fills in the shared settings it does not state)."""
-    return raw_file(name)
+    """A profile's file (from_dict fills in the shared settings it does not state). One not
+    marked (is_marked: from before the shared settings, or put back from elsewhere) comes as it
+    would be stamped: it keeps its own of each it would otherwise have taken, so whatever reads
+    or saves it - the app, the CLI, the watcher - finds it doing what it always did."""
+    data = raw_file(name)
+    if not is_marked(data) and shared_file().exists():
+        try:
+            data = _stamped(data, shared_values())
+        except (TypeError, ValueError, AttributeError):
+            pass                                        # (malformed: from_dict says what is wrong)
+    return data
 
 
 def load(name: str) -> Profile:
@@ -1689,8 +1776,13 @@ def minimal(profile: Profile, *, sv=None, mark=False) -> dict:
             _put(out, p, v)
     for k in [k for k, v in out.items() if v == {} and isinstance(DEFAULTS.get(k), dict)]:
         out.pop(k)
-    if own and (mark or shared_file().exists()):     # (before the shared settings exist: as before)
+    # (before the shared settings exist, only a profile saying which it keeps - the editor's - is
+    # marked: its Only This Profile is kept; others are stamped as they worked when they come)
+    if mark or shared_file().exists():
         out[OWN_KEY] = sorted(own)
+    elif is_marked(profile.data):                    # (only what was chosen: a value all profiles
+        out[OWN_KEY] = sorted(p for p in profile.data[OWN_KEY]   #  agree on is shared when they are)
+                              if p in SHARED_SETTINGS)
     return out
 
 
@@ -1725,10 +1817,10 @@ def _write(profile: Profile, *, full=False):
 def migrate(name: str) -> tuple[bool, Path | None]:
     """Write an older profile file in today's form, keeping the old one as NAME.json.bak-<time>.
     Returns (changed, backup path)."""
-    data = raw(name)
-    if int(data.get("version") or 0) == SCHEMA_VERSION and not has_legacy(data):
+    orig = raw_file(name)                 # (the file as written: raw() gives it in today's form)
+    if int(orig.get("version") or 0) == SCHEMA_VERSION and not has_legacy(orig):
         return False, None
-    prof = from_dict(data)              # (checked first: a profile that cannot be used is left alone)
+    prof = from_dict(raw(name))              # (checked first: a profile that cannot be used is left alone)
     problems = check_template(prof.data)
     if problems:
         raise ProfileError(f"profile {name!r}: " + "; ".join(problems))

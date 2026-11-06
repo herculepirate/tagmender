@@ -96,6 +96,24 @@ class V086ApplyDuringLookUp(V084Overview):
         rq.assert_called_once()
 
 
+    def test_apply_selected_applies_only_the_album_chosen(self):
+        ov = self.ov
+        first, second, third, g2, g3 = self.start()
+        if not ov.actionable():
+            self.skipTest("the first album has nothing to apply")
+        ov.table.clearSelection()
+        ov.table.selectRow(ov.proxy.mapFromSource(ov.model.index(ov.model.albums.index(self.row(first)), 0)).row())
+        offered = []
+        with mock.patch.object(self.gui.sheets, "confirm",
+                               side_effect=lambda *a, **k: offered.append(list(ov.to_apply())) or False) as ask:
+            ov.apply_selected()
+            g2.set()
+            self.assertTrue(wait(lambda: ask.called, self.app, timeout=30), ov.summary.text())
+            g3.set()
+            self.assertTrue(wait(lambda: not ov.running, self.app, timeout=60), ov.summary.text())
+        self.assertEqual([a["source_dir"] for a in offered[0]], [self.row(first)["source_dir"]])
+
+
 del V084Overview
 
 if __name__ == "__main__":

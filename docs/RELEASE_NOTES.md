@@ -1,5 +1,27 @@
 # Release notes
 
+## 0.8.7
+
+Fixes to the 0.8.6 changes.
+
+**Settings shared by all profiles**
+- A profile that follows the tagger's settings for Windows-safe names and empty folders keeps
+  following them when the shared settings are first set up.
+- A shared change that would stop another profile from working (for example the pictures
+  folder given the name another profile uses for logs) is refused and that profile named.
+- *Start from a preset* changes only the profile it is chosen in: a shared setting it changes
+  becomes that profile's own.
+- A profile file put back from elsewhere (a backup, another computer, the deleted profiles
+  folder) works as it always did; it is never given the shared values silently, whichever
+  way it is opened or saved. An own setting left as *Automatic* stays Automatic.
+- `tagmender profiles migrate` upgrades an older file again once the shared settings exist.
+
+**Overview**
+- *Apply This Album* during a look-up applies only the albums you chose, not one the stopped
+  look-up brings in meanwhile (another album of the same folder included).
+- Dragging the inspector's edge or the window no longer counts as you sizing the columns: only
+  a drag on the column headers keeps a width.
+
 ## 0.8.6
 
 **Settings shared by all profiles**

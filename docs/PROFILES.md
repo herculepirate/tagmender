@@ -93,12 +93,15 @@ format preferences, the MP3 tag versions and stray-tag removal of `tagger`, `cle
 
 Their values are kept in `shared_settings.json` next to the profiles (`{"version": 1, "values":
 {"dotted.key": value}}`; a key not there has its default). A profile keeps its own value of one
-only when its file lists it in `own_settings` (the editor's *Only This Profile*); a file without
-that list counts a shared key as its own when it states a value that differs from the shared
-one. Profiles are resolved when they are read, so the app, the CLI and the watcher see the same
+only when its file lists it in `own_settings` (the editor's *Only This Profile*), or states a
+value that differs from the shared one; a listed key it leaves unset keeps its default
+(Automatic). A file without the list (from before the shared settings, or put back from a
+backup or another computer) works as it always did: each shared key whose value would change
+counts as its own, and the app marks it so at its next start. Profiles are resolved when they are read, so the app, the CLI and the watcher see the same
 values. The first time the app starts with this version, a value two or more profiles all hold
 (unlike the default) becomes the shared one, and each profile file is rewritten to state only
-the shared settings it keeps its own of (the file as it was is kept once as `NAME.json.bak-shared`); what any profile does is unchanged. A whole profile kept elsewhere (a plan's) states every value and is never changed by the shared ones.
+the shared settings it keeps its own of (the file as it was is kept once as `NAME.json.bak-shared`); what any profile does is unchanged; whatever a file leaves to the tagger's settings still
+follows them. A shared change that would stop another profile from working is refused. A whole profile kept elsewhere (a plan's) states every value and is never changed by the shared ones.
 
 ## How the Profiles page shows these settings
 

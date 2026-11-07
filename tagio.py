@@ -256,17 +256,44 @@ def _lang_desc(k: str, default="eng") -> tuple[str, str]:
     return default, desc
 
 
+def _item_name(field: str) -> str:
+    """The name field is stored under, for checking it is one the format allows: a custom
+    tag's own (~custom:NAME), else the field's; a credit, comment or lyrics field with a role
+    or description is stored under its base name (the rest goes into the value)."""
+    k = field[8:] if field.startswith("~custom:") else field
+    for base in ("performer:", "comment:", "lyrics:"):
+        if k.startswith(base):
+            return base[:-1]
+    return k
+
+
 def holds(path, field: str) -> bool:
     """Whether a file of this kind has a place for field, as Picard writes it: MP4 and WMA
-    have none for performer:<role> credits; WMA none for custom tags."""
+    have none for performer:<role> credits; WMA none for custom tags. A custom tag whose name
+    the format cannot store (a Vorbis comment or APEv2 item named in other letters than ASCII
+    or with "=", an MP4 atom named beyond Latin-1) has none either: Picard leaves it out, as
+    the plan does, instead of the write failing."""
     ext = Path(str(path)).suffix.lower()
+    name = _item_name(field) if not field.startswith("~") or field.startswith("~custom:") else None
     if ext in (".m4a", ".m4b", ".m4p", ".mp4", ".m4r", ".3gp"):            # (Picard's MP4File.supports_tag)
+        if name is not None:
+            try:
+                name.encode("latin-1")
+            except UnicodeEncodeError:
+                return False
         return not field.startswith("performer:") and not (field.startswith("comment:") and len(field) > 9)
     if ext in (".wma", ".asf"):
         return field in ASF_MAP or field == "totaldiscs" or field in CI_ONLY or \
             field.startswith("lyrics:")                                          # (no total tracks)
     if ext in (".wv", ".ape", ".mpc", ".mp+", ".ofr", ".ofs", ".tak", ".wvc"):  # (APEv2: Picard's UNSUPPORTED_TAGS)
+        if name is not None:
+            import mutagen.apev2
+            if not mutagen.apev2.is_valid_apev2_key(APE.get(name, name.title())):
+                return False
         return field not in APE_UNSUPPORTED
+    if ext in (".flac", ".ogg", ".oga", ".opus", ".spx", ".ogx") and name is not None:
+        import mutagen._vorbis                                                   # (Picard's is_valid_key)
+        return mutagen._vorbis.is_valid_key(VORBIS_W.get(name, name.upper()))
     return True
 CI_ONLY = {"replaygain_album_gain", "replaygain_album_peak", "replaygain_album_range", "replaygain_track_gain",
            "replaygain_track_peak", "replaygain_track_range", "replaygain_reference_loudness"}

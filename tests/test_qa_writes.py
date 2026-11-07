@@ -75,6 +75,45 @@ class UnquotedCueFile(Base):
         self.assertEqual(pl._cue_rewrites(cue, {"a.flac": "01 A b.flac"}), ('FILE "01 A b.flac" WAVE\n', "utf-8"))
 
 
+class CustomTagNamesTheFormatCannotStore(Base):
+    """A custom tag (a tagger script's $set(ключ,...)) named so the format cannot store it - a
+    Vorbis comment or APEv2 item outside ASCII or with "=", an MP4 atom beyond Latin-1 - was
+    planned and shown, then failed the whole album at Apply with an empty error (mutagen's
+    ValueError). Like Picard (supports_tag), the plan leaves such a tag out."""
+
+    BAD = {"ключ": ["v"], "a=b": ["v"]}
+
+    def test_holds(self):
+        for name in ("x.flac", "x.ogg", "x.opus"):
+            self.assertFalse(tagio.holds(name, "ключ"))
+            self.assertFalse(tagio.holds(name, "a=b"))
+            self.assertFalse(tagio.holds(name, "~custom:Ключ"))
+            self.assertTrue(tagio.holds(name, "MyTag".lower()))
+            self.assertTrue(tagio.holds(name, "performer:гитара"))       # (the role goes into the value)
+        self.assertFalse(tagio.holds("x.wv", "ключ"))
+        self.assertFalse(tagio.holds("x.m4a", "ключ"))
+        self.assertTrue(tagio.holds("x.m4a", "ünï"))
+        self.assertTrue(tagio.holds("x.mp3", "ключ"))                    # (TXXX holds any name)
+
+    def test_album_is_written_without_them(self):
+        prop = self.proposal(targets=[target(1, "First", **self.BAD), target(2, "Second", **self.BAD)])
+        p = pl.build([prop], self.profile())
+        self.assertEqual(p["albums"][0]["status"], "ready")
+        for fe in p["albums"][0]["files"]:
+            self.assertFalse(set(fe["changes"]) & set(self.BAD), fe["changes"])
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertEqual(tagio.read(self.f1)["title"], ["First"])
+
+    def test_mp3_keeps_them(self):
+        from test_executor import audio
+        m = audio(self.album / "03 c.mp3", 700, album="Some Album", title="c")
+        prop = self.proposal(files=[str(m)], targets=[target(1, "First", **self.BAD)])
+        res = executor.Executor(pl.build([prop], self.profile())).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertEqual(tagio.read(m).get("ключ"), ["v"])
+
+
 @unittest.skipIf(os.geteuid() == 0, "root writes into read-only folders")
 class UndoFolderCannotBeMade(Base):
     """Undo of a move whose emptied source folder could not be made again (its parent

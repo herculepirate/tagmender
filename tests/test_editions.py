@@ -57,7 +57,7 @@ class Variable(unittest.TestCase):
 
     def test_kinds(self):
         for media, kind in (('7" Vinyl', "Vinyl"), ("10\"", "Vinyl"), ("Vinyl", "Vinyl"), ("Cassette", "Tape"),
-                            ("Digital Media", "WEB"), ("SACD", "CD"), ("Enhanced CD", "CD"),
+                            ("Digital Media", "WEB"), ("SACD", "SACD"), ("Enhanced CD", "CD"),
                             ("File, FLAC, Album, Stereo", "WEB"),     # Sunn O))) 2026: the Discogs plugin's media
                             ("CD, Album, Reissue, Remastered", "CD")):
             self.assertEqual(naming.edition_parts({"media": [media]})[0], kind, media)

@@ -1,5 +1,84 @@
 # Release notes
 
+## 0.8.12
+
+**One release in several versions (SACD stereo and multichannel)**
+- Folders named by channel layout under one release folder (`2.0` and `5.0`, `Stereo` and
+  `Multichannel`, `Mono` and `Stereo`) are one album. Each version is matched to its own disc of
+  the release and tagged and filed as that disc: a Hybrid SACD's stereo layer as disc 2 of 5 in
+  `Disc 02`, its multichannel layer as disc 3 in `Disc 03`. Before, each version was a separate
+  album, both went into one folder and one set of files got `~` suffixes.
+- A version is mapped to an SACD layer only with evidence: an `SACD_AREA` tag, DSD files, or
+  high-resolution audio. A 44.1 kHz/16-bit rip is not taken for the SACD layer.
+- When the release does not say which disc is which version, the album is left for you to choose,
+  with the reason, instead of both versions being filed together.
+- The same files filed this way and looked up again are recognised as they were filed; nothing
+  is rewritten.
+- Only folders that are really versions count: at least two sibling folders with different
+  layouts, all of one album, with no other music beside them. An artist or album called *Mono* or
+  *Stereo* is read as before.
+
+**DVD-Audio, DVD-Video and Blu-ray audio rips**
+- Version folders such as `Stereo 24-96` and `5.1 24-96`, `DVD-A 2.0` and `DVD-A 5.1`,
+  `BD Stereo` and `BD Atmos` are one album too. Stereo, 5.1, Quad, Atmos (its own version, not
+  5.1) and 7.1 are told apart; codec and rate words in the name (DTS, MLP, TrueHD, LPCM, 24-96,
+  48kHz) are allowed.
+- A DVD or Blu-ray holds both mixes on one disc: when the release lists each mix (titles such as
+  "(5.1 Mix)"), each folder is matched to its own tracks; when it lists the tracks once, both
+  versions share the disc number. Versions that share a disc are filed into a subfolder each,
+  `Disc 02/Stereo/` and `Disc 02/5.1/` (or `<album>/Stereo/` without disc folders), whatever your
+  naming script; never with `~` suffixes.
+- What says which disc a version came from: a disc word in its folder name (DVD, DVD-A, BD,
+  Blu-ray), the media tag of its files, an SACD_AREA tag or DSD files. The sample rate alone never
+  proves it: such a match is shown for you to check, never as certain. A single folder named
+  `Stereo 24-96` is matched as an ordinary album.
+
+**The edition in folder names says SACD, DVD-A and Blu-ray**
+- With the built-in naming (and *Separate editions in folder names* on, or the All music, Various
+  artists and Classical presets), an album filed from an SACD layer is `[SACD]`, from a DVD-Audio
+  `[DVD-A]`, from a Blu-ray `[Blu-ray]`; before, each was named as a CD. The Piano Man set above
+  becomes `1973 - Piano Man [2024 SACD]`.
+- Albums of those media already in your library move to the new folder name the next time they
+  are filed (and their Album tag changes when *Edition in the album title* is on). A profile with
+  its own copy of the naming script keeps naming as before until you choose the preset again or
+  copy its edition line.
+
+**The release folder's name is read for its versions**
+- The catalogue number, country, year and format written in the release folder's name count for
+  the version folders inside it, and a catalogue number range is understood: `SICP 10151-4` and
+  `SICP 10151~4` mean SICP 10151 to 10154. A European format suffix (`COL 474161-2`) is not taken
+  for a range.
+- A release the folder name contradicts (another year, a download where the folder says CD or
+  SACD) is no longer reported as certain.
+
+**Watched folders: never the library**
+- A profile's library (or a folder inside it) is no longer looked at as a watched folder. Watched,
+  every album already filed there was treated as a new drop, and a pass over a large library could
+  run so long that the drop folders after it were never reached. Watch a Folder now refuses a
+  library, and one already on the list shows *No: it is the library* under Available and is skipped.
+
+**Watched folders: when you say, or on the clock**
+- **Check Selected** looks in the selected watched folder now (also *Check This Folder Now* in its
+  right-click menu and Tools › Watched Folders); **Check All Now** looks in every one.
+- The timer runs on the clock for all watched folders: every 10 minutes is 12:00, 12:10, 12:20,
+  not 10 minutes after TagMender started. The page shows when the next check is; untick *Keep
+  watching while TagMender is open* to look only when you ask. The background service keeps the
+  same times.
+- The list under the folders is now *Recently in watched folders*: albums applied on the Overview
+  are on the Jobs page.
+
+**Jobs: which albums, and where they went**
+- Each job shows its albums (artist and album as filed) and the folder they were filed into, with
+  **Open Folder** (also in the right-click menu). For an undone job it opens where the albums are
+  back.
+- The release folder's artwork, scans and notes now move with an album made of version folders
+  (they were left behind beside `2.0` and `5.0`).
+
+**Editing a disc number moves the files**
+- An edit in the inspector of a field your naming uses (disc number, total discs) now previews the
+  album again, so Apply files it where the edit says (a `Disc 02` folder). Undoing the edit does
+  the same.
+
 ## 0.8.11
 
 **Overview**

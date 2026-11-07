@@ -1286,6 +1286,16 @@ class Planner:
         # script too (only the file names: its folders stay as they are), at the rename level
         renaming = op == "in_place" and identified and organize_ok and bool(p.get("rename_in_place")) and \
             not vsplit and not flat
+        # your edits of fields the naming script reads (a disc number, the album's title): the
+        # files are named with your values (apply_edits writes them after); recorded, so an edit
+        # made later on the preview shown is known to need a new preview (edit_renames)
+        naming_edit = {}
+        if (op in ("copy", "move") or renaming) and identified:
+            entry["naming_fields"] = sorted(template_fields(template))
+            naming_edit = _naming_edit(edit_for(self.edits, prop.source_dir, [str(f) for f in files]),
+                                       entry["naming_fields"])
+            if naming_edit:
+                entry["naming_edit"] = naming_edit
         album_dirs = {}
         if op == "copy" and identified:
             album_dirs["prior"] = self._prior_album_dir(kept, dest_root)
@@ -1328,6 +1338,11 @@ class Planner:
             entry["notes"].append("Partial identification on files that already name a release: only empty "
                                   "fields filled, their release tags and TagMender mark left as they are")
         win_split, split = {}, False
+        apart = self._versions_apart(kept, targets, template, rel_tags) \
+            if identified and op in ("copy", "move") and not flat and not vsplit else False
+        if apart:
+            entry["notes"].append("versions of one disc (" + ", ".join(apart) + ") would be named alike: each "
+                                  "goes into a folder of its own, named after it, inside the album's (or its disc's) folder")
         naming_with = plugins.working()                   # (a $function of a plugin failing while naming)
         for f in kept:
             try:
@@ -1629,6 +1644,13 @@ class Planner:
                         al = str((names.get("album") or [""])[0])
                         if tag_ed and al.endswith(f" [{tag_ed}]"):
                             names["album"] = [al[:-len(f" [{tag_ed}]")]]
+                    for k_, v_ in _edited_names(naming_edit, f).items():
+                        if v_ is None:
+                            names.pop(k_, None)
+                        elif v_ != KEEP:
+                            names[k_] = _vals(v_)
+                        elif before.get(k_):
+                            names[k_] = before[k_]
                     try:
                         comps = naming.render(template, names, self._picard(), p["filenames"].get("compat", "windows"),
                                               own=f.stem)
@@ -1664,6 +1686,12 @@ class Planner:
                                     split = True        # (the most shortened wins, for every track)
                                     if sum(map(len, got[:i + 1])) < sum(map(len, was)):
                                         win_split[k] = got[:i + 1]
+                    ver_ = _vals((targets.get(f) or {}).get("~version")) if apart else []
+                    if dst is not None and not renaming and ver_:
+                        # (a version of a disc another version of the album shares: in a folder of
+                        # its own inside the one the naming made - "Disc 02/5.1/201.T.flac")
+                        dst = dst.parent / fnm.safe_component(str(ver_[0]), p["filenames"].get("compat", "windows")) \
+                            / dst.name
                 entry["notes"] += notes
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
@@ -2221,6 +2249,33 @@ class Planner:
                     break
         return max(found, key=found.get) if found else None
 
+    def _versions_apart(self, kept, targets, template, rel_tags) -> list:
+        """The versions (%_version%: "Stereo", "5.1" ...) of an album that share a disc (a DVD's or
+        Blu-ray's mixes) or whose files the naming script names alike - each is then put in a
+        folder of its own, named after it (so a later run knows each version by its folder).
+        [] when they are discs of their own (an SACD's layers) and named apart."""
+        compat = self.profile["filenames"].get("compat", "windows")
+        by_name, seen, by_disc = {}, [], {}
+        for f in kept:
+            t = targets.get(f) or {}
+            ver = _vals(t.get("~version"))
+            if not ver:
+                continue
+            seen.append(str(ver[0]))
+            # (two versions on one disc - a DVD's or Blu-ray's mixes: apart too, whatever their
+            # names, so a later run knows each version again by its folder)
+            by_disc.setdefault(str((_vals(t.get("discnumber")) or ["1"])[0]), set()).add(fnm.fold(str(ver[0])))
+            names = {**{"_" + k[1:]: v for k, v in t.items() if k.startswith("~") and k != "~remove"},
+                     **{k: v for k, v in t.items() if not k.startswith("~")}, **rel_tags}
+            try:
+                comps = naming.render(template, names, self._picard(), compat, own=Path(f).stem)
+            except Exception:
+                continue
+            by_name.setdefault(tuple(fnm.fold(c) for c in comps), set()).add(fnm.fold(str(ver[0])))
+        if not any(len(v) > 1 for v in list(by_name.values()) + list(by_disc.values())):
+            return []
+        return list(dict.fromkeys(seen))
+
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release
         the same folder as a different release (in this plan, or already on disk): "Now
@@ -2589,11 +2644,11 @@ def preview(plan: dict, verbose=False) -> str:
             head += "\n    provider problems (recorded): " + "; ".join(f"{k}: {v}" for k, v in
                                                                       ident["provider_errors"].items())
         out.append(head)
-        for c in a["conflicts"]:
+        for c in a.get("conflicts") or []:
             out.append(f"    CONFLICT: {c}")
-        for n in a["notes"]:
+        for n in a.get("notes") or []:
             out.append(f"    note: {n}")
-        for s in a["skipped"]:
+        for s in a.get("skipped") or []:
             out.append(f"    {s['label']}: {Path(s['file']).name} ({s['rule']}: {s['matched']})")
         for fe in a["files"]:
             if fe["op"] == "none" and not verbose:
@@ -2608,7 +2663,7 @@ def preview(plan: dict, verbose=False) -> str:
                     af = "; ".join(r["after"]) or "—"
                     out.append(f"           {r['action']:<9} {r['field']}: {b[:50]} => {af[:50]}"
                                + (f"  ({r['note']})" if r.get("note") else ""))
-        for c in a["companions"]:
+        for c in a.get("companions") or []:
             note = "" if not c.get("rewrite") else \
                 "  (replaced by the larger cover; the old one is kept for undo)" if c["rewrite"].get("cover") \
                 else "  (TagMender's downloaded artist photo replaced by yours; kept for undo)" \
@@ -2671,6 +2726,62 @@ def edit_for(edits, source_dir, files):
         if n > most or (not mine and best is None):
             best, most = e, n
     return best
+
+
+def template_fields(template) -> set:
+    """The tags a naming script reads (%discnumber%, %album% ...), lower case; never its own
+    variables (%_edition%) or Picard's hidden ones."""
+    return {m.lower() for m in re.findall(r"%([A-Za-z0-9][A-Za-z0-9_:]*)%", str(template or ""))}
+
+
+def _naming_edit(edit, fields) -> dict:
+    """The part of an edit the naming reads: {"tags": {field: value}, "file_tags": {realpath:
+    {field: value}}} for the fields in fields; {} when it touches none."""
+    if edit_empty(edit):
+        return {}
+    want = {str(f).lower() for f in fields or ()}
+
+    def mine(d):
+        return {k: v for k, v in (d or {}).items() if str(k).lower() in want}
+    tags = mine(edit.get("tags"))
+    per = {os.path.realpath(str(f)): mine(v) for f, v in (edit.get("file_tags") or {}).items()}
+    per = {f: v for f, v in per.items() if v}
+    return {"tags": tags, "file_tags": per} if tags or per else {}
+
+
+def _edited_names(naming_edit, f) -> dict:
+    """{field: value} of naming_edit for file f (its own edit over the album's)."""
+    if not naming_edit:
+        return {}
+    return {str(k).lower(): v for k, v in dict(naming_edit.get("tags") or {}, **(
+        (naming_edit.get("file_tags") or {}).get(os.path.realpath(str(f))) or {})).items()}
+
+
+def edit_renames(entry, edit) -> bool:
+    """Whether an edit of this album changes what its files are named after (a field its
+    naming script reads, where the files are moved, copied or renamed) from what the plan
+    named them with: apply_edits cannot name them again on the preview shown - a new preview
+    (Planner(edits=...), engine.Engine.edits) does."""
+    fields = entry.get("naming_fields")
+    if not fields:
+        return False
+    return _naming_edit(edit, fields) != (entry.get("naming_edit") or {})
+
+
+def _note_renames(entry, edit):
+    """entry["renames"]: why this preview's names are no longer what your edits make them (a
+    disc number, title ... the naming reads, edited or reverted since the album was planned):
+    apply_edits cannot name files again - preview again, with the edits, to rename them."""
+    entry.pop("renames", None)
+    if not edit_renames(entry, edit):
+        return
+    now, was = _naming_edit(edit, entry["naming_fields"]), entry.get("naming_edit") or {}
+    fields = set()
+    for d in (now, was):
+        fields |= {str(k).lower() for k in d.get("tags") or {}}
+        fields |= {str(k).lower() for v in (d.get("file_tags") or {}).values() for k in v}
+    entry["renames"] = (f"your edit of {', '.join(sorted(fields))} changes where the files go: "
+                        "preview again to name them with it")
 
 
 def edit_empty(edit) -> bool:
@@ -2890,6 +3001,7 @@ def apply_edits(entry: dict, edit: dict | None, profile=None, settings=None) -> 
     Reads the files' tags (never writes them). An album that is not to be written (blocked,
     excluded, done) is left as it is."""
     _restore(entry)
+    _note_renames(entry, edit)
     if edit_empty(edit) or entry.get("status") not in EDITABLE:
         return entry
     _snapshot(entry)

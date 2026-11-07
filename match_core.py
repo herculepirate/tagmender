@@ -527,7 +527,329 @@ def catno_same(a, b):
 
 
 def catnos_agree(mine, theirs):
-    return any(catno_same(x, y) for x in mine or () for y in theirs or ())
+    return any(catno_same(x, y) or catno_range_same(x, y) for x in mine or () for y in theirs or ())
+
+
+# A set's numbers written as a range: "SICP 10151~4", "SICP-10151~10154" (a Japanese box:
+# SICP-10151, -10152, -10153, -10154). The end is the first number with its last digits
+# replaced and must come after it. "~" always means a range; a "-" ("SICP 10151-4") is as
+# often a format or disc suffix ("COL 474161-2", "DOMO 71063-2", "ABC 1001-2"), so it names a
+# range only in a Japanese-style number (four letters, four or more digits) and is then only
+# ever the same as that range written with "~" (catno_range_same), never one of its numbers.
+_CATNO_RANGE = re.compile(r"^\s*([A-Za-z]{2,6})[\s-]?(\d{3,7})\s*([~\-])\s*(\d{1,7})\s*$")
+
+
+def catno_range(code, dash=True):
+    """The catalogue numbers a range form names, normalised (norm_code), in order, or []
+    when it is not one: "SICP 10151~4" -> [sicp10151, sicp10152, sicp10153, sicp10154].
+    A "~" form names up to 20; a "-" form (only with dash, and only Japanese-style) 2 to 9."""
+    m = _CATNO_RANGE.match(str(code or ""))
+    if not m:
+        return []
+    prefix, first, sep, end = m.groups()
+    if sep == "-" and not (dash and len(prefix) == 4 and len(first) >= 4):
+        return []
+    if len(end) > len(first):
+        return []
+    last = first[:len(first) - len(end)] + end
+    a, b = int(first), int(last)
+    n = b - a + 1
+    if n < 2 or n > (20 if sep == "~" else 9):
+        return []
+    width = len(first)
+    return [norm_code(f"{prefix}{str(x).zfill(width)}") for x in range(a, b + 1)]
+
+
+def catno_range_same(a, b):
+    """Two catalogue numbers of one set when either is a "~" range (catno_range): "SICP
+    10151~4" and "SICP-10153" (one of its discs), or "SICP 10151-4" (a folder) and "SICP
+    10151~4" (MusicBrainz) - a "-" form only when the other is that very range with "~"."""
+    ta, tb = catno_range(a, dash=False), catno_range(b, dash=False)
+    if ta and tb:
+        return ta == tb
+    if not (ta or tb):
+        return False
+    tilde, other = (ta, b) if ta else (tb, a)
+    dashed = catno_range(other)
+    if dashed:                          # ("SICP 10151-4": the whole range, never one disc of it)
+        return dashed == tilde
+    return norm_code(other) in tilde
+
+
+def catno_range_forms(code):
+    """A Japanese-style range written with "-" ("SICP 10151-4"), as MusicBrainz and Discogs
+    list it: ["SICP 10151~4"]. [] for any other number."""
+    m = _CATNO_RANGE.match(str(code or ""))
+    if not m or m.group(3) != "-" or not catno_range(code):
+        return []
+    prefix, first, _sep, end = m.groups()
+    return [f"{prefix} {first}~{end}"]
+
+
+# ---- versions of one disc in folders of their own ("2.0/", "5.1/", "Stereo 24-96/") ------
+# A folder named after a channel layout holds one version of the album's audio (an SACD's
+# stereo and multichannel areas, a DVD-Audio's or Blu-ray's 2.0, 5.1 and Atmos mixes), not an
+# album of its own. Its name may carry the codec, the disc and the rate too ("DTS 5.1", "LPCM
+# 2.0 24-96", "BD 96-24 Stereo", "DVD-A 5.1"); any other word makes it a name, not a layout.
+_LAYOUT_NUMBER = re.compile(r"(?<![\d.])([1-9])\.([0-2])(?:\.([0-9]))?(?![\d.])")
+_LAYOUT_WORDS = (("atmos", "atmos", "Atmos"), ("dolby atmos", "atmos", "Atmos"),
+                 ("immersive", "atmos", "Atmos"), ("auro 3d", "atmos", "Auro-3D"),
+                 ("stereo", "stereo", "Stereo"), ("mono", "mono", "Mono"),
+                 ("quadraphonic", "multichannel", "Quad"), ("quad", "multichannel", "Quad"),
+                 ("surround", "multichannel", "Surround"), ("multichannel", "multichannel", "Multichannel"),
+                 ("multi channel", "multichannel", "Multichannel"), ("multich", "multichannel", "Multichannel"),
+                 ("multi ch", "multichannel", "Multichannel"))
+# what may stand beside the layout: the disc, the codec, the rate and depth, "mix"
+_DISC_WORDS = {"dvd": "video", "dvda": "video", "dvd a": "video", "dvd audio": "video", "dvd video": "video",
+               "dvdv": "video", "bd": "video", "bdmv": "video", "blu ray": "video", "bluray": "video",
+               "bd audio": "video", "pure audio": "video", "hd dvd": "video", "hddvd": "video",
+               "mlp": "video", "dts": "video", "dts hd": "video", "dts hd ma": "video", "truehd": "video",
+               "true hd": "video", "dolby": "", "dd": "video", "ac3": "video", "lpcm": "", "pcm": "",
+               "sacd": "sacd", "dsd": "sacd", "dsf": "sacd", "dff": "sacd", "flac": "", "wav": "",
+               "hires": "", "hi res": "", "mix": "", "area": "", "layer": "", "version": "", "audio": "",
+               "ma": "", "hd": ""}
+_RATE_WORD = re.compile(r"^(?:\d{2,3}(?:k|khz|bit)?|\d{2,3}[-/x]\d{2,3}(?:k|khz)?|\d{2,3}(?:\.\d)?k(?:hz)?)$")
+
+
+def parse_version(name):
+    """(layout, label, disc kind) a version folder's name gives, or None when it is not
+    one: "5.1" -> ("multichannel", "5.1", ""), "LPCM 2.0 24-96" -> ("stereo", "Stereo", ""),
+    "BD 96-24 Stereo" -> ("stereo", "Stereo", "video"), "Dolby Atmos" -> ("atmos", "Atmos",
+    "video"), "DSD Stereo" -> ("stereo", "Stereo", "sacd"). layout: "mono", "stereo",
+    "multichannel" (quad, 5.1, 7.1, surround) or "atmos" (immersive). disc kind: "sacd",
+    "video" (DVD-Audio/-Video, Blu-ray: their codecs too) or "" when the name does not say.
+    "24-96", "DTS" or "Blu-ray" alone name no layout."""
+    text = re.sub(r"[\[\](){}]", " ", str(name or "")).casefold()
+    found = []
+    for m in _LAYOUT_NUMBER.finditer(text):
+        n, lfe, top = int(m.group(1)), int(m.group(2)), m.group(3)
+        label = m.group(0)
+        if top is not None and int(top) > 0:
+            found.append(("atmos", label))
+        elif n + lfe == 1:
+            found.append(("mono", "Mono"))
+        elif n == 2 and lfe == 0:
+            found.append(("stereo", "Stereo"))
+        else:
+            found.append(("multichannel", label))
+    text = _LAYOUT_NUMBER.sub(" ", text)
+    for m in re.finditer(r"(?<![a-z\d])([1-8])\s*-?\s*ch(?:annels?)?(?![a-z])", text):
+        n = int(m.group(1))
+        found.append(("mono", "Mono") if n == 1 else ("stereo", "Stereo") if n == 2 else ("multichannel", f"{n}ch"))
+    text = re.sub(r"(?<![a-z\d])[1-8]\s*-?\s*ch(?:annels?)?(?![a-z])", " ", text)
+    words = " " + re.sub(r"[\s_.\-/+,&]+", " ", text).strip() + " "
+    for w, lay, label in sorted(_LAYOUT_WORDS, key=lambda x: -len(x[0])):
+        if f" {w} " in words:
+            found.append((lay, label))
+            words = words.replace(f" {w} ", " ")
+    kind = ""
+    if "atmos" in {f[0] for f in found} and "dolby" in words:
+        words = words.replace(" dolby ", " ")
+    for w, k in sorted(_DISC_WORDS.items(), key=lambda x: -len(x[0])):
+        while f" {w} " in words:
+            words = words.replace(f" {w} ", " ", 1)
+            kind = kind or k
+    left = [w for w in words.split() if not _RATE_WORD.match(w)]
+    lays = {f[0] for f in found}
+    if left or len(lays) != 1:
+        return None
+    lay = lays.pop()
+    if lay == "atmos":
+        kind = kind or "video"
+    return lay, found[0][1], kind
+
+
+def version_layout(name):
+    """The channel layout a folder name gives (parse_version): "stereo", "multichannel",
+    "atmos" or "mono"; "" when the name is not a version folder's."""
+    got = parse_version(name)
+    return got[0] if got else ""
+
+
+def version_label(name):
+    """The version a folder name names, as %_version% has it: "Stereo" ("2.0" too), "5.1", "Quad",
+    "Atmos"; "" when the name is not a version folder's."""
+    got = parse_version(name)
+    return got[1] if got else ""
+
+
+def layout_of_channels(channels, area=""):
+    """The layout of audio with this many channels, or as its SACD_AREA tag names it
+    ("Stereo", "Multichannel"); "" when neither says."""
+    a = str(area or "").casefold()
+    if "multi" in a:
+        return "multichannel"
+    if "stereo" in a:
+        return "stereo"
+    try:
+        n = int(channels or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return "multichannel" if n > 2 else "stereo" if n == 2 else "mono" if n == 1 else ""
+
+
+def medium_layout(fmt):
+    """The channel layout a database medium's format names: MusicBrainz "Hybrid SACD (SACD
+    layer, 2 channels)" is "stereo", "... (SACD layer, multichannel)" "multichannel"; "" when
+    the format does not say (a plain CD, an SACD without its area, a DVD or Blu-ray, which
+    holds every mix on one medium)."""
+    f = str(fmt or "").casefold()
+    if re.search(r"multi-?channel|surround|\b[4-7]\.[01]\b|\bquad", f):
+        return "multichannel"
+    if re.search(r"\b2 ?ch(?:annels?)?\b|\bstereo\b|\b2\.0\b", f):
+        return "stereo"
+    return ""
+
+
+def medium_type(fmt):
+    """What a database medium is, for a version folder: "sacd" (an SACD's high-resolution
+    layer), "video" (DVD-Audio, DVD-Video, Blu-ray, HD-DVD, a DualDisc's DVD side: one medium
+    with every mix), "cd" (a CD, an SACD's CD layer, a DualDisc's CD side) or ""."""
+    f = str(fmt or "").casefold()
+    if re.search(r"(?<!sa)cd layer|cd side", f):         # ("SACD layer" holds "CD layer")
+        return "cd"
+    if "sacd" in f:
+        return "sacd"
+    if re.search(r"dvd|blu-?ray|hd-?dvd|dualdisc|\bbd\b", f):
+        return "video"
+    if re.search(r"\bcd\b|-cd\b|\bcd-", f) or f in ("cd", "hdcd", "shm-cd", "blu-spec cd"):
+        return "cd"
+    return ""
+
+
+def title_mix(title):
+    """The mix a track title names ("Money (5.1 Mix)", "Money - Stereo", "Money [Atmos]"):
+    "stereo", "multichannel", "atmos", "mono" or ""."""
+    t = str(title or "").casefold()
+    if re.search(r"\batmos\b|\bimmersive\b|\b\d\.\d\.\d\b", t):
+        return "atmos"
+    if re.search(r"(?<![\d.])[4-7]\.[01](?![\d.])|\bsurround\b|\bmulti-?channel\b|\bquad(?:raphonic)?\b", t):
+        return "multichannel"
+    if re.search(r"\bstereo\b|(?<![\d.])2\.0(?![\d.])", t):
+        return "stereo"
+    if re.search(r"\bmono\b", t):
+        return "mono"
+    return ""
+
+
+_MIX_ORDER = {"mono": 0, "stereo": 1, "multichannel": 2, "atmos": 3}
+
+
+def _version_options(n, lay, media):
+    """Where a version of n tracks of this layout can be on the release's media: [(kind,
+    medium, tracks or None, how)]: an SACD layer naming it, a DVD's or Blu-ray's tracklist (the
+    whole of it, or the part of it whose titles name the mix, or - its parts naming none - one
+    part to be told by order), a CD for a stereo version."""
+    out = []
+    for m in media:
+        t, tracks, fmt = medium_type(m.get("format")), m.get("tracks") or [], m.get("format")
+        if t == "sacd" and medium_layout(fmt) == lay and len(tracks) == n:
+            out.append(("sacd", m, tracks, "format"))
+        elif t == "video" and n and len(tracks) == n:
+            out.append(("video", m, tracks, "single"))
+        elif t == "video" and n and len(tracks) > n and len(tracks) % n == 0:
+            parts = [tracks[i:i + n] for i in range(0, len(tracks), n)]
+            mixes = []
+            for part in parts:
+                said = {title_mix(x.get("title")) for x in part}
+                mixes.append(said.pop() if len(said) == 1 else "?")
+            if mixes.count(lay) == 1:
+                out.append(("video", m, parts[mixes.index(lay)], "titles"))
+            elif lay == "stereo" and mixes.count("") == 1 and "stereo" not in mixes and "?" not in mixes:
+                # (the others' titles name their mix - "(5.1 Mix)" -, the plain titles are the
+                # stereo mix's)
+                out.append(("video", m, parts[mixes.index("")], "titles"))
+            elif all(x == "" for x in mixes):
+                out.append(("video", m, None, "order"))
+        elif t == "cd" and lay == "stereo" and len(tracks) == n:
+            out.append(("cd", m, tracks, "cd"))
+    return out
+
+
+def version_view(album, cand):
+    """The album's version folders ("2.0/", "5.1/": album "version_discs" {disc: layout}) as
+    their own tracks of one release (cand "media_info": its media, their formats and tracks):
+    an SACD's stereo or multichannel layer, the part of a DVD's or Blu-ray's tracklist that is
+    that mix (or, the tracklist listing the tracks once, the whole of it, for every version),
+    each version compared with its own tracks. Which kind of medium a version is must be
+    what its files say (album "version_kinds": "sacd" - an SACD_AREA tag, DSD, 88.2 kHz -,
+    "video" - a DVD or Blu-ray word in its folder name, a 48 kHz-family rate past a CD's,
+    more channels -, "cd" - 16-bit/44.1 kHz stereo); a version with no such evidence, or
+    with two places to be, is not placed. None when any version is not.
+
+    The view keeps the release's ID; "version_tracks" [[medium position, track index]] are
+    the files' own tracks of the release (in the album's order), "version_media" {album disc:
+    medium position}; no track is "missing" (the other media are other formats of it).
+    "version_unsure" says why the placing is not proof (a CD-quality stereo rip taken as the
+    CD; a tracklist's parts taken in order, their titles naming no mix): never exact then."""
+    versions = album.get("version_discs") or {}
+    media = cand.get("media_info") or []
+    if not versions or not media:
+        return None
+    discs = sorted({t.get("disc") or 1 for t in album.get("tracks") or ()})
+    if set(discs) != set(versions):
+        return None
+    kinds = album.get("version_kinds") or {}
+    labels = album.get("version_labels") or {}
+    mine = {d: [t for t in album["tracks"] if (t.get("disc") or 1) == d] for d in discs}
+    chosen, hows, unsure, notes, by_order = {}, {}, [], [], {}
+    for d in discs:
+        kind = kinds.get(d) or ""
+        if not kind:
+            return None                       # (nothing says which disc this version is from)
+        opts = [o for o in _version_options(len(mine[d]), versions[d], media) if o[0] == kind]
+        if len(opts) != 1:
+            return None
+        _k, m, tracks, how = opts[0]
+        if how == "order":
+            by_order.setdefault(id(m), (m, []))[1].append(d)
+            continue
+        chosen[d], hows[d] = (m, tracks), how
+        by = (album.get("version_kind_by") or {}).get(d)
+        if how != "cd" and by == "media" and \
+                str(cand.get("id")) not in (album.get("version_release_ids") or {}).get(d, ()):
+            # (a media tag naming the disc counts when the files' release ID is this release's:
+            # TagMender's own filing. Another tagger's media tag, of another release, is no proof)
+            unsure.append(f"only the media tag of your {labels.get(d) or versions[d]} folder, written for another "
+                          f"release, says it is from the {m.get('format')}")
+        if how != "cd" and by == "audio":
+            # (only the rate, depth or channels say it came off that disc: a download of
+            # the mix looks the same)
+            unsure.append(f"only the audio of your {labels.get(d) or versions[d]} folder (its rate, depth "
+                          f"or channels) says it is from the {m.get('format')}")
+        if how == "cd":
+            unsure.append(f"your {labels.get(d) or versions[d]} folder (16-bit/44.1 kHz) taken as the "
+                          f"{m.get('format')}: a CD-quality copy of another medium would look the same")
+        if how == "single":
+            notes.append(f"the {m.get('format')} lists its tracks once: your {labels.get(d) or versions[d]} "
+                         "folder is those tracks")
+    for m, ds in by_order.values():
+        n = len(mine[ds[0]])
+        parts = [m["tracks"][i:i + n] for i in range(0, len(m["tracks"]), n)]
+        order = sorted(ds, key=lambda d: (_MIX_ORDER.get(versions[d], 9), d))
+        if len(order) != len(parts) or len({versions[d] for d in ds}) != len(ds) or \
+                any(len(mine[d]) != n for d in ds):
+            return None
+        for d, part in zip(order, parts):
+            chosen[d], hows[d] = (m, part), "order"
+        unsure.append(f"the {m.get('format')} lists {len(parts)} sets of {n} tracks naming no mix: taken in "
+                      f"order as {', '.join(labels.get(d) or versions[d] for d in order)}")
+    taken = {}
+    for d, (m, tracks) in chosen.items():
+        taken.setdefault((id(m), id(tracks[0]) if tracks else 0), []).append(d)
+    if any(len(ds) > 1 and any(hows[d] != "single" for d in ds) for ds in taken.values()):
+        return None                           # (two versions taken as one set of tracks)
+    view, where = [], []
+    for d in discs:
+        m, tracks = chosen[d]
+        if len(tracks) != len(mine[d]):
+            return None
+        view += [{"disc": d, "title": x.get("title", ""), "secs": x.get("secs") or 0.0} for x in tracks]
+        where += [[m.get("position"), x.get("index")] for x in tracks]
+    return dict(cand, tracks=view, version_tracks=where,
+                version_media={d: chosen[d][0].get("position") for d in discs},
+                version_unsure="; ".join(unsure), version_notes=notes, full_tracks=len(cand.get("tracks") or []),
+                disc_count=len(discs))
 
 
 def barcode_key(value):
@@ -702,6 +1024,14 @@ _MADE_IN = re.compile(r"\b(?:made|printed|manufactured|pressed|produced)\s+in\s+
 _LABEL_FILLER = {"records", "recordings", "record", "music", "entertainment", "productions", "production",
                  "inc", "ltd", "llc", "gmbh", "co", "company", "label", "group", "the", "and", "media",
                  "distribution", "sound", "sounds", "audio", "international", "a", "of"}
+
+
+# Country codes a folder name may give as a comma-separated field of their own, in capitals
+# ("[Sony, SICP 10151-4, JP]"): never words of a title, and none a format or rip word
+_FIELD_COUNTRIES = {c: c for c in ("JP", "DE", "FR", "NL", "CA", "AU", "KR", "TW", "HK", "RU", "SE", "BR",
+                                   "MX", "AR", "PL", "CZ", "FI", "DK", "AT", "BE", "PT", "GR", "CN", "NZ",
+                                   "IT", "ES", "GB")}
+_FIELD_COUNTRIES.update({"UK": "GB", "EU": "XE"})
 
 
 def country_code(name):
@@ -1370,6 +1700,8 @@ def file_clues(album, cand, clues, against, cfg=None):
         # (never the word "us" of a title)
         if any(f.strip() == "US" for f in re.split(r"[,;]", folder)):
             named.add("US")
+        # ... and likewise another country's code: "(2024, SACD, Sony, SICP 10151-4, JP, 2.0)"
+        named |= {_FIELD_COUNTRIES[f.strip()] for f in re.split(r"[,;]", folder) if f.strip() in _FIELD_COUNTRIES}
         if named and cc and cc != "XW":
             if cc in named:
                 clues.setdefault("country", f"{_readable_country(cc)} in the folder name")
@@ -2129,6 +2461,19 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             cand = box
             n_cand = len(cand["tracks"])
             box_note = (f"disc {cand['box_disc']} of {cand['box_title']}")
+    if n_file and not box_note and album.get("version_discs") and not cand.get("version_media"):
+        # versions of one disc in folders of their own ("2.0/", "5.1/"): each its own tracks of
+        # the release - an SACD's layer, its part of a DVD's or Blu-ray's tracklist
+        view = version_view(album, cand)
+        if view:
+            cand = view
+            n_cand = len(cand["tracks"])
+    if cand.get("version_media"):          # (a view scored again: told again)
+        fmts = {m.get("position"): m.get("format") for m in cand.get("media_info") or ()}
+        labels = album.get("version_labels") or {}
+        box_note = "; ".join([f"your {labels.get(d) or (album.get('version_discs') or {}).get(d, '')} folder is "
+                              f"disc {m} ({fmts.get(m) or 'its format unnamed'})"
+                              for d, m in sorted(cand["version_media"].items())] + list(cand.get("version_notes") or []))
     t_sim = title_sim(album["title"], cand["title"])
     pts += cfg["w_artist"] * a_sim
     avail += cfg["w_artist"]
@@ -2179,6 +2524,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     # must not hide the folder's catalogue number, which the other pressings are weighed by)
     if (not code or code == TAGS_BARCODE) and album["catnos"] and cand["catnos"]:
         shared = album["catnos"] & cand["catnos"]
+        # (a set's numbers as a range: "SICP 10151-4" in the folder, "SICP 10151~4" listed)
+        shared |= {c for c in album["catnos"] - shared if any(catno_range_same(c, x) for x in cand["catnos"])}
         if shared and not (code and tagger_catno(album, shared)):
             code = ("catalogue number (folder name)"
                     if shared <= set(album.get("catnos_from_folder") or ()) else
@@ -2762,6 +3109,10 @@ def classify(scored, cfg):
             proven and (best["artist_sim"] < cfg["auto_min_artist"] or best["title_sim"] < cfg["auto_min_title"])
             and not split_credit):
         why.append(f"confidence {best['confidence']} < {cfg['auto_min_confidence']}")
+    if best["cand"].get("version_unsure"):
+        # (which tracks of the release each version folder is rests on order or on CD-like
+        # audio: the album may be right, the medium is not proven)
+        why.append(f"which tracks of the release each version is is not proven: {best['cand']['version_unsure']}")
     if best.get("other_version"):
         why.append(f"the release is the {best['other_version']} version, which your folder and tags do not say")
     if best.get("conflict"):

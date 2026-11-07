@@ -1056,7 +1056,8 @@ class Overview(QWidget):
         if not self.plan:                                   # (all applied: the rows shown are the list)
             if not self.model.albums:
                 return
-            self.plan = {"albums": self.model.albums, "listed": True, "provider_notes": {}}
+            self.plan = {"job": "", "profile": self.profile.currentText(), "operation": "",
+                         "albums": self.model.albums, "listed": True, "provider_notes": {}}
         if self.plan.get("albums") is not self.model.albums:
             self.model.set_plan(self.plan)
         fresh, missing = [], 0
@@ -1104,8 +1105,12 @@ class Overview(QWidget):
     def plan_for(self, albums) -> dict:
         """The plan of ALBUMS as their profile's preview made it (its job, rules and folders)."""
         name = self.planned_with.get(self.album_key(albums[0])) if albums else None
-        head = self.headers.get(name) or self.plan or {"job": "", "profile": "", "operation": ""}
-        return dict(head, albums=list(albums))
+        head = self.headers.get(name) or self.plan or {}
+        # (a list made here - albums applied and filed again - has no job of its own yet)
+        out = {"job": "", "profile": self.profile.currentText(), "operation": ""}
+        out.update(head)
+        out["albums"] = list(albums)
+        return out
 
     def stale_profiles(self, albums) -> list:
         """ALBUMS whose preview was made with another profile than the one now chosen for them."""

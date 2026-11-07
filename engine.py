@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import os
 import re
 import sqlite3
@@ -134,8 +135,8 @@ def is_disc_dir(d: Path) -> bool:
     """A disc folder ("CD1", "Disc 2", "Disc One", "Side A"). A folder named only by a
     number counts when its siblings are numbered 1, 2, ... too: "Adele/19" and "Adele/21"
     are albums, "Box/1" and "Box/2" are discs."""
-    if not DISC_DIR.match(d.name):
-        return False
+    if not DISC_DIR.match(d.name) or mc.parse_version(d.name):
+        return False                      # ("DVD 2.0", "DVD 5.1": a version's folder, not "DVD 2")
     if not _NUMBER_ONLY.match(d.name):
         return True
     try:
@@ -143,6 +144,61 @@ def is_disc_dir(d: Path) -> bool:
     except OSError:
         return False
     return len(nums) >= 2 and nums[0] == 1 and nums == list(range(1, len(nums) + 1))
+
+
+def version_dirs(parent: Path, metas=None, skips=None) -> list:
+    """The folders of parent that hold versions of one disc of one album, each named after
+    its channel layout ("2.0/" and "5.0/", "Stereo/" and "Multichannel/": an SACD's two areas,
+    a DVD-Audio's mixes) - they belong to parent, as disc folders do, and parent's name names
+    the release. [] unless two or more such folders, each a different layout, hold all the
+    audio below parent (none in parent itself, none in another folder), and every file is
+    tagged as one same album that is not its folder's name (an album called "Stereo").
+    metas: {file: tags} already read (albums_in); skips: the folders never looked into (a
+    profile's folder_skipper; hidden and TagMender's own ones without it)."""
+    parent = Path(parent)
+    skips = skips or _skips_folder
+    try:                     # (two or more layout-named folders first: never a library walked for one)
+        named = [x for x in parent.iterdir() if x.is_dir() and not skips(x.name) and mc.version_label(x.name)]
+    except OSError:
+        return []
+    if len(named) < 2:
+        return []
+    audio = {}
+    try:
+        for dirpath, dirs, names in os.walk(parent):
+            dirs[:] = [x for x in dirs if not skips(x)]
+            fs = sorted(Path(dirpath) / n for n in names
+                        if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
+            if fs:
+                audio[Path(dirpath)] = fs
+    except OSError:
+        return []
+    lays = [mc.fold(mc.version_label(d.name)) if d.parent == parent else "" for d in audio]
+    if len(audio) < 2 or "" in lays or len(set(lays)) != len(lays):
+        return []
+    metas = dict(metas or {})
+    files = [f for fs in audio.values() for f in fs]
+    for f in files:
+        if f not in metas:
+            metas[f] = ex.read_meta(f)
+    keys = set(album_keys(files, parent, metas).values())
+    if len(keys) != 1 or next(iter(keys))[0] != "tags":
+        return []
+    if any(mc.fold(_first(metas[f], "album")) == mc.fold(f.parent.name) for f in files):
+        return []
+    return sorted(audio)
+
+
+def is_version_dir(d: Path, metas=None, skips=None) -> bool:
+    """A version folder of the folder above it (version_dirs; skips: the profile's folder_skipper)."""
+    d = Path(d)
+    return bool(mc.version_layout(d.name)) and d in version_dirs(d.parent, metas, skips)
+
+
+def set_dir(d: Path, skips=None) -> bool:
+    """A disc folder or a version folder (is_disc_dir, is_version_dir): one part of the album
+    in the folder above it."""
+    return is_disc_dir(d) or is_version_dir(d, skips=skips)
 
 
 @dataclass
@@ -501,12 +557,24 @@ class Engine:
         # inside an album's folder belongs to that album (a bonus disc filed inside it, as
         # match_albums._owners has it) only when both are tagged as that same album -
         # otherwise it is an album of its own
-        disc = {d: d != path and is_disc_dir(d) for d in found}
+        metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}      # (each file opened once)
+        # (a version folder, "2.0/" beside "5.0/", too: the set's folder names the release)
+        sets = {}
+
+        def version_of(d):
+            if not mc.version_layout(d.name):
+                return False
+            if d.parent not in sets:
+                sets[d.parent] = version_dirs(d.parent, metas, skips)
+            return d in sets[d.parent]
+        disc = {d: d != path and (is_disc_dir(d) or version_of(d)) for d in found}
         owner_of = {d: (d.parent if disc[d] else d) for d in found}
+        for d in found:          # ("Album/Disc 02/5.1/": versions filed inside a disc folder)
+            if disc[d] and version_of(d) and owner_of[d] != path and is_disc_dir(owner_of[d]):
+                owner_of[d] = owner_of[d].parent
         own_key = {}
         for d in found:
             own_key.setdefault(owner_of[d], []).extend(found[d])
-        metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}      # (each file opened once)
         own_key = {o: set(album_keys(fs, o, metas).values()) for o, fs in own_key.items()}
         folders = {}
         for d in sorted(found):
@@ -544,6 +612,10 @@ class Engine:
         if hasattr(self.profile, "joins_deluxe") and not self.profile.joins_deluxe():
             return groups
         return _with_deluxe(self.profile, groups, path, skip)
+
+    def _skipper(self):
+        """The profile's Skip These Folders (its folder_skipper), as albums_in reads folders."""
+        return self.profile.folder_skipper() if hasattr(self.profile, "folder_skipper") else _skips_folder
 
     def _accepts(self, tier: str) -> bool:
         """identification.accept lets an album of this tier be tagged (Profile.accepts)."""
@@ -657,6 +729,10 @@ class Engine:
             return self._identify_album(g, names)
 
     def _identify_album(self, g: Group, names=None) -> planmod.Proposal:
+        if names is None and is_version_dir(g.folder, skips=self._skipper()):
+            # a version folder named alone ("2.0/" of an SACD's set): the set's folder names
+            # the release, as for one disc of a set (_per_disc)
+            names = (g.folder.parent.parent.name, one_disc_name(g.folder.parent.name))
         artist_folder, album_folder = names or (g.folder.parent.name, g.folder.name)
         self._last_out = None
         # OCR and gnudb are not providers an album needs: their notes are told once for the
@@ -776,6 +852,7 @@ class Engine:
         # each planned into a folder of its own (split_versions)
         if not alone and not names:
             self._disc_outs = []
+            self._set_note = ""
             p = self._per_disc(g, errors)
             if self.split_on() and not (p and p.tier in ("", "exact") and
                                         all(q.tier in ("", "exact") for q in p.parts or [])):
@@ -789,7 +866,13 @@ class Engine:
                     return q
             if p:
                 return self._discs_split(g, p)
-        return self._unresolved(out, files, base, errors)
+        prop = self._unresolved(out, files, base, errors)
+        note = getattr(self, "_set_note", "") if not alone and not names else ""
+        if note:
+            prop.why = list(prop.why or []) + [note]
+            prop.notes = list(prop.notes or []) + [note]
+            prop.reason = f"{prop.reason}; {note}" if prop.reason else note
+        return prop
 
     def _per_disc(self, g: Group, errors):
         """The album's discs, each identified alone as a one-disc release, when the whole
@@ -801,7 +884,7 @@ class Engine:
         titles, or from MusicBrainz's or Discogs's album, names no version), and no two
         discs the same release. None otherwise (the set stays as it was found)."""
         discs = sorted({Path(f).parent for f in g.files}, key=lambda d: ma._natural_key(d.name))
-        if len(discs) < 2 or any(d.parent != g.folder or not is_disc_dir(d) for d in discs):
+        if len(discs) < 2 or any(d.parent != g.folder or not set_dir(d, self._skipper()) for d in discs):
             return None
         props = []
         self._disc_alone = True
@@ -823,6 +906,14 @@ class Engine:
             self._disc_alone = False
         keys = [(p.provider, p.release_id or p.url or _release_words(p)) for p in props]
         if len(set(keys)) < len(keys):
+            if all(is_version_dir(d, skips=self._skipper()) for d in discs):
+                # versions of one disc ("2.0/", "5.0/") that each fit the same release, whose
+                # media do not say which is which (match_core.version_view): never tagged as
+                # one disc twice, into one folder
+                self._set_note = (f"the version folders {', '.join(d.name for d in discs)} each fit "
+                                  f"{_release_words(props[0])}, whose media do not tell which version each is "
+                                  "(no medium names its channel layout): left for you to choose a release for "
+                                  "each folder, or to file them apart")
             return None
         names = "; ".join(f"{d.name}: {_release_words(p)}" for d, p in zip(discs, props))
         note = f"the discs of this set are different releases of the album, each tagged from its own ({names})"
@@ -1043,7 +1134,7 @@ class Engine:
         split into a folder of its own, tagged from the release its lengths fit. None when the
         discs are not paired title by title, or their lengths do not tell the versions apart."""
         discs = sorted({Path(f).parent for f in g.files}, key=lambda d: ma._natural_key(d.name))
-        if len(discs) != 2 or any(d.parent != g.folder or not is_disc_dir(d) for d in discs):
+        if len(discs) != 2 or any(d.parent != g.folder or not set_dir(d, self._skipper()) for d in discs):
             return None
         by = [sorted((Path(f) for f in g.files if Path(f).parent == d), key=lambda f: ma._natural_key(f.name))
               for d in discs]
@@ -1197,7 +1288,26 @@ class Engine:
                 dparts = discogs_parts(det, self.dm, self.http, es)
         n = len(files)
         slots, missing = best.get("slots"), _missing_of(best)
-        if slots:
+        vtracks = best.get("version_tracks")
+        if vtracks and rel:
+            # versions of one disc in folders of their own: each file its own track of the
+            # medium its version is (an SACD's layer, a DVD's or Blu-ray's mix: match_core.
+            # version_view) - a DVD's or Blu-ray's tracks included, as audio files
+            want = {int(p) for p, _k in vtracks}
+            whole = mb_tags.release_tags(rel, ps, media=want)
+            at = {(int(p), int(k)): i for i, (p, k) in enumerate(mb_tags.track_keys(rel, media=want))}
+            try:
+                tags_mb = [copy.deepcopy(whole[at[(int(p), int(k))]]) for p, k in vtracks]
+            except (KeyError, IndexError):
+                tags_mb = None
+            # (Discogs lists a release's media apart from MusicBrainz: its tracks are not these)
+            dparts = (dparts[0], None, dparts[2]) if dparts else None
+            labels = album.get("version_labels") or {}
+            if tags_mb and len(tags_mb) == n == len(album.get("tracks") or ()):
+                for t, tr in zip(tags_mb, album["tracks"]):
+                    if labels.get(tr.get("disc") or 1):
+                        t["~version"] = [labels[tr.get("disc") or 1]]
+        elif slots:
             # tracks missing from the folder: each file takes its own track of the release
             # (its number, the release's totals), the others are left out
             full = best.get("release_tracks") or 0
@@ -3173,7 +3283,7 @@ def restored_folder(folder) -> bool:
     """The album folder (or, for one disc of a set, the folder above it) says its audio was
     restored or remastered."""
     d = Path(str(folder))
-    names = [d.name] + ([d.parent.name] if is_disc_dir(d) else [])
+    names = [d.name] + ([d.parent.name] if set_dir(d) else [])
     return any(_RESTORED.search(n) for n in names)
 
 

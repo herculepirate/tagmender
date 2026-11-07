@@ -262,6 +262,7 @@ class Main(QMainWindow):
             "search_web": lambda: self.album_do("web"),
             "open_folder": lambda: self.album_do("open"),
             "check_now": lambda: (self.go("Watched folders"), self.pages["Watched folders"].check_now()),
+            "check_folder": lambda: self.pages["Watched folders"].check_selected(),
             "change_watch": lambda: self.pages["Watched folders"].change(),
             "stop_watch": lambda: self.pages["Watched folders"].remove(),
             "process_again": lambda: self.pages["Watched folders"].process_again(),
@@ -576,7 +577,8 @@ class Main(QMainWindow):
             on_w = page is w
             folder = on_w and bool(w.selected()[0])
             plan = on_w and w.chosen_plan() is not None and not w.applying
-            for k, on in (("change_watch", folder), ("stop_watch", folder), ("process_again", folder and not w.busy),
+            for k, on in (("check_folder", folder and not w.busy), ("change_watch", folder),
+                          ("stop_watch", folder), ("process_again", folder and not w.busy),
                           ("show_plan", plan),
                           ("apply_plan", plan), ("dismiss_plan", plan),
                           ("apply_all_plans", on_w and bool(w.plans) and not w.applying)):

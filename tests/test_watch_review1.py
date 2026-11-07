@@ -212,7 +212,8 @@ class WatchedPage(unittest.TestCase):
     def test_look_every_change_reaches_the_running_timer(self):
         wp = self.win.pages["Watched folders"]
         wp.live.setChecked(True)
-        self.assertEqual(wp.timer.interval(), 600_000)
+        self.assertEqual(wp.interval_ms(), 600_000)          # (0.8.12: the timer runs to the clock -
+        self.assertLessEqual(wp.timer.interval(), 600_000)  # 12:00, 12:10 - so it waits at most that)
         dlg = self.gui.WatchDialog(wp, str(self.tmp / "inbox"), "Mover")
         self.assertEqual([dlg.every.itemData(i) // 60 for i in range(dlg.every.count())],
                          [1, 2, 5, 10, 15, 30, 60, 120, 180, 300, 540, 720, 1440])
@@ -220,7 +221,8 @@ class WatchedPage(unittest.TestCase):
         dlg.save()
         wp.reload()
         self.assertEqual(pf.load("Mover")["watch"]["interval_seconds"], 60)
-        self.assertEqual(wp.timer.interval(), 60_000)
+        self.assertEqual(wp.interval_ms(), 60_000)
+        self.assertLessEqual(wp.timer.interval(), 60_000)
         wp.live.setChecked(False)
 
     # 7b. the dialog: a profile that refuses the folder changes no profile

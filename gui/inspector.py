@@ -1425,6 +1425,12 @@ class Inspector(QDockWidget):
                 if self.tabs.currentIndex() == TABS.index("Artwork"):
                     self.art.load()
             self.edited.emit(album)
+            if album.get("renames") and ov is not None and plan is getattr(ov, "plan", None):
+                # (an edit of a field the naming reads - a disc number: where the files go changes;
+                # the album is previewed again with your edits, and Apply waits for it)
+                self.tags.note.setText(tr("Your edit changes where the files go: this album is previewed "
+                                          "again with it."))
+                ov.look_up(ov.sources.currentData() or "profile", [album], again=True, queued=True)
 
         def failed(msg):
             if self._wanted.get(id(album)) is not token:

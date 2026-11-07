@@ -929,6 +929,7 @@ def read_file(path):
         t["rate"] = getattr(f.info, "sample_rate", 0) or 0
         t["bits"] = getattr(f.info, "bits_per_sample", 0) or 0
         t["samples"] = getattr(f.info, "total_samples", 0) or 0
+        t["channels"] = getattr(f.info, "channels", 0) or 0
         t["lossless"] = path.suffix.lower() in _LOSSLESS_EXT
         if t["lossless"] and not t["samples"] and t["rate"]:
             t["samples"] = round(t["secs"] * t["rate"])        # WAV/AIFF/WavPack: from the length
@@ -977,6 +978,7 @@ def read_file(path):
         t["num0"] = _numbered_zero(g("tracknumber"))
         _write_failed(t, g("tagmenderreason"))
         t["cdtoc"] = g("cdtoc")
+        t["sacd_area"] = g("sacdarea")                 # an SACD rip's area: "Stereo", "Multichannel"
         for k, v in low.items():                     # UPC / EAN / ASIN under their other names
             if k != "barcode" and _plain_key(k) in _BARCODE_KEYS + _ASIN_KEYS:
                 _code_tag(t, k, _txt(v))
@@ -1027,6 +1029,8 @@ def _same_copy(g1, g2, info):
     can be equally long."""
     if len(g1) != len(g2) or not g1:
         return False
+    if _layouts(g1, info) != _layouts(g2, info):
+        return False                     # (stereo and multichannel: two versions, not two copies)
     close = sum(1 for a, b in zip(g1, g2)
                 if abs(info[a]["secs"] - info[b]["secs"]) <= _SAME_AUDIO_S)
     if close / len(g1) < 0.9:
@@ -1037,6 +1041,15 @@ def _same_copy(g1, g2, info):
         return t or re.sub(r"\W+", " ", p.stem).strip().casefold()
     same = sum(1 for a, b in zip(g1, g2) if name(a) == name(b))
     return same / len(g1) >= 0.8
+
+
+def _layouts(files, info):
+    """The channel layouts of these files: their folder's name ("2.0", "Stereo") and their
+    audio's channel count or SACD_AREA tag. Two groups whose layouts differ are two versions."""
+    out = {mc.layout_of_channels(info[p].get("channels"), info[p].get("sacd_area")) for p in files}
+    out |= {mc.version_layout(p.parent.name) for p in files}
+    out.discard("")
+    return out
 
 
 def _drop_duplicate_copies(files, info, album_dir):
@@ -1096,6 +1109,9 @@ def _other_disc(a, b, info) -> bool:
         return True
     if a.parent == b.parent:
         return False
+    if mc.version_layout(a.parent.name) and mc.version_layout(b.parent.name) and \
+            _layouts([a], info) != _layouts([b], info):
+        return True                                   # ("2.0/" and "5.0/": a version each)
     from engine import is_disc_dir                    # (engine imports this module)
     return is_disc_dir(a.parent) or is_disc_dir(b.parent)
 
@@ -1542,8 +1558,27 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     folders = sorted({p.parent for p in files if album_dir in p.parents},
                      key=lambda d: _natural_key(d.relative_to(album_dir).as_posix()))
     folder_disc = {d: i + 1 for i, d in enumerate(folders)} if len(folders) > 1 else {}
+    # versions of the album in folders of their own ("2.0/", "5.0/": an SACD's stereo and
+    # multichannel areas): each folder its own disc, whatever disc tag the files carry (each
+    # version's files say disc 1)
+    versions = version_folders(infos, folders)
+    kinds = {d: version_kind(v[2], [(p, i) for p, i in infos if p.parent == d]) for d, v in versions.items()}
+    if len(versions) == 1 and next(iter(kinds.values()))[1] == "audio":
+        # one layout-named folder alone ("Stereo 24-96/" of a download): a version of a disc only
+        # when its name's disc word, an SACD_AREA tag, DSD or its media tag says which disc
+        versions, kinds = {}, {}
     for p, i in infos:
-        i["disc_eff"] = i["disc"] or folder_disc.get(p.parent, 1)
+        i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else i["disc"] or folder_disc.get(p.parent, 1)
+    # (or, filed already as discs of their release, by the layout each disc's tags name)
+    if versions:
+        found = {(folder_disc.get(d, 1) if folder_disc else 1): v for d, v in versions.items()}
+        kinds = {(folder_disc.get(d, 1) if folder_disc else 1): k for d, k in kinds.items()}
+    else:
+        found = version_discs_by_tags(infos)
+        kinds = {d: version_kind(v[2], [(p, i) for p, i in infos if i["disc_eff"] == d]) for d, v in found.items()}
+    version_discs = {d: v[0] for d, v in found.items()}
+    version_labels = {d: v[1] for d, v in found.items()}
+    version_kinds = {d: k[0] for d, k in kinds.items()}
     # (a file numbered 0, "00 - Hidden.flac": the hidden track before track 1, first on its disc)
     infos.sort(key=lambda x: (x[1]["disc_eff"], x[1]["num"] or (0 if x[1].get("num0") else 9999),
                               _natural_key(rel(x[0]))))
@@ -1560,6 +1595,12 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                                    if h not in mc.catno_hints(album_folder)]
     folder_match = set(mc.catno_hints(album_folder, variants=True)) | set(
         mc.catno_hints(title, variants=True))
+    # a Japanese set's numbers as a range with "-" ("SICP 10151-4"): the "~" form MusicBrainz
+    # and Discogs list it by is the folder's too, and searched as well (never its single numbers:
+    # mc.catno_range)
+    tilde = [f for h in folder_hints for f in mc.catno_range_forms(h)]
+    folder_match |= set(tilde)
+    folder_hints += [f for f in tilde if f not in folder_hints]
     # An EAC/XLD log: the copy was ripped from a CD. Only a log whose TOC fits the files
     # counts; one that fits no disc was made of another rip (R10), and its TOC, title and
     # paths say nothing of these files.
@@ -1668,7 +1709,126 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tag_release_mb": tag_release_mb | tag_mb_links,
         "tag_release_discogs": tag_release_discogs | tag_discogs_links,
         "total_releases": total_releases,
+        # {disc: "stereo" | "multichannel" | "atmos" | "mono"}: the album's discs are versions of
+        # one disc in folders named after their channel layout (match_core.version_view)
+        "version_discs": version_discs,
+        # {disc: "Stereo" | "5.1" | "Quad" | "Atmos" ...}: each version's name (%_version%)
+        "version_labels": version_labels,
+        # {disc: "sacd" | "video" | "cd" | ""}: the kind of disc each version's folder name or
+        # audio says it was ripped from (_audio_kind); "" when nothing says
+        "version_kinds": version_kinds,
+        # {disc: "name" | "media" | "tags" | "audio"}: what says so (version_kind) - "audio" (the rate,
+        # depth and channels alone) never proves which disc a version is (match_core.version_view)
+        "version_kind_by": {d: k[1] for d, k in kinds.items()},
+        # {disc: release IDs its files' tags name (MusicBrainz, Discogs)}: a media tag counts as the
+        # disc's evidence only when they name the release it is scored against (version_view)
+        "version_release_ids": {d: sorted({str(x) for _p, i in infos if i["disc_eff"] == d
+                                          for x in (i.get("mb_albumid"), i.get("discogs_releaseid")) if x})
+                                for d in kinds},
+        # {disc: True} for a disc whose audio is no CD's (an SACD_AREA tag, hi-res or DSD audio,
+        # more than two channels, a DVD or Blu-ray word in its folder name)
+        "version_hires": {d: version_kinds[d] in ("sacd", "video") or
+                          all(_not_cd_audio(p, i) for p, i in infos if i["disc_eff"] == d) for d in version_discs},
     }
+
+
+def version_folders(infos, folders=()):
+    """{folder: (layout, label, disc kind)} (match_core.parse_version) when the album's files are
+    versions of one disc in folders named after their channel layout ("2.0/" and "5.0/",
+    "Stereo 24-96/" and "DTS 5.1/"; or the album folder itself when it is one and holds them
+    all): every folder holding its files is one, each a different version, and no file's
+    channel count or SACD_AREA tag says otherwise. {} otherwise. folders: the album's
+    subfolders holding files (read_album)."""
+    dirs = sorted({p.parent for p, _i in infos})
+    if not dirs or (len(dirs) > 1 and set(dirs) != set(folders or ())):
+        return {}
+    out = {}
+    for d in dirs:
+        got = mc.parse_version(d.name)
+        if not got or any(mc.fold(i.get("album") or "") == mc.fold(d.name) for _p, i in infos):
+            return {}                    # (an album called "Stereo" in its own folder)
+        lay = got[0]
+        mine = [i for p, i in infos if p.parent == d]
+        if len({i.get("disc") for i in mine if i.get("disc")}) > 1:
+            return {}                    # (a whole set in one version's folder: its discs stand)
+        heard = {mc.layout_of_channels(i.get("channels"), i.get("sacd_area")) for i in mine}
+        heard.discard("")
+        if lay == "mono" and not any(i.get("sacd_area") for i in mine):
+            heard.discard("stereo")     # (mono as two identical channels)
+        if lay == "atmos":
+            heard.discard("multichannel")   # (an immersive mix's bed, as ripped)
+        if heard and heard != {lay}:
+            return {}                    # (the audio is another layout than the folder's name)
+        out[d] = got
+    if len({mc.fold(v[1]) for v in out.values()}) != len(out):
+        return {}
+    return out
+
+
+def version_discs_by_tags(infos):
+    """{disc: (layout, label, "")} when every file of each disc names its layout in its
+    SACD_AREA tag ("Stereo", "Multichannel") or its media tag ("Hybrid SACD (SACD layer, 2
+    channels)", as TagMender wrote it), a different one each: versions of one disc already
+    filed as discs of their release ("Disc 02/", "Disc 03/"). {} otherwise; never from the
+    channel count alone."""
+    by = {}
+    for _p, i in infos:
+        lay = mc.layout_of_channels(0, i.get("sacd_area")) or mc.medium_layout(i.get("media"))
+        by.setdefault(i["disc_eff"], set()).add(lay)
+    if not by or any(len(v) != 1 or "" in v for v in by.values()):
+        return {}
+    out = {d: next(iter(v)) for d, v in by.items()}
+    if len(set(out.values())) != len(out):
+        return {}
+    return {d: (lay, lay.title(), "") for d, lay in out.items()}
+
+
+def version_kind(name_kind, files):
+    """(kind, what says so) of the disc a version's files were ripped from: the disc word in
+    its folder's name ("DVD 5.1", "BD Stereo": "name"), else the media tag every file carries
+    ("DVD-Video", "Blu-ray", "Hybrid SACD (SACD layer, ...)" as TagMender wrote it: "media"),
+    else the audio (_audio_kind: "tags" for an SACD_AREA tag or DSD, "audio" otherwise)."""
+    if name_kind:
+        return name_kind, "name"
+    media = {mc.medium_type(i.get("media")) for _p, i in files}
+    if len(media) == 1 and next(iter(media)):
+        return media.pop(), "media"
+    kind = _audio_kind(files)
+    sure = any(i.get("sacd_area") for _p, i in files) or any(Path(p).suffix.lower() in (".dsf", ".dff")
+                                                            for p, _i in files)
+    return kind, ("tags" if sure else "audio")
+
+
+def _audio_kind(files):
+    """The kind of disc these files' audio says they were ripped from: "sacd" (an SACD_AREA tag,
+    DSD, a 44.1 kHz-family rate past a CD's), "video" (a 48 kHz-family rate with more than a
+    CD's depth or channels, or past 48 kHz: a DVD or Blu-ray), "cd" (16-bit/44.1 kHz stereo)
+    or "" (48 kHz/16-bit stereo, mixed: nothing says)."""
+    if not files:
+        return ""
+    infos = [i for _p, i in files]
+    if any(i.get("sacd_area") for i in infos) or any(Path(p).suffix.lower() in (".dsf", ".dff") for p, _i in files):
+        return "sacd"
+    rates = {int(i.get("rate") or 0) for i in infos}
+    if len(rates) != 1 or not next(iter(rates)):
+        return ""
+    rate = rates.pop()
+    deep = any((i.get("bits") or 0) > 16 for i in infos)
+    wide = any((i.get("channels") or 0) > 2 for i in infos)
+    if rate % 44100 == 0 and rate > 44100:
+        return "sacd"
+    if rate % 48000 == 0 and (rate > 48000 or deep or wide):
+        return "video"
+    if rate == 44100 and not deep and not wide:
+        return "cd"
+    return ""
+
+
+def _not_cd_audio(p, i):
+    """The file's audio is no CD's: an SACD_AREA tag, a DSD file, a sample rate or depth past a
+    CD's, or more than two channels."""
+    return bool(i.get("sacd_area") or Path(p).suffix.lower() in (".dsf", ".dff")
+                or (i.get("rate") or 0) > 48000 or (i.get("bits") or 0) > 16 or (i.get("channels") or 0) > 2)
 
 
 def _log_year(album_dir, logs):
@@ -3500,6 +3660,10 @@ def mb_candidate(rel):
         "release_group": str(group.get("id") or ""), "release_types": mb_group_types(group),
         "discogs_master": mb_group_master(group),
         "media_formats": names if names and all(names) else [],
+        # every medium (a DVD's and Blu-ray's too), its format and its audio tracks ("index": the
+        # track's place on its medium): which tracks of it a version folder of yours is
+        # (match_core.version_view; the tags are made for those, mb_tags.track_keys)
+        "media_info": mb_media_info(rel),
         "artist": mb_credit(rel), "artist_alt": mb_canonical_artists(rel),
         "artist_sort": mb_sort_names(rel),
         "title": rel.get("title", ""),
@@ -3520,6 +3684,17 @@ def mb_candidate(rel):
         # rule on the identified release's genre checks)
         "genre": _genre_names(list(rel.get("genres") or []) + list((rel.get("release-group") or {}).get("genres") or [])),
     }
+
+
+def mb_media_info(rel):
+    """[{"position", "format", "tracks": [{"title", "secs", "index"}]}] of every medium of a
+    MusicBrainz release, video recordings left out (as mb_tags.track_keys leaves them out)."""
+    out = []
+    for disc, m in enumerate(rel.get("media") or [], 1):
+        tracks = [{"title": t.get("title", ""), "secs": (t.get("length") or 0) / 1000.0, "index": k}
+                  for k, t in enumerate(m.get("tracks") or []) if not (t.get("recording") or {}).get("video")]
+        out.append({"position": m.get("position") or disc, "format": str(m.get("format") or ""), "tracks": tracks})
+    return out
 
 
 def _genre_names(genres):
@@ -5896,6 +6071,11 @@ def summarize(res):
             # the release's order), the missing ones {disc: [numbers]}, the release's count
             **({"slots": list(c["slots"]), "missing": {str(d): v for d, v in b["missing"].items()},
                 "release_tracks": c.get("full_tracks")} if b.get("missing") else {}),
+            # versions of one disc in folders of their own: each its own medium of the release
+            # (match_core.version_view), tagged as that medium's tracks - nothing missing
+            **({"version_tracks": [list(x) for x in c["version_tracks"]],
+                "version_media": {str(d): m for d, m in c["version_media"].items()}}
+               if c.get("version_media") and not b.get("missing") else {}),
             "mb_id": res.get("mb_twin") or (c["id"] if c["source"] == "mb" else ""),
             # (Sources "MusicBrainz preferred": Discogs's sure pick of the same pressing)
             **({"discogs_id": res["dg_twin"]} if res.get("dg_twin") and not c.get("discogs_id") else {})}

@@ -454,6 +454,13 @@ spreadsheet (Export as Web Page…, Export as CSV…).
 - Scan the back/tray card (both spines in view) and the disc; name them
   `back.jpg`, `tray.jpg`, `disc.jpg`.
 - Keep the source's tags (label, catalogue number, barcode) when converting.
+- An SACD, DVD-Audio or Blu-ray ripped in several mixes: one folder named after the release
+  (catalogue number, country, year and format in it, as above), and inside it one folder per mix,
+  named by its layout: `2.0` and `5.0`, `Stereo` and `Multichannel`, `DVD-A 2.0` and `DVD-A 5.1`,
+  `BD Stereo 24-96` and `BD Atmos`. Keep the SACD ripper's `SACD_AREA` tag. A disc word in the
+  folder name (DVD, DVD-A, BD, Blu-ray) says which disc a mix came from; the sample rate alone does
+  not. Each mix is matched to its own disc of the release (an SACD's stereo and multichannel layers
+  are two discs) and filed into its own folder.
 
 ## Requirements
 

@@ -94,6 +94,8 @@ COMMANDS = {
     # Tools
     "check_now": (N_("&Check Watched Folders Now"), "Ctrl+Shift+K", "folder-sync",
                   N_("Look in the watched folders now")),
+    "check_folder": (N_("Chec&k This Folder Now"), None, "folder-sync",
+                     N_("Look in the selected watched folder now")),
     "change_watch": (N_("C&hange Watched Folder…"), None, None,
                      N_("Change the selected watched folder's profile or timing")),
     "process_again": (N_("&Process Folder Again…"), None, None,
@@ -191,7 +193,7 @@ MENUS = (
                 "open_folder", "copy_path")),
     (N_("&Controls"), ("play_pause", "next_track", "previous_track", "stop_playing", None, "skip_forward",
                        "skip_back", None, "volume_up", "volume_down", "mute")),
-    (N_("&Tools"), ("check_now", (N_("&Watched Folders"), ("change_watch", "process_again", "stop_watch", "run_in_background", None,
+    (N_("&Tools"), ("check_now", (N_("&Watched Folders"), ("check_folder", "change_watch", "process_again", "stop_watch", "run_in_background", None,
                                                    "show_plan", "apply_plan", "apply_all_plans", "dismiss_plan")),
                 (N_("&Rules"), ("new_rule", "edit_rule", "toggle_rule", "delete_rule", None, "test_rules")), None,
                 "edit_scripts", "tags_from_filenames", "tagscript", None,

@@ -262,14 +262,17 @@ class WatchDialog(QDialog):
         own = (p.source_destination(text) if text else "") or p["destination"]   # (this folder's own library)
         dest = Path(os.path.abspath(os.path.expanduser(own))) if own else None
         if folder is not None and dest is not None and p["operation"] != "in_place":
+            # (a watched folder is where you drop new music; the library is where it is filed to:
+            # watched, every album already filed would be looked at and filed again)
             if dest == folder:
-                notes.append(tr("This folder IS the profile's library: every album already in it will be "
-                                "checked and filed again by this profile."))
+                errs.append(tr("This folder is the profile's library. Watch the folder you drop new music "
+                               "into; the profile files it into the library."))
+            elif dest in folder.parents:
+                errs.append(tr("This folder is inside the profile's library. Watch the folder you drop new "
+                               "music into; the profile files it into the library."))
             elif folder in dest.parents:
                 notes.append(tr("The library is inside this folder: what is in it is left alone, only new "
                                 "drops are filed."))
-            elif dest in folder.parents:
-                notes.append(tr("This folder is inside the profile's library."))
         if folder is not None:
             for n in pf.names():
                 if n == p.name:
@@ -376,7 +379,7 @@ class Watched(QWidget):
                                               "tagged and filed by its profile."))
         self.table.setAccessibleName(tr("Watched folders"))
         self.table.itemSelectionChanged.connect(self.update_buttons)
-        self.menu_for(self.table, ("change_watch", "process_again", "stop_watch", None, "check_now"))
+        self.menu_for(self.table, ("check_folder", "change_watch", "process_again", "stop_watch", None, "check_now"))
         lay.addWidget(self.table, 1)
         # a list editor's + and − under the list, as on a Mac (Change… and Check Now: the context
         # menu, Return and the Tools menu)
@@ -387,7 +390,17 @@ class Watched(QWidget):
         row.addWidget(self.add_btn)
         row.addWidget(self.stop_btn)
         row.addStretch(1)
-        self.check_btn = QPushButton(tr("Check Now"))            # (not waiting for the next look)
+        self.next_label = QLabel("")                           # (when the timer looks next: on the clock)
+        self.next_label.setProperty("role", "hint")
+        row.addWidget(self.next_label)
+        self.check_one_btn = QPushButton(tr("Check Selected"))
+        self.check_one_btn.setFlat(True)
+        self.check_one_btn.setAutoDefault(False)
+        self.check_one_btn.setToolTip(tr("Look in the selected watched folder now. Music still being copied "
+                                         "waits until it has settled."))
+        self.check_one_btn.clicked.connect(self.check_selected)
+        row.addWidget(self.check_one_btn)
+        self.check_btn = QPushButton(tr("Check All Now"))       # (not waiting for the next look)
         self.check_btn.setFlat(True)
         self.check_btn.setAutoDefault(False)
         self.check_btn.setToolTip(tr("Look in every watched folder now instead of waiting for the next check. "
@@ -445,7 +458,9 @@ class Watched(QWidget):
         lay.addWidget(self.hairline())
         self.fold = QToolButton()                              # "Recently" folds away on a short window
         self.fold.setProperty("role", "tool")
-        self.fold.setText(tr("Recently"))
+        self.fold.setText(tr("Recently in watched folders"))
+        self.fold.setToolTip(tr("What the watched folders filed. Albums you apply on the Overview are on the "
+                                "Jobs page."))
         self.fold.setCheckable(True)
         self.fold.setChecked(True)
         self.fold.setArrowType(Qt.DownArrow)
@@ -486,8 +501,9 @@ class Watched(QWidget):
         for i in range(1, split.count()):
             split.handle(i).setCursor(Qt.SplitVCursor)
             split.handle(i).setToolTip(tr("Drag to give this list more room"))
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.check_now)
+        self.timer = QTimer(self)                              # (single shots, each on the clock: schedule)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.timed)
         self.reload()
         self.set_live(self.live.isChecked(), save=False)
 
@@ -583,6 +599,7 @@ class Watched(QWidget):
         """Each button is enabled only when it can act (a selection; nothing being applied)."""
         folder = bool(self.selected()[0])
         self.stop_btn.setEnabled(folder)
+        self.check_one_btn.setEnabled(folder)
         self.plan_btns["all"].setEnabled(bool(self.plans) and not self.applying)
         self.win.update_album_actions()
 
@@ -649,15 +666,19 @@ class Watched(QWidget):
             self.recent.setRowCount(0)
         self.win.set_badge("Watched folders", len(self.prow_plans))     # (albums waiting, as the list rows)
         if getattr(self, "timer", None) is not None and self.timer.isActive():
-            ms = self.interval_ms()
-            if ms != self.timer.interval():                  # "Look every" changed
-                self.timer.start(ms)
+            self.schedule()                                  # ("Look every" may have changed)
         self.update_buttons()
-        self.ask_slow([path for path, _p in rows])
+        self.ask_slow([path for path, _p in rows], [p for _path, p in rows])
 
-    def ask_slow(self, paths):
+    def ask_slow(self, paths, profs=()):
         def work(_w):
             here = [Path(p).expanduser().is_dir() for p in paths]
+            try:
+                import watcher
+                lib = [watcher.Watcher.is_library(Path(p).expanduser(), q) for p, q in zip(paths, profs)]
+            except Exception:
+                lib = []
+            here = [("library" if i < len(lib) and lib[i] and h else h) for i, h in enumerate(here)]
             st = None
             try:
                 import watcher
@@ -672,6 +693,12 @@ class Watched(QWidget):
             for r in range(self.table.rowCount()):
                 it = self.table.item(r, 0)
                 if it is not None and r < len(paths_) and it.text() == paths_[r]:
+                    if here[r] == "library":                 # (skipped by the watcher: say why)
+                        cell = status_cell(self.table.item(r, 4), "failed", tr("No: it is the library"),
+                                           "circle-x")
+                        cell.setToolTip(tr("This folder is where the profile files music, so it is not watched. "
+                                           "Watch the folder you drop new music into, and stop watching this one."))
+                        continue
                     status_cell(self.table.item(r, 4), "done" if here[r] else "failed",
                                 tr("Yes") if here[r] else tr("Not mounted"), "circle-check" if here[r] else "circle-x")
             self.show_service(st)
@@ -770,9 +797,30 @@ class Watched(QWidget):
             _set_gui_pref("watch_in_app", bool(on))
         if not on:
             self.timer.stop()
+            self.show_next()
             return
-        self.timer.start(self.interval_ms())
+        self.schedule()
         self.check_now()
+
+    def schedule(self):
+        """The next timed check, on the clock: every 10 minutes is 12:00, 12:10, 12:20 (watcher.
+        next_on_clock), for all the watched folders."""
+        import watcher
+        at = watcher.next_on_clock(self.interval_ms() / 1000)
+        self.timer.start(max(1000, int((at - time.time()) * 1000)))
+        self._next_at = at
+        self.show_next()
+
+    def timed(self):
+        self.check_now()
+        if self.live.isChecked():
+            self.schedule()
+
+    def show_next(self):
+        on = getattr(self, "timer", None) is not None and self.timer.isActive()
+        at = getattr(self, "_next_at", None)
+        self.next_label.setText(tr("Next check {0}").format(time.strftime("%H:%M", time.localtime(at)))
+                                if on and at else "")
 
     def ask_live(self) -> bool:
         """Watching while open files albums with no sheet for a profile set to Automatically:
@@ -813,20 +861,31 @@ class Watched(QWidget):
             self.watcher.stop = True
         return not self.busy
 
-    def check_now(self):
+    def check_selected(self):
+        """Check Selected: the selected watched folder only, now."""
+        path, _name = self.selected()
+        if path:
+            self.check_now(only=[path])
+
+    def check_now(self, only=None):
+        """Look in the watched folders now (ONLY: just these), instead of waiting for the timer."""
+        if only is False:                                    # (a button's clicked(bool))
+            only = None
         if self.busy or not self.rows():
             if not self.rows():
                 self.out.setText(tr("No folder is watched yet. Choose Watch a Folder… to add one."))
+            elif self.busy:
+                self.say(tr("A check is running; this one waits for the next."))
             return
         self.busy = True
 
         def work(_w):
             import watcher
-            w = watcher.Watcher(once=True)
+            w = watcher.Watcher(once=True, only=only)
             self.watcher = w
             res = w.tick()
             return res, getattr(w, "skipped", "")
-        self.out.setText(tr("Checking…"))
+        self.out.setText(tr("Checking {0}…").format(Path(only[0]).name or only[0]) if only else tr("Checking…"))
 
         def done(out):
             res, skipped = out

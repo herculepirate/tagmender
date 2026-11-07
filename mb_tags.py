@@ -632,10 +632,38 @@ _TRACK_SETS = {"title", "artist", "artistsort", "artists", "musicbrainz_artistid
 DATA_TRACK_TITLE, SILENCE_TRACK_TITLE = "[data track]", "[silence]"
 
 
-def release_tags(rel, settings=None, pregap=False) -> list[dict]:
+def _audio_ids(rel, media=None) -> set:
+    """id() of the media whose tracks are the album's audio files: every one but a video
+    format's, and those at the positions in media (a DVD's or Blu-ray's audio, ripped as one
+    version of the album: engine version folders)."""
+    out = {id(m) for m in audio_media(rel)}
+    if media:
+        want = {int(x) for x in media}
+        out |= {id(m) for disc, m in enumerate(rel.get("media") or [], 1) if int(m.get("position") or disc) in want}
+    return out
+
+
+def track_keys(rel, pregap=False, media=None) -> list:
+    """(medium position, track index on it) of each entry release_tags(rel, pregap=pregap,
+    media=media) gives, in its order (a pregap track's index is -1)."""
+    audio, out = _audio_ids(rel, media), []
+    for disc, m in enumerate(rel.get("media") or [], 1):
+        if id(m) not in audio:
+            continue
+        pos = m.get("position") or disc
+        if pregap and m.get("pregap") and not (m["pregap"].get("recording") or {}).get("video"):
+            out.append((pos, -1))
+        for k, t in enumerate(m.get("tracks") or []):
+            if not (t.get("recording") or {}).get("video"):
+                out.append((pos, k))
+    return out
+
+
+def release_tags(rel, settings=None, pregap=False, media=None) -> list[dict]:
     """pregap=True: a medium's hidden track before track 1 (its "pregap", numbered 0) is one
     of the album's audio files too (a rip that has it as a file numbered 0), first on its
-    disc, as Picard lists it."""
+    disc, as Picard lists it. media: positions of video-format media whose tracks are audio
+    files too (a DVD's or Blu-ray's mix ripped as a version of the album; _audio_ids)."""
     s = _settings(settings)
     per_medium = {}
     common = album_tags(rel, s, per_medium)
@@ -649,7 +677,7 @@ def release_tags(rel, settings=None, pregap=False) -> list[dict]:
     # album's n-th audio file)
     all_media = rel.get("media") or []
     total_discs = len(all_media) or 1
-    audio = {id(m) for m in audio_media(rel)}
+    audio = _audio_ids(rel, media)
     absolute, out, artists = 0, [], set()
     for disc, m in enumerate(all_media, 1):
         loaded = ([("pregap", m["pregap"])] if m.get("pregap") else []) + \

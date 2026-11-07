@@ -135,7 +135,7 @@ class Shell(unittest.TestCase):
         self.assertEqual(menu_only, {"read_scans", "test_rules", "tagscript", "recover", "export",
                                      "zoom", "main_window", "report", "about", "undo_selected", "show_job_albums",
                                      "setup",                             # (the Setup page itself: Alt+7)
-                                     "exclude_again", "change_watch", "process_again", "show_plan", "apply_all_plans",
+                                     "exclude_again", "check_folder", "change_watch", "process_again", "show_plan", "apply_all_plans",
                                      "dismiss_plan", "edit_rule", "run_in_background", "cover_link",
                                      "suggested_cover", "add_to_collection", "submit_ratings",
                                      "submit_acoustids",                  # (sends: menu only, DESIGN.md)

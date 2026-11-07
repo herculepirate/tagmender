@@ -280,12 +280,14 @@ _GONE = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
 
 
 class Watcher:
-    def __init__(self, profiles=None, once=False, log=None):
+    def __init__(self, profiles=None, once=False, log=None, only=None):
         self.fixed = profiles is not None        # else the profiles are read again on every pass
         self.log = log or logsetup.setup("watch")
         self.profiles = profiles if profiles is not None else self._watched_profiles(self.log)
         self.once = once
         self.stop = False
+        # only: the watched folders to look in (Check Selected); None: all of them
+        self.only = None if only is None else {os.path.realpath(os.path.expanduser(str(x))) for x in only}
 
     @staticmethod
     def _watched_profiles(log=None):
@@ -304,6 +306,8 @@ class Watcher:
     def roots(self):
         """(root, profile), deepest first, so overlapping roots go to the most specific profile."""
         pairs = [(Path(s["path"]).expanduser(), p) for p in self.profiles for s in p["sources"] if s.get("watch")]
+        if getattr(self, "only", None) is not None:
+            pairs = [(r, p) for r, p in pairs if os.path.realpath(str(r)) in self.only]
         return sorted(pairs, key=lambda rp: -len(str(rp[0])))
 
     @staticmethod
@@ -464,6 +468,19 @@ class Watcher:
             return self._tick()
 
     @staticmethod
+    def is_library(root: Path, prof) -> bool:
+        """The watched folder is the profile's library, or inside it (a move or copy profile)."""
+        if prof["operation"] not in ("copy", "move"):
+            return False
+        r = Path(os.path.realpath(os.path.expanduser(str(root))))
+        for d in pf.filing_roots(getattr(prof, "data", prof)):
+            if d:
+                d = Path(os.path.realpath(os.path.expanduser(d)))
+                if r == d or d in r.parents:
+                    return True
+        return False
+
+    @staticmethod
     def library_inside(root: Path, prof) -> list:
         """The profile's library (and unresolved folder) where it lies inside the watched folder:
         what is already there - filed by TagMender or not - is never taken for a new drop."""
@@ -512,6 +529,13 @@ class Watcher:
                 break
             if not root.is_dir():
                 self.log.warning("watched folder %s is not available (unmounted?)", root)
+                continue
+            if self.is_library(root, prof):
+                # (the profile's own library, or inside it: what is there is filed already - looked at,
+                # every album in it would be filed again; and a pass would never reach the other folders)
+                self.log.warning("watched folder %s is profile %s's library (or inside it); not looked at. "
+                                 "Watch the folder new music is dropped into.", root, prof.name)
+                self.libraries = sorted(set(getattr(self, "libraries", [])) | {str(root)})
                 continue
             e = eng_mod.Engine(prof, log=self.log)
             libs = self.library_inside(root, prof)
@@ -643,13 +667,23 @@ class Watcher:
                 if self.once:
                     return
                 interval = min((p["watch"]["interval_seconds"] for p in self.profiles), default=300)
-                end = time.time() + max(1, interval)
+                end = next_on_clock(interval)              # (on the clock: 12:00, 12:10, 12:20...)
                 while not self.stop and time.time() < end:
                     if stop_requested(started):
                         self.log.info("watch: asked to stop")
                         self.stop = True
                         break
                     time.sleep(min(1, max(0, end - time.time())))
+
+
+def next_on_clock(interval, now=None) -> float:
+    """The next time on the clock that is a whole number of INTERVAL seconds after midnight
+    (local time): every 10 minutes is 12:00, 12:10, 12:20 - not 10 minutes after starting."""
+    now = time.time() if now is None else now
+    iv = max(1, int(interval))
+    lt = time.localtime(now)
+    midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    return midnight + (int((now - midnight) // iv) + 1) * iv
 
 
 def forget(root) -> int:

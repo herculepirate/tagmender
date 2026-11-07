@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import time
 
 from PySide6.QtCore import Qt
@@ -13,6 +15,35 @@ from .common import STATUS, counts_text, filter_table, heading, left_header, plu
 from .i18n import N_, tr
 from .widgets import FlowLayout
 from .work import start
+
+ALBUMS, PLACE = 4, 5                                         # (the columns added in 0.8.12)
+PLACES: dict = {}                                            # job -> job_places(job), read once
+DISC_DIR = re.compile(r"^(?:disc|cd|disk)\s*\d+\b", re.IGNORECASE)
+
+
+def job_places(job) -> list:
+    """[(album as filed - "Artist / 1973 - Album [edition]", the folder it went to, the folder it
+    came from)] for each album of JOB, from its plan; [] when the plan cannot be read."""
+    import executor
+    try:
+        plan = json.loads((executor.job_dir(job) / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for a in plan.get("albums") or []:
+        dsts = [os.path.dirname(fe["dst"]) for fe in a.get("files") or [] if fe.get("dst")]
+        if not dsts:
+            continue
+        try:
+            dest = os.path.commonpath(dsts)
+        except ValueError:
+            dest = dsts[0]
+        while DISC_DIR.match(os.path.basename(dest)):        # (a set's Disc 01, Disc 02: the album's folder)
+            dest = os.path.dirname(dest)
+        parent, name = os.path.split(dest)
+        title = f"{os.path.basename(parent)} / {name}" if parent else name
+        out.append((title, dest, a.get("source_dir") or ""))
+    return out
 
 # a job's status as the table shows it: a word, the colour of a style.STATUS key and a Lucide icon
 # ("errors": a job that ended with failed albums; "interrupted": one still marked running that no
@@ -85,14 +116,17 @@ class Jobs(QWidget):
         lay = QVBoxLayout(self)
         lay.addLayout(heading(tr("Jobs"),
                               tr("Every change, newest first. Undo puts a job back.")))
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels([tr("Started"), tr("Status"), tr("Profile"), tr("Result")])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels([tr("Started"), tr("Status"), tr("Profile"), tr("Result"),
+                                              tr("Albums"), tr("Filed into")])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        for c in range(3):                                   # (a date and a status are read whole)
+        for c in range(4):                                   # (a date, a status, a count: read whole)
             self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(ALBUMS, QHeaderView.Interactive)
+        self.table.horizontalHeader().resizeSection(ALBUMS, 320)
+        self.table.horizontalHeader().setSectionResizeMode(PLACE, QHeaderView.Stretch)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table.setTextElideMode(Qt.ElideRight)
         left_header(self.table)
@@ -130,7 +164,10 @@ class Jobs(QWidget):
         self.report_btn = QPushButton(tr("Show Report…"))
         self.report_btn.setToolTip(tr("What the job did, what needs your decision and what could not finish"))
         self.report_btn.clicked.connect(self.show_report)
-        for b in (self.undo_btn, self.albums_btn, self.report_btn, self.recover_btn):
+        self.folder_btn = QPushButton(tr("Open Folder"))
+        self.folder_btn.setToolTip(tr("Open the folder the selected job filed its albums into"))
+        self.folder_btn.clicked.connect(self.open_folder)
+        for b in (self.undo_btn, self.albums_btn, self.report_btn, self.folder_btn, self.recover_btn):
             b.setAccessibleName(b.text().rstrip("…"))
             row.addWidget(b)
         row.addStretch(1)
@@ -164,9 +201,61 @@ class Jobs(QWidget):
             self.table.setItem(i, 1, status_item(status, counts))
             self.table.setItem(i, 2, QTableWidgetItem(prof or ""))
             self.table.setItem(i, 3, QTableWidgetItem(counts_text(counts)))
+            for c in (ALBUMS, PLACE):
+                self.table.setItem(i, c, QTableWidgetItem(""))
+        self.places = {}
+        self.fill_places([job for job, *_r in rows])
         self.recover_btn.setText(tr("Recover Interrupted Jobs ({0})…").format(len(self.pending)) if self.pending
                                  else tr("Recover Interrupted Jobs…"))
         self.selection_changed()
+
+    def fill_places(self, jobs):
+        """The Albums and Filed into cells, from each job's plan (on a worker: 200 plans are read)."""
+        def done(found):
+            self.places.update(found)
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, 0)
+                got = found.get(it.data(Qt.UserRole)) if it is not None else None
+                if not got:
+                    continue
+                names = [t for t, _d, _s in got]
+                text = names[0] + (tr(" and {0} more").format(len(names) - 1) if len(names) > 1 else "")
+                a = QTableWidgetItem(text)
+                a.setToolTip("\n".join(names))
+                self.table.setItem(r, ALBUMS, a)
+                dests = sorted({d for _t, d, _s in got if d})
+                place = dests[0] if len(dests) == 1 else (os.path.commonpath(dests) if dests else "")
+                p = QTableWidgetItem(place)
+                p.setToolTip("\n".join(dests))
+                p.setData(Qt.UserRole, place)
+                self.table.setItem(r, PLACE, p)
+            self.selection_changed()
+        cache = PLACES                                      # (a job's plan does not change: read once)
+        known = {j: cache[j] for j in jobs if j in cache}
+        todo = [j for j in jobs if j not in cache]
+        if known:
+            done(known)
+        if todo:
+            def work(_w):
+                got = {j: job_places(j) for j in todo}
+                return got
+
+            def keep(got):
+                cache.update(got)
+                done(got)
+            start(self, work, keep, failed=lambda _m: None)
+
+    def open_folder(self):
+        """Open Folder: where the selected job filed its albums (undone: where they are back)."""
+        from .common import open_folder
+        job = self.job()
+        got = (getattr(self, "places", {}) or {}).get(job) or []
+        undone = self.status_of(job) == "undone"
+        for _t, dest, src in got[:5]:                       # (a few windows, not thirty)
+            for d in ((src, dest) if undone else (dest, src)):
+                if d and os.path.isdir(d):
+                    open_folder(d)
+                    break
 
     def status_of(self, job):
         return (self.rows.get(job) or ("", None, "", {}))[2]
@@ -179,6 +268,8 @@ class Jobs(QWidget):
     def selection_changed(self):
         job = self.job()
         self.undo_btn.setEnabled(bool(job) and not self.working and self.undoable())
+        if hasattr(self, "folder_btn"):
+            self.folder_btn.setEnabled(bool(job and (getattr(self, "places", {}) or {}).get(job)))
         why = tr(NOT_UNDOABLE.get(shown_status(self.status_of(job)), "")) if job and not self.undoable() else ""
         self.undo_btn.setToolTip(why or tr("Put back everything the selected job changed"))
         self.albums_btn.setEnabled(bool(job))
@@ -190,9 +281,12 @@ class Jobs(QWidget):
             self.win.update_album_actions()
 
     def context_menu(self, pos):
-        popup_menu(self, self.table, pos, [self.win.act(k) if k else None for k in
-                                                ("job_details", "show_job_albums", "show_report", None,
-                                                 "undo_selected")]
+        from PySide6.QtGui import QAction
+        here = QAction(tr("Open Folder"), self, triggered=lambda _=False: self.open_folder())
+        here.setEnabled(self.folder_btn.isEnabled())
+        popup_menu(self, self.table, pos, ([self.win.act(k) if k else None for k in
+                                            ("job_details", "show_job_albums", "show_report")]
+                                           + [here, None, self.win.act("undo_selected")])
                    if self.win is not None else [])
 
     def open_details(self):

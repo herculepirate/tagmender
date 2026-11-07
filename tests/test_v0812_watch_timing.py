@@ -22,6 +22,35 @@ class OnTheClock(unittest.TestCase):
         self.assertEqual(watcher.next_on_clock(300, self.at(12, 1)), self.at(12, 5))
         self.assertEqual(watcher.next_on_clock(3600, self.at(23, 30)), self.at(23, 30) + 1800)   # (midnight)
 
+    def test_a_day_starts_again_at_midnight(self):
+        # every 9 hours: 00:00, 09:00, 18:00, then midnight - not 03:00 the next day
+        self.assertEqual(watcher.next_on_clock(9 * 3600, self.at(19, 0)),
+                         time.mktime((2026, 11, 8, 0, 0, 0, 0, 0, -1)))
+        self.assertEqual(watcher.next_on_clock(9 * 3600, self.at(8, 59)), self.at(9, 0))
+
+    def test_on_the_wall_clock_on_a_summer_time_day(self):
+        import os
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "America/New_York"
+        time.tzset()
+        try:
+            def at(d, h, m=0):
+                return time.mktime((2026, 3, d, h, m, 0, 0, 0, -1))
+            # 8 March 2026 the clocks go from 02:00 to 03:00: every 2 hours stays 12:00, 14:00
+            got = time.localtime(watcher.next_on_clock(7200, at(8, 11, 30)))
+            self.assertEqual((got.tm_hour, got.tm_min), (12, 0))
+            # 02:30 does not exist that day: the next check is still ahead, never in the past
+            self.assertGreater(watcher.next_on_clock(1800, at(8, 1, 59)), at(8, 1, 59))
+            # and on 1 November (03:00 back to 02:00) as well
+            got = time.localtime(watcher.next_on_clock(7200, time.mktime((2026, 11, 1, 11, 30, 0, 0, 0, -1))))
+            self.assertEqual((got.tm_hour, got.tm_min), (12, 0))
+        finally:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
+
 
 class OnlySome(DropBase):
     def test_check_selected_looks_in_that_folder_only(self):

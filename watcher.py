@@ -678,12 +678,19 @@ class Watcher:
 
 def next_on_clock(interval, now=None) -> float:
     """The next time on the clock that is a whole number of INTERVAL seconds after midnight
-    (local time): every 10 minutes is 12:00, 12:10, 12:20 - not 10 minutes after starting."""
+    (local time): every 10 minutes is 12:00, 12:10, 12:20 - not 10 minutes after starting.
+    Counted on the wall clock (a day that changes to or from summer time keeps 12:00, 14:00),
+    and each day starts again at midnight (every 9 hours: 00:00, 09:00, 18:00, then 00:00)."""
     now = time.time() if now is None else now
     iv = max(1, int(interval))
     lt = time.localtime(now)
-    midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
-    return midnight + (int((now - midnight) // iv) + 1) * iv
+    into = lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec
+    slot = (into // iv + 1) * iv
+    day = (lt.tm_year, lt.tm_mon, lt.tm_mday)
+    if slot >= 86400:                                   # (past the last of today's: midnight)
+        day, slot = (lt.tm_year, lt.tm_mon, lt.tm_mday + 1), 0
+    at = time.mktime((*day, slot // 3600, slot // 60 % 60, slot % 60, 0, 0, -1))
+    return at if at > now else now + iv                 # (a wall time that does not exist: later)
 
 
 def forget(root) -> int:

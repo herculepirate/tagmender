@@ -75,5 +75,43 @@ class UnquotedCueFile(Base):
         self.assertEqual(pl._cue_rewrites(cue, {"a.flac": "01 A b.flac"}), ('FILE "01 A b.flac" WAVE\n', "utf-8"))
 
 
+@unittest.skipIf(os.geteuid() == 0, "root writes into read-only folders")
+class UndoFolderCannotBeMade(Base):
+    """Undo of a move whose emptied source folder could not be made again (its parent
+    read-only now) ended in an uncaught PermissionError: no other file of the job went back,
+    and nothing recorded the undo as partial. It is a problem of its own now; the rest goes
+    back, and undo again (when the folder can be made) finishes."""
+
+    def test_problem_reported_and_second_undo_finishes(self):
+        other = self.lib / "Other" / "Album2"
+        g = self.album.parent.parent / "Other" / "Album2" / "01 g.flac"
+        from test_executor import audio
+        audio(g, 700, album="X", title="g")
+        before = {p: p.read_bytes() for p in self.lib.rglob("*") if p.is_file()}
+        prof = self.profile(operation="move", destination=str(self.dest))
+        p = pl.build([self.proposal(),
+                      self.proposal(source_dir=str(other), files=[str(g)],
+                                    targets=[target(1, "Gee", album="Second Album")])], prof)
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 2}, res)
+        self.assertFalse((self.lib / "Some Artist").exists())
+        self.assertFalse((self.lib / "Other").exists())
+        os.mkdir(self.lib / "Other")              # (the second album's folder can be made again)
+        self.lib.chmod(0o555)                     # the first's cannot
+        try:
+            out = executor.undo(p["job"])
+        finally:
+            self.lib.chmod(0o755)
+        self.assertTrue(g.exists(), out)          # the other album went back
+        self.assertTrue(any("could not be made again" in o for o in out if o.startswith("PROBLEM")), out)
+        self.assertTrue(any(self.dest.rglob("01*.flac")))   # the first stays where the job put it
+        out = executor.undo(p["job"])
+        self.assertFalse([o for o in out if o.startswith("PROBLEM")], out)
+        self.assertEqual({p: p.read_bytes() for p in self.lib.rglob("*") if p.is_file() and p.suffix != ".flac"},
+                         {p: b for p, b in before.items() if p.suffix != ".flac"})
+        self.assertEqual(sorted(p for p in self.lib.rglob("*.flac")), sorted(p for p in before if p.suffix == ".flac"))
+        self.assertEqual(list(self.dest.rglob("*.*")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

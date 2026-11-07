@@ -2690,12 +2690,22 @@ def _undo(job, jd, journal, events, force):
             problems.append(f"{c['src']}: {exc}")
     removed = [e for e in events if e.get("ev") == "dir_removed" and e.get("album") not in staying]
     for e in removed:
-        mkdirs_like_parent(Path(e["path"]))
+        try:
+            mkdirs_like_parent(Path(e["path"]))
+        except OSError as exc:           # (a folder that cannot be made again - read-only, full -
+            # holds back only what goes into it: its files say so below; undo again when fixed)
+            problems.append(f"{e['path']}: the folder could not be made again ({exc.strerror})")
     for e in events:                     # .DS_Store / Thumbs.db of the folders removed: back in them
         if e.get("ev") == "junk_removed" and e.get("album") not in staying and e["album"] not in rolled:
             saved, path = Path(e["saved"]), Path(e["path"])
             if saved.exists() and not os.path.lexists(path) and path.parent.is_dir():
-                shutil.copy2(saved, path)
+                try:
+                    shutil.copy2(saved, path)
+                except OSError as exc:
+                    if os.path.isfile(path) and not os.path.islink(path):
+                        os.unlink(path)          # (a part copy: the next undo copies it whole)
+                    problems.append(f"{path}: not put back ({exc.strerror})")
+                    continue
                 _keep_owner(path, os.stat(path.parent))
     for (a, j), f in sorted(files.items(), reverse=True):
         if (a, j) not in verdict:

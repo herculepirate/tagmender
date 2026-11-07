@@ -128,8 +128,10 @@ profiles using it. The app runs these checks off the window's thread.
 | Deezer, iTunes (barcode lookups) | no key; Deezer about 50 requests per 5 s, iTunes about 20 per minute | only for an album whose barcode found nothing sure; iTunes at most one request per 3 s; one try with a 20 s timeout, and after 3 failures not asked again for 30 minutes (noted, never a provider error) |
 | gnudb.org (CDDB over HTTP) | a registered e-mail address in the `hello` of every request | only for an album still unsure that has a table of contents (FLAC sample counts, rip log or cue sheet): `cddb query` then `cddb read`, at most 3 entries for each of the first 2 discs; one request per 2 s, one try with a 20 s timeout, after 3 failures (a refused `hello` counts, noted as "gnudb refused the lookup (...): check the e-mail address", or, when gnudb does not list this version of TagMender, as "gnudb.org does not accept this version of TagMender yet") not asked again for 30 minutes; the address is never stored in the cache. Not set up: skipped, with one note for the run ("gnudb lookups are not used: no gnudb e-mail. …"); a `gnudb_user` file other users can read is refused the same way, and the note says to `chmod 600` it |
 
-Every answer is cached (`~/.local/state/tagmender/cache.sqlite`). `Retry-After` is honoured; other
-pauses grow with each retry and carry random jitter.
+Every answer is cached (`~/.local/state/tagmender/cache.sqlite`); a key or address a service
+takes in its request (the AcoustID application key, the gnudb e-mail) is never part of what is
+stored. `Retry-After` is honoured, in seconds or as a date, up to 5 minutes between two tries;
+other pauses grow with each retry and carry random jitter.
 
 ## How failures are told apart
 

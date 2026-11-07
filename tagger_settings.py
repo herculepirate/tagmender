@@ -367,7 +367,7 @@ def _qt_variant(data: str):
     for qt5 in (False, True):
         try:
             return parse(qt5)
-        except (ValueError, struct.error, UnicodeDecodeError):
+        except (ValueError, struct.error, UnicodeDecodeError, IndexError, RecursionError):   # (cut short, damaged)
             continue
     return None
 

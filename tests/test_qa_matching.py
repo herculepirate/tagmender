@@ -218,5 +218,21 @@ class CliMissingPath(unittest.TestCase):
         self.assertIn("no job", err)
 
 
+class DamagedTaggerIni(unittest.TestCase):
+    """A Picard.ini value in Qt's binary form cut short (a bool's byte missing) reads as no value,
+    as any other unreadable one: it raised IndexError, and every plan reading the tag settings
+    failed."""
+
+    def test_a_cut_short_variant(self):
+        import tagger_settings as ts
+        self.assertEqual(ts._qt_value(r"@Variant(\0\0\0\x1)"), [])
+        d = Path(_tempfile.mkdtemp(prefix="tm-qa-ini-"))
+        ini = d / "Picard.ini"
+        ini.write_text("[application]\nversion=3.0.0\n[setting]\ntranslate_artist_names=@Variant(\\0\\0\\0\\x1)\n",
+                       encoding="utf-8")
+        s = ts.tag_settings(path=ini)
+        self.assertIs(s["translate_artist_names"], False)       # (an unreadable value: not on)
+
+
 if __name__ == "__main__":
     unittest.main()

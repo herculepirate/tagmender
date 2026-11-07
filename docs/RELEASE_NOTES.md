@@ -18,7 +18,7 @@ A quality release: fixes found by testing every part of TagMender again.
   running Undo again finishes it.
 - Undo of a file whose name is near the length limit works on Python 3.10 and 3.11.
 - A custom tag the format cannot store (letters other than ASCII in FLAC, Ogg and Opus,
-  `TAG` in WavPack, and so on) is left out of the plan, as Picard does, instead of the album
+  `TAG` in WavPack, and so on) is left out of the plan instead of the album
   failing at Apply.
 - Cue sheets with file names without quotes, and cue sheets and playlists that write accented
   names in the other Unicode form (as a Mac does), are rewritten when the files are renamed.
@@ -29,7 +29,7 @@ A quality release: fixes found by testing every part of TagMender again.
 - A server's "try again later" in any form (a date, a fraction) is waited out (at most five
   minutes) instead of the album failing; your AcoustID key is no longer stored in the cache.
 - One damaged profile file no longer stops the watcher or the command line: it is reported
-  and the other profiles carry on. A damaged value in Picard's settings is read as no value.
+  and the other profiles carry on. A damaged value in your tagger's settings file is read as no value.
 - `tagmender scan`, `plan`, `run`, `unresolved` and `retry` with a folder that is not there, and
   `tagmender jobs` with an unknown job, end with an error (exit code 1) instead of "nothing".
 

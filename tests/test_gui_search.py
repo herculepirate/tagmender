@@ -695,6 +695,7 @@ class SearchAndVersions(unittest.TestCase):
             shown = [c for c in range(t.model().columnCount()) if not t.isColumnHidden(c)]
             self.assertLessEqual(sum(t.columnWidth(c) for c in shown), t.viewport().width())
             hidden = dlg.model.hidden
+            self.assertNotIn("format", hidden)                           # (CD, Vinyl, File: always in view)
             if hidden:                                                   # (their values in the row's tooltip)
                 k = next(iter(hidden))
                 title = dict(dlg.model.cols)[k]
@@ -803,6 +804,58 @@ class SearchAndVersions(unittest.TestCase):
             dlg = self.opened(search.open_versions(self.page))
         self.assertEqual(st.call_count, 1)
         self.assertIs(st.call_args[0][0], dlg)
+
+
+@unittest.skipIf(QApplication is None, "PySide6 not installed")
+class UseThisReleaseInTheList(unittest.TestCase):
+    """Use This Release (Find Release, Choose Your Pressing) on one album of a list: that album
+    alone is looked up again with it, never every album listed."""
+
+    def test_only_the_album_chosen_is_looked_up(self):
+        sys.path.insert(0, str(HERE / "tools"))
+        import gui
+        import gui_screens
+        from gui import search
+        app = QApplication.instance() or QApplication([])
+        top = Path(tempfile.mkdtemp(prefix="tm-use-"))
+        self.addCleanup(shutil.rmtree, top, True)
+        win = gui.Main()
+        self.addCleanup(win.close)
+        ov = win.pages["Overview"]
+        ov.path = str(top)
+        ov.planned(gui_screens.sample_plan(top))
+        app.processEvents()
+        albums = ov.plan["albums"]
+        self.assertGreater(len({a["source_dir"] for a in albums}), 2)
+        chosen = albums[1]
+        with mock.patch.object(type(ov), "look_up") as look_up, mock.patch.object(type(ov), "preview") as preview:
+            self.assertTrue(search.force_release(ov, chosen, IDS[0]))
+        preview.assert_not_called()
+        look_up.assert_called_once()
+        self.assertEqual({a["source_dir"] for a in look_up.call_args.args[1]}, {chosen["source_dir"]})
+        self.assertTrue(look_up.call_args.kwargs.get("again"))
+        self.assertEqual([c["ref"] for c in ov.forced[_os.path.realpath(chosen["source_dir"])]], [IDS[0]])
+
+
+class ReleasePages(unittest.TestCase):
+    """Right-click on an album looked up: its release's pages on MusicBrainz and Discogs."""
+
+    def test_the_ids_its_files_are_given_or_keep(self):
+        from gui.overview import release_pages
+        mbid = "59a2b7ce-0067-4180-a14c-f39d5ded76fb"
+        a = {"identification": {"url": "https://www.discogs.com/release/853631-X"},
+             "files": [{"changes": {"musicbrainz_albumid": [mbid]},
+                        "diff": [{"field": "discogs_release_id", "before": ["853631"], "after": ["853631"],
+                                  "action": "kept"}]}]}
+        self.assertEqual(release_pages(a), [("Open on MusicBrainz", f"https://musicbrainz.org/release/{mbid}"),
+                                            ("Open on Discogs", "https://www.discogs.com/release/853631")])
+
+    def test_a_shop_page_when_no_database_release(self):
+        from gui.overview import release_pages
+        a = {"identification": {"url": "https://www.deezer.com/album/1"}, "files": [{"changes": {}}]}
+        self.assertEqual(release_pages(a), [("Open Source Page", "https://www.deezer.com/album/1")])
+        self.assertEqual(release_pages({"files": [], "identification": {"url": "javascript:x"}}), [])
+        self.assertEqual(release_pages({"files": [{"changes": {"musicbrainz_albumid": ["../etc"]}}]}), [])
 
 
 class Page(QMainWindow if QApplication else object):

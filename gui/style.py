@@ -2,9 +2,9 @@
 symbols, words, icons and colours, and the app's stylesheet. `apply(app)` puts it all in place."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QColor, QFont, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QComboBox
 
 from .i18n import N_
 
@@ -240,7 +240,7 @@ def stylesheet():
     QPushButton[role="destructive"] {{ color: {err}; }}
     QComboBox, QLineEdit {{ background: {base}; color: {ink}; border: 1px solid {field};
                    border-radius: {CONTROL}px; padding: 3px 8px; min-height: 18px; }}
-    QComboBox {{ padding-right: 24px; }}
+    QComboBox {{ padding-right: 24px; combobox-popup: 0; }}
     QComboBox:disabled, QLineEdit:disabled, QAbstractSpinBox:disabled {{ color: {off}; }}
     QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; border: none;
                             width: 22px; }}
@@ -344,6 +344,29 @@ def stylesheet():
     """
 
 
+# Every dropdown shows its whole list (combobox-popup: 0 above - a list under the box, or above it
+# where the screen ends - and as many rows as it has): Qt shortens it only to keep it on the screen.
+COMBO_ROWS = 100
+
+
+class _WholeLists(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Polish and isinstance(obj, QComboBox) and obj.maxVisibleItems() < COMBO_ROWS:
+            obj.setMaxVisibleItems(COMBO_ROWS)
+        return False
+
+
+_whole_lists = None
+
+
+def whole_lists(app):
+    """Install, once, the filter that lets every dropdown show all its options."""
+    global _whole_lists
+    if _whole_lists is None:
+        _whole_lists = _WholeLists(app)
+        app.installEventFilter(_whole_lists)
+
+
 def apply(app=None, appearance=None):
     """Palette, stylesheet and icons for the current scheme. appearance: "system", "light" or
     "dark" (Preferences); None keeps the one chosen."""
@@ -362,6 +385,7 @@ def apply(app=None, appearance=None):
     app.setAttribute(Qt.AA_DontShowIconsInMenus, True)    # (no icon column: one narrow check column)
     app.setPalette(palette())
     app.setStyleSheet(stylesheet())
+    whole_lists(app)
     from . import icons
     icons.clear()
     for w in app.topLevelWidgets():                        # (icons drawn in the old colours)

@@ -89,11 +89,14 @@ def _list(t, key) -> list:
     return [str(x) for x in (v if isinstance(v, list) else [v] if v else [])]
 
 
-def choose(t: dict, profile, members_of=None, discogs_members_of=None):
+def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=None):
     """(name, sort name, MusicBrainz ID, Discogs ID) of the album artist for tags t, or None to
     keep the credit. members_of(mbid) -> [(name, sort, id), ...] of a band (None: unknown);
     discogs_members_of(discogs id) -> [(name, "", "", discogs id), ...], asked when MusicBrainz
-    names no leader (or the band has no MusicBrainz ID)."""
+    names no leader (or the band has no MusicBrainz ID). find_ids(name, mbid) -> (mbid, discogs
+    id): the band's IDs when the credit lacks them or its own lead to no leader - the Discogs
+    artist its MusicBrainz entry links to, or (no ID at all: a shop's credit) the one MusicBrainz
+    artist of exactly that name - so the rule holds whichever source the album was tagged from."""
     c = settings(profile)
     if not c.get("lead") or compilations.is_various(t):
         return None
@@ -135,13 +138,25 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None):
         # (MusicBrainz first; Discogs when MusicBrainz names no such member or has no ID for the
         # band. Unknown - the credit kept as the files hold it - only when no database that
         # was asked could answer: MusicBrainz's answer stands when Discogs cannot be reached)
-        hit, unknown = None, {}
-        for which, some_id, ask in (("mb", lead[2], members_of), ("dg", lead[3], discogs_members_of)):
-            if hit or not some_id or not ask:
-                continue
-            members = ask(some_id)
-            unknown[which] = members is None
-            hit = leader_of(lead[0], members) if members else None
+        def ask_both(mbid, dgid):
+            hit, unknown = None, {}
+            for which, some_id, ask in (("mb", mbid, members_of), ("dg", dgid, discogs_members_of)):
+                if hit or not some_id or not ask:
+                    continue
+                members = ask(some_id)
+                unknown[which] = members is None
+                hit = leader_of(lead[0], members) if members else None
+            return hit, unknown
+        hit, unknown = ask_both(lead[2], lead[3])
+        if not hit and find_ids and not (unknown.get("mb") or unknown.get("dg")) \
+                and len(_no_the(fold(lead[0])).split()) >= 2:      # (a member's name and more)
+            # (no leader by the credit's own IDs, or none: the band's other database, or the band
+            # found by its name; a leader found there stands, nothing found keeps the credit)
+            found = find_ids(lead[0], lead[2]) or ("", "")
+            more = (found[0] if found[0] and found[0] != lead[2] else "",
+                    found[1] if found[1] and found[1] != lead[3] else "")
+            if any(more):
+                hit, _more_unknown = ask_both(*more)
         # (MusicBrainz not reached, or the band known only to Discogs and it not reached)
         unknown = unknown.get("mb") or ("mb" not in unknown and unknown.get("dg"))
         if hit:
@@ -161,12 +176,12 @@ def _found(name, ids, members_of):
     return (name, "", "", "")
 
 
-def apply(targets: list, profile, members_of=None, discogs_members_of=None) -> list:
+def apply(targets: list, profile, members_of=None, discogs_members_of=None, find_ids=None) -> list:
     """Every track's tags with the album artist chosen (choose, from the first track's: the
     album artist is the album's)."""
     if not targets or not enabled(profile):
         return targets
-    lead = choose(targets[0], profile, members_of, discogs_members_of)
+    lead = choose(targets[0], profile, members_of, discogs_members_of, find_ids)
     if lead == UNKNOWN:
         keys = ("albumartist", "albumartists", "albumartistsort", "musicbrainz_albumartistid",
                 "discogs_albumartist_id", "~albumartists", "~albumartists_sort")
@@ -198,12 +213,46 @@ def apply(targets: list, profile, members_of=None, discogs_members_of=None) -> l
     return out
 
 
+MB_ARTIST = "https://musicbrainz.org/ws/2/artist/{0}?inc=artist-rels+url-rels&fmt=json"
+
+
+def linked_discogs(http, mbid, log=None) -> str:
+    """The Discogs artist ID MusicBrainz's entry for MBID links to ("" when none or not read)."""
+    try:
+        det = http.get_json(MB_ARTIST.format(mbid), "mb")
+    except Exception as exc:
+        if log:
+            log.info("album artist: links of %s not read: %s", mbid, exc)
+        return ""
+    for r in (det or {}).get("relations") or [] if isinstance(det, dict) else []:
+        m = re.search(r"discogs\.com/artist/(\d+)", str((r.get("url") or {}).get("resource") or ""))
+        if r.get("type") == "discogs" and m:
+            return m.group(1)
+    return ""
+
+
+def artist_named(http, name, log=None) -> str:
+    """The MusicBrainz ID of the one artist named exactly NAME (case, accents and "&"/"and"
+    aside); "" when there is none, several, or MusicBrainz could not be asked."""
+    import urllib.parse
+    q = urllib.parse.quote(f'artist:"{name}"')
+    try:
+        res = http.get_json(f"https://musicbrainz.org/ws/2/artist?query={q}&limit=10&fmt=json", "mb")
+    except Exception as exc:
+        if log:
+            log.info("album artist: %s not searched: %s", name, exc)
+        return ""
+    same = [a.get("id") for a in (res or {}).get("artists") or [] if isinstance(res, dict)
+            and fold(a.get("name")) == fold(name) and a.get("id")]
+    return same[0] if len(set(same)) == 1 else ""
+
+
 def band_members(http, mbid, log=None):
     """[(name, sort name, MusicBrainz ID)] of the people MusicBrainz lists as members of the
     artist MBID (none for a person); None when MusicBrainz could not be asked (the album artist
     is then left as credited)."""
     try:
-        det = http.get_json(f"https://musicbrainz.org/ws/2/artist/{mbid}?inc=artist-rels&fmt=json", "mb")
+        det = http.get_json(MB_ARTIST.format(mbid), "mb")     # (one request: linked_discogs reads it too)
     except Exception as exc:                             # (an outage: the credit stays)
         if log:
             log.info("album artist: members of %s not read: %s", mbid, exc)

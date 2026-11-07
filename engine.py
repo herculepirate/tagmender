@@ -2529,7 +2529,7 @@ class Engine:
             if album_artist.enabled(self.profile):
                 # (the lead artist alone as album artist: album_artist.py; a band's members once each)
                 prop.targets = album_artist.apply(prop.targets, self.profile, self._band_members,
-                                                  self._discogs_band_members)
+                                                  self._discogs_band_members, self._band_ids)
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
 
@@ -2549,6 +2549,18 @@ class Engine:
                 bool(((self.profile.get("providers") or {}).get("discogs") or {}).get("enabled", True))
             memo[dgid] = album_artist.discogs_members(self.http, dgid, self.log) if asks else []
         return memo[dgid]
+
+    def _band_ids(self, name, mbid):
+        """album_artist.choose's find_ids: (MusicBrainz ID, Discogs ID) of the band NAME - its
+        MusicBrainz entry (MBID, or the one artist of that name) and the Discogs artist it links
+        to - asked once per band in this run."""
+        memo = self.__dict__.setdefault("_band_ids_memo", {})
+        key = (album_artist.fold(name), mbid or "")
+        if key not in memo:
+            found = mbid or (album_artist.artist_named(self.http, name, self.log) if self.http is not None else "")
+            memo[key] = (found, album_artist.linked_discogs(self.http, found, self.log) if found and
+                         self.http is not None else "")
+        return memo[key]
 
     def proposals(self, path, progress=None, cancel=None, only=None):
         """The albums in PATH, each identified; only: the group_key()s of the albums to look up

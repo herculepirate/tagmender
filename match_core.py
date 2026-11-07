@@ -21,6 +21,7 @@ import functools
 import math
 import re
 import unicodedata
+from collections import Counter
 
 DEFAULT_CFG = {
     # --- point weights (confidence = earned / available * 100) -------------
@@ -932,6 +933,13 @@ def barcode_variants(value):
 def duration_ok(file_secs, cand_secs, cfg):
     tol = max(cfg["duration_tol_s"], cfg["duration_tol_pct"] * cand_secs)
     return abs(file_secs - cand_secs) <= tol
+
+
+def numbers_repeat(album) -> int:
+    """How many of the album's files share their disc and track number with another (two discs'
+    tracks 1 to 11 in one folder without disc tags): their order against a release is unknown."""
+    seen = Counter((t.get("disc") or 1, t.get("num")) for t in album.get("tracks") or () if t.get("num"))
+    return sum(n for n in seen.values() if n > 1)
 
 
 def align_durations(file_secs, cand_secs, cfg):
@@ -2683,7 +2691,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     res = {
         "confidence": conf, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
-        "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
+        "numbers_repeat": numbers_repeat(album), "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
         "pressing_year": album.get("pressing_year"),
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "len_err": len_err, "titles_agree": titles_agree, "len_diffs": len_diffs,
@@ -3050,6 +3058,11 @@ def classify(scored, cfg):
     split_credit = bool(best.get("lacks"))     # a collaborator would be dropped: never
     if not best["tracks_ok"]:
         why.append("track count differs")
+    if best.get("numbers_repeat"):
+        # (two discs' files in one folder, no disc tags: which file is which release track is a
+        # guess, and a guess writes another track's IDs; nothing excuses it, a code neither)
+        why.append(f"{best['numbers_repeat']} files share their track numbers on one disc: which disc "
+                   "each is on is not known")
     if proven and best["artist_sim"] < cfg["auto_min_artist"] and not split_credit:
         best["notes"] = best["notes"] + [f"artist differs from the folder's; {proof} proves the album, "
                                          f"so it is credited as the database does "

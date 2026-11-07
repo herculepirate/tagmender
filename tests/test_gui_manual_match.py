@@ -382,6 +382,9 @@ class Sheet(unittest.TestCase):
         self.a = self.plan["albums"][0]
         self.previews = []
         self.ov.preview = lambda: self.previews.append(dict(self.ov.forced))   # (no engine run here)
+        # (a release chosen for an album of the list: that album alone looked up again - counted
+        #  as its new preview)
+        self.ov.look_up = lambda *_a, **_k: self.previews.append(dict(self.ov.forced))
 
     def tearDown(self):
         self.idle()

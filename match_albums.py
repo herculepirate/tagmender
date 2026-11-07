@@ -1116,6 +1116,15 @@ def _other_disc(a, b, info) -> bool:
     return is_disc_dir(a.parent) or is_disc_dir(b.parent)
 
 
+def _other_audio(a, b, info) -> bool:
+    """a and b are two FLAC files whose decoded audio has a checksum each, and the two differ:
+    two recordings, however alike their titles and lengths (a suite played twice on one CD,
+    its "Gnomus" 2:43 both times). A file without one (another format, a FLAC whose encoder
+    left it empty) says nothing."""
+    ma_, mb_ = info[a].get("audio_md5"), info[b].get("audio_md5")
+    return bool(ma_ and mb_ and ma_ != mb_)
+
+
 def _drop_duplicate_tracks(files, info):
     """The same track twice in one album - same title (or same name apart
     from the number) and the same length (within _SAME_AUDIO_S), in any folder
@@ -1153,7 +1162,8 @@ def _drop_duplicate_tracks(files, info):
         by_title = not str(key).startswith("md5:")
         for p in sorted(group, key=preference):
             if any(abs(info[p]["secs"] - info[k]["secs"]) <= _SAME_AUDIO_S
-                   and not (by_title and _other_disc(p, k, info)) for k in kept):
+                   and not (by_title and (_other_disc(p, k, info) or _other_audio(p, k, info)))
+                   for k in kept):
                 gone.append(p)
             else:
                 kept.append(p)
@@ -1518,6 +1528,29 @@ def _owners(top, audio, disc_re):
     return sorted(owners)
 
 
+_ALBUM_DISC = re.compile(r"^(.*?)[\s\-\u2013\u2014:,_]*[(\[]?\s*(?:cd|disc|disk)\s*[-_.#]?\s*(\d{1,2})"
+                         r"(?:\s*(?:of|/)\s*\d{1,2})?\s*[)\]]?\s*$", re.I)
+
+
+def album_tag_discs(infos) -> tuple:
+    """({path: disc}, title) when the files without a disc tag name their disc in their album
+    tags ("The Principle Of Doubt (Compilation) CD 1" and "... CD 2"): every one of them does,
+    all name the same album, and at least two discs. Else ({}, "")."""
+    untagged = [(p, i) for p, i in infos if not i.get("disc")]
+    if len(untagged) < 2:
+        return {}, ""
+    found, bases = {}, set()
+    for p, i in untagged:
+        m = _ALBUM_DISC.match(i.get("album") or "")
+        if not m or not m.group(1).strip() or not int(m.group(2)):
+            return {}, ""
+        found[p] = int(m.group(2))
+        bases.add(m.group(1).strip())
+    if len({b.casefold() for b in bases}) != 1 or len(set(found.values())) < 2:
+        return {}, ""
+    return found, min(bases)
+
+
 def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     """blind=True (validate.py): the files were tagged already, so their release IDs,
     ISRCs, label, catalogue number, barcode, country, date and year came FROM a release
@@ -1567,8 +1600,13 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # one layout-named folder alone ("Stereo 24-96/" of a download): a version of a disc only
         # when its name's disc word, an SACD_AREA tag, DSD or its media tag says which disc
         versions, kinds = {}, {}
+    # Files of one folder without disc tags whose album tags name their disc ("Title CD 1" and
+    # "Title CD 2", as EAC writes each disc of a set): that disc. Without it, the two discs'
+    # tracks 1, 1, 2, 2 ... interleave and are lined up with the wrong tracks of the release.
+    tag_disc, tag_title = ({}, "") if versions else album_tag_discs(infos)
     for p, i in infos:
-        i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else i["disc"] or folder_disc.get(p.parent, 1)
+        i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else \
+            i["disc"] or folder_disc.get(p.parent) or tag_disc.get(p, 1)
     # (or, filed already as discs of their release, by the layout each disc's tags name)
     if versions:
         found = {(folder_disc.get(d, 1) if folder_disc else 1): v for d, v in versions.items()}
@@ -1589,7 +1627,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
 
     m = re.match(r"\s*(\d{4})\s*-\s*(.*)", album_folder)
     year = top("year") or (int(m.group(1)) if m else 0)
-    title = top("album") or (m.group(2) if m else album_folder)
+    title = tag_title or top("album") or (m.group(2) if m else album_folder)
     n_discs = len({i["disc_eff"] for _p, i in infos}) or 1
     folder_hints = mc.catno_hints(album_folder) + [h for h in mc.catno_hints(title)
                                                    if h not in mc.catno_hints(album_folder)]

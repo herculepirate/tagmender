@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer
+from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
                                QWidget)
@@ -101,6 +103,41 @@ ROW_STATES = {"waiting": N_("Waiting…"), "looking": N_("Looking up…"), "appl
 
 RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "web_unavailable", "rate_limited",
                "missing_credentials"}
+
+
+def release_pages(a) -> list:
+    """[(words, url)] for the release album A was looked up as: its MusicBrainz and Discogs pages
+    (the IDs its files are given, or keep), else the page it was found on (a shop, a site)."""
+    ids = {"musicbrainz_albumid": "", "discogs_release_id": ""}
+    for fe in a.get("files") or []:
+        if not isinstance(fe, dict):
+            continue
+        for k in ids:
+            v = (fe.get("changes") or {}).get(k)
+            if not v:
+                row = next((r for r in fe.get("diff") or [] if isinstance(r, dict) and r.get("field") == k), None)
+                v = row and (row.get("after") or row.get("before"))
+            if v and not ids[k]:
+                ids[k] = str(v[0] if isinstance(v, list) else v).strip()
+        if all(ids.values()):
+            break
+    ident = a.get("identification") or {}
+    out = []
+    mb, dg = ids["musicbrainz_albumid"], ids["discogs_release_id"]
+    if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", mb):
+        out.append((tr("Open on MusicBrainz"), f"https://musicbrainz.org/release/{mb}"))
+    if dg.isdigit():
+        out.append((tr("Open on Discogs"), f"https://www.discogs.com/release/{dg}"))
+    url = str(ident.get("url") or "")
+    if not out and url.startswith(("https://", "http://")):
+        out.append((tr("Open Source Page"), url))
+    return out
+
+
+def _dropped_names(paths) -> str:
+    """The folders dropped, named as the status bar names them."""
+    from .manual_match import _names
+    return _names(paths)
 
 
 def _list_first() -> bool:
@@ -229,6 +266,8 @@ class Overview(QWidget):
         # when it ends, and are looked up then (List first: listed only)
         self.later = []
         self._later_list_only = False
+        # folders dropped while Apply runs, being read now (their albums join the list at once)
+        self._reading = []
         # album key -> the folder its look-up reads, for albums outside the folder previewed (a
         # folder dropped meanwhile, an album already applied and given another profile)
         self.roots = {}
@@ -622,6 +661,13 @@ class Overview(QWidget):
                 act.setEnabled(on)
                 act.triggered.connect(lambda _=False, s=slot: s())
                 mine.append(act)
+            pages = release_pages(chosen[0]) if n == 1 else []
+            if pages:                                     # (the release looked up: its page)
+                mine.append(None)
+                for words, url in pages:
+                    act = QAction(words, self)
+                    act.triggered.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+                    mine.append(act)
             items = items + [None] + mine
         popup_menu(self, self.table, pos, items)
 
@@ -737,8 +783,13 @@ class Overview(QWidget):
             self.win.statusBar().showMessage(tr("Cancelling; drop the folder again when it has stopped."), 5000)
             return []
         new, present = manual_match.new_paths(self, paths)
-        held = {os.path.realpath(str(p)) for p in self.later}
+        held = {os.path.realpath(str(p)) for p in self.later + self._reading}
         new = [p for p in new if os.path.realpath(str(p)) not in held]
+        if new and getattr(self, "_applying", False) and not self.touches_apply(new) and self.read_now(new):
+            msg = (tr("{0}: added to the list; not looked up yet.") if self._later_list_only or _list_first()
+                   else tr("{0}: added to the list; looked up when Apply ends.")).format(manual_match._names(new))
+            self.win.statusBar().showMessage(msg, 6000)
+            return new
         self.later += new
         if new:
             msg = tr("{0}: added to the list when the current work ends.").format(manual_match._names(new))
@@ -783,11 +834,92 @@ class Overview(QWidget):
         self.summary.setText(tr("Adding {0}…").format(manual_match._names(new)))
         self.worker = start(self, work, lambda got: self.added(got, folders, list_only), self.progress, self.oops)
 
-    def added(self, got, folders, list_only):
-        """The dropped folders' albums, found: put under the albums already listed, then looked up."""
-        self.busy(False)
-        if not self.plan:                                    # (the list went meanwhile)
+    def touches_apply(self, paths) -> bool:
+        """A folder dropped during Apply that is, holds or sits inside a folder Apply is working
+        on (an album's own folder, or where its files go): read only once Apply has finished
+        moving them, never while it does."""
+        def inside(a, b):
+            return a == b or b.startswith(a.rstrip(os.sep) + os.sep)
+        busy = set()
+        for i in getattr(self, "_applied_rows", None) or ():
+            if 0 <= i < len((self.plan or {}).get("albums") or []):
+                a = self.plan["albums"][i]
+                busy.add(os.path.realpath(a["source_dir"]))
+                busy.update(os.path.realpath(os.path.dirname(fe["dst"])) for fe in a.get("files") or []
+                            if isinstance(fe, dict) and fe.get("dst"))
+        for p in paths:
+            d = os.path.realpath(p if os.path.isdir(p) else os.path.dirname(p))
+            if any(inside(d, b) or inside(b, d) for b in busy):
+                return True
+        return False
+
+    def read_now(self, paths) -> bool:
+        """Folders dropped while Apply runs: read now, on a thread of their own (Apply's worker
+        and Cancel are left alone), and their albums put under the list as soon as they are
+        found, to be looked up when Apply ends (queued). False when they cannot be (no list, or
+        the profile cannot be loaded): then they wait for the end of the work, as before."""
+        if not self.plan or not self.path:
+            return False
+        try:
+            prof = load_profile(self.profile.currentText())
+        except pf.ProfileError:
+            return False
+        folders = list(dict.fromkeys(os.path.abspath(p if os.path.isdir(p) else os.path.dirname(p)) for p in paths))
+        self._reading += list(paths)
+
+        def work(_w):
+            import engine
+            out = []                                         # (each folder read on its own: no wider scan)
+            for f in folders:
+                out += [(f, x) for x in engine.Engine(prof).listing(f, meta=META_STORE).get("albums") or []]
+            return out
+
+        def finish():
+            self._reading = [p for p in self._reading if p not in paths]
+
+        def done(got):
+            finish()
+            self.joined(got, paths)
+
+        def failed(msg):
+            finish()
+            self.win.statusBar().showMessage(tr("{0} could not be read: {1}").format(
+                _dropped_names(paths), msg.split("\n\n")[0]), 8000)
+        start(self, work, done, failed=failed)
+        return True
+
+    def joined(self, got, paths):
+        """The albums of folders dropped during Apply, read: under the list at once, and queued to
+        be looked up when Apply ends (unless your setting lists added folders first, or Apply
+        was cancelled). Apply ended meanwhile: as any folder dropped then."""
+        if not self.plan or not self.path:                   # (the list went: Apply applied every album)
+            if self.running:
+                self.later += [p for p in paths if p not in self.later]
+            else:
+                from . import manual_match
+                manual_match.add_dropped(self.win, paths)
             return
+        fresh = self.put_under_list(got)
+        if not fresh:
+            self.win.statusBar().showMessage(tr("No music found in {0}.").format(_dropped_names(paths)), 6000)
+            return
+        if getattr(self, "_applying", False):
+            self._joined = True                              # (Apply keeps the list for them)
+        cancelled = self.worker is not None and getattr(self.worker, "cancelled", False)
+        if self._later_list_only or _list_first() or cancelled:
+            self.show_ready()
+            return
+        mode = self.sources.currentData() or "profile"
+        if self.running:
+            for a in fresh:
+                self.queue.setdefault(self.album_key(a), (mode, False))
+            self.model.refresh_rows()                        # (their rows: Waiting…)
+        else:
+            self.look_up(mode, fresh, queued=True)
+
+    def put_under_list(self, got) -> list:
+        """The albums GOT ((folder read, album) pairs) that the list does not have yet: put under
+        it, each read from its own folder (self.roots). Returns them."""
         if self.plan.get("albums") is not self.model.albums:
             self.model.set_plan(self.plan)
         have = {self.album_key(a) for a in self.plan["albums"]}
@@ -800,13 +932,22 @@ class Overview(QWidget):
                 fresh.append(a)
         extra = len({os.path.realpath(r) for r in self.roots.values()})
         self.where.setText(tr("{0} (and {1} more)").format(self.path, plural(extra, tr("folder"), tr("folders"))))
+        if fresh:
+            self.model.replace_rows([], fresh)
+            self.plan["listed"] = True
+            self.show_profile_column()
+            self.fit_status()
+        return fresh
+
+    def added(self, got, folders, list_only):
+        """The dropped folders' albums, found: put under the albums already listed, then looked up."""
+        self.busy(False)
+        if not self.plan:                                    # (the list went meanwhile)
+            return
+        fresh = self.put_under_list(got)
         if not fresh:
             self.summary.setText(tr("No music found in the folders dropped."))
             return
-        self.model.replace_rows([], fresh)
-        self.plan["listed"] = True
-        self.show_profile_column()
-        self.fit_status()
         if list_only:
             self.summary.setText(tr("{0} added, not looked up yet. Select them and press Look Up.").format(
                 plural(len(fresh), tr("album"), tr("albums"))))
@@ -1901,6 +2042,7 @@ class Overview(QWidget):
     def apply_failed(self, msg):
         """Apply stopped with an error: said as any failure; the albums a look-up was
         interrupted for (Apply during a look-up) are looked up still."""
+        self._joined = False
         self.oops(msg)
         if self.queue and not self.running:
             self.run_queue()
@@ -1964,9 +2106,10 @@ class Overview(QWidget):
         if left:                                          # (albums left out stay, to apply later)
             self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(
                 plural(len(left), tr("album"), tr("albums"))))
-        elif not self.queue:
-            self.plan = None
+        elif not self.queue and not getattr(self, "_joined", False) and not self._reading:
+            self.plan = None                              # (albums dropped meanwhile: the list stays)
             self.show_ready()
+        self._joined = False
         self.busy(False)
         self.service_status(force=True)
         notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))

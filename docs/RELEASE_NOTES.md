@@ -1,5 +1,36 @@
 # Release notes
 
+## 0.8.14
+
+**Matching**
+- Two discs ripped into one folder without disc tags, each disc's files with its own album
+  tag ("Title CD 1" and "Title CD 2", as EAC writes them): each file is now on the disc its
+  album tag names. Before, the two discs' tracks 1, 1, 2, 2 ... were taken in name order and
+  half the files were given another track's IDs.
+- When files share their disc and track number and nothing says which disc each is on, the
+  album is left for you to choose instead of being tagged: which file is which track would be
+  a guess. A catalogue number no longer lets such an album through.
+
+- A release that plays a piece twice (a suite on one CD: "Gnomus" at track 2 and again at
+  track 18, the same length) keeps both: files whose audio differs are two tracks. Before, the
+  second was taken for a copy, left behind with the album's cue, log and scans, and the rest moved.
+- Lead artist only, with "a band named after a member": now for albums tagged from MusicBrainz
+  or a shop page too. When MusicBrainz lists no members, the Discogs artist its entry links to is
+  asked; a credit without IDs is found on MusicBrainz by its exact name (only when one artist
+  has that name). The band must still list that member.
+
+**Window**
+- Every dropdown shows its whole list, below the box or above it near the screen's edge; no
+  more lists cut off with scroll arrows.
+- Search for Release always shows the Format column (CD, Vinyl, File ...).
+- Right-click an album that was looked up: Open on MusicBrainz, Open on Discogs (or the page it
+  was found on).
+- A folder dropped while Apply runs is in the list at once (read alongside Apply), waiting; it
+  is looked up when Apply ends. Before, it appeared only after Apply. (A folder Apply is moving
+  albums out of or into is still read once Apply has finished.)
+- Use This Release (Find Release, Choose Your Pressing) looks up only the album you chose it
+  for; before, every album in the list was looked up again.
+
 ## 0.8.13
 
 A quality release: fixes found by testing every part of TagMender again.

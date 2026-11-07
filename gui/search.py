@@ -45,8 +45,9 @@ SORT_ROLE = Qt.UserRole + 1
 # elided), then the DROP columns hidden in order (their values move into the row's tooltip; a value
 # that tells pressings apart is never hidden), then "Agrees with your files", then every column
 FLEX = ("fit", "title", "recording", "name", "about", "artist", "label")
-SHRINK = ("artist", "label", "title", "about", "name", "recording")
-DROP = ("country", "label", "format", "years", "type", "artist", "title")
+SHRINK = ("artist", "label", "title", "about", "name", "recording", "barcode")
+# (Format - CD, Vinyl, File - is never hidden: it is how one tells pressings apart at a glance)
+DROP = ("country", "label", "barcode", "years", "type", "artist", "title")
 FLEX_MIN = 96
 FIT_CAP = 420                        # "Agrees with your files" at its widest: the reason to open the sheet
 WHOLE = ("date", "score", "tracks")  # short values never shortened while another column can give
@@ -77,9 +78,20 @@ def force_release(page, album, ref) -> bool:
     mine = {os.path.realpath(f) for f in files}
     choices = [c for c in (page.forced.get(key) or []) if isinstance(c, dict)]
     was = next((c for c in choices if mine & {os.path.realpath(f) for f in c.get("files") or []}), None)
-    choices = [c for c in choices if c is not was] + [{"ref": ref, "files": files}]
+    choices = [c for c in choices if c is not was] + [
+        dict({"ref": ref, "files": files}, **({"only": True} if album.get("split") else {}))]
     page.forced[key] = choices
-    page.preview()
+    # (this album only - not every album listed - looked up again with the release chosen, as
+    # Overview.choose_release does; an album not in the list is previewed as its folder)
+    listed = [a for a in (getattr(page, "plan", None) or {}).get("albums") or []
+              if os.path.realpath(a["source_dir"]) == key
+              and (not mine or mine & {os.path.realpath(f) for f in engine.plan_entry_files(a)})]
+    if listed and hasattr(page, "look_up"):
+        with_versions = getattr(page, "with_versions", None)
+        page.look_up(page.sources.currentData() or "profile",
+                     with_versions(listed) if with_versions else listed, again=True)
+    else:
+        page.preview()
     win = getattr(page, "win", None)
     if win is not None and hasattr(win, "statusBar"):
         win.statusBar().showMessage(tr(CHOSEN).format(name=Path(album["source_dir"]).name), 10000)

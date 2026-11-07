@@ -44,9 +44,13 @@ def merge_results(plans, run, cancelled=lambda: False) -> dict:
     the albums' indexes count on through them. A plan whose run cannot start (another job is
     running or waits to be recovered) fails its albums; once cancelled, the rest wait."""
     jobs, counts, albums, off, partial = [], {}, [], 0, False
-    for plan in plans:
+    for at, plan in enumerate(plans):
         n = len(plan["albums"])
-        if cancelled():
+        if cancelled():                                     # (the rest not started: counted cancelled,
+            left = sum(len(p["albums"]) for p in plans[at:])  # as the executor counts its own)
+            if left:
+                counts["cancelled"] = counts.get("cancelled", 0) + left
+                partial = True
             break
         try:
             res = run(plan)
@@ -1948,8 +1952,9 @@ class Overview(QWidget):
         self.model.set_plan(self.plan)
         many = ", " in (res.get("job") or "")
         self.summary.setText((tr("Jobs {0}: ").format(res["job"]) if many else f"Job {res['job']}: " if res.get("job")
-                              else "") + counts_text(res["counts"]) +
-                             (tr(". Undo them from Jobs.") if many else tr(". Undo it from Jobs.")))
+                              else "") + (counts_text(res["counts"]) or tr("Nothing was changed")) +
+                             ((tr(". Undo them from Jobs.") if many else tr(". Undo it from Jobs.")) if res.get("job")
+                              else "."))           # (no job ran - cancelled before the first: nothing to undo)
         left = [a for a in self.plan["albums"] if can_apply(a)]
         if left:                                          # (albums left out stay, to apply later)
             self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(

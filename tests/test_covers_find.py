@@ -163,6 +163,18 @@ class ChooserSheet(unittest.TestCase):
         what, data, source = insp.fetched
         self.assertEqual((what, source), ("Scans/Front.jpg", "chosen:own:Scans/Front.jpg"))
         self.assertEqual(data, (a / "Scans" / "Front.jpg").read_bytes())
+        # (the reading thread's quit is queued after its result: let it end before the window
+        # goes, as the app's own window waits for its threads on closing)
+        from gui.work import _alive
+        for th, _w in getattr(dlg, "_threads", []):
+            end = time.time() + 10
+            while _alive(th) and time.time() < end:
+                app.processEvents()
+                th.wait(20)
+        dlg.close()
+        dlg.deleteLater()
+        win.deleteLater()
+        app.processEvents()
 
 
 if __name__ == "__main__":

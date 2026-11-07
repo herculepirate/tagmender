@@ -106,6 +106,18 @@ class CacheKeysHoldNoCredentials(unittest.TestCase):
         ma.Http(db, dict(mc.DEFAULT_CFG), "t")
         rows = [r[0] for r in db.execute("SELECT url FROM http_cache")]
         self.assertEqual(rows, ["https://musicbrainz.org/ws/2/release/x?fmt=json"])
+        self.assertFalse(db.in_transaction)
+
+    def test_a_second_engine_on_the_same_cache_does_not_wait(self):
+        # (the clean-up once left a write transaction open, so the next Engine on the same
+        # cache file waited out the whole busy timeout)
+        path = Path(_tempfile.mkdtemp(prefix="tm-cache-")) / "cache.sqlite"
+        first = sqlite3.connect(path, timeout=60)
+        ma.Http(first, dict(mc.DEFAULT_CFG), "t")
+        self.assertFalse(first.in_transaction)
+        second = sqlite3.connect(path, timeout=0.5)
+        ma.Http(second, dict(mc.DEFAULT_CFG), "t")              # sqlite3.OperationalError if locked
+        self.assertFalse(second.in_transaction)
 
 
 class WatchFutureTimes(unittest.TestCase):

@@ -275,13 +275,24 @@ class SnapshotParity(unittest.TestCase):
     def test_each_entry_is_stat_ed_once(self):
         _root, album = self.tree()
         files = sorted(album.glob("*.flac"))
-        calls = []
-        real = os.stat
+        calls, inside = [], []
+        real, real_path_stat = os.stat, Path.stat
 
         def stat(p, *a, **k):
-            calls.append(str(p))
+            if not inside:
+                calls.append(str(p))
             return real(p, *a, **k)
-        with mock.patch.object(os, "stat", stat):
+
+        def path_stat(self, *a, **k):
+            # (Python 3.10's Path.stat calls an os.stat bound at import, which the patch above
+            # never sees; counted here once, whichever way the version goes)
+            calls.append(str(self))
+            inside.append(1)
+            try:
+                return real_path_stat(self, *a, **k)
+            finally:
+                inside.pop()
+        with mock.patch.object(os, "stat", stat), mock.patch.object(Path, "stat", path_stat):
             watcher.snapshot(album, files, True)
         # (the folder itself; the album's files come from the listing: none stat-ed by name again -
         # but a broken link and a staging file, which the listing passes over, as before)

@@ -3197,11 +3197,20 @@ class Http:
         db.commit()
         # (answers cached by an older version under a URL holding the AcoustID application key:
         # the key is a credential and never stays in the cache)
+        # (looked for first, so an ordinary start never takes the write lock; a DELETE that
+        # matched nothing would leave its transaction open and hold every other Engine back)
+        old = "url LIKE 'https://api.acoustid.org/%client=%'"
         try:
-            if db.execute("DELETE FROM http_cache WHERE url LIKE 'https://api.acoustid.org/%client=%'").rowcount:
-                db.commit()
+            if db.execute(f"SELECT 1 FROM http_cache WHERE {old} LIMIT 1").fetchone():
+                db.execute(f"DELETE FROM http_cache WHERE {old}")
         except sqlite3.Error:
             pass
+        finally:
+            if db.in_transaction:
+                try:
+                    db.commit()
+                except sqlite3.Error:
+                    db.rollback()
         self.max_age = None
         self.run_failures, self.run_ok, self.run_errors = Counter(), set(), {}
         self._mb_base = max(1.0, float(cfg.get("mb_delay") or 1.0))  # mb_delay recovers toward this

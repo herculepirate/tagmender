@@ -282,6 +282,22 @@ def _ffmpeg(path):
     return "ffmpeg:" + out.split("=", 1)[1] if r.returncode == 0 and "=" in out else None
 
 
+# digests one kind was labelled by an earlier version: the same audio hash under either label
+# (a TrueAudio file holding an ID3 tag: "mpeg" in jobs of earlier versions, "apev2" now)
+_SAME_KINDS = ({"mpeg", "apev2"},)
+
+
+def same(now, recorded) -> bool:
+    """Whether digest NOW is the audio RECORDED (by this or an earlier version, as a journal
+    or plan keeps it): equal, or the same hash under a label an earlier version gave it."""
+    if now == recorded:
+        return True
+    if not now or not recorded or ":" not in now or ":" not in recorded:
+        return False
+    (k1, h1), (k2, h2) = now.split(":", 1), recorded.split(":", 1)
+    return h1 == h2 and any(k1 in g and k2 in g for g in _SAME_KINDS)
+
+
 def digest(path) -> str | None:
     """'kind:sha256' of the audio data, or None when it cannot be told apart from tags."""
     path = Path(path)

@@ -50,6 +50,71 @@ class TrueAudioWrites(Base):
         self.assertEqual([payload.digest(f) for f in fs], digests)
 
 
+class TrueAudioJobOfAnEarlierVersion(Base):
+    # a job of an earlier version on a TrueAudio file that already had an ID3 tag journalled its
+    # audio as "mpeg:H"; read now as "apev2:H" (the same hash), undo left every file alone as
+    # "holds different audio now" - and --force did not help
+    def test_undone(self):
+        al = self.lib / "TTA" / "Album"
+        fs = [encode(al / f"0{n} t.tta", 440 + 100 * n, "tta") for n in (1, 2)]
+        for f in fs:
+            tagio.write(f, {"title": ["old"]})
+        new_sniff = payload._sniff
+
+        def old_sniff(fh):
+            got = new_sniff(fh)
+            fh.seek(0)
+            return "mpeg" if fh.read(3) == b"ID3" and got == "apev2" else got
+        payload._sniff = old_sniff
+        try:
+            self.assertTrue(payload.digest(fs[0]).startswith("mpeg:"))
+            res = executor.Executor(pl.build([self.proposal(source_dir=str(al), files=[str(f) for f in fs])],
+                                             self.profile())).run()
+        finally:
+            payload._sniff = new_sniff
+        self.assertEqual(res["counts"], {"done": 1})
+        out = executor.undo(res["job"])
+        self.assertFalse([x for x in out if "PROBLEM" in x], out)
+        self.assertEqual([tagio.read(f).get("title") for f in fs], [["old"], ["old"]])
+
+    def test_same(self):
+        self.assertTrue(payload.same("apev2:ab", "mpeg:ab"))
+        self.assertTrue(payload.same("flac:ab", "flac:ab"))
+        self.assertFalse(payload.same("apev2:ab", "mpeg:cd"))
+        self.assertFalse(payload.same("flac:ab", "mpeg:ab"))
+        self.assertFalse(payload.same(None, "mpeg:ab"))
+        self.assertTrue(payload.same(None, None))
+
+
+class ApeCustomNamesAsTheWriterStoresThem(Base):
+    # holds() checked a custom name title-cased while the writer stores it as named: TAG, ID3 and
+    # a ligature passed and the album failed at Apply
+    def test_holds_agrees_with_the_write(self):
+        f = encode(self.tmp / "x.wv", 440, "wavpack")
+        for field in ("~custom:TAG", "~custom:ID3", "~custom:\ufb01x", "~custom:Mood", "mytag", "~custom:x"):
+            held = tagio.holds(f, field)
+            try:
+                tagio.write(f, {field: ["v"]})
+                wrote = True
+            except Exception:
+                wrote = False
+            self.assertEqual(held, wrote, field)
+
+
+class StagingNamesOfALongName(Base):
+    # Python 3.10/3.11 stat a glob pattern without wildcards: for a name near the 255-byte limit
+    # the earlier versions' staging name raised "File name too long" and undo stopped
+    def test_no_staging_file_rather_than_an_error(self):
+        import errno
+        from unittest import mock
+        dst = self.lib / ("x" * 240 + ".flac")
+
+        def too_long(self_, pattern):
+            raise OSError(errno.ENAMETOOLONG, "File name too long", pattern)
+        with mock.patch.object(Path, "glob", too_long):
+            self.assertEqual(executor._all_stage_names(dst, "job1"), [])
+
+
 class UnquotedCueFile(Base):
     """A cue sheet naming a file without quotes (FILE 01.flac WAVE: allowed for a name without
     spaces, and read so by the matcher) kept the old name after the files were renamed."""

@@ -781,7 +781,11 @@ def _old_stage_names(dst: Path, job):
     """Staging files named the way earlier versions named them (recover still finds them)."""
     h = hashlib.sha1(Path(dst).name.encode("utf-8", "surrogateescape")).hexdigest()[:12]
     d, ext = Path(dst).parent, Path(dst).suffix if len(Path(dst).suffix) <= 8 else ""
-    return list(d.glob(f".{glob.escape(Path(dst).name)}{STAGE_TAG}{job}.part")) + \
+    try:            # (Python 3.10/3.11 stat a pattern with no wildcard: a name near the 255-byte
+        oldest = list(d.glob(f".{glob.escape(Path(dst).name)}{STAGE_TAG}{job}.part"))   # limit raised
+    except OSError:                                     # "File name too long" - no such file can be)
+        oldest = []
+    return oldest + \
         [p for p in dict.fromkeys([d / f"{STAGE_TAG}{job}-{h}.part", d / f"{STAGE_TAG}{job}-{h}.part{ext}"])
          if os.path.lexists(p)]
 
@@ -1957,7 +1961,7 @@ def _undo_step(step, jd, rolling_back=False):
             if backup:
                 _restore(src, backup, jd)
             return
-        if src.exists() and not dst.exists() and (digest is None or payload.digest(src) == digest):
+        if src.exists() and not dst.exists() and (digest is None or payload.same(payload.digest(src), digest)):
             if backup:                                   # moved back before an interruption
                 _restore(src, backup, jd)
             return
@@ -1974,7 +1978,7 @@ def _undo_step(step, jd, rolling_back=False):
             return
         if src.exists():
             if rolling_back and dst.exists() and not _same_file(src, dst) and \
-                    (digest is None or payload.digest(src) == digest):
+                    (digest is None or payload.same(payload.digest(src), digest)):
                 dst.unlink()                                 # the source was never removed
                 return
             raise StepError(f"cannot move back: {src} exists")
@@ -2009,7 +2013,7 @@ def _undo_relink(src: Path, dst: Path, backup, digest, jd, op="relink_move"):
         _put_back(dst, src, os.stat(dst))
         if backup:
             _restore(src, backup, jd)
-    elif digest is not None and payload.digest(src) != digest:
+    elif digest is not None and not payload.same(payload.digest(src), digest):
         raise StepError(f"{src} holds different audio now; left alone")
     elif op != "relink_copy" and backup and not _tags_sig_backup_free(src, backup):
         _restore(src, backup, jd)                    # an earlier, interrupted undo got this far
@@ -2233,7 +2237,7 @@ def _recover(job, jd, journal, events):
             fe = planned[a]["files"][j]
         except (IndexError, KeyError, TypeError):
             return False
-        if digest is not None and payload.digest(dst) != digest:
+        if digest is not None and not payload.same(payload.digest(dst), digest):
             return False
         try:
             got = tagio.read(dst)
@@ -2589,13 +2593,13 @@ def _undo(job, jd, journal, events, force):
         elif op == "copy" and dst.exists() and f.get("size") is not None and not force and (
                 ((os.stat(dst).st_size, os.stat(dst).st_mtime_ns) != (f["size"], f["mtime_ns"]) and
                  not (f.get("tags_sig") and _sig_is(dst, f["tags_sig"], f.get("backup"), jd / "blobs") and
-                      (not f.get("digest") or payload.digest(dst) == f["digest"]))) or
+                      (not f.get("digest") or payload.same(payload.digest(dst), f["digest"])))) or
                 (f.get("tags_sig") and not _sig_is(dst, f["tags_sig"], f.get("backup"), jd / "blobs")) or
                 (f.get("pics_sig") and _pics_sig(dst) != f["pics_sig"])):
             # (a copy whose only change is its time - a later job's undo put its tags back - is
             # still the copy; one with other tags is not, even when the editor kept its time)
             why = f"{dst} was changed after the job; left in place"
-        elif f.get("digest") and check.exists() and payload.digest(check) != f["digest"]:
+        elif f.get("digest") and check.exists() and not payload.same(payload.digest(check), f["digest"]):
             why = f"{check} holds different audio now; left alone"
         elif op in ("tag", "move", "relink_move", "relink_copy") and f.get("tags_sig") and \
                 check == (src if op == "tag" else dst) and check.exists() and not force and \

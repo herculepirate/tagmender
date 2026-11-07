@@ -288,7 +288,8 @@ def holds(path, field: str) -> bool:
     if ext in (".wv", ".ape", ".mpc", ".mp+", ".ofr", ".ofs", ".tak", ".wvc"):  # (APEv2: Picard's UNSUPPORTED_TAGS)
         if name is not None:
             import mutagen.apev2
-            if not mutagen.apev2.is_valid_apev2_key(APE.get(name, name.title())):
+            stored = name if field.startswith("~custom:") else APE.get(name, name.title())   # (a custom
+            if not mutagen.apev2.is_valid_apev2_key(stored):                              # tag: as named)
                 return False
         return field not in APE_UNSUPPORTED
     if ext in (".flac", ".ogg", ".oga", ".opus", ".spx", ".ogx") and name is not None:

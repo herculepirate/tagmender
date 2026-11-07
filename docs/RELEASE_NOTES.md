@@ -1,5 +1,48 @@
 # Release notes
 
+## 0.8.13
+
+A quality release: fixes found by testing every part of TagMender again.
+
+**Please note: one change in behaviour**
+- An album whose folder is a link to a folder outside your profile's folders is no longer
+  moved: its files would have been taken out of that outside folder. The preview says why. Add
+  that folder to the profile (or drop it on the window) to file it; copying still works.
+
+**Files and undo**
+- TrueAudio (.tta) files can be tagged: every write was refused by the audio check. Jobs made by
+  earlier versions on .tta files that already had a tag can be undone again.
+- When the journal cannot be written for a moment (a full or failing disk), each change already
+  made is still put back; before, a file could keep its new tags or a copy stay behind.
+- Undo goes on when a folder cannot be made again (read-only or full disk): it says so, and
+  running Undo again finishes it.
+- Undo of a file whose name is near the length limit works on Python 3.10 and 3.11.
+- A custom tag the format cannot store (letters other than ASCII in FLAC, Ogg and Opus,
+  `TAG` in WavPack, and so on) is left out of the plan, as Picard does, instead of the album
+  failing at Apply.
+- Cue sheets with file names without quotes, and cue sheets and playlists that write accented
+  names in the other Unicode form (as a Mac does), are rewritten when the files are renamed.
+- A plugin calling `sys.exit` is switched off instead of ending TagMender; a plugin's empty
+  value is no value instead of the text "None".
+
+**Look-ups and settings**
+- A server's "try again later" in any form (a date, a fraction) is waited out (at most five
+  minutes) instead of the album failing; your AcoustID key is no longer stored in the cache.
+- One damaged profile file no longer stops the watcher or the command line: it is reported
+  and the other profiles carry on. A damaged value in Picard's settings is read as no value.
+- `tagmender scan`, `plan`, `run`, `unresolved` and `retry` with a folder that is not there, and
+  `tagmender jobs` with an unknown job, end with an error (exit code 1) instead of "nothing".
+
+**Watched folders**
+- A file dated in the future (copied from a device with a wrong clock) no longer holds its album
+  back as "still changing".
+- The timer stays on the clock on a summer-time change day, and starts again at midnight
+  (every 9 hours: 00:00, 09:00, 18:00).
+
+**Window**
+- An Apply cancelled before its first album says nothing was changed (it offered an Undo).
+- Jobs: Filed into lists only the albums the job finished.
+
 ## 0.8.12
 
 **One release in several versions (SACD stereo and multichannel)**

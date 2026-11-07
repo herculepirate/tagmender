@@ -246,5 +246,26 @@ class DamagedTaggerIni(unittest.TestCase):
         self.assertIs(s["translate_artist_names"], False)       # (an unreadable value: not on)
 
 
+class DoctorPySideOnOlderPython(unittest.TestCase):
+    """PySide6 6.12 corrupts None and True on Python 3.10 and 3.11 (the app crashes, often on
+    closing a window): doctor says so and how to put 6.11 back; 3.12 and later are fine."""
+
+    def test_which_versions(self):
+        import doctor
+        self.assertTrue(doctor.pyside_unsafe("6.12.0", (3, 10)))
+        self.assertTrue(doctor.pyside_unsafe("6.12.3", (3, 11, 9)))
+        self.assertFalse(doctor.pyside_unsafe("6.12.0", (3, 12)))
+        self.assertFalse(doctor.pyside_unsafe("6.11.3", (3, 10)))
+        self.assertFalse(doctor.pyside_unsafe("6.13.0", (3, 10)))
+
+    def test_doctor_warns_with_the_fix(self):
+        import doctor
+        with mock.patch.object(doctor, "_module", lambda m: "6.12.0" if m == "PySide6" else "1.0"), \
+                mock.patch.object(doctor, "pyside_unsafe", lambda v, python=None: v == "6.12.0"):
+            row = next(c for c in doctor.checks() if c.name == "PySide6")
+        self.assertEqual(row.status, "warn")
+        self.assertIn("<6.12", row.fix)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,6 +43,11 @@ A quality release: fixes found by testing every part of TagMender again.
 - An Apply cancelled before its first album says nothing was changed (it offered an Undo).
 - Jobs: Filed into lists only the albums the job finished.
 
+**Installing from source**
+- PySide6 6.12 crashes on Python 3.10 and 3.11 (often when a window closes). `tagmender doctor`
+  warns about it; install `'PySide6-Essentials<6.12'` there, or use the AppImage. Python 3.12
+  and later are not affected.
+
 ## 0.8.12
 
 **One release in several versions (SACD stereo and multichannel)**

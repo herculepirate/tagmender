@@ -74,6 +74,17 @@ def _module(name):
         return None
 
 
+# PySide6 6.12 frees None and True once too often on Python 3.10 and 3.11 (3.12 made them
+# immortal): the app can crash at random, often on closing a window. 6.11 is fine there.
+PYSIDE_UNSAFE_FIX = ("PySide6 6.12 crashes on Python 3.10 and 3.11: "
+                     "pip install --user 'PySide6-Essentials<6.12'  (or use the AppImage)")
+
+
+def pyside_unsafe(version: str, python=None) -> bool:
+    py = tuple(python or sys.version_info)[:2]
+    return py < (3, 12) and version.split(".")[:2] == ["6", "12"]
+
+
 def checks() -> list[Check]:
     """Everything doctor reports."""
     out = []
@@ -88,6 +99,9 @@ def checks() -> list[Check]:
                            ("numpy", False, "sudo apt install python3-numpy  (transcode detection)"),
                            ("pykakasi", False, "pip install pykakasi  (Japanese title matching)")):
         ver = _module(mod)
+        if mod == "PySide6" and ver and pyside_unsafe(str(ver)):
+            out.append(Check(mod, "warn", f"{ver} on Python {platform.python_version()}", PYSIDE_UNSAFE_FIX))
+            continue
         out.append(Check(mod, "ok" if ver else ("fail" if need else "warn"),
                          str(ver) if ver else "not installed", "" if ver else fix))
     out += registry_checks()

@@ -146,6 +146,7 @@ The newest build of `main`, rebuilt after every change once all tests pass:
 ```bash
 git clone https://github.com/herculepirate/tagmender && cd tagmender
 pip install --user mutagen Pillow fonttools PySide6-Essentials   # Debian/Ubuntu/Mint: add --break-system-packages
+# (on Python 3.10 or 3.11, ask for 'PySide6-Essentials<6.12': 6.12 crashes there)
 python3 tagmender.py setup        # add your keys
 python3 tagmender.py gui          # open the app
 ```

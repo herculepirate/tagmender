@@ -15,6 +15,10 @@ unset TAGMENDER_PICARD_INI
 # no stale bytecode: a file edited twice in one second at the same size keeps its old .pyc
 find . -name __pycache__ -not -path "./.git/*" -prune -exec rm -rf {} +
 export PYTHONDONTWRITEBYTECODE=1
+# each suite's own settings, state, data and cache folders, all under one folder removed at the end
+scratch=$(mktemp -d -t tagmender-tests.XXXXXX)
+trap 'rm -rf "$scratch"' EXIT
+fresh() { mktemp -d -p "$scratch"; }
 fail=0
 total=0
 for t in tests/test_*.py; do
@@ -23,7 +27,8 @@ for t in tests/test_*.py; do
     tests/test_match.py) args=("$TAGMENDER_DISCOGS_PLUGIN");;
     tests/test_coverup_batch.py) args=("$TAGMENDER_COVERUP_DIR");;
   esac
-  out=$(XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) XDG_DATA_HOME=$(mktemp -d) "$PY" -W ignore "$t" "${args[@]}" 2>&1)
+  out=$(XDG_CONFIG_HOME=$(fresh) XDG_STATE_HOME=$(fresh) XDG_DATA_HOME=$(fresh) XDG_CACHE_HOME=$(fresh) \
+        "$PY" -W ignore "$t" "${args[@]}" 2>&1)
   rc=$?
   ran=$(printf '%s\n' "$out" | grep -oE '^Ran [0-9]+' | grep -oE '[0-9]+' || echo 0)
   total=$((total + ran))
@@ -39,7 +44,9 @@ for t in tests/test_*.py; do
       printf '%s\n' "$out" | tail -15 | sed 's/^/    /'
       # it stopped before naming what failed: once more, test by test, to show the last one
       echo "    -- again, naming each test:"
-      XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) "$PY" -W ignore -m unittest -v "$t" 2>&1 \
+      # (isolated as the first run; a suite that takes a plugin folder reads it from the environment)
+      XDG_CONFIG_HOME=$(fresh) XDG_STATE_HOME=$(fresh) XDG_DATA_HOME=$(fresh) XDG_CACHE_HOME=$(fresh) \
+        "$PY" -W ignore -m unittest -v "$t" 2>&1 \
         | grep -E ' \.\.\. |^(FAIL|ERROR|Traceback|  File|[A-Za-z]+Error)' | tail -25 | sed 's/^/    /'
     fi
   fi

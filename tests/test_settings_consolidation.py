@@ -27,7 +27,8 @@ except ImportError:                                           # GUI is optional
 import levels  # noqa: E402
 import profiles as pf  # noqa: E402
 
-REAL = Path("~/.config/tagmender/profiles").expanduser()
+# (a person's own profiles, read only when named: a test run never reads ~/.config/tagmender)
+REAL = Path(_os.environ.get("TAGMENDER_TEST_PROFILES_DIR") or "/nonexistent")
 
 
 class LyricsLevels(unittest.TestCase):
@@ -360,7 +361,7 @@ class Merged(unittest.TestCase):
         for name, raw in self.corpus().items():
             self.check_unchanged(name, raw)
 
-    @unittest.skipUnless(REAL.is_dir(), "no profiles of this person to read")
+    @unittest.skipUnless(REAL.is_dir(), "TAGMENDER_TEST_PROFILES_DIR names no profiles folder")
     def test_real_profiles_open_and_save_unchanged(self):
         # (read-only: each file is read, never written)
         for path in sorted(REAL.glob("*.json")):

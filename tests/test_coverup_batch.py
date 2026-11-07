@@ -1,5 +1,5 @@
 """Tests for coverup_batch.py. Offline: CoverUp's real pipeline runs with its local-files source and a
-stand-in for the Cover Art Archive. Run: python3 test_coverup_batch.py [coverup-dir] [Picard.ini]"""
+stand-in for the Cover Art Archive. Run: python3 test_coverup_batch.py [coverup-dir]"""
 import base64
 import io
 import os
@@ -18,7 +18,6 @@ _os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
 COVERUP = sys.argv[1] if len(sys.argv) > 1 else "plugins_builtin/coverup"
-INI = sys.argv[2] if len(sys.argv) > 2 else "~/.var/app/org.musicbrainz.Picard/config/MusicBrainz/Picard.ini"
 import coverup_loader  # noqa: E402
 coverup_loader.load_coverup(COVERUP)
 import coverup_batch as cb  # noqa: E402
@@ -137,9 +136,21 @@ class Base(unittest.TestCase):
 
 class Settings_(unittest.TestCase):
     def test_reads_your_coverup_settings_from_picard_ini(self):
-        ini = Path(INI).expanduser()
-        if not ini.exists():
-            self.skipTest("Picard.ini not available")
+        # (a Picard.ini made here, never the user's own: it holds their keys)
+        ini = Path(tempfile.mkdtemp()) / "Picard.ini"
+        ini.write_text(f"""[setting]
+save_images_to_tags=true
+
+[plugin.{cb.COVERUP_UUID}]
+embed_max_side=1200
+naming_preset=kodi
+folder_name=covers
+jpeg_quality=100
+collision_policy=if_better
+providers_enabled=caa, discogs
+discogs_token=not-a-real-token
+file_max_side=@Variant(\\0\\0\\0\\x7f)
+""", encoding="utf-8")
         s, plugin, picard = cb.batch_settings(ini, "full")
         self.assertEqual(s["embed_max_side"], 1200)
         self.assertEqual(s["naming_preset"], "kodi")
@@ -151,7 +162,9 @@ class Settings_(unittest.TestCase):
         self.assertTrue(s["save_artist_art"])                           # batch decision
         self.assertEqual(s["creative_triggers"], [])                    # no generated covers
         self.assertIn("discogs", s.enabled_providers())
-        self.assertTrue(s["discogs_token"])                             # key read (not printed)
+        self.assertEqual(s["discogs_token"], "not-a-real-token")        # key read (not printed)
+        self.assertNotIn("file_max_side", plugin)                       # (a Qt value: CoverUp's default)
+        self.assertEqual(picard["save_images_to_tags"], "true")
 
 
 class Panels(unittest.TestCase):

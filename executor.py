@@ -1378,6 +1378,8 @@ class Executor:
         if op == "tag" and not changes and not embed and not fix:
             return                          # only the cover was new, and it is gone: nothing to write
         _check_target(dst, self.roots)
+        if op == "move":
+            _check_target(src, self.roots)       # (its name is removed there: a folder linked from elsewhere)
         if op == "tag" and Path(src).is_symlink():
             raise StepError(f"refusing to write through a symbolic link: {src}")
         with file_lock(src):
@@ -1577,6 +1579,8 @@ class Executor:
     def companion_step(self, i, j, ce, done_steps):
         src, dst, op = Path(ce["src"]), Path(ce["dst"]), ce["op"]
         _check_target(dst, self.roots)
+        if op == "move":
+            _check_target(src, self.roots)
         rw = ce.get("rewrite") or {}
         if rw.get("from") and not _rewrite_ready(rw):   # the larger cover is gone (staging pruned)
             self.journal.write(ev="note", album=i, text=f"{src.name} kept: the cover planned for it is gone")

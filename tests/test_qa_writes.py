@@ -166,6 +166,56 @@ class JournalWriteFailsOnce(Base):
                 self.assertEqual([x for x in self.lib.rglob(".tm-*")], [])
 
 
+class AlbumFolderLinkedFromOutside(Base):
+    """An album folder inside the library that is a symbolic link to a folder outside the
+    profile's folders: in place, the plan was "ready" and Apply failed (the write is refused
+    there); a move took the files out of the outside folder - removing them there - though
+    writes stay inside the plan's folders. The plan says so now, and the executor refuses to
+    remove a source outside them; a copy, which only reads the source, still goes."""
+
+    def link_album(self):
+        import shutil
+        import tempfile
+        outside = Path(tempfile.mkdtemp(prefix="outside-"))
+        self.addCleanup(shutil.rmtree, outside, True)
+        real = outside / "Album"
+        shutil.move(str(self.album), real)
+        os.symlink(real, self.album)
+        return real
+
+    def prop(self):
+        return self.proposal(files=[str(self.album / "01 a.flac"), str(self.album / "02 b.flac")])
+
+    def test_plan_blocks_in_place_and_move(self):
+        real = self.link_album()
+        before = {p.name: p.read_bytes() for p in real.iterdir()}
+        for kw in ({}, {"operation": "move", "destination": str(self.dest)}):
+            p = pl.build([self.prop()], self.profile(**kw))
+            self.assertEqual(p["albums"][0]["status"], "blocked", kw)
+            self.assertIn("outside the folders this profile may change", p["albums"][0]["conflicts"][0])
+            executor.Executor(p).run()
+        self.assertEqual({p.name: p.read_bytes() for p in real.iterdir()}, before)
+
+    def test_executor_refuses_to_move_out_of_it(self):
+        p = pl.build([self.prop()], self.profile(operation="move", destination=str(self.dest)))
+        self.assertEqual(p["albums"][0]["status"], "ready")
+        real = self.link_album()                   # (linked away after the plan was made)
+        before = {p.name: p.read_bytes() for p in real.iterdir()}
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"failed": 1}, res)
+        self.assertIn("outside the folders", res["albums"][0]["detail"])
+        self.assertEqual({p.name: p.read_bytes() for p in real.iterdir()}, before)
+        self.assertEqual([x for x in self.dest.rglob("*.*")], [])
+
+    def test_copy_still_goes(self):
+        real = self.link_album()
+        res = executor.Executor(pl.build([self.prop()], self.profile(operation="copy",
+                                                                     destination=str(self.dest)))).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        self.assertEqual(len(list(real.glob("*.flac"))), 2)
+        self.assertEqual(len(list(self.dest.rglob("*.flac"))), 2)
+
+
 @unittest.skipIf(os.geteuid() == 0, "root writes into read-only folders")
 class UndoFolderCannotBeMade(Base):
     """Undo of a move whose emptied source folder could not be made again (its parent

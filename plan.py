@@ -839,16 +839,25 @@ def _spelled_names(raw: dict, changes: dict) -> dict:
     return {tagio.field_name(k): k for k in raw if tagio.field_name(k) != k and tagio.field_name(k) in changes}
 
 
-def _linked_tracks(entry) -> list:
+def _linked_tracks(entry, roots=None) -> list:
     """Conflicts for the album's tracks that are symbolic links (a library of links into a
     download folder) and would be moved or written: moving one leaves a copy where the link
-    was, and TagMender never writes through a link."""
+    was, and TagMender never writes through a link. roots: the plan's folders - a track in a
+    folder that is a link to a place outside them would be written or removed there, which
+    the executor refuses (as for a destination): said here, before Apply."""
     out = []
     for fe in entry["files"]:
         s_ = Path(fe.get("copy_of") or fe["src"])
-        if s_.is_symlink() and (fe["op"] == "move" or (fe["op"] == "tag" and fe["src"] == str(s_))):
+        writes = fe["op"] == "move" or (fe["op"] == "tag" and fe["src"] == str(s_))
+        if s_.is_symlink() and writes:
             out.append(f"{s_.name} is a symbolic link (to {os.readlink(s_)}): TagMender does not move or "
                        "write through links - replace it with the file, or use a copy profile")
+        elif writes and roots:
+            real = os.path.realpath(str(s_.parent))
+            if not any(real == r or real.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
+                out.append(f"{s_.name} is in {s_.parent}, which leads to {real}, outside the folders this "
+                           "profile may change: TagMender does not move or write files there - add that "
+                           "folder, or use a copy profile")
     return out
 
 
@@ -1767,7 +1776,7 @@ class Planner:
                         if op == "copy" and not changes and not fe.get("fix_pictures"):
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
-        entry["conflicts"] += _linked_tracks(entry)
+        entry["conflicts"] += _linked_tracks(entry, self.roots() + sorted(self._split_roots))
         if identified and getattr(prop, "suspect_lossy", "") and (p.get("quality_action") == "hold" or
                                                                   p.get("quality_action") == "move" and op == "copy"):
             entry["conflicts"].append(f"held for review: the lossless files look converted from lossy "
@@ -1978,7 +1987,7 @@ class Planner:
         # - the album folder's parent, when that folder is named after the album artist and lies
         # inside one of the profile's folders (never a library root, never over a file there)
         entry["artist_photo"] = self._artist_photo(prop, entry, op) if identified else None
-        linked = _linked_tracks(entry)                 # (a linked track that gets only a cover or photo)
+        linked = _linked_tracks(entry, self.roots() + sorted(self._split_roots))   # (a linked track that gets only a cover or photo)
         if linked:
             entry["conflicts"] += linked
             entry["status"] = "blocked"

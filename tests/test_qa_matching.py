@@ -3,6 +3,7 @@ temporary XDG folders, no music files unless a test makes its own."""
 import os as _os, tempfile as _tempfile  # noqa: E402
 _os.environ.setdefault("XDG_CONFIG_HOME", _tempfile.mkdtemp(prefix="tm-config-"))
 _os.environ.setdefault("XDG_STATE_HOME", _tempfile.mkdtemp(prefix="tm-state-"))
+import os
 import sqlite3
 import sys
 import unittest
@@ -105,6 +106,116 @@ class CacheKeysHoldNoCredentials(unittest.TestCase):
         ma.Http(db, dict(mc.DEFAULT_CFG), "t")
         rows = [r[0] for r in db.execute("SELECT url FROM http_cache")]
         self.assertEqual(rows, ["https://musicbrainz.org/ws/2/release/x?fmt=json"])
+
+
+class WatchFutureTimes(unittest.TestCase):
+    """A dropped album holding a file whose modification time is ahead of the clock (copied with
+    its times from a device with a wrong clock, or a FAT stick's time zone) settles as any other:
+    it was "still changing" until the clock reached that time."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.d = Path(tempfile.mkdtemp(prefix="tm-qa-watch-"))
+        self.addCleanup(shutil.rmtree, self.d, True)
+
+    def test_a_file_dated_next_year_does_not_hold_the_album(self):
+        import time
+        import watcher
+        album = self.d / "Band - Album"
+        album.mkdir()
+        for n in (1, 2):
+            (album / f"0{n} Track.flac").write_bytes(b"x" * 10)
+        old = time.time() - 3600
+        for f in [album, *album.iterdir()]:
+            os.utime(f, (old, old))
+        ahead = time.time() + 365 * 86400
+        os.utime(album / "02 Track.flac", (ahead, ahead))
+        _sig, newest, partial = watcher.snapshot(album, sorted(album.iterdir()))
+        self.assertFalse(partial)
+        self.assertLessEqual(newest, time.time() + 1)
+        # (the status-change time stands for it: the copy made just now is still settling)
+        self.assertGreater(newest, time.time() - 600)
+        st = (album / "02 Track.flac").stat()
+        self.assertEqual(watcher._changed_at(st, now=st.st_ctime + 7200), st.st_ctime)
+        self.assertEqual(watcher._changed_at((album / "01 Track.flac").stat()), old)
+
+
+class MalformedProfileFiles(unittest.TestCase):
+    """A profile file with a section of the wrong kind is a ProfileError (said, and that profile
+    skipped), never a ValueError or AttributeError: the watcher and the command line catch
+    ProfileError, so one hand-edited profile stopped `tagmender watch` for every profile."""
+
+    def setUp(self):
+        import json
+        import profiles as pf
+        self.pf = pf
+        pf.profiles_dir().mkdir(parents=True, exist_ok=True)
+        self.written = []
+        for name, data in (("qa-bad-version", {"version": "two"}), ("qa-bad-unresolved", {"unresolved": []})):
+            pf.path_of(name).write_text(json.dumps(data), encoding="utf-8")
+            self.written.append(pf.path_of(name))
+        self.inbox = Path(_tempfile.mkdtemp(prefix="tm-qa-inbox-"))
+        good = pf.from_dict({"name": "qa-good", "sources": [{"path": str(self.inbox), "watch": True}]})
+        pf.save(good)
+        self.written.append(pf.path_of("qa-good"))
+
+    def tearDown(self):
+        import shutil
+        for f in self.written:
+            f.unlink(missing_ok=True)
+        shutil.rmtree(self.inbox, ignore_errors=True)
+
+    def test_load_says_what_is_wrong(self):
+        for name in ("qa-bad-version", "qa-bad-unresolved"):
+            with self.subTest(name=name), self.assertRaises(self.pf.ProfileError) as e:
+                self.pf.load(name)
+            self.assertIn(name, str(e.exception))
+
+    def test_the_watcher_skips_it_and_watches_the_others(self):
+        import logging
+        import watcher
+        log = logging.getLogger("qa-watch")
+        with self.assertLogs(log, "WARNING") as said:
+            got = watcher.Watcher._watched_profiles(log)
+        self.assertEqual([p.name for p in got], ["qa-good"])
+        self.assertTrue(any("qa-bad-version" in m for m in said.output))
+
+    def test_nan_settle_minutes_is_refused(self):
+        with self.assertRaises(self.pf.ProfileError):
+            self.pf.from_dict({"name": "x", "watch": {"settle_minutes": float("nan")}})
+
+
+class CliMissingPath(unittest.TestCase):
+    """A folder that is not there (mistyped, a share not mounted) is an error (exit 1), never an
+    empty plan or scan that exits 0 for a script to take as done; likewise an unknown job."""
+
+    def cli(self, *argv):
+        import contextlib
+        import io
+        import tagmender
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err), \
+                mock.patch.object(ma.urllib.request, "urlopen", side_effect=AssertionError("network")):
+            code = tagmender.main(list(argv))
+        return code, err.getvalue()
+
+    def test_missing_path(self):
+        missing = str(Path(_tempfile.mkdtemp(prefix="tm-qa-cli-")) / "not-there")
+        for cmd in ("scan", "plan", "run", "unresolved", "retry"):
+            with self.subTest(cmd=cmd):
+                code, err = self.cli(cmd, missing)
+                self.assertEqual(code, 1)
+                self.assertIn("no such folder", err)
+
+    def test_an_empty_folder_is_still_fine(self):
+        empty = _tempfile.mkdtemp(prefix="tm-qa-cli-")
+        self.assertEqual(self.cli("scan", empty)[0], 0)
+
+    def test_unknown_job(self):
+        code, err = self.cli("jobs", "20990101-000000-none")
+        self.assertEqual(code, 1)
+        self.assertIn("no job", err)
 
 
 if __name__ == "__main__":

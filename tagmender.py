@@ -815,6 +815,9 @@ def cmd_jobs(args):
         return EXIT_OK
     if args.job:
         rows = executor.job_albums(args.job)
+        if not rows and args.job not in {r[0] for r in executor.jobs(1 << 30)}:
+            _err(f"no job {args.job}  (tagmender jobs lists them)")
+            return EXIT_ERR
         if args.json:
             print(json.dumps([dict(zip(("album", "status", "label", "detail", "ts"), r)) for r in rows], indent=1))
             return EXIT_OK
@@ -1321,6 +1324,12 @@ def main(argv=None):
         return EXIT_USAGE
     args = ap.parse_args(argv)
     args.profile = profile
+    if args.cmd in ("scan", "plan", "run", "unresolved", "retry") and \
+            not os.path.exists(os.path.expanduser(args.path)):
+        # (a mistyped or unmounted folder is an error, never "nothing to do" - exit 0 - for a
+        # script to take as done)
+        _err(f"tagmender {args.cmd}: no such folder or file: {args.path}")
+        return EXIT_ERR
     if args.cmd in WORK:
         _load_plugins()
         try:

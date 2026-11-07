@@ -243,6 +243,9 @@ class Jobs(QWidget):
             def keep(got):
                 cache.update(got)
                 done(got)
+            if self.win is None:                            # (a page on its own: no window waits for
+                keep(work(None))                            # a worker at exit - read here)
+                return
             start(self, work, keep, failed=lambda _m: None)
 
     def open_folder(self):

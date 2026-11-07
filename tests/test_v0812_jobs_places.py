@@ -32,6 +32,21 @@ class JobPlaces(Base):
         with mock.patch.object(executor, "job_dir", lambda _j: d / "gone"):
             self.assertEqual(jobs.job_places("j2"), [])
 
+    def test_a_page_without_a_window_leaves_no_thread_running(self):
+        # (a Jobs page on its own - as the Recover test makes one - started a worker no window
+        # waited for: the process aborted at exit with "QThread: Destroyed while thread is running")
+        import os
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        try:
+            import gui
+            from gui.work import _alive
+        except ImportError as exc:                       # pragma: no cover
+            self.skipTest(f"no PySide6: {exc}")
+        gui.QApplication.instance() or gui.QApplication([])
+        page = gui.Jobs(None)
+        page.fill_places(["j-none"])                  # (a job whose plan is not read yet)
+        self.assertEqual([th for th, _w in getattr(page, "_threads", []) if _alive(th)], [])
+
 
 if __name__ == "__main__":
     unittest.main()

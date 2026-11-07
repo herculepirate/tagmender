@@ -242,6 +242,8 @@ def _sniff(fh):
         head2 = fh.read(4)
         if head2 == b"fLaC":
             return "flac"
+        if head2 == b"TTA1":
+            return "apev2"         # (a TrueAudio file's ID3 tag, as tagio writes one: the same kind as without it)
         return "mpeg"
     if head[:4] == b"fLaC":
         return "flac"

@@ -929,6 +929,12 @@ def _cue_rewrites(path: Path, renames: dict):
         m = re.match(r'^(\s*FILE\s+")([^"]+)(".*)$', ln, re.I)
         if m and swap(m.group(2)):
             return m.group(1) + swap(m.group(2)) + m.group(3)
+        # (a name without spaces may stand unquoted - FILE 01.flac WAVE -, as the matcher reads
+        # it too; a new name with spaces gets its quotes)
+        m = re.match(r'^(\s*FILE\s+)([^"\s]+)(\s+\S+\s*)$', ln, re.I)
+        if m and swap(m.group(2)):
+            new_name = swap(m.group(2))
+            return m.group(1) + (f'"{new_name}"' if re.search(r"\s", new_name) else new_name) + m.group(3)
         body = ln.rstrip("\r")
         if body.strip() and not body.lstrip().startswith("#") and swap(body.strip()):
             return ln[:len(ln) - len(ln.lstrip())] + swap(body.strip()) + ln[len(body):]

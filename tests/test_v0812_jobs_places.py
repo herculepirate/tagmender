@@ -32,6 +32,30 @@ class JobPlaces(Base):
         with mock.patch.object(executor, "job_dir", lambda _j: d / "gone"):
             self.assertEqual(jobs.job_places("j2"), [])
 
+    def test_an_album_the_job_did_not_finish_was_not_filed(self):
+        import executor
+        from gui import jobs
+        d = Path(tempfile.mkdtemp())
+        plan = {"albums": [
+            {"source_dir": "/in/A", "files": [{"src": "/in/A/1.flac", "dst": "/lib/X/2001 - A/01.flac"}]},
+            {"source_dir": "/in/B", "files": [{"src": "/in/B/1.flac", "dst": "/lib/Y/2002 - B/01.flac"}]}]}
+        (d / "plan.json").write_text(json.dumps(plan))
+        (d / "journal.jsonl").write_text("\n".join(json.dumps(e) for e in (
+            {"ev": "album_begin", "album": 0}, {"ev": "album_done", "album": 0},
+            {"ev": "album_begin", "album": 1}, {"ev": "failed", "album": 1})) + "\n")
+        with mock.patch.object(executor, "job_dir", lambda _j: d):
+            self.assertEqual(jobs.job_places("j"), [("X / 2001 - A", "/lib/X/2001 - A", "/in/A")])
+
+    def test_a_plan_not_as_written_shows_nothing_rather_than_failing(self):
+        import executor
+        from gui import jobs
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.object(executor, "job_dir", lambda _j: d):
+            for bad in ([], {"albums": {"a": 1}}, {"albums": ["x", None]},
+                        {"albums": [{"files": [None, {"dst": None}, {"dst": 5}, "x"]}]}):
+                (d / "plan.json").write_text(json.dumps(bad))
+                self.assertEqual(jobs.job_places("j"), [], bad)
+
     def test_a_page_without_a_window_leaves_no_thread_running(self):
         # (a Jobs page on its own - as the Recover test makes one - started a worker no window
         # waited for: the process aborted at exit with "QThread: Destroyed while thread is running")

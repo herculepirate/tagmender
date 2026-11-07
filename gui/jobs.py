@@ -25,13 +25,26 @@ def job_places(job) -> list:
     """[(album as filed - "Artist / 1973 - Album [edition]", the folder it went to, the folder it
     came from)] for each album of JOB, from its plan; [] when the plan cannot be read."""
     import executor
+    folder = executor.job_dir(job)
     try:
-        plan = json.loads((executor.job_dir(job) / "plan.json").read_text(encoding="utf-8"))
+        plan = json.loads((folder / "plan.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
+    albums = plan.get("albums") if isinstance(plan, dict) else None
+    if not isinstance(albums, list):
+        return []
+    try:                                                     # (the albums the job finished: not one that
+        events = executor.Journal(folder).read()             # failed, was in conflict or was cancelled)
+    except (OSError, ValueError):
+        events = []
+    begun = {e.get("album") for e in events if isinstance(e, dict) and e.get("ev") == "album_begin"}
+    done = {e.get("album") for e in events if isinstance(e, dict) and e.get("ev") == "album_done"}
     out = []
-    for a in plan.get("albums") or []:
-        dsts = [os.path.dirname(fe["dst"]) for fe in a.get("files") or [] if fe.get("dst")]
+    for i, a in enumerate(albums):
+        if not isinstance(a, dict) or begun and i not in done:
+            continue
+        dsts = [os.path.dirname(fe["dst"]) for fe in a.get("files") or []
+                if isinstance(fe, dict) and isinstance(fe.get("dst"), str) and fe["dst"]]
         if not dsts:
             continue
         try:

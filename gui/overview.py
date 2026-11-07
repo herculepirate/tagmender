@@ -39,6 +39,10 @@ def run_report(plan, res):
     return rep
 
 
+# what an album that changed nothing ended as: a job of only these has nothing to undo
+NOTHING_DONE = {"conflict", "failed", "cancelled", "unchanged"}
+
+
 def merge_results(plans, run, cancelled=lambda: False) -> dict:
     """One Apply's result from running PLANS (one per profile, each a job of its own) in order:
     the albums' indexes count on through them. A plan whose run cannot start (another job is
@@ -1953,8 +1957,9 @@ class Overview(QWidget):
         many = ", " in (res.get("job") or "")
         self.summary.setText((tr("Jobs {0}: ").format(res["job"]) if many else f"Job {res['job']}: " if res.get("job")
                               else "") + (counts_text(res["counts"]) or tr("Nothing was changed")) +
-                             ((tr(". Undo them from Jobs.") if many else tr(". Undo it from Jobs.")) if res.get("job")
-                              else "."))           # (no job ran - cancelled before the first: nothing to undo)
+                             ((tr(". Undo them from Jobs.") if many else tr(". Undo it from Jobs."))
+                              if res.get("job") and set(res["counts"]) - NOTHING_DONE
+                              else "."))           # (no job, or nothing changed by it: nothing to undo)
         left = [a for a in self.plan["albums"] if can_apply(a)]
         if left:                                          # (albums left out stay, to apply later)
             self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(

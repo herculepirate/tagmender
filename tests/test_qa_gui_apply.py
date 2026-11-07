@@ -99,6 +99,7 @@ class ApplyInTheWindow(Base):
         text, statuses = self.run_apply(mutate)
         self.assertEqual(statuses, ["conflict"])
         self.assertIn("Changed since preview", text)
+        self.assertNotIn("Undo", text)                            # (the job changed nothing)
         self.assertEqual(FLAC(str(self.f1)).get("title"), ["edited by hand"])
         self.assertEqual(self.f2.read_bytes(), raw2)
         self.assertEqual(list(self.dest.rglob("*.flac")), [])

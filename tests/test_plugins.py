@@ -120,6 +120,41 @@ class Running(Base):
         self.assertEqual(plugins.status("breaks"), "error: RuntimeError: oops")
         self.assertEqual(plugins._PROCESSORS, [])
 
+    def test_a_plugin_that_calls_sys_exit_is_switched_off_not_the_program(self):
+        # (SystemExit is no Exception: it went through every guard and ended the run, or the app)
+        write_plugin(plugins.plugins_dir(), "exits-load", body="import sys\nsys.exit(3)\n")
+        write_plugin(plugins.plugins_dir(), "exits-run", body=(
+            "import sys\n"
+            "def register(api):\n"
+            "    api.tag_processor(lambda tags, info: sys.exit(4))\n"
+            "    api.naming_function('exits_run', lambda parser, text: sys.exit(5))\n"))
+        plugins.set_enabled("exits-load", True)
+        plugins.set_enabled("exits-run", True)
+        plugins.load_enabled()
+        self.assertEqual(plugins.status("exits-load"), "error: SystemExit: 3")
+        tags = {"title": ["x"]}
+        self.assertEqual(plugins.process_tags(tags, {}), tags)
+        self.assertEqual(plugins.status("exits-run"), "error: SystemExit: 4")
+
+    def test_a_script_function_that_calls_sys_exit_gives_nothing(self):
+        write_plugin(plugins.plugins_dir(), "exits-fn", body=(
+            "import sys\n"
+            "def register(api):\n"
+            "    api.naming_function('exits_fn', lambda parser, text: sys.exit(5))\n"))
+        plugins.set_enabled("exits-fn", True)
+        plugins.load_enabled()
+        self.assertEqual(naming.render("A$exits_fn(x)B", {}), ["AB"])
+        self.assertEqual(plugins.status("exits-fn"), "error: SystemExit: 5")
+
+    def test_none_from_a_tag_processor_is_no_value(self):
+        write_plugin(plugins.plugins_dir(), "nones", body=(
+            "def register(api):\n"
+            "    api.tag_processor(lambda tags, info: dict(tags, comment=None, mood=['calm', None]))\n"))
+        plugins.set_enabled("nones", True)
+        plugins.load_enabled()
+        got = plugins.process_tags({"title": ["x"]}, {})
+        self.assertEqual(got, {"title": ["x"], "comment": [], "mood": ["calm"]})
+
     def test_a_plugin_that_fails_to_load_and_a_name_taken(self):
         write_plugin(plugins.plugins_dir(), "takes-if", body=(
             "def register(api):\n    api.naming_function('if', lambda p, x: x)\n"))

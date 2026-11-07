@@ -393,7 +393,7 @@ def _guarded(plugin: Plugin, fn):
             return ""
         try:
             got = fn(*a, **kw)
-        except Exception as exc:              # (a plugin's mistake never stops a run)
+        except (Exception, SystemExit) as exc:   # (a plugin's mistake - sys.exit too - never stops a run)
             _fail(plugin, f"{type(exc).__name__}: {exc}")
             return ""
         if got is None:
@@ -467,7 +467,7 @@ def load_enabled() -> list[Plugin]:
                 raise PluginError("__init__.py has no register(api)")
             mod.register(Api(p))
             p.loaded = True
-        except Exception as exc:              # (a plugin that fails is switched off, never fatal)
+        except (Exception, SystemExit) as exc:   # (a plugin that fails is switched off, never fatal)
             _fail(p, f"{type(exc).__name__}: {exc}")
     return out
 
@@ -483,8 +483,10 @@ def process_tags(tags: dict, info: dict) -> dict:
             got = fn({k: list(v) for k, v in tags.items()}, dict(info))
             if not isinstance(got, dict):
                 raise PluginError("a tag processor must return the tags (a dict)")
-            tags = {str(k): [str(x) for x in (v if isinstance(v, list) else [v])] for k, v in got.items()}
-        except Exception as exc:
+            # (None - a value or a tag - is no value: never the text "None")
+            tags = {str(k): [str(x) for x in (v if isinstance(v, list) else [v]) if x is not None]
+                    for k, v in got.items()}
+        except (Exception, SystemExit) as exc:
             owner = _LOADED.get(pid) or Plugin(pid, pid, "?", plugins_dir() / pid, {})   # (forgotten meanwhile)
             _fail(owner, f"{type(exc).__name__}: {exc}")
     return tags

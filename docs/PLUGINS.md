@@ -136,7 +136,8 @@ def register(api):
   Several plugins' processors run one after another, in the order the plugins load (by folder name).
 - `tags` is `{name: [values]}` with TagMender's tag names (lower case: `title`, `artist`,
   `albumartist`, `tracknumber`, `discsubtitle` ...; a custom tag spelled as in the file). Values
-  are lists of text; a single value or a number you return is put in a list and made text.
+  are lists of text; a single value or a number you return is put in a list and made text (`None`
+  is no value, never the text "None").
 - **What you return is what is written:** a tag you leave out of the returned dict is removed from
   the file (return `tags` with your changes, not a new dict of only what you changed).
 - `info`: `file` (the file's path), `album_folder` (the album's folder, also for an album in

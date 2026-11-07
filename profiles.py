@@ -683,7 +683,7 @@ def validate(data: dict) -> list[str]:
             p.append(f"sources[{i}].destination must be an absolute path")
     w = d.get("watch") or {}
     num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731
-    if not num(w.get("settle_minutes")) or w["settle_minutes"] < 0:
+    if not num(w.get("settle_minutes")) or not w["settle_minutes"] >= 0:      # (NaN too)
         p.append("watch.settle_minutes must be a number of minutes, 0 or more")
     if not num(w.get("interval_seconds")) or not 1 <= w["interval_seconds"] <= 86400:
         p.append("watch.interval_seconds must be a number of seconds, 1 to 86400 (a day)")
@@ -1257,6 +1257,19 @@ def _picard_defaults(base: dict) -> dict:
 
 
 def from_dict(data: dict, *, check=True, sv=None) -> Profile:
+    """The Profile of these settings. ProfileError when they do not work - also for a file
+    with a section of the wrong kind ("unresolved": [], "version": "two"), which a caller
+    catching ProfileError (the watcher, the CLI) skips or reports instead of crashing."""
+    try:
+        return _from_dict(data, check=check, sv=sv)
+    except ProfileError:
+        raise
+    except (TypeError, ValueError, AttributeError) as exc:
+        name = data.get("name") if isinstance(data, dict) else None
+        raise ProfileError(f"profile {name!r} is malformed: {type(exc).__name__}: {exc}") from None
+
+
+def _from_dict(data: dict, *, check=True, sv=None) -> Profile:
     # (the shared settings in place of those it does not state or keep its own of: a whole
     # profile, such as a plan's, states every one and stays exactly as it is)
     data = with_shared(upgrade(data), sv)          # (SV: these shared values instead - {} for none)
@@ -1671,7 +1684,12 @@ def raw_file(name: str) -> dict:
     if not isinstance(data, dict):
         raise ProfileError(f"profile {name!r} is not a JSON object")
     data.setdefault("name", name)
-    return older_behaviour(data)
+    try:
+        return older_behaviour(data)
+    except ProfileError:
+        raise
+    except (TypeError, ValueError, AttributeError) as exc:     # ("version": "two")
+        raise ProfileError(f"profile {name!r} is malformed: {type(exc).__name__}: {exc}") from None
 
 
 def raw(name: str) -> dict:

@@ -868,6 +868,13 @@ def _first_values(raw: dict, changes: dict) -> dict:
             if changes.get(k) and len(raw.get(k) or []) > 1}
 
 
+def _sheet_key(name: str) -> str:
+    """A file name as a cue sheet or playlist entry is matched: letter case and Unicode form
+    aside (a sheet written on a Mac names "Café" composed, the files copied from it spell it
+    decomposed - or the other way)."""
+    return unicodedata.normalize("NFC", name).casefold()
+
+
 def _cue_rewrites(path: Path, renames: dict):
     """New text of a cue sheet or playlist whose entries name files being renamed or moved,
     or None. renames: {old path relative to the sheet's folder: new path relative to where
@@ -906,12 +913,12 @@ def _cue_rewrites(path: Path, renames: dict):
         if old_n != new_n:
             new_s = (as_sheet(new_n) or [new_n])[0]
             for o_s in as_sheet(old_n):
-                table[o_s.casefold()] = new_s
+                table[_sheet_key(o_s)] = new_s
                 if o_s != old_n:
-                    by_bytes.add(o_s.casefold())      # (named by the bytes on disk)
+                    by_bytes.add(_sheet_key(o_s))      # (named by the bytes on disk)
                 o, n = os.path.splitext(o_s), os.path.splitext(new_s)
                 if o[1].lower() in AUDIO_EXT:
-                    stems.setdefault(o[0].casefold(), set()).add(n[0])
+                    stems.setdefault(_sheet_key(o[0]), set()).add(n[0])
     if not table:
         return None
 
@@ -919,12 +926,12 @@ def _cue_rewrites(path: Path, renames: dict):
         key = name.replace("\\", "/")
         while key.startswith("./"):
             key = key[2:]
-        hit = table.get(key.casefold())
+        hit = table.get(_sheet_key(key))
         if hit is not None:
-            swapped.append((key.casefold() in by_bytes, hit))
+            swapped.append((_sheet_key(key) in by_bytes, hit))
         if hit is None:          # EAC's cue names the rip's WAV files: "01 a.wav" for "01 a.flac"
             stem, ext = os.path.splitext(key)
-            got = stems.get(stem.casefold()) if ext.lower() in AUDIO_EXT else None
+            got = stems.get(_sheet_key(stem)) if ext.lower() in AUDIO_EXT else None
             if got and len(got) == 1:
                 hit = next(iter(got)) + ext              # the cue's own extension, as it had it
         return hit

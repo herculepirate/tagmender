@@ -75,6 +75,37 @@ class UnquotedCueFile(Base):
         self.assertEqual(pl._cue_rewrites(cue, {"a.flac": "01 A b.flac"}), ('FILE "01 A b.flac" WAVE\n', "utf-8"))
 
 
+class SheetNamesInAnotherUnicodeForm(Base):
+    """A cue sheet or playlist naming a file in the other Unicode form than the file's name
+    on disk (written on a Mac: "Café" composed in the sheet, decomposed in the copied file
+    names, or the reverse) kept the old name when the file was renamed."""
+
+    def test_rewritten_either_way(self):
+        import unicodedata
+        nfc, nfd = (unicodedata.normalize(f, "01 Café.flac") for f in ("NFC", "NFD"))
+        cue = self.tmp / "x.cue"
+        for in_sheet, on_disk in ((nfc, nfd), (nfd, nfc)):
+            cue.write_text(f'FILE "{in_sheet}" WAVE\n', encoding="utf-8")
+            self.assertEqual(pl._cue_rewrites(cue, {on_disk: "01 New.flac"}), ('FILE "01 New.flac" WAVE\n', "utf-8"))
+            cue.write_text(f"#EXTM3U\n{in_sheet}\n", encoding="utf-8")
+            self.assertEqual(pl._cue_rewrites(cue, {on_disk: "01 New.flac"}), ("#EXTM3U\n01 New.flac\n", "utf-8"))
+
+    def test_move_rewrites_the_sheet(self):
+        import unicodedata
+        f1 = self.album / unicodedata.normalize("NFD", "01 Café.flac")
+        os.rename(self.f1, f1)
+        old = f'FILE "{unicodedata.normalize("NFC", f1.name)}" WAVE\nFILE "02 b.flac" WAVE\n'
+        (self.album / "rip.cue").write_text(old, encoding="utf-8")
+        p = pl.build([self.proposal(files=[str(f1), str(self.f2)])],
+                     self.profile(operation="move", destination=str(self.dest)))
+        res = executor.Executor(p).run()
+        self.assertEqual(res["counts"], {"done": 1}, res)
+        cue = next(self.dest.rglob("rip.cue"))
+        self.assertEqual(cue.read_text(encoding="utf-8"), 'FILE "01.F.flac" WAVE\nFILE "02.S.flac" WAVE\n')
+        executor.undo(p["job"])
+        self.assertEqual((self.album / "rip.cue").read_text(encoding="utf-8"), old)
+
+
 class CustomTagNamesTheFormatCannotStore(Base):
     """A custom tag (a tagger script's $set(ключ,...)) named so the format cannot store it - a
     Vorbis comment or APEv2 item outside ASCII or with "=", an MP4 atom beyond Latin-1 - was

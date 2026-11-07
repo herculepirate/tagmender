@@ -3143,6 +3143,36 @@ _SHARED_HOST_LOCKS: dict = {}        # host (SAME_LIMIT name) -> its lock, held 
 _HOST_LOCKS_GUARD = threading.Lock()
 
 
+# The longest a Retry-After is waited out between two tries of one request: a server's (or a
+# proxy's) hour is not sat through five times over; the request gives up as rate limited instead.
+RETRY_AFTER_MAX = 300
+
+
+def retry_after(headers, now=None):
+    """The seconds a 429's or 503's Retry-After asks for (RFC 9110: whole seconds or an HTTP
+    date), at most RETRY_AFTER_MAX; 0 when it is missing, unreadable or already past (the
+    caller's own back-off then). Never raises: a header in another form is no reason for the
+    request to fail as anything but rate limited or unavailable."""
+    try:
+        value = str((headers.get("Retry-After") if headers is not None else None) or "").strip()
+    except Exception:
+        return 0
+    if not value:
+        return 0
+    try:
+        secs = float(value)
+    except ValueError:
+        try:
+            import email.utils
+            when = email.utils.parsedate_to_datetime(value)
+            secs = when.timestamp() - (time.time() if now is None else now)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return 0
+    if secs != secs or secs <= 0:        # (NaN, negative, now)
+        return 0
+    return min(float(RETRY_AFTER_MAX), secs)
+
+
 def share_pace(http):
     """`http` (an Http) pacing its requests with every other shared Http of this process:
     their last-call times and per-host locks are the process's (_SHARED_LAST,
@@ -3165,6 +3195,13 @@ class Http:
         db.execute("CREATE TABLE IF NOT EXISTS provider_health (host TEXT PRIMARY KEY, fails INT, "
                    "last_error TEXT, last_fail REAL, last_ok REAL)")
         db.commit()
+        # (answers cached by an older version under a URL holding the AcoustID application key:
+        # the key is a credential and never stays in the cache)
+        try:
+            if db.execute("DELETE FROM http_cache WHERE url LIKE 'https://api.acoustid.org/%client=%'").rowcount:
+                db.commit()
+        except sqlite3.Error:
+            pass
         self.max_age = None
         self.run_failures, self.run_ok, self.run_errors = Counter(), set(), {}
         self._mb_base = max(1.0, float(cfg.get("mb_delay") or 1.0))  # mb_delay recovers toward this
@@ -3191,6 +3228,19 @@ class Http:
         except Exception:      # (an old cache file, a locked db) a record never stops a lookup
             pass
 
+    # Query parameters that are credentials, per host: left out of the cache key (cache_key)
+    CREDENTIAL_PARAMS = {"acoustid": ("client",)}
+
+    def cache_key(self, url, host):
+        """The cache key of a GET: its URL, without a credential the host takes in the query
+        (AcoustID's application key, client=), which must never be stored in the cache."""
+        names = self.CREDENTIAL_PARAMS.get(host)
+        if not names or "?" not in url:
+            return url
+        base, query = url.split("?", 1)
+        kept = [p for p in query.split("&") if p.split("=", 1)[0] not in names]
+        return base + ("?" + "&".join(kept) if kept else "")
+
     def get_json(self, url, host, attempts=None):
         body = self.get_text(url, host, attempts=attempts)
         if body is None:
@@ -3198,7 +3248,7 @@ class Http:
         try:
             data = json.loads(body)
         except ValueError:
-            self.db.execute("DELETE FROM http_cache WHERE url=?", (url,))
+            self.db.execute("DELETE FROM http_cache WHERE url=?", (self.cache_key(url, host),))
             self.db.commit()
             raise ProviderUnavailable(host, "invalid_response", f"not JSON from {url.split('?')[0]}") from None
         error = data.get("error") if host == "deezer" and isinstance(data, dict) else None
@@ -3207,7 +3257,7 @@ class Http:
             # an answer; a quota (4) or busy (700) reply is not kept as "no results"
             code_no = error.get("code") if isinstance(error, dict) else None
             if code_no != DEEZER_NO_DATA:
-                self.db.execute("DELETE FROM http_cache WHERE url=?", (url,))
+                self.db.execute("DELETE FROM http_cache WHERE url=?", (self.cache_key(url, host),))
                 self.db.commit()
                 raise ProviderUnavailable(host, "rate_limited" if code_no == 4 else "outage",
                                           f"Deezer error {code_no}")
@@ -3347,7 +3397,7 @@ class Http:
         be stored, such as gnudb's registered address, stay out of the cache). `headers` are
         sent as well (an API key), never part of the cache key. attempts: at most this many
         tries (a single-try re-ask) instead of the host's own number."""
-        key = key or url
+        key = key or self.cache_key(url, host)
         self._check_stop(host)
         row = self.db.execute("SELECT body, ts FROM http_cache WHERE url=?", (key,)).fetchone()
         if row and not (self.max_age and time.time() - float(row[1] or 0) > self.max_age):
@@ -3497,9 +3547,9 @@ class Http:
                         self.cfg["mb_delay"] = min(3.0, self.cfg["mb_delay"] * 1.2)
                         delay = self.cfg["mb_delay"]
                         self._mb_ok = 0
-                        pause = int(e.headers.get("Retry-After") or 0) or 3 * (attempt + 1)
+                        pause = retry_after(e.headers) or 3 * (attempt + 1)
                     else:
-                        pause = int(e.headers.get("Retry-After") or 0) or 15 * (attempt + 1)
+                        pause = retry_after(e.headers) or 15 * (attempt + 1)
                     pause += random.uniform(0, 1)                   # jitter: parallel runs do not retry in step
                     if attempt == attempts - 1:
                         # giving up: no sleep now, but the host's next request still waits the

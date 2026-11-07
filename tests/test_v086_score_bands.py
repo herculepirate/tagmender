@@ -37,9 +37,13 @@ class ScoreBands(unittest.TestCase):
         from gui.models import PlanModel
         m = PlanModel()
         m.albums = [album(confidence=100), album(status="listed", confidence=0)]
-        self.assertIsNone(m.data(m.index(0, 3), tg.Qt.BackgroundRole))       # (0.8.10: a fit to trust is plain)
+        calm = m.data(m.index(0, 3), tg.Qt.BackgroundRole)                   # (0.8.11: a fit to trust: a wash)
+        self.assertIsNotNone(calm)
+        self.assertIsNone(m.data(m.index(0, 3), tg.Qt.FontRole))
         m.albums[0] = album(confidence=60)
-        self.assertIsNotNone(m.data(m.index(0, 3), tg.Qt.BackgroundRole))    # (one that asks for a look: tinted)
+        loud = m.data(m.index(0, 3), tg.Qt.BackgroundRole)                   # (one that asks for a look: twice
+        self.assertGreater(loud.color().alpha(), 2 * calm.color().alpha() - 1)   # as strong, and bold: it
+        self.assertTrue(m.data(m.index(0, 3), tg.Qt.FontRole).bold())         # stands out by weight too)
         self.assertIn("Needs investigation", m.data(m.index(0, 3), tg.Qt.AccessibleTextRole))   # (and in words)
         self.assertIn("not a probability", m.data(m.index(0, 3), tg.Qt.ToolTipRole))
         self.assertIsNone(m.data(m.index(1, 3), tg.Qt.BackgroundRole))

@@ -448,6 +448,8 @@ def add_dropped(win, paths) -> list:
     if page is None:
         return []
     if getattr(page, "running", False):
+        if hasattr(page, "add_later"):                  # (joins the list when the work ends)
+            return page.add_later(paths)
         tell(tr(BUSY))
         return []
     new, present = new_paths(page, paths)

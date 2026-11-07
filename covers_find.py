@@ -83,13 +83,14 @@ def own(folder, files=()) -> list[Choice]:
         if not size:
             continue
         out.append(Choice("own", str(p.relative_to(folder)), size[0], size[1], thumbnail(data), data,
-                          extra={"front": artwork._says_front(p.stem) or p.stem.lower() in artwork.COVER_STEMS}))
+                          extra={"front": artwork._says_front(p.stem) or p.stem.lower() in artwork.COVER_STEMS,
+                                 "path": str(p)}))
     for f in list(files)[:1]:                       # (the tracks share one front, as written)
         data = artwork.embedded_front(f)
         if data and data not in seen:
             size = artwork._size_of(data) or (0, 0)
             out.append(Choice("own", f"in {Path(f).name}", size[0], size[1], thumbnail(data), data,
-                              extra={"front": True}))
+                              extra={"front": True, "file": str(f)}))
     out.sort(key=lambda c: (not c.extra.get("front"), -(c.width * c.height)))
     return out
 
@@ -121,7 +122,8 @@ def found(folder, files, ids: dict, artist="", album="", staging=None, cancelled
         out.append(Choice("found", PROVIDER_WORDS.get(c.provider, c.provider), c.width or 0, c.height or 0,
                           thumbnail(thumb) if thumb else None, c.data,
                           fetch=lambda c=c: c.data or pipe.fetch_full(c),
-                          note=c.attribution or c.comment or "", extra={"provider": c.provider}))
+                          note=c.attribution or c.comment or "",
+                          extra={"provider": c.provider, "url": getattr(c, "url", "") or ""}))
     return out
 
 

@@ -309,8 +309,12 @@ def reduced_motion() -> bool:
 
 
 def left_header(view):
-    """Column titles over the start of their column, as the cells are (Qt centres them)."""
+    """Column titles over the start of their column, as the cells are (Qt centres them); and, as
+    in a folder, a rectangle dragged across the list selects its rows (gui.rubber: only where
+    several rows can be selected)."""
     view.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    from .rubber import RubberBand
+    RubberBand.on(view)
 
 
 class MiddleElide(QStyledItemDelegate):
@@ -342,7 +346,14 @@ def say(lb, key, text):
 
 def popup_menu(parent, view, pos, actions):
     """A table's context menu, for the mouse and for the Menu key or Shift+F10 (whose position
-    does not reliably land on the current row): the row under pos, else the current row."""
+    does not reliably land on the current row): the row under pos, else the current row. Asked
+    from the keyboard (the mouse is not at pos), the current row, wherever pos says."""
+    from PySide6.QtGui import QCursor
+    by_mouse = (view.viewport().mapFromGlobal(QCursor.pos()) - pos).manhattanLength() <= 4
+    cur = view.currentIndex()
+    if not by_mouse and cur.isValid() and view.selectionModel() is not None and \
+            view.selectionModel().hasSelection():
+        pos = view.visualRect(cur).center()
     if not view.indexAt(pos).isValid():
         cur = view.currentIndex()
         if not (cur.isValid() and view.selectionModel() is not None and view.selectionModel().hasSelection()):

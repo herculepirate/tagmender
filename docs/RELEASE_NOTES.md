@@ -1,5 +1,52 @@
 # Release notes
 
+## 0.8.11
+
+**Overview**
+- The Profile column is always shown, for one album as for many.
+- Drop folders while a look-up or Apply is running, or choose them with Add Folder (now available
+  during a run). They wait, and when the run ends their albums are added below the ones already
+  listed and looked up with the same sources. Albums already looked up keep their results. Cancel
+  discards folders still waiting; after a failed look-up they are listed but not looked up.
+- An album already applied can take another profile: choose it in the album's Profile cell or
+  menu. TagMender reads the album where Apply put it, looks it up again with that profile, and
+  the next Apply files it the new profile's way, as a job of its own that Jobs can undo.
+- Drag a rectangle across a list to select the rows it covers, as in a file manager: from a row
+  or from the empty space below the rows, with Ctrl to add to the selection. It works on every
+  list that can select several rows. Escape clears the Overview's selection.
+- Delete (or Backspace) and Remove from List take the selected albums out of the Overview list
+  again, also after an Apply of every album. Nothing on disk changes. Delete did nothing because
+  Remove Tag in the menus used the same key, and after a full Apply the list had no plan behind
+  its rows.
+- Scores are tinted again: a light wash for Excellent and Good, and a stronger tint with bold
+  digits for Worth a look and Needs investigation, so a doubtful score stands out by weight as
+  well as colour.
+
+**Lists that behave like a folder**
+- Copy copies every selected row, one per line (folder paths where the row has one).
+- Needs attention: Retry and Open Folder act on every selected album; several are listed
+  together on the Overview.
+- The Menu key and Shift+F10 open a list's menu on the current row, wherever the pointer is.
+- Lists whose actions take one row at a time (Watched folders, Waiting for your approval,
+  Recently, Ignore and skip rules) now select one row, so an action never quietly applies to
+  only one of several selected rows.
+
+**Watched folders**
+- A **Check Now** button under the folders looks in every watched folder at once instead of
+  waiting for the next check. Music still being copied waits until it has settled, as before.
+- The lists on Watched folders and Jobs are resized by dragging the line between them; the heights
+  are kept for the next start.
+
+**Find Covers…**
+- Right-click a picture (or press the Menu key): open your own pictures in their default app or
+  show their folder; open a copy of a cover stored in the tracks; open a found cover in the
+  browser or copy its link.
+
+**Profiles**
+- The profile section **Source** is now **Files Read**: it sets which audio files are read. The
+  databases a profile asks are under Identification. (The Overview's Source column, which says
+  how each album was matched, is unchanged.)
+
 ## 0.8.10
 
 - The packaged app (.deb, AppImage, Flatpak) shows the TagMender logo beside each page's title

@@ -217,6 +217,13 @@ class Overview(QWidget):
         # and the albums the running look-up has (album key -> (profile, sources))
         self.queue = {}
         self.looking = {}
+        # folders dropped (or chosen with Add Folder) while work runs: their albums join this list
+        # when it ends, and are looked up then (List first: listed only)
+        self.later = []
+        self._later_list_only = False
+        # album key -> the folder its look-up reads, for albums outside the folder previewed (a
+        # folder dropped meanwhile, an album already applied and given another profile)
+        self.roots = {}
         # what is being done with each album now (album key, or id() of a row Apply has): ROW_STATES
         self.states = {}
         self._lookup_order, self._applying = [], False
@@ -413,9 +420,10 @@ class Overview(QWidget):
         self.table.customContextMenuRequested.connect(self.context_menu)
         self.model.ticked.connect(self.win.update_album_actions)
         self.show_profile_column()
-        from PySide6.QtGui import QShortcut, QKeySequence
-        rm = QShortcut(QKeySequence.Delete, self.table, context=Qt.WidgetShortcut)   # (the list's own Delete)
-        rm.activated.connect(self.remove_selected)
+        # the list's own keys, as in a folder: Delete (or Backspace) takes the selected albums out of
+        # the list, Escape lets go of the selection. Taken before the menus' shortcuts (Remove Tag is
+        # Del too: two shortcuts on one key and Qt runs neither)
+        self.table.installEventFilter(self)
         rl.addSpacing(8)                                     # (the controls above, then the list: two groups)
         rl.addWidget(self.table, 1)
         foot = QHBoxLayout()                                 # (what is ready, strong; the other counts, quiet)
@@ -463,8 +471,33 @@ class Overview(QWidget):
     COLUMN_LEAST = ((1, 180), (4, 140), (6, 110), (2, 110), (7, 90))
     LAST_LEAST = 120                                     # (the last column - Why - keeps this much)
 
+    # the list's own keys, as in a folder: Delete or Backspace takes the selected albums out of the
+    # list, Escape lets go of the selection
+    LIST_KEYS = (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_Escape)
+
+    def list_key(self, e) -> bool:
+        from PySide6.QtCore import QEvent
+        if e.key() not in self.LIST_KEYS or (e.modifiers() & ~Qt.KeypadModifier):
+            return False
+        if e.key() == Qt.Key_Escape and not self.table.selectionModel().hasSelection():
+            return False                                    # (nothing selected: Escape is the window's)
+        if e.type() == QEvent.ShortcutOverride:
+            e.accept()                                      # (the list's key, before a menu shortcut's)
+            return True
+        if e.key() == Qt.Key_Escape:
+            self.table.clearSelection()
+        elif self.running:
+            self.win.statusBar().showMessage(tr("Albums can be taken out of the list when the current "
+                                                "work ends."), 4000)
+        else:
+            self.remove_selected()
+        return True
+
     def eventFilter(self, obj, e):
         from PySide6.QtCore import QEvent
+        if hasattr(self, "table") and obj is self.table and e.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
+            if self.list_key(e):
+                return True
         if hasattr(self, "_fit_timer") and obj is self.table.viewport() and e.type() == QEvent.Resize:
             self._fit_timer.start()
         elif hasattr(self, "table") and obj is self.table.horizontalHeader().viewport():
@@ -559,7 +592,7 @@ class Overview(QWidget):
             again.setEnabled(not self.running or bool(self.looking))
             mine.append(again)
             # (the profile of the selected albums: theirs, or the one chosen above)
-            if len(self.model.albums) >= 2:
+            if self.model.albums:
                 pm = QMenu(tr("Profile"), self)
                 above = pm.addAction(tr("As Above ({0})").format(self.profile.currentText()))
                 above.triggered.connect(lambda _=False, c=chosen: self.set_album_profile(c, ""))
@@ -567,8 +600,8 @@ class Overview(QWidget):
                 for name in profile_names():
                     act = pm.addAction(name)
                     act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
-                pm.setEnabled((not self.running or bool(self.looking)) and
-                              any(a.get("status") != "done" for a in chosen))
+                pm.setEnabled(not self.running or (bool(self.looking) and   # (applied: filed again, after)
+                                                   any(a.get("status") != "done" for a in chosen)))
                 mine.append(pm.menuAction())
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
                                     self.apply_selected, any(can_apply(a) for a in chosen) and self.may_apply_now()),
@@ -610,12 +643,16 @@ class Overview(QWidget):
     def remove_selected(self):
         """Take the selected albums out of this preview (their folders and files are not touched)."""
         chosen = self.selected_albums()
-        if not chosen or self.running or not self.plan:
+        if not chosen or self.running:
             return
         ids = {id(a) for a in chosen}
-        self.plan["albums"] = [a for a in self.plan["albums"] if id(a) not in ids]
+        left = [a for a in self.model.albums if id(a) not in ids]
+        if self.plan:
+            self.plan["albums"] = left
+            self.model.set_plan(self.plan)
+        else:                                               # (all applied: the rows shown, no plan behind)
+            self.model.set_plan({"albums": left})
         self.removed |= {os.path.realpath(a["source_dir"]) for a in chosen}    # (dropped again: listed again)
-        self.model.set_plan(self.plan)
         self.summary.setText(tr("{0} taken out of this preview; nothing on disk changed.")
                              .format(plural(len(chosen), tr("album"), tr("albums"))))
         self.win.update_album_actions()
@@ -656,8 +693,8 @@ class Overview(QWidget):
             pass
 
     def busy(self, on):
-        """Preview and Apply are enabled by the window (on this page only); while work runs no
-        other folder can be chosen or dropped."""
+        """Preview and Apply are enabled by the window (on this page only); while work runs a
+        folder dropped or chosen waits (add_later), and joins the list when the work ends."""
         self.running = on
         self.show_ready()
         if hasattr(self, "model"):
@@ -678,6 +715,96 @@ class Overview(QWidget):
         self.btn_cancel.setEnabled(on)
         self.win.show_progress(on)
         self.win.update_album_actions()
+        if not on and getattr(self, "later", None):
+            # (after whatever ended has finished: a look-up queued meanwhile goes first)
+            QTimer.singleShot(0, self.add_waiting)
+
+    # ---- folders dropped while work runs ---------------------------------------------------
+    def add_later(self, paths) -> list:
+        """Folders or audio files dropped (or chosen) while work runs: held, and their albums
+        added to this list when the work ends; the albums here keep what was found for them.
+        Returns the paths taken (not those already in the list or waiting)."""
+        from . import manual_match
+        if self.worker is not None and getattr(self.worker, "cancelled", False):
+            self.win.statusBar().showMessage(tr("Cancelling; drop the folder again when it has stopped."), 5000)
+            return []
+        new, present = manual_match.new_paths(self, paths)
+        held = {os.path.realpath(str(p)) for p in self.later}
+        new = [p for p in new if os.path.realpath(str(p)) not in held]
+        self.later += new
+        if new:
+            msg = tr("{0}: added to the list when the current work ends.").format(manual_match._names(new))
+        elif present:
+            msg = tr("Already in the preview: {0}.").format(manual_match._names(present))
+        else:
+            msg = tr("Already waiting to be added.")
+        self.win.statusBar().showMessage(msg, 6000)
+        if new and self.looking:
+            self.summary.setText(self.lookup_words(self._lookup_i, self._lookup_name))
+        return new
+
+    def add_waiting(self):
+        """The work ended: the folders dropped meanwhile join the list under the albums there (each
+        read from its own folder: self.roots) and are looked up with the sources chosen above.
+        With no list left (all applied), the first is previewed as a drop."""
+        if self.running or not self.later:
+            return
+        from . import manual_match
+        paths, self.later = list(self.later), []
+        list_only, self._later_list_only = self._later_list_only or _list_first(), False
+        new, _ = manual_match.new_paths(self, paths)
+        if not new:
+            return
+        if not self.plan or not self.path:
+            manual_match.add_dropped(self.win, new)
+            return
+        try:
+            prof = load_profile(self.profile.currentText())
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("This profile cannot be used."), str(exc))
+            return
+        folders = list(dict.fromkeys(os.path.abspath(p if os.path.isdir(p) else os.path.dirname(p)) for p in new))
+
+        def work(_w):
+            import engine
+            out = []                                         # (each folder read on its own: no wider scan)
+            for f in folders:
+                out += [(f, x) for x in engine.Engine(prof).listing(f, meta=META_STORE).get("albums") or []]
+            return out
+        self.busy(True)
+        self.summary.setText(tr("Adding {0}…").format(manual_match._names(new)))
+        self.worker = start(self, work, lambda got: self.added(got, folders, list_only), self.progress, self.oops)
+
+    def added(self, got, folders, list_only):
+        """The dropped folders' albums, found: put under the albums already listed, then looked up."""
+        self.busy(False)
+        if not self.plan:                                    # (the list went meanwhile)
+            return
+        if self.plan.get("albums") is not self.model.albums:
+            self.model.set_plan(self.plan)
+        have = {self.album_key(a) for a in self.plan["albums"]}
+        fresh = []
+        for root, a in got:
+            k = self.album_key(a)
+            if k not in have:
+                have.add(k)
+                self.roots[k] = root
+                fresh.append(a)
+        extra = len({os.path.realpath(r) for r in self.roots.values()})
+        self.where.setText(tr("{0} (and {1} more)").format(self.path, plural(extra, tr("folder"), tr("folders"))))
+        if not fresh:
+            self.summary.setText(tr("No music found in the folders dropped."))
+            return
+        self.model.replace_rows([], fresh)
+        self.plan["listed"] = True
+        self.show_profile_column()
+        self.fit_status()
+        if list_only:
+            self.summary.setText(tr("{0} added, not looked up yet. Select them and press Look Up.").format(
+                plural(len(fresh), tr("album"), tr("albums"))))
+            self.show_ready()
+            return
+        self.look_up(self.sources.currentData() or "profile", fresh, queued=True)
 
     def actionable(self):
         return len(self.to_apply())
@@ -695,6 +822,7 @@ class Overview(QWidget):
         self.within = list(within or [])                     # (several folders dropped: only these)
         self.looked = {}                                     # (a new folder: nothing looked up yet)
         self.queue = {}                                      # (nor waiting to be)
+        self.roots = {}
         self.album_profiles, self.planned_with, self.headers = {}, {}, {}
         self.removed = set()                                 # (albums taken out of this list: their folders)
         self.plan_library = ""
@@ -866,9 +994,10 @@ class Overview(QWidget):
         ofs = {(a.get("split") or {}).get("of") for a in albums} - {None, ""}
         albums = list(albums) + [x for x in self.model.albums if (x.get("split") or {}).get("of") in ofs
                                  and not any(x is y for y in albums)]
-        again = []
+        again, done = [], []
         for a in albums:
-            if a.get("status") == "done":                  # (applied already: as it was done)
+            if a.get("status") == "done":                  # (applied already: filed again, from where it is)
+                done.append(a)
                 continue
             k = self.album_key(a)
             if name:
@@ -882,6 +1011,77 @@ class Overview(QWidget):
         self.show_profile_column()
         if again:
             self.look_up(self.sources.currentData() or "profile", again)
+        if done and not self.running:
+            self.refile(done, name)
+        elif done:
+            self.win.statusBar().showMessage(tr("Albums already applied can take another profile when this "
+                                                "look-up ends."), 6000)
+
+    def refile(self, done, name):
+        """Albums already applied, given another profile (NAME; "": the one chosen above): their
+        rows become the albums where Apply put them, looked up there with NAME, so Apply files
+        them as NAME does (a job of its own: Undo in Jobs). The tags written name the release
+        found, so it is found again."""
+        items = []
+        for a in done:
+            files = [fe["dst"] for fe in a.get("files") or [] if fe.get("dst") and os.path.isfile(fe["dst"])]
+            if files:
+                items.append((a, os.path.commonpath([os.path.dirname(f) for f in files]), files))
+        if not items:
+            self.win.statusBar().showMessage(tr("The applied files are no longer where Apply put them."), 6000)
+            return
+        try:
+            prof = load_profile(name or self.profile.currentText())
+        except pf.ProfileError as exc:
+            sheets.warning(self, tr("This profile cannot be used."), str(exc))
+            return
+
+        def work(_w):
+            import engine
+            out = []
+            for a, folder, files in items:
+                want = {os.path.realpath(f) for f in files}
+                found = [x for x in engine.Engine(prof).listing(folder, meta=META_STORE).get("albums") or []
+                         if want & {os.path.realpath(f) for f in x.get("album_files") or []}]
+                out.append((a, folder, found))
+            return out
+        self.busy(True)
+        self.summary.setText(tr("Reading {0} where Apply put them…").format(
+            plural(len(items), tr("album"), tr("albums"))))
+        self.worker = start(self, work, lambda got: self.refound(got, name), self.progress, self.oops)
+
+    def refound(self, got, name):
+        """The applied albums, found where they are now: in their rows' place, then looked up."""
+        self.busy(False)
+        if not self.plan:                                   # (all applied: the rows shown are the list)
+            if not self.model.albums:
+                return
+            self.plan = {"albums": self.model.albums, "listed": True, "provider_notes": {}}
+        if self.plan.get("albums") is not self.model.albums:
+            self.model.set_plan(self.plan)
+        fresh, missing = [], 0
+        for a, folder, found in got:
+            row = next((i for i, x in enumerate(self.model.albums) if x is a), None)
+            if row is None or not found:
+                missing += row is not None
+                continue
+            for x in found:
+                k = self.album_key(x)
+                self.roots[k] = folder
+                if name:
+                    self.album_profiles[k] = name
+                else:
+                    self.album_profiles.pop(k, None)
+            self.model.replace_rows([row], found)
+            fresh += found
+        if missing:
+            self.win.statusBar().showMessage(tr("{0} not found where Apply put them.").format(
+                plural(missing, tr("album"), tr("albums"))), 6000)
+        self.plan["listed"] = any(a.get("status") == "listed" for a in self.model.albums)
+        self.show_profile_column()
+        self.fit_status()
+        if fresh:
+            self.look_up(self.sources.currentData() or "profile", fresh, again=True, queued=True)
 
     def profile_clicked(self, idx):
         """A click on an album's profile opens its drop-down."""
@@ -890,9 +1090,10 @@ class Overview(QWidget):
             self.table.edit(idx)
 
     def show_profile_column(self):
-        """The Profile column: shown when the list holds two or more albums."""
+        """The Profile column: always shown, so the list looks the same for one album or many, and
+        each album says which profile it is filed with (one album too: chosen in its row or above)."""
         if hasattr(self, "table"):
-            self.table.setColumnHidden(PlanModel.PROFILE, len(self.model.albums) < 2)
+            self.table.setColumnHidden(PlanModel.PROFILE, False)
 
     def with_versions(self, albums) -> list:
         """ALBUMS and the other versions of a folder split per version (looked up together)."""
@@ -1121,18 +1322,24 @@ class Overview(QWidget):
         forced = dict(self.forced)                           # (the releases you chose: kept, as Preview)
         total = sum(len(ks) for ks in groups.values())
 
+        roots = dict(getattr(self, "roots", {}))
+
         def work(w):
             off = 0
             for name, ks in groups.items():
-                if w.cancelled:
-                    break
-                e = engine.Engine(profs[name], ocr=True if ocr else None)
-                e.edits = edits
-                e.force = forced
-                # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
-                off += plan_each(e, path, ks, lambda k, plan, name=name: w.partial.emit((name, k, plan)),
-                                 progress=lambda i, what, o=off: w.progress.emit(o + i, total, what),
-                                 cancel=lambda: w.cancelled, meta=META_STORE)
+                by_root = {}                                # (the folder each album is read from)
+                for k in ks:
+                    by_root.setdefault(roots.get(k) or path, []).append(k)
+                for where, kr in by_root.items():
+                    if w.cancelled:
+                        break
+                    e = engine.Engine(profs[name], ocr=True if ocr else None)
+                    e.edits = edits
+                    e.force = forced
+                    # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
+                    off += plan_each(e, where, kr, lambda k, plan, name=name: w.partial.emit((name, k, plan)),
+                                     progress=lambda i, what, o=off: w.progress.emit(o + i, total, what),
+                                     cancel=lambda: w.cancelled, meta=META_STORE)
             return off
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
         self._lookup_again = again                         # (Refresh: so is what Apply interrupts)
@@ -1201,6 +1408,9 @@ class Overview(QWidget):
         note = tr(" ({0} already looked up, skipped)").format(skipped) if skipped else ""
         queued = len(getattr(self, "queue", ()))
         then = tr(" Then {0} queued.").format(plural(queued, tr("album"), tr("albums"))) if queued else ""
+        later = len(getattr(self, "later", ()))
+        if later:
+            then += tr(" Then the {0} dropped.").format(plural(later, tr("folder"), tr("folders")))
         return head + tail + "…" + note + then + tr(" Nothing is changed while previewing.")
 
     def remember_looked(self, albums, stamp):
@@ -1290,6 +1500,7 @@ class Overview(QWidget):
     def lookup_failed(self, msg):
         self._apply_next, self._apply_only = False, None
         self.looking, self.queue = {}, {}                  # (nothing queued starts after a failure)
+        self._later_list_only = bool(self.later)           # (folders dropped meanwhile: listed, not looked up)
         self.oops(msg)
 
     def preview_release(self, folder, ref, files=None, only=False) -> bool:
@@ -1441,7 +1652,7 @@ class Overview(QWidget):
     def preview(self):
         if not self.path:
             return
-        if (getattr(self, "within", None) or self.album_profiles) and self.plan:
+        if (getattr(self, "within", None) or self.album_profiles or getattr(self, "roots", None)) and self.plan:
             # (several folders: just the albums listed; albums with a profile of their own: each with it)
             self.look_up(self.sources.currentData() or "profile", list(self.plan["albums"]))
             return
@@ -1757,6 +1968,10 @@ class Overview(QWidget):
             self._apply_next, self._apply_only = False, None   # (Cancel stops it all, Apply too)
             n = len(self.queue)
             self.queue = {}                                # (nor is what waited for it looked up)
+            if self.later:                                 # (nor are the folders dropped meanwhile added)
+                from .manual_match import _names
+                self.win.statusBar().showMessage(tr("Not added: {0}.").format(_names(self.later)), 6000)
+                self.later = []
             self.states = {k: v for k, v in self.states.items() if v != "waiting"}
             self.model.refresh_rows()
             self.summary.setText(tr("Cancelling after the current album…") + (tr(

@@ -357,21 +357,23 @@ class Main(QMainWindow):
 
     @staticmethod
     def row_text(view):
-        """A table's selected row: the folder behind it (Qt.UserRole of a folder cell), else its words."""
+        """A table's selected rows, a line each (as a folder's files copy): the folder behind each
+        (Qt.UserRole of a folder cell), else its words."""
         sel = view.selectionModel()
         if sel is None or not sel.hasSelection():
             return ""
-        idx = view.currentIndex()
-        if not idx.isValid():
-            return ""
         model = view.model()
-        cells = [model.index(idx.row(), c) for c in range(model.columnCount())
-                 if not view.isColumnHidden(c)]
-        for c in cells:
-            v = c.data(Qt.UserRole)
-            if isinstance(v, str) and os.path.isabs(v):
-                return v
-        return "\t".join(str(c.data(Qt.DisplayRole) or "") for c in cells).strip()
+        rows = sorted({i.row() for i in sel.selectedIndexes()})
+        if not rows:
+            idx = view.currentIndex()
+            rows = [idx.row()] if idx.isValid() else []
+        lines = []
+        for r in rows:
+            cells = [model.index(r, c) for c in range(model.columnCount()) if not view.isColumnHidden(c)]
+            path = next((c.data(Qt.UserRole) for c in cells
+                         if isinstance(c.data(Qt.UserRole), str) and os.path.isabs(c.data(Qt.UserRole))), None)
+            lines.append(path or "\t".join(str(c.data(Qt.DisplayRole) or "") for c in cells).strip())
+        return "\n".join(x for x in lines if x)
 
     def copy_row(self):
         w = QApplication.focusWidget()
@@ -558,7 +560,8 @@ class Main(QMainWindow):
             ov.show_ready()                                  # (ticked, highlighted, applied: the count now)
         page = self.stack.currentWidget()
         on_ov = ov is not None and page is ov
-        self.commands["add_folder"].setEnabled(idle)            # (no folder picker while a run goes on)
+        # (during a run too: the folder chosen joins the list when the run ends; not while cancelling)
+        self.commands["add_folder"].setEnabled(idle or not getattr(getattr(ov, "worker", None), "cancelled", False))
         # Preview and Apply act on the Overview preview: on another page they would act on
         # something not on screen (Watched folders has its own Apply for waiting plans)
         if ov is not None:
@@ -758,7 +761,13 @@ class Main(QMainWindow):
 
     def add_folder(self):
         self.go("Overview")
-        self.pages["Overview"].drop.choose()
+        ov = self.pages["Overview"]
+        if ov.running:                                       # (chosen during a run: added when it ends)
+            d = sheets.choose_folder(self, tr("Choose a music folder to add to the list"))
+            if d:
+                ov.add_later([d])
+            return
+        ov.drop.choose()
 
     def help(self):
         """The quick start: the copy that came with TagMender, else the one on GitHub."""
@@ -795,12 +804,10 @@ class Main(QMainWindow):
     BUSY = N_("Finish or cancel the current work first.")
 
     def dragEnterEvent(self, e):
-        """Music is taken anywhere in the window; during a run it is taken too, and the drop
-        says why nothing happens (a no-drop cursor alone gives no reason)."""
+        """Music is taken anywhere in the window, during a run too: then it joins the list
+        when the run ends (Overview.add_later)."""
         if self.music(e):
             e.acceptProposedAction()
-            if self.pages["Overview"].running:
-                self.statusBar().showMessage(tr(self.BUSY), 4000)
         else:
             e.ignore()
 
@@ -809,10 +816,7 @@ class Main(QMainWindow):
         if not urls:
             return
         e.acceptProposedAction()
-        if self.pages["Overview"].running:
-            self.statusBar().showMessage(tr(self.BUSY), 4000)
-        else:
-            self.dropped(urls)
+        self.dropped(urls)
 
     # ---- the sidebar, pages and search -------------------------------------
     def go(self, name):

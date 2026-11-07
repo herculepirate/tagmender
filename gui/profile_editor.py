@@ -79,7 +79,8 @@ CHOOSE = "__choose__"                                     # a pop-up's "Chooseâ€
 # ---- sections and groups (in reading order) ---------------------------------------------------
 SECTIONS = (
     ("general", N_("General"), ""),
-    ("source", N_("Source"), N_("Which files are read, and which are left alone.")),
+    ("source", N_("Files Read"), N_("Which audio files are read and which are left alone. The databases asked "
+                                    "are under Identification.")),
     ("identification", N_("Identification"), N_("How each album is matched to a release in the music databases.")),
     ("tags", N_("Tags"), N_("What is written into the files' tags.")),
     ("artwork", N_("Artwork"), N_("Front covers and artist photos: where they come from and where they go.")),

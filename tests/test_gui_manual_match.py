@@ -335,7 +335,10 @@ class Dropping(unittest.TestCase):
         busy = self.Page(None, running=True)
         win = self.Win(busy)
         self.assertEqual(mm.add_dropped(win, [str(self.tmp / "lib/A")]), [])
-        self.assertEqual((busy.set, win.bar.said), ([], [mm.BUSY]))
+        self.assertEqual((busy.set, win.bar.said), ([], [mm.BUSY]))   # (a page that cannot hold it)
+        busy.add_later = lambda paths: list(paths)                         # (the Overview: held for later)
+        self.assertEqual(mm.add_dropped(win, [str(self.tmp / "lib/A")]), [str(self.tmp / "lib/A")])
+        self.assertEqual(busy.set, [])
 
 
 # --------------------------------------------------------------------------

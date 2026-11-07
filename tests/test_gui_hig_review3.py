@@ -12,6 +12,8 @@ _os.environ.setdefault("TAGMENDER_TAGGER_INI", "/nonexistent")
 import sys
 import time
 import unittest
+import shutil
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -189,24 +191,32 @@ class Review3(unittest.TestCase):
         self.assertEqual(heads[2], "Report a problem?")
 
     # ---- busy -----------------------------------------------------------------------
-    def test_add_folder_is_off_and_a_drop_says_why_during_a_run(self):
+    def test_a_drop_during_a_run_waits_for_it_and_replaces_nothing(self):
         from PySide6.QtCore import QMimeData, QPoint, QUrl
         from PySide6.QtGui import QDropEvent
         ov = self.show_plan()
         was = ov.path
+        other = Path(tempfile.mkdtemp(prefix="tm-later-"))
         ov.busy(True)
         try:
-            self.assertFalse(self.win.act("add_folder").isEnabled())
+            self.assertTrue(self.win.act("add_folder").isEnabled())   # (a folder chosen waits as well)
             md = QMimeData()
-            md.setUrls([QUrl.fromLocalFile(str(self.tmp))])
-            with mock.patch.object(type(ov), "set_path") as set_path:
+            md.setUrls([QUrl.fromLocalFile(str(other))])
+            with mock.patch.object(type(ov), "set_path") as set_path, \
+                    mock.patch.object(type(ov), "add_waiting") as later:
                 self.win.dropEvent(QDropEvent(QPoint(5, 5), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier))
-            set_path.assert_not_called()
-            self.assertEqual(self.win.statusBar().currentMessage(), "Finish or cancel the current work first.")
-            self.assertEqual(ov.path, was)
+                set_path.assert_not_called()                          # (the preview is not replaced)
+                self.assertEqual(ov.later, [str(other)])
+                self.assertIn("added to the list when the current work ends",
+                              self.win.statusBar().currentMessage())
+                self.assertEqual(ov.path, was)
+                ov.busy(False)
+                settle(self.app)
+                later.assert_called_once()                            # (the run ended: now added)
         finally:
+            ov.later = []
             ov.busy(False)
-        self.assertTrue(self.win.act("add_folder").isEnabled())
+            shutil.rmtree(other, ignore_errors=True)
 
     # ---- the toolbar's profile pop-up -------------------------------------------
     def test_the_profile_pop_up_is_shown_on_overview_only(self):

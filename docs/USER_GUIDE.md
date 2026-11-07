@@ -521,11 +521,16 @@ inspector on the right (Ctrl+Alt+I). Drop a music folder on the window or choose
 pick a profile, Preview (Ctrl+P), then Apply (Ctrl+Return); Edit > Undo Last Job (Ctrl+Alt+Z) puts
 it back. Every command is in the menu bar, and Ctrl+/ lists the shortcuts.
 
-With two or more albums listed (several folders dropped at once, or a folder holding several
-albums), each row has a **Profile** drop-down: *As Above* uses the profile chosen in the
-toolbar, or choose another for that album (several selected: right-click › Profile). Look Up and
-Preview plan each album with its own profile, and Apply runs one job per profile (each undone
-on its own from Jobs). Changing an album's profile after it was looked up looks it up again.
+Each row has a **Profile** drop-down: *As Above* uses the profile chosen in the toolbar, or
+choose another for that album (several selected: right-click › Profile). Look Up and Preview
+plan each album with its own profile, and Apply runs one job per profile (each undone on its
+own from Jobs). Changing an album's profile after it was looked up looks it up again. After
+Apply, choosing another profile for a *Done* album reads it where Apply put it and looks it up
+with that profile; the next Apply files it that profile's way.
+
+Drop a folder (or use Add Folder) while a look-up or Apply runs and it waits: when the run ends,
+its albums join the list and are looked up. Select rows as in a folder (click, Shift, Ctrl, or
+drag a rectangle) and press Delete to take them out of the list; nothing on disk changes.
 Look Up while another look-up runs queues the albums; each row shows its result as soon as
 that album is matched (*Waiting…* and *Looking up…* on the others), and Apply shows the album
 and file it is writing.
@@ -575,7 +580,7 @@ choice for one album, after a sheet that says exactly what will be sent.
 ### Profile settings in the app
 
 Preferences › Profiles shows the chosen profile's settings as grouped lists, in the order the work
-happens: **Source** (the folders it covers, folders to skip, which audio files, a separate folder
+happens: **Files Read** (the folders it covers, folders to skip, which audio files, a separate folder
 for lossy files), **Identification** (the preferred database, which albums are tagged, the lookups
 used as evidence, preferred releases), **Tags**, **Artwork**, **Target** (what happens to files,
 the library folder, names with a live example of the folder and file name, pictures and logs
@@ -667,6 +672,9 @@ the plans waiting for approval (Show plan / Apply / Apply all / Dismiss) and wha
 recently. What it filed is remembered, so a library inside the watched folder is not taken
 for a new drop. An album nothing identifies stays where it was dropped (or goes to the
 profile's unresolved folder) and is looked at again after `retry.after_days`.
+**Check Now** under the folders looks in all of them at once instead of waiting for the next
+check; music still being copied waits until it has settled. Drag the line between the lists to
+give one more room.
 
 Folder access: the .deb, the AppImage and a clone run as you, and so does the background
 service (a systemd user service, not sandboxed): they read and write every folder you can,

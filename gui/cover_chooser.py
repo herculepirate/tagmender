@@ -6,10 +6,13 @@ The chosen image goes to the inspector as Choose Image… sends one: checked, st
 the album's new cover; nothing is written until the preview is applied, and Undo puts it back."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QPushButton,
-                               QVBoxLayout)
+import os
+import tempfile
+
+from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
+from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem,
+                               QPushButton, QVBoxLayout)
 
 from . import sheets
 from .i18n import tr
@@ -46,6 +49,8 @@ class CoverChooser(QDialog):
         self.grid.setAccessibleName(tr("Covers"))
         self.grid.itemDoubleClicked.connect(lambda _it: self.use())
         self.grid.currentItemChanged.connect(lambda *_: self._enable())
+        self.grid.setContextMenuPolicy(Qt.CustomContextMenu)            # (and the Menu key, Shift+F10)
+        self.grid.customContextMenuRequested.connect(self.menu)
         lay.addWidget(self.grid, 1)
         self.status = caption("", "hint")
         lay.addWidget(self.status)
@@ -194,6 +199,55 @@ class CoverChooser(QDialog):
         start(self, work, done, progress=lambda text: self.status.setText(str(text)), failed=self._failed)
 
     # ---- choosing -----------------------------------------------------------------------------
+    # ---- the picture's own menu ------------------------------------------------------------
+    def actions_for(self, c) -> list:
+        """(words, function) for a picture: yours - open it in its app, show its folder; one inside
+        the tracks - opened as a copy, and the track's folder; one found - its page in the browser."""
+        out = []
+        path, track, url = c.extra.get("path"), c.extra.get("file"), c.extra.get("url")
+        if path:
+            out.append((tr("Open in Default App"), lambda: self._open(path)))
+            out.append((tr("Show in Folder"), lambda: self._open(os.path.dirname(path))))
+        elif track:
+            out.append((tr("Open a Copy in Default App"), lambda: self._open_copy(c)))
+            out.append((tr("Show in Folder"), lambda: self._open(os.path.dirname(track))))
+        elif c.data:                                    # (not fetched here: no network on this thread)
+            out.append((tr("Open a Copy in Default App"), lambda: self._open_copy(c)))
+        if url:
+            out.append((tr("Open in Browser"), lambda: QDesktopServices.openUrl(QUrl(url))))
+            out.append((tr("Copy Image Link"), lambda: QApplication.clipboard().setText(url)))
+        return out
+
+    def menu(self, pos):
+        from .common import popup_menu
+        it = self.grid.itemAt(pos) or self.grid.currentItem()
+        if it is None:
+            return None
+        self.grid.setCurrentItem(it)
+        c = self.choices[it.data(Qt.UserRole)]
+        acts = [QAction(tr("Use This Cover"), self, triggered=self.use), None]
+        for words, fn in self.actions_for(c):
+            acts.append(QAction(words, self, triggered=lambda _=False, fn=fn: fn()))
+        return popup_menu(self, self.grid, pos if self.grid.itemAt(pos) else self.grid.visualItemRect(it).center(),
+                          acts)
+
+    @staticmethod
+    def _open(path):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _open_copy(self, c):
+        """A picture with no file of its own (inside the tracks, or found and already read): a copy
+        in the temporary folder, opened; the album's files are never handed to another app to change."""
+        data = c.data
+        if not data:
+            self.status.setText(tr("Could not get the picture."))
+            return
+        ext = ".png" if data[:8] == b"\x89PNG\r\n\x1a\n" else ".jpg"
+        fd, name = tempfile.mkstemp(prefix="tagmender-cover-", suffix=ext)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        self._open(name)
+
     def chosen(self):
         it = self.grid.currentItem()
         return self.choices[it.data(Qt.UserRole)] if it is not None else None

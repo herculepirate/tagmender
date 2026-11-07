@@ -95,6 +95,9 @@ SCORE_BANDS = {
 }
 
 
+CALM_BANDS = ("excellent", "good")          # (a light wash; the others strong and bold)
+
+
 def score_band(a):
     """"excellent", "good", "check" or "investigate" for album a, or None while it has no
     match to judge (not looked up yet, left alone by a rule)."""
@@ -144,9 +147,8 @@ class PlanModel(QAbstractTableModel):
         f = super().flags(idx)
         if idx.isValid() and idx.column() == 1 and can_apply(self.albums[idx.row()]):
             f |= Qt.ItemIsUserCheckable                  # (ticked: applied; unticked: left out)
-        if idx.isValid() and idx.column() == self.PROFILE and self.choose_profile and not self.locked and \
-                self.albums[idx.row()].get("status") != "done":
-            f |= Qt.ItemIsEditable
+        if idx.isValid() and idx.column() == self.PROFILE and self.choose_profile and not self.locked:
+            f |= Qt.ItemIsEditable                       # (an album applied too: filed again with it)
         return f
 
     def refresh_rows(self):
@@ -300,10 +302,16 @@ class PlanModel(QAbstractTableModel):
                                                            "probability.")
             from PySide6.QtGui import QBrush, QColor
             from .style import is_dark
-            if band in ("excellent", "good"):                # (a fit to trust: plain, so the doubtful stand out)
-                return None
+            # a fit to trust: a light wash; a doubtful one: twice as strong, and bold (below), so it
+            # stands out in a column of good ones by weight too, not by hue alone
+            calm = band in CALM_BANDS
             r, g, b = SCORE_BANDS[band][0]
-            return QBrush(QColor(r, g, b, 90 if is_dark() else 60))
+            return QBrush(QColor(r, g, b, (45 if is_dark() else 30) if calm else (100 if is_dark() else 70)))
+        if role == Qt.FontRole and c == 3 and score_band(a) in ("check", "investigate"):
+            from PySide6.QtGui import QFont
+            f = QFont()
+            f.setBold(True)
+            return f
         if role == Qt.AccessibleTextRole and c == 3 and score_band(a):
             # (the band in words too: its tint alone says nothing to a screen reader)
             return f"{self.data(idx, Qt.DisplayRole) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"

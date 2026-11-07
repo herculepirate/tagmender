@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSizePolicy, QSplitter,
                                QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
 
@@ -368,6 +368,7 @@ class Watched(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.table.horizontalHeader().resizeSection(0, 180)
         path_column(self.table, 0)                             # (a whole path: its start and its end in view)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)   # (its actions take one)
         self.table.activated.connect(lambda *_: self.change())  # (Return, or a double click)
         self.table.setMinimumHeight(TABLE_MIN)
         self._empty_folders = EmptyOverlay(self.table, "folder-plus", tr("No watched folders."),
@@ -386,6 +387,13 @@ class Watched(QWidget):
         row.addWidget(self.add_btn)
         row.addWidget(self.stop_btn)
         row.addStretch(1)
+        self.check_btn = QPushButton(tr("Check Now"))            # (not waiting for the next look)
+        self.check_btn.setFlat(True)
+        self.check_btn.setAutoDefault(False)
+        self.check_btn.setToolTip(tr("Look in every watched folder now instead of waiting for the next check. "
+                                     "Music still being copied waits until it has settled."))
+        self.check_btn.clicked.connect(self.check_now)
+        row.addWidget(self.check_btn)
         lay.addLayout(row)
         row = QHBoxLayout()
         self.live = QCheckBox(tr("Keep watching while TagMender is open"))
@@ -412,6 +420,7 @@ class Watched(QWidget):
         self.pending.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.pending.horizontalHeader().resizeSection(0, 260)
         path_column(self.pending, 1)
+        self.pending.setSelectionMode(QAbstractItemView.SingleSelection)   # (its actions take one)
         self._empty_pending = EmptyOverlay(self.pending, "circle-check", tr("Nothing is waiting for you."),
                                            tr("Albums a watched folder's profile asks you to approve wait here."))
         self.pending.activated.connect(lambda *_: self.show_plan())
@@ -452,6 +461,7 @@ class Watched(QWidget):
         self.recent = _table([N_("When"), N_("Album"), N_("Outcome"), N_("Match"), N_("Profile")], stretch=1,
                               fit=(0, 2, 3, 4))
         self.recent.activated.connect(lambda *_: self.review_recent())
+        self.recent.setSelectionMode(QAbstractItemView.SingleSelection)   # (its actions take one)
         self.recent.setContextMenuPolicy(Qt.CustomContextMenu)
         self.recent.customContextMenuRequested.connect(self.recent_menu)
         self.recent.setMinimumHeight(TABLE_MIN)
@@ -468,6 +478,14 @@ class Watched(QWidget):
         split.setStretchFactor(1, 2)
         split.setStretchFactor(2, 2)
         self.split = split
+        # the panes' heights, as you dragged them last (the handle between two lists)
+        sizes = _gui_prefs().get("watched_split")
+        if isinstance(sizes, list) and len(sizes) == split.count() and all(isinstance(x, int) for x in sizes):
+            split.setSizes(sizes)
+        split.splitterMoved.connect(lambda *_: _set_gui_pref("watched_split", split.sizes()))
+        for i in range(1, split.count()):
+            split.handle(i).setCursor(Qt.SplitVCursor)
+            split.handle(i).setToolTip(tr("Drag to give this list more room"))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.check_now)
         self.reload()

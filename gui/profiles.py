@@ -288,6 +288,7 @@ class Profiles(QWidget):
         self.rules.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.rules.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.rules.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.rules.setSelectionMode(QAbstractItemView.SingleSelection)   # (Edit, Toggle, Remove: one rule)
         self.rules.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.rules.verticalHeader().hide()
         self.rules.itemChanged.connect(self.toggle_rule)

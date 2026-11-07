@@ -296,16 +296,28 @@ class Attention(QWidget):
         it = self.table.item(r, 1) if r >= 0 else None
         return it.data(Qt.UserRole) if it else None
 
+    def folders(self) -> list:
+        """The folders of every album selected (as a folder's selection: Shift, Ctrl, a rectangle)."""
+        rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()}) or \
+            ([self.table.currentRow()] if self.table.currentRow() >= 0 else [])
+        out = [self.table.item(r, 1).data(Qt.UserRole) for r in rows if self.table.item(r, 1) is not None]
+        return list(dict.fromkeys(f for f in out if f))
+
     def retry(self):
-        f = self.folder()
-        if not f:
+        """Preview the albums selected again: one, as its folder; several, listed together. During a
+        run they join the list when it ends (Overview.add_later)."""
+        fs = self.folders()
+        if not fs:
             return
         ov = self.win.pages["Overview"]
-        if ov.running:                                      # (set_path says so too; stay on this page)
-            self.win.statusBar().showMessage(tr("Finish or cancel the current work first."), 4000)
+        if ov.running:
+            ov.add_later(fs)
             return
         self.win.go("Overview")
-        ov.set_path(f)
+        if len(fs) > 1 and hasattr(ov, "set_folders"):
+            ov.set_folders(fs)
+        else:
+            ov.set_path(fs[0])
 
     def show_report(self):
         """The report of the albums listed (gui.report): Partial ones need your decision, Unresolved
@@ -323,6 +335,5 @@ class Attention(QWidget):
             search_web({"source_dir": f})
 
     def open(self):
-        f = self.folder()
-        if f:
+        for f in self.folders()[:10]:                       # (a few windows, not hundreds)
             open_folder(f)

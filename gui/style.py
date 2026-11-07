@@ -331,6 +331,8 @@ def stylesheet():
     QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
     QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
     QSplitter#pageSplit::handle {{ background: transparent; }}
+    QSplitter#pageSplit::handle:vertical {{ border-top: 1px solid {line}; margin: 2px 0; }}
+    QSplitter#pageSplit::handle:vertical:hover {{ border-top: 2px solid {accent}; }}
     QSplitter#scriptSplit::handle {{ background: {line}; }}
     QToolTip {{ background: {base}; color: {ink}; border: 1px solid {line}; padding: 4px; }}
     QPushButton:focus, QComboBox:focus, QLineEdit:focus, QAbstractSpinBox:focus, QListWidget:focus,

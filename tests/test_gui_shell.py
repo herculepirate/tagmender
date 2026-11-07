@@ -488,10 +488,9 @@ class Shell(unittest.TestCase):
             md = QMimeData()
             md.setUrls([QUrl.fromLocalFile(str(self.tmp))])
             e = QDragEnterEvent(QPointF(10, 10).toPoint(), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier)
-            self.win.dragEnterEvent(e)                               # taken, and the drop says why nothing
-            self.assertTrue(e.isAccepted())                          # happens (not a bare no-drop cursor)
-            self.assertEqual(self.win.statusBar().currentMessage(), "Finish or cancel the current work first.")
-            self.assertFalse(self.win.act("add_folder").isEnabled())  # (Ctrl+O: no folder picker either)
+            self.win.dragEnterEvent(e)                               # taken: it joins the list when the
+            self.assertTrue(e.isAccepted())                          # run ends (Overview.add_later)
+            self.assertTrue(self.win.act("add_folder").isEnabled())   # (Ctrl+O: so does a folder chosen)
             self.assertFalse(self.win.search_box.acceptDrops())      # (a folder on the search field is no text)
         finally:
             ov.busy(False)

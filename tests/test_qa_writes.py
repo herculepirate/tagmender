@@ -114,6 +114,58 @@ class CustomTagNamesTheFormatCannotStore(Base):
         self.assertEqual(tagio.read(m).get("ключ"), ["v"])
 
 
+class JournalWriteFailsOnce(Base):
+    """A journal write that fails once (a full or flaky state disk) right after a step had
+    changed a file: the step was not yet among the album's steps to put back, so the album was
+    reported "put back as it was" while the file kept its new tags (in place: and undo, which
+    knew nothing of it, could never restore them), or a moved, copied or created file stayed
+    at the destination beside the original. The step counts as the album's before its journal
+    line now."""
+
+    def tree(self):
+        return {str(p): p.read_bytes() for r in (self.lib, self.dest) for p in r.rglob("*") if p.is_file()}
+
+    def plan(self, op):
+        from PIL import Image
+        front = self.tmp / "front.jpg"
+        Image.new("RGB", (60, 60), (1, 2, 3)).save(front)
+        kw = {} if op == "in_place" else {"operation": op, "destination": str(self.dest)}
+        return pl.build([self.proposal(artwork={"front": str(front), "source": "t"},
+                                       sidecars={str(self.f1): "[00:00.00]la"})],
+                        self.profile(artwork={"enabled": True, "embed_front": True, "files": True}, **kw))
+
+    def test_each_step_is_put_back(self):
+        from unittest import mock
+        import errno
+        real = executor.Journal.write
+        cases = [("in_place", ("file", "committed")), ("in_place", ("cover_file", None)),
+                 ("in_place", ("new_file", None)), ("move", ("file", "committed")),
+                 ("move", ("file", "source_removed")), ("move", ("companion", "committed")),
+                 ("move", ("dir_created", None)), ("copy", ("file", "committed")),
+                 ("copy", ("companion", "committed")), ("copy", ("new_file", None))]
+        for op, (ev_, state) in cases:
+            with self.subTest(op=op, ev=ev_, state=state):
+                self.tearDown()
+                self.setUp()
+                p = self.plan(op)
+                before = self.tree()
+                hit = []
+
+                def jw(j, **ev):
+                    if not hit and ev.get("ev") == ev_ and (state is None or ev.get("state") == state):
+                        hit.append(ev)
+                        raise OSError(errno.EIO, "journal write failed")
+                    return real(j, **ev)
+                with mock.patch.object(executor.Journal, "write", jw):
+                    res = executor.Executor(p).run()
+                self.assertTrue(hit)
+                self.assertEqual(res["counts"], {"failed": 1}, res)
+                self.assertIn("album put back as it was", res["albums"][0]["detail"])
+                self.assertEqual(self.tree(), before)
+                self.assertEqual([x for x in self.dest.rglob("*")], [])
+                self.assertEqual([x for x in self.lib.rglob(".tm-*")], [])
+
+
 @unittest.skipIf(os.geteuid() == 0, "root writes into read-only folders")
 class UndoFolderCannotBeMade(Base):
     """Undo of a move whose emptied source folder could not be made again (its parent

@@ -352,10 +352,10 @@ def _make_dirs(d: Path, roots, journal, album, created=None):
     for m in reversed(missing):
         journal.write(ev="dir_create_begin", album=album, path=str(m))
         m.mkdir()
+        if created is not None:
+            created.append(m)            # (before the journal says so: a failed write still removes it)
         _like_parent(m)
         journal.write(ev="dir_created", album=album, path=str(m))
-        if created is not None:
-            created.append(m)
 
 
 def _space_for(folder: Path, nbytes: int):
@@ -1418,10 +1418,12 @@ class Executor:
                     if exc.errno != errno.EXDEV:          # bind mounts / mergerfs of one disk: copy
                         raise
                 else:
+                    # (the step is the album's to put back first: a journal write failing
+                    # after it - a full or flaky state disk - must not leave it unrecorded)
+                    done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
                     self.journal.write(ev="file", album=i, idx=j, state="committed", moved_by="rename",
                                        tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
                     self.journal.write(ev="file", album=i, idx=j, state="source_removed")
-                    done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
                     return
             if op in ("copy", "move"):
                 _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
@@ -1479,10 +1481,10 @@ class Executor:
                     self.journal.write(ev="file", album=i, idx=j, state="place_failed")
                     stage.unlink(missing_ok=True)
                     raise
+            done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
             st = os.stat(dst)
             self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
                                mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
-            done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
             if op == "copy":
                 _record_copy(src, dst, self.job)
             if op == "move" and not case_only:
@@ -1554,10 +1556,10 @@ class Executor:
                         back.unlink(missing_ok=True)
                     raise StepError(f"{src.name} changed while it was being written; original kept")
                 pre = now
+        done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
         st = os.stat(dst)
         self.journal.write(ev="file", album=i, idx=j, state="committed", size=st.st_size,
                            mtime_ns=st.st_mtime_ns, tags_sig=_tags_sig(dst), pics_sig=_pics_sig(dst))
-        done_steps.append(("file", i, j, op, str(src), str(dst), backup, src_digest))
         if op == "relink_copy":
             _record_copy(src, dst, self.job)
         if op == "relink_move":
@@ -1604,10 +1606,10 @@ class Executor:
                 stage.unlink(missing_ok=True)
                 raise
             _fsync_dir(src.parent)
+            done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved), None))
             st = os.stat(src)
             self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
                                mtime_ns=st.st_mtime_ns)
-            done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved), None))
             return
         if op == "move" and _case_only(src, dst):         # "01 a.lrc" -> "01 A.lrc" on a share
             saved = None
@@ -1636,11 +1638,11 @@ class Executor:
                 if saved:
                     _restore_text(saved, src)
                 raise
+            done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved) if saved else None, None))
             st = os.stat(dst)
             self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
                                mtime_ns=st.st_mtime_ns)
             self.journal.write(ev="companion", album=i, idx=j, state="source_removed")
-            done_steps.append(("companion", i, j, op, str(src), str(dst), str(saved) if saved else None, None))
             return
         renamed = False
         if op == "move" and not ce.get("rewrite") and not src.is_symlink() and not os.path.lexists(dst) and \
@@ -1666,10 +1668,10 @@ class Executor:
                 else:
                     raise
             if renamed:
+                done_steps.append(("companion", i, j, op, str(src), str(dst), None, None))
                 st = os.stat(dst)
                 self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
                                    mtime_ns=st.st_mtime_ns, moved_by="rename")
-                done_steps.append(("companion", i, j, op, str(src), str(dst), None, None))
                 self.journal.write(ev="companion", album=i, idx=j, state="source_removed")
                 return
         _make_dirs(dst.parent, self.roots, self.journal, i, self.created)
@@ -1692,10 +1694,10 @@ class Executor:
             if stage.exists() and not (dst.exists() and _same_file(stage, dst)):
                 stage.unlink()
             raise
+        done_steps.append(("companion", i, j, op, str(src), str(dst), saved, None))
         st = os.stat(dst)
         self.journal.write(ev="companion", album=i, idx=j, state="committed", size=st.st_size,
                            mtime_ns=st.st_mtime_ns)
-        done_steps.append(("companion", i, j, op, str(src), str(dst), saved, None))
         if op == "move":
             _still(src, pre)
             os.unlink(src)
@@ -1738,9 +1740,9 @@ class Executor:
             stage.unlink(missing_ok=True)
             raise
         _place_staged(stage, dst)
+        done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
         st = os.stat(dst)
         self.journal.write(ev="cover_file", album=i, path=str(dst), size=st.st_size, mtime_ns=st.st_mtime_ns)
-        done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
 
     def new_file(self, i, sc, done_steps):
         """A new file beside the music - time-synced lyrics, the artist photo in the artist
@@ -1772,6 +1774,7 @@ class Executor:
             stage.unlink(missing_ok=True)
             raise
         _place_staged(stage, dst)
+        done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
         st = os.stat(dst)
         # (kind "artist": the artist folder's photo, shared by every album there - one changed
         # later never keeps an album from going back)
@@ -1780,7 +1783,6 @@ class Executor:
         if sc.get("kind") == "artist" and sc.get("download"):
             import artwork
             artwork.remember_written(dst, hashlib.sha256(data).hexdigest())     # (a download, not the user's)
-        done_steps.append(("cover", i, 0, "create", "", str(dst), None, None))
 
     def cleanup_dirs(self, i, a):
         """Remove source folders this album's move left empty (never a profile root). As

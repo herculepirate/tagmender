@@ -58,6 +58,18 @@ class DialogRefuses(DropBase):
         app.processEvents()
         errs, _notes = dlg.problems()
         self.assertFalse(any("library" in e for e in errs), errs)
+        # (a sheet with no window owns its folder check: let it end before the process does - in
+        # the app the window owns it and waits for it; else Qt crashed at exit)
+        import time
+        from gui.work import _alive
+        dlg.ask_timer.stop()
+        end = time.time() + 10
+        while time.time() < end and any(_alive(t) for t, _w in getattr(dlg, "_threads", [])):
+            app.processEvents()
+            time.sleep(0.01)
+        dlg.close()
+        dlg.deleteLater()
+        app.processEvents()
 
 
 if __name__ == "__main__":

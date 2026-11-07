@@ -49,7 +49,19 @@ def _partial(name: str) -> bool:
     return n.endswith(PARTIAL) or n.startswith(("~$", ".~lock.")) or bool(_RSYNC_TMP.match(name))
 
 
-def _changed_at(st) -> float:
+# A modification time further ahead of the clock than this says nothing of when the entry
+# changed (a copy keeping the times a device with a wrong clock or a FAT stick's time zone gave
+# it): its status-change time, which the system sets, stands for it then
+_FUTURE_SLACK = 60
+
+
+def _changed_at(st, now=None) -> float:
+    """When the entry last changed: its modification time, or, that being in the future, its
+    status-change time (else an album holding one such file would wait as "still changing"
+    until the clock reached it - hours or years)."""
+    now = time.time() if now is None else now
+    if st.st_mtime > now + _FUTURE_SLACK:
+        return min(st.st_ctime, now)
     return st.st_mtime
 PROVIDER_RETRY = [600, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600]
 # outcomes tried again later: a provider outage, an unresolved album, a Partial one (its album
@@ -220,7 +232,7 @@ def snapshot(folder: Path, files=None, deep=True):
     if files is not None:                # (anything new in the folder is "still changing" too)
         if deep:                          # (an album folder; a watched root's time is everyone's)
             try:
-                newest = os.stat(folder).st_mtime
+                newest = _changed_at(os.stat(folder))
             except OSError:
                 pass
         try:

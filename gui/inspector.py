@@ -1021,7 +1021,9 @@ class EvidenceView(QScrollArea):
         self.set("What matched", "\n".join(f"• {x}" for x in (ident.get("evidence") or [])))
         doubts = []
         codes, words = reasons.parse(ident.get("reason", "") or "")
-        codes = list(dict.fromkeys(list(codes) + list(ident.get("reason_codes") or [])))
+        stored = [c for c in ident.get("reason_codes") or []
+                  if not (c == "low_similarity" and "low_confidence" in codes)]   # (a plan before 0.8.15)
+        codes = list(dict.fromkeys(list(codes) + stored))
         if ident.get("status") == "unresolved" or ident.get("tier") in ("partial", "album_only"):
             doubts += [reasons.describe(c).capitalize() + "." for c in codes]
             if words and not codes:

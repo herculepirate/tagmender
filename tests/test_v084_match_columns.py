@@ -119,6 +119,40 @@ class V084MatchColumns(tg.Gui):
         shown.assert_not_called()
         self.assertIn("no longer waiting", self.win.statusBar().currentMessage())
 
+    def test_process_again_on_an_undone_album(self):
+        # an album you undid stays in the watched folder for good unless you ask for it again
+        # (Mekong Delta - The Principle Of Doubt, undone after a wrong disc order in 0.8.13)
+        import tempfile
+        from gui import sheets
+        d = tempfile.mkdtemp()
+        w = self.make_recent([(d, "Auto", "undone", 1, "", {}), ("/m/gone", "Auto", "done", 2, "", {}),
+                              ("/m/B", "Auto", "planned", 3, "", {})])
+        self.assertIn("Process Again", w.recent.item(0, 2).toolTip())
+        w.recent.selectRow(0)
+        self.assertEqual(w.recent_album(), (d, "undone"))
+        with mock.patch.object(sheets, "question", return_value=True) as asked, \
+                mock.patch("watcher.forget", return_value=1) as forget, \
+                mock.patch.object(w, "check_now") as check:
+            w.process_album_again()
+        asked.assert_called_once()                                  # (it was undone by you: asked first)
+        forget.assert_called_once_with(d, undone=True)
+        check.assert_called_once()
+        with mock.patch.object(sheets, "question", return_value=False), \
+                mock.patch("watcher.forget") as forget:
+            w.process_album_again()
+        forget.assert_not_called()                                  # (said no)
+        # the menu: Process Again where the folder is still there; Review… for a waiting one
+        shown = {}
+        with mock.patch("gui.watched.popup_menu", lambda _s, _t, _p, acts: shown.update(
+                {r: [a.text() for a in acts]})):
+            for r in range(3):
+                w.recent.selectRow(r)
+                shown[r] = None
+                w.recent_menu(None)
+        self.assertEqual(shown[0], ["Process Again"])
+        self.assertIsNone(shown[1])                                  # (moved away: nothing to process)
+        self.assertEqual(shown[2], ["Review…"])
+
     def test_overview_shot(self):
         self.wide()
         ov = self.win.pages["Overview"]

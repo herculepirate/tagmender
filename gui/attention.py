@@ -25,7 +25,8 @@ SHORT = {"no_candidate": N_("Not found"), "incomplete_album": N_("Track count di
          "web_unavailable": N_("Web source unreachable"),
          "rate_limited": N_("Slowed down"), "missing_credentials": N_("Key missing"),
          "unsupported_format": N_("Format not writable"), "duration_mismatch": N_("Lengths differ"),
-         "low_similarity": N_("Names differ"), "missing_collaborator": N_("Credit incomplete"),
+         "low_similarity": N_("Names differ"), "low_confidence": N_("Not sure enough"),
+         "missing_collaborator": N_("Credit incomplete"),
          "write_failed": N_("Not written"),
          "partially_tagged": N_("Partly tagged"), "other": N_("Not identified")}
 

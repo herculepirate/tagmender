@@ -581,13 +581,47 @@ class Watched(QWidget):
                 return
         self.win.statusBar().showMessage(tr("{0} is no longer waiting for approval.").format(Path(f).name), 6000)
 
+    def recent_album(self):
+        """(folder, status) of the selected Recently row, or ("", "")."""
+        r = self.recent.currentRow()
+        it = self.recent.item(r, 2) if r >= 0 else None
+        f = self.recent.item(r, 1) if it else None
+        if not (it and f and f.data(Qt.UserRole)):
+            return "", ""
+        return f.data(Qt.UserRole), it.data(Qt.UserRole) or ""
+
     def recent_menu(self, pos):
-        if not self.recent_folder():
-            return
         from PySide6.QtGui import QAction
-        a = QAction(tr("Review…"), self)
-        a.triggered.connect(self.review_recent)
-        popup_menu(self, self.recent, pos, [a])
+        acts = []
+        if self.recent_folder():
+            a = QAction(tr("Review…"), self)
+            a.triggered.connect(self.review_recent)
+            acts.append(a)
+        folder, status = self.recent_album()
+        if folder and status != "planned" and Path(folder).exists():
+            a = QAction(tr("Process Again"), self)
+            a.triggered.connect(self.process_album_again)
+            a.setEnabled(not self.busy)
+            acts.append(a)
+        if acts:
+            popup_menu(self, self.recent, pos, acts)
+
+    def process_album_again(self):
+        """Process Again on a Recently row: that album is identified and handled again at the
+        next check (now), as its profile says now - one you undid too (you asked for it)."""
+        folder, status = self.recent_album()
+        if not folder or self.busy:
+            return
+        name = Path(folder).name or folder
+        if status == "undone" and not sheets.question(
+                self, tr("Process {0} again?").format(name),
+                tr("You undid what the watcher did with this album. It is identified again and handled as "
+                   "its profile says now; this too can be undone from Jobs."), action=tr("Process Again")):
+            return
+        import watcher
+        n = watcher.forget(folder, undone=True)
+        self.say(tr("{0} forgotten; checking now…").format(plural(n, tr("album record"), tr("album records"))))
+        self.check_now()
 
     def menu_for(self, table, keys):
         """The table's context menu: the same commands as the Tools menu (the Menu key too)."""
@@ -652,6 +686,10 @@ class Watched(QWidget):
                 self.recent.setItem(r, 1, folder_item(f, album=True, root=watch_root(f, roots)))
                 word, colour, icon = watch_word(st)
                 cell = status_cell(QTableWidgetItem(), colour, word, icon)
+                cell.setData(Qt.UserRole, st)                # (the status itself: Process Again asks it)
+                if st == "undone":
+                    cell.setToolTip(tr("You undid this job: the watcher leaves the album as it is. "
+                                       "Right-click › Process Again to have it handled again."))
                 if st == "planned":                          # (waiting for you: it stands out, and can be reviewed)
                     ft = cell.font()
                     ft.setBold(True)
@@ -733,18 +771,18 @@ class Watched(QWidget):
 
     def process_again(self):
         """Process Folder Again: every album in the selected folder is looked at again at the next
-        check (now), as its profile says now - one already filed or tagged where it was too. An
-        album you undid, or one a rule ignores, stays as it is."""
+        check (now), as its profile says now - one already filed or tagged where it was too, and
+        one you undid (you asked for it by hand). One a rule ignores stays as it is."""
         folder, profile = self.selected()
         if not folder or self.busy:
             return
         if not sheets.question(self, tr("Process the albums in {0} again?").format(Path(folder).name or folder),
-                               tr("Each album there is identified again and handled as “{0}” says now. Albums you "
-                                  "undid, and albums a rule ignores, are left as they are.").format(profile),
+                               tr("Each album there is identified again and handled as “{0}” says now, albums "
+                                  "you undid too. Albums a rule ignores are left as they are.").format(profile),
                                action=tr("Process Again")):
             return
         import watcher
-        n = watcher.forget(folder)
+        n = watcher.forget(folder, undone=True)
         self.say(tr("{0} forgotten; checking now…").format(plural(n, tr("album record"), tr("album records"))))
         self.check_now()
 

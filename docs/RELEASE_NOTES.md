@@ -1,5 +1,21 @@
 # Release notes
 
+## 0.8.15
+
+**Watched folders**
+- Process Folder Again now also handles albums you undid. Before, an album whose job you
+  undid was never looked at again: it stayed in the watched folder for good, even once a newer
+  version would identify it correctly. (The watcher still never redoes an undone album by
+  itself; only when you ask.)
+- Right-click an album under Recently › Process Again: that one album is identified and
+  handled again at once. An album you undid asks first, and its row says how to bring it back.
+
+**Report**
+- An album held back because no release fits surely enough (confidence under the threshold)
+  now says so: "no release fits surely enough". Before, it said "the artist or title agree only
+  partly", even when both agreed in full. Albums looked at before are shown the right way too.
+  Needs attention calls it "Not sure enough".
+
 ## 0.8.14
 
 **Matching**

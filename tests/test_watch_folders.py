@@ -296,7 +296,31 @@ class Drop(DropBase):
             db.close()
             self.assertEqual(watcher.forget(self.inbox), 0)              # (an undo is kept)
             self.assertEqual(watcher.forget(str(self.inbox) + "-other"), 0)
+            # Process Again by hand: the album you undid is handled again (else it stays in the
+            # watched folder for good - The Principle Of Doubt, undone after a wrong disc order)
+            self.assertEqual(watcher.forget(str(self.inbox) + "-other", undone=True), 0)
+            self.assertEqual(watcher.forget(d, undone=True), 1)          # (one album's folder)
+            self.assertEqual(list(w.tick().values()), ["unchanged"])
         self.assertTrue(d.exists())
+
+    def test_process_again_by_hand_moves_an_undone_album_into_the_library(self):
+        prof = self.profile()                                            # (a move profile)
+        d = self.drop("Band X", "Album X")
+        later = time.time() + 7200
+        with mock.patch.object(watcher.time, "time", return_value=later):
+            db = watcher._db()                                           # (the user undid its job)
+            db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
+                       (watcher.album_key(d, self.audio_in(d)), prof.name,
+                        watcher.shape(d, sorted(self.audio_in(d))), "undone", 0, 0, later, ""))
+            db.commit()
+            db.close()
+            w = watcher.Watcher([prof], once=True)
+            self.assertEqual(w.tick(), {})
+            self.assertTrue(d.exists())
+            self.assertEqual(watcher.forget(self.inbox, undone=True), 1)
+            self.assertEqual(list(w.tick().values()), ["done"])
+        self.assertFalse(d.exists())
+        self.assertEqual(len(self.audio_in(self.dest)), 3)
 
 
 class Cli(DropBase):

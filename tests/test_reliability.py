@@ -74,6 +74,23 @@ class Reasons(unittest.TestCase):
         self.assertEqual(reasons.parse("review: track count differs")[0], ["incomplete_album"])
         self.assertEqual(reasons.encode(codes=["rate_limited"]), "rate_limited")
 
+    def test_low_confidence_is_not_called_names_that_differ(self):
+        # Mekong Delta - Visions Fugitives: artist 1.00, title 1.00, 6 of 10 lengths, confidence
+        # 88.5 < 90 - the report said "the artist or title agree only partly"
+        self.assertEqual(reasons.classify("review: confidence 88.5 < 90.0"), ["low_confidence"])
+        self.assertEqual(reasons.classify("title similarity 0.61 < 0.85"), ["low_similarity"])
+        self.assertEqual(reasons.classify("artist similarity 0.61 < 0.85"), ["ambiguous_artist"])
+        # (a plan or tag written before: read as what it was)
+        self.assertEqual(reasons.parse("low_similarity: review: confidence 88.5 < 90.0"),
+                         (["low_confidence"], "review: confidence 88.5 < 90.0"))
+        both = "low_similarity: review: title similarity 0.6 < 0.85; confidence 70 < 90"
+        self.assertEqual(reasons.parse(both)[0], ["low_similarity"])
+        import report
+        a = {"source_dir": "/x", "identification": {
+            "status": "unresolved", "reason": "low_similarity: review: confidence 88.5 < 90.0"}}
+        self.assertEqual(report._reason_words(a), "no release fits surely enough (review: confidence 88.5 < 90.0)")
+        self.assertIn("low_confidence", reasons.CODES)
+
     def test_unknown_prefix_is_not_taken_for_codes(self):
         self.assertTrue(reasons.encode("review: x").startswith("other: review: x"))
         self.assertLessEqual(len(reasons.encode("x" * 1000)), reasons.MAX_LEN)

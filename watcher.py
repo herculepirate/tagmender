@@ -705,15 +705,17 @@ def next_on_clock(interval, now=None) -> float:
     return at if at > now else now + iv                 # (a wall time that does not exist: later)
 
 
-def forget(root) -> int:
-    """Forget what was done with the albums under ROOT (a watched folder), so the next pass
-    looks at each again - as its profile says now. An album you undid stays undone (not
-    done again by itself). Returns how many records were forgotten."""
+def forget(root, undone=False) -> int:
+    """Forget what was done with the albums under ROOT (a watched folder, or one album's
+    folder in it), so the next pass looks at each again - as its profile says now. An album
+    you undid stays undone (not done again by itself) unless UNDONE: you asked for it by hand
+    (Process Again), and an album undone stays in the watched folder for good otherwise.
+    Returns how many records were forgotten."""
     root = planmod.db_text(os.path.abspath(os.path.expanduser(str(root)))).rstrip("/")
     db = _db()
     try:
         rows = [r[0] for r in db.execute("SELECT folder, status FROM processed").fetchall()
-                if r[1] != "undone" and (r[0] == root or r[0].startswith(root + "/") or r[0].startswith(root + "#"))]
+                if (undone or r[1] != "undone") and (r[0] == root or r[0].startswith(root + "/") or r[0].startswith(root + "#"))]
         db.executemany("DELETE FROM processed WHERE folder=?", [(f,) for f in rows])
         db.executemany("DELETE FROM processed_match WHERE folder=?", [(f,) for f in rows])
         db.commit()

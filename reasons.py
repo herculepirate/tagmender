@@ -34,6 +34,7 @@ CODES = {
     "incomplete_album": "the track count differs from every candidate (missing or extra tracks)",
     "duration_mismatch": "track lengths do not agree closely enough",
     "low_similarity": "artist or title agree only partly",
+    "low_confidence": "no release fits surely enough (the confidence is under the threshold)",
     "missing_collaborator": "the database credit leaves out an artist your tags name",
     "write_failed": "the tags could not be written or verified",
     "partially_tagged": "some files already carry IDs from another release",
@@ -47,7 +48,8 @@ _PATTERNS = [
     (r"durations? (agree|unavailable)|lengths? (differ|disagree)", "duration_mismatch"),
     (r"credit (lacks|differs)|missing collaborator", "missing_collaborator"),
     (r"artist similarity|same-?name artist|ambiguous artist", "ambiguous_artist"),
-    (r"title similarity|confidence \d", "low_similarity"),
+    (r"title similarity", "low_similarity"),
+    (r"confidence \d", "low_confidence"),
     (r"folder name says|barcode differs|catalogue number .* not|contradict|conflict", "conflicting_sources"),
     (r"partially tagged", "partially_tagged"),
     (r"not on musicbrainz,? (or )?discogs|no candidates? found|^nomatch|not found", "no_candidate"),
@@ -90,7 +92,13 @@ def parse(value: str) -> tuple[list[str], str]:
     value = str(value or "").strip()
     m = _CODE_PREFIX.match(value)
     if m and all(c in CODES for c in m.group(1).split(",")):
-        return m.group(1).split(","), value[m.end():]
+        codes, words = m.group(1).split(","), value[m.end():]
+        # (before 0.8.15 a confidence under the threshold was written as low_similarity,
+        # "artist or title agree only partly", although both may agree in full)
+        if "low_similarity" in codes and re.search(r"confidence \d", words.casefold()) \
+                and not re.search(r"similarity", words.casefold()):
+            codes = list(dict.fromkeys("low_confidence" if c == "low_similarity" else c for c in codes))
+        return codes, words
     return (classify(value) if value else []), value
 
 

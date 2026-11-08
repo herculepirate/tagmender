@@ -744,7 +744,7 @@ class InspectorEditing(Base):
                 self.ov.set_path(str(other))                             # (Discard Edits: forgotten)
             self.idle()
         self.assertEqual(self.insp.edits, {})
-        self.assertEqual(seen[-1], {})
+        self.assertEqual(self.ov.win.inspector.edits_for_preview(), {})
 
     def test_undo_edit_takes_back_the_last_edit(self):
         a = self.win.act("undo_edit")

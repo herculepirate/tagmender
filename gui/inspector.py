@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QCompleter, QDialog
                                QVBoxLayout, QWidget)
 
 from . import icons, sheets, style
-from .common import (album_words, label_for, left_header, plural, planmod, popup_menu, reasons, reduced_motion,
-                     say)
+from .common import (album_words, label_for, left_header, music_paths, plural, planmod, popup_menu, reasons,
+                     reduced_motion, say)
 from .i18n import N_, tr
 from .tagnames import NAMES
 from .tagnames import display as tag_name
@@ -935,12 +935,17 @@ class ArtworkView(QWidget):
         return "", ""
 
     def dragEnterEvent(self, e):
-        if self.editable() and any(self._dropped(e.mimeData())):
-            e.acceptProposedAction()
+        if music_paths(e.mimeData()) or (self.editable() and any(self._dropped(e.mimeData()))):
+            e.acceptProposedAction()                     # (music here is for the window: a drop anywhere)
         else:
             e.ignore()
 
     def dropEvent(self, e):
+        music = music_paths(e.mimeData())
+        if music and hasattr(self.window(), "dropped"):
+            e.acceptProposedAction()
+            self.window().dropped(music)
+            return
         path, url = self._dropped(e.mimeData())
         if not self.editable() or not (path or url):
             return e.ignore()

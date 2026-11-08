@@ -137,8 +137,8 @@ class AppKeepsMetadata(te.Base):
         src = inspect.getsource(overview)
         self.assertIsInstance(overview.META_STORE, dict)
         # List first, Look Up, Preview; 0.8.11: folders dropped during a run, an applied album re-filed;
-        # 0.8.14: a folder dropped during Apply, read at once
-        self.assertEqual(src.count("meta=META_STORE"), 6)
+        # 0.8.14: a folder dropped during Apply, read at once (0.8.16: both through read_folders, which merges)
+        self.assertEqual(src.count("meta=META_STORE"), 4)
 
     def test_a_file_with_a_large_picture_is_not_kept(self):
         d = self.lib / "Pics"

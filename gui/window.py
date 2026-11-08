@@ -764,10 +764,10 @@ class Main(QMainWindow):
     def add_folder(self):
         self.go("Overview")
         ov = self.pages["Overview"]
-        if ov.running:                                       # (chosen during a run: added when it ends)
+        if ov.running or (ov.plan and ov.path):              # (a list or a run: joins it, as a drop does)
             d = sheets.choose_folder(self, tr("Choose a music folder to add to the list"))
             if d:
-                ov.add_later([d])
+                self.dropped([d])
             return
         ov.drop.choose()
 

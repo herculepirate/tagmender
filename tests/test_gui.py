@@ -101,7 +101,7 @@ class Gui(te.Base):
         ov.refresh_profiles()
         ov.profile.setCurrentText("Auto")
         ov.set_path(str(self.lib))
-        self.assertTrue(wait(lambda: ov.plan is not None, self.app), ov.summary.text())
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.running, self.app), ov.summary.text())
         ov.table.selectRow(0)
         self.app.processEvents()
         a = ov.selected()
@@ -158,7 +158,7 @@ class Gui(te.Base):
         self.shot("1-empty")
         before = (self.d2 / "01.flac").read_bytes()
         ov.set_path(str(self.lib))
-        self.assertTrue(wait(lambda: ov.plan is not None, self.app), ov.summary.text())
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.running, self.app), ov.summary.text())
         self.assertTrue(ov.results.isVisible())
         rows = {ov.model.data(ov.model.index(i, 1)).split(" — ")[0]: ov.model.data(ov.model.index(i, 0))
                 for i in range(ov.model.rowCount())}

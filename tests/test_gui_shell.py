@@ -1503,9 +1503,11 @@ class Shell(unittest.TestCase):
         other = Path(tempfile.mkdtemp(prefix="tm-drop-", dir=self.tmp.parent))
         try:
             md.setUrls([QUrl.fromLocalFile(str(other))])
-            with mock.patch.object(type(ov), "set_path") as set_path:
+            with mock.patch.object(type(ov), "set_path") as set_path, \
+                    mock.patch.object(type(ov), "add_to_list") as add_to_list:
                 self.win.dropEvent(QDropEvent(QPoint(5, 5), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier))
-            set_path.assert_called_once_with(str(other))
+            set_path.assert_not_called()                                     # (never replaces the list)
+            add_to_list.assert_called_once_with([str(other)])
         finally:
             shutil.rmtree(other, ignore_errors=True)
 

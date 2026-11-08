@@ -99,6 +99,12 @@ class Proposal:
     # disc_id, link, scan_search, barcode_lookup or fingerprint (None: not known)
     scans: dict | None = None
     via: str | None = None
+    # what lets an album be filed below organize_min_confidence (_files_on_evidence):
+    # all_lengths: the release holds the files' tracks and every length agrees (exact tier);
+    # no_lengths_tie: artist, title and tracks match, only entries of this album tie, and they
+    # list no lengths to score (album_only tier)
+    all_lengths: bool = False
+    no_lengths_tie: bool = False
 
 
 def _fp(path):
@@ -150,6 +156,22 @@ def _organize_floor_words(profile) -> str:
     used = _threshold(profile, "organize_min_confidence")
     raised = used > float(profile["thresholds"]["organize_min_confidence"])
     return f"{used:g}" + (" (Extra-careful matching)" if raised else "")
+
+
+def _files_on_evidence(prop, profile, conf) -> str:
+    """Why an album below organize_min_confidence is filed all the same, or "": the score is a
+    heuristic, and what is known about the copy can outweigh it. Never with Extra-Careful
+    Matching (it asks for more proof, not less)."""
+    if (profile.get("matching") or {}).get("extra_careful"):
+        return ""
+    tier = tier_of(prop)
+    if tier == "album_only" and getattr(prop, "no_lengths_tie", False):
+        return "artist, title and tracks match, and only entries of this album tie (they list no track lengths)"
+    if tier == "exact" and getattr(prop, "all_lengths", False) and \
+            conf >= max(90.0, _threshold(profile, "auto_min_confidence")) and prop.margin is not None and \
+            prop.margin >= _threshold(profile, "auto_min_margin"):
+        return "every track length agrees and no other release is close"
+    return ""
 
 
 def diff_tags(before: dict, target: dict, profile, confidence: float, extra_removals=()):
@@ -1182,6 +1204,14 @@ class Planner:
         conf = float(prop.confidence or 0)
         organize_ok = identified and not partial and conf >= _threshold(p, "organize_min_confidence")
         op = p["operation"]
+        evidence = _files_on_evidence(prop, p, conf) if identified and not partial and not organize_ok else ""
+        if evidence:
+            organize_ok = True
+            if op in ("copy", "move"):
+                entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
+                                      f"{_organize_floor_words(p)}; filed because {evidence}")
+            if getattr(prop, "no_lengths_tie", False):      # (its album tags are written, not only added)
+                conf = max(conf, _threshold(p, "replace_min_confidence"))
         # one version of an album found in one folder with another (engine._versions_split,
         # _discs_split): into a folder of its own
         vsplit = getattr(prop, "split", None) if identified else None
@@ -1493,7 +1523,8 @@ class Planner:
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
             import levels as _lv
-            if identified and conf >= _threshold(p, "replace_min_confidence") and _lv.level(p) != "basic":
+            if identified and float(prop.confidence or 0) >= _threshold(p, "replace_min_confidence") \
+                    and _lv.level(p) != "basic":
                 join_ = tagio.v23_join(f, fmt) if cust_set else None
                 for k_, v_ in cust_set.items():
                     if join_ and len(_vals(v_)) > 1:         # (an ID3v2.3 TXXX: its values joined, as written)

@@ -97,6 +97,19 @@ LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicB
 META_STORE: dict = {}
 
 
+def read_folders(prof, folders) -> list:
+    """[(folder, album)] of FOLDERS, each read on its own (no wider scan). What they remember goes
+    into META_STORE beside the rest: a listing given META_STORE itself would forget every album
+    outside its folder, and the albums of the list would be opened again."""
+    import engine
+    out = []
+    for f in folders:
+        seen = {}
+        out += [(f, x) for x in engine.Engine(prof).listing(f, meta=seen).get("albums") or []]
+        META_STORE.update(seen)
+    return out
+
+
 # what is being done with an album now, in its Status column (the page's, never the plan's)
 ROW_STATES = {"waiting": N_("Waiting…"), "looking": N_("Looking up…"), "applying": N_("Applying…")}
 
@@ -785,9 +798,11 @@ class Overview(QWidget):
         new, present = manual_match.new_paths(self, paths)
         held = {os.path.realpath(str(p)) for p in self.later + self._reading}
         new = [p for p in new if os.path.realpath(str(p)) not in held]
-        if new and getattr(self, "_applying", False) and not self.touches_apply(new) and self.read_now(new):
+        applying = getattr(self, "_applying", False)
+        if new and (self.looking or (applying and not self.touches_apply(new))) and self.read_now(new):
             msg = (tr("{0}: added to the list; not looked up yet.") if self._later_list_only or _list_first()
-                   else tr("{0}: added to the list; looked up when Apply ends.")).format(manual_match._names(new))
+                   else tr("{0}: added to the list; looked up when Apply ends.") if applying
+                   else tr("{0}: added to the list; looked up next.")).format(manual_match._names(new))
             self.win.statusBar().showMessage(msg, 6000)
             return new
         self.later += new
@@ -802,11 +817,25 @@ class Overview(QWidget):
             self.summary.setText(self.lookup_words(self._lookup_i, self._lookup_name))
         return new
 
+    def add_to_list(self, paths):
+        """Folders or audio files dropped or chosen with a list showing and nothing running: their
+        albums join the list; the albums here keep what was found for them."""
+        reading = {os.path.realpath(str(p)) for p in self._reading}    # (dropped twice: read once)
+        self.later += [p for p in paths if p not in self.later and os.path.realpath(str(p)) not in reading]
+        self.add_waiting()
+
     def add_waiting(self):
         """The work ended: the folders dropped meanwhile join the list under the albums there (each
         read from its own folder: self.roots) and are looked up with the sources chosen above.
-        With no list left (all applied), the first is previewed as a drop."""
-        if self.running or not self.later:
+        With no list left (all applied), the first is previewed as a drop. A look-up has already
+        started (the one the folder was listed for): read now, and queued behind it."""
+        if not self.later:
+            return
+        if self.running:
+            if self.looking and self.plan and self.path:
+                paths, self.later = list(self.later), []
+                if not self.read_now(paths):
+                    self.later = paths + self.later
             return
         from . import manual_match
         paths, self.later = list(self.later), []
@@ -824,15 +853,10 @@ class Overview(QWidget):
             return
         folders = list(dict.fromkeys(os.path.abspath(p if os.path.isdir(p) else os.path.dirname(p)) for p in new))
 
-        def work(_w):
-            import engine
-            out = []                                         # (each folder read on its own: no wider scan)
-            for f in folders:
-                out += [(f, x) for x in engine.Engine(prof).listing(f, meta=META_STORE).get("albums") or []]
-            return out
         self.busy(True)
         self.summary.setText(tr("Adding {0}…").format(manual_match._names(new)))
-        self.worker = start(self, work, lambda got: self.added(got, folders, list_only), self.progress, self.oops)
+        self.worker = start(self, lambda _w: read_folders(prof, folders),
+                            lambda got: self.added(got, folders, list_only), self.progress, self.oops)
 
     def touches_apply(self, paths) -> bool:
         """A folder dropped during Apply that is, holds or sits inside a folder Apply is working
@@ -868,11 +892,7 @@ class Overview(QWidget):
         self._reading += list(paths)
 
         def work(_w):
-            import engine
-            out = []                                         # (each folder read on its own: no wider scan)
-            for f in folders:
-                out += [(f, x) for x in engine.Engine(prof).listing(f, meta=META_STORE).get("albums") or []]
-            return out
+            return read_folders(prof, folders)
 
         def finish():
             self._reading = [p for p in self._reading if p not in paths]
@@ -987,15 +1007,16 @@ class Overview(QWidget):
         self.show_ready()                                    # (the folder before's count: gone)
         self.detail.clear()
         self.busy(False)
-        if not self.forced and (_list_first() or self.within):
-            self.list_albums()                              # (looked up when you choose: Look Up)
-        else:
+        if self.forced:
             self.preview()
+        else:                                                # (listed first, so more can join it at once)
+            self.list_albums(look_up=not (_list_first() or self.within))
         return True
 
     # ---- List first: the albums shown, looked up when you choose ---------------------------
-    def list_albums(self):
-        """The folder's albums, not looked up yet: nothing is asked of any database."""
+    def list_albums(self, look_up=False):
+        """The folder's albums, not looked up yet: nothing is asked of any database. LOOK_UP:
+        then looked up, an album at a time, in their rows."""
         try:
             prof = load_profile(self.profile.currentText())
         except pf.ProfileError as exc:
@@ -1008,9 +1029,9 @@ class Overview(QWidget):
             return engine.Engine(prof).listing(path, within=within or None, meta=META_STORE)
         self.busy(True)
         self.summary.setText(tr("Finding the albums… nothing is looked up yet."))
-        self.worker = start(self, work, self.listed, self.progress, self.oops)
+        self.worker = start(self, work, lambda plan: self.listed(plan, look_up), self.progress, self.oops)
 
-    def listed(self, plan):
+    def listed(self, plan, look_up=False):
         self.plan = plan
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
@@ -1019,6 +1040,12 @@ class Overview(QWidget):
         self.fit_status()
         self.busy(False)
         n = len(plan["albums"])
+        if look_up and n:
+            self.look_up(self.sources.currentData() or "profile", list(plan["albums"]), queued=True)
+            return
+        if look_up:
+            self.summary.setText(tr("No music found in this folder."))
+            return
         self.summary.setText(tr("{0} found, not looked up yet. Select the albums you want and press Look Up "
                                 "(none selected: all of them).").format(plural(n, tr("album"), tr("albums"))))
         if self.proxy.rowCount():
@@ -1587,7 +1614,10 @@ class Overview(QWidget):
     def looked_up_one(self, name, key, new, stamp=None):
         """Album KEY looked up with profile NAME (NEW: its plan, its rows): they take the
         places of the album's rows at once; the other rows stay as they were."""
+        had = (self.headers.get(name) or {}).get("roots") or []     # (albums read from other folders: theirs too)
         self.headers[name] = {k: v for k, v in new.items() if k != "albums"}
+        if had or new.get("roots"):
+            self.headers[name]["roots"] = list(dict.fromkeys(list(had) + list(new.get("roots") or [])))
         self.states.pop(key, None)
         found = list(new["albums"])
         keys = {key} | {self.album_key(a) for a in found}

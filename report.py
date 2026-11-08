@@ -242,6 +242,8 @@ def _failed_words(a, res) -> str:
 def _row(section, a, issue, folder, status, done=False) -> dict:
     ident = a.get("identification") or {}
     cands = list(ident.get("candidates") or [])
+    if section == "failed" and status in ("Failed", "Stopped") and ident.get("tier") == "exact":
+        cands = []                                  # (the release was certain; another would not have helped)
     if not cands and ident.get("release_id") and ident.get("provider") in ("musicbrainz", "discogs") \
             and section == "decide":
         src = "mb" if ident["provider"] == "musicbrainz" else "discogs"

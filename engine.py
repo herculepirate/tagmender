@@ -1397,7 +1397,10 @@ class Engine:
             release_id=mbid if provider == "musicbrainz" else dgid, url=best.get("url", ""),
             confidence=float(best.get("confidence") or 0), margin=out.get("margin"),
             why=list(out.get("why") or []), evidence=evidence_of(out, best),
-            provenance=prov, release=self._release(best), tier="exact")
+            provenance=prov, release=self._release(best), tier="exact",
+            all_lengths=bool(best.get("tracks_ok") and best.get("dur_frac") == 1.0 and
+                             (best.get("dur_cov") or 0) >= 1.0 and not best.get("conflict")
+                             and not best.get("missing")))
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
@@ -1441,6 +1444,7 @@ class Engine:
         isrc_note = []
         p.targets = _drop_isrcs(targets, p.source_dir, isrc_note)
         p.release_id, p.url, p.tier = "", "", "album_only"
+        p.no_lengths_tie = bool(info.get("no_lengths"))
         kept = {k for t in p.targets for k in t}
         p.provenance = {k: v for k, v in p.provenance.items() if k in kept}
         p.why = list(p.why) + [f"pressing unknown ({len(tied)} pressings fit equally): album tags only; "

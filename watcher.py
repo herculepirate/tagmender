@@ -13,7 +13,10 @@ An album is processed when:
     signature is stored, so TagMender's own writes never queue it again;
   - it is not remembered as Ignored (until its files or the rules change);
   - an unresolved album is retried after retry.after_days, at most retry.max_attempts
-    times; a provider outage or throttling is retried sooner, with growing pauses.
+    times; a provider outage or throttling is retried sooner, with growing pauses;
+  - with a move profile, one that is not unresolved but still here after it was handled -
+    done, up to date, or Partial (unless retry.after_days is 0, Never) - is looked at on every
+    pass until it is filed.
 
 An interrupted job found at start is recovered first. An `unattended` profile applies an
 album only when every part of it is Ready (identified for sure); one it is not sure of is
@@ -68,6 +71,8 @@ PROVIDER_RETRY = [600, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600]
 # known, its release not: MusicBrainz or Discogs may later have its barcode or disc ID), and an
 # album that failed or was blocked for what may be a passing reason (a share dropping, a locked file)
 RETRIED = ("unresolved", "partial", "provider_error", "failed", "conflict", "blocked")
+# (a move profile's album still in the watched folder with one of these: looked at on every pass)
+LOOPED = ("partial", "done", "unchanged")
 
 
 def _is_partial(entry) -> bool:
@@ -396,6 +401,8 @@ class Watcher:
             return False, "excluded (unchanged)"
         if status == "waiting_destination":          # planned while the stick/share was out
             return (True, "destination back") if self.destination_ready(prof) else (False, status)
+        if prof["operation"] == "move" and status in LOOPED and (status != "partial" or prof["retry"]["after_days"]):
+            return True, "retry"                     # (found but not filed: every pass until it is)
         if status in RETRIED and (attempts or 0) < prof["retry"]["max_attempts"] \
                 and time.time() >= (next_try or 0):
             return True, "retry"
@@ -579,7 +586,7 @@ class Watcher:
                     self.log.info("watch: a job is changing files; the rest of this pass waits")
                     self.stop_pass = True
                     break
-                prev = db.execute("SELECT attempts FROM processed WHERE folder=?", (k,)).fetchone()
+                prev = db.execute("SELECT attempts, status FROM processed WHERE folder=?", (k,)).fetchone()
                 attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
                 try:
                     # (a set whose discs are different releases: each disc an album of the plan)
@@ -597,7 +604,11 @@ class Watcher:
                     # "File albums without asking" files only what it is sure of: an album it is not
                     # (Unresolved, Partial, a pressing it could not tell) waits for your approval
                     sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
-                    if prof["unattended"] and sure:
+                    has_work = any(planmod.has_work(x) for x in plan["albums"])    # (none: no job to record)
+                    if why == "retry" and has_work and prev and prev[1] == "partial" and \
+                            not (prof["unattended"] and sure) and all(_is_partial(x) for x in plan["albums"]):
+                        continue                               # (still Partial, and it is yours to approve: no new plan)
+                    if prof["unattended"] and sure and has_work:
                         res = executor.Executor(plan, log=self.log).run()
                         outcome = res["albums"][0]["status"] if res["albums"] else a["status"]
                     elif a["status"] == "blocked":                # nothing to apply: planned again later
@@ -623,6 +634,8 @@ class Watcher:
                         p_i = next((q for q in props if str(q.source_dir) == x.get("source_dir")), prop)
                         each.append((x, out_i, self._status_of(x, p_i, out_i, prof)))
                     status = _worst([st for _x, _o, st in each])
+                    if why == "retry" and res is None and prev and prev[1] == status and status in LOOPED:
+                        continue                               # (looked again, nothing new: no record, no notice)
                     shown = status
                     if status == "waiting_destination":
                         shown = "blocked"

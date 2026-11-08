@@ -436,9 +436,9 @@ def new_paths(page, paths) -> tuple[list, list]:
 
 def add_dropped(win, paths) -> list:
     """Folders and audio files dropped on the window (gui.common.music_paths): the ones the
-    preview already holds are left out and said so; the first new one is previewed (one folder
-    at a time, as the Overview previews), the others named in the status bar. Returns the new
-    paths. Connect in place of MainWindow.dropped."""
+    preview already holds are left out and said so; the new ones join the list (Overview.add_to_list,
+    or add_later during a run). With no list yet the first new one is previewed, the others named
+    in the status bar. Returns the new paths. Connect in place of MainWindow.dropped."""
     page = (getattr(win, "pages", None) or {}).get("Overview")
     bar = win.statusBar() if hasattr(win, "statusBar") else None
 
@@ -457,6 +457,11 @@ def add_dropped(win, paths) -> list:
         if present:
             tell(tr("Already in the preview: {0}.").format(_names(present)))
         return []
+    if getattr(page, "plan", None) and getattr(page, "path", None) and hasattr(page, "add_to_list"):
+        page.add_to_list(new)                           # (a list showing: joined, never replaced)
+        if present:
+            tell(tr("Already in the preview: {0}.").format(_names(present)))
+        return new
     folders = [p for p in new if os.path.isdir(p)]
     if len(folders) > 1 and hasattr(page, "set_folders"):
         # several folders at once: all listed together (nothing looked up), you choose what to look up

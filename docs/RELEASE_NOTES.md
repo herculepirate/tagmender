@@ -1,5 +1,36 @@
 # Release notes
 
+## 0.8.16
+
+**Overview: add albums at any time**
+- A folder dropped on a list now joins it. Before, dropping one when nothing was running replaced
+  the whole list. Add Folder does the same.
+- Drop more albums while a look-up runs: each one is in the list at once, marked Waiting, and is
+  looked up next. A first folder is listed, then looked up album by album, so there is always a
+  list to add to.
+- Music dropped on the cover panel is added too, instead of being refused.
+- Adding a folder no longer makes the albums already listed read their files again.
+
+**Apply**
+- Albums added from different folders can all be applied. Before, only the folder added last was
+  allowed and the others failed with "outside the folders this profile may change".
+- The report offers other releases only where choosing one could help. An album identified for
+  certain that failed while being written no longer shows a list of releases.
+
+**Fewer albums left behind**
+- An exact match scoring at least 90 is filed when every track length agrees and no other release
+  is close. The preview says why. Before, it needed a score of 95 whatever the evidence.
+- When artist, title and tracks all match and the only doubt is between entries of that album that
+  list no track lengths, the album is tagged with what they share (no release IDs) and filed.
+- Extra-careful matching still asks for the higher score in both cases.
+
+**Watched folders**
+- With a move profile, an album still in the watched folder after it was handled is looked at on
+  every check until it is filed. Before, one held back from moving was never looked at again.
+  Unresolved albums keep the schedule set in the profile.
+- A check that finds nothing new adds no job and no notification.
+- An unresolved album is no longer listed as a job that was done.
+
 ## 0.8.15
 
 **Watched folders**

@@ -102,6 +102,117 @@ class DropWhileRunning(Base):
             self.ov.later = []
             self.ov.busy(False)
 
+    def real_drop(self, target, path):
+        """A drop as Qt delivers one to TARGET."""
+        from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+        from PySide6.QtGui import QDropEvent
+        md = QMimeData()
+        md.setUrls([QUrl.fromLocalFile(str(path))])
+        target.dropEvent(QDropEvent(QPointF(5, 5), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier))
+
+    def keys(self):
+        return [self.ov.album_key(a) for a in self.ov.plan["albums"]]
+
+    def test_dropped_on_a_finished_list_is_added_and_the_list_kept(self):
+        import engine
+        had = self.keys()
+        with mock.patch.object(engine.Engine, "listing", self.listing), \
+                mock.patch.object(type(self.ov), "look_up") as look_up:
+            self.real_drop(self.win, self.other)
+            self.wait()
+        self.assertEqual(self.keys(), had + ["album-b"])
+        self.assertEqual(self.ov.path, str(self.first))
+        self.assertEqual([self.ov.album_key(a) for a in look_up.call_args.args[1]], ["album-b"])
+
+    def test_dropped_during_a_look_up_is_listed_at_once_and_queued(self):
+        import engine
+        had = self.keys()
+        self.ov.looking = {had[0]: ("", "profile")}
+        self.ov.busy(True)
+        try:
+            with mock.patch.object(engine.Engine, "listing", self.listing):
+                self.real_drop(self.win, self.other)
+                end = time.time() + 10
+                while time.time() < end and (self.ov._reading or self.win.threads()):
+                    settle(self.app)
+            self.assertTrue(self.ov.running)                             # (the look-up goes on)
+            self.assertEqual(self.keys(), had + ["album-b"])
+            self.assertEqual(self.ov.later, [])
+            self.assertIn("album-b", self.ov.queue)
+        finally:
+            self.ov.looking, self.ov.queue = {}, {}
+            self.ov.busy(False)
+
+    def test_a_folder_dropped_first_is_listed_then_looked_up_and_a_second_joins_it(self):
+        import engine
+        __import__("app_settings").set_value("add_folder", "look_up")
+        d = str(self.first)
+        plan = {"albums": [dict(self.listing()["albums"][0], key="album-a", source_dir=d,
+                                album_files=[d + "/01.flac"])], "listed": True}
+        self.ov.plan, self.ov.path = None, None
+        with mock.patch.object(engine.Engine, "listing", lambda *_a, **_k: plan), \
+                mock.patch.object(type(self.ov), "look_up") as look_up:
+            self.ov.set_path(d)
+            self.wait()
+        self.assertEqual(self.keys(), ["album-a"])
+        look_up.assert_called_once()
+        self.assertEqual([a["key"] for a in look_up.call_args.args[1]], ["album-a"])
+
+    def test_listing_a_dropped_folder_keeps_what_is_remembered_of_the_others(self):
+        from gui import overview
+        def listing(_e, folder, meta=None):
+            meta["new"] = 1
+            return {"albums": []}
+        overview.META_STORE.clear()
+        overview.META_STORE["other album"] = 2
+        with mock.patch("engine.Engine.__init__", return_value=None), \
+                mock.patch("engine.Engine.listing", listing):
+            overview.read_folders(object(), ["/x"])
+        self.assertEqual(overview.META_STORE, {"other album": 2, "new": 1})
+        overview.META_STORE.clear()
+
+    def test_music_dropped_on_the_cover_panel_goes_to_the_window(self):
+        from gui.inspector import ArtworkView
+        panel = self.win.inspector.findChild(ArtworkView)
+        with mock.patch.object(type(self.win), "dropped") as dropped:
+            self.real_drop(panel, self.other)
+        dropped.assert_called_once_with([str(self.other)])
+
+    def test_every_added_folder_stays_a_folder_apply_may_change(self):
+        for root in ("/music/first", "/music/added"):                    # (no such album: rows untouched)
+            self.ov.looked_up_one("Some Profile", "no-such-album", {"job": "j", "roots": [root], "albums": []})
+        self.assertEqual(self.ov.headers["Some Profile"]["roots"], ["/music/first", "/music/added"])
+        album = self.ov.plan["albums"][0]
+        self.ov.planned_with[self.ov.album_key(album)] = "Some Profile"
+        self.assertEqual(self.ov.plan_for([album])["roots"], ["/music/first", "/music/added"])
+
+    def test_a_write_failure_offers_no_releases_but_not_identified_does(self):
+        import report
+        cand = {"source": "discogs", "id": "1", "url": "u", "ref": "discogs:1", "score": 90, "title": "T"}
+        ok = {"source_dir": "/a", "status": "ready", "files": [],
+              "identification": {"tier": "exact", "candidates": [cand]}}
+        self.assertEqual(report._row("failed", ok, "outside", "/a", "Failed")["candidates"], [])
+        self.assertEqual(report._row("failed", ok, "taken", "/a", "Conflict")["candidates"], [cand])
+        unsure = {"source_dir": "/a", "status": "ready", "files": [],
+                  "identification": {"tier": "partial", "candidates": [cand]}}
+        self.assertEqual(report._row("failed", unsure, "stopped", "/a", "Failed")["candidates"], [cand])
+        lost = {"source_dir": "/a", "status": "unresolved", "files": [],
+                "identification": {"tier": "unresolved", "candidates": [cand]}}
+        self.assertEqual(report._row("failed", lost, "not identified", "/a", "Unresolved")["candidates"], [cand])
+
+    def test_a_folder_being_read_is_not_taken_twice(self):
+        self.ov._reading = [str(self.other)]
+        try:
+            with mock.patch.object(type(self.ov), "add_waiting"):
+                self.ov.add_to_list([str(self.other)])
+            self.assertEqual(self.ov.later, [])
+        finally:
+            self.ov._reading = []
+
+    def test_an_empty_folder_says_so(self):
+        self.ov.listed({"albums": [], "listed": True}, look_up=True)
+        self.assertEqual(self.ov.summary.text(), "No music found in this folder.")
+
     def test_cancel_drops_what_waited(self):
         self.ov.busy(True)
         self.ov.add_later([str(self.other)])

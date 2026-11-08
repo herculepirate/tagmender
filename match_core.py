@@ -3787,6 +3787,22 @@ PRESSING_FIELDS = {"musicbrainz_albumid", "musicbrainz_trackid", "musicbrainz_di
                    "catalognumber", "barcode", "asin"}
 
 
+_LOW_SCORE_WHY = re.compile(r"^confidence [\d.]+ < [\d.]+$")
+
+
+def _no_lengths_tie(best, why) -> bool:
+    """The pick is held back only because the entries tied with it list no track lengths (which
+    also lowers its score): artist, title and the tracks all match, and nothing contradicts it."""
+    rest = [w for w in why if not _TIE_WHY.match(w)]
+    if len(rest) == len(why) or "durations unavailable" not in rest or \
+            not all(w == "durations unavailable" or _LOW_SCORE_WHY.match(w) for w in rest):
+        return False
+    titles = best.get("titles_agree")
+    return bool(best.get("artist_sim", 0) >= 1.0 and best.get("title_sim", 0) >= 1.0 and best.get("tracks_ok")
+                and best.get("dur_frac") is None and best.get("dur_cov") == 0 and not best.get("conflict")
+                and (titles is None or titles == len(best["cand"]["tracks"])))
+
+
 def album_only(final, cfg, source=""):
     """The tied pressings when the ALBUM is certain and only its pressing is not: the pick
     is as sure as an automatic one (score, title, artist, every track length), and the only
@@ -3795,15 +3811,18 @@ def album_only(final, cfg, source=""):
     if not best or final.get("status") == "auto":
         return None
     why = [w for w in final.get("why") or [] if not w.startswith("investigated")]
-    if not why or not all(_TIE_WHY.match(w) for w in why):
+    no_lengths = _no_lengths_tie(best, why)
+    if not no_lengths and (not why or not all(_TIE_WHY.match(w) for w in why)):
         return None
-    if best["confidence"] < cfg["auto_min_confidence"] or not best.get("tracks_ok") \
-            or (best.get("dur_frac") or 0) < 1.0 or best.get("conflict"):
+    if not no_lengths and (best["confidence"] < cfg["auto_min_confidence"] or not best.get("tracks_ok")
+                           or (best.get("dur_frac") or 0) < 1.0 or best.get("conflict")):
         return None
     n = len(best["cand"]["tracks"])
-    tied = [s for s in final.get("scored") or [best]
-            if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
-            and title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n]
+    close = [s for s in final.get("scored") or [best] if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+    tied = [s for s in close
+            if title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n]
+    if no_lengths and (len(tied) != len(close) or any(s.get("dur_cov") != 0 for s in tied)):
+        return None                                      # (another album as close, or lengths that could disagree)
     if best.get("pressing_year") and best.get("year_ok"):
         tied = [s for s in tied if s.get("year_ok")]   # the edition your folder names, not the others
     if len(tied) < 2:
@@ -3817,7 +3836,7 @@ def album_only(final, cfg, source=""):
             # Buried And Me - Automata I & II): their shared tags would name the wrong media
             return None
         tied = same_kind or tied
-    return {"source": source, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+    return {"source": source, "no_lengths": no_lengths, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
                       "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
                       "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in tied]}
 

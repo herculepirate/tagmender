@@ -934,6 +934,9 @@ SETTINGS = [
               "always written.")),
     S("compilations.grouping", N_("Set Grouping to Compilation"), "switch", "compilations",
       foot=N_("Only when Grouping is empty; it never replaces yours.")),
+    S("marks.grouping", N_("Mark HD audio and vinyl rips in Grouping"), "switch", "compilations",
+      foot=N_("Grouping says HD Audio (above 16 bits or 44.1 kHz, DSD too) or Vinyl Rip. Only when Grouping "
+              "is empty; it never replaces yours.")),
     S("compilations.single_artist", N_("Also flag single-artist compilations"), "switch", "compilations",
       foot=N_("Best-ofs. Many players then list them under Various Artists.")),
     S("album_artist.lead", N_("Lead artist only"), "switch", "album_artist",

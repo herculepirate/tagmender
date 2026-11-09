@@ -222,7 +222,7 @@ class Gui(te.Base):
         from PySide6.QtCore import QItemSelectionModel
         ov = self.win.pages["Overview"]
         a1 = {"source_dir": "/x/A", "status": "ready", "files": [{"src": "/x/A/1.flac", "dst": "/x/A/1.flac",
-              "op": "tag", "changes": {"title": ["t"]}}], "conflicts": [], "identification": {}, "notes": []}
+              "op": "tag", "changes": {"title": ["t"]}, "diff": []}], "conflicts": [], "identification": {}, "notes": []}
         a2, a3 = (dict(a1, source_dir=f"/x/{x}", files=[dict(a1["files"][0], src=f"/x/{x}/1.flac",
                                                               dst=f"/x/{x}/1.flac")]) for x in "BC")
         ov.plan = {"albums": [a1, a2, a3], "profile": "Auto"}
@@ -241,14 +241,12 @@ class Gui(te.Base):
         self.assertEqual(ov.to_apply(), [a1, a3])
         ov.model.set_left_out([a2], False)
         done = dict(a1, status="done", source_dir="/x/D")
-        ov.model.albums.append(done)
-        ov.plan["albums"].append(done)
-        ov.model.layoutChanged.emit()
-        ov.table.selectRow(3)
+        ov.plan = {"albums": [a1, a2, a3, done], "profile": "Auto"}
+        ov.model.set_plan(ov.plan)
+        ov.table.selectRow(ov.proxy.mapFromSource(ov.model.index(3, 0)).row())
         self.assertEqual(ov.to_apply(), [])                           # (a row with nothing to apply: nothing)
-        ov.model.albums.remove(done)
-        ov.plan["albums"].remove(done)
-        ov.model.layoutChanged.emit()
+        ov.plan = {"albums": [a1, a2, a3], "profile": "Auto"}
+        ov.model.set_plan(ov.plan)
         ov.table.clearSelection()
         ov.table.selectRow(0)
         for a in (a1, a3):

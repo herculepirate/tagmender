@@ -1475,6 +1475,10 @@ def download_store(folder):
     return ""
 
 
+# (a rip marker, never a word of the title: "Demo Tape")
+_CASSETTE_HINT = re.compile(r"\b(?:cassette|tape)[- ]?rip\b|[\[(]\s*(?:cassette|tape)\s*[\])]", re.I)
+
+
 def media_hint(folder):
     """What the folder name says the copy was made from: "vinyl", "cd", or
     "digital" (a web or hi-res download with no CD or vinyl named)."""
@@ -1745,6 +1749,8 @@ def file_clues(album, cand, clues, against, cfg=None):
     if formats:
         if hint and hint in formats:
             clues.setdefault("format", f"{hint} release (folder name)")
+        elif not hint and "cassette" in formats and _CASSETTE_HINT.search(str(album.get("folder") or "")):
+            clues.setdefault("format", "cassette release (folder name)")
         elif hint in ("vinyl", "cd") and hint not in formats:
             against.append(f"folder name says {hint}, this pressing is {'/'.join(sorted(formats))}")
         if audio.get("hires") and hint != "vinyl":
@@ -2127,6 +2133,67 @@ def _undated_edition(edition, undated):
         return None
     return pick, dict(telling, date=f"undated, so not ruled out by the {pick['pressing_year']} edition "
                                     f"your folder names")
+
+
+# What says "this is your copy" by its own number, compared by the number and not its kind
+_OWN_NUMBERS = {"barcode", "catalogue number", "code", "folder catalogue number"}
+
+
+def prefers_vinyl_or_tape(formats) -> bool:
+    """Your preferred medium formats put vinyl or cassette ahead of every CD: you asked for
+    them, so no_media_evidence does not set them aside."""
+    kinds = [media_kind(f) for f in formats or ()]
+    first = next((k for k in kinds if k in ("cd", "vinyl", "cassette")), "")
+    return first in ("vinyl", "cassette")
+
+
+def no_media_evidence(tied):
+    """The vinyl and cassette pressings among those tied that nothing about your copy points
+    to, when a CD of this album your copy does not contradict is among them: with no evidence
+    for those media the copy is a CD. Evidence is what no such CD also has: the folder name or
+    your tags naming the media, a number, label or country of yours on that pressing alone, its
+    packaging in your scans, its lengths or titles fitting where the CDs' do not, your files
+    already tagged with it, or the edition year your folder names. An entry of several media or
+    none is left alone, and so is a folder that says vinyl or a download. When your copy's
+    catalogue number is on none of them, your pressing may not be among them."""
+    if len(tied) < 2 or all(s.get("own_catno_absent") for s in tied):
+        return []
+    if any(s.get("copy_hint") in ("vinyl", "digital") for s in tied):
+        return []
+    cds = [s for s in tied if "cd" in (s["cand"].get("formats") or ()) and not s.get("clues_against")
+           and not s.get("other_version") and not s.get("conflict") and s.get("tracks_ok")
+           and not s.get("discs_off") and not s["cand"].get("unofficial")]
+    if not cds:
+        return []
+
+    def shown(s):
+        out = set(_evidence(s)) | ({"packaging"} if (s.get("clues") or {}).get("packaging") else set())
+        out |= set(MATRIX_KINDS.values()) & set(s.get("clues") or ())
+        return out - {"physical"} - _OWN_NUMBERS
+    on_a_cd = set().union(*(shown(c) for c in cds))
+    edition_cd = any(c.get("pressing_year") and c.get("year_ok") for c in cds)
+
+    def same_number(s, c):
+        return s.get("code") == c.get("code") and bool(
+            (set(s["cand"].get("catnos") or ()) & set(c["cand"].get("catnos") or ()))
+            | (set(s["cand"].get("barcodes") or ()) & set(c["cand"].get("barcodes") or ())))
+
+    def unproven(s):
+        kinds = set(s["cand"].get("formats") or ())
+        if not kinds or not kinds <= {"vinyl", "cassette"}:
+            return False
+        if s.get("tagged") and not s.get("tagger_tagged"):
+            return False
+        if s.get("pressing_year") and s.get("year_ok") and not edition_cd:
+            return False
+        if _carries_barcode(s) and not any(_carries_barcode(c) for c in cds):
+            return False
+        if _OWN_NUMBERS & set(_evidence(s)) and not any(same_number(s, c) for c in cds):
+            return False
+        if not any(title_sim(c["cand"]["title"], s["cand"]["title"]) >= 0.85 for c in cds):
+            return False                        # no CD of the same album
+        return not (shown(s) - on_a_cd) and not _relative_clues([s] + cds)[id(s)]
+    return [s for s in tied if unproven(s)]
 
 
 def choose_pressing(tied, preferred_countries=None, prefs=None):
@@ -2711,6 +2778,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
         "lengths_missing": lengths_missing, "avail": avail,
         "numbers_repeat": numbers_repeat(album), "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
+        "copy_hint": album.get("media_hint") or "",
+        "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
         "pressing_year": album.get("pressing_year"),
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "len_err": len_err, "titles_agree": titles_agree, "len_diffs": len_diffs,
@@ -2863,7 +2932,8 @@ def _fits_to_the_ms(best, scored, cfg):
     if not (best.get("ms_lengths") and best.get("len_diffs")):
         return None
     for s in scored:
-        if s is best or not s.get("tracks_ok") or s["artist_sim"] < cfg["auto_min_artist"]:
+        if (s is best or not s.get("tracks_ok") or s["artist_sim"] < cfg["auto_min_artist"]
+                or s.get("unproven_media")):
             continue
         hit = exact_lengths([best, s])
         if hit and hit[0] is s and hit[2] == "ms":
@@ -3064,6 +3134,23 @@ def classify(scored, cfg):
     # Pressings that score the same: what the scans show can tell them apart
     # (a label, "Made in Germany", a catalogue number printed on the back).
     tied = [s for s in ranked if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+    # No vinyl or cassette without evidence for it: they are out of the tie, while they stay
+    # listed for Change Release
+    for s in scored:
+        s.pop("unproven_media", None)
+    unproven = []
+    asked_for = prefers_vinyl_or_tape(release_preferences(cfg)["formats"])
+    while not asked_for:            # (the top pressing gone, others may now be in the tie)
+        out = no_media_evidence(tied)
+        if not out:
+            break
+        for x in out:
+            x["unproven_media"] = True
+        unproven += out
+        ranked = [x for x in ranked if not x.get("unproven_media")]
+        best = ranked[0]
+        tied = [x for x in ranked if best["confidence"] - x["confidence"] < cfg["auto_min_margin"]]
+    ranked += unproven
     scan_pick = None
     # A number decides only when it is the ONLY one that agrees. When several tied
     # pressings each match a number (King Diamond: the tags carry Metal Blade's
@@ -3091,7 +3178,7 @@ def classify(scored, cfg):
             best, scan_pick, audio_split = fits_audio[0], None, [s for s in barcoded if s is not fits_audio[0]]
         if audio_split or barcode_split:
             ranked = [best] + [s for s in ranked if s is not best]
-    runner = ranked[1] if len(ranked) > 1 else None
+    runner = next((s for s in ranked[1:] if not s.get("unproven_media")), None)
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
     # One release fits every track exactly where the pick misses every one, and nothing
     # else decides: the lengths are that release's own, so it is the pick. Millisecond
@@ -3104,6 +3191,10 @@ def classify(scored, cfg):
         margin, scan_pick = abs(best["confidence"] - runner["confidence"]), None
         best["notes"] = best["notes"] + [f"pressing chosen by {exact[1]}; {runner['cand']['id']} scored "
                                          f"{runner['confidence']} but is off on every track"]
+    if unproven and "cd" in (best["cand"].get("formats") or ()):
+        best["notes"] = best["notes"] + [
+            "nothing about your copy points to " + " or ".join(sorted(
+                {k for x in unproven for k in x["cand"].get("formats") or ()})) + ", so it is taken for a CD"]
 
     why = [best["media_why"]] if best.get("media_why") else []
     if tags_against:
@@ -3782,6 +3873,19 @@ def _yields_to_audio(res, other):
     return dict(res, status="review", why=list(res.get("why") or []) + format_contradictions(best))
 
 
+def _yields_to_cd(res, other, prefs=None):
+    """res, unsure, when it is sure of a vinyl or cassette nothing about your copy points to and
+    the other database is sure of a CD (no_media_evidence, between the databases)."""
+    best, theirs = (res or {}).get("best"), (other or {}).get("best")
+    if not (res and res["status"] == "auto" and best and theirs and other["status"] == "auto"
+            and not prefers_vinyl_or_tape((prefs or {}).get("formats"))
+            and any(x is best for x in no_media_evidence([best, theirs]))):
+        return res
+    return dict(res, status="review", why=list(res.get("why") or [])
+                + [f"nothing about your copy points to {'/'.join(sorted(best['cand']['formats']))}, "
+                   f"and {theirs['cand']['id']} is a CD"])
+
+
 def combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
@@ -3800,6 +3904,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     prefer = preferred_source(mb_result, dg_result)
     mb_result, dg_result = _yields_to_lengths(mb_result, dg_result), _yields_to_lengths(dg_result, mb_result)
     mb_result, dg_result = _yields_to_audio(mb_result, dg_result), _yields_to_audio(dg_result, mb_result)
+    mb_result, dg_result = _yields_to_cd(mb_result, dg_result, prefs), _yields_to_cd(dg_result, mb_result, prefs)
     # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
     disputed = _proof_left_unsure(mb_result, dg_result)
     if disputed:
@@ -3952,7 +4057,8 @@ def album_only(final, cfg, source=""):
                            or (best.get("dur_frac") or 0) < 1.0 or best.get("conflict")):
         return None
     n = len(best["cand"]["tracks"])
-    close = [s for s in final.get("scored") or [best] if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+    close = [s for s in final.get("scored") or [best] if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
+             and not s.get("unproven_media")]
     tied = [s for s in close
             if title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n]
     if no_lengths and (len(tied) != len(close) or any(s.get("dur_cov") != 0 for s in tied)):
@@ -3974,6 +4080,29 @@ def album_only(final, cfg, source=""):
     return {"source": source, "no_lengths": no_lengths, "other_kind": other_kind, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
                       "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
                       "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in tied]}
+
+
+def scans_name_another(final, report):
+    """What album_only returns, when the pick was sure but your scans name another pressing
+    and nothing of yours is on the pick (no barcode, catalogue number or disc ID): the album
+    is certain, its pressing is not. report: match_albums' scans report. None otherwise."""
+    best = (final or {}).get("best")
+    if not best or (report or {}).get("state") != "differs" or set(report.get("found") or ()) & {"barcode", "catalogue_number"}:
+        return None
+    if _carries_barcode(best) or (best.get("code") and best["code"] not in WEAK_BARCODES):
+        return None
+    if (best.get("clues") or {}).get("disc TOC") and best["cand"].get("source") != "discogs":
+        return None
+    if (best.get("clues") or {}).get("source link") or (best.get("tagged") and not best.get("tagger_tagged")):
+        return None                             # (your files' link, or your own earlier choice)
+    n = len(best["cand"]["tracks"])
+    same = [s for s in final.get("scored") or [best]
+            if title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n
+            and not s.get("unproven_media")]
+    return {"source": "", "no_lengths": False, "other_kind": False, "scans": True,
+            "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+                      "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
+                      "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in same]}
 
 
 def disc_layout(cand):

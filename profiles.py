@@ -229,6 +229,8 @@ DEFAULTS = {
     # artist of a various-artists release) has no default here: unset, the tagger's own
     # setting is used, as before this group existed
     "compilations": {"extra_flags": False, "grouping": False, "single_artist": False},
+    # marks.py: grouping - GROUPING "HD Audio" or "Vinyl Rip" where empty
+    "marks": {"grouping": True},
     # album artist as the lead artist alone (album_artist.py): lead - a joint credit's first
     # artist, and (bands) a band named after a member filed under that member; file_under -
     # your own names {"credit": "album artist"} (a name mapped to itself is kept as credited)
@@ -299,7 +301,8 @@ DEFAULTS = {
     "unresolved": {"action": "mark", "move_to": "", "allow_partial": True},
     "retry": {"after_days": 30, "max_attempts": 6},
     "unattended": False,                  # apply plans without asking
-    "watch": {"settle_minutes": 10, "interval_seconds": 300, "workers": 1},
+    # recheck_after_update: albums this profile filed are looked up again after an update
+    "watch": {"settle_minutes": 10, "interval_seconds": 300, "workers": 1, "recheck_after_update": False},
     "exclusions": [],
 }
 
@@ -849,6 +852,13 @@ def _new_setting_problems(d: dict) -> list[str]:
     else:
         for k in ("extra_flags", "grouping", "single_artist"):
             _bool(p, d, f"compilations.{k}")
+    if not isinstance(d.get("marks"), dict):
+        p.append("marks must be an object")
+    else:
+        _bool(p, d, "marks.grouping")
+    _bool(p, d, "watch.recheck_after_update")
+    comp = d.get("compilations")
+    if isinstance(comp, dict):
         if "va_name" in comp and not (isinstance(comp["va_name"], str) and comp["va_name"].strip()
                                       and len(comp["va_name"]) <= 100):
             p.append("compilations.va_name must be a name of up to 100 characters")

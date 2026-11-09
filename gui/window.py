@@ -1132,6 +1132,45 @@ class Main(QMainWindow):
             t.start(200)
 
 
+def instance_name() -> str:
+    """The local channel of the TagMender using this state folder."""
+    import hashlib
+    from exclusions import STATE_DIR
+    return "tagmender-" + hashlib.sha1(str(STATE_DIR).encode()).hexdigest()[:16]
+
+
+def hand_over_to_running(name) -> bool:
+    """True when a TagMender already runs here: it was told to show its window."""
+    from PySide6.QtNetwork import QLocalSocket
+    sock = QLocalSocket()
+    sock.connectToServer(name)
+    if not sock.waitForConnected(1000):
+        return False
+    sock.write(b"show")
+    sock.flush()
+    sock.waitForBytesWritten(1000)
+    sock.disconnectFromServer()
+    return True
+
+
+def listen_for_second_launch(name, win):
+    """A second launch brings WIN forward instead of opening a window of its own."""
+    from PySide6.QtNetwork import QLocalServer
+    QLocalServer.removeServer(name)                          # (left by a crash: nobody answered on it)
+    server = QLocalServer(win)
+
+    def come_forward():
+        while server.hasPendingConnections():
+            server.nextPendingConnection().deleteLater()
+        if win.isMinimized():
+            win.showNormal()
+        win.raise_()
+        win.activateWindow()
+    server.newConnection.connect(come_forward)
+    server.listen(name)
+    return server
+
+
 def main(argv=None):
     os.environ.setdefault("QT_ACCESSIBILITY", "1")
     try:                       # (first: a first run decides between a new and an earlier install)
@@ -1168,7 +1207,11 @@ def main(argv=None):
         app.styleHints().colorSchemeChanged.connect(scheme_changed)
     except AttributeError:
         pass
+    channel = instance_name()
+    if hand_over_to_running(channel):                        # (one TagMender: the open window comes forward)
+        return 0
     win = Main()
+    listen_for_second_launch(channel, win)
     win.show()
     if not win.first_run():                                  # (once, after an upgrade: keep the old built-in?)
         from .profiles import offer_previous_builtin

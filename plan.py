@@ -106,6 +106,8 @@ class Proposal:
     all_lengths: bool = False
     lengths_missing: bool = False       # exact tier, and the release lists no track lengths to compare
     no_lengths_tie: bool = False
+    # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
+    known_from_tags: bool = False
 
 
 def _fp(path):
@@ -168,6 +170,8 @@ def _files_on_evidence(prop, profile, conf) -> str:
     tier = tier_of(prop)
     if tier == "album_only" and getattr(prop, "no_lengths_tie", False):
         return "artist, title and tracks match, and only entries of this album tie (they list no track lengths)"
+    if tier == "album_only" and getattr(prop, "known_from_tags", False):
+        return "your files name the album, and the databases list this artist's album"
     lengths = getattr(prop, "all_lengths", False)
     if tier == "exact" and lengths and conf >= 80.0 and (getattr(prop, "scans", None) or {}).get("printed"):
         # (a low score here is a folder name that does not say the artist, not doubt about the release)

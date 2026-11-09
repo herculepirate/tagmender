@@ -42,6 +42,7 @@ from pathlib import Path
 import companions
 import album_artist
 import compilations
+import marks
 import credentials
 import requirements as rq
 import exclusions as ex
@@ -348,6 +349,11 @@ def styles_into_genre(t: dict, most: int = 5) -> dict:
     if not [g for g in t.get("genre") or [] if g] and [s for s in t.get("discogs_style") or [] if s]:
         t["genre"] = [s for s in t["discogs_style"] if s][:max(1, int(most or 5))]
     return t
+
+
+# Why a listing of the album could not be matched to your files (engine._known_from_own_tags)
+_NOT_COMPARABLE = re.compile(r"durations unavailable$|only \d+% of durations agree$|"
+                             r"title similarity [\d.]+ < [\d.]+$|confidence [\d.]+ < [\d.]+$")
 
 
 def own_tag_choices(t: dict, profile, path=None) -> dict:
@@ -875,6 +881,9 @@ class Engine:
                     return q
             if p:
                 return self._discs_split(g, p)
+        known = self._known_from_own_tags(out, files, base) if partial_ok and not alone else None
+        if known:
+            return known
         prop = self._unresolved(out, files, base, errors)
         note = getattr(self, "_set_note", "") if not alone and not names else ""
         if note:
@@ -1434,7 +1443,8 @@ class Engine:
             t = mc.album_only_tags(t, tied, same_recordings, other_kind=bool(info.get("other_kind")))
             # the year every tied pressing shares, else the album's first release: never the
             # day of one pressing
-            if len(years) == 1 and None not in years and "" not in years:
+            # (and not the year of a pressing your scans contradict)
+            if len(years) == 1 and None not in years and "" not in years and not info.get("scans"):
                 t["date"] = [str(next(iter(years)))]
             else:
                 first = t.get("originaldate") or t.get("originalyear")
@@ -1455,7 +1465,9 @@ class Engine:
         p.no_lengths_tie = bool(info.get("no_lengths"))
         kept = {k for t in p.targets for k in t}
         p.provenance = {k: v for k, v in p.provenance.items() if k in kept}
-        p.why = list(p.why) + [f"pressing unknown ({len(tied)} pressings fit equally): album tags only; "
+        doubt = ("your scans name another pressing" if info.get("scans")
+                 else f"{len(tied)} pressings fit equally")
+        p.why = list(p.why) + [f"pressing unknown ({doubt}): album tags only; "
                                "release IDs, catalogue number, barcode and every field of one pressing left empty"] \
             + isrc_note
         return p
@@ -2285,6 +2297,32 @@ class Engine:
         return (name, top, dict(sc, base_title=base)), [f"versions of the album fit about as well ({titles}): "
                                                          f"the album's own title \"{base}\" written"]
 
+    def _known_from_own_tags(self, out, files, base):
+        """Album known from your own tags, with no database field written: a database lists
+        this artist's album but not in a form that can be matched (a promo, a sampler, a
+        pressing with other track lengths). Every file must already name its artist and album,
+        and the best listing must be of that artist and album. None otherwise."""
+        best = (out or {}).get("best") or {}
+        why = (out or {}).get("why") or []
+        # (only a listing that cannot be compared: anything else in the way stays as it was,
+        # a look-up that failed, another tagger's release, versions in one folder)
+        if not (self._accepts("album") and len(files) >= 2 and why and all(_NOT_COMPARABLE.match(w) for w in why)
+                and best.get("artist_sim", 0) >= mc.DEFAULT_CFG["auto_min_artist"]
+                and best.get("title_sim", 0) >= 0.75):
+            return None
+        for f in files:
+            try:
+                t = tagio.read(f)
+            except Exception:
+                return None
+            if not (t.get("album") and (t.get("albumartist") or t.get("artist"))):
+                return None
+        return planmod.Proposal(**base, status="identified", tier="album_only", targets=[{} for _ in files],
+                                known_from_tags=True, confidence=float(best.get("confidence") or 0), evidence=evidence_of(out, best),
+                                reason="album known from your tags",
+                                why=list((out or {}).get("why") or [])
+                                + ["album known from your own tags: no release fits, and no database field is written"])
+
     def _unresolved(self, out, files, base, errors):
         status = (out or {}).get("status") or "nomatch"
         why = list((out or {}).get("why") or [])
@@ -2551,6 +2589,9 @@ class Engine:
                                                   self._discogs_band_members, self._band_ids)
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
+        if prop.status == "identified":
+            prop.targets = marks.apply(prop.targets, prop.files, prop.source_dir, self.profile,
+                                       prop.full_targets)
 
     def _band_members(self, mbid):
         """album_artist.band_members, asked once per artist in this run."""

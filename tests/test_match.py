@@ -1569,9 +1569,7 @@ class PressingEvidence(unittest.TestCase):
         lp = c(id="lpbox", country="XE", year=2021, date="2021", formats={"vinyl"})
         s = [mc.score_candidate(a, x, CFG) for x in (us, cd, lp)]
         r = dict(mc.classify(s, CFG), scored=s)
-        self.assertIn(r["best"]["cand"]["id"], ("cdbox", "lpbox"))
-        ao = mc.album_only(r, CFG, "")
-        self.assertEqual(sorted(t["id"] for t in ao["tied"]), ["cdbox", "lpbox"])   # never the 2006 CD
+        self.assertEqual(r["best"]["cand"]["id"], "cdbox")   # never the 2006 CD; nothing says vinyl
         s = [mc.score_candidate(a, x, CFG) for x in (us, cd)]
         r = mc.classify(s, CFG)
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cdbox"), r["why"])

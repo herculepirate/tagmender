@@ -158,6 +158,11 @@ class WatchDialog(QDialog):
         form.addRow(tr("What happens"), self.does)
         form.addRow("", self.deep)
         form.addRow("", self.auto)
+        self.recheck = QCheckBox(tr("Look up filed albums again after an update"))
+        self.recheck.setToolTip(tr("A few at a time, only albums unchanged since they were filed; "
+                                   "what is not sure stays as it is. An album's job can be undone."))
+        self.recheck.setAccessibleName(tr("Look up filed albums again after an update"))
+        form.addRow("", self.recheck)
         form.addRow(tr("Wait until unchanged for"), self.settle)
         form.addRow(tr("Look every"), self.every)
         lay.addLayout(form)
@@ -234,6 +239,7 @@ class WatchDialog(QDialog):
             return
         self.does.setText(watch_does(p))
         self.auto.setChecked(bool(p["unattended"]))
+        self.recheck.setChecked(bool(p["watch"].get("recheck_after_update")))
         self.settle.setValue(p["watch"]["settle_minutes"])
         secs = p["watch"]["interval_seconds"]             # (a value set elsewhere: the nearest choice)
         self.every.setCurrentIndex(min(range(len(LOOK_EVERY)), key=lambda i: abs(LOOK_EVERY[i] - secs)))
@@ -312,7 +318,7 @@ class WatchDialog(QDialog):
             shown = getattr(self, "shown", {})
             settle, shown_settle = shown.get("settle", (None, None))
             secs, shown_every = shown.get("every", (None, None))
-            data["watch"] = dict(data.get("watch") or {},
+            data["watch"] = dict(data.get("watch") or {}, recheck_after_update=self.recheck.isChecked(),
                                  settle_minutes=settle if self.settle.value() == shown_settle else self.settle.value(),
                                  interval_seconds=secs if self.every.currentIndex() == shown_every
                                  else int(self.every.currentData()))

@@ -31,6 +31,7 @@ import os
 import sqlite3
 import stat
 import time
+from itertools import chain
 from pathlib import Path
 
 import engine as eng_mod
@@ -40,7 +41,9 @@ import executor
 import logsetup
 import plan as planmod
 import profiles as pf
+from version import VERSION
 
+RECHECK_PER_PASS = 10     # filed albums looked up again in one pass (the databases' limits are shared)
 PARTIAL = (".part", ".crdownload", ".tmp", ".!qb", ".partial", ".download", ".opdownload")
 import re as _re
 # rsync's temporary file: ".01 Track.flac.Xy12Ab" next to where 01 Track.flac will be
@@ -540,9 +543,41 @@ class Watcher:
         db.close()
         return done
 
+    def recheck_groups(self, e, prof, db, limit=RECHECK_PER_PASS) -> list:
+        """A few albums this profile filed before the version running now, not touched since,
+        to be looked up again (watch.recheck_after_update): the album's folder or a job undone,
+        moved or edited after filing is left alone. Each is looked at once per version."""
+        if not prof["watch"].get("recheck_after_update") or prof["operation"] == "copy" or prof.name in self._rechecked:
+            return []                              # (a copy would leave the album filed twice)
+        self._rechecked.add(prof.name)
+        db.execute("CREATE TABLE IF NOT EXISTS recheck_since (version TEXT PRIMARY KEY, since REAL)")
+        db.execute("INSERT OR IGNORE INTO recheck_since VALUES (?,?)", (VERSION, time.time()))
+        since = db.execute("SELECT since FROM recheck_since WHERE version=?", (VERSION,)).fetchone()[0]
+        db.commit()
+        if not self.destination_ready(prof):       # (the library's share is out: looked at when it is back)
+            return []
+        rows = db.execute("SELECT folder, signature FROM processed WHERE profile=? AND status IN ('done','unchanged') "
+                          "AND signature<>'gone' AND ts<? ORDER BY ts LIMIT ?", (prof.name, since, limit)).fetchall()
+        out, state = [], ex.State()
+        for folder, signature in rows:
+            path = Path(planmod.db_path(folder))
+            found = [g for g in e.albums_in(path) if self.key(g) == folder] if path.is_dir() else []
+            snap = snapshot(found[0].folder, found[0].files, True) if found else None
+            if snap and snap[0] == signature and not snap[2] and not state.ignored_item(found[0].folder):
+                out.append(found[0])
+            else:                                  # gone, changed by you since it was filed, or Ignored: yours
+                self.seen_again(db, folder)
+        return out
+
+    @staticmethod
+    def seen_again(db, key):
+        db.execute("UPDATE processed SET ts=? WHERE folder=?", (time.time(), key))
+        db.commit()
+
     def _pass(self, db, done):
         seen = set()
         self.stop_pass = False
+        self._rechecked = set()
         for root, prof in self.roots():
             if self.stop or self.stop_pass:
                 break
@@ -560,23 +595,25 @@ class Watcher:
             libs = self.library_inside(root, prof)
             flat = self.shallow(root, prof)
             top = Path(os.path.realpath(root))
-            for g in (e.albums_in(root, skip=libs) if libs else e.albums_in(root)):
+            again = self.recheck_groups(e, prof, db)     # (after those dropped in: below)
+            for g in chain(e.albums_in(root, skip=libs) if libs else e.albums_in(root), again):
                 if self.stop:
                     break
+                recheck = any(g is x for x in again)
                 real = Path(os.path.realpath(g.folder))
-                if flat and real != top and real.parent != top:
+                if not recheck and flat and real != top and real.parent != top:
                     continue                               # (Include subfolders is off: only albums directly in it)
-                if any(real == lb or lb in real.parents for lb in libs):
+                if not recheck and any(real == lb or lb in real.parents for lb in libs):
                     continue                               # already in the library
                 key = (str(g.folder), tuple(sorted(map(str, g.files))))
-                if key in seen:
+                if key in seen and not recheck:
                     continue
                 seen.add(key)
                 k = self.key(g)
                 deep = real != top
                 scope = g.files                            # the album's own files (see snapshot)
                 try:
-                    go, why = self.due(g.folder, prof, db, k, scope, g.files, deep)
+                    go, why = (True, "recheck") if recheck else self.due(g.folder, prof, db, k, scope, g.files, deep)
                 except Exception:                              # one album never stops the watcher
                     self.log.exception("watch: %s could not be looked at", g.folder)
                     continue
@@ -598,13 +635,19 @@ class Watcher:
                                 getattr(e, step)(p)
                     n_jobs = getattr(self, "_n", 0) + 1
                     self._n = n_jobs
-                    plan = planmod.build(props, prof, e.job + f"-{n_jobs}", extra_roots=[root])
+                    plan = planmod.build(props, prof, e.job + f"-{n_jobs}", extra_roots=[root, g.folder] if recheck else [root])
                     a = plan["albums"][0]
                     res = None
                     # "File albums without asking" files only what it is sure of: an album it is not
                     # (Unresolved, Partial, a pressing it could not tell) waits for your approval
                     sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
                     has_work = any(planmod.has_work(x) for x in plan["albums"])    # (none: no job to record)
+                    # (only a proven release: an album-known result never takes the place of a filed one)
+                    if recheck and not (sure and has_work and all(
+                            (x.get("identification") or {}).get("tier") == "exact"
+                            for x in plan["albums"] if planmod.has_work(x))):
+                        self.seen_again(db, k)                 # (nothing better known of it: it stays as filed)
+                        continue
                     if why == "retry" and has_work and prev and prev[1] == "partial" and \
                             not (prof["unattended"] and sure) and all(_is_partial(x) for x in plan["albums"]):
                         continue                               # (still Partial, and it is yours to approve: no new plan)
@@ -664,6 +707,9 @@ class Watcher:
                     self.log.info("%s: %s (%s)", g.folder, status, why)
                 except Exception as exc:                       # one album never stops the watcher
                     self.log.exception("watch: %s failed", g.folder)
+                    if recheck:                                # (it stays as filed)
+                        self.seen_again(db, k)
+                        continue
                     self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k, files=scope, deep=deep)
                     done[str(g.folder)] = "error"
 

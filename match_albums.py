@@ -6202,6 +6202,7 @@ def summarize(res):
             "artist": c["artist"], "title": c["title"], "year": c["year"],
             "country": c["country"], "label": c["label"],
             "tracks": len(c["tracks"]), "confidence": b["confidence"],
+            "artist_sim": b.get("artist_sim", 0), "title_sim": b.get("title_sim", 0),
             # (what lets a sure album be filed below the organize threshold: plan._files_on_evidence)
             "all_lengths": bool(b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
                                 and not b.get("conflict") and not b.get("missing")),
@@ -7130,6 +7131,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         ao = mc.album_only(final, cfg, tie_source(album, final))
         if ao:
             out["album_only"] = ao              # the album is certain, its pressing is not
+    else:
+        ao = mc.scans_name_another(final, out.get("scans"))
+        if ao:                                  # (sure of a pressing your scans contradict)
+            out["album_only"], out["status"] = ao, "review"
     return out
 
 

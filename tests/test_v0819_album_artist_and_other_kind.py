@@ -191,6 +191,121 @@ class SurePickStands(unittest.TestCase):
         self.assertIs(ma._sure_if_no_album_only(final, {"media_hint": "vinyl"}, cfg), final)
 
 
+class NoVinylOrCassetteWithoutEvidence(unittest.TestCase):
+    """Nothing about your copy points to vinyl or cassette: it is a CD."""
+    BARCODE = "707723007025"
+
+    def run_it(self, *cands, **kw):
+        from test_match import album, CFG
+        a = album(**kw)
+        scored = [mc.score_candidate(a, c, CFG) for c in cands]
+        return dict(mc.classify(scored, CFG), scored=scored)
+
+    def press(self, rid, fmt, **kw):
+        from test_match import cand
+        return cand(source="discogs", id=rid, country="US", formats={fmt}, **kw)
+
+    def test_one_cd_among_cassette_and_vinyl_is_the_pressing(self):
+        r = self.run_it(self.press("tape", "cassette"), self.press("lp", "vinyl"), self.press("cd", "cd"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cd"), r["why"])
+        self.assertIn("so it is taken for a CD", " ".join(r["best"]["notes"]))
+
+    def test_they_stay_listed_for_change_release(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd", "cd"))
+        self.assertEqual({s["cand"]["id"] for s in r["scored"]}, {"lp", "cd"})
+
+    def test_two_cds_are_still_two_pressings(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd1", "cd", label="One"), self.press("cd2", "cd", label="Two"))
+        self.assertTrue(r["best"]["cand"]["id"].startswith("cd"), r["best"]["cand"]["id"])
+        self.assertTrue(r["best"].get("unproven_media") is None)
+        self.assertIn("lp", [s["cand"]["id"] for s in r["scored"] if s.get("unproven_media")])
+
+    def test_the_folder_name_saying_vinyl_keeps_the_vinyl(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd", "cd"), media_hint="vinyl")
+        self.assertEqual(r["best"]["cand"]["id"], "lp")
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_the_folder_name_saying_cassette_keeps_the_cassette(self):
+        r = self.run_it(self.press("tape", "cassette"), self.press("cd", "cd"), folder="Album [Cassette Rip]")
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_your_barcode_on_the_vinyl_alone_keeps_the_vinyl(self):
+        r = self.run_it(self.press("lp", "vinyl", barcodes={self.BARCODE}), self.press("cd", "cd"), barcodes={self.BARCODE})
+        self.assertEqual(r["best"]["cand"]["id"], "lp")
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_no_cd_your_copy_allows_leaves_the_vinyl_alone(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd", "cd"),
+                        audio={"hires": True, "cd_frames": False, "not_cd": False})
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_vinyl_and_download_with_no_cd_are_left_alone(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("web", "digital"))
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_your_catalogue_number_on_none_of_them_does_not_pick_the_cd(self):
+        tied = [{"cand": {"formats": {"vinyl"}, "id": "lp"}, "own_catno_absent": True},
+                {"cand": {"formats": {"cd"}, "id": "cd"}, "own_catno_absent": True}]
+        self.assertEqual(mc.no_media_evidence(tied), [])
+
+    def test_between_the_databases_the_sure_cd_wins(self):
+        from test_match import cand, CFG, album
+        a = album()
+        lp = mc.classify([mc.score_candidate(a, cand(source="discogs", id="lp", country="US", formats={"vinyl"}), CFG)], CFG)
+        cd = mc.classify([mc.score_candidate(a, cand(source="musicbrainz", id="cd", country="US", formats={"cd"}), CFG)], CFG)
+        self.assertEqual((lp["status"], cd["status"]), ("auto", "auto"))
+        for args in ((cd, lp), (lp, cd)):
+            r = mc.combine(*args)
+            self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "cd"), r.get("why"))
+
+    def test_your_barcode_on_the_vinyl_against_your_number_on_the_cd_keeps_the_vinyl(self):
+        from test_match import album, cand, CFG
+        n = mc.norm_code("XYZ9")
+        a = album(barcodes={self.BARCODE}, catnos={n})
+        lp = cand(source="discogs", id="lp", country="US", formats={"vinyl"}, barcodes={self.BARCODE})
+        cd = cand(source="discogs", id="cd", country="US", formats={"cd"}, catnos={n})
+        s = [mc.score_candidate(a, x, CFG) for x in (lp, cd)]
+        mc.classify(s, CFG)
+        self.assertFalse(any(x.get("unproven_media") for x in s))
+
+    def test_two_vinyls_fitting_where_the_cd_does_not_stay(self):
+        from test_match import album, cand, CFG
+        tr = [{"disc": 1, "num": i + 1, "title": f"T{i}", "secs": 200.0 + i} for i in range(3)]
+        off = [dict(t, secs=t["secs"] + 2.5) for t in tr]
+        a = album(tracks=tr)
+        c = lambda rid, fmt, t: cand(source="discogs", id=rid, country="US", formats={fmt}, tracks=[dict(x) for x in t])  # noqa: E731
+        s = [mc.score_candidate(a, x, CFG) for x in (c("lp1", "vinyl", tr), c("lp2", "vinyl", tr), c("cd", "cd", off))]
+        mc.classify(s, CFG)
+        self.assertFalse(any(x.get("unproven_media") for x in s))
+
+    def test_a_cd_that_is_not_this_album_decides_nothing(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd", "cd", disc_count=2))
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd", "cd", unofficial=True))
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_a_folder_that_says_a_download_is_left_alone(self):
+        r = self.run_it(self.press("lp", "vinyl"), self.press("cd", "cd"), media_hint="digital")
+        self.assertFalse(any(s.get("unproven_media") for s in r["scored"]))
+
+    def test_tape_in_the_title_is_no_cassette_rip(self):
+        r = self.run_it(self.press("tape", "cassette"), self.press("cd", "cd"), folder="2010 - Demo Tape")
+        self.assertEqual(r["best"]["cand"]["id"], "cd")
+
+    def test_a_pressing_that_joins_the_tie_when_the_top_one_goes_is_out_too(self):
+        tied = {"lp1": 100.0, "cd": 94.7, "tape": 89.5}
+        from test_match import album, cand, CFG
+        a = album()
+        s = [mc.score_candidate(a, cand(source="discogs", id=k, country="US",
+                                        formats={"cd" if k == "cd" else "vinyl" if k == "lp1" else "cassette"}), CFG)
+             for k in tied]
+        for x in s:
+            x["confidence"] = tied[x["cand"]["id"]]
+        r = mc.classify(s, CFG)
+        self.assertEqual(r["best"]["cand"]["id"], "cd")
+        self.assertIsNone(r.get("runner_up"))
+
+
 class YourBarcodeIsTheRelease(unittest.TestCase):
     """A barcode read off your copy names the release, whatever the audio was ripped to."""
     BARCODE = "707723007025"

@@ -1,5 +1,30 @@
 # Release notes
 
+## 0.8.20
+
+**No vinyl or cassette without evidence**
+- When a CD of the album is among pressings that tie, and nothing about your copy points to vinyl
+  or cassette, those are set aside and the copy is taken for a CD. They stay listed in Change
+  Release. A folder name, your tags, a number of yours, or lengths only they fit keep them in.
+
+**One TagMender**
+- Starting TagMender again brings the open window forward instead of opening another, which also
+  stopped watched folders being checked.
+
+**Filing without asking**
+- An album a database knows but cannot be matched to (a promo, a sampler), whose files already
+  name their artist and album, is filed as "album known". No database field is written.
+- An album whose scans name another pressing, with nothing of yours on the one picked (no barcode,
+  catalogue number or disc ID), is tagged as "album known" rather than as that pressing.
+- Watched folders can look up filed albums again after an update (off unless you tick it): a few
+  at a time, only albums unchanged since they were filed, and only a proven release is applied.
+  Profiles that copy are left out, as a copy would file the album twice.
+
+**HD audio and vinyl rips**
+- Grouping now says **HD Audio** for lossless audio above 16 bits or 44.1 kHz, DSD included, or
+  **Vinyl Rip** for a vinyl rip, so a player can filter on it. Only when Grouping is empty; it can
+  be switched off in the profile.
+
 ## 0.8.19
 
 **Your barcode is the release**

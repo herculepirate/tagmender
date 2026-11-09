@@ -449,11 +449,10 @@ class TieBreak(unittest.TestCase):
         self.assertEqual(mc.combine(copy.deepcopy(mb), copy.deepcopy(dg), ["US"])["best"]["cand"]["id"], "dg-cd")
         out = mc.combine(copy.deepcopy(mb), copy.deepcopy(dg), ["US"], prefs)
         self.assertEqual((out["best"]["cand"]["id"], out["status"]), ("mb-lp", "review"))
-        # the preference picking Discogs's pressing: a guess, noted
+        # nothing points to vinyl: it is the CD (no_media_evidence), no guess and no preference
         out = mc.combine(copy.deepcopy(mb), copy.deepcopy(dg), ["US"],
                          mc.release_preferences(cfg_with(preferred_release_formats=["CD"])))
-        self.assertEqual((out["best"]["cand"]["id"], out["status"]), ("dg-cd", "review"))
-        self.assertTrue(any("your preferred medium formats" in n for n in out["best"]["notes"]))
+        self.assertEqual((out["best"]["cand"]["id"], out["status"]), ("dg-cd", "auto"))
         # not known to be the same album: no preference
         dg2 = run(a, cand(**dict(dg_shape, master_id="m9")), cfg=cfg)
         out = mc.combine(copy.deepcopy(mb), copy.deepcopy(dg2), ["US"], prefs)

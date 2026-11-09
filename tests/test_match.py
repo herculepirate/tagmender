@@ -14,6 +14,7 @@ import tempfile
 import types
 import re
 import unittest
+from unittest import mock
 from pathlib import Path
 
 # TagMender settings and state of the tests never touch the real ones
@@ -57,6 +58,81 @@ def cand(**kw):
          "tracks": [{"disc": 1, "title": f"T{i}", "secs": s} for i, s in enumerate((200, 305, 410))]}
     c.update(kw)
     return c
+
+
+class DiscogsPressingsTied(unittest.TestCase):
+    """MusicBrainz is "sure" only because it lists one pressing where Discogs ties several:
+    the pressing is not known, so no release tags (album_only), unless your copy proves it."""
+
+    @staticmethod
+    def res(*cands):
+        scored = [mc.score_candidate(album(), c, CFG) for c in cands]
+        return dict(mc.classify(scored, CFG), scored=scored, source=cands[0]["source"])
+
+    def tied(self):
+        return self.res(cand(source="discogs", id="d1", catnos={"aa1"}, country="DE"),
+                        cand(source="discogs", id="d2", catnos={"bb2"}, country="UK"))
+
+    def test_tie_on_discogs_is_not_settled_by_a_lone_musicbrainz_entry(self):
+        dg = self.tied()
+        self.assertEqual(dg["status"], "review", dg["why"])
+        out = mc.combine(self.res(cand(catnos={"cc3"})), dg)
+        self.assertEqual(out["status"], "review")
+        self.assertEqual(out["best"]["cand"]["source"], "discogs")
+        self.assertTrue(mc.album_only(out, CFG))
+
+    def test_musicbrainz_pick_with_proof_about_your_copy_stands(self):
+        mb = self.res(cand(catnos={"cc3"}))
+        mb["best"]["clues"] = {"catalogue number (OCR)": "cc3"}
+        with mock.patch.object(mc, "_evidence", lambda b: {"x": 1} if b is mb["best"] else {}):
+            self.assertEqual(mc.combine(mb, self.tied())["status"], "auto")
+
+    def test_discogs_unsure_for_another_reason_leaves_musicbrainz_alone(self):
+        dg = dict(self.tied(), why=["track count differs"])
+        out = mc.combine(self.res(cand(catnos={"cc3"})), dg)
+        self.assertEqual((out["status"], out["best"]["cand"]["source"]), ("auto", "mb"))
+
+    def test_a_discogs_pick_that_does_not_fit_leaves_musicbrainz_alone(self):
+        dg = self.tied()
+        dg["best"] = dict(dg["best"], tracks_ok=False)
+        self.assertEqual(mc.combine(self.res(cand(catnos={"cc3"})), dg)["status"], "auto")
+
+    def test_your_barcode_on_the_musicbrainz_pick_stands_even_when_the_tie_carries_it_too(self):
+        mb = self.res(cand(catnos={"cc3"}))
+        with mock.patch.object(mc, "_evidence", lambda b: {"code": "barcode"}):
+            self.assertEqual(mc.combine(mb, self.tied())["status"], "auto")
+
+    def test_the_musicbrainz_pressing_counts_among_the_tied(self):
+        out = mc.combine(self.res(cand(catnos={"cc3"})), self.tied())
+        self.assertIn("x1", [t["id"] for t in mc.album_only(out, CFG)["tied"]])
+
+    def test_falls_back_on_the_sure_pick_when_album_only_is_impossible(self):
+        mb = self.res(cand(catnos={"cc3"}))
+        out = mc.combine(mb, self.tied())
+        with mock.patch.object(mc, "album_only", return_value=None), \
+                mock.patch.object(ma, "tie_source", return_value="cd"):
+            self.assertIs(ma._sure_if_no_album_only(out, {}, CFG), mb)
+        self.assertIs(ma._sure_if_no_album_only(out, {"media_hint": ""}, CFG), out)
+
+    def test_musicbrainz_preferred_keeps_its_own_way(self):
+        mb = self.res(cand(catnos={"cc3"}))
+        with mock.patch.object(mc, "preferred_source", lambda *_a: "musicbrainz"):
+            self.assertEqual(mc.combine(mb, self.tied())["best"]["cand"]["source"], "mb")
+
+
+class CheckerLogsAndUnlistedBarcodes(unittest.TestCase):
+    def test_an_audio_checker_verdict_is_no_catalogue_number(self):
+        self.assertEqual(mc.codes_from_ocr_text("Conclusion: CDDA 100%\nConclusion: CDDA 99%")["catnos"], [])
+
+    def report(self, barcodes):
+        best = {"cand": {"barcodes": barcodes, "catnos": []}, "clues": {}}
+        return ma.scans_report(best, {"ocr_barcodes": ["5012985401326"]}, "", (None, None), True)
+
+    def test_a_release_that_lists_no_barcode_contradicts_none(self):
+        self.assertEqual(self.report([])["against"], [])
+
+    def test_a_release_with_another_barcode_does(self):
+        self.assertEqual(self.report(["0077779118618"])["against"], ["barcode"])
 
 
 class SpacedCatalogueNumbers(unittest.TestCase):

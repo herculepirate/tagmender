@@ -419,7 +419,7 @@ _OCR_NOT_CATNO = {"lc", "cd", "lp", "disc", "disk", "side", "track", "tracks", "
                   "page", "pages", "issue", "edition", "remaster", "remastered", "recorded", "year",
                   "dvd", "bonus", "mix", "version", "take", "bar", "bars", "min", "mins", "sec",
                   "copy", "time", "for", "suite", "route", "room", "postfach", "postbus", "cedex", "pmb", "box",
-                  "dr", "rms", "khz", "bit", "hz", "db"}             # dynamic-range reports in rip notes
+                  "dr", "rms", "khz", "bit", "hz", "db", "cdda"}     # dynamic-range and audio-check reports in rip notes
 # US state + ZIP code ("CA 90064", "NY 11576") on label addresses
 _US_STATES = set("al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv "
                  "nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy dc".split())
@@ -3709,6 +3709,19 @@ def _proof_left_unsure(mb_result, dg_result):
     return None
 
 
+def _discogs_pressings_tied(dg_result, mb_best) -> bool:
+    """Discogs, which lists more pressings, is held back only by a tie between pressings of a
+    release that fits your files, and MusicBrainz's sure pick has nothing about your copy behind
+    it: MusicBrainz is sure only because it lists fewer. The pressing is not known (album_only)."""
+    best = (dg_result or {}).get("best")
+    if not best or not mb_best or dg_result.get("status") != "review":
+        return False
+    why = [w for w in dg_result.get("why") or [] if not w.startswith("investigated")]
+    return bool(why) and all(_TIE_WHY.match(w) for w in why) and bool(best.get("tracks_ok")) and \
+        (best.get("dur_frac") or 0) >= 1.0 and not best.get("conflict") and not format_contradictions(best) and \
+        not _evidence(mb_best).get("code") and not has_evidence(mb_best, best)   # (your barcode or number on it: proof)
+
+
 def combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
@@ -3798,6 +3811,12 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                 f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; Discogs decides"]
         return out
     if mb_result and mb_result["status"] == "auto":
+        if _discogs_pressings_tied(dg_result, mb_result.get("best")):
+            _noted(dg_result, f"MusicBrainz lists one pressing ({mb_result['best']['cand']['id']}), "
+                              "but nothing about your copy shows it is that one")
+            # (its pressing is one of those tied; match_albums falls back on it when even the
+            # album-only tags cannot be written: _sure_if_no_album_only)
+            return dict(_guessed(dg_result, mb_result), sure_elsewhere=mb_result)
         return mb_result
     order = {"review": 0, "nomatch": 1}
     options = [r for r in (mb_result, dg_result) if r and r["best"]]

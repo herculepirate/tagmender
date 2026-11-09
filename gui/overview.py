@@ -425,6 +425,13 @@ class Overview(QWidget):
         self.refresh_btn.clicked.connect(self.reload)
         self.refresh_btn.setFlat(True)
         look.addWidget(self.refresh_btn)
+        self.clear_done_btn = QPushButton(tr("Clear Done"))
+        self.clear_done_btn.setAccessibleName(tr("Take every Done album out of the list"))
+        self.clear_done_btn.setToolTip(tr("Takes every album marked Done out of this list. "
+                                          "Their folders and files are not touched."))
+        self.clear_done_btn.clicked.connect(self.clear_done)
+        self.clear_done_btn.setFlat(True)
+        self.clear_done_btn.setEnabled(False)
         # (a choice other than the profile's is for this look-up only; this saves it into the profile)
         self.keep_link = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
         self.keep_link.setTextFormat(Qt.RichText)
@@ -522,6 +529,8 @@ class Overview(QWidget):
         self._fit_timer.timeout.connect(self.fit_columns)
         for sig in (self.model.modelReset, self.model.rowsInserted, self.model.dataChanged):
             sig.connect(lambda *_: self._fit_timer.start())
+            sig.connect(lambda *_: self.clear_done_btn.setEnabled(any(a.get("status") == "done"
+                                                                      for a in self.model.albums)))
         h.moveSection(PlanModel.PROFILE, 2)               # (an album's profile: next to its name, in view)
         h.moveSection(h.visualIndex(PlanModel.SCANS), h.visualIndex(2) + 1)   # (what the scans said: after Source)
         self.table.setAccessibleName(tr("Albums in the preview"))
@@ -554,6 +563,7 @@ class Overview(QWidget):
         self.summary.setProperty("role", "hint")
         self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the counts are what is read)
         foot.addWidget(self.summary, 1)
+        foot.addWidget(self.clear_done_btn, 0, Qt.AlignTop)   # (down here: the row above fills a 960 px window)
         rl.addLayout(foot)
         self.views.addWidget(self.results)
         self.detail = win.inspector.full                  # (the inspector's Evidence > Full preview)
@@ -765,7 +775,13 @@ class Overview(QWidget):
 
     def remove_selected(self):
         """Take the selected albums out of this preview (their folders and files are not touched)."""
-        chosen = self.selected_albums()
+        self._take_out(self.selected_albums())
+
+    def clear_done(self):
+        """Take every album marked Done out of the list (their folders and files are not touched)."""
+        self._take_out([a for a in self.model.albums if a.get("status") == "done"])
+
+    def _take_out(self, chosen):
         if not chosen or self.running:
             return
         ids = {id(a) for a in chosen}

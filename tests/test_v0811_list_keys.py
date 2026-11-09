@@ -2,6 +2,7 @@
 # albums out of the list (nothing on disk), Escape lets go of the selection - also after an Apply
 # of every album (the rows stay on screen with no plan behind them), and before the menus' Del
 # shortcut (Remove Tag): two shortcuts on one key and Qt ran neither. Remove from List as well.
+import os
 import sys
 import tempfile
 import time
@@ -74,6 +75,41 @@ class ListKeys(Base):
         self.ov.table.selectRow(0)
         self.key(Qt.Key_Backspace)
         self.assertEqual(len(self.ov.model.albums), n - 2)
+
+    def test_clear_done_takes_out_only_the_done_rows(self):
+        albums = self.ov.model.albums
+        keep = albums[0]
+        for a in albums[1:]:
+            a["status"] = "done"
+        self.ov.model.refresh_rows()
+        self.assertTrue(self.ov.clear_done_btn.isEnabled())
+        gone = {os.path.realpath(a["source_dir"]) for a in albums[1:]}
+        self.ov.clear_done_btn.click()
+        self.assertEqual(self.ov.model.albums, [keep])
+        self.assertLessEqual(gone, self.ov.removed)          # (not listed again by itself)
+        self.assertFalse(self.ov.clear_done_btn.isEnabled())
+
+    def test_clear_done_with_a_plan_keeps_what_is_left_applicable(self):
+        albums = list(self.ov.model.albums)
+        albums[0]["status"] = "done"
+        self.ov.model.refresh_rows()
+        self.ov.clear_done()
+        self.assertEqual(self.ov.plan["albums"], albums[1:])
+
+    def test_clear_done_with_all_done_and_no_plan_empties_the_list(self):
+        self.all_applied()
+        self.ov.clear_done()
+        self.assertEqual(self.ov.model.albums, [])
+
+    def test_clear_done_waits_for_running_work(self):
+        self.all_applied()
+        n = len(self.ov.model.albums)
+        self.ov.busy(True)
+        try:
+            self.ov.clear_done()
+            self.assertEqual(len(self.ov.model.albums), n)
+        finally:
+            self.ov.busy(False)
 
     def test_remove_from_list_in_the_menu_too(self):
         self.all_applied()

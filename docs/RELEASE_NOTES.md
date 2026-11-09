@@ -1,5 +1,25 @@
 # Release notes
 
+## 0.8.18
+
+**Overview**
+- A new Clear Done button takes every album marked Done out of the list at once. Their folders and
+  files are not touched, and the albums stay out of the list unless you add those folders again.
+
+**Pressings nothing can prove**
+- When Discogs ties between several pressings and MusicBrainz lists only one, that one is no longer
+  taken as certain. Unless something about your copy proves it, the album is tagged as "album
+  known" with no pressing details, as for any other pressing that cannot be told apart. With
+  MusicBrainz preferred in Sources, its pick still decides.
+
+**Reading scans and logs**
+- "CDDA 100%" in an audio checker's log is no longer taken for a catalogue number and searched for.
+- A barcode on your scans no longer shows as ✗ when the chosen release lists no barcode at all.
+
+**Builds**
+- The Flatpak build frees disk space on the build machine first and retries when a download server
+  has a brief outage.
+
 ## 0.8.17
 
 **Overview: several albums looked up at once**

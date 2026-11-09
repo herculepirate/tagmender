@@ -1957,6 +1957,14 @@ def copy_source(album):
     return ""
 
 
+def _sure_if_no_album_only(final, album, cfg):
+    """FINAL, or the sure pick it set aside (match_core.combine, Discogs's pressings tied) when
+    the album could not be tagged as "album known" after all: that would leave it unresolved."""
+    if final.get("sure_elsewhere") and not mc.album_only(final, cfg, tie_source(album, final)):
+        return final["sure_elsewhere"]
+    return final
+
+
 def tie_source(album, final):
     """What the files were made from, for the tied pressings album_only keeps: copy_source,
     but not "cd" when nothing proves it, as file_clues has it: hi-res audio beside a rip
@@ -7028,6 +7036,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                        rules_hash=exclusions.rules_hash(rules), version=result_version(), checked=round(time.time()))
             return out
 
+    final = _sure_if_no_album_only(final, album, cfg)
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     disagrees = _copy_disagrees(final, album, ocr_txt, (mb_res, dg_res)) if status == "auto" else []
@@ -7177,7 +7186,7 @@ def scans_report(best, album, ocr_txt, results, had_scans):
             + mc.barcodes_read_whole(ocr_txt or "", printed)} - {""} - stickers
     if read & have:
         add(found, "barcode")
-    elif read:
+    elif read and have:                           # (a release that lists no barcode contradicts none)
         add(against, "barcode")
     # a catalogue number read on the scans that another scored pressing carries, not this one
     if "catalogue_number" not in found and ocr_txt:

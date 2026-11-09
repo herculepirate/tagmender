@@ -96,10 +96,17 @@ class Scans(Base):
 
     def test_a_barcode_decoded_off_the_scans_not_on_the_release_differs(self):
         self.decoded = {"4006381333931"}
-        prop, _ = self.run_album()
+        prop, _ = self.run_album(http=FakeHttp(mb=[dict(release(), barcode="5012345678900")]))
         ident = self.ident(prop)
         self.assertEqual(ident["scans"]["state"], "differs", ident["scans"])
         self.assertIn("barcode", ident["scans"]["against"])
+
+    def test_a_release_that_lists_no_barcode_does_not_differ_from_the_scans(self):
+        self.decoded = {"4006381333931"}
+        prop, _ = self.run_album()
+        ident = self.ident(prop)
+        self.assertEqual(ident["scans"]["state"], "unread", ident["scans"])
+        self.assertEqual(ident["scans"]["against"], [])
 
     def test_scans_with_nothing_read_are_unread(self):
         self.text = ""

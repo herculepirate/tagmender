@@ -199,7 +199,8 @@ class ReportSheet(QDialog):
             line = it if i == 0 else QTreeWidgetItem(["", "", ""])
             if i:
                 it.addChild(line)
-            words = f"{c.get('title') or c['id']} ({'MusicBrainz' if c['source'] == 'musicbrainz' else 'Discogs'})"
+            import report
+            words = f"{report.candidate_words(c)} ({'MusicBrainz' if c['source'] == 'musicbrainz' else 'Discogs'})"
             lab = _link(words, c["url"])
             if c.get("lengths") is False:
                 lab.setToolTip(tr("This release lists no track lengths: check it is your copy before applying it."))

@@ -222,6 +222,45 @@ class Building(unittest.TestCase):
         self.assertEqual([r["folder"] for r in section(rep, "decide")], ["/music/P"])
         self.assertEqual(section(rep, "failed")[0]["issue"], "not found on MusicBrainz or Discogs")
 
+    def test_an_exact_match_without_lengths_is_not_asked_about(self):
+        """A barcode proved it: the report must not say the files can't be proven."""
+        a = album("/music/Band/LP", identification=ident(
+            "exact", evidence=["barcode agrees", "durations unavailable (barcode decides)"], cands=[cand(lengths=False)]))
+        rep = report.build(make_plan([a]))
+        self.assertEqual(section(rep, "decide"), [])
+        self.assertEqual(len(section(rep, "done")), 1)
+
+    def test_an_album_whose_pressing_cannot_be_told_is_not_a_question(self):
+        """Every clue tried: it is tagged as the album with no pressing's tags, and nobody is asked."""
+        a = album("/music/Band/A", tier="album_only", identification=ident(
+            "album_only", reason="ambiguous_release: album known, pressing not established", cands=[cand(), cand(rid="9")]))
+        rep = report.build(make_plan([a]))
+        self.assertEqual(section(rep, "decide"), [])
+        self.assertEqual(len(section(rep, "done")), 1)
+
+    def test_an_album_only_mark_found_on_disk_is_not_a_question_either(self):
+        rows = [{"folder": "/music/A", "codes": ["ambiguous_release"], "mark": "Partial",
+                 "reason": "album known, pressing not established: pressing unknown (6 pressings fit equally)"},
+                {"folder": "/music/P", "codes": ["ambiguous_release"], "reason": "two pressings", "mark": "Partial"}]
+        self.assertEqual([r["folder"] for r in report.for_attention(rows, look_up=False)["rows"]], ["/music/P"])
+
+    def test_a_pick_not_proven_without_lengths_is_still_asked_about(self):
+        a = album("/music/Band/P", tier="partial", identification=ident(
+            "partial", reason="ambiguous_release: x", why=["durations unavailable"], cands=[cand(lengths=False)]))
+        self.assertIn(report.NO_LENGTHS, section(report.build(make_plan([a])), "decide")[0]["issue"])
+
+    def test_the_preferred_database_comes_first_after_the_pick(self):
+        c = [{"source": s, "id": i, "score": n, "title": i, "details": ""}
+             for s, i, n in (("mb", "m1", 96.0), ("mb", "m2", 90.0), ("discogs", "d1", 80.0))]
+        out = {"best": {"source": "mb", "id": "m1", "confidence": 96.0}, "choices": c}
+        self.assertEqual([x["id"] for x in engine.candidates_of(out, prefer="discogs")], ["m1", "d1", "m2"])
+        self.assertEqual([x["id"] for x in engine.candidates_of(out)], ["m1", "m2", "d1"])
+
+    def test_a_suggestion_says_first_what_it_is(self):
+        self.assertEqual(report.candidate_words(dict(cand(), details="Vinyl · Germany")),
+                         "Vinyl · Germany: Band - Album (1999)")
+        self.assertEqual(report.candidate_words(cand()), "Band - Album (1999)")      # (a plan saved before)
+
     def test_candidates_from_the_matcher(self):
         out = {"best": {"source": "discogs", "id": 77, "artist": "Band", "title": "Album", "year": 1999,
                         "confidence": 71.5, "notes": ["durations unavailable (barcode decides)"]},

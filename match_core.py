@@ -427,6 +427,8 @@ _OCR_CATNO_RE = re.compile(
     r"(?<![A-Za-z0-9])([A-Z][A-Za-z]{1,9}(?:[ -]?(?:CD|LP|DVD|SACD|MC|CDR|DA))?[ -]?\d{2,7}(?:[-/]\d{1,3})?"
     r"(?:(?:CD|LP|DVD|SACD|MC|CDR|DG)[A-Z]{0,2})?)"    # "FO532CD", "QDISS0201CDD": the format after the number
     r"(?![A-Za-z0-9])")
+# EMI's spaced form: "CDP 7 91186 2", "CDP 566-7 91186 2" (letters, a digit, five digits, a check digit)
+_OCR_SPACED_CATNO_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,5} (?:\d{3}[- ])?\d[ -]?\d{5}[ -]\d)(?![A-Za-z0-9])")
 _OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ °'’·.]?\d){10,12})(?!\d)")
 
 
@@ -443,6 +445,11 @@ def codes_from_ocr_text(text, limit=5):
         if valid_barcode(code) and code not in out["barcodes"]:
             out["barcodes"].append(code)
     seen = set()
+    for m in _OCR_SPACED_CATNO_RE.finditer(text):
+        key = norm_code(m.group(1))
+        if key not in seen and m.group(1).split()[0].casefold() not in _OCR_NOT_CATNO:
+            seen.add(key)
+            out["catnos"].append(m.group(1))
     for m in _OCR_CATNO_RE.finditer(text):
         cand = m.group(1).strip()
         word = re.match(r"[A-Za-z]+", cand).group(0)
@@ -1479,6 +1486,13 @@ def media_hint(folder):
     if _DIGITAL_HINT.search(text):
         return "digital"
     return ""
+
+
+def release_details(cand):
+    """What tells a release from the album's others, in words: format, country, catalogue number."""
+    names = list(dict.fromkeys(str(x) for x in cand.get("media_formats") or () if x))
+    fmt = ", ".join(names) or "/".join(sorted(cand.get("formats") or ()))
+    return " · ".join(x for x in (fmt, cand.get("country"), cand.get("catno_shown")) if x)
 
 
 def media_kind(fmt):
@@ -2605,11 +2619,15 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                 notes.append(f"{run} track lengths line up in order "
                              f"(files have {abs(extra)} {'extra' if extra > 0 else 'missing'} "
                              f"track{'s' if abs(extra) != 1 else ''})")
+    # (the release lists too few lengths to compare, and none of those it lists disagrees;
+    # a proving barcode costs nothing for lengths in the first place)
+    lengths_missing = bool(dur_frac is None and tracks_ok and n_cand and not barcode_proves({"code": code})
+                           and all(duration_ok(f, c, cfg) for f, c in known))
     if dur_frac is None:
         if barcode_proves({"code": code}):
             notes.append("durations unavailable (barcode decides)")
         else:
-            avail += cfg["w_durations"]  # missing evidence costs confidence
+            avail += cfg["w_durations"]  # missing evidence costs confidence (_missing_lengths_free)
             if tracks_ok:
                 notes.append(f"durations unavailable ({dur_cov:.0%} listed)")
 
@@ -2691,6 +2709,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     res = {
         "confidence": conf, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
+        "lengths_missing": lengths_missing, "avail": avail,
         "numbers_repeat": numbers_repeat(album), "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
         "pressing_year": album.get("pressing_year"),
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
@@ -2894,6 +2913,41 @@ def _exact_rival(best, scored, cfg, scan_pick=None):
     return None if alike else rival
 
 
+def _lengths_back_it(s) -> bool:
+    """The candidate is this album and at least half the track lengths it lists agree: what tells
+    it from an entry that lists none (one with most of them wrong does not)."""
+    return bool(s.get("tracks_ok") and s.get("dur_frac") is not None and s["dur_frac"] >= 0.5
+                and s.get("title_sim", 0) >= 0.85)
+
+
+def _yields_to_lengths(res, other):
+    """RES as combine() must see it: its pick was only lifted because it lists no lengths
+    (_missing_lengths_free), and the other database has a candidate whose lengths do agree. Then
+    it is not sure, and has its first score back, as it would within one database."""
+    best = (res or {}).get("best")
+    if not best or not best.get("lengths_free") or \
+            not any(_lengths_back_it(s) for s in (other or {}).get("scored") or [(other or {}).get("best") or {}]):
+        return res
+    why = list(res.get("why") or [])
+    return dict(res, status="review" if res.get("status") == "auto" else res.get("status"),
+                best=dict(best, confidence=best["lifted_from"], lengths_free=False),
+                why=why + ([] if "durations unavailable" in why else ["durations unavailable"]))
+
+
+def _missing_lengths_free(scored, cfg):
+    """A release that lists no track lengths loses no points and is not held back for it - unless
+    another candidate's lengths do agree with the files: then those are what tells them apart, and
+    the entry nothing can be compared on must not tie with it. Lengths that are listed and
+    disagree still count against a release. Extra-Careful Matching keeps asking for them."""
+    if cfg.get("lengths_required") or any(_lengths_back_it(s) for s in scored):
+        return
+    for s in scored:
+        if s.get("lengths_missing") and not s.get("lengths_free") and s.get("avail", 0) > cfg["w_durations"]:
+            s["lifted_from"] = s["confidence"]
+            s["confidence"] = min(100.0, round(s["confidence"] * s["avail"] / (s["avail"] - cfg["w_durations"]), 1))
+            s["lengths_free"] = True
+
+
 def classify(scored, cfg):
     """Decide auto / review / nomatch for ONE source's scored candidates.
 
@@ -2903,6 +2957,7 @@ def classify(scored, cfg):
     if not scored:
         return {"status": "nomatch", "best": None, "runner_up": None,
                 "margin": None, "why": ["no candidates found"]}
+    _missing_lengths_free(scored, cfg)
     scored = _full_fit_first(scored, cfg)
 
     def barcode_agrees(s):
@@ -3102,6 +3157,8 @@ def classify(scored, cfg):
             if excuse:
                 lengths_excused = True
                 best["notes"] = best["notes"] + [f"track lengths not compared: {excuse}"]
+            elif best.get("lengths_free") and min_dur <= cfg["auto_min_duration_frac"]:
+                pass                          # (the release lists none; a partial title still needs them)
             elif best["dur_frac"] is None and (best["tracks_ok"] or best.get("aligned")):
                 why.append("durations unavailable")
             elif best["dur_frac"] is None:
@@ -3668,6 +3725,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     release your files are already tagged with is kept; only then does the preferred
     database's pick stand, in place of a guess. Neither: as above."""
     prefer = preferred_source(mb_result, dg_result)
+    mb_result, dg_result = _yields_to_lengths(mb_result, dg_result), _yields_to_lengths(dg_result, mb_result)
     # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
     disputed = _proof_left_unsure(mb_result, dg_result)
     if disputed:
@@ -3794,7 +3852,7 @@ def _no_lengths_tie(best, why) -> bool:
     """The pick is held back only because the entries tied with it list no track lengths (which
     also lowers its score): artist, title and the tracks all match, and nothing contradicts it."""
     rest = [w for w in why if not _TIE_WHY.match(w)]
-    if len(rest) == len(why) or "durations unavailable" not in rest or \
+    if len(rest) == len(why) or not (best.get("lengths_free") or "durations unavailable" in rest) or \
             not all(w == "durations unavailable" or _LOW_SCORE_WHY.match(w) for w in rest):
         return False
     titles = best.get("titles_agree")

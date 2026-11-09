@@ -1,5 +1,52 @@
 # Release notes
 
+## 0.8.17
+
+**Overview: several albums looked up at once**
+- A look-up now works on up to three albums at the same time, and each shows "Looking up…" in the
+  list. Albums added from different folders run side by side.
+- The limits the databases set are shared between them, so MusicBrainz and Discogs get no more
+  requests per second than before. Albums waiting mostly on those two gain least; reading files,
+  scans and artwork gain most.
+
+**Track lengths no longer needed to match**
+- A release that lists no track lengths no longer holds an album back or costs it points.
+- Lengths that clearly disagree still send the album to review. So does a pick without lengths when
+  the other database has a release whose lengths do match.
+- Extra-careful matching still asks for track lengths.
+
+**Report: fewer questions, better choices**
+- An album proven some other way, by a barcode on your scans for example, is no longer asked about
+  because its release lists no track lengths.
+- When every clue has been tried and the pressing still cannot be told, the album is tagged with
+  its original date and no pressing's details, and nothing is asked. Before, it asked you to choose.
+- Releases your folder name rules out are no longer offered: a folder marked vinyl is not offered
+  a CD or a cassette. If none fits, they are all shown.
+- Each release offered now starts with its format, country and catalogue number, and your preferred
+  database comes first.
+
+**Reading scans**
+- Catalogue numbers printed with spaces, such as EMI's "CDP 7 91186 2", are now recognised.
+
+**Look-ups**
+- A file that cannot be read for a moment, on a network share for example, now affects only its own
+  album. Before, it stopped the whole look-up.
+
+**Watched folders**
+- A barcode or catalogue number found on your scans, with every track length agreeing, now files an
+  exact match even on a score from 80. The score only looks low when a folder name does not say the
+  artist. Extra-careful matching keeps the higher score.
+- Fixed: when the terminal or program that started TagMender had gone, a routine "waiting" message
+  from a busy database stopped the album's look-up with "Broken pipe".
+- Fixed: the rule added in 0.8.16 for filing an exact match scoring at least 90 never took effect,
+  so those albums were identified again on every check and stayed in the folder. They are now filed,
+  as are exact matches of a release that lists no track lengths.
+- When a repeat check finds nothing new and an album still cannot be filed, the log says why.
+
+**Artwork**
+- Cover images are written whole and then put in place, so albums looked up together cannot leave a
+  half-written file.
+
 ## 0.8.16
 
 **Overview: add albums at any time**

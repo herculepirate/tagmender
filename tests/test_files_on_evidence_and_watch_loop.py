@@ -110,6 +110,41 @@ class Filing(unittest.TestCase):
                    {"confidence": 91.5, "margin": None, "all_lengths": True}):
             self.assertFalse(self.moved(self.entry(tier="exact", **kw)), kw)
 
+    def test_proven_by_the_scans_with_every_length_is_filed_on_a_low_score(self):
+        a = self.entry(tier="exact", confidence=86.9, margin=0.0, all_lengths=True,
+                       scans={"state": "proven", "printed": True, "found": ["catalogue_number"], "against": []})
+        self.assertTrue(self.moved(a))
+        self.assertTrue(any("your scans show" in n for n in a["notes"]))
+
+    def test_scans_alone_or_weak_scans_do_not_file_it(self):
+        proven = {"state": "proven", "printed": True, "found": ["barcode"], "against": []}
+        for kw in ({"confidence": 86.9, "all_lengths": False, "scans": proven},
+                   {"confidence": 79.9, "all_lengths": True, "scans": proven},
+                   {"confidence": 86.9, "all_lengths": True, "scans": {"state": "agrees", "found": ["label"], "against": []}},
+                   {"confidence": 86.9, "all_lengths": True, "scans": dict(proven, printed=False)},   # (typed in a note)
+                   {"confidence": 86.9, "all_lengths": True, "scans": None}):
+            self.assertFalse(self.moved(self.entry(tier="exact", margin=0.0, **kw)), kw)
+
+    def test_extra_careful_ignores_the_scans_too(self):
+        self.assertFalse(self.moved(self.entry(careful=True, tier="exact", confidence=86.9, margin=0.0, all_lengths=True,
+                                               scans={"state": "proven", "printed": True, "found": ["barcode"], "against": []})))
+
+    def test_a_closed_terminal_does_not_end_the_work(self):
+        import logsetup
+
+        class Gone:
+            encoding = "utf-8"
+
+            def write(self, text):
+                raise BrokenPipeError(32, "Broken pipe")
+
+            def flush(self):
+                raise BrokenPipeError(32, "Broken pipe")
+        quiet = logsetup.QuietStream(Gone())
+        self.assertEqual(quiet.write("waiting"), 7)
+        quiet.flush()
+        self.assertEqual(quiet.encoding, "utf-8")
+
     def test_album_known_with_no_lengths_is_filed_and_tagged(self):
         a = self.entry(tier="album_only", confidence=66.7, no_lengths_tie=True)
         self.assertTrue(self.moved(a))

@@ -635,7 +635,10 @@ class Watcher:
                         each.append((x, out_i, self._status_of(x, p_i, out_i, prof)))
                     status = _worst([st for _x, _o, st in each])
                     if why == "retry" and res is None and prev and prev[1] == status and status in LOOPED:
-                        continue                               # (looked again, nothing new: no record, no notice)
+                        # (looked again, nothing new: no record, no notice - but the log says why it stayed)
+                        self.log.info("%s: not filed, still %s: %s", g.folder, status,
+                                      "; ".join(a.get("notes") or []) or "nothing to do")
+                        continue
                     shown = status
                     if status == "waiting_destination":
                         shown = "blocked"

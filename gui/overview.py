@@ -80,6 +80,62 @@ def merge_results(plans, run, cancelled=lambda: False) -> dict:
     return {"job": ", ".join(jobs), "status": "partial" if partial else "done", "counts": counts, "albums": albums}
 
 
+def run_batches(batches, run, cancelled, partial, progress, workers=None) -> int:
+    """The look-up's albums, in batches (a profile and the folder they are read from), at most
+    WORKERS albums at once in all: one batch shares them among its albums, several (albums dropped
+    from different folders) run side by side. run(batch, report, workers) -> albums looked up;
+    report(what, args) from any thread, emitted here, on the look-up's own thread, in order."""
+    import engine
+    import queue
+    import threading
+    workers = workers or engine.LOOKUP_WORKERS
+    if len(batches) < 2:
+        n = 0
+        for b in batches:
+            if not cancelled():
+                n += run(b, lambda what, a: (partial if what == "partial" else progress)(a), workers)
+        return n
+    each = max(1, workers // len(batches))
+    todo, out = queue.SimpleQueue(), queue.SimpleQueue()
+    for b in batches:
+        todo.put(b)
+    failed = threading.Event()
+
+    def side():
+        try:
+            while not cancelled() and not failed.is_set():
+                try:
+                    b = todo.get_nowait()
+                except queue.Empty:
+                    break
+                out.put(("count", run(b, lambda what, a: out.put((what, a)), each)))
+        except BaseException as exc:              # (raised below, on the look-up's thread)
+            failed.set()
+            out.put(("failed", exc))
+        finally:
+            out.put(("ended", None))
+    threads = [threading.Thread(target=side, name=f"look-up-batch-{i}", daemon=True)
+               for i in range(min(workers, len(batches)))]
+    for t in threads:
+        t.start()
+    n, error, live = 0, None, len(threads)
+    while live:
+        what, a = out.get()
+        if what == "ended":
+            live -= 1
+        elif what == "failed":
+            error = error or a
+        elif what == "count":
+            n += a
+        else:
+            (partial if what == "partial" else progress)(a)
+    for t in threads:
+        t.join()
+    if error is not None:
+        raise error
+    return n
+
+
 def plan_each(e, path, keys, emit, progress=None, cancel=None, meta=None) -> int:
     """Engine E's plan of KEYS an album at a time (engine.Engine.plan_each)."""
     return e.plan_each(path, keys, emit, progress=progress, cancel=cancel, meta=meta)
@@ -1505,23 +1561,28 @@ class Overview(QWidget):
 
         roots = dict(getattr(self, "roots", {}))
 
+        at = {k: i for i, k in enumerate(k for ks in groups.values() for k in ks)}    # (its row: _lookup_order)
+
         def work(w):
-            off = 0
+            batches = []
             for name, ks in groups.items():
                 by_root = {}                                # (the folder each album is read from)
                 for k in ks:
                     by_root.setdefault(roots.get(k) or path, []).append(k)
-                for where, kr in by_root.items():
-                    if w.cancelled:
-                        break
-                    e = engine.Engine(profs[name], ocr=True if ocr else None)
-                    e.edits = edits
-                    e.force = forced
-                    # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
-                    off += plan_each(e, where, kr, lambda k, plan, name=name: w.partial.emit((name, k, plan)),
-                                     progress=lambda i, what, o=off: w.progress.emit(o + i, total, what),
-                                     cancel=lambda: w.cancelled, meta=META_STORE)
-            return off
+                batches += [(name, where, kr) for where, kr in by_root.items()]
+
+            def one_batch(batch, report, workers):
+                name, where, kr = batch
+                e = engine.engine_for_thread(profs[name], ocr=True if ocr else None)
+                e.edits = edits
+                e.force = forced
+                e.lookup_workers = workers
+                # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
+                return plan_each(e, where, kr, lambda k, plan: report("partial", (name, k, plan)),
+                                 progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
+                                 cancel=lambda: w.cancelled, meta=META_STORE)
+            return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
+                               lambda a: w.progress.emit(*a))
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
         self._lookup_again = again                         # (Refresh: so is what Apply interrupts)
         self._lookup_order = [k for ks in groups.values() for k in ks]
@@ -1767,6 +1828,13 @@ class Overview(QWidget):
             badge.setVisible(bool(short))
 
     def progress(self, i, n, what):
+        if getattr(self, "_lookup_n", 0) and self.running and not self._applying:
+            # (several albums at once: i says which row is being looked up, the bar how many have started)
+            order = self._lookup_order
+            if i < len(order) and self.states.get(order[i]) == "waiting":
+                self.states[order[i]] = "looking"
+                self.model.refresh_rows()
+            i = max(0, sum(1 for k in order if self.states.get(k) != "waiting") - 1)
         self.service_status()
         self.bar.setMaximum(max(n, 1))
         self.bar.setValue(i + 1)
@@ -1780,9 +1848,6 @@ class Overview(QWidget):
             self.summary.setText(tr("Applying album {0} of {n}: {name}…").format(i + 1, n=n, name=Path(what).name))
         elif getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
             self._lookup_i, self._lookup_name = i, Path(what).name
-            if i < len(self._lookup_order) and self.states.get(self._lookup_order[i]) == "waiting":
-                self.states[self._lookup_order[i]] = "looking"
-                self.model.refresh_rows()
             self.summary.setText(self.lookup_words(i, Path(what).name))
         elif self.running:
             self.summary.setText(tr("Identifying album {0} of {n}: {name}… nothing is changed while previewing.")

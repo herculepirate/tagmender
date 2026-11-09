@@ -45,6 +45,11 @@ DEFAULT_INTERVAL = 0.1
 MAX_BYTES = 40 * 1024 * 1024  # hard cap for any single download
 
 
+_HOST_LOCKS: dict[str, threading.Lock] = {}
+_HOST_NEXT: dict[str, float] = {}
+_HOST_GUARD = threading.Lock()
+
+
 class Cancelled(Exception):
     pass
 
@@ -125,9 +130,8 @@ class HttpClient:
         self.timeout = timeout
         self.retries = retries
         self.cancel = cancel or threading.Event()
-        self._host_locks: dict[str, threading.Lock] = {}
-        self._host_next: dict[str, float] = {}
-        self._global = threading.Lock()
+        # (one pace per host for the process: every look-up worker has its own client)
+        self._host_locks, self._host_next, self._global = _HOST_LOCKS, _HOST_NEXT, _HOST_GUARD
         self.stats = {"requests": 0, "cache_hits": 0, "errors": 0}
 
     # ---- rate limiting ----

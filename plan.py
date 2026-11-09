@@ -93,7 +93,7 @@ class Proposal:
     # the releases the matcher scored best, for the run report's suggestions (engine.candidates_of):
     # [{"source", "id", "url", "ref", "score", "title", "lengths"}]
     candidates: list = field(default_factory=list)
-    # reporting only (engine.scans_of): what the album's scans showed about the chosen
+    # (engine.scans_of; only "printed" is acted on: _files_on_evidence): what the album's scans showed about the chosen
     # release, {"state": proven|agrees|differs|unread, "found": [kinds], "against": [kinds]}
     # (None: no scans, or OCR did not run), and how the release was found: "" (plain search),
     # disc_id, link, scan_search, barcode_lookup or fingerprint (None: not known)
@@ -104,6 +104,7 @@ class Proposal:
     # no_lengths_tie: artist, title and tracks match, only entries of this album tie, and they
     # list no lengths to score (album_only tier)
     all_lengths: bool = False
+    lengths_missing: bool = False       # exact tier, and the release lists no track lengths to compare
     no_lengths_tie: bool = False
 
 
@@ -167,10 +168,15 @@ def _files_on_evidence(prop, profile, conf) -> str:
     tier = tier_of(prop)
     if tier == "album_only" and getattr(prop, "no_lengths_tie", False):
         return "artist, title and tracks match, and only entries of this album tie (they list no track lengths)"
-    if tier == "exact" and getattr(prop, "all_lengths", False) and \
+    lengths = getattr(prop, "all_lengths", False)
+    if tier == "exact" and lengths and conf >= 80.0 and (getattr(prop, "scans", None) or {}).get("printed"):
+        # (a low score here is a folder name that does not say the artist, not doubt about the release)
+        return "your scans show its barcode or catalogue number and every track length agrees"
+    if tier == "exact" and (lengths or getattr(prop, "lengths_missing", False)) and \
             conf >= max(90.0, _threshold(profile, "auto_min_confidence")) and prop.margin is not None and \
             prop.margin >= _threshold(profile, "auto_min_margin"):
-        return "every track length agrees and no other release is close"
+        return ("every track length agrees" if lengths else "the release does not list track lengths to compare") + \
+            " and no other release is close"
     return ""
 
 

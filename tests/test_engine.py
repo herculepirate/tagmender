@@ -150,6 +150,56 @@ class Base(unittest.TestCase):
         return engine.Engine(pf.from_dict(d), http=http)
 
 
+class FiledOnEvidence(Base):
+    """The real matcher's answer, through the engine and the planner, to a move: what the
+    filing rule reads must be what identification really says (a flag set by hand proves nothing)."""
+
+    def move_of(self, p, confidence=91.5):
+        (self.tmp / "filed").mkdir(exist_ok=True)
+        prof = pf.from_dict({"name": "default", "operation": "move", "destination": str(self.tmp / "filed"),
+                             "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False}})
+        p.confidence, p.margin = confidence, 25.8
+        a = pl.build([p], prof, "job", extra_roots=[self.lib])["albums"][0]
+        return {fe["op"] for fe in a["files"]}, a["notes"]
+
+    def test_every_length_agreeing_is_seen_and_files_the_album(self):
+        d = self.album("Band B", "Album B")
+        eng = self.engine(FakeHttp(dg=[dg_release(901, "Band B", "Album B")]))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.tier, "exact")
+        self.assertTrue(p.all_lengths)
+        self.assertFalse(p.lengths_missing)
+        ops, notes = self.move_of(p)
+        self.assertIn("move", ops, notes)
+        self.assertIn("every track length agrees", " ".join(notes))
+
+    def test_a_release_listing_no_lengths_is_matched_and_filed(self):
+        d = self.album("Band C", "Album C")
+        eng = self.engine(FakeHttp(dg=[dg_release(902, "Band C", "Album C", durs=("", "", ""))]))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.status, p.tier), ("identified", "exact"), p.why)
+        self.assertFalse(p.all_lengths)
+        self.assertTrue(p.lengths_missing)
+        ops, notes = self.move_of(p)
+        self.assertIn("move", ops, notes)
+        self.assertIn("does not list track lengths", " ".join(notes))
+
+    def test_lengths_that_disagree_still_hold_it_back(self):
+        d = self.album("Band D", "Album D")
+        eng = self.engine(FakeHttp(dg=[dg_release(903, "Band D", "Album D", durs=("5:00", "6:00", "7:00"))]))
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertFalse(p.all_lengths or p.lengths_missing)
+        self.assertNotEqual(p.tier, "exact")
+
+    def test_extra_careful_still_wants_lengths(self):
+        d = self.album("Band E", "Album E")
+        eng = self.engine(FakeHttp(dg=[dg_release(904, "Band E", "Album E", durs=("", "", ""))]),
+                          matching={"extra_careful": True})
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertFalse(p.lengths_missing)
+        self.assertNotEqual(p.tier, "exact")
+
+
 class MbTags(unittest.TestCase):
     def test_picard_mapping_and_video_tracks_left_out(self):
         tags = mb_tags.release_tags(mb_release("r1", "Band", "Album"))

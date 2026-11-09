@@ -31,8 +31,10 @@ import argparse
 import contextlib
 import copy
 import os
+import queue
 import re
 import sqlite3
+import threading
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -250,7 +252,8 @@ def scans_of(prop, out):
     """Reporting only: the matcher's account of the album's scans and of how its pick was
     found (match_albums.scans_report / found_via), on PROP when PROP is about that pick: an
     exact release it names, its album only or Partial tags from the matcher's candidates,
-    or the pick an unresolved album was left with for review. Decides nothing."""
+    or the pick an unresolved album was left with for review. The planner reads one thing of it:
+    plan._files_on_evidence, whether the pick's own number is printed on your copy."""
     out = out or {}
     best = out.get("best") or {}
     if not best or ("scans" not in out and "via" not in out):
@@ -369,8 +372,11 @@ def own_tag_choices(t: dict, profile, path=None) -> dict:
 
 
 class Engine:
+    lookup_workers = 1      # albums plan_each looks up at once (Overview sets LOOKUP_WORKERS)
+
     def __init__(self, profile, *, http=None, dm=None, ocr=None, log=None, job=None, cache=None):
         self.profile = profile
+        self._made_with = {"dm": dm, "ocr": ocr, "cache": cache}     # (a worker's Engine: _plan_each_at_once)
         # the profile's own Ignore/Skip rules, handed to the matcher with each album (never
         # through the process environment: the GUI and its watcher run several engines at once,
         # each for its own profile)
@@ -411,6 +417,7 @@ class Engine:
             cfg["artist_aliases"] = json.loads((ex.CONFIG_DIR / "rules.json").read_text()).get("artist_aliases") or {}
         except (OSError, ValueError):
             pass
+        cfg["lengths_required"] = bool((self.profile.get("matching") or {}).get("extra_careful"))
         self.cfg = cfg
         gnudb_off = profile.provider_on("web", "gnudb") and ma.gnudb_problem()
         if gnudb_off:
@@ -688,7 +695,9 @@ class Engine:
         whole = not ref and not getattr(prop, "parts", None) and not getattr(prop, "split", None) \
             and not str(prop.reason or "").startswith(MIXED_WORDS)
         if whole and not getattr(prop, "candidates", None):
-            prop.candidates = candidates_of(self._last_out)
+            source = getattr(self, "source", "") or ""
+            prop.candidates = candidates_of(self._last_out, prefer=("mb" if source == "musicbrainz_preferred" else
+                                                                    "discogs" if source == "discogs_preferred" else ""))
         if whole:
             scans_of(prop, self._last_out)     # (reporting only)
         # (a set whose discs are different releases: each disc is its own album, _per_disc)
@@ -1398,9 +1407,7 @@ class Engine:
             confidence=float(best.get("confidence") or 0), margin=out.get("margin"),
             why=list(out.get("why") or []), evidence=evidence_of(out, best),
             provenance=prov, release=self._release(best), tier="exact",
-            all_lengths=bool(best.get("tracks_ok") and best.get("dur_frac") == 1.0 and
-                             (best.get("dur_cov") or 0) >= 1.0 and not best.get("conflict")
-                             and not best.get("missing")))
+            all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")))
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
@@ -2646,7 +2653,11 @@ class Engine:
         album already in its place keeps it; a newcomer planned first never takes it). The
         folder is scanned once. progress(i, folder): album i (0-based) is being looked up.
         Cancelled: the albums not reached are not emitted; those reached are planned together.
-        Returns how many albums were looked up."""
+        Returns how many albums were looked up.
+        lookup_workers > 1: several albums at once (_plan_each_at_once), the same results."""
+        clones = self._thread_clones(min(self.lookup_workers, len(keys)))
+        if clones:
+            return self._plan_each_at_once(path, keys, emit, clones, progress, cancel, meta)
         root = Path(os.path.abspath(Path(path).expanduser()))
         found = {}
         prev = self.__dict__.get("albums_in")
@@ -2677,8 +2688,8 @@ class Engine:
                 for q in props:                          # (as plan.build: absolute paths)
                     q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
                     q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
+                out, (props,) = _build_despite_gone(planner, [props], getattr(self, "log", None))   # (shown at once; replaced below)
                 done.append((k, props))
-                out = planner().build(list(props))      # (shown at once; replaced below)
                 with_keys(out["albums"], props)
                 out["provider_notes"] = notes()
                 emit(k, out)
@@ -2688,8 +2699,8 @@ class Engine:
             else:
                 self.__dict__.pop("albums_in", None)     # (the class's own again)
         if len(done) > 1:
-            allp = [q for _k, ps in done for q in ps]
-            whole = planner().build(allp)
+            whole, groups = _build_despite_gone(planner, [ps for _k, ps in done], getattr(self, "log", None))
+            allp = [q for g in groups for q in g]
             with_keys(whole["albums"], allp)
             whole["provider_notes"] = notes()
             for k, ps in done:
@@ -2697,9 +2708,162 @@ class Engine:
         return len(done)
 
 
+    def _thread_clones(self, n) -> list:
+        """n connections for n workers, or [] to work an album at a time (one album, or a stand-in
+        Http that cannot be cloned). Made here: the base connection belongs to this thread."""
+        if n < 2:
+            return []
+        make = getattr(self.http, "thread_clone", None)
+        out = []
+        for _i in range(n):
+            c = make() if make else None
+            if c is None:
+                for x in out:
+                    x.close_clone()
+                return []
+            out.append(c)
+        return out
+
+    def _plan_each_at_once(self, path, keys, emit, clones, progress, cancel, meta) -> int:
+        """plan_each with len(clones) albums looked up at the same time. An album's work belongs
+        to one worker with its own Engine (an Engine holds the album it is on) and connection;
+        the providers' pace and back-off are shared by the clones, so the requests per second
+        do not change. Only this thread reports, and the plan of them all is made once, in KEYS
+        order, as plan_each's."""
+        root = Path(os.path.abspath(Path(path).expanduser()))
+        found, found_lock = {}, threading.Lock()
+        tasks, results = queue.SimpleQueue(), queue.SimpleQueue()
+        for item in enumerate(keys):
+            tasks.put(item)
+        failed = threading.Event()
+
+        def planner(e):
+            return planmod.Planner(e.profile, e.job, extra_roots=[root], edits=getattr(e, "edits", None))
+
+        def notes(e):
+            return {**getattr(e, "run_notes", {}), **e.notes}     # (outages: the clones' shared state, below)
+
+        def worker(clone):
+            try:
+                e = engine_for_thread(self.profile, http=clone, log=self.log, job=self.job, **self._made_with)
+                for name in ("edits", "force"):
+                    if name in self.__dict__:
+                        setattr(e, name, self.__dict__[name])
+                scan = e.albums_in
+
+                def albums_in(p, skip=()):               # (the folder is scanned once, for them all)
+                    k = (str(p), tuple(sorted(str(x) for x in skip)))
+                    with found_lock:
+                        if k not in found:
+                            found[k] = scan(p, skip)
+                        return list(found[k])
+                e.albums_in = albums_in
+                while not failed.is_set() and not (cancel and cancel()):
+                    try:
+                        i, k = tasks.get_nowait()
+                    except queue.Empty:
+                        break
+                    with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+                        props = e.proposals(path, lambda _i, _n, what, i=i: results.put(("progress", i, what)),
+                                            cancel, only={k})
+                    if k not in e.reached and cancel and cancel():
+                        break                            # (cancelled before it: its rows stay)
+                    for q in props:
+                        q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
+                        q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
+                    out, (props,) = _build_despite_gone(lambda: planner(e), [props], e.log)
+                    with_keys(out["albums"], props)
+                    out["provider_notes"] = notes(e)
+                    results.put(("done", i, k, props, out))
+            except BaseException as exc:                 # (reported, and raised, by the coordinator)
+                failed.set()
+                results.put(("failed", exc))
+            finally:
+                clone.close_clone()
+                results.put(("ended",))
+        threads = [threading.Thread(target=worker, args=(c,), name=f"look-up-{n}", daemon=True)
+                   for n, c in enumerate(clones)]
+        for t in threads:
+            t.start()
+        done, told, error, live = {}, {}, None, len(threads)
+        while live:
+            msg = results.get()
+            if msg[0] == "ended":
+                live -= 1
+            elif msg[0] == "failed":
+                error = error or msg[1]
+            elif msg[0] == "progress":
+                if progress:
+                    progress(msg[1], msg[2])
+            else:
+                _kind, i, k, props, out = msg
+                done[i] = (k, props)
+                told.update(out["provider_notes"])       # (a note one worker's album gave stays shown)
+                out["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **told}
+                emit(k, out)
+        for t in threads:
+            t.join()
+        if error is not None:
+            raise error
+        self.reached = {k for k, _p in done.values()}
+        if len(done) > 1:
+            whole, groups = _build_despite_gone(lambda: planner(self), [done[i][1] for i in sorted(done)],
+                                                getattr(self, "log", None))
+            allp = [q for g in groups for q in g]
+            with_keys(whole["albums"], allp)
+            whole["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **notes(self), **told}
+            for i in sorted(done):
+                k = done[i][0]
+                emit(k, dict(whole, albums=[a for a in whole["albums"] if a.get("key") == k]))
+        return len(done)
+
+
+# albums looked up at once: enough to use the waiting on scans, images and files, few enough
+# for a home machine and a network share (the providers' pace is shared and does not change)
+LOOKUP_WORKERS = 3
+_MAKING = threading.Lock()
+
+
+def engine_for_thread(*args, **kw) -> "Engine":
+    """An Engine made while other threads make theirs (loading its plugin is not thread-safe)."""
+    with _MAKING:
+        return Engine(*args, **kw)
+
+
 def group_key(folder, files) -> str:
     """One album of a folder, as List first names it: its folder and its files."""
     return "|".join([os.path.realpath(str(folder))] + sorted(os.path.realpath(str(f)) for f in files))
+
+
+def _build_despite_gone(planner, groups, log=None) -> tuple:
+    """(the plan of these albums, the albums as planned). groups: each album's proposals. An album
+    a file of which cannot be read while it is planned (a network share that lost it for a moment, a
+    folder moved away) becomes a row saying so, as one that failed being identified does
+    (Engine.proposals: one bad album never stops the run); the others are planned."""
+    groups = [list(g) for g in groups]
+    for _try in range(sum(len(q.files) + 1 for g in groups for q in g)):
+        try:
+            return planner().build([q for g in groups for q in g]), groups
+        except OSError as exc:
+            where = str(exc.filename or "")
+            spots = [(g, i) for g in groups for i in range(len(g)) if g[i].files]
+            inside = [(g, i) for g, i in spots if where and (where == str(g[i].source_dir)
+                      or where.startswith(str(g[i].source_dir) + os.sep))]
+            hit = next(((g, i) for g, i in spots if where in map(str, g[i].files)), None) or \
+                max(inside, key=lambda x: len(str(x[0][x[1]].source_dir)), default=None)
+            if hit is None:
+                raise
+            g, i = hit
+            q = g[i]
+            if log:
+                log.warning("planning %s failed: %s", q.source_dir, exc)
+            # (no files: nothing of it is tagged, moved or marked on what was seen of it for a moment)
+            p = planmod.Proposal(source_dir=str(q.source_dir), files=[], status="unresolved",
+                                 reason=f"error: {exc}", reason_codes=["other"])
+            p.group_key = getattr(q, "group_key", None)
+            p.group_files = [str(f) for f in getattr(q, "group_files", None) or q.files]      # (its row's key: with_keys)
+            g[i] = p
+    return planner().build([q for g in groups for q in g]), groups
 
 
 def with_keys(entries, props):
@@ -2712,11 +2876,14 @@ def with_keys(entries, props):
         if k:
             for f in list(q.files or []) + list(getattr(q, "group_files", None) or []):
                 of.setdefault(str(f), k)
+            if not q.files:                              # (planned with none: _build_despite_gone)
+                of.setdefault(str(q.source_dir), k)
     for a in entries:
         if a.get("key"):
             continue
         k = next((of[str(f)] for f in list(a.get("album_files") or []) +
-                  [fe.get("src") for fe in a.get("files") or [] if isinstance(fe, dict)] if str(f) in of), None)
+                  [fe.get("src") for fe in a.get("files") or [] if isinstance(fe, dict)] + [a.get("source_dir")]
+                  if str(f) in of), None)
         if k:
             a["key"] = k
 
@@ -3353,14 +3520,19 @@ def release_url(source, rid) -> str:
             else f"https://www.discogs.com/release/{rid}")
 
 
-def candidates_of(out, limit=5) -> list:
+def candidates_of(out, limit=5, prefer="") -> list:
     """The releases the matcher scored best for an album, best first (its pick, then its
     "alts"), as the run report suggests them: [{"source": "musicbrainz" | "discogs", "id",
     "url", "ref" (what plan --release takes), "score", "title", "lengths"}]. "lengths" is
-    False when the pick's release lists no track lengths, None when not known."""
+    False when the pick's release lists no track lengths, None when not known; "details" its
+    format, country and catalogue number. A release the folder name rules out is not offered,
+    unless none fits. prefer ("mb" or "discogs"): that database's releases first, after the pick."""
     if not isinstance(out, dict):
         return []
     found, seen = [], set()
+
+    choices = [c for c in out.get("choices") or () if isinstance(c, dict)]
+    details = {(c["source"], c["id"]): c.get("details") or "" for c in choices}
 
     def add(src, rid, score, title, lengths=None):
         key = (src, str(rid))
@@ -3369,7 +3541,8 @@ def candidates_of(out, limit=5) -> list:
         seen.add(key)
         found.append({"source": "musicbrainz" if src == "mb" else "discogs", "id": str(rid),
                       "url": release_url(src, rid), "ref": str(rid) if src == "mb" else f"discogs:{rid}",
-                      "score": round(float(score or 0), 1), "title": title, "lengths": lengths})
+                      "score": round(float(score or 0), 1), "title": title, "lengths": lengths,
+                      "details": details.get(key, "")})
     best = out.get("best") or {}
     if best.get("id"):
         title = " - ".join(x for x in (best.get("artist"), best.get("title")) if x) + \
@@ -3378,11 +3551,14 @@ def candidates_of(out, limit=5) -> list:
         add(best.get("source"), best.get("id"), best.get("confidence"), title,
             False if "durations unavailable" in notes else None)
     alts = []
-    for a in out.get("alts") or []:
+    if choices:                                      # (a result saved by an older matcher has none)
+        offered = [c for c in choices if not c.get("against_folder")] or choices
+        alts = [(float(c.get("score") or 0), c["source"], c["id"], c.get("title") or "") for c in offered]
+    for a in (out.get("alts") or []) if not choices else ():
         m = _ALT_WORDS.match(str(a))
         if m:
             alts.append((float(m.group(3)), m.group(1), m.group(2), m.group(4).strip()))
-    for score, src, rid, title in sorted(alts, key=lambda x: -x[0]):
+    for score, src, rid, title in sorted(alts, key=lambda x: (x[1] != prefer if prefer else False, -x[0])):
         add(src, rid, score, title)
     return found[:limit]
 

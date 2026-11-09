@@ -54,6 +54,28 @@ def redact(text: str) -> str:
     return s
 
 
+class QuietStream:
+    """A stream whose writes never raise: a message for a terminal that has gone (the program that
+    started this one has closed the pipe) must not end the work it was reporting on."""
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        try:
+            return self._stream.write(text)
+        except (OSError, ValueError):
+            return len(text)
+
+    def flush(self):
+        try:
+            self._stream.flush()
+        except (OSError, ValueError):
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 def new_job_id() -> str:
     return time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
 

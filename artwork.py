@@ -19,12 +19,14 @@ note says why.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import http.client
 import io
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -70,8 +72,16 @@ def _stage(data: bytes, staging: Path, quality=JPEG_QUALITY) -> tuple[Path, int,
             data = buf.getvalue()
             w, h = Image.open(io.BytesIO(data)).size       # (after turning it the right way up)
     path = staging / (hashlib.sha1(data).hexdigest()[:16] + ".jpg")
-    path.write_bytes(data)
+    _write_whole(path, data)
     return path, w, h
+
+
+def _write_whole(path: Path, data: bytes) -> None:
+    """A staged image, never seen half written (albums looked up at once can share a cover and
+    a staging folder; its name is the hash of its bytes)."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
 
 
 def embed_copy(front: Path, staging: Path, max_side=EMBED_MAX_SIDE, quality=JPEG_QUALITY) -> Path:
@@ -105,16 +115,20 @@ def embed_copy(front: Path, staging: Path, max_side=EMBED_MAX_SIDE, quality=JPEG
             q -= 10
     staging.mkdir(parents=True, exist_ok=True)
     path = staging / (hashlib.sha1(buf.getvalue()).hexdigest()[:16] + ".embed.jpg")
-    path.write_bytes(buf.getvalue())
+    _write_whole(path, buf.getvalue())
     return path
+
+
+_CAA_ONE = threading.Lock()
 
 
 def _get(url, headers=None, limit=MAX_BYTES) -> bytes | None:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     caa = urllib.parse.urlsplit(url).hostname == "coverartarchive.org"
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data = r.read(limit + 1)
+        with _CAA_ONE if caa else contextlib.nullcontext():    # (albums looked up at once: still one by one)
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = r.read(limit + 1)
     except urllib.error.HTTPError as exc:
         if caa:                     # (404: an answer - there is no such image)
             _caa_health(f"HTTP {exc.code}" if exc.code in (429, 503) or exc.code >= 500 else None)
@@ -619,7 +633,7 @@ def as_format(front: Path, suffix: str, staging: Path) -> Path:
                 **({"icc_profile": icc} if icc else {}))
     staging.mkdir(parents=True, exist_ok=True)
     path = staging / (hashlib.sha1(buf.getvalue()).hexdigest()[:16] + (".png" if want == "PNG" else ".jpg"))
-    path.write_bytes(buf.getvalue())
+    _write_whole(path, buf.getvalue())
     return path
 
 

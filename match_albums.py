@@ -3770,6 +3770,7 @@ def mb_candidate(rel):
         "country": rel.get("country", ""),
         "label": "; ".join(sorted({i["label"]["name"] for i in infos if i.get("label")})),
         "catnos": {mc.norm_code(i.get("catalog-number")) for i in infos if i.get("catalog-number")},
+        "catno_shown": ", ".join(dict.fromkeys(i["catalog-number"] for i in infos if i.get("catalog-number"))),
         "barcodes": {mc.norm_code(rel["barcode"])} if rel.get("barcode") else set(),
         "disc_count": len([m for m in audio_media if m.get("tracks")]) or len(audio_media) or 1,
         "tracks": tracks, "pregap_tracks": pregaps, "disc_titles": disc_titles, "packaging": mc.packaging_kind(rel.get("packaging")),
@@ -4216,6 +4217,8 @@ def discogs_candidate(rel, dm):
         "label": "; ".join(sorted({dm.clean_artist_name(l.get("name")) for l in labels})),
         "catnos": {mc.norm_code(l["catno"]) for l in labels
                    if l.get("catno") and str(l["catno"]).casefold() != "none"},
+        "catno_shown": ", ".join(dict.fromkeys(l["catno"] for l in labels
+                                               if l.get("catno") and str(l["catno"]).casefold() != "none")),
         "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks, "disc_titles": disc_titles,
         # matrix / runout, SID and label codes: compared with what the disc scans read
         "matrix": [(str(i.get("type")), str(i["value"])) for i in rel.get("identifiers", [])
@@ -4555,6 +4558,20 @@ def ocr_workers():
 
 
 _POOL = threading.local()
+_TESSERACT_SLOTS = None
+_TESSERACT_GUARD = threading.Lock()
+
+
+def _tesseract(*args, **kw):
+    """subprocess.run of tesseract, no more at a time in the process than ocr_workers() (albums
+    looked up at once each read their scans: their pools must not add up)."""
+    import subprocess
+    global _TESSERACT_SLOTS
+    with _TESSERACT_GUARD:
+        if _TESSERACT_SLOTS is None:
+            _TESSERACT_SLOTS = threading.BoundedSemaphore(max(1, ocr_workers()))
+    with _TESSERACT_SLOTS:
+        return subprocess.run(*args, **kw)
 
 
 def _pmap(fn, items):
@@ -4795,10 +4812,9 @@ def decoded_barcodes(db, images, log=None):
         return set()
 
     def compute():
-        _DECODED_ON.clear()
-        codes = sorted(ocr_barcodes(images))
-        return {"codes": codes, "from": {c: images.index(_DECODED_ON[c]) for c in codes
-                                         if _DECODED_ON.get(c) in images}}
+        codes = sorted(ocr_barcodes(images))           # (albums looked up at once share _DECODED_ON)
+        where = {c: [p for p in list(_DECODED_ON.get(c, ())) if p in images] for c in codes}
+        return {"codes": codes, "from": {c: min(images.index(p) for p in on) for c, on in where.items() if on}}
     value = _cached(db, "barcodes2", images_key(images), compute)
     if isinstance(value, list):                        # a reading stored as the codes alone
         value = {"codes": value, "from": {}}
@@ -4963,7 +4979,7 @@ def ocr_barcodes(paths, per_image_s=8.0, total_s=40.0, patches_s=60.0):
 
 def _decoded_on(codes, path):
     for c in codes:
-        _DECODED_ON[c] = str(path)
+        _DECODED_ON.setdefault(c, set()).add(str(path))
     return codes
 
 
@@ -5011,7 +5027,7 @@ def ocr_spines(paths):
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                         whole.rotate(angle, expand=True).save(tmp.name)
-                        r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                        r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
                                            capture_output=True, text=True, timeout=120, env=_tess_env())
                     chunks.append(r.stdout)
                 except Exception:
@@ -5029,7 +5045,7 @@ def ocr_spines(paths):
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                         strip.rotate(angle, expand=True).save(tmp.name)
-                        r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                        r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
                                            capture_output=True, text=True, timeout=60, env=_tess_env())
                     chunks.append(r.stdout)
                 except Exception:
@@ -5402,7 +5418,7 @@ def _tess(img, psm, langs=None, tsv=False, only=""):
         img.save(tmp.name)
         cmd = ["tesseract", tmp.name, "stdout", "--psm", str(psm)] + (["-l", langs] if langs else [])
         cmd += ["-c", "tessedit_char_whitelist=" + only] if only else []
-        r = subprocess.run(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=180,
+        r = _tesseract(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=180,
                            env=_tess_env())
     return r.stdout
 
@@ -6062,7 +6078,7 @@ def ocr_text(paths):
             im.thumbnail((2400, 2400))
             with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                 im.save(tmp.name)
-                r = subprocess.run(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
                                    capture_output=True, text=True, timeout=120, env=_tess_env())
             chunks.append(r.stdout)
         except Exception:
@@ -6163,6 +6179,10 @@ def summarize(res):
             "artist": c["artist"], "title": c["title"], "year": c["year"],
             "country": c["country"], "label": c["label"],
             "tracks": len(c["tracks"]), "confidence": b["confidence"],
+            # (what lets a sure album be filed below the organize threshold: plan._files_on_evidence)
+            "all_lengths": bool(b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
+                                and not b.get("conflict") and not b.get("missing")),
+            "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
             # tracks missing from the folder: each file's track of the release (0-based, in
             # the release's order), the missing ones {disc: [numbers]}, the release's count
@@ -7052,7 +7072,8 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # release ID in your files is contradicted, or only not confirmed)
     sure_picks = {name: str(res["best"]["cand"]["id"]) for name, res in (("mb", mb_res), ("discogs", dg_res))
                   if res and res.get("status") == "auto" and res.get("best")}
-    out.update(status=status, why=why, best=summarize(final), alts=alts, pool=pool, sure_picks=sure_picks,
+    out.update(status=status, why=why, best=summarize(final), alts=alts, pool=pool, choices=release_choices((mb_res, dg_res)),
+               sure_picks=sure_picks,
                margin=final.get("margin"), version=result_version(), checked=round(time.time()))
     note_barcode_sources(out, album)
     note_gnudb(out, album, final)
@@ -7125,7 +7146,8 @@ def scans_report(best, album, ocr_txt, results, had_scans):
     OCR did not run. state: "proven" (a barcode or catalogue number read on the scans is on
     the pick), "agrees" (only weaker clues: label, country, matrix, packaging), "differs"
     (the scans name another pressing), "unread" (nothing usable about the pick was read).
-    Reporting only: it decides nothing."""
+    "printed": True when the barcode or catalogue number on the pick is printed on your copy, not
+    only typed in a note (plan._files_on_evidence, the one thing that reads this report)."""
     if not had_scans or not best:
         return None
     cand = best.get("cand") or {}
@@ -7178,7 +7200,11 @@ def scans_report(best, album, ocr_txt, results, had_scans):
         state = "agrees"
     else:
         state = "unread"
-    return {"state": state, "found": found, "against": against}
+    out = {"state": state, "found": found, "against": against}
+    on_copy = mc.codes_from_ocr_text(album.get("printed_text") or "", limit=50)["catnos"]
+    if state == "proven" and (read & have or any(mc.catnos_agree([c], cand.get("catnos") or ()) for c in on_copy)):
+        out["printed"] = True
+    return out
 
 
 def found_via(best, album):
@@ -7241,6 +7267,22 @@ def barcode_source_note(album):
     if not album.get("barcode_sources"):
         return ""
     return f"barcode read from the {' / '.join(album['barcode_sources'])} tag, not BARCODE"
+
+
+def release_choices(results):
+    """Every release scored, as a person would be offered it (engine.candidates_of): "against_folder"
+    when the folder name rules it out, by the test that keeps it from being picked (match_core.classify).
+    Beside "alts", which says what came close whatever it is: rivals are weighed on that."""
+    out = []
+    for res in results:
+        for s in (res or {}).get("scored") or ():
+            c = s["cand"]
+            year = f" ({c['year']})" if c.get("year") else ""
+            out.append({"source": c["source"], "id": str(c["id"]), "score": s["confidence"],
+                        "title": f"{c['artist']} - {c['title']}{year}", "details": mc.release_details(c),
+                        "against_folder": any(str(x).startswith("folder name says")
+                                              for x in s.get("clues_against") or ())})
+    return out
 
 
 def note_barcode_sources(out, album):

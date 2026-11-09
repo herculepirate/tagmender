@@ -59,6 +59,78 @@ def cand(**kw):
     return c
 
 
+class SpacedCatalogueNumbers(unittest.TestCase):
+    def found(self, text):
+        return mc.codes_from_ocr_text(text)["catnos"]
+
+    def test_the_spaced_form_is_read_whole_and_is_the_release_s_number(self):
+        for printed in ("CDP 7 91186 2", "CDP 566-7 91186 2"):
+            got = [c for c in self.found(f"some artist\n{printed}\nsome album") if " " in c and len(c) > 11]
+            self.assertEqual(got, [printed])
+        self.assertTrue(mc.catno_same("CDP 7 91186 2", "CDP 7 91186 2"))
+
+    def test_ordinary_text_is_no_spaced_number(self):
+        for text in ("ROOM 4 12345", "Side 1 91186 2", "AB 12 3"):
+            self.assertFalse(mc._OCR_SPACED_CATNO_RE.search(text), text)
+        for text in ("LC 0 01234 5", "TEL 2 12345 6"):
+            self.assertNotIn(text, self.found(text))
+
+    def test_it_is_not_lost_to_the_limit(self):
+        many = " ".join(f"ABC{i}{i}{i}" for i in range(1, 9))
+        self.assertIn("CDP 7 91186 2", mc.codes_from_ocr_text(f"{many} CDP 7 91186 2", limit=5)["catnos"][:5])
+
+
+class PrintedOrTyped(unittest.TestCase):
+    """What moves an album below its score: the pick's own number on the copy, not in a note."""
+    BAR = "5901234123457"
+
+    def report(self, printed, typed, cand_extra=None, code=""):
+        best = {"cand": dict({"barcodes": {self.BAR}, "catnos": set()}, **(cand_extra or {})), "clues": {}, "code": code}
+        album = {"printed_text": printed, "typed_text": typed, "note_barcodes": []}
+        return ma.scans_report(best, album, f"{typed}\n{printed}", [], True)
+
+    def test_a_barcode_printed_on_a_scan_counts(self):
+        self.assertTrue(self.report(f"back cover {self.BAR}", "")["printed"])
+
+    def test_a_barcode_typed_in_a_note_does_not(self):
+        self.assertFalse(self.report("back cover", f"Barcode: {self.BAR}").get("printed"))
+
+    def test_a_catalogue_number_printed_counts_and_typed_does_not(self):
+        extra = {"barcodes": set(), "catnos": {mc.norm_code("ABCD 12345")}}
+        how = "catalogue number (OCR)"                               # (the matcher found it in the two together)
+        self.assertTrue(self.report("ABCD 12345", "", extra, how)["printed"])
+        self.assertFalse(self.report("back cover", "ABCD 12345", extra, how).get("printed"))
+
+
+class OfferedReleases(unittest.TestCase):
+    """From the real scores to the list of releases to choose from."""
+    def offered(self, hint, *cands):
+        import engine
+        a = album(media_hint=hint)
+        choices = ma.release_choices([{"scored": [mc.score_candidate(a, c, CFG) for c in cands]}])
+        best = {"source": cands[0]["source"], "id": cands[0]["id"], "artist": "A", "title": "T", "confidence": 96.0}
+        return engine.candidates_of({"best": best, "choices": choices})
+
+    @staticmethod
+    def of(rid, kind, name, source="discogs"):
+        return cand(id=rid, source=source, formats={kind}, media_formats=[name], country="DE", catno_shown=f"N-{rid}")
+
+    def test_a_vinyl_folder_is_offered_no_cd_cassette_or_download(self):
+        got = self.offered("vinyl", self.of("lp", "vinyl", "Vinyl"), self.of("lp2", "vinyl", "Vinyl", "mb"),
+                           self.of("cd", "cd", "CD", "mb"), self.of("tape", "cassette", "Cassette"),
+                           self.of("file", "digital", "Digital Media", "mb"))
+        self.assertEqual([c["id"] for c in got], ["lp", "lp2"])
+        self.assertEqual(got[0]["details"], "Vinyl · DE · N-lp")
+
+    def test_when_nothing_fits_the_folder_every_release_is_offered(self):
+        got = self.offered("vinyl", self.of("cd", "cd", "CD"), self.of("tape", "cassette", "Cassette"))
+        self.assertEqual({c["id"] for c in got}, {"cd", "tape"})
+
+    def test_no_format_in_the_folder_leaves_every_release(self):
+        got = self.offered("", self.of("lp", "vinyl", "Vinyl"), self.of("cd", "cd", "CD"))
+        self.assertEqual({c["id"] for c in got}, {"lp", "cd"})
+
+
 class Core(unittest.TestCase):
     def test_similarity_helpers(self):
         self.assertGreater(mc.artist_sim("Max Corbacho; Bruno Sanfilippo", "Bruno Sanfilippo & Max Corbacho"), 0.95)
@@ -108,11 +180,58 @@ class Core(unittest.TestCase):
         self.assertEqual(r["status"], "review")
         self.assertIn("track count differs", r["why"])
 
-    def test_missing_durations_never_auto(self):
+    def test_missing_durations_do_not_hold_a_match_back(self):
         c = cand(tracks=[{"disc": 1, "title": f"T{i}", "secs": 0} for i in range(3)])
-        r = mc.classify([mc.score_candidate(album(), c, CFG)], CFG)
+        s = mc.score_candidate(album(), c, CFG)
+        before = s["confidence"]
+        r = mc.classify([s], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertNotIn("durations unavailable", r["why"])
+        self.assertGreater(r["best"]["confidence"], before)
+
+    def test_missing_durations_still_required_when_extra_careful(self):
+        c = cand(tracks=[{"disc": 1, "title": f"T{i}", "secs": 0} for i in range(3)])
+        r = mc.classify([mc.score_candidate(album(), c, CFG)], dict(CFG, lengths_required=True))
         self.assertNotEqual(r["status"], "auto")
         self.assertIn("durations unavailable", r["why"])
+
+    @staticmethod
+    def _result(c):
+        s = mc.score_candidate(album(), c, CFG)
+        return dict(mc.classify([s], CFG), scored=[s], source=c["source"])
+
+    def _none(self, cid, source):
+        return cand(id=cid, source=source, tracks=[{"disc": 1, "title": f"T{i}", "secs": 0} for i in range(3)])
+
+    def test_no_lengths_on_discogs_does_not_overrule_lengths_proven_on_musicbrainz(self):
+        r = mc.combine(self._result(cand(id="mb", source="mb")), self._result(self._none("dg", "discogs")))
+        self.assertEqual(r["best"]["cand"]["id"], "mb")
+
+    def test_no_lengths_on_musicbrainz_does_not_overrule_lengths_proven_on_discogs(self):
+        r = mc.combine(self._result(self._none("mb", "mb")), self._result(cand(id="dg", source="discogs")))
+        self.assertEqual(r["best"]["cand"]["id"], "dg")
+
+    def test_rival_with_most_lengths_agreeing_keeps_the_penalty_on_one_listing_none(self):
+        some = cand(id="some", tracks=[dict(t, secs=t["secs"] if i else 999) for i, t in enumerate(cand()["tracks"])])
+        s_none, s_some = mc.score_candidate(album(), self._none("none", "mb"), CFG), mc.score_candidate(album(), some, CFG)
+        mc.classify([s_none, s_some], CFG)
+        self.assertFalse(s_none.get("lengths_free"))
+
+    def test_a_proving_barcode_is_not_lifted_for_lengths(self):
+        c = cand(barcodes={"0801837013429"}, tracks=self._none("x", "mb")["tracks"])
+        s = mc.score_candidate(album(), c, CFG, ocr_text="0 801837 01342 9  Made in EU")
+        self.assertTrue(mc.barcode_proves(s))
+        before = s["confidence"]
+        self.assertFalse(s["lengths_missing"])
+        mc.classify([s], CFG)
+        self.assertEqual(s["confidence"], before)
+
+    def test_release_whose_lengths_agree_beats_one_listing_none(self):
+        none = cand(id="none", tracks=[{"disc": 1, "title": f"T{i}", "secs": 0} for i in range(3)])
+        s_none, s_ok = mc.score_candidate(album(), none, CFG), mc.score_candidate(album(), cand(id="ok"), CFG)
+        r = mc.classify([s_none, s_ok], CFG)
+        self.assertEqual(r["best"]["cand"]["id"], "ok")
+        self.assertFalse(s_none.get("lengths_free"))
 
     def test_wrong_durations_not_auto(self):
         c = cand(tracks=[{"disc": 1, "title": "x", "secs": s} for s in (100, 500, 90)])
@@ -2082,9 +2201,9 @@ class Pipeline(unittest.TestCase):
         o = self.out["2012 - Slow Drift"]
         self.assertEqual((o["status"], o["best"]["source"], o["best"]["id"]), ("auto", "discogs", "501"), o["why"])
 
-    def test_discogs_without_durations_is_review(self):
+    def test_discogs_without_durations_is_not_held_back(self):
         o = self.out["2013 - Quiet Room"]
-        self.assertEqual(o["status"], "review", o["why"])
+        self.assertEqual(o["status"], "auto", o["why"])
 
     def test_bonus_track_near_miss_is_review(self):
         o = self.out["2014 - Bonus Round"]
@@ -2101,10 +2220,10 @@ class Pipeline(unittest.TestCase):
         for o in self.out.values():
             db.execute("INSERT INTO results VALUES (?,?)", (o["path"], json.dumps(o, default=list)))
         counts = ma.export(db, self.tmp)
-        self.assertEqual(counts, {"auto": 2, "review": 3, "nomatch": 1, "moved": 0, "excluded": 0})
+        self.assertEqual(counts, {"auto": 3, "review": 2, "nomatch": 1, "moved": 0, "excluded": 0})
         with open(Path(self.tmp) / "matches_auto.csv", encoding="utf-8") as fh:
             ids = {r["ID"] for r in csv.DictReader(fh)}
-        self.assertEqual(ids, {"mb-alpha", "501"})
+        self.assertEqual(ids, {"mb-alpha", "501", "502"})
 
 
 class RealWorldCases(unittest.TestCase):
@@ -2946,7 +3065,7 @@ class Reevaluation(unittest.TestCase):
             out = self.run_main("--retry-review")
         finally:
             ma.process = real
-        self.assertIn("Re-evaluating 3 albums (3 review)", out)
+        self.assertIn("Re-evaluating 2 albums (2 review)", out)
         self.assertEqual(self.csv_rows(), 6)
 
     def test_keep_old_results_flag(self):

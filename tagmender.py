@@ -1289,6 +1289,9 @@ def main(argv=None):
             stream.reconfigure(errors="backslashreplace")
         except (AttributeError, ValueError):
             pass
+    if sys.stderr is not None:
+        import logsetup
+        sys.stderr = logsetup.QuietStream(sys.stderr)    # (progress messages, from any thread)
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = None
     _first_settings()

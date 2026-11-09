@@ -126,6 +126,12 @@ def _no_lengths(a) -> bool:
     return any(c.get("lengths") is False for c in (ident.get("candidates") or [])[:1])
 
 
+def candidate_words(c) -> str:
+    """A suggested release in words, what tells it from the others first (a narrow column cuts the end)."""
+    head = c.get("title") or c["id"]
+    return f"{c['details']}: {head}" if c.get("details") else head
+
+
 def _reason(a) -> tuple:
     ident = a.get("identification") or {}
     return reasons.parse(ident.get("reason", ""))
@@ -217,9 +223,9 @@ def _decide_words(a, applied) -> str:
     if tier == "partial":
         out.append("the album is known but its release is not proven: choose the release" +
                    (f" ({words})" if words else ""))
-    elif tier == "album_only":
-        out.append("the album is known, its pressing is not: choose the pressing")
-    if _no_lengths(a) and a.get("status") != "excluded":
+    # (album_only: every clue was tried and none tells the pressing, so it is tagged as the album,
+    # its original date and no pressing's details; that is the answer, not a question)
+    if _no_lengths(a) and a.get("status") != "excluded" and tier not in ("exact", "album_only"):
         out.append(NO_LENGTHS)
     return "; ".join(dict.fromkeys(out))
 
@@ -401,6 +407,8 @@ def for_attention(rows, look_up=True) -> dict:
     rep = {"job": "", "profile": "", "applied": True, "status": "attention", "rows": [], "note": "",
            "title": ATTENTION_TITLE}
     for r in rows:
+        if "album known, pressing not established" in (r.get("reason") or ""):
+            continue                                 # (every clue tried: tagged as the album, nothing to decide)
         partial = str(r.get("mark", "")).lower() == "partial"
         codes = [c for c in r.get("codes") or [] if c != "other"]
         lead = "; ".join(ISSUE_WORDS.get(c, reasons.describe(c)) for c in codes)
@@ -472,7 +480,7 @@ def text(rep) -> str:
             out.append(f"    link:   {r['uri']}")
             out.append(f"    issue:  {r['issue']}")
             for c in r["candidates"]:
-                out.append(f"    suggested: {c['title'] or c['id']}  score {c['score']}  {c['url']}")
+                out.append(f"    suggested: {candidate_words(c)}  score {c['score']}  {c['url']}")
                 out.append(f"      apply:   {apply_command(r, c, rep.get('profile')) or 'in the app (Report: Apply This Release)'}")
     out.append("\n" + summary(rep))
     return "\n".join(out)
@@ -492,7 +500,7 @@ def csv_text(rep) -> str:
     for r in rep["rows"]:
         w.writerow([_cell(x) for x in (
             section_title(rep, r["section"]), r["album"], r["folder"], r["uri"], r["status"], r["issue"],
-            " | ".join(f"{c['title'] or c['id']} {c['url']}" for c in r["candidates"]),
+            " | ".join(f"{candidate_words(c)} {c['url']}" for c in r["candidates"]),
             " | ".join(filter(None, (apply_command(r, c, rep.get("profile")) for c in r["candidates"]))))])
     return buf.getvalue()
 
@@ -532,7 +540,7 @@ def html_page(rep) -> str:
         out.append("<div class='wrap'><table><tr><th>Album</th><th>Folder</th><th>Issue</th>"
                    "<th>Suggested releases</th></tr>")
         for r in rows:
-            sugg = "<br>".join(f"<a href='{e(c['url'])}'>{e(c['title'] or c['id'])}</a> (score {c['score']})"
+            sugg = "<br>".join(f"<a href='{e(c['url'])}'>{e(candidate_words(c))}</a> (score {c['score']})"
                                + (f"<br><code>{e(apply_command(r, c, rep.get('profile')))}</code>"
                                   if apply_command(r, c) else "")
                                for c in r["candidates"]) or "—"

@@ -3056,7 +3056,8 @@ def classify(scored, cfg):
         return barcode_agrees(s) or s["code"] in ("catalogue number", "catalogue number (folder name)")
     # Ties go to the candidate whose barcode agrees, then to the one whose year does.
     # (then one your copy cannot be - a CD rip log against a 12" - after the others)
-    ranked = sorted(scored, key=lambda s: (-s["confidence"], bool(format_contradictions(s)), not barcode_agrees(s),
+    ranked = sorted(scored, key=lambda s: (-s["confidence"], bool(format_contradictions(s)) and not _carries_barcode(s),
+                                           not barcode_agrees(s),
                                            not number_agrees(s), not s["year_ok"],
                                            s.get("year_off") if s.get("year_off") is not None else 99))
     best = ranked[0]
@@ -3074,6 +3075,22 @@ def classify(scored, cfg):
             pick = scan_pick[0]
             ranked = [pick] + [s for s in ranked if s is not pick]
             best = pick
+    # Several tied pressings carry your barcode: it names them all. What else your copy shows
+    # tells them apart first; what they are ripped to only for want of anything better (a hi-res
+    # rip of the hybrid SACD and the CD of one barcode). A pressing that alone carries it is
+    # never lost to the audio.
+    barcoded = [s for s in tied if _carries_barcode(s)]
+    audio_split = barcode_split = None
+    if len(barcoded) > 1 and (not scan_pick or set(scan_pick[1]) == {"format"}
+                              or any(k in FALLBACK_PICKS for k in scan_pick[1])):
+        fits_audio = [s for s in barcoded if not format_contradictions(s)]
+        ahead = [s for s in barcoded if all(_more_behind(s, o) for o in barcoded if o is not s)]
+        if len(ahead) == 1:
+            best, scan_pick, barcode_split = ahead[0], None, [s for s in barcoded if s is not ahead[0]]
+        elif len(fits_audio) == 1 and not any(_more_behind(s, fits_audio[0]) for s in barcoded):
+            best, scan_pick, audio_split = fits_audio[0], None, [s for s in barcoded if s is not fits_audio[0]]
+        if audio_split or barcode_split:
+            ranked = [best] + [s for s in ranked if s is not best]
     runner = ranked[1] if len(ranked) > 1 else None
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
     # One release fits every track exactly where the pick misses every one, and nothing
@@ -3189,8 +3206,10 @@ def classify(scored, cfg):
         why.append("barcode differs from the candidate's")
     # Your copy cannot be this format (hi-res audio and a CD; a rip log and a download):
     # however well the rest fits, a person decides (Ahab - The Coral Tombs: 24/48 audio
-    # matched to the only CD listed).
-    why += [x for x in format_contradictions(best) if not any(x in w for w in why)]
+    # matched to the only CD listed). Not when your barcode is on it: the barcode names the
+    # release, and the audio says only what it was ripped to.
+    if not (barcode_agrees(best) and not best.get("conflict")):
+        why += [x for x in format_contradictions(best) if not any(x in w for w in why)]
     why += unofficial_why(best)
     # A file numbered 0 as long as the release's hidden track before track 1 is no proof that
     # the files are that disc: only the exact disc ID or a fitting rip log's or CDTOC tag's TOC
@@ -3227,6 +3246,13 @@ def classify(scored, cfg):
             # not evidence: the album is tagged without the pressing's IDs (album_only)
             why.append(f"runner-up {runner['cand']['id']} within {abs(margin):.1f} points "
                        f"(likely another pressing)")
+    elif barcode_split:
+        best["notes"] = best["notes"] + [f"pressing chosen by your barcode and what else your copy shows (not on "
+                                         f"{', '.join(str(s['cand']['id']) for s in barcode_split[:3])})"]
+    elif audio_split:
+        best["notes"] = best["notes"] + [f"pressing chosen by your barcode and audio (the same barcode "
+                                         f"is on {', '.join(str(s['cand']['id']) for s in audio_split[:3])}, "
+                                         "which cannot hold this audio)"]
     elif margin < cfg["auto_min_margin"] and (barcode_decided or catno_decided):
         what = "barcode" if barcode_decided else "catalogue number"
         best["notes"] = best["notes"] + [f"pressing chosen by {what} (runner-up "
@@ -3250,7 +3276,7 @@ def classify(scored, cfg):
 
     if not why:
         rival = _fits_to_the_ms(best, scored, cfg)
-        if rival:
+        if rival and (not _carries_barcode(best) or _carries_barcode(rival[0])):   # (your barcode names the release)
             runner, margin = rival[0], best["confidence"] - rival[0]["confidence"]
             why.append(f"{rival[0]['cand']['id']} fits every track to the millisecond ({rival[1]}); "
                        f"the pick does not")
@@ -3422,6 +3448,20 @@ def _guessed(res, other):
                 why=[f"runner-up {rival['cand']['id']} within {margin:.1f} points (likely another pressing)"])
 
 
+def _carries_barcode(s) -> bool:
+    """A barcode read off your copy is on this pick, and no other barcode of yours argues."""
+    return bool(s) and barcode_proves(s) and not s.get("conflict")
+
+
+def _more_behind(a, b) -> bool:
+    """A has something about your copy that B lacks, other than the barcode they share and what
+    the audio suggests (a format clue only says how the copy was made)."""
+    mine, theirs = set(_evidence(a)) - {"format"}, set(_evidence(b)) - {"format"}
+    def own_number(s):
+        return bool(s.get("own_catnos")) and catnos_agree(s["own_catnos"], s["cand"].get("catnos") or ())
+    return bool(mine - theirs) or (own_number(a) and not own_number(b))
+
+
 def _exact_toc(s):
     """This pick carries a disc ID of your files that MusicBrainz has attached to it."""
     return bool(s) and (s.get("clues") or {}).get("disc TOC") == EXACT_TOC_CLUE
@@ -3591,6 +3631,8 @@ def mb_overrules(mb_result, dg_result, twins):
     dg_best = dg_result["best"]
     if not (mb_result and mb_result["status"] == "auto" and mb_best) or any(s is mb_best for s in twins):
         return None
+    if _carries_barcode(mb_best) and not _carries_barcode(dg_best):
+        return _noted(mb_result, "MusicBrainz chosen: your barcode is on its release, not on Discogs's pick")
     # a disc ID a sector-aligned download could give says nothing about the format
     toc_unsure = _toc_maybe_download(mb_best, dg_best, mb_result, dg_result)
     if _exact_toc(mb_best) and not toc_unsure and not any(_exact_toc(s) for s in twins):
@@ -3599,6 +3641,8 @@ def mb_overrules(mb_result, dg_result, twins):
                              f"your disc ID is attached to MusicBrainz's {mb_best['cand']['id']}, but Discogs's "
                              f"pick {dg_best['cand']['id']} has evidence of its own")
         return _noted(mb_result, "MusicBrainz chosen: your disc ID is attached to its release, not to Discogs's pick")
+    if _carries_barcode(dg_best) and not _carries_barcode(mb_best):
+        return None                                      # (your barcode names it: the format says only how you copied it)
     fm, fd = set(mb_best["cand"].get("formats") or ()), set(dg_best["cand"].get("formats") or ())
     mine, theirs = _format_evidence(mb_best), _format_evidence(dg_best)
     if toc_unsure:
@@ -3646,6 +3690,10 @@ def _musicbrainz_decides(mb_result, dg_result):
         if mb_best["cand"].get("discogs_id"):
             return mb_result
         return dict(mb_result, dg_twin=str(dg_best["cand"]["id"]))
+    if _carries_barcode(dg_best) != _carries_barcode(mb_best):      # (your barcode names the release)
+        if _carries_barcode(mb_best):
+            return _noted(mb_result, "MusicBrainz chosen: your barcode is on its release, not on Discogs's pick")
+        return _noted(dg_result, "Discogs chosen: your barcode is on its release, not on MusicBrainz's pick")
     theirs, mine = has_evidence(dg_best, mb_best), has_evidence(mb_best, dg_best)
     if theirs and not mine:
         return _noted(dg_result, "Discogs chosen: only its pressing has evidence about your copy behind it")
@@ -3722,6 +3770,18 @@ def _discogs_pressings_tied(dg_result, mb_best) -> bool:
         not _evidence(mb_best).get("code") and not has_evidence(mb_best, best)   # (your barcode or number on it: proof)
 
 
+def _yields_to_audio(res, other):
+    """res, unsure, when your barcode is on both databases' picks and your audio rules out only
+    res's: the barcode tells them apart no more than it does pressings of one database (classify;
+    Stygian Bough: the CD and the download of one barcode)."""
+    best, theirs = (res or {}).get("best"), (other or {}).get("best")
+    if not (res and res["status"] == "auto" and _carries_barcode(best) and _carries_barcode(theirs)
+            and format_contradictions(best) and not format_contradictions(theirs)
+            and not _more_behind(best, theirs)):
+        return res
+    return dict(res, status="review", why=list(res.get("why") or []) + format_contradictions(best))
+
+
 def combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
@@ -3739,6 +3799,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     database's pick stand, in place of a guess. Neither: as above."""
     prefer = preferred_source(mb_result, dg_result)
     mb_result, dg_result = _yields_to_lengths(mb_result, dg_result), _yields_to_lengths(dg_result, mb_result)
+    mb_result, dg_result = _yields_to_audio(mb_result, dg_result), _yields_to_audio(dg_result, mb_result)
     # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
     disputed = _proof_left_unsure(mb_result, dg_result)
     if disputed:
@@ -3825,12 +3886,10 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     # a pick your files contradict (hi-res vs a CD, a rip log vs a download) is never shown
     # over one your copy's own numbers back (Sadist - Spellbound: the digital release, with
     # your CD rip log against it, over the Fono CD with your barcode and catalogue number).
-    # Your copy's barcode on a pick outweighs that when the other pick carries another
-    # barcode, so your copy contradicts both: the barcode names the product, the audio only
-    # how it was copied (BTBAM - The Great Misdirect: the Russian CD 3190836 carries the
+    # Your copy's barcode on a pick outweighs that: the barcode names the product, the audio
+    # only how it was copied (BTBAM - The Great Misdirect: the Russian CD 3190836 carries the
     # barcode read on the scans, its tracks are not whole CD sectors; the 2019 download
-    # "[2019 RMX RM]" in the folder name points to carries another barcode). Against a pick
-    # nothing of yours contradicts, the contradiction counts.
+    # "[2019 RMX RM]" in the folder name points to carries another barcode).
     # When the other pick carries that barcode too (Stygian Bough: the CD and the download
     # share one), it tells neither apart, and the contradiction counts again.
     def own_barcode(best):
@@ -3838,9 +3897,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
 
     def rank(r):
         other = next((o["best"] for o in options if o is not r), None)
-        # only against a pick your barcode contradicts (it carries another): then both are
-        # contradicted, and the barcode names the product
-        waived = own_barcode(r["best"]) and not own_barcode(other) and bool(other and other.get("conflict"))
+        waived = own_barcode(r["best"]) and (not own_barcode(other) or _more_behind(r["best"], other))
         # a pick that holds the files' tracks before one that does not (Feared - Reborn: the
         # 2-CD Discogs entry over MusicBrainz's 12-track CD, whose disc ID is disc 1's alone)
         fits = bool(r["best"].get("tracks_ok") or r["best"].get("aligned"))
@@ -3906,14 +3963,15 @@ def album_only(final, cfg, source=""):
         return None
     # what the files are (a CD rip, a download, a vinyl rip) narrows the pressings whose
     # shared fields are written: a CD rip is tagged from the CDs only, so its media is "CD"
+    other_kind = False
     if source:
         same_kind = [s for s in tied if source in (s["cand"].get("formats") or ())]
-        if not same_kind and any(s["cand"].get("formats") for s in tied):
-            # none of them is what your copy is (a CD rip among vinyl pressings: Between The
-            # Buried And Me - Automata I & II): their shared tags would name the wrong media
-            return None
+        # none of them is what your copy is (a download of an album listed only on vinyl and CD,
+        # a CD rip among vinyl pressings): the album is still known, only its media and numbering
+        # cannot be theirs (album_only_tags)
+        other_kind = not same_kind and any(s["cand"].get("formats") for s in tied)
         tied = same_kind or tied
-    return {"source": source, "no_lengths": no_lengths, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+    return {"source": source, "no_lengths": no_lengths, "other_kind": other_kind, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
                       "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
                       "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in tied]}
 
@@ -3938,18 +3996,19 @@ RECORDING_FIELDS = {"musicbrainz_recordingid", "isrc", "engineer", "mixer", "pro
                     "~recording_firstreleasedate", "~recordingtitle"}
 
 
-def album_only_tags(tags, tied, same_recordings=False):
+def album_only_tags(tags, tied, same_recordings=False, other_kind=False):
     """One file's tags, kept to what every tied pressing shares: release IDs, catalogue
     numbers, barcode, ASIN and a pressing's own notes and companies are dropped; label,
     release country, media and release date stay only when all the pressings agree on them
     (else the date becomes the album's original date). Track and disc numbers stay only when
     every pressing is of one media and one disc layout; recording IDs, ISRCs and recording
     credits only when the caller has shown every pressing has the same recordings
-    (same_recordings)."""
+    (same_recordings). other_kind: your copy is none of these media, so neither their media nor
+    their numbering is written, even when they all agree."""
     out = {k: v for k, v in tags.items() if k not in PRESSING_FIELDS and not k.startswith("discogs_company_")}
     same = lambda vals: len(vals) == 1 and "" not in vals and None not in vals   # noqa: E731
-    if not (same({",".join(t.get("formats") or ()) for t in tied})
-            and same({",".join(str(n) for n in t.get("layout") or ()) for t in tied})):
+    if other_kind or not (same({",".join(t.get("formats") or ()) for t in tied})
+                          and same({",".join(str(n) for n in t.get("layout") or ()) for t in tied})):
         for k in TRACK_NUMBER_FIELDS:
             out.pop(k, None)
     if not same_recordings:
@@ -3960,7 +4019,7 @@ def album_only_tags(tags, tied, same_recordings=False):
         out.pop("label", None)
     if not same({country_code(t.get("country")) or "" for t in tied}):
         out.pop("releasecountry", None)
-    if not same({",".join(t.get("formats") or ()) for t in tied}):
+    if other_kind or not same({",".join(t.get("formats") or ()) for t in tied}):
         out.pop("media", None)
     if not same({t.get("year") for t in tied}):
         original = out.get("originaldate") or out.get("originalyear")

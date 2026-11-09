@@ -1,5 +1,48 @@
 # Release notes
 
+## 0.8.19
+
+**Your barcode is the release**
+- A barcode read off your copy now decides the release, whatever the audio was ripped to: a hi-res
+  rip of a disc, or tracks that are not whole CD sectors, no longer send it for review or lose it
+  to a listing of another format.
+- When several tied pressings carry that barcode and nothing else tells them apart, the audio
+  chooses between them: a hi-res rip goes to the hybrid SACD rather than the CD with the same
+  barcode.
+
+**Look-ups**
+- A database answering "temporarily unavailable" no longer ends the look-up of an album when the
+  window was started from a terminal or program that has since closed.
+
+**Overview**
+- Apply carries out only the rows you highlighted, even when it is just one, however many others
+  are Ready. With nothing highlighted (Escape clears it), Apply carries out every ticked album.
+  The first row, highlighted by itself after a look-up, does not count.
+
+**Rip logs**
+- A remixer or other words in a ripped track's file name, as a rip log lists it, are no longer
+  read as a catalogue number. *MC 900 Ft. Jesus* blocked the right release and brought in unrelated
+  cassettes.
+
+**Album artist: lead artist only**
+- A joint credit from Discogs now follows the setting: *Thomas Strønen, Time Is A Blind Guide* is
+  filed as **Thomas Strønen**, and Artist keeps the whole credit. It only worked for MusicBrainz
+  before, so one artist's albums could end up in two folders. A name that merely has a comma in
+  it, such as *Earth, Wind & Fire*, is left alone.
+- A credit written as one value per artist follows it too: *Jon Hassell / Farafina* gave both names
+  as the album artist.
+- Albums already filed move only when you look them up again and apply.
+
+**Folder names**
+- With "Replace directory separators with" left empty, a " / " in a name no longer leaves two
+  spaces behind.
+
+**Pressings of another media**
+- An album whose only tied listings are of another media than your copy (a download listed only
+  on vinyl and CD, a CD rip listed only on vinyl) no longer stays Unresolved. It is tagged as
+  "album known", with no media, track numbering, release IDs, catalogue number or barcode, and it
+  is filed.
+
 ## 0.8.18
 
 **Overview**

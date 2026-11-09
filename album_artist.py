@@ -105,7 +105,18 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         return None
     mine = {fold(k): str(v).strip() for k, v in (c.get("file_under") or {}).items()
             if str(k).strip() and str(v).strip()}
-    names, ids = _list(t, "albumartists"), _list(t, "musicbrainz_albumartistid")
+    # (a credit already written one value per artist; a Discogs release gives its credit as one
+    # text, and its artists separately: the engine passes those along unwritten. A comma or "&"
+    # in the text alone proves nothing: "Earth, Wind & Fire")
+    values = _list(t, "albumartist")
+    split = len(values) >= 2
+    names = _list(t, "albumartists") or _list(t, "~discogs_albumartists") or (values if split else [])
+    ids = _list(t, "musicbrainz_albumartistid")
+
+    def changed(name):
+        """NAME is not already the whole album artist."""
+        return split or fold(name) != fold(credit)
+
     # (the Discogs ID: a Partial album's tag, or the credited Discogs artists the engine passes
     # along unwritten for a release tagged from Discogs)
     sorts = _list(t, "~albumartists_sort")
@@ -118,12 +129,12 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
             return to, fold(to) == fold(name)
         return None, False
 
-    to, keep = mapped(credit)
+    to, keep = mapped(credit) if not split else (None, False)    # (of a split credit: its lead, below)
     if keep:
         return None
     if to:
         return _found(to, ids, members_of)
-    if len(names) >= 2:                                  # a joint credit: its first artist
+    if len(names) >= 2:                                 # a joint credit: its first artist
         aligned = lambda xs: xs[0] if len(xs) == len(names) else ""   # noqa: E731
         lead = (names[0], aligned(sorts), aligned(ids), aligned(dg))
     else:
@@ -131,7 +142,7 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
                 ids[0] if len(ids) == 1 else "", dg[0] if len(dg) == 1 else "")
     to, keep = mapped(lead[0])
     if keep:
-        return lead if fold(lead[0]) != fold(credit) else None
+        return lead if changed(lead[0]) else None
     if to:
         return _found(to, [lead[2]] if lead[2] else [], members_of)
     if c.get("bands", True):
@@ -163,7 +174,7 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
             lead = (hit[0], hit[1] or "", hit[2] or "", hit[3] if len(hit) > 3 else "")
         elif unknown:
             return UNKNOWN
-    return lead if fold(lead[0]) != fold(credit) else None
+    return lead if changed(lead[0]) else None
 
 
 def _found(name, ids, members_of):
@@ -193,6 +204,7 @@ def apply(targets: list, profile, members_of=None, discogs_members_of=None, find
     for t in targets:
         t = dict(t)
         t.pop("~discogs_albumartist_id", None)          # (the whole credit's: not the lead's)
+        t.pop("~discogs_albumartists", None)
         remove = [str(x) for x in t.get("~remove") or []]
         t["albumartist"] = t["albumartists"] = t["~albumartists"] = [name]
         for key, value in (("albumartistsort", sort), ("musicbrainz_albumartistid", mbid),

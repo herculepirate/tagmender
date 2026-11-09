@@ -242,7 +242,9 @@ class Ctx:
         sep = dir_sep if isinstance(dir_sep, str) and "/" not in dir_sep and "\\" not in dir_sep else "_"
         for k, v in self.tags.items():
             name = "~" + k[1:] if k.startswith("_") else k
-            self.metadata[name] = [text_ascii.sanitize_filename(str(x), sep, win_compat) for x in v]
+            # (a "/" replaced with nothing leaves no double space behind: "Jon Hassell / Farafina")
+            self.metadata[name] = [text_ascii.sanitize_filename(re.sub(r" +/ +", " ", str(x)) if not sep else str(x),
+                                                                sep, win_compat) for x in v]
         self._start = {k: self.metadata.getall(k) for k in self.metadata}
 
     def _derive(self):

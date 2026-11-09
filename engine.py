@@ -1375,6 +1375,7 @@ class Engine:
                           if isinstance(a, dict) and a.get("id")]
                 if dg_ids:
                     hidden["~discogs_albumartist_id"] = dg_ids
+                hidden.update(self._discogs_joint_names(det))
             remove = list(hidden.pop("~remove", []))
             if remove:
                 merged["~remove"] = list(dict.fromkeys(remove))
@@ -1430,7 +1431,7 @@ class Engine:
         same_recordings = self._tied_recordings_agree(tied, p.targets)
         targets = []
         for t in p.targets:
-            t = mc.album_only_tags(t, tied, same_recordings)
+            t = mc.album_only_tags(t, tied, same_recordings, other_kind=bool(info.get("other_kind")))
             # the year every tied pressing shares, else the album's first release: never the
             # day of one pressing
             if len(years) == 1 and None not in years and "" not in years:
@@ -2088,6 +2089,13 @@ class Engine:
         alb.update(dm.extract_original_year(master))
         return _as_tags(alb)
 
+    def _discogs_joint_names(self, entry) -> dict:
+        """The names of a Discogs entry's joint credit, unwritten, for album_artist (Discogs gives
+        the credit as one text): {} for a single artist."""
+        names = [n for a in entry.get("artists") or [] if isinstance(a, dict)
+                 for n in [self.dm.clean_artist_name(a.get("anv") or a.get("name"))] if n]
+        return {"~discogs_albumartists": names} if len(names) >= 2 else {}
+
     def _partial_discogs(self, det, sc, album, n, notes, need_album):
         """The album's tags from an established Discogs release `det`: its master's facts and
         the master's titles where the release has the same one in that place. Nothing of the
@@ -2124,7 +2132,7 @@ class Engine:
         to_flat = dict(_lcs(mine, flat, lambda a, b: mc.fold(a["title"]) == mc.fold(b["title"])))
         targets, differ, alone = [], 0, 0
         for i in range(n):
-            t = dict(alb, albumartist=[credit], album=[master["title"]])
+            t = dict(alb, albumartist=[credit], album=[master["title"]], **self._discogs_joint_names(master))
             j = to_mine.get(i)
             k = to_flat.get(j) if j is not None else None
             if k is None:
@@ -3742,7 +3750,7 @@ ALBUM_ONLY_HIDDEN = {"~remove", "~multiartist", "~absolutetracknumber", "~totala
                      "~discpregap", "~silence", "~releasegroup", "~releasegroupcomment",
                      "~releasegroup_firstreleasedate", "~primaryreleasetype", "~secondaryreleasetype",
                      "~recording_firstreleasedate", "~iswc", "~workcomment", "~lyricistsort", "~writersort",
-                     "~performance_attributes"}
+                     "~performance_attributes", "~discogs_albumartist_id", "~discogs_albumartists"}
 
 
 class TaggerScriptError(Exception):

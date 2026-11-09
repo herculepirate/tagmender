@@ -1121,7 +1121,7 @@ class Overview(QWidget):
         self.summary.setText(tr("{0} found, not looked up yet. Select the albums you want and press Look Up "
                                 "(none selected: all of them).").format(plural(n, tr("album"), tr("albums"))))
         if self.proxy.rowCount():
-            self.table.selectRow(0)
+            self.show_row(0)
 
     def look_up_clicked(self):
         """Look Up: the selected albums, or all of them, with the sources chosen beside it."""
@@ -1716,7 +1716,7 @@ class Overview(QWidget):
         self.plan["listed"] = any(a["status"] == "listed" for a in self.model.albums)
         if mine:                                          # (the album shown: shown as found now)
             if found and not self.table.selectionModel().hasSelection():
-                self.table.selectRow(self.proxy.mapFromSource(self.model.index(at, 0)).row())
+                self.show_row(self.proxy.mapFromSource(self.model.index(at, 0)).row())
             self.show_detail()
         self.win.update_album_actions()
 
@@ -1755,7 +1755,7 @@ class Overview(QWidget):
             return
         notify(self.win, "finished", tr("Preview finished"), counts_by_label((self.plan or {}).get("albums") or []))
         if self.proxy.rowCount() and not self.table.selectionModel().hasSelection():
-            self.table.selectRow(0)
+            self.show_row(0)
         self.win.refresh_attention_badge(self.path)
 
     def lookup_failed(self, msg):
@@ -1968,7 +1968,7 @@ class Overview(QWidget):
         self.service_status(force=True)
         notify(self.win, "finished", tr("Preview finished"), counts_by_label(plan["albums"]))
         if self.proxy.rowCount():
-            self.table.selectRow(0)
+            self.show_row(0)
         self.win.refresh_attention_badge(self.path)
 
     def show_counts(self):
@@ -1986,7 +1986,7 @@ class Overview(QWidget):
 
     def show_ready(self):
         """The bold line under the list: how many albums Apply would carry out now (the ticked
-        ones, or of two or more highlighted rows those), nothing while work runs or no list shows."""
+        ones, or of the rows you highlighted those), nothing while work runs or no list shows."""
         if not hasattr(self, "ready_line"):
             return
         albums = (self.plan or {}).get("albums") or []
@@ -2017,11 +2017,12 @@ class Overview(QWidget):
 
     def to_apply(self):
         """The albums Apply carries out: those with changes, unless left out (unticked); with
-        two or more rows highlighted, only those of them (the others stay as they are)."""
+        rows you highlighted, only those of them, even one (the others stay as they are: a row
+        highlighted only to show it, show_row, chooses nothing; nor does one just unticked)."""
         albums = [a for a in (self.plan or {}).get("albums", [])
                   if can_apply(a) and not a.get(PlanModel.LEAVE_OUT)]
-        chosen = self.selected_albums() if hasattr(self, "table") else []
-        if len(chosen) >= 2:
+        chosen = self.selected_albums() if hasattr(self, "table") and getattr(self, "_rows_chosen", False) else []
+        if chosen and not all(a.get(PlanModel.LEAVE_OUT) for a in chosen):
             ids = {id(a) for a in chosen}
             albums = [a for a in albums if id(a) in ids]
         return albums
@@ -2256,8 +2257,19 @@ class Overview(QWidget):
         row = self.proxy.mapToSource(self.proxy.index(idx.row(), 0)).row()
         return self.model.albums[row] if 0 <= row < len(self.model.albums) else None
 
+    def show_row(self, row):
+        """Highlight ROW only to show it in the inspector: nobody chose it for Apply."""
+        self._showing_row = True
+        try:
+            self.table.selectRow(row)
+        finally:
+            self._showing_row = False
+
     def selection_changed(self, *_):
         from PySide6.QtWidgets import QApplication
+        self._rows_chosen = not getattr(self, "_showing_row", False) and self.table.selectionModel().hasSelection()
+        self.show_ready()                                 # (what Apply would carry out has changed)
+        self.win.update_album_actions()
         if QApplication.mouseButtons() & Qt.LeftButton:
             self._detail_timer.start()
         else:

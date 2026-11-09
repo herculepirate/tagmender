@@ -431,38 +431,43 @@ class BarcodeOverEdition(unittest.TestCase):
         mb, dg = self.results()
         self.assertEqual(dg["best"]["cand"]["id"], "3190836")
         self.assertTrue(dg["best"]["code"].startswith("barcode"))
-        self.assertTrue(mc.format_contradictions(dg["best"]))         # not whole sectors: review
+        self.assertTrue(mc.format_contradictions(dg["best"]))         # not whole sectors: the audio only
         self.assertTrue(mb["best"]["conflict"])                       # MusicBrainz: another barcode
         for countries in (None, ["CA", "US", "XW"]):
             out = mc.combine(mb, dg, countries)
-            self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("review", "3190836"), out["why"])
-            self.assertIn("lossless tracks are not whole CD sectors", " ".join(out["why"]))
+            self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", "3190836"), out["why"])
 
-    def test_a_barcode_both_picks_carry_waives_nothing(self):
-        # Stygian Bough: the CD and the download share one barcode; the contradicted pick is
-        # shown second however its barcode agrees
+    def test_a_barcode_both_picks_carry_leaves_the_audio_to_tell_them_apart(self):
+        # Stygian Bough: the CD and the download share one barcode; nothing else on either
         mb, dg = self.results()
         mb2 = dict(mb, status="review", best=dict(mb["best"], code="barcode", conflict=False, clues_against=[]))
         self.assertFalse(mc.format_contradictions(mb2["best"]))
-        # the contradicted CD has more of your copy behind it (its label on the scans) and more points
-        dg = dict(dg, best=dict(dg["best"], clues=dict(dg["best"].get("clues") or {}, label="label on the scans")))
-        self.assertTrue(mc.has_evidence(dg["best"], mb2["best"]))
         for pair in ((mb2, dg), (dg, mb2)):
             self.assertEqual(mc.combine(*pair)["best"]["cand"]["id"], "9f398ec8")
 
+    def test_what_else_your_copy_shows_comes_before_the_audio(self):
+        # the same, but the label on the scans is the contradicted CD's alone
+        mb, dg = self.results()
+        mb2 = dict(mb, status="review", best=dict(mb["best"], code="barcode", conflict=False, clues_against=[]))
+        dg = dict(dg, best=dict(dg["best"], clues=dict(dg["best"].get("clues") or {}, label="label on the scans")))
+        self.assertTrue(mc.has_evidence(dg["best"], mb2["best"]))
+        for pair in ((mb2, dg), (dg, mb2)):
+            self.assertEqual(mc.combine(*pair)["best"]["cand"]["id"], "3190836")
+
     def test_a_barcode_with_a_conflict_waives_nothing(self):
         mb, dg = self.results()
-        dg2 = dict(dg, best=dict(dg["best"], conflict=True))
+        dg2 = dict(dg, status="review", why=["barcode differs from the candidate's"],
+                   best=dict(dg["best"], conflict=True))
         self.assertNotEqual(mc.combine(mb, dg2)["best"]["cand"]["id"], "3190836")
 
-    def test_the_barcode_waives_nothing_against_a_pick_your_copy_does_not_contradict(self):
-        # the edition the folder names ("[2019 RMX RM]") carries no barcode against yours:
-        # the CD your files contradict is not shown over it
+    def test_your_barcode_stands_against_a_pick_your_copy_does_not_contradict(self):
+        # the edition the folder names ("[2019 RMX RM]") carries no barcode against yours: your
+        # barcode names the CD, and the audio says only what it was ripped to
         mb, dg = self.results()
         mb2 = dict(mb, best=dict(mb["best"], conflict=False))
         self.assertFalse(mc.format_contradictions(mb2["best"]))
         for pair in ((mb2, dg), (dg, mb2)):
-            self.assertEqual(mc.combine(*pair)["best"]["cand"]["id"], "9f398ec8")
+            self.assertEqual(mc.combine(*pair)["best"]["cand"]["id"], "3190836")
 
     def test_without_the_barcode_the_contradicted_cd_is_not_shown(self):
         # Sadist's rule stands: the CD your files contradict, with nothing of yours on it

@@ -430,7 +430,8 @@ class WebTag(Base):
 
     def test_album_only_never_names_media_the_copy_is_not(self):
         """Between The Buried And Me - Automata I & II: a CD rip tied between vinyl pressings
-        only: their shared tags would say Vinyl, so it is left for a person."""
+        only: the album is known, but their shared tags would say Vinyl, so media and numbering
+        are never written."""
         sys.path.insert(0, str(HERE))
         import match_core as mc
         from tests.test_match import album, cand, CFG
@@ -438,8 +439,12 @@ class WebTag(Base):
         tied = [mc.score_candidate(a, cand(id="v1", country="US", formats={"vinyl"}), CFG),
                 mc.score_candidate(a, cand(id="v2", country="US", formats={"vinyl"}), CFG)]
         r = dict(mc.classify(tied, CFG), scored=tied)
-        self.assertIsNone(mc.album_only(r, CFG, "cd"))
-        self.assertIsNotNone(mc.album_only(r, CFG, "vinyl"))
+        ao = mc.album_only(r, CFG, "cd")
+        self.assertTrue(ao["other_kind"])
+        kept = mc.album_only_tags({"album": ["A"], "media": ["Vinyl"], "tracknumber": ["1"], "discnumber": ["2"]},
+                                  ao["tied"], other_kind=ao["other_kind"])
+        self.assertEqual(kept, {"album": ["A"]})
+        self.assertFalse(mc.album_only(r, CFG, "vinyl")["other_kind"])
         self.assertIsNotNone(mc.album_only(r, CFG, ""))
         # an older matcher result that still says so is not tagged either
         info = {"source": "cd", "tied": [{"source": "discogs", "id": "1", "formats": ["vinyl"]},

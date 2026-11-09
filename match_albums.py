@@ -102,6 +102,15 @@ def _txt(v):
     return str(v).strip()
 
 
+def _tell(text):
+    """A progress line on stderr. Nobody may be reading it (a window started from a terminal or
+    another program that has since gone): a look-up never fails for that."""
+    try:
+        print(text, file=sys.stderr)
+    except (OSError, ValueError):
+        pass
+
+
 def _names(v):
     """All values of a multi-valued artist tag, joined. The Discogs Enrichment
     plugin writes a collaboration as ONE NAME PER ARTIST (albumartist =
@@ -1959,9 +1968,12 @@ def copy_source(album):
 
 def _sure_if_no_album_only(final, album, cfg):
     """FINAL, or the sure pick it set aside (match_core.combine, Discogs's pressings tied) when
-    the album could not be tagged as "album known" after all: that would leave it unresolved."""
-    if final.get("sure_elsewhere") and not mc.album_only(final, cfg, tie_source(album, final)):
-        return final["sure_elsewhere"]
+    the album could not be tagged as "album known" after all: that would leave it unresolved. So
+    too when the tied pressings are all of another media than your copy: a sure pick stands."""
+    if final.get("sure_elsewhere"):
+        ao = mc.album_only(final, cfg, tie_source(album, final))
+        if not ao or ao.get("other_kind"):
+            return final["sure_elsewhere"]
     return final
 
 
@@ -2156,7 +2168,10 @@ def _path_codes(text, name):
         line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
         if not (_OUTPUT_LINE.search(line) or _AUDIO_PATH.search(path)):
             continue
-        parts += [x for x in re.split(r"[\\/]", path)[1:] if x and not _PROGRAM_PART.search(x)]
+        folders = re.split(r"[\\/]", path)[1:]
+        if _AUDIO_PATH.search(path):             # (a track's own name is its title: "... (MC 900 Ft. Jesus Mix).wav")
+            folders = folders[:-1]
+        parts += [x for x in folders if x and not _PROGRAM_PART.search(x)]
     out = []
     for part in parts:
         for c in mc.catno_hints(part):
@@ -3361,8 +3376,8 @@ class Http:
         until = time.time() + pause_s if fails >= max_fail else 0
         down[host] = (0 if until else fails, until)
         if until:
-            print(f"    {host} failed {max_fail} times in a row (unreachable or refusing), "
-                  f"not asked again for {pause_s // 60} minutes", file=sys.stderr)
+            _tell(f"    {host} failed {max_fail} times in a row (unreachable or refusing), "
+                  f"not asked again for {pause_s // 60} minutes")
 
     def post_json(self, url, payload, host, headers=None):
         """A JSON POST (Tavily), cached by URL and body; never retried (an optional host).
@@ -3434,8 +3449,8 @@ class Http:
         state, lock = self._breaker()
         with lock:
             state[host] = [time.time() + self.BREAKER_S, False]
-        print(f"    {host} is not answering: its uncached requests are skipped for "
-              f"{self.BREAKER_S // 60} minutes, then tried again", file=sys.stderr)
+        _tell(f"    {host} is not answering: its uncached requests are skipped for "
+              f"{self.BREAKER_S // 60} minutes, then tried again")
 
     def _breaker_trial_done(self, host):
         """The trial request finished: closed, unless it gave up again (re-tripped)."""
@@ -3611,7 +3626,7 @@ class Http:
                         # pause out (the pacing wait is delay - (now - last))
                         self.last[limit] = max(self.last.get(limit, 0), time.time() + pause - delay)
                         break
-                    print(f"    {host} HTTP {e.code}, waiting {pause:.0f}s", file=sys.stderr)
+                    _tell(f"    {host} HTTP {e.code}, waiting {pause:.0f}s")
                     self._pause(pause)                      # (a given-up clone: stops at once)
                     continue
                 # another refusal (400, 403, 410): no retry, but the failure is recorded
@@ -3624,7 +3639,7 @@ class Http:
                 last_err = f"{type(e).__name__}: {getattr(e, 'reason', '') or e}"
                 if attempt == attempts - 1:
                     break                                   # giving up: no sleep first
-                print(f"    {host} network error {e}, retrying", file=sys.stderr)
+                _tell(f"    {host} network error {e}, retrying")
                 self._pause(10 * (attempt + 1) + random.uniform(0, 1))
             except (OSError, _HTTPException, ValueError) as e:
                 # a broken answer (connection reset, incomplete read, SSL error, not UTF-8)
@@ -5758,7 +5773,7 @@ def _web_note(http, notes, text):
     if text in said:
         return
     said.add(text)
-    print(f"    {text}", file=sys.stderr)
+    _tell(f"    {text}")
     if notes is not None:
         notes.append(text)
 

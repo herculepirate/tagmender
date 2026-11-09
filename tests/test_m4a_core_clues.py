@@ -160,8 +160,8 @@ class FormatContradiction(unittest.TestCase):
         a = album(audio={"hires": False, "cd_frames": False, "not_cd": True})
         r = run(a, cand(id="cd", formats={"cd"}, barcodes={"746105035126"}), ocr="0 746105 035126")
         self.assertTrue(r["best"]["code"].startswith("barcode"), r["best"]["code"])
-        self.assertEqual(r["status"], "review")
-        self.assertIn("lossless tracks are not whole CD sectors, so not ripped from this CD", r["why"])
+        self.assertEqual(r["status"], "auto", r["why"])                # (the barcode names the release)
+        self.assertTrue(mc.format_contradictions(r["best"]))
 
     def test_hi_res_vinyl_rip_stays_allowed(self):
         a = album(folder="2014 - X [Vinyl Rip 24bit 96khz]", media_hint="vinyl",

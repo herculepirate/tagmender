@@ -143,7 +143,7 @@ class FakeCoverUp:
 
 
 def _no_network(*a, **k):
-    raise OSError("network off in tests")
+    raise getattr(__import__("builtins"), "NetworkOffInTests", OSError)("network off in tests")  # (tests/_offline: no retries)
 
 
 class Case(unittest.TestCase):

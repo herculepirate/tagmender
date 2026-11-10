@@ -1,5 +1,5 @@
-# Every push to main: the whole test suite runs, then the .deb, the AppImage and the Flatpak are
-# built and checked, and replace the files of the "latest" GitHub Release (the newest build of
+# Every push to main: the whole test suite runs while the .deb, the AppImage and the Flatpak are
+# built and checked; when all pass, they replace the files of the "latest" GitHub Release (the newest build of
 # main, always at https://github.com/herculepirate/tagmender/releases/tag/latest).
 # Versioned releases still come from tags (release.yml).
 # Actions are pinned to a commit (the version in the comment); all run on Node.js 24.
@@ -15,7 +15,7 @@ jobs:
     uses: ./.github/workflows/tests.yml
 
   deb-appimage:
-    needs: tests
+    # (built while the tests run: publish waits for both, so nothing is published untested)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -52,7 +52,6 @@ jobs:
             dist/*.AppImage.sha256
 
   flatpak:
-    needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
@@ -94,7 +93,7 @@ jobs:
             TagMender.flatpak.sha256
 
   publish:
-    needs: [deb-appimage, flatpak]
+    needs: [tests, deb-appimage, flatpak]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

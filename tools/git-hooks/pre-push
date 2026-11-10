@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Local CI: every `git push` runs the whole test suite first (./run_tests.sh, every file side by
+# side: a few minutes) and is refused when anything fails, so a broken commit never reaches
+# GitHub, where the packages are built and published. Turned on once per clone with
+#   git config core.hooksPath tools/git-hooks
+# Skip it for one push (nothing but documentation, say) with: git push --no-verify
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+# (the tests run on the files here: they must be the commits being pushed)
+if ! git diff --quiet HEAD --; then
+  echo "pre-push: there are changes not committed; commit or stash them, so the tests run on what is pushed" >&2
+  exit 1
+fi
+py=${PYTHON:-}
+[ -n "$py" ] || { [ -x /usr/bin/python3 ] && py=/usr/bin/python3 || py=python3; }
+echo "pre-push: running the test suite (every file side by side)..." >&2
+start=$(date +%s)
+log=$(mktemp -t tagmender-prepush.XXXXXX)
+PYTHON="$py" ./run_tests.sh > "$log" 2>&1
+rc=$?
+secs=$(( $(date +%s) - start ))
+if [ $rc -ne 0 ]; then
+  grep -vE '  OK( \(skipped=[0-9]+\))?  \[[0-9]+s\]$' "$log" | tail -60 >&2
+  echo "pre-push: tests failed after ${secs}s - push refused (full output: $log)" >&2
+  exit 1
+fi
+echo "pre-push: $(grep 'tests in all' "$log") passed in ${secs}s" >&2
+rm -f "$log"

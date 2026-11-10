@@ -17,7 +17,10 @@ _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
 _os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 HERE = Path(__file__).resolve().parent.parent   # the scripts sit above tests/
 sys.path.insert(0, str(HERE))
-COVERUP = sys.argv[1] if len(sys.argv) > 1 else "plugins_builtin/coverup"
+# (the plugin folder: the first argument when it is one, else TAGMENDER_COVERUP_DIR - a split run passes
+# test names instead - else the built-in one)
+COVERUP = sys.argv[1] if len(sys.argv) > 1 and os.path.isdir(sys.argv[1]) else \
+    os.environ.get("TAGMENDER_COVERUP_DIR") or "plugins_builtin/coverup"
 import coverup_loader  # noqa: E402
 coverup_loader.load_coverup(COVERUP)
 import coverup_batch as cb  # noqa: E402

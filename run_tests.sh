@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Run every test suite. Needs ffmpeg. The built-in Discogs and CoverUp plugins are in plugins_builtin/.
-#   ./run_tests.sh                       with python3
+#   ./run_tests.sh                       with python3, several files at once
 #   PYTHON=/path/to/python3 ./run_tests.sh
+#   ./run_tests.sh --jobs 1              one file at a time
+#   ./run_tests.sh --shard 2/4           the second of four parts (CI runs them side by side)
+#   ./run_tests.sh tests/test_a.py ...   only these files
+# Each file's line says how long it took; a file running longer than --timeout (300 s) is stopped.
+# Tests run without the network (tests/_offline): set TAGMENDER_TESTS_NETWORK=1 for a live check.
 # Tests never touch your settings or music: each uses temporary folders and its own XDG dirs.
 set -u
 cd "$(dirname "$0")"
@@ -15,41 +20,8 @@ unset TAGMENDER_PICARD_INI
 # no stale bytecode: a file edited twice in one second at the same size keeps its old .pyc
 find . -name __pycache__ -not -path "./.git/*" -prune -exec rm -rf {} +
 export PYTHONDONTWRITEBYTECODE=1
-# each suite's own settings, state, data and cache folders, all under one folder removed at the end
-scratch=$(mktemp -d -t tagmender-tests.XXXXXX)
-trap 'rm -rf "$scratch"' EXIT
-fresh() { mktemp -d -p "$scratch"; }
-fail=0
-total=0
-for t in tests/test_*.py; do
-  args=()
-  case "$t" in
-    tests/test_match.py) args=("$TAGMENDER_DISCOGS_PLUGIN");;
-    tests/test_coverup_batch.py) args=("$TAGMENDER_COVERUP_DIR");;
-  esac
-  out=$(XDG_CONFIG_HOME=$(fresh) XDG_STATE_HOME=$(fresh) XDG_DATA_HOME=$(fresh) XDG_CACHE_HOME=$(fresh) \
-        "$PY" -W ignore "$t" "${args[@]}" 2>&1)
-  rc=$?
-  ran=$(printf '%s\n' "$out" | grep -oE '^Ran [0-9]+' | grep -oE '[0-9]+' || echo 0)
-  total=$((total + ran))
-  last=$(printf '%s\n' "$out" | tail -1)
-  printf '%-34s %4s tests  %s\n' "$t" "$ran" "$last"
-  if [ $rc -ne 0 ]; then
-    fail=1
-    printf '%s\n' "$out" | grep -E '^(FAIL|ERROR):' | head -10
-    # (and why: each failure's error line, so a failure seen only on another machine says what it was)
-    printf '%s\n' "$out" | grep -E '^[A-Za-z_.]*(Error|Exception)\b' | head -10 | sed 's/^/    /'
-    # a suite that crashed says no FAIL or ERROR: show how it ended
-    if ! printf '%s\n' "$out" | grep -qE '^(FAIL|ERROR):'; then
-      printf '%s\n' "$out" | tail -15 | sed 's/^/    /'
-      # it stopped before naming what failed: once more, test by test, to show the last one
-      echo "    -- again, naming each test:"
-      # (isolated as the first run; a suite that takes a plugin folder reads it from the environment)
-      XDG_CONFIG_HOME=$(fresh) XDG_STATE_HOME=$(fresh) XDG_DATA_HOME=$(fresh) XDG_CACHE_HOME=$(fresh) \
-        "$PY" -W ignore -m unittest -v "$t" 2>&1 \
-        | grep -E ' \.\.\. |^(FAIL|ERROR|Traceback|  File|[A-Za-z]+Error)' | tail -25 | sed 's/^/    /'
-    fi
-  fi
-done
-echo "$total tests in all"
-exit $fail
+# no test reaches the network (tests/_offline/sitecustomize.py)
+export PYTHONPATH="$PWD/tests/_offline${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHON="$PY"
+# each file in its own process with its own settings, state, data and cache folders: tests/_runner.py
+exec "$PY" tests/_runner.py "$@"

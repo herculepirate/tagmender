@@ -28,7 +28,7 @@ sys.path.insert(0, sys.argv[1])
 import _review27a_common as c
 import socket
 def _no(*a, **k):
-    raise OSError("network off in tests")
+    raise getattr(__import__("builtins"), "NetworkOffInTests", OSError)("network off in tests")  # (tests/_offline: no retries)
 socket.create_connection = _no
 import companions, coverup_loader
 coverup_loader.load_coverup(str(companions.coverup_dir()))

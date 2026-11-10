@@ -24,7 +24,7 @@ os.environ.setdefault("TAGMENDER_COVERUP_DIR", str(Path("plugins_builtin/coverup
 import artwork  # noqa: E402
 import match_albums as ma  # noqa: E402
 import plan as pl  # noqa: E402
-from test_artwork_review import ART, ArtBase, flac_pictures  # noqa: E402
+from test_artwork_review import ART, COVERUP, ArtBase, flac_pictures  # noqa: E402
 from test_executor import audio, target  # noqa: E402
 from PIL import Image, ImageOps  # noqa: E402
 
@@ -110,6 +110,8 @@ class A17_01_OtherAlbumsEmbeddedFrontAndIds(Base17):
 
     def test_query_carries_the_neighbours_release_ids(self):
         from mutagen.flac import FLAC
+        import coverup_loader
+        coverup_loader.load_coverup(str(COVERUP))       # (not left to an earlier test of this file)
         from coverup.pipeline import Pipeline
         artist = self.lib / "Some Artist"
         single = audio(artist / "single.flac", 660, album="A Single", title="s", artist="Some Artist")

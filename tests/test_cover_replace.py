@@ -99,7 +99,7 @@ class Engine(eng_mod.Engine):
 
 
 def _no_network(*a, **k):
-    raise OSError("no network in tests")
+    raise getattr(__import__("builtins"), "NetworkOffInTests", OSError)("no network in tests")  # (tests/_offline: no retries)
 
 
 class Replace(Base):

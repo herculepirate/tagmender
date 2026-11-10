@@ -344,5 +344,24 @@ class R14_10_DeletedCompanionKeepsUndoUnfinished(Base):
         self.assertEqual(tree(self.lib), ALBUM[:3])
 
 
+def setUpModule():
+    # (ART-1, larger_only by default: an album with a cover gets a cover search - never the
+    # real shops and databases in a test; a test that wants covers patches its own)
+    import artwork
+    class NoCoverUp:                     # (the artist photo search builds its own CoverUp)
+        name = "coverup"
+
+        def __init__(self, *a, **k):
+            pass
+
+        def artist_photo(self, *a, **k):
+            return None
+
+    for p in (mock.patch.object(artwork, "chain", lambda *a, **k: []),
+              mock.patch.object(artwork, "CoverUp", NoCoverUp)):
+        p.start()
+        unittest.addModuleCleanup(p.stop)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

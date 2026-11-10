@@ -159,7 +159,12 @@ class Case(unittest.TestCase):
         for p in (mock.patch.object(socket, "create_connection", _no_network),
                   mock.patch.object(artwork, "CoverUp", FakeCoverUp),
                   mock.patch.object(artwork, "chain", lambda prof, staging, *a, **k: [FakeFront(staging)]),
-                  mock.patch.object(engine.Engine, "_identify", lambda eng, g: self.ident(eng, g))):
+                  mock.patch.object(engine.Engine, "_identify", lambda eng, g: self.ident(eng, g)),
+                  # (NAM-1, on by default: no band look-ups here - the network is off, and each
+                  # one would wait out the client's retries)
+                  mock.patch.object(engine.Engine, "_band_members", lambda eng, mbid: None),
+                  mock.patch.object(engine.Engine, "_discogs_band_members", lambda eng, dgid: []),
+                  mock.patch.object(engine.Engine, "_band_ids", lambda eng, name, mbid: (mbid or "", ""))):
             p.start()
             self.addCleanup(p.stop)
         self.addCleanup(shutil.rmtree, self.root, True)

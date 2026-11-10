@@ -535,5 +535,14 @@ class Sheet(te.Base):
         self.assertEqual(opened[1]["rows"][0]["folder"], "/music/U")
 
 
+def setUpModule():
+    # (ART-1, larger_only by default: an album with a cover gets a cover search - never the
+    # real shops and databases in a test; a test that wants covers patches its own)
+    import artwork
+    p = mock.patch.object(artwork, "chain", lambda *a, **k: [])
+    p.start()
+    unittest.addModuleCleanup(p.stop)
+
+
 if __name__ == "__main__":
     unittest.main()

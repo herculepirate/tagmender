@@ -202,7 +202,9 @@ _NOT_CATNO_WORD = re.compile(
     r"^(\d+\s*-?\s*bit|\d+(\.\d+)?k?hz|\d+x\d+g?|\d+g|rm|remaster(ed)?|reissue|edition|deluxe|"
     r"expanded|limited|bonus|track|tracks|with|and|anniversary|version|complete|album|included|"
     r"\d*cds?|\d*lps?|vinyl|rip|ripped|web|digital|flac|mp3|sacd\S*|dvda?\S*|dts|\d*ch|"
-    r"surround|stereo|mono|boxset|box|set|hi-?res|lossless|\+)$", re.I)
+    r"surround|stereo|mono|boxset|box|set|hi-?res|lossless|\+|"
+    # a bit depth and sample rate ("ECM 24-96", "[24/192]", "16-44.1"): the audio, not a number
+    r"(?:16|20|24|32)\s*[-/]\s*(?:44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384))$", re.I)
 # words that, followed by a number, mean something else ("Volume 5", "Live 1996")
 _NUMBER_WORDS = {"vol", "volume", "part", "pt", "no", "nr", "op", "opus", "chapter", "book",
                  "side", "live", "by", "disc", "disk", "cd", "track", "edition", "session",

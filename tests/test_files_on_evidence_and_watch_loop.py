@@ -116,6 +116,17 @@ class Filing(unittest.TestCase):
         self.assertTrue(self.moved(a))
         self.assertTrue(any("your scans show" in n for n in a["notes"]))
 
+    def test_proven_by_the_scans_replaces_the_old_album_title(self):            # BAR-1 / EVI-1
+        # (Mercurial Balm: filed on its scans' catalogue number at 88, its album tag "Mercurial
+        # Balm [ECM 2269]" was kept below the replace threshold, and the folder named from it)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", "-c:a", "flac",
+                        "-metadata", "album=Album [ECM 2269]", "-y", str(self.f)], check=True)
+        a = self.entry(tier="exact", confidence=88.0, margin=0.0, all_lengths=True,
+                       scans={"state": "proven", "printed": True, "found": ["catalogue_number"], "against": []})
+        self.assertTrue(self.moved(a))
+        self.assertEqual(a["files"][0]["changes"].get("album"), ["Album"])
+        self.assertNotIn("ECM", a["files"][0]["dst"])
+
     def test_scans_alone_or_weak_scans_do_not_file_it(self):
         proven = {"state": "proven", "printed": True, "found": ["barcode"], "against": []}
         for kw in ({"confidence": 86.9, "all_lengths": False, "scans": proven},

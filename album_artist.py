@@ -134,7 +134,16 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         return None
     if to:
         return _found(to, ids, members_of)
-    if len(names) >= 2:                                 # a joint credit: its first artist
+    # NAM-1: a band credited after its members, Discogs's "Thomas Strønen / Iain Ballamy : Food",
+    # is the band ("Food"), not its first member: the " : " puts the members before the act
+    band_at = -1
+    if len(names) >= 2 and " : " in credit:
+        after = fold(credit.rsplit(" : ", 1)[1])
+        band_at = next((k for k, n in enumerate(names) if fold(n) == after), -1)
+    if band_at >= 0:
+        aligned = lambda xs: xs[band_at] if len(xs) == len(names) else ""   # noqa: E731
+        lead = (names[band_at], aligned(sorts), aligned(ids), aligned(dg))
+    elif len(names) >= 2:                               # a joint credit: its first artist
         aligned = lambda xs: xs[0] if len(xs) == len(names) else ""   # noqa: E731
         lead = (names[0], aligned(sorts), aligned(ids), aligned(dg))
     else:

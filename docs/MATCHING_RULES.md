@@ -110,7 +110,7 @@ When rules point different ways, the earlier group wins:
 
 | ID | Rule | Status |
 |---|---|---|
-| NAM-1 | Album Artist is the lead artist only ("Thomas Strønen & Time Is A Blind Guide" -> "Thomas Strønen"; a band named after a member -> that member). The Artist tag keeps the full credit. The folder follows the Album Artist. | in code (`album_artist.py`, on by default); test `NAM1_*` |
+| NAM-1 | Album Artist is the lead artist only ("Thomas Strønen & Time Is A Blind Guide" -> "Thomas Strønen"; a band named after a member -> that member; a band credited after its members, "Thomas Strønen / Iain Ballamy : Food" -> the band, "Food"). The Artist tag keeps the full credit. The folder follows the Album Artist. | in code (`album_artist.py`, on by default); test `NAM1_*` |
 | NAM-2 | Compilations and classical albums are filed as the profile's naming script says. | in code (naming script) |
 | NAM-3 | Artist names and track titles are written as the database spells them, not as your files do. | in code; test `NAM3_*` |
 | GEN-1 | Genre is filled as the profile's genre settings say. | in code |

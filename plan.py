@@ -1220,7 +1220,11 @@ class Planner:
             if op in ("copy", "move"):
                 entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
                                       f"{_organize_floor_words(p)}; filed because {evidence}")
-            if getattr(prop, "no_lengths_tie", False):      # (its album tags are written, not only added)
+            # (its album tags are written, not only added: an exact release proven by your copy -
+            # its scans' barcode or catalogue number, every track length - is THE release, BAR-1/
+            # EVI-1, so its title replaces an old one such as "Album [ECM 2269]", and the folder
+            # is named from it; an album-only one only when its entries tie for want of lengths)
+            if getattr(prop, "no_lengths_tie", False) or tier_of(prop) == "exact":
                 conf = max(conf, _threshold(p, "replace_min_confidence"))
         # one version of an album found in one folder with another (engine._versions_split,
         # _discs_split): into a folder of its own

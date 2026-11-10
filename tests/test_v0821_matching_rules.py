@@ -234,9 +234,38 @@ class HF2_DisputeTakesThePreferredPick(unittest.TestCase):
         self.assertEqual(mc._disputed(dg, mb, "the disc ID is on MusicBrainz's")["status"], "review")
 
 
+class EVI_FormatNoteIsNoCatalogueNumber(unittest.TestCase):
+    """"[ECM 24-96]" (Quiet Inlet) is ECM's 24-bit/96 kHz edition, not a catalogue number:
+    taken for one, it counted against every pressing and left the album Unresolved."""
+    def test_bit_depth_and_rate_pairs(self):
+        for t in ("Quiet Inlet [ECM 24-96]", "Quiet Inlet [ECM 24/96]", "X [24/192]", "X [16-44.1]",
+                  "X [24-88.2]"):
+            self.assertEqual(mc.catno_hints(t), [], t)
+
+    def test_real_catalogue_numbers_stay(self):
+        self.assertEqual(mc.catno_hints("Mercurial Balm [ECM 2269]"), ["ECM 2269"])
+        self.assertEqual(mc.catno_hints("Y [BRC-67]"), ["BRC-67"])
+        self.assertEqual(mc.catno_hints("W [DIN 24-2]"), ["DIN 24-2"])
+
+
 class NAM1_LeadArtistByDefault(unittest.TestCase):
     def test_default(self):
         self.assertTrue(pf.DEFAULTS["album_artist"]["lead"])
+
+    def lead(self, credit, names):
+        import album_artist
+        prof = pf.from_dict({"name": "t", "album_artist": {"lead": True, "bands": False}})
+        t = {"albumartist": [credit], "~discogs_albumartists": names, "title": ["x"]}
+        return album_artist.apply([t], prof)[0]["albumartist"]
+
+    def test_joint_credit_takes_its_first_artist(self):
+        self.assertEqual(self.lead("Thomas Strønen & Time Is A Blind Guide",
+                                   ["Thomas Strønen", "Time Is A Blind Guide"]), ["Thomas Strønen"])
+
+    def test_band_credited_after_its_members_is_the_band(self):
+        # (Discogs: "Thomas Strønen / Iain Ballamy : Food" - Mercurial Balm went under Thomas Strønen)
+        self.assertEqual(self.lead("Thomas Strønen / Iain Ballamy : Food",
+                                   ["Thomas Strønen", "Iain Ballamy", "Food"]), ["Food"])
 
 
 if __name__ == "__main__":

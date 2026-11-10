@@ -1,5 +1,22 @@
 # Release notes
 
+## 0.8.22
+
+**Folder names that did not change**
+- An album proven by your own copy - your scans' barcode or catalogue number, every track
+  length agreeing - now has its tags replaced in full even on a low score, as it was already
+  filed. Its old album title ("Mercurial Balm [ECM 2269]") no longer survives into the new
+  folder name ("2012 - Mercurial Balm [HD]").
+- "[ECM 24-96]", "[24/192]" and other bit-depth and sample-rate notes in a folder name or album
+  title are no longer taken for a catalogue number. Taken for one, it counted against every
+  pressing and left the album Unresolved (Quiet Inlet).
+- A band credited after its members ("Thomas Strønen / Iain Ballamy : Food") is the album
+  artist, not its first member, so the band's albums stay in one folder (NAM-1).
+
+**Faster checks**
+- The test suite runs in a few minutes and never reaches the network; packages are built while
+  the tests run, and published only when every test passes.
+
 ## 0.8.21
 
 **Matching rules, written down**

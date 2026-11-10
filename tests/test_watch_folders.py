@@ -243,7 +243,8 @@ class Drop(DropBase):
         self.assertEqual(list(res.values()), ["unresolved"])
         self.assertEqual(self.audio_in(self.dest), [])
         calls = len(self.http.calls)
-        with mock.patch.object(watcher.time, "time", return_value=time.time() + 7200):
+        # (HF-3: looked up again every 10 minutes on its first day - not on the next 5-minute pass)
+        with mock.patch.object(watcher.time, "time", return_value=time.time() + 300):
             self.assertEqual(w.tick(), {})
         self.assertEqual(len(self.http.calls), calls)
         self.assertTrue(d.exists())

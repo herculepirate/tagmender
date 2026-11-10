@@ -1802,8 +1802,8 @@ class Executor:
             stops = {r.rstrip(os.sep) for r in self.roots}
         else:
             # never removed: the profile's own folders, every other profile's folders, your
-            # home folder and mount parents, and a folder named on the command line - unless
-            # it is this album's own folder (`tagmender run Inbox/Album`: removed once empty,
+            # home folder and mount parents, and a folder named on the command line outside
+            # the profile's folders - unless it is this album's own folder (`tagmender run Inbox/Album`: removed once empty,
             # as Picard does, and nothing above it unless it lies inside a profile's folders)
             lib = [r.rstrip(os.sep) for r in lib]
             stops = set(lib) | _protected_folders()
@@ -1813,10 +1813,13 @@ class Executor:
                 r = r.rstrip(os.sep)
                 if r in stops:
                     continue
+                inside_lib = any(r.startswith(x + os.sep) for x in lib)
                 if r == own:
-                    if not any(r.startswith(x + os.sep) for x in lib):
+                    if not inside_lib:
                         stops.add(os.path.dirname(r))
-                else:
+                elif not inside_lib:
+                    # (a folder opened inside the library - an artist folder - is the library's
+                    # own: removed once a move empties it, like any other folder there)
                     stops.add(r)
         roots = stops
         for d in sorted({str(Path(fe["src"]).parent) for fe in a["files"] + a["companions"]},

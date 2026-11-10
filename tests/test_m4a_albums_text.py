@@ -269,8 +269,17 @@ class Investigation(unittest.TestCase):
         a = {"ocr_barcodes": {"693723019529"}, "tracks": [{}]}
         final = self.final(id="8382890")
         res = {"scored": [{"cand": final["best"]["cand"]}]}
+        # (not searched, or a search failed: another pressing, perhaps)
         self.assertEqual(ma._copy_disagrees(final, a, "", (res, None)),
                          ["scans show barcode 693723019529, not on this release"])
+        # BAR-4: searched and found on no release anywhere: told, never a reason to wait
+        a2 = dict(a, unlisted_barcodes={"693723019529"})
+        self.assertEqual(ma._copy_disagrees(final, a2, "", (res, None)), [])
+        self.assertIn("693723019529, on no release: ignored (BAR-4)", " ".join(final["best"]["notes"]))
+        # a second barcode of the scans, never searched, still says another pressing
+        a3 = dict(a2, ocr_barcodes={"693723019529", "5013929020160"})
+        self.assertEqual(ma._copy_disagrees(final, a3, "", (res, None)),
+                         ["scans show barcode 5013929020160, not on this release"])
         other = {"scored": [{"cand": cand([1.0], id="2247495", barcodes={"693723019529"})}]}
         self.assertEqual(ma._copy_disagrees(final, a, "", (res, other)), [])
         # printed and read whole on a scan counts too; one only completed by the check digit does not

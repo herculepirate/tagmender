@@ -59,14 +59,14 @@ class EditionBase(Base):
 # script..." dialog (naming.tagscript) gives Picard the same doubled result.
 class R16_01_PicardPresetsDoubleTheEdition(EditionBase):
     def test_x(self):
-        want = {"all-music": "Meshuggah/2004 - I [2019 Vinyl]",
-                "various-artists": "Meshuggah/I - 2004 [2019 Vinyl]",
-                "classical-performer": "Meshuggah/2004 - I [2019 Vinyl]"}
+        want = {"all-music": "Meshuggah/2004 - I [2019 Vinyl Rip]",           # ED-2
+                "various-artists": "Meshuggah/I - 2004 [2019 Vinyl Rip]",
+                "classical-performer": "Meshuggah/2004 - I [2019 Vinyl Rip]"}
         got = {}
         for preset in want:
             p = self.plan([vinyl(1, "A"), vinyl(2, "B")], preset=preset, editions="edition_year",
                           album_editions="edition_year")
-            self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [2019 Vinyl]"])
+            self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [2019 Vinyl Rip]"])
             got[preset] = self.folders(p)[0]
         self.assertEqual(got, want)
 
@@ -89,7 +89,7 @@ class R16_02_WordLimitCutsTheEditionOutOfTheFolder(EditionBase):
               vinyl(2, "B", album=al, artist="Metallica", originaldate=["1986"], originalyear=["1986"],
                     date=["2017-11-10"])]
         p = self.plan(ts, preset="tagmender", editions="edition_year", album_editions="edition_year")
-        self.assertEqual(self.folders(p), ["Metallica/1986 - Master of Puppets Remastered [2017 Vinyl]"])
+        self.assertEqual(self.folders(p), ["Metallica/1986 - Master of Puppets Remastered [2017 Vinyl Rip]"])
 
 
 # ---------------------------------------------------------------------------------------

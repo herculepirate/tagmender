@@ -120,7 +120,7 @@ class PublicDefaults(Base):
         self.assertEqual((p["subfolders"]["where"], p["subfolders"]["covers_name"], p["subfolders"]["misc_name"]),
                          ("album", "Artwork", "Extras"))
         self.assertEqual(p["artwork"]["artist"], {"enabled": False, "file": "artist.jpg", "embed": False})
-        self.assertEqual(p["artwork"]["replace"], "never")
+        self.assertEqual(p["artwork"]["replace"], "larger_only")   # ART-1: a small cover (< 500 px) is replaced
         self.assertEqual(p["artwork"]["sources"][0], "caa")
         self.assertFalse(p["providers"]["web"]["partial"])
         self.assertTrue(p["providers"]["acoustid"]["enabled"])

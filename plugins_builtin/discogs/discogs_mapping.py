@@ -836,6 +836,14 @@ def extract_remaining_release_fields(release: dict[str, Any]) -> dict[str, str |
         # under its own name rather than colliding with a different concept.
         out['discogs_status'] = str(status).strip()
 
+    # BOOT-1: a release Discogs lists as "Unofficial Release" (a format
+    # description) is a bootleg - releasestatus as MusicBrainz writes it.
+    for fmt in release.get('formats', []) or []:
+        descriptions = fmt.get('descriptions') if isinstance(fmt, dict) else None
+        if any(str(d).strip().casefold() == 'unofficial release' for d in descriptions or []):
+            out['releasestatus'] = 'bootleg'
+            break
+
     # Every identifier type, not just Barcode (Label Code, Matrix / Runout,
     # Rights Society, Mastering SID Code, ASIN, ...).
     for identifier in release.get('identifiers', []) or []:

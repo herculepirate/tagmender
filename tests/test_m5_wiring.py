@@ -291,7 +291,7 @@ class UserIniUnchanged(unittest.TestCase):
         a, shapes = self.shapes()
         cfg = dict(mc.DEFAULT_CFG, preferred_countries=["DE"], preferred_release_formats=['12" Vinyl'])
         r = m5.run(a, *shapes[0], cfg=cfg)
-        self.assertEqual((r["best"]["cand"]["id"], r["status"]), ("lp1", "review"))
+        self.assertEqual((r["best"]["cand"]["id"], r["status"]), ("lp1", "auto"))         # TIE-1
 
 
 class BuildersToCombine(unittest.TestCase):

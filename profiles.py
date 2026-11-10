@@ -229,12 +229,12 @@ DEFAULTS = {
     # artist of a various-artists release) has no default here: unset, the tagger's own
     # setting is used, as before this group existed
     "compilations": {"extra_flags": False, "grouping": False, "single_artist": False},
-    # marks.py: grouping - GROUPING "HD Audio" or "Vinyl Rip" where empty
+    # marks.py: grouping - GROUPING "HD Audio", "Vinyl Rip" or "Tape Rip" where empty
     "marks": {"grouping": True},
     # album artist as the lead artist alone (album_artist.py): lead - a joint credit's first
     # artist, and (bands) a band named after a member filed under that member; file_under -
     # your own names {"credit": "album artist"} (a name mapped to itself is kept as credited)
-    "album_artist": {"lead": False, "bands": True, "file_under": {}},
+    "album_artist": {"lead": True, "bands": True, "file_under": {}},      # NAM-1
     # artwork: sources - where covers come from, in order (coverup: CoverUp with all its sources;
     #   caa: MusicBrainz's Cover Art Archive; discogs; web: shops and web image search via
     #   CoverUp; local: the album's own scans); when - "needed" (only for albums missing a cover
@@ -242,10 +242,12 @@ DEFAULTS = {
     #   least 250 px) is enlarged to min_px; generate - when nothing is found: off | template
     #   (CoverUp's offline renderer) | ai (the AI service set in CoverUp) | auto (CoverUp's order);
     #   replace - larger_only: an album's own cover smaller than min_px (embedded or cover.jpg) is
-    #   replaced by a larger one found, else by itself enlarged (backed up, undoable) | never
+    #   replaced by a larger one found, else by itself enlarged (backed up, undoable; the default,
+    #   ART-1) | never
     "artwork": {"enabled": True, "provider": "coverup", "sources": ["caa", "discogs", "coverup"],
                 "when": "needed", "enlarge": True, "generate": "off", "embed_front": True, "files": True,
-                "replace": "never", "min_px": 500, "max_bytes": 20_000_000,
+                # ART-1: your own cover is kept unless it is small (under min_px, 500 px)
+                "replace": "larger_only", "min_px": 500, "max_bytes": 20_000_000,
                 # the longest side of the cover put into each track (0: as found)
                 "embed_max_side": 1200,
                 # the album artist's photo, at Enthusiast and Audiophile: artist.jpg in the artist

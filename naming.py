@@ -103,20 +103,57 @@ def edition_parts(tags: dict) -> tuple[str, str]:
     return kind, reissue
 
 
+# ED-1/ED-2: what is always marked, with the pressing's own year; ED-3: a CD or download is
+# marked only as a newer remaster or reissue
+_ALWAYS_MARKED = {"Vinyl": "Vinyl Rip", "Tape": "Tape Rip", "SACD": "SACD", "DVD-A": "DVD-A", "Blu-ray": "Blu-ray"}
+
+
+def _pressing_year(tags) -> str:
+    def first(k):
+        v = tags.get(k)
+        v = (v if isinstance(v, list) else [v]) if v not in (None, "") else []
+        return str(v[0]).strip() if v else ""
+    y = (first("~edition_date") if first("~edition_media") else first("date"))[:4]
+    return y if y.isdigit() else ""
+
+
+def _reissue_word(tags) -> str:
+    """ED-3: "Reissue" when the release calls itself a reissue and not a remaster, else
+    "Remaster"."""
+    text = " ".join(str(x) for k in ("~edition_media", "media", "releasecomment", "~releasecomment")
+                    for x in (tags.get(k) if isinstance(tags.get(k), list) else [tags.get(k) or ""])).lower()
+    return "Reissue" if "reissue" in text and "remaster" not in text else "Remaster"
+
+
 def edition(tags: dict, mode: str = "edition_year") -> str:
-    """The edition text for a folder or the album tag: "2019 Vinyl", "Vinyl", "2014 CD";
-    "" for an original CD, unknown media or mode "off"."""
+    """The edition text for a folder and the album tag (ED-1 to ED-4): an SACD, DVD-Audio or
+    Blu-ray always "1999 SACD"; a vinyl or tape rip always "1977 Vinyl Rip", "1984 Tape Rip"
+    (the pressing's own year); a CD or download only when it is newer than the original:
+    "2015 Remaster" ("2015 Reissue" when the release says reissue). "" for the original CD or
+    download, unknown media or mode "off". ED-5: hi-res audio ("~edition_hd") on a CD-type
+    or download edition adds HD: "HD", "2015 Remaster HD"; an album known ("~edition_unproven")
+    shows only "HD". Mode "edition": the kind alone ("Vinyl Rip", "SACD", "Remaster").""" 
     if mode not in EDITION_VAR:
         return ""
+    hd = bool(tags.get("~edition_hd"))
+    if tags.get("~edition_unproven"):
+        return "HD" if hd else ""                   # ED-5: an album known shows only its HD
     kind, reissue = edition_parts(tags)
-    if not kind:
-        return ""
-    if mode == "edition":
-        return "" if kind == "CD" else kind
-    return "" if kind == "CD" and not reissue else f"{reissue} {kind}".strip()
+    if kind in _ALWAYS_MARKED:
+        word = _ALWAYS_MARKED[kind]
+        return word if mode == "edition" else f"{_pressing_year(tags)} {word}".strip()
+    if not kind or not reissue:
+        return "HD" if hd else ""                   # the original CD or download: no suffix (ED-3), or HD (ED-5)
+    word = _reissue_word(tags) + (" HD" if hd else "")
+    return word if mode == "edition" else f"{reissue} {word}"
 
 
 _ALBUM_EXPR = re.compile(r"\$words\(%album%,\s*\d+\)|%album%", re.I)
+
+
+# what a script's own edition lines strip off the album tag, and the words ED-1..4 add
+_OWN_SUFFIX_WORDS = "\\(?:CD|WEB|Vinyl|Tape\\)"
+_RULE_SUFFIX_WORDS = "\\(?:CD|WEB|Vinyl Rip|Tape Rip|Vinyl|Tape|SACD|DVD-A|Blu-ray|Remaster HD|Reissue HD|Remaster|Reissue|HD\\)"
 
 
 def with_editions(template: str, mode: str) -> str:
@@ -126,9 +163,14 @@ def with_editions(template: str, mode: str) -> str:
     if "$set(_edition," in template and piece in template:     # a Picard script with its own edition
         if mode == "off":
             return template.replace(piece, "")
-        if mode == "edition":                                  # the kind alone: [Vinyl], never [2019 Vinyl]
-            return template.replace(piece, "$set(_edition,$if($ne(%_edkind%,CD),%_edkind%))" + piece)
-        return template
+        # ED-1..4: the edition TagMender's rules give, in place of the script's own (an
+        # original download is no "[WEB]"); and the album tag's suffix in those words is taken
+        # off as the script takes off its own (" [2015 WEB]")
+        template = template.replace(_OWN_SUFFIX_WORDS, _RULE_SUFFIX_WORDS)
+        var = "_ed_rule_kind" if mode == "edition" else "_ed_rule"
+        if _RULE_SUFFIX_WORDS not in template:
+            var += "_add"                    # (the script names the album tag as it is: suffix once)
+        return template.replace(piece, f"$set(_edition,%{var}%)" + piece)
     var = EDITION_VAR.get(mode)
     if not var:
         return template
@@ -141,19 +183,27 @@ def with_editions(template: str, mode: str) -> str:
 
 
 def _picard_edition(mode: str, prefix: str = "") -> list:
-    """Picard script lines setting %{prefix}_edition% as the shared scripts do (Vinyl / WEB /
-    Tape, plus the pressing's own year for a reissue; an original CD and unknown media get
-    nothing); "edition" mode: the kind alone."""
+    """Picard script lines setting %{prefix}_edition% as naming.edition does (ED-1..ED-5): an
+    SACD, DVD-A or Blu-ray "1999 SACD" and a vinyl or tape rip "1977 Vinyl Rip" always; a CD
+    or download only as a newer "2015 Remaster" ("Reissue"), with " HD" for lossless audio
+    past 16 bits or 44.1 kHz, or "HD" alone; "edition" mode: without the year."""
     v = (prefix + "_") if prefix else "_"
+    lossless = " flac wav aif aiff ape wv dsf dff tak alac "
     lines = [
         f"$set({v}usedate,$if(%originaldate%,%originaldate%,%date%))",
         f"$set({v}edkind,$if($in(%media%,Vinyl),Vinyl,$if($or($in(%media%,Digital),$in(%media%,File)),WEB,$if($in(%media%,Cassette),Tape,"
         f"$if($in(%media%,SACD layer),SACD,$if($in(%media%,CD layer),CD,$if($in(%media%,CD side),CD,$if($in(%media%,SACD),SACD,$if($in(%media%,DVD-Audio),DVD-A,$if($in(%media%,Blu-ray),Blu-ray,$if(%media%,CD,)))))))))))",
         f"$set({v}edyear,$if($and(%date%,$ne($left(%date%,4),$left(%{v}usedate%,4))),$left(%date%,4),))",
-        f"$set({v}edition,$if(%{v}edkind%,$if($or($ne(%{v}edkind%,CD),%{v}edyear%),$trim(%{v}edyear% %{v}edkind%)),))",
+        f"$set({v}edword,$if($eq(%{v}edkind%,Vinyl),Vinyl Rip,$if($eq(%{v}edkind%,Tape),Tape Rip,"
+        f"$if($or($eq(%{v}edkind%,SACD),$eq(%{v}edkind%,DVD-A),$eq(%{v}edkind%,Blu-ray)),%{v}edkind%,))))",
+        f"$set({v}reword,$if($and($in($lower(%media%),reissue),$not($in($lower(%media%),remaster))),Reissue,Remaster))",
+        f"$set({v}hd,$if($and($in({lossless},$lower( %_extension% )),$or($gt(%_bits_per_sample%,16),$gt(%_sample_rate%,44100))),HD,))",
     ]
     if mode == "edition":
-        lines.append(f"$set({v}edition,$if($ne(%{v}edkind%,CD),%{v}edkind%))")
+        lines.append(f"$set({v}edition,$if(%{v}edword%,%{v}edword%,$if(%{v}edyear%,%{v}reword%$if(%{v}hd%, HD),%{v}hd%)))")
+    else:
+        lines.append(f"$set({v}edition,$if(%{v}edword%,$trim($left(%date%,4) %{v}edword%),"
+                     f"$if(%{v}edyear%,%{v}edyear% %{v}reword%$if(%{v}hd%, HD),%{v}hd%)))")
     return lines
 
 
@@ -171,6 +221,11 @@ def tagscript(mode: str, album_tag: str = "off", template: str = "") -> str:
                      "$set(_tm_album,$if(%_tmt_edition%,$replace(%album%, [%_tmt_edition%],),%album%))"]
     if template and "$set(_edition," in template:
         script = with_editions(template, mode) if mode in EDITION_VAR else with_editions(template, "off")
+        if mode in EDITION_VAR:                  # (what with_editions takes from TagMender: Picard works it out)
+            script = "\n".join([*_picard_edition(mode, "_tmr"),
+                                 "$set(_ed_rule,%_tmr_edition%)", "$set(_ed_rule_kind,%_tmr_edition%)",
+                                 "$set(_ed_rule_add,$if($endswith(%album%,[%_tmr_edition%]),,%_tmr_edition%))",
+                                 "$set(_ed_rule_kind_add,%_ed_rule_add%)", script])
         if strip_tag:
             script = script.replace("%album%", "%_tm_album%")
         script = re.sub(r"\n\s*\n", "\n", script)       # (a blank line separates the two scripts)
@@ -269,6 +324,14 @@ class Ctx:
             ed = edition(t, mode)
             if ed and not album.endswith(f"[{ed}]"):       # (the album tag may carry it already)
                 t[var] = [ed]
+        # (ED-1..4 for a script with its own edition lines: with_editions sets its %_edition%
+        # from these, whatever the album tag carries)
+        for var, mode in (("_ed_rule", "edition_year"), ("_ed_rule_kind", "edition")):
+            ed = edition(t, mode)
+            if ed:
+                t[var] = [ed]
+                if not album.endswith(f"[{ed}]"):         # (for a script that keeps the album's suffix)
+                    t[var + "_add"] = [ed]
 
     @property
     def local(self) -> dict:

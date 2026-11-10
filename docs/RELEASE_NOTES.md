@@ -1,5 +1,72 @@
 # Release notes
 
+## 0.8.21
+
+**Matching rules, written down**
+- docs/MATCHING_RULES.md lists every rule TagMender follows to choose a release, tag it and file
+  it, each with an ID the code and tests refer to. Everything below follows it.
+
+**Your barcode is the release (BAR-2, BAR-3, BAR-5)**
+- Your barcode on one database's pick wins over the other database's sure pick, whichever you
+  prefer in Sources. When both picks carry it, the sure one is taken (an SACD whose CD-listed
+  twin cannot hold your 24-bit audio).
+- Two barcodes of yours naming two releases: the one on the back cover, box or slipcase wins.
+- A barcode decoded off your scans beats a different one in your files' tags.
+
+**Evidence (EVI-1, EVI-2, EVI-4)**
+- A catalogue number counts for more than a disc ID or matrix code.
+- A catalogue number on your scans no longer tells a pressing apart from a download entry that
+  lists none (its booklet shows the disc's number).
+- Scans that read badly never lower the score; they only add evidence.
+
+**Nothing identified waits (TIE-1, TIE-2, HF-2, ALB-1)**
+- When nothing of yours tells pressings apart, your country order picks one (the original date
+  only within a country) and it is tagged in full. "Album known" is left for a copy whose kind
+  (CD, download, vinyl) is not among them.
+- When two pieces of your own evidence disagree, your preferred database's pick is taken.
+- Every track title matching with at most one track length off is tagged as that release.
+
+**Your choices stand (TAG-1, CHG-1)**
+- A release you chose, or TagMender tagged, stays unless a barcode or catalogue number of your
+  copy names another; a better score alone does not move it.
+
+**SACD and hi-res (MED-3, MED-4)**
+- 88.2 or 176.4 kHz audio, DSD files and SACD area tags point to the SACD.
+- 96 or 192 kHz audio, with both an SACD or Blu-ray and a download listed and nothing else
+  deciding, is filed as "album known".
+
+**Edition suffixes (ED-1 to ED-5)**
+- SACD and vinyl or tape rips are always marked with the pressing's year: "[1999 SACD]",
+  "[1977 Vinyl Rip]". A CD or download only as a newer remaster or reissue: "[2015 Remaster]".
+  The original CD or download gets none, so no more plain "[WEB]".
+- Hi-res audio adds HD: "[HD]", "[2015 Remaster HD]".
+- The same text in the folder name, the Album tag and the exported tagger script; naming
+  scripts with their own edition lines get it too.
+
+**Watched folders (HF-3, HF-4, DSC-1)**
+- An Unresolved album is looked up again every 10 minutes on its first day, then daily for a
+  week. New albums always go first.
+- When your preferred database is down, the album waits and is retried until it answers, never
+  decided from the other one alone.
+- Disc folders of one release ("Album CD1", "Album CD2") are joined into one album, and a
+  watched folder waits for a missing disc.
+
+**Tags (NAM-1, BOOT-1, CLS-1, MIX-1, HF-5, MED-6, ART-1)**
+- The album artist is the lead artist by default ("A & Band" is filed under A). This also
+  applies to existing profiles that never set it; switch it off in the profile to keep the full
+  credit.
+- A Discogs bootleg is marked with release status bootleg.
+- Classical: Movement, movement number and total from MusicBrainz.
+- Two versions of one release in a folder get a disc subtitle such as "SACD Stereo".
+- Missing tracks are noted in the report, no longer as a TAGMENDER_MISSING tag.
+- Grouping says Tape Rip for a cassette rip.
+- A cover of yours under 500 px is replaced by a larger one, also in existing profiles that
+  never set Artwork > Replace; set it to Never to keep every cover as it is.
+
+**Fixes**
+- An artist folder you opened inside your library is removed once a move empties it.
+- Clear Done is a real button below the list, not flat text that was easy to miss.
+
 ## 0.8.20
 
 **No vinyl or cassette without evidence**

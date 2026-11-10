@@ -238,7 +238,8 @@ class Engine(Base):
         self.assertEqual([t["tracknumber"] for t in p.targets], [["1"], ["3"]])
         self.assertEqual({t["totaltracks"][0] for t in p.targets}, {"3"})
         self.assertEqual([t["title"] for t in p.targets], [["T0"], ["T2"]])
-        self.assertEqual({t["tagmender_missing"][0] for t in p.targets}, {"2"})
+        # HF-5: the gaps are no tag of their own; the plan's notes tell them (below)
+        self.assertFalse([t for t in p.targets if "tagmender_missing" in t])
         self.assertTrue(any("tracks 2 of 3 are missing" in e for e in p.evidence), p.evidence)
         plan = self.engine(FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")])).plan(d)
         self.assertEqual(plan["albums"][0]["status"], "ready", pl.preview(plan))
@@ -247,7 +248,7 @@ class Engine(Base):
         res = executor.Executor(plan).run()
         self.assertEqual(res["counts"], {"done": 1})
         t = tagio.read(d / "03.flac")
-        self.assertEqual((t["tracknumber"], t["tagmender_missing"], t["musicbrainz_albumid"]), (["3"], ["2"], ["mb-m"]))
+        self.assertEqual((t["tracknumber"], t.get("tagmender_missing"), t["musicbrainz_albumid"]), (["3"], None, ["mb-m"]))  # HF-5
         self.assertEqual(t.get("totaltracks") or t.get("tracktotal"), ["3"])
         again = self.engine(FakeHttp(mb=[mb_release("mb-m", "Band M", "Album M")])).plan(d)
         self.assertEqual(again["albums"][0]["status"], "unchanged", pl.preview(again))

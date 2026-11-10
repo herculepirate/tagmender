@@ -86,7 +86,8 @@ class Forced(Base):
         p = e.identify(e.albums_in(d)[0])
         self.assertEqual((p.status, p.release_id), ("identified", MBID), p.reason)
         self.assertEqual([t["tracknumber"] for t in p.targets], [["1"], ["3"]])
-        self.assertEqual({t["tagmender_missing"][0] for t in p.targets}, {"2"})
+        self.assertFalse([t for t in p.targets if "tagmender_missing" in t])     # HF-5: no tag
+        self.assertTrue(any("tracks 2 of the release are not in this folder" in n for n in p.notes), p.notes)
         self.assertIn("incomplete_album", p.reason_codes)
 
 

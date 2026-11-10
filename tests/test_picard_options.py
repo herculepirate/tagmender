@@ -576,9 +576,8 @@ class CoverFileInPlan(Base):
 
 class Classical(Plain):
     """Picard 3 writes a recording's work (title, ID, language, comment, ISWC, the work's own
-    credits) and nothing of movements: movement, movementnumber, movementtotal and
-    showmovement are only read and written as a file has them (Classical Extras, a plugin,
-    makes them from the parent work)."""
+    credits); CLS-1: TagMender adds the movement (name and number) from the work's parent
+    "parts" relation, as Classical Extras (a Picard plugin) does."""
     def test_work_fields_as_picard_and_no_movements(self):
         import mb_tags
         rels = [{"type": "performance", "target-type": "work", "attributes": [], "work": {
@@ -595,7 +594,10 @@ class Classical(Plain):
         self.assertEqual(m["musicbrainz_workid"], ["w2"])
         self.assertEqual(m["composer"], ["Ludwig van Beethoven"])
         self.assertEqual(m["~iswc"], ["T-123"])
-        for k in ("movement", "movementnumber", "movementtotal", "showmovement"):
+        # CLS-1 (docs/MATCHING_RULES.md, over Picard 3's "nothing of movements"): the part's
+        # place in its parent work is its movement; no total (the parent lists no parts here)
+        self.assertEqual((m["movement"], m["movementnumber"]), (["Allegro con brio"], ["1"]))
+        for k in ("movementtotal", "showmovement"):
             self.assertNotIn(k, m)
 
 

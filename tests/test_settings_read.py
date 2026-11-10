@@ -252,8 +252,15 @@ class MusicBrainzDown(Base):
         e = engine.Engine(prof, http=DownHttp(dg=[dg_release(905, "Band D", "Album D")]))
         return e.plan(self.lib)
 
-    def test_carries_on_with_discogs_and_says_so(self):
+    def test_preferred_down_holds_the_album_and_says_so(self):       # HF-4
         p = self.plan("musicbrainz_preferred")
+        a = p["albums"][0]
+        self.assertEqual(a["identification"]["status"], "unresolved", a["identification"])
+        self.assertIn("musicbrainz", a["identification"]["provider_errors"])
+        self.assertIn("held and tried again later", p["provider_notes"]["musicbrainz"])
+
+    def test_discogs_preferred_carries_on_with_discogs(self):
+        p = self.plan("discogs_preferred")
         a = p["albums"][0]
         self.assertEqual(a["identification"]["status"], "identified", a["identification"])
         self.assertTrue(a["identification"]["provider"].startswith("discogs"))

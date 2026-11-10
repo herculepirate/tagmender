@@ -418,9 +418,8 @@ class TieBreak(unittest.TestCase):
             self.assertEqual(mc.score_candidate(a, c, plain)["confidence"],
                              mc.score_candidate(a, c, pref)["confidence"])
         r = run(a, c1, c2, cfg=pref)
-        self.assertEqual(r["best"]["cand"]["id"], "lp1")
-        self.assertNotEqual(r["status"], "auto")
-        self.assertTrue(any("runner-up" in w for w in r["why"]))
+        # TIE-1: your preferred formats, the last tie-break, pick it and it is tagged in full
+        self.assertEqual((r["best"]["cand"]["id"], r["status"]), ("lp1", "auto"), r["why"])
 
     def test_never_between_albums(self):
         # a clearly better album is never passed over for a preferred format or type
@@ -448,7 +447,7 @@ class TieBreak(unittest.TestCase):
         self.assertEqual((mb["status"], dg["status"]), ("auto", "auto"))
         self.assertEqual(mc.combine(copy.deepcopy(mb), copy.deepcopy(dg), ["US"])["best"]["cand"]["id"], "dg-cd")
         out = mc.combine(copy.deepcopy(mb), copy.deepcopy(dg), ["US"], prefs)
-        self.assertEqual((out["best"]["cand"]["id"], out["status"]), ("mb-lp", "review"))
+        self.assertEqual((out["best"]["cand"]["id"], out["status"]), ("mb-lp", "auto"))       # TIE-1
         # nothing points to vinyl: it is the CD (no_media_evidence), no guess and no preference
         out = mc.combine(copy.deepcopy(mb), copy.deepcopy(dg), ["US"],
                          mc.release_preferences(cfg_with(preferred_release_formats=["CD"])))

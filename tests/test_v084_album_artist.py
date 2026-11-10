@@ -55,8 +55,13 @@ class Choose(unittest.TestCase):
                          (["Thomas Strønen"], ["Strønen, Thomas"], ["a-ts"]))
         self.assertEqual(out["artist"], self.JOINT["artist"])                 # (the Artist tag keeps it)
 
-    def test_off_by_default_and_various_artists_never(self):
-        self.assertEqual(aa.apply([dict(self.JOINT)], pf.from_dict({"name": "t"}))[0], self.JOINT)
+    def test_on_by_default_and_various_artists_never(self):
+        # NAM-1 (docs/MATCHING_RULES.md): the lead artist alone is the album artist by default;
+        # switched off, the credit stays
+        self.assertEqual(aa.apply([dict(self.JOINT)], pf.from_dict({"name": "t"}))[0]["albumartist"],
+                         ["Thomas Strønen"])
+        self.assertEqual(aa.apply([dict(self.JOINT)], pf.from_dict({"name": "t", "album_artist": {"lead": False}}))[0],
+                         self.JOINT)
         va = {"albumartist": ["Various Artists"], "albumartists": ["Various Artists"],
               "musicbrainz_albumartistid": [aa.compilations.VARIOUS_ARTISTS_MBID]}
         self.assertIsNone(aa.choose(va, prof()))

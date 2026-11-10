@@ -934,9 +934,9 @@ SETTINGS = [
               "always written.")),
     S("compilations.grouping", N_("Set Grouping to Compilation"), "switch", "compilations",
       foot=N_("Only when Grouping is empty; it never replaces yours.")),
-    S("marks.grouping", N_("Mark HD audio and vinyl rips in Grouping"), "switch", "compilations",
-      foot=N_("Grouping says HD Audio (above 16 bits or 44.1 kHz, DSD too) or Vinyl Rip. Only when Grouping "
-              "is empty; it never replaces yours.")),
+    S("marks.grouping", N_("Mark HD audio, vinyl and tape rips in Grouping"), "switch", "compilations",
+      foot=N_("Grouping says HD Audio (above 16 bits or 44.1 kHz, DSD too), Vinyl Rip or Tape Rip. "
+              "Only when Grouping is empty; it never replaces yours.")),
     S("compilations.single_artist", N_("Also flag single-artist compilations"), "switch", "compilations",
       foot=N_("Best-ofs. Many players then list them under Various Artists.")),
     S("album_artist.lead", N_("Lead artist only"), "switch", "album_artist",
@@ -1114,12 +1114,13 @@ SETTINGS = [
       foot=N_("Long album titles are cut to this many words in the folder name. The tags keep the whole "
               "title.")),
     S("naming.editions", N_("Editions in folder names"), "popup", "names", attr="editions", enable=_names_used,
-      choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl], [WEB])")),
-               ("edition_year", N_("Edition and reissue year ([2019 Vinyl])"))),
-      foot=N_("Tells a vinyl or download apart from the CD in the folder name.")),
+      choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl Rip], [SACD], [Remaster], [HD])")),
+               ("edition_year", N_("Edition and year ([1999 SACD], [2015 Remaster HD])"))),
+      foot=N_("SACD and vinyl or tape rips always; a CD or download only as a newer remaster or "
+              "reissue; HD for hi-res audio. The original CD or download has none.")),
     S("naming.album_editions", N_("Edition in the Album tag"), "popup", "names", attr="album_editions",
-      choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl], [WEB])")),
-               ("edition_year", N_("Edition and reissue year ([2019 Vinyl])"))),
+      choices=(("off", N_("Off")), ("edition", N_("Edition ([Vinyl Rip], [SACD], [Remaster], [HD])")),
+               ("edition_year", N_("Edition and year ([1999 SACD], [2015 Remaster HD])"))),
       foot=N_("The same, added to the album title in the tags.")),
     S("_subfolders", N_("Folders inside the album folder"), "list", "subfolders", custom="check",
       get=_subfolders_get, put=_subfolders_put, read=_subfolders_read, known=SUBFOLDER_ITEMS,

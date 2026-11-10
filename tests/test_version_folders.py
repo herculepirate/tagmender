@@ -561,8 +561,9 @@ class Editions(unittest.TestCase):
                 got = "/".join(naming.render(tpl, t))
                 if kind == "CD":                  # (an original CD: no edition, or "CD" - never SACD)
                     self.assertNotIn("SACD", got, (name, media))
-                else:
-                    self.assertRegex(got, rf"\[(?:2024 )?{re.escape(kind)}\]", (name, media))
+                else:                             # (ED-1..3: "2024 Vinyl Rip", "2024 SACD", "2024 Remaster")
+                    word = {"Vinyl": "Vinyl Rip", "Tape": "Tape Rip", "WEB": "Remaster"}.get(kind, kind)
+                    self.assertRegex(got, rf"\[(?:2024 )?{re.escape(word)}\]", (name, media))
 
 
 class Clues(unittest.TestCase):

@@ -18,12 +18,12 @@ import tagio  # noqa: E402
 from test_executor import Base, audio, target  # noqa: E402
 
 TPL = naming.PRESETS["tagmender"]
-TABLE = [  # (album, originaldate, date, media) -> album folder with "Edition + reissue year"
+TABLE = [  # (album, originaldate, date, media) -> album folder, as ED-1..ED-3 of docs/MATCHING_RULES.md
     (("I", "2004", "2004-07-06", "CD"), "2004 - I"),
-    (("I", "2004", "2019-03-01", '12" Vinyl'), "2004 - I [2019 Vinyl]"),
-    (("I", "2004", "2004", '12" Vinyl'), "2004 - I [Vinyl]"),
-    (("I", "2004", "2014-10-22", "CD"), "2004 - I [2014 CD]"),
-    (("Reign in Blood", "1986", "2015", "Digital Media"), "1986 - Reign in Blood [2015 WEB]"),
+    (("I", "2004", "2019-03-01", '12" Vinyl'), "2004 - I [2019 Vinyl Rip]"),
+    (("I", "2004", "2004", '12" Vinyl'), "2004 - I [2004 Vinyl Rip]"),
+    (("I", "2004", "2014-10-22", "CD"), "2004 - I [2014 Remaster]"),
+    (("Reign in Blood", "1986", "2015", "Digital Media"), "1986 - Reign in Blood [2015 Remaster]"),
     (("I", "2004", "2019-03-01", None), "2004 - I"),                       # no media: unchanged
 ]
 
@@ -47,8 +47,8 @@ class Variable(unittest.TestCase):
 
     def test_edition_only(self):
         got = [folder(tags(*args), "edition") for args, _ in TABLE]
-        self.assertEqual(got, ["2004 - I", "2004 - I [Vinyl]", "2004 - I [Vinyl]", "2004 - I",
-                               "1986 - Reign in Blood [WEB]", "2004 - I"])
+        self.assertEqual(got, ["2004 - I", "2004 - I [Vinyl Rip]", "2004 - I [Vinyl Rip]", "2004 - I [Remaster]",
+                               "1986 - Reign in Blood [Remaster]", "2004 - I"])
 
     def test_off_gives_todays_names(self):
         self.assertEqual(naming.with_editions(TPL, "off"), TPL)
@@ -68,12 +68,12 @@ class Variable(unittest.TestCase):
             out = naming.with_editions(tpl, "edition_year")
             parts = naming.render(out, t)
             if "%album%" in tpl and "/" in tpl.split("%album%", 1)[1]:
-                self.assertTrue(any(p.endswith("[2019 Vinyl]") for p in parts[:-1]), (name, parts))
+                self.assertTrue(any(p.endswith("[2019 Vinyl Rip]") for p in parts[:-1]), (name, parts))
             self.assertFalse(parts[-1].endswith("]"), (name, parts))
 
     def test_album_tag_already_carrying_it_is_not_doubled(self):
-        t = tags("I [2019 Vinyl]", "2004", "2019-03-01", '12" Vinyl')
-        self.assertEqual(folder(t, "edition_year"), "2004 - I [2019 Vinyl]")
+        t = tags("I [2019 Vinyl Rip]", "2004", "2019-03-01", '12" Vinyl')
+        self.assertEqual(folder(t, "edition_year"), "2004 - I [2019 Vinyl Rip]")
 
     def test_picard_lines(self):
         self.assertEqual(naming.tagscript("off"), "")
@@ -85,8 +85,12 @@ class Variable(unittest.TestCase):
         self.assertIn("$if(%_edition%,$set(album,%album% [%_edition%]))", naming.tagscript("off", "edition"))
         # a preset that is a Picard script: that script itself
         import re
-        self.assertEqual(naming.tagscript("edition_year", "off", naming.PRESETS["all-music"]).split("\n", 1)[1],
-                         re.sub(r"\n\s*\n", "\n", naming.PRESETS["all-music"]))   # (no blank lines)
+        # (ED-4: TagMender's edition lines first, then the script itself, the edition piece taking them)
+        out = naming.tagscript("edition_year", "off", naming.PRESETS["all-music"])
+        self.assertIn("$set(_ed_rule,%_tmr_edition%)", out)
+        self.assertIn(re.sub(r"\n\s*\n", "\n", naming.PRESETS["all-music"]).split("$if(%_edition%, [%_edition%])")[0]
+                      .split("\n", 1)[1][:200], out)
+        naming.compile_template(out)
 
 
 class NamingScripts(unittest.TestCase):
@@ -112,27 +116,29 @@ class NamingScripts(unittest.TestCase):
 
     def test_various_artists(self):
         self.assertEqual(self.table("various-artists", "edition_year"),
-                         ["I - 2004", "I - 2004 [2019 Vinyl]", "I - 2004 [Vinyl]", "I - 2004 [2014 CD]",
-                          "Reign in Blood - 1986 [2015 WEB]", "I - 2004"])
+                         ["I - 2004", "I - 2004 [2019 Vinyl Rip]", "I - 2004 [2004 Vinyl Rip]", "I - 2004 [2014 Remaster]",
+                          "Reign in Blood - 1986 [2015 Remaster]", "I - 2004"])
 
     def test_setting_switches_the_scripts_edition(self):
         self.assertEqual(self.table("all-music", "off"), ["2004 - I"] * 4 + ["1986 - Reign in Blood", "2004 - I"])
         self.assertEqual(self.table("all-music", "edition"),
-                         ["2004 - I", "2004 - I [Vinyl]", "2004 - I [Vinyl]", "2004 - I",
-                          "1986 - Reign in Blood [WEB]", "2004 - I"])
-        for p in ("all-music", "various-artists", "classical-performer"):
-            self.assertEqual(naming.with_editions(naming.PRESETS[p], "edition_year"), naming.PRESETS[p])
+                         ["2004 - I", "2004 - I [Vinyl Rip]", "2004 - I [Vinyl Rip]", "2004 - I [Remaster]",
+                          "1986 - Reign in Blood [Remaster]", "2004 - I"])
+        for p in ("all-music", "various-artists", "classical-performer"):     # ED-4: TagMender's edition
+            self.assertIn("$set(_edition,%_ed_rule_add%)$if(%_edition%, [%_edition%])",
+                          naming.with_editions(naming.PRESETS[p], "edition_year"))
 
     def test_a_cut_title_never_ends_on_a_separator(self):
         """"Beethoven: Symphony No. 5 / No. 7 Complete" cut to five words ended on "/" (a
         subfolder in Picard, "_" here); a download from Discogs ("File, FLAC") is WEB."""
         t = dict(album="Beethoven: Symphony No. 5 / No. 7 Complete", originaldate="1963", date="1988", media="CD")
-        self.assertEqual(self.render("all-music", "edition_year", **t)[1], "1963 - Beethoven: Symphony No. 5 [1988 CD]")
-        self.assertEqual(self.render("various-artists", "edition_year", **t)[1], "Beethoven: Symphony No. 5 - 1988")
+        self.assertEqual(self.render("all-music", "edition_year", **t)[1], "1963 - Beethoven: Symphony No. 5 [1988 Remaster]")
+        self.assertEqual(self.render("various-artists", "edition_year", **t)[1],
+                         "Beethoven: Symphony No. 5 - 1988 [1988 Remaster]")             # (ED-3: newer than 1963)
         self.assertEqual(self.render("classical-performer", "edition_year", **t)[1],
-                         "1963 - Beethoven: Symphony No. 5 [1988 CD]")
+                         "1963 - Beethoven: Symphony No. 5 [1988 Remaster]")
         t = dict(album="Sunn O)))", originaldate="2026", date="2026-04-03", media="File, FLAC, Album, Stereo")
-        self.assertEqual(self.render("all-music", "edition_year", **t)[1], "2026 - Sunn O))) [WEB]")
+        self.assertEqual(self.render("all-music", "edition_year", **t)[1], "2026 - Sunn O)))")   # ED-3: original download
 
     def test_the_rest_of_the_scripts(self):
         t = dict(album="A Very Long Album Title With Many Words", albumartists=["Simon", "Art Garfunkel"],
@@ -178,7 +184,7 @@ class Plans(Base):
 
     def test_on(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")], editions="edition_year")
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl]"])
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip]"])
 
     def test_off(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")])
@@ -190,7 +196,7 @@ class Plans(Base):
         p = self.plan(ts, editions="edition_year")
         self.assertEqual(self.folders(p), ["Meshuggah/2004 - I/Disc 01", "Meshuggah/2004 - I/Disc 02"])
         p = self.plan([dict(ts[0], media=['12" Vinyl']), ts[1]], editions="edition")
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [Vinyl]/Disc 01", "Meshuggah/2004 - I [Vinyl]/Disc 02"])
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [Vinyl Rip]/Disc 01", "Meshuggah/2004 - I [Vinyl Rip]/Disc 02"])
 
     def test_mixed_media_with_johns_script(self):
         ts = [self.t(1, "A", media=["CD"], discnumber=["1"], totaldiscs=["2"], date=["2014-10-22"]),
@@ -198,7 +204,7 @@ class Plans(Base):
         prof = self.profile(operation="move", destination=str(self.dest),
                             naming={"preset": "all-music", "editions": "edition_year"})
         p = pl.build([self.proposal(targets=ts)], prof)
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2014 CD]/Disc 01", "Meshuggah/2004 - I [2014 CD]/Disc 02"])
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2014 Remaster]/Disc 01", "Meshuggah/2004 - I [2014 Remaster]/Disc 02"])
         self.assertEqual(p["albums"][0]["files"][1]["changes"].get("media", ['7" Vinyl']), ['7" Vinyl'])  # tag untouched
 
     def test_album_words_setting_reaches_the_script(self):
@@ -212,11 +218,11 @@ class Plans(Base):
     def test_album_tag(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")], album_editions="edition_year")
         fe = p["albums"][0]["files"][0]
-        self.assertEqual(fe["changes"]["album"], ["I [2019 Vinyl]"])
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl]"])   # (from the tag; never twice)
+        self.assertEqual(fe["changes"]["album"], ["I [2019 Vinyl Rip]"])
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip]"])   # (from the tag; never twice)
         self.assertEqual(executor.Executor(p).run()["counts"], {"done": 1})
         moved = Path(fe["dst"])
-        self.assertEqual(tagio.read(moved)["album"], ["I [2019 Vinyl]"])
+        self.assertEqual(tagio.read(moved)["album"], ["I [2019 Vinyl Rip]"])
         again = pl.build([self.proposal(source_dir=str(moved.parent), files=[str(x) for x in sorted(
             moved.parent.glob("*.flac"))], targets=[self.t(1, "A"), self.t(2, "B")])],
             self.profile(operation="move", destination=str(self.dest), sources=[{"path": str(self.dest)}],

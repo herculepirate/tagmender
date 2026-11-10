@@ -430,7 +430,7 @@ class Overview(QWidget):
         self.clear_done_btn.setToolTip(tr("Takes every album marked Done out of this list. "
                                           "Their folders and files are not touched."))
         self.clear_done_btn.clicked.connect(self.clear_done)
-        self.clear_done_btn.setFlat(True)
+        # (a real button, not flat text: flat and greyed out in the corner, nobody saw it)
         self.clear_done_btn.setEnabled(False)
         # (a choice other than the profile's is for this look-up only; this saves it into the profile)
         self.keep_link = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')

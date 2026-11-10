@@ -83,6 +83,11 @@ class MusicBrainzMapping(unittest.TestCase):
                 got = {k: [str(x) for x in v] for k, v in got.items()
                        if v and (len(v) > 1 or v[0]) and k not in ("totaltracks", "~genres", "~folksonomy_tags",
                                                                      "~rating")}
+                # CLS-1 (docs/MATCHING_RULES.md): TagMender adds a work's movement (name, number,
+                # total) from its parent "parts" relation, which Picard 3 does not write
+                for k in ("movement", "movementnumber", "movementtotal"):
+                    if k not in c["want"]:
+                        got.pop(k, None)
             with self.subTest(fixture=c["fixture"], kind=c["kind"], settings=s):
                 self.assertEqual(got, c["want"])
 

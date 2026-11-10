@@ -252,7 +252,7 @@ class Editor(Base):
         ed.set_value("on_existing", "keep_code")
         self.assertIn("203.TLK ~1a2b.flac", ed.preview.text())
         ed.set_value("naming.editions", "edition_year")
-        self.assertIn("[1994 CD]", ed.preview.text())
+        self.assertIn("[1994 Remaster]", ed.preview.text())          # ED-3
         self.assertTrue(pr.picard_btn.isEnabled())
         ed.set_value("filenames.max_name_bytes", 40)
         self.assertIn("Too long", ed.preview.text())

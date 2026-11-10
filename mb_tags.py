@@ -379,9 +379,45 @@ def _work(work, m, s, instrumental, per_medium):
         _add(m, "~workcomment", work["disambiguation"])
     if work.get("relations"):
         relations(work["relations"], m, s, instrumental, per_medium, entity="work")
+        _movement(work, m)
     for iswc in work.get("iswcs") or []:
         if iswc:
             m.setdefault("~iswc", []).append(iswc)
+
+
+_MOVEMENT_NO = re.compile(r"^\s*(?:[IVXLCDM]+|\d+)\s*[.:)-]\s+")
+
+
+def _movement(work, m):
+    """CLS-1: a work that MusicBrainz lists as a part of another (its backward "parts"
+    relation, with the part's ordering-key) is that work's movement: movement (the name,
+    the parent's title and the movement's number taken off: "Symphony No. 5: I. Allegro con
+    brio" -> "Allegro con brio"), movementnumber (the ordering-key) and, when the parent work
+    lists its parts, movementtotal. The first such relation only; nothing when none is given."""
+    if "movementnumber" in m:
+        return
+    for rel in work.get("relations") or []:
+        if rel.get("target-type") != "work" or rel.get("type") != "parts" or \
+                rel.get("direction") != "backward" or not isinstance(rel.get("work"), dict):
+            continue
+        key = rel.get("ordering-key")
+        if not isinstance(key, int) or isinstance(key, bool) or key < 1:
+            continue
+        parent = rel["work"]
+        name, ptitle = str(work.get("title") or "").strip(), str(parent.get("title") or "").strip()
+        if ptitle and name.casefold().startswith(ptitle.casefold()):
+            rest = name[len(ptitle):].lstrip()
+            if rest[:1] in (":", ",", "-", "–", "/"):
+                name = rest[1:].strip()
+        name = _MOVEMENT_NO.sub("", name, count=1).strip() or name
+        if name:
+            m["movement"] = [name]
+        m["movementnumber"] = [str(key)]
+        parts = [r for r in parent.get("relations") or [] if r.get("type") == "parts" and
+                 r.get("target-type") == "work" and r.get("direction") == "forward"]
+        if parts:
+            m["movementtotal"] = [str(max(len(parts), key))]
+        return
 
 
 _AMAZON = re.compile(r"^https?://(?:www.)?(?P<host>.*?)(?::[0-9]+)?/.*/(?P<asin>[0-9B][0-9A-Z]{9})(?:[^0-9A-Z]|$)")

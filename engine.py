@@ -149,6 +149,125 @@ def is_disc_dir(d: Path) -> bool:
     return len(nums) >= 2 and nums[0] == 1 and nums == list(range(1, len(nums) + 1))
 
 
+# DSC-1: a disc of a set in a folder of its own beside the others, named after the set:
+# "Album CD1", "Album - Disc 2", "Album [CD 1]", "Album (Disc 2)"
+_SIBLING_DISC = re.compile(r"^(?P<stem>.*?[^\s._\-\[\(])[\s._\-]*[\[\(]?\s*(?:cd|disc|disk)\s*[-_.]?\s*"
+                           r"(?P<n>\d{1,2})\s*[\]\)]?$", re.I)
+
+
+def sibling_disc(d: Path):
+    """DSC-1: (the set's name, disc number) of a disc folder named after its set ("Album CD1"
+    -> ("Album", 1)), else None. A folder named as a disc alone ("CD1", "Disc 2") is a disc
+    folder of the album folder holding it (is_disc_dir), not this."""
+    d = Path(d)
+    if is_disc_dir(d):
+        return None
+    m = _SIBLING_DISC.match(d.name)
+    if not m or int(m["n"]) < 1:
+        return None
+    return m["stem"].strip(), int(m["n"])
+
+
+def _format_word(fmt) -> str:
+    """MIX-1: a database medium's format as a disc subtitle names it: "SACD", "CD", "Blu-ray",
+    "DVD-Audio", "DVD"; else the format as given ("Digital Media")."""
+    f = str(fmt or "").strip()
+    kind = mc.medium_type(f)
+    if kind == "sacd":
+        return "SACD"
+    if kind == "cd":
+        return "CD"
+    low = f.casefold()
+    if "blu" in low:
+        return "Blu-ray"
+    if "dvd-audio" in low or "dvd audio" in low:
+        return "DVD-Audio"
+    if "dvd" in low:
+        return "DVD"
+    return f
+
+
+_CHANNEL_WORDS = {1: "Mono", 2: "Stereo", 3: "3.0", 4: "Quad", 5: "5.0", 6: "5.1", 7: "6.1", 8: "7.1"}
+
+
+def version_subtitles(targets, files) -> bool:
+    """MIX-1: two versions of the album in one folder matched as one release whose media carry
+    no title (an SACD's stereo and 5.1 areas as discs 1 and 2): each such disc's subtitle is
+    inferred from its format and its audio's layout - "SACD Stereo", "SACD 5.1", "Blu-ray 5.1",
+    "CD" (a CD names no layout). Only when the discs' layouts or formats differ (a plain 2CD set
+    is no two versions); a disc subtitle the database gives is never replaced. True when one
+    was written."""
+    if not targets or len(targets) != len(files):
+        return False
+    discs = {}
+    for t, f in zip(targets, files):
+        d = str((t.get("discnumber") or [""])[0]).partition("/")[0].strip()
+        if not d:
+            return False
+        discs.setdefault(d, []).append((t, f))
+    if len(discs) < 2:
+        return False
+    # (versions: two discs of the release holding the same tracks - not a CD and its bonus disc)
+    lists = [tuple(mc.fold(str((t.get("title") or [""])[0])) for t, _f in m) for m in discs.values()]
+    if len(set(lists)) == len(lists):
+        return False
+    words = {}
+    for d, members in discs.items():
+        fmts = {_format_word((t.get("media") or [""])[0]) for t, _f in members}
+        lays = set()
+        for _t, f in members:
+            try:
+                info = ma.read_file(Path(f))
+            except Exception:
+                return False
+            area = mc.layout_of_channels(0, info.get("sacd_area"))
+            n = int(info.get("channels") or 0)
+            lays.add("Stereo" if area == "stereo" else
+                     _CHANNEL_WORDS.get(n) or ("Multichannel" if area == "multichannel" else ""))
+        if len(fmts) != 1 or len(lays) != 1 or "" in fmts or "" in lays:
+            return False
+        words[d] = (fmts.pop(), lays.pop())
+    if len(set(words.values())) < 2:
+        return False                                       # (the same disc twice over: no versions)
+    wrote = False
+    for d, (fmt, lay) in words.items():
+        if any(t.get("discsubtitle") for t, _f in discs[d]):
+            continue                                       # (the database's own title stays)
+        text = fmt if fmt == "CD" else f"{fmt} {lay}"
+        for t, _f in discs[d]:
+            t["discsubtitle"] = [text]
+        wrote = True
+    return wrote
+
+
+def _disc_sets(groups, metas) -> list:
+    """DSC-1: sibling folders of one release ("Album CD1", "Album CD2": one parent, one set
+    name, different disc numbers) whose tags name the same album are one album: their files
+    join the first disc's group (Group.discs lists the folders) and the others are no group of
+    their own. A mixed folder, or two folders naming the same disc, is left as it is."""
+    sets = {}
+    for g in groups:
+        sd = None if g.others else sibling_disc(g.folder)
+        if sd is None:
+            continue
+        keys = set(album_keys(g.files, g.folder, metas).values())
+        if len(keys) != 1 or next(iter(keys))[0] != "tags":
+            continue
+        sets.setdefault((g.folder.parent, mc.fold(sd[0]), next(iter(keys))), []).append((sd[1], g))
+    joined = set()
+    for members in sets.values():
+        if len({n for n, _g in members}) != len(members):
+            continue                                     # (two folders say the same disc)
+        members.sort(key=lambda m: m[0])
+        first = members[0][1]
+        first.discs = [g.folder for _n, g in members]
+        if len(members) > 1:
+            first.files = [f for _n, g in members for f in g.files]
+            first.single = False
+            joined |= {id(g) for _n, g in members[1:]}
+    return [g for g in groups if id(g) not in joined]
+
+
 def version_dirs(parent: Path, metas=None, skips=None) -> list:
     """The folders of parent that hold versions of one disc of one album, each named after
     its channel layout ("2.0/" and "5.0/", "Stereo/" and "Multichannel/": an SACD's two areas,
@@ -210,6 +329,9 @@ class Group:
     files: list = field(default_factory=list)
     others: list = field(default_factory=list)     # files in the same folder that belong elsewhere
     single: bool = False
+    # DSC-1: the disc folders of a set filed side by side ("Album CD1", "Album CD2"), in disc
+    # order - folder is the first; one such folder alone names a set too. [] for any other album.
+    discs: list = field(default_factory=list)
 
 
 def _slots_of(album, cand, sc):
@@ -476,7 +598,11 @@ class Engine:
             return
         kind = getattr(exc, "kind", "outage")
         busy = "busy" if kind == "rate_limited" else "not answering"
-        if self.use_discogs:
+        if self.use_discogs and self._preferred() == "musicbrainz":     # HF-4
+            self.run_notes["musicbrainz"] = (
+                f"{kind}: MusicBrainz is {busy}. MusicBrainz is preferred in Sources: albums are held "
+                "and tried again later, not decided from Discogs alone.")
+        elif self.use_discogs:
             self.run_notes["musicbrainz"] = (
                 f"{kind}: MusicBrainz is {busy}. TagMender carries on with Discogs: albums Discogs proves are "
                 "tagged from it; those only MusicBrainz can prove are left to try again later.")
@@ -622,6 +748,7 @@ class Engine:
                         groups.append(Group(folder, [m], [f for f in files if f != m], single=True))
                 else:
                     groups.append(Group(folder, members, others, single=len(members) == 1))
+        groups = _disc_sets(groups, metas)               # DSC-1
         if hasattr(self.profile, "joins_deluxe") and not self.profile.joins_deluxe():
             return groups
         return _with_deluxe(self.profile, groups, path, skip)
@@ -741,9 +868,40 @@ class Engine:
         its folder's own (one disc of a set, identified alone: _per_disc). Its files' tags
         and rule metadata are read once (ex.meta_memo, tagio.reading)."""
         with ex.meta_memo(), tagio.reading():
+            if names is None and len(getattr(g, "discs", None) or ()) > 1:
+                return self._identify_set(g)
             return self._identify_album(g, names)
 
-    def _identify_album(self, g: Group, names=None) -> planmod.Proposal:
+    def _identify_set(self, g: Group) -> planmod.Proposal:
+        """DSC-1: the discs of a set in folders side by side ("Album CD1", "Album CD2"),
+        matched as one release: the matcher reads a temporary folder named after the set,
+        holding each disc's folder as links to its files (its scans and logs too), so they
+        are discs 1, 2 ... of one album; what it says of the files is said of the real ones."""
+        import shutil
+        import tempfile
+        stem = (sibling_disc(g.discs[0]) or (g.folder.name, 1))[0]
+        tmp = Path(tempfile.mkdtemp(prefix="tagmender-discs-"))
+        top, real_of = tmp / stem, {}
+        mine, skips = {str(f) for f in g.files}, self._skipper()
+        try:
+            for d in g.discs:
+                for dirpath, dirs, names in os.walk(d):
+                    dirs[:] = sorted(x for x in dirs if not skips(x))
+                    for n in names:
+                        src = Path(dirpath) / n
+                        if src.suffix.lower() in ex.AUDIO_EXT and str(src) not in mine:
+                            continue                     # (not this album's: never read with it)
+                        dst = top / Path(d).name / src.relative_to(d)
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        os.symlink(src, dst)
+                        real_of[str(dst)] = str(src)
+            return self._identify_album(g, (g.folder.parent.name, stem), stage=(top, real_of))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _identify_album(self, g: Group, names=None, stage=None) -> planmod.Proposal:
+        """stage: (folder, {link: real file}) the matcher reads instead of the album's folder
+        (a set of discs side by side: _identify_set)."""
         if names is None and is_version_dir(g.folder, skips=self._skipper()):
             # a version folder named alone ("2.0/" of an SACD's set): the set's folder names
             # the release, as for one disc of a set (_per_disc)
@@ -764,9 +922,10 @@ class Engine:
         # unless one release proven exactly holds every file (a 2CD edition ripped into one
         # folder, its second disc's other takes under the same titles): the matcher is asked first
         mixed = mixed_versions(g.files)
-        row = {"FullPath": str(g.folder), "AlbumArtistFolder": artist_folder, "AlbumFolder": album_folder,
+        where = stage[0] if stage else g.folder         # DSC-1 (a set side by side: its stage)
+        row = {"FullPath": str(where), "AlbumArtistFolder": artist_folder, "AlbumFolder": album_folder,
                "Status": "untagged"}
-        outside = self._outside(g)
+        outside = [] if stage else self._outside(g)
         args = argparse.Namespace(ocr=self.ocr, max_images=getattr(self, "ocr_images", 15), process_anyway=False,
                                   use_mb=self.use_mb, rules=self.rules,
                                   use_discogs=self.use_discogs, provider_errors=errors, exclude_files=outside,
@@ -791,9 +950,16 @@ class Engine:
         if errors.get("musicbrainz") in ("outage", "rate_limited", "invalid_response"):
             self._note_mb_down(argparse.Namespace(kind=errors["musicbrainz"]))
         self._last_out = out                         # (the matcher's answer: _versions_split's candidates)
+        held = self._preferred_down(errors, g.folder, [str(f) for f in g.files])
+        if held is not None:
+            return held
         if mixed and not _holds_every_file(out, len(g.files)):
             return self._split_or_mixed(g, mixed, errors)
-        album = ma.read_album(g.folder, artist_folder, album_folder, exclude={str(x) for x in outside})
+        album = ma.read_album(where, artist_folder, album_folder, exclude={str(x) for x in outside})
+        if stage:                                        # (the real files, not the stage's links)
+            for t in album["tracks"]:
+                if t.get("path"):
+                    t["path"] = stage[1].get(str(t["path"]), t["path"])
         mine = {str(f) for f in g.files}
         files = [t["path"] for t in album["tracks"] if t.get("path") in mine] or [str(f) for f in g.files]
         base = dict(source_dir=str(g.folder), files=files, provider_errors=errors)
@@ -891,6 +1057,33 @@ class Engine:
             prop.notes = list(prop.notes or []) + [note]
             prop.reason = f"{prop.reason}; {note}" if prop.reason else note
         return prop
+
+    def _preferred(self) -> str:
+        """HF-4: the database the Sources setting prefers ("musicbrainz" / "discogs"), when the
+        other one is asked too; "" when there is no preference (a *_only source, or a matcher
+        order with no preferred database)."""
+        if not str(getattr(self, "source", "") or "").endswith("_preferred"):
+            return ""
+        pref = (getattr(self, "cfg", None) or {}).get("prefer_source", "")
+        return pref if pref in ("musicbrainz", "discogs") else ""
+
+    def _preferred_down(self, errors, folder, files):
+        """HF-4: the Sources-preferred database is down, rate-limited or not answering for this
+        album: it is held (Unresolved with that database's error, so the watcher retries it on
+        PROVIDER_RETRY), never decided from the other database alone. None: not held."""
+        pref = self._preferred()
+        kind = (errors or {}).get(pref) if pref else None
+        if kind not in ("outage", "rate_limited", "invalid_response"):
+            return None
+        if not (self.use_mb if pref == "musicbrainz" else self.use_discogs):
+            return None
+        name, other = (("MusicBrainz", "Discogs") if pref == "musicbrainz" else ("Discogs", "MusicBrainz"))
+        code = "rate_limited" if kind == "rate_limited" else f"{pref}_unavailable"
+        words = (f"{name} (preferred in Sources) did not answer ({kind.replace('_', ' ')}): held and "
+                 f"tried again later, not decided from {other} alone")
+        return planmod.Proposal(source_dir=str(folder), files=list(files), provider_errors=errors,
+                                status="unresolved", tier="unresolved", reason=words, reason_codes=[code],
+                                why=[words])
 
     def _per_disc(self, g: Group, errors):
         """The album's discs, each identified alone as a one-disc release, when the whole
@@ -1285,7 +1478,9 @@ class Engine:
             except ma.ProviderUnavailable as exc:
                 # MusicBrainz busy or down: Discogs's own release, when the match names one and
                 # Discogs can be read, tags the album; else it is tried again later
-                if not (dgid and self.dm is not None and (self.use_discogs or self.token)):
+                # HF-4: never from Discogs alone while MusicBrainz is the preferred database
+                if not (dgid and self.dm is not None and (self.use_discogs or self.token)) or \
+                        self._preferred() == "musicbrainz":
                     raise
                 mb_down, rel = exc, None
                 self._note_mb_down(exc)
@@ -1373,8 +1568,8 @@ class Engine:
                     if v:
                         merged[fld], where[fld] = v, name
                         break
-            if missing:
-                merged["tagmender_missing"] = [missing]
+            # HF-5: a partial album's missing tracks are no tag of their own (no TAGMENDER_MISSING):
+            # "incomplete" is told in the proposal's notes (the plan's and the job report's) only
             if not self.profile["mark_resolved"]:
                 merged.pop("tagmender", None)
             hidden = {k: v for k, v in (tags_mb[i] if tags_mb else {}).items() if k.startswith("~")}
@@ -1409,6 +1604,8 @@ class Engine:
         provider = "musicbrainz" if order[0] == "musicbrainz" else "discogs"
         # the missing tracks are information, not a block
         codes = ["incomplete_album"] if missing else []
+        if version_subtitles(targets, files):           # MIX-1
+            prov.setdefault("discsubtitle", "tagmender")
         prop = planmod.Proposal(
             **base, targets=targets, status="identified", reason_codes=codes, provider=provider + (
                 "+discogs" if len(order) == 2 and order[1] == "discogs" else
@@ -1421,6 +1618,12 @@ class Engine:
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
+        if missing:
+            # HF-5: the gaps go to the album's notes (plan, job report: report._gaps reads this
+            # wording), never into the files
+            prop.notes = list(getattr(prop, "notes", None) or []) + [
+                f"tracks {missing} of the release are not in this folder: each file is tagged as its own "
+                "track, with the release's totals"]
         if mb_down is not None:
             words = (f"MusicBrainz did not answer ({mb_down.kind.replace('_', ' ')}): tagged from Discogs alone; "
                      "its MusicBrainz IDs are added when the album is processed again")
@@ -2584,9 +2787,13 @@ class Engine:
             prop.targets = [own_tag_choices(t, self.profile, files[i] if len(files) == len(prop.targets or []) else None)
                             for i, t in enumerate(prop.targets or [])]
             if album_artist.enabled(self.profile):
-                # (the lead artist alone as album artist: album_artist.py; a band's members once each)
-                prop.targets = album_artist.apply(prop.targets, self.profile, self._band_members,
-                                                  self._discogs_band_members, self._band_ids)
+                # NAM-1 (the lead artist alone as album artist: album_artist.py; a band's members
+                # once each). A stand-in engine without the band look-ups (or without http) still
+                # takes the lead artist from the credit, with no MusicBrainz band questions.
+                prop.targets = album_artist.apply(prop.targets, self.profile,
+                                                  getattr(self, "_band_members", None),
+                                                  getattr(self, "_discogs_band_members", None),
+                                                  getattr(self, "_band_ids", None))
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
         if prop.status == "identified":
@@ -2597,7 +2804,9 @@ class Engine:
         """album_artist.band_members, asked once per artist in this run."""
         memo = self.__dict__.setdefault("_members_memo", {})
         if mbid not in memo:
-            memo[mbid] = album_artist.band_members(self.http, mbid, self.log) if self.http is not None else None
+            # (Sources without MusicBrainz: never asked - SRC-1)
+            asks = self.http is not None and getattr(self, "use_mb", True)
+            memo[mbid] = album_artist.band_members(self.http, mbid, self.log) if asks else None
         return memo[mbid]
 
     def _discogs_band_members(self, dgid):
@@ -2617,9 +2826,9 @@ class Engine:
         memo = self.__dict__.setdefault("_band_ids_memo", {})
         key = (album_artist.fold(name), mbid or "")
         if key not in memo:
-            found = mbid or (album_artist.artist_named(self.http, name, self.log) if self.http is not None else "")
-            memo[key] = (found, album_artist.linked_discogs(self.http, found, self.log) if found and
-                         self.http is not None else "")
+            asks = self.http is not None and getattr(self, "use_mb", True)    # (SRC-1: as above)
+            found = mbid or (album_artist.artist_named(self.http, name, self.log) if asks else "")
+            memo[key] = (found, album_artist.linked_discogs(self.http, found, self.log) if found and asks else "")
         return memo[key]
 
     def proposals(self, path, progress=None, cancel=None, only=None):

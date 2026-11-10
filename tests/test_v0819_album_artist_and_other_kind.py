@@ -79,7 +79,8 @@ class FromDiscogs(Base):
 
     def test_off_the_credit_stays(self):
         d = self.album(JOINT, "Quiet Record")
-        eng = self.engine(FakeHttp(dg=[self.release("Quiet Record")]))
+        eng = self.engine(FakeHttp(dg=[self.release("Quiet Record")]),          # (NAM-1: on by default)
+                          album_artist={"lead": False, "bands": True, "file_under": {}})
         self.assertEqual(eng.proposals(d)[0].targets[0]["albumartist"], [JOINT])
 
     def test_an_anv_is_the_name_written(self):

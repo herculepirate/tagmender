@@ -258,7 +258,8 @@ class TaggerTags(unittest.TestCase):
                cand(id="gb", country="GB", date="2010-03-01", label="Beta"))
         for kw in (dict(tag_country="GB"), dict(tag_date="2010-03-01"), dict(tag_label="Beta")):
             r = pick(album(tag_release_mb={"gb"}, tags_by_tagger=True, **kw), *rel)
-            self.assertEqual(r["status"], "review", (kw, r["why"]))
+            # (TAG-2: they pick nothing; TIE-1: the earlier pressing is taken instead, in full)
+            self.assertEqual(outcome(r), ("auto", "de"), (kw, r["why"]))
             r = pick(album(tag_release_mb={"gb"}, tags_by_tagger=False, **kw), *rel)
             self.assertEqual(outcome(r), ("auto", "gb"), (kw, r["why"]))
         # Mekong Delta - 1989 - Toccata [Aaarrg! Records, Germany, AAARRG 17], tagged by TagMender as

@@ -165,9 +165,10 @@ class Inside(H):
         r1 = w.tick()
         where = sorted(str(p.relative_to(self.inbox)) for p in self.inbox.rglob("*.flac"))
         calls = len(self.http.calls)
-        with self.later():
+        # (HF-3: an unresolved album is looked up again after 10 minutes - these passes are sooner)
+        with self.later(300):
             r2 = w.tick()
-        with self.later(14400):
+        with self.later(540):
             r3 = w.tick()
         where3 = sorted(str(p.relative_to(self.inbox)) for p in self.inbox.rglob("*.flac"))
         self.assertEqual((r2, r3, len(self.http.calls)), ({}, {}, calls),

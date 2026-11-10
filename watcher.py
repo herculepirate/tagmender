@@ -12,8 +12,13 @@ An album is processed when:
   - its files differ from what TagMender last left there: after a job, the album's
     signature is stored, so TagMender's own writes never queue it again;
   - it is not remembered as Ignored (until its files or the rules change);
-  - an unresolved album is retried after retry.after_days, at most retry.max_attempts
-    times; a provider outage or throttling is retried sooner, with growing pauses;
+  - an unresolved album is looked up again every 10 minutes for its first day, then daily for
+    the rest of its first week, then only when you ask (Look Up, `tagmender retry`) - HF-3;
+    retry.after_days 0 (Never) leaves it for you at once. A Partial one is retried after
+    retry.after_days, at most retry.max_attempts times; a provider outage or throttling is
+    retried sooner, with growing pauses, and never decided on the other database alone (HF-4);
+  - new albums go before retries in every pass, and the retries of one pass stop after a
+    watch interval (RETRY_PASS_SECONDS at least), so they never keep a new drop waiting;
   - with a move profile, one that is not unresolved but still here after it was handled -
     done, up to date, or Partial (unless retry.after_days is 0, Never) - is looked at on every
     pass until it is filed.
@@ -70,12 +75,92 @@ def _changed_at(st, now=None) -> float:
         return min(st.st_ctime, now)
     return st.st_mtime
 PROVIDER_RETRY = [600, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600]
+# HF-3: an Unresolved album in a watched folder is looked up again every 10 minutes for its
+# first day, then daily for the rest of the week, then only when you ask. The clock starts when
+# it was first found Unresolved with these files (table unresolved_since); a provider outage
+# meanwhile (HF-4: held, retried on PROVIDER_RETRY) does not restart it, new files do.
+UNRESOLVED_FAST_EVERY = 10 * 60          # HF-3: every 10 minutes...
+UNRESOLVED_FAST_FOR = 24 * 3600          # HF-3: ...for its first day,
+UNRESOLVED_SLOW_EVERY = 24 * 3600        # HF-3: then daily...
+UNRESOLVED_RETRY_FOR = 7 * 24 * 3600     # HF-3: ...for the rest of the week,
+ASK_ONLY = -1.0                          # HF-3: then only when you ask (processed.next_try)
+# HF-3: new albums always go before retries; the retries of one pass stop after the watch
+# interval (this at least), so a pass full of retries never keeps the next pass's new drops waiting
+RETRY_PASS_SECONDS = 10 * 60
+
+
+def unresolved_next_try(since: float, now: float) -> float:
+    """HF-3: when an album Unresolved since SINCE, looked up at NOW, is looked up next;
+    ASK_ONLY once its week is over."""
+    if now - since < UNRESOLVED_FAST_FOR:
+        return now + UNRESOLVED_FAST_EVERY
+    nxt = now + UNRESOLVED_SLOW_EVERY
+    return nxt if nxt - since < UNRESOLVED_RETRY_FOR else ASK_ONLY
+
+
+def _since_table(db):
+    db.execute("CREATE TABLE IF NOT EXISTS unresolved_since (folder TEXT PRIMARY KEY, signature TEXT, since REAL)")
 # outcomes tried again later: a provider outage, an unresolved album, a Partial one (its album
 # known, its release not: MusicBrainz or Discogs may later have its barcode or disc ID), and an
 # album that failed or was blocked for what may be a passing reason (a share dropping, a locked file)
 RETRIED = ("unresolved", "partial", "provider_error", "failed", "conflict", "blocked")
 # (a move profile's album still in the watched folder with one of these: looked at on every pass)
 LOOPED = ("partial", "done", "unchanged")
+
+
+def _disc_count(v) -> int:
+    try:
+        return int(str((v or [""])[0] if isinstance(v, (list, tuple)) else v).strip() or 0)
+    except ValueError:
+        return 0
+
+
+def _network_error(exc) -> bool:
+    """The failure is a database or the network not answering (an outage, a timeout, a 5xx
+    or 429), not a fault in the album or in TagMender."""
+    import socket
+    import urllib.error
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500 or exc.code == 429
+    if isinstance(exc, (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError)):
+        return True
+    return any(t.__name__ == "ProviderUnavailable" for t in type(exc).__mro__)
+
+
+def missing_discs(g, props) -> str:
+    """DSC-1: why a set of disc folders side by side ("Album CD1" beside "Album CD2"; one such
+    folder alone too) waits: the discs its files' tags count (totaldiscs, "1/2"), else the
+    matched release's, against the disc folders there - "disc 2 of 2 is not here yet"; ""
+    when none is missing, or for any other album."""
+    discs = list(getattr(g, "discs", None) or [])
+    if not discs:
+        return ""
+    have = set()
+    for d in discs:
+        sd = eng_mod.sibling_disc(d)
+        if sd:
+            have.add(sd[1])
+    total = 0
+    for f in g.files:
+        m = ex.read_meta(f)
+        total = max(total, _disc_count(m.get("totaldiscs")), _disc_count(m.get("disctotal")),
+                    _disc_count(str((m.get("discnumber") or [""])[0]).partition("/")[2]))
+    from_release = not total
+    if not total:                                  # (the files do not say: the matched release)
+        for p in props or []:
+            if getattr(p, "status", "") != "identified":
+                continue
+            for t in (getattr(p, "full_targets", None) or p.targets or []):
+                total = max(total, _disc_count(t.get("totaldiscs")), _disc_count(t.get("disctotal")))
+    gone = [n for n in range(1, total + 1) if n not in have]
+    if from_release and have:
+        # (the release's count may hold a DVD or Blu-ray no audio folder will ever bring: only a
+        # gap below the highest disc here is waited for)
+        gone = [n for n in gone if n < max(have)]
+    if not gone or not have:
+        return ""
+    words = ", ".join(map(str, gone))
+    return f"disc{'s' if len(gone) > 1 else ''} {words} of {total} {'are' if len(gone) > 1 else 'is'} not here yet"
 
 
 def _is_partial(entry) -> bool:
@@ -108,6 +193,7 @@ def _db():
     # the processed rows keep their eight columns (executor's undo record writes them by
     # position); a row counts only while its ts is its processed row's (recent)
     db.execute("CREATE TABLE IF NOT EXISTS processed_match (folder TEXT PRIMARY KEY, ts REAL, match TEXT)")
+    _since_table(db)                     # (HF-3: since when each album has been Unresolved)
     return db
 
 
@@ -345,6 +431,19 @@ class Watcher:
         return _files_key(g.folder, g.files)
 
     @staticmethod
+    def discs_settled(g, prof) -> bool:
+        """DSC-1: the other disc folders of a set side by side hold no download in progress and
+        have not changed within the settle time (the first disc's folder is due()'s)."""
+        for d in list(getattr(g, "discs", None) or [])[1:]:
+            try:
+                _sig, newest, partial = snapshot(Path(d), [f for f in g.files if Path(f).parent == Path(d)], True)
+            except OSError:
+                return False
+            if partial or time.time() - newest < prof["watch"]["settle_minutes"] * 60:
+                return False
+        return True
+
+    @staticmethod
     def destination_ready(prof) -> bool:
         """The folders a copy or move profile files albums into are there (mounted)."""
         roots = []
@@ -406,6 +505,15 @@ class Watcher:
             return (True, "destination back") if self.destination_ready(prof) else (False, status)
         if prof["operation"] == "move" and status in LOOPED and (status != "partial" or prof["retry"]["after_days"]):
             return True, "retry"                     # (found but not filed: every pass until it is)
+        if status == "unresolved":                   # HF-3 (its own schedule: no max_attempts)
+            _since_table(db)
+            hf3 = db.execute("SELECT 1 FROM unresolved_since WHERE folder=?", (key,)).fetchone()
+            if not prof["retry"]["after_days"] or (next_try or 0) < 0 or \
+                    (not hf3 and (attempts or 0) >= prof["retry"]["max_attempts"]):
+                return False, status                 # (Never; its week is over; an old record's tries used up)
+            return (True, "retry") if time.time() >= (next_try or 0) else (False, status)
+        if status == "provider_error":               # HF-4: held for an outage, retried until it answers
+            return (True, "retry") if time.time() >= (next_try or 0) else (False, status)
         if status in RETRIED and (attempts or 0) < prof["retry"]["max_attempts"] \
                 and time.time() >= (next_try or 0):
             return True, "retry"
@@ -413,13 +521,23 @@ class Watcher:
 
     def record(self, db, folder, prof, status, attempts, detail="", key=None, files=None, deep=True, match=None):
         sig, _n, _p = snapshot(folder, files, deep) if Path(folder).exists() else ("gone", 0, False)
+        key, now = key or planmod.db_text(folder), time.time()
         if status in ("provider_error", "failed", "conflict", "blocked"):
-            nxt = time.time() + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
-        elif status in ("unresolved", "partial"):
-            nxt = time.time() + prof["retry"]["after_days"] * 86400
+            nxt = now + PROVIDER_RETRY[min(attempts, len(PROVIDER_RETRY) - 1)]
+        elif status == "unresolved" and not deep:
+            # (loose tracks right in a watched folder: looking at them again reads the whole
+            # folder, the library inside it too - they keep the slow schedule, not HF-3's)
+            nxt = now + prof["retry"]["after_days"] * 86400 if prof["retry"]["after_days"] else ASK_ONLY
+        elif status == "unresolved":
+            since = self._unresolved_since(db, key, sig, now)
+            nxt = unresolved_next_try(since, now) if prof["retry"]["after_days"] else ASK_ONLY   # HF-3
+        elif status == "partial":
+            nxt = now + prof["retry"]["after_days"] * 86400
         else:
             nxt = 0
-        key, now = key or planmod.db_text(folder), time.time()
+        if status not in ("unresolved", "provider_error"):     # (HF-3's clock: only while it is Unresolved)
+            _since_table(db)
+            db.execute("DELETE FROM unresolved_since WHERE folder=?", (key,))
         db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
                    (key, prof.name, sig, status, attempts, nxt, now, planmod.db_text(detail)))
         try:
@@ -431,6 +549,22 @@ class Watcher:
         except sqlite3.Error:                # (a database without the table: the record stands)
             pass
         db.commit()
+
+    @staticmethod
+    def _unresolved_since(db, key, sig, now) -> float:
+        """HF-3: since when the album (these files) has been Unresolved - recorded the first time.
+        A record kept from before HF-3 (Unresolved, no clock) counts from its last look."""
+        _since_table(db)
+        row = db.execute("SELECT signature, since FROM unresolved_since WHERE folder=?", (key,)).fetchone()
+        if row and row[0] == sig:
+            return row[1]
+        since = now
+        if not row:
+            old = db.execute("SELECT signature, status, ts FROM processed WHERE folder=?", (key,)).fetchone()
+            if old and old[0] == sig and old[1] == "unresolved" and old[2]:
+                since = min(old[2], now)
+        db.execute("INSERT OR REPLACE INTO unresolved_since VALUES (?,?,?)", (key, sig, since))
+        return since
 
     def _status_of(self, a, prop, outcome, prof):
         """What the watcher remembers of one album of a plan: excluded, provider_error (an
@@ -578,6 +712,7 @@ class Watcher:
         seen = set()
         self.stop_pass = False
         self._rechecked = set()
+        later = []                       # HF-3: retries (and re-checks), after every new album of the pass
         for root, prof in self.roots():
             if self.stop or self.stop_pass:
                 break
@@ -614,104 +749,152 @@ class Watcher:
                 scope = g.files                            # the album's own files (see snapshot)
                 try:
                     go, why = (True, "recheck") if recheck else self.due(g.folder, prof, db, k, scope, g.files, deep)
+                    if go and not recheck:
+                        go = self.discs_settled(g, prof)         # DSC-1: the set's other disc folders too
                 except Exception:                              # one album never stops the watcher
                     self.log.exception("watch: %s could not be looked at", g.folder)
                     continue
                 if not go:
                     continue
+                if why in ("retry", "recheck"):            # HF-3: new albums always go first
+                    row = db.execute("SELECT next_try FROM processed WHERE folder=?", (k,)).fetchone()
+                    later.append(((recheck, (row and row[0]) or 0, len(later)),
+                                  (root, prof, e, g, k, deep, scope, why, recheck)))
+                    continue
                 if executor.job_running():                 # a plan being applied, an undo: it may be this album
                     self.log.info("watch: a job is changing files; the rest of this pass waits")
                     self.stop_pass = True
                     break
-                prev = db.execute("SELECT attempts, status FROM processed WHERE folder=?", (k,)).fetchone()
-                attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
-                try:
-                    # (a set whose discs are different releases: each disc an album of the plan)
-                    props = e.identify_all(g) if hasattr(e, "identify_all") else [e.identify(g)]
-                    prop = props[0]
-                    for p in props:
-                        for step in ("add_artwork", "apply_level"):   # as `tagmender run` does
-                            if hasattr(e, step):
-                                getattr(e, step)(p)
-                    n_jobs = getattr(self, "_n", 0) + 1
-                    self._n = n_jobs
-                    plan = planmod.build(props, prof, e.job + f"-{n_jobs}", extra_roots=[root, g.folder] if recheck else [root])
-                    a = plan["albums"][0]
-                    res = None
-                    # "File albums without asking" files only what it is sure of: an album it is not
-                    # (Unresolved, Partial, a pressing it could not tell) waits for your approval
-                    sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
-                    has_work = any(planmod.has_work(x) for x in plan["albums"])    # (none: no job to record)
-                    # (only a proven release: an album-known result never takes the place of a filed one)
-                    if recheck and not (sure and has_work and all(
-                            (x.get("identification") or {}).get("tier") == "exact"
-                            for x in plan["albums"] if planmod.has_work(x))):
-                        self.seen_again(db, k)                 # (nothing better known of it: it stays as filed)
-                        continue
-                    if why == "retry" and has_work and prev and prev[1] == "partial" and \
-                            not (prof["unattended"] and sure) and all(_is_partial(x) for x in plan["albums"]):
-                        continue                               # (still Partial, and it is yours to approve: no new plan)
-                    if prof["unattended"] and sure and has_work:
-                        res = executor.Executor(plan, log=self.log).run()
-                        outcome = res["albums"][0]["status"] if res["albums"] else a["status"]
-                    elif a["status"] == "blocked":                # nothing to apply: planned again later
-                        outcome = "blocked"
-                    elif not any(planmod.has_work(x) for x in plan["albums"]):   # nothing to change
-                        outcome = a["status"]
-                    else:
-                        plan["watch"] = {"key": k, "folder": planmod.db_text(g.folder),
-                                         "files": [planmod.db_text(f) for f in scope], "deep": deep}
-                        pdir = plans_dir()
-                        pdir.mkdir(parents=True, exist_ok=True)
-                        planmod.save(plan, pdir / f"{plan['job']}.json")
-                        superseded = _supersede(k, but=plan["job"])   # one plan per album waits: this one
-                        outcome = "planned"
-                        if superseded:
-                            self.log.info("%s: plan %s replaces %s", g.folder, plan["job"], ", ".join(superseded))
-                    # each album of the plan as it came out (each disc of a set tagged disc by disc)
-                    each = []
-                    for i, x in enumerate(plan["albums"]):
-                        out_i = outcome
-                        if res is not None:
-                            out_i = next((r["status"] for r in res["albums"] if r.get("index") == i), x["status"])
-                        p_i = next((q for q in props if str(q.source_dir) == x.get("source_dir")), prop)
-                        each.append((x, out_i, self._status_of(x, p_i, out_i, prof)))
-                    status = _worst([st for _x, _o, st in each])
-                    if why == "retry" and res is None and prev and prev[1] == status and status in LOOPED:
-                        # (looked again, nothing new: no record, no notice - but the log says why it stayed)
-                        self.log.info("%s: not filed, still %s: %s", g.folder, status,
-                                      "; ".join(a.get("notes") or []) or "nothing to do")
-                        continue
-                    shown = status
-                    if status == "waiting_destination":
-                        shown = "blocked"
-                    if len(each) > 1:
-                        # (each disc remembered as it came out, by its own folder; the set as its worst
-                        # disc, so a disc left Partial is tried again with the set)
-                        for x, _o, st in each:
-                            dfiles = [Path(fe["src"]) for fe in x.get("files") or []
-                                      if Path(fe["src"]).suffix.lower() in ex.AUDIO_EXT]
-                            self.record(db, Path(x["source_dir"]), prof, st, attempts, x.get("label", ""),
-                                        key=album_key(Path(x["source_dir"]), dfiles), files=dfiles, deep=True,
-                                        match=match_of(x))
-                    # (the set: as the album it is remembered by)
-                    worst = next((x for x, _o, st in each if st == status), a)
-                    self.record(db, g.folder, prof, status, attempts,
-                                ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
-                                key=k, files=scope, deep=deep,
-                                match=None if status == "excluded" else match_of(worst))
-                    if res is not None:
-                        for x, out_i, _st in each:
-                            self.filed(db, x, prof, out_i)
-                    done[str(g.folder)] = shown
-                    self.log.info("%s: %s (%s)", g.folder, status, why)
-                except Exception as exc:                       # one album never stops the watcher
-                    self.log.exception("watch: %s failed", g.folder)
-                    if recheck:                                # (it stays as filed)
-                        self.seen_again(db, k)
-                        continue
-                    self.record(db, g.folder, prof, "provider_error", attempts, str(exc)[:200], key=k, files=scope, deep=deep)
-                    done[str(g.folder)] = "error"
+                self._look(db, done, root, prof, e, g, k, deep, scope, why, recheck)
+        # HF-3: then the retries, the longest overdue first (re-checks of filed albums last), one
+        # at a time (the providers' limits are shared); they stop after a watch interval, and what
+        # is left is due at the next pass - after its new albums
+        budget = RETRY_PASS_SECONDS
+        for _o, args in later:
+            try:
+                budget = max(budget, float(args[1]["watch"]["interval_seconds"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+        start = time.time()
+        for n, (_order, args) in enumerate(sorted(later, key=lambda x: x[0])):
+            if self.stop or self.stop_pass:
+                break
+            if n and time.time() - start >= budget:
+                self.log.info("watch: %d retries left for the next pass (new albums go first)", len(later) - n)
+                break
+            if executor.job_running():
+                self.log.info("watch: a job is changing files; the rest of this pass waits")
+                self.stop_pass = True
+                break
+            self._look(db, done, *args)
+
+    def _look(self, db, done, root, prof, e, g, k, deep, scope, why, recheck):
+        """Identify one album that is due and plan, file or remember it."""
+        prev = db.execute("SELECT attempts, status FROM processed WHERE folder=?", (k,)).fetchone()
+        attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
+        try:
+            # (a set whose discs are different releases: each disc an album of the plan)
+            props = e.identify_all(g) if hasattr(e, "identify_all") else [e.identify(g)]
+            prop = props[0]
+            wait = "" if recheck else missing_discs(g, props)
+            if wait:
+                # DSC-1: a set with a disc folder still missing is not filed: it waits (as an
+                # Unresolved album, on its schedule) and is looked at again when the disc arrives
+                self.log.info("%s: %s; not filed until it arrives", g.folder, wait)
+                self.record(db, g.folder, prof, "unresolved", attempts, wait, key=k, files=scope, deep=deep)
+                done[str(g.folder)] = "unresolved"
+                return
+            for p in props:
+                for step in ("add_artwork", "apply_level"):   # as `tagmender run` does
+                    if hasattr(e, step):
+                        getattr(e, step)(p)
+            n_jobs = getattr(self, "_n", 0) + 1
+            self._n = n_jobs
+            plan = planmod.build(props, prof, e.job + f"-{n_jobs}", extra_roots=[root, g.folder] if recheck else [root])
+            a = plan["albums"][0]
+            res = None
+            # "File albums without asking" files only what it is sure of: an album it is not
+            # (Unresolved, Partial, a pressing it could not tell) waits for your approval
+            sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
+            has_work = any(planmod.has_work(x) for x in plan["albums"])    # (none: no job to record)
+            # (only a proven release: an album-known result never takes the place of a filed one)
+            if recheck and not (sure and has_work and all(
+                    (x.get("identification") or {}).get("tier") == "exact"
+                    for x in plan["albums"] if planmod.has_work(x))):
+                self.seen_again(db, k)                 # (nothing better known of it: it stays as filed)
+                return
+            if why == "retry" and has_work and prev and prev[1] == "partial" and \
+                    not (prof["unattended"] and sure) and all(_is_partial(x) for x in plan["albums"]):
+                return                                 # (still Partial, and it is yours to approve: no new plan)
+            if prof["unattended"] and sure and has_work:
+                res = executor.Executor(plan, log=self.log).run()
+                outcome = res["albums"][0]["status"] if res["albums"] else a["status"]
+            elif a["status"] == "blocked":                # nothing to apply: planned again later
+                outcome = "blocked"
+            elif not any(planmod.has_work(x) for x in plan["albums"]):   # nothing to change
+                outcome = a["status"]
+            else:
+                plan["watch"] = {"key": k, "folder": planmod.db_text(g.folder),
+                                 "files": [planmod.db_text(f) for f in scope], "deep": deep}
+                pdir = plans_dir()
+                pdir.mkdir(parents=True, exist_ok=True)
+                planmod.save(plan, pdir / f"{plan['job']}.json")
+                superseded = _supersede(k, but=plan["job"])   # one plan per album waits: this one
+                outcome = "planned"
+                if superseded:
+                    self.log.info("%s: plan %s replaces %s", g.folder, plan["job"], ", ".join(superseded))
+            # each album of the plan as it came out (each disc of a set tagged disc by disc)
+            each = []
+            for i, x in enumerate(plan["albums"]):
+                out_i = outcome
+                if res is not None:
+                    out_i = next((r["status"] for r in res["albums"] if r.get("index") == i), x["status"])
+                p_i = next((q for q in props if str(q.source_dir) == x.get("source_dir")), prop)
+                each.append((x, out_i, self._status_of(x, p_i, out_i, prof)))
+            status = _worst([st for _x, _o, st in each])
+            if status == "provider_error" and prev and prev[1] == "unresolved":
+                attempts = 1     # (HF-4: an outage's quick retries counted afresh, not with HF-3's lookups)
+            if why == "retry" and res is None and prev and prev[1] == status and status in LOOPED:
+                # (looked again, nothing new: no record, no notice - but the log says why it stayed)
+                self.log.info("%s: not filed, still %s: %s", g.folder, status,
+                              "; ".join(a.get("notes") or []) or "nothing to do")
+                return
+            shown = status
+            if status == "waiting_destination":
+                shown = "blocked"
+            if len(each) > 1:
+                # (each disc remembered as it came out, by its own folder; the set as its worst
+                # disc, so a disc left Partial is tried again with the set)
+                for x, _o, st in each:
+                    dfiles = [Path(fe["src"]) for fe in x.get("files") or []
+                              if Path(fe["src"]).suffix.lower() in ex.AUDIO_EXT]
+                    self.record(db, Path(x["source_dir"]), prof, st, attempts, x.get("label", ""),
+                                key=album_key(Path(x["source_dir"]), dfiles), files=dfiles, deep=True,
+                                match=match_of(x))
+            # (the set: as the album it is remembered by)
+            worst = next((x for x, _o, st in each if st == status), a)
+            self.record(db, g.folder, prof, status, attempts,
+                        ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
+                        key=k, files=scope, deep=deep,
+                        match=None if status == "excluded" else match_of(worst))
+            if res is not None:
+                for x, out_i, _st in each:
+                    self.filed(db, x, prof, out_i)
+            done[str(g.folder)] = shown
+            self.log.info("%s: %s (%s)", g.folder, status, why)
+        except Exception as exc:                       # one album never stops the watcher
+            self.log.exception("watch: %s failed", g.folder)
+            if recheck:                                # (it stays as filed)
+                self.seen_again(db, k)
+                return
+            # (a database or network failing is an outage, retried until it answers - HF-4; anything
+            # else - a damaged file, a permission, a fault of TagMender's - is "failed", tried a
+            # few times only, never every day for ever)
+            status = "provider_error" if _network_error(exc) else "failed"
+            if prev and prev[1] == "unresolved" and status == "provider_error":
+                attempts = 1                           # (HF-4: as above)
+            self.record(db, g.folder, prof, status, attempts, str(exc)[:200], key=k, files=scope, deep=deep)
+            done[str(g.folder)] = "error"
 
     def run(self):
         """Watch until stopped. One watching process at a time (the app's background
@@ -780,6 +963,7 @@ def forget(root, undone=False) -> int:
                 if (undone or r[1] != "undone") and (r[0] == root or r[0].startswith(root + "/") or r[0].startswith(root + "#"))]
         db.executemany("DELETE FROM processed WHERE folder=?", [(f,) for f in rows])
         db.executemany("DELETE FROM processed_match WHERE folder=?", [(f,) for f in rows])
+        db.executemany("DELETE FROM unresolved_since WHERE folder=?", [(f,) for f in rows])   # (HF-3: asked)
         db.commit()
     finally:
         db.close()

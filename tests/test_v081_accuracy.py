@@ -124,10 +124,12 @@ class UnsureProof(unittest.TestCase):
                             catnos={"vicp1"}),
                     cand(source="discogs", id="2", country="Japan", label="Victor", barcodes={JP_BARCODE},
                          catnos={"vicp1"}, notes="obi variant"))
-        self.assertEqual((mb["status"], dg["status"]), ("auto", "review"))
+        # (0.8.21: Discogs's two entries are one pressing listed twice - sure of it; BAR-1: the
+        # barcode on it beats MusicBrainz's pick, which has nothing of your copy behind it)
+        self.assertEqual((mb["status"], dg["status"]), ("auto", "auto"))
         f = mc.combine(mb, dg)
-        self.assertEqual(f["status"], "review", f["why"])
-        self.assertIn("barcode", " ".join(f["why"]))
+        self.assertEqual((f["status"], f["best"]["cand"]["source"], f["best"]["cand"]["id"]),
+                         ("auto", "discogs", "1"), f["why"])
 
     def test_an_exact_disc_id_on_the_unsure_musicbrainz_pick_disputes_discogs(self):
         # (p8: two JP releases carry the exact disc ID; Discogs sure of the EU CD on nothing)
@@ -158,7 +160,8 @@ class TaggerPressingTags(unittest.TestCase):
         for kw in (dict(tag_country="GB"), dict(tag_date="2010-03-01"), dict(tag_label="Beta"),
                    dict(tag_media="cd")):
             r = pick(album(tag_release_mb={"gb"}, tags_by_tagger=True, **kw), *self.REL)
-            self.assertEqual(r["status"], "review", (kw, r["why"]))
+            # TAG-2: ignored; TIE-1/TIE-2: the tie goes to the original pressing, tagged in full
+            self.assertEqual(outcome(r), ("auto", "de"), (kw, r["why"]))
 
     def test_the_copys_own_tags_still_do(self):
         for kw in (dict(tag_country="GB"), dict(tag_date="2010-03-01"), dict(tag_label="Beta")):

@@ -1389,13 +1389,18 @@ class Planner:
             except Exception:
                 rel = {}
         rel_tags = {f"~edition_{k}": v for k, v in rel.items()}
+        # ED-5: hi-res audio adds HD to a CD-type or download edition, and is the only edition
+        # an album known (its pressing unproven) shows
+        if identified and (folder_mode != "off" or album_mode != "off") and kept:
+            import marks
+            if any(marks.is_hd(f) for f in kept[:3]):
+                rel_tags["~edition_hd"] = ["1"]
+            if unproven:
+                rel_tags["~edition_unproven"] = ["1"]
         # a Partial album whose files already name a release (Picard's or TagMender's tags):
         # only what they lack is filled; their date, album, titles and mark stay as they are
         held = partial and _names_release(kept)
-        gaps = next((t["tagmender_missing"][0] for t in targets.values() if (t or {}).get("tagmender_missing")), "")
-        if gaps and identified:
-            entry["notes"].append(f"tracks {gaps} of the release are not in this folder: each file is tagged as "
-                                  "its own track, with the release's totals, and TAGMENDER_MISSING lists the gaps")
+        # (HF-5: tracks missing are noted by the engine, in the report only; no tag)
         if held:
             entry["notes"].append("Partial identification on files that already name a release: only empty "
                                   "fields filled, their release tags and TagMender mark left as they are")
@@ -1437,7 +1442,7 @@ class Planner:
                                     album_mode) if album_mode != "off" else ""
             # (never on a Partial or album-only album: its edition would be read from an unproven
             # media tag)
-            if identified and not unproven and tag_ed and (target.get("album") or [""])[0]:
+            if identified and (not unproven or tag_ed == "HD") and tag_ed and (target.get("album") or [""])[0]:
                 album = str(target["album"][0])
                 if not album.endswith(f" [{tag_ed}]"):      # "I" -> "I [2019 Vinyl]", once
                     target["album"] = [f"{album} [{tag_ed}]"] + list(target["album"][1:])
@@ -1885,10 +1890,27 @@ class Planner:
             if vsplit:              # (each version takes its own; what both share is copied to each)
                 comps, why_not, how = _split_companions(vsplit, pairs, p, moved[0]["op"],
                                                         extra=tidy.extensions(sub))
+                own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
             else:
                 comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
                                              artist=[who] + sort,
                                              single=single, extra=tidy.extensions(sub))
+                own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
+                # DSC-1: a set joined from disc folders side by side ("Album CD1", "Album CD2"):
+                # each other disc folder's scans, logs and cue sheets go with its music
+                others = sorted({Path(f).parent for f in pairs if Path(f).parent != src_root
+                                 and src_root not in Path(f).parents})
+                for od in others:
+                    if os.path.realpath(od) in self.roots():
+                        continue                     # (never a watched or library folder itself)
+                    mine = {f: d for f, d in pairs.items() if Path(f).parent == od}
+                    more, why2 = _companions(od, mine, p, artist=[who] + sort, single=single,
+                                             extra=tidy.extensions(sub))
+                    comps += [c for c in more if c not in comps]
+                    if why2 == SHARED_FOLDER_NOTE:       # (that folder's own: told, and marked one by one)
+                        own_from |= {c for c, _w in more}
+                    elif why2:
+                        why_not = why_not or why2
             if why_not and not tidy_here:
                 entry["notes"].append(why_not)
             base_op = moved[0]["op"] if moved else "move"
@@ -1924,10 +1946,10 @@ class Planner:
                       "fingerprint": _fp(c)}
                 if kind:
                     ce["tidy"] = kind         # (into the album's covers or misc folder)
-                if why_not == SHARED_FOLDER_NOTE:
+                if c in own_from:              # (a track's own file, from a folder shared with other music)
                     ce["own"] = True
                 if c in how:
-                    ce["shared"] = True       # (a split's file both versions share: copied to each)          # (a track's own file, from a folder shared with other music)
+                    ce["shared"] = True       # (a split's file both versions share: copied to each)
                 if c.suffix.lower() in CUE_LIKE and p.get("companions_rewrite_cues", True) is False:
                     entry["notes"].append(f"{c.name}: kept as it is (cue sheets and playlists are not rewritten); "
                                           "it may name the old file names")

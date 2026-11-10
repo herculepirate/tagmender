@@ -154,10 +154,16 @@ class Combine(unittest.TestCase):
         out = mc.combine(mb, dg)
         self.assertEqual((out["status"], out["best"]["cand"]["id"], out.get("dg_twin")), ("auto", "mb-1", "9"))
 
-    def test_without_a_preference_as_before(self):
+    def test_without_a_preference_the_country_order_picks(self):     # TIE-1
         mb, dg = self.picks("")
         out = mc.combine(mb, dg, countries=["US"])
-        self.assertEqual(out["status"], "review")
+        self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", "mb-1"))
+        self.assertTrue(any("TIE-1" in n for n in out["best"]["notes"]))
+
+    def test_without_a_preference_or_country_order_discogs_first(self):
+        mb, dg = self.picks("")
+        out = mc.combine(mb, dg)
+        self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", 9))
 
 
 class Modes(Base):

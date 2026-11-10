@@ -145,9 +145,10 @@ class Replace(Base):
         self.assertEqual([x.name for x in self.album.iterdir() if x.suffix == ".jpg"], ["cover.jpg"])
 
     def test_small_covers_are_looked_for_when_replacing_is_on(self):
-        # (off by default since schema 3: an album's own cover is the user's choice)
+        # ART-1 (docs/MATCHING_RULES.md): on by default - your own cover is kept unless it is
+        # small (under min_px, 500 px); "never" still keeps every cover
         import profiles as pf
-        self.assertEqual(pf.DEFAULTS["artwork"]["replace"], "never")
+        self.assertEqual(pf.DEFAULTS["artwork"]["replace"], "larger_only")
         prof = self.profile(artwork=self.art())
         self.assertIn("smaller than 500 px", artwork.needs_art(self.album, [self.f1, self.f2], prof))
         self.assertEqual(artwork.needs_art(self.album, [self.f1, self.f2],

@@ -288,11 +288,11 @@ class Identify(Base):
         eng.cfg["preferred_countries"] = ["US"]
         eng.cfg["prefer_source"] = ""
         p = eng.identify(eng.albums_in(d)[0])
-        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"))
+        self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"), (p.tier, p.why, p.evidence))
         self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])   # the other pressing stays out
-        # the country order is a guess (M4a R2): the album is tagged without the pressing's IDs
-        self.assertNotIn("catalognumber", p.targets[0])
-        self.assertNotIn("musicbrainz_albumid", p.targets[0])
+        # TIE-1: the country order picks the pressing, and it is tagged in full
+        self.assertEqual(p.targets[0]["catalognumber"], ["OTHER-100"])
+        self.assertEqual(p.targets[0]["musicbrainz_albumid"], ["mb-d2"])
         self.assertEqual(p.targets[0]["album"], ["Album D2"])
 
     def test_missing_discogs_token_still_identifies_from_musicbrainz(self):

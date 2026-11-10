@@ -133,7 +133,7 @@ class R15_02_UndoMarksOtherLooseTracksUndone(Base):
         audio(self.lib / "known.flac", 440, title="k", album="Known", artist="X")
         audio(self.lib / "other.flac", 550, title="o", album="Other", artist="Y")
         age(self.lib)
-        prof = watched(self, unresolved={"action": "leave"}, retry={"after_days": 0, "max_attempts": 5})
+        prof = watched(self, unresolved={"action": "leave"}, retry={"after_days": 30, "max_attempts": 5})
         FakeEngine.test = self
         w = watcher.Watcher(profiles=[prof], once=True)
         with mock.patch.object(watcher.eng_mod, "Engine", self.Engine):
@@ -141,7 +141,8 @@ class R15_02_UndoMarksOtherLooseTracksUndone(Base):
             self.assertEqual(sorted(self.Engine.calls), ["known.flac", "other.flac"])
             executor.undo(job_that_changed("known.flac"))     # the single was matched wrongly
             self.Engine.calls.clear()
-            w.tick()                                           # other.flac is due for its retry
+            with mock.patch.object(watcher.time, "time", return_value=time.time() + 30 * 86400 + 1):
+                w.tick()                   # other.flac is due for its retry (a loose track: retry.after_days)
         self.assertIn("other.flac", self.Engine.calls,
                       "the unresolved single next to the undone one is never retried")
 

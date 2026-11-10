@@ -199,12 +199,8 @@ class FallbackTieBreaks(unittest.TestCase):
     def test_country_order_is_album_only(self):
         a, cs = self.book_of_kings()
         r = run(a, *cs, cfg=CFG_US)
-        self.assertEqual(r["best"]["cand"]["id"], "spin")
-        self.assertNotEqual(r["status"], "auto")
-        self.assertTrue(all(mc._TIE_WHY.match(w) for w in r["why"]), r["why"])
-        only = mc.album_only(r, CFG_US, source="cd")
-        self.assertIsNotNone(only)
-        self.assertEqual({t["id"] for t in only["tied"]}, {"osmose", "spin"})
+        # TIE-1: the country order picks, and the pick is tagged in full
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "spin"), r["why"])
 
     def test_original_pressing_is_album_only(self):
         a, (fr, us) = self.book_of_kings()
@@ -212,8 +208,7 @@ class FallbackTieBreaks(unittest.TestCase):
         r = run(a, fr, us)
         self.assertEqual(r["best"]["cand"]["id"], "osmose")
         self.assertIn("label's original pressing", " ".join(r["best"]["notes"]))
-        self.assertEqual(r["status"], "review")
-        self.assertIsNotNone(mc.album_only(r, CFG))
+        self.assertEqual(r["status"], "auto")                 # TIE-1: no country order, the original
 
     def test_the_release_in_your_tags_is_kept(self):
         # Cult of Luna - Salvation: the files carry the GB pressing's MusicBrainz ID, no link
@@ -225,11 +220,10 @@ class FallbackTieBreaks(unittest.TestCase):
         a, cs = self.book_of_kings(tag_release_mb={"osmose"})
         r = run(a, *cs, cfg=CFG_US)
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "osmose"), r["why"])
-        # a blind run blanks those IDs: the country order is a guess again
+        # a blind run blanks those IDs: the country order picks (TIE-1)
         a, cs = self.book_of_kings(tag_release_mb=set())
         r = run(a, *cs, cfg=dict(CFG, preferred_countries=["FR"]))
-        self.assertNotEqual(r["status"], "auto")
-        self.assertIsNotNone(mc.album_only(r, CFG, source="cd"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "osmose"), r["why"])
         # a Discogs ID in the tags, a Discogs pressing
         a, (fr, us) = self.book_of_kings(tag_release_discogs={"2952"})
         r = run(a, dict(fr, source="discogs", id="1111"), dict(us, source="discogs", id="2952"), cfg=dict(
@@ -248,10 +242,8 @@ class FallbackTieBreaks(unittest.TestCase):
         dg = run(a, dict(us, source="discogs"))
         self.assertEqual((mb["status"], dg["status"]), ("auto", "auto"))
         out = mc.combine(mb, dg, ["US"])
-        self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("review", "spin"))
-        self.assertTrue(all(mc._TIE_WHY.match(w) for w in out["why"]), out["why"])
-        only = mc.album_only(out, CFG_US, source="cd")
-        self.assertEqual({t["id"] for t in only["tied"]}, {"osmose", "spin"})
+        # TIE-1: the country order decides between the databases, tagged in full
+        self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", "spin"))
         # the files tagged with the MusicBrainz one: it is kept
         a, (fr, us) = self.book_of_kings(toc_releases=set(), tag_release_mb={"osmose"})
         out = mc.combine(run(a, fr), run(a, dict(us, source="discogs")), ["US"])

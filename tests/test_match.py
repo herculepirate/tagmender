@@ -1407,11 +1407,9 @@ class OriginalPressing(unittest.TestCase):
         r = mc.classify([mc.score_candidate(a, cand(id="lic", country="BR", date="2010-11-02"), CFG_PREF),
                          mc.score_candidate(a, cand(id="orig", country="DE", date="2010-03-15"), CFG_PREF),
                          mc.score_candidate(a, cand(id="us", country="US", date="2010-04-20"), CFG_PREF)], CFG_PREF)
-        # the original is the pick, but a release date is no evidence about your copy (M4a R2):
-        # the album is tagged without the pressing's IDs
-        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "orig"), r["why"])
-        self.assertIn("label's original pressing", " ".join(r["best"]["notes"]))
-        self.assertTrue(all(mc._TIE_WHY.match(w) for w in r["why"]), r["why"])
+        # TIE-1/TIE-2: the country order before the original date, and the pick is tagged in full
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
+        self.assertIn("preferred country order", " ".join(r["best"]["notes"]))
 
     def test_pressings_released_together_fall_back_to_the_country_order(self):
         a = album()
@@ -1434,8 +1432,9 @@ class OriginalPressing(unittest.TestCase):
         dg = mc.classify([mc.score_candidate(a, cand(id="dgde", source="discogs", country="DE",
                                                          date="2010-03-15"), CFG)], CFG)
         out = mc.combine(dict(mb, scored=[]), dict(dg, scored=[]), ["CA", "US", "DE"])
-        self.assertEqual(out["best"]["cand"]["id"], "dgde")
-        self.assertIn("label's original pressing", " ".join(out["best"]["notes"]))
+        # TIE-2: between the databases too, the country order before the original date
+        self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", "mbus"))
+        self.assertIn("country order", " ".join(out["best"]["notes"]))
 
 
 
@@ -1615,10 +1614,11 @@ class PressingEvidence(unittest.TestCase):
         s = mc.score_candidate(a, c, CFG)
         r = mc.classify([s], CFG)
         self.assertEqual(r["status"], "auto", (s["confidence"], r["why"]))
-        # without the number, the same points stay under the bar
+        # without the number: every title agrees and one length is off, so ALB-1 takes it too
         r = self.pick(dict(a, folder="2004 - 2012 - Live I - VI", catnos=set(), catnos_from_folder=set()),
                       dict(c, catnos=set(), label="Other"))
-        self.assertNotEqual(r["status"], "auto")
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertIn("ALB-1", " ".join(r["best"]["notes"]))
 
     def test_one_disc_of_a_box_set(self):
         """Testament - 1988 - The New Order (2013, Warner, 8122796510-1): disc 2 of the 5CD
@@ -1962,12 +1962,11 @@ class PressingEvidence(unittest.TestCase):
     def test_one_pressing_listed_twice(self):
         r = self.pick(album(), cand(id="a", date="2006", catnos={"vr297"}, barcodes={"746105029729"}),
                       cand(id="b", date="2006-06-13", catnos={"vr297"}, barcodes={"746105029729"}))
-        # either entry is right, but which one is a guess (M4a R2): tagged without the IDs
-        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "b"), r["why"])
-        self.assertTrue(all(mc._TIE_WHY.match(w) for w in r["why"]), r["why"])
+        # either entry is right: the fuller one is tagged in full (TIE-1)
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])
         r = self.pick(album(), cand(id="a", catnos={"cm77412"}, barcodes=set()),
                       cand(id="b", date="1992-06-01", catnos={"cm77412"}, barcodes={"727701774121"}))
-        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "b"), r["why"])   # one lacks a barcode
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b"), r["why"])   # one lacks a barcode (TIE-1)
         r = self.pick(album(), cand(id="a", catnos={"nb4664"}, barcodes={"727361466411"}, formats={"vinyl"}),
                       cand(id="b", catnos={"nb4664"}, barcodes={"727361466428"}, formats={"vinyl"}))
         self.assertEqual(r["status"], "review")              # two vinyl colours: different barcodes
@@ -2028,10 +2027,9 @@ class PressingEvidence(unittest.TestCase):
     def test_country_preference_is_the_last_resort(self):
         cs = [cand(id="de", country="DE"), cand(id="us", country="US"), cand(id="jp", country="JP")]
         r = mc.classify([mc.score_candidate(album(), c, CFG_PREF) for c in cs], CFG_PREF)
-        # the country order picks, but never as an automatic pressing (M4a R2)
-        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "us"), r["why"])
+        # TIE-1: the country order picks, and the pick is tagged in full
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us"), r["why"])
         self.assertIn("preferred country order", " ".join(r["best"]["notes"]))
-        self.assertTrue(all(mc._TIE_WHY.match(w) for w in r["why"]), r["why"])
         # two US pressings: still undecided
         cs = [cand(id="us1", country="US", catnos={"a1"}), cand(id="us2", country="US", catnos={"a2"})]
         r = mc.classify([mc.score_candidate(album(), c, CFG_PREF) for c in cs], CFG_PREF)

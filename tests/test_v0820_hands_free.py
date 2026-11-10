@@ -38,8 +38,14 @@ class ADiscAndItsDownload(unittest.TestCase):
     def test_your_barcode_names_the_disc(self):
         self.assertEqual(self.pick(barcodes={mc.norm_code(CODE)}), "sacd")
 
-    def test_no_barcode_and_hi_res_audio_is_the_download(self):
-        self.assertEqual(self.pick(), "web")
+    def test_no_barcode_and_hi_res_audio_is_album_known(self):
+        # MED-4: 96 kHz audio with an SACD and a download listed, nothing else: album known
+        from test_match import album, cand, CFG
+        a = album(audio=HIRES)
+        c = [cand(source="discogs", id="sacd", country="US", formats={"cd"}, hires_media=True),
+             cand(source="discogs", id="web", country="US", formats={"digital"})]
+        r = mc.classify([mc.score_candidate(a, x, CFG) for x in c], dict(CFG, preferred_countries=["US"]))
+        self.assertNotEqual(r["status"], "auto")
 
 
 class Marks(unittest.TestCase):

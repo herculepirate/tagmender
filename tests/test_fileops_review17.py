@@ -135,7 +135,8 @@ class R17_03_DiscMediaOverwrittenWithEditionsOn(EditionBase):
               vinyl(1, "B", discnumber=["2"], totaldiscs=["2"], media=["DVD-Video"])]
         self.assertEqual(self.folders(self.plan(ts, template=tpl)), ["Meshuggah/I/CD 1", "Meshuggah/I/DVD-Video 2"])
         p = self.plan(ts, template=tpl, editions="edition")
-        self.assertEqual(self.folders(p), ["Meshuggah/I/CD 1", "Meshuggah/I/DVD-Video 2"])
+        # (ED-3: the 2019 CD reissue of a 2004 album is a remaster; the discs keep their media)
+        self.assertEqual(self.folders(p), ["Meshuggah/I [Remaster]/CD 1", "Meshuggah/I [Remaster]/DVD-Video 2"])
 
 
 # ---------------------------------------------------------------------------------------
@@ -319,9 +320,9 @@ class R17_10_PicardScriptDialogTextIsWrong(unittest.TestCase):
         ctx = naming.Ctx(tags)
         naming._ev(naming.compile_template(tagger), ctx)             # the tagger script: the Album tag
         album = ctx.local.get("album", "I")
-        self.assertEqual(album, "I [2019 Vinyl]")
+        self.assertEqual(album, "I [2019 Vinyl Rip]")                    # ED-2
         folder = naming.render(naming_part, dict(tags, album=album))[1]
-        self.assertEqual(folder, "2004 - I [2019 Vinyl]")
+        self.assertEqual(folder, "2004 - I [2019 Vinyl Rip]")
 
 
 # ---------------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 """What the copy is, written where a player can filter on it: GROUPING = "Vinyl Rip" for a vinyl
-rip and GROUPING = "HD Audio" for anything finer than a CD (more than 16 bits or more than
+rip, "Tape Rip" for a cassette rip (MED-6) and GROUPING = "HD Audio" for anything finer than a CD (more than 16 bits or more than
 44.1 kHz, DSD included). Only lossless audio counts: a lossy file's rate says nothing. Only
 where the file has no Grouping: it never replaces yours. marks.grouping."""
 from __future__ import annotations
@@ -10,7 +10,7 @@ import match_core as mc
 import tagio
 
 LOSSLESS = {".flac", ".wav", ".aif", ".aiff", ".ape", ".wv", ".dsf", ".dff", ".m4a", ".alac", ".tak"}
-HD, VINYL = "HD Audio", "Vinyl Rip"
+HD, VINYL, TAPE = "HD Audio", "Vinyl Rip", "Tape Rip"      # MED-8
 
 
 def is_hd(path) -> bool:
@@ -29,11 +29,14 @@ def is_hd(path) -> bool:
 
 
 def of_album(targets, files, folder="") -> str:
-    """The album's mark: "Vinyl Rip" when its release is on vinyl or its folder says so, "HD
+    """The album's mark: "Vinyl Rip" when its release is on vinyl or its folder says so, "Tape
+    Rip" likewise for a cassette, "HD
     Audio" when any of its files is finer than a CD, else ""."""
     kinds = {mc.media_kind(m) for t in targets or () for m in t.get("media") or ()}
     if "vinyl" in kinds or mc.media_hint(Path(str(folder)).name) == "vinyl":
         return VINYL
+    if "cassette" in kinds or mc._CASSETTE_HINT.search(Path(str(folder)).name):
+        return TAPE                                                       # MED-6
     return HD if any(is_hd(f) for f in files or ()) else ""
 
 

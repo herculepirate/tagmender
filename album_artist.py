@@ -4,7 +4,7 @@ names) as the lead artist alone, while the Artist tag keeps the whole credit.
   lead         on: a joint credit's first artist is the album artist ("Thomas Strønen & Time Is
                a Blind Guide" -> "Thomas Strønen"), and (bands) a band named after one of its
                members is filed under that member ("Steve Morse Band" -> "Steve Morse").
-               Off (default): the album artist is the release's credit, as before.
+               On by default (NAM-1); off: the album artist is the release's credit.
   bands        with lead: a band whose name is a member's own name followed by more words
                ("Pat Metheny Group", "The Jimi Hendrix Experience", "Tom Petty and the
                Heartbreakers", "Glenn Miller and His Orchestra") is filed under that member.

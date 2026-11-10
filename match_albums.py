@@ -511,6 +511,8 @@ def unlisted_scan_barcodes(http, album, results, args=None):
     tags = {mc.barcode_key(b) for b in album.get("tag_barcodes") or ()}   # your copy's own
     listed = {mc.barcode_key(b) for res in results for sc in (res or {}).get("scored") or ()
               for b in sc["cand"].get("barcodes") or ()}
+    # (only the barcodes the databases were searched by: one the scans show beside a different
+    # barcode in the tags was not, and is never called unlisted - BAR-4)
     left = sorted(b for b in album.get("barcodes") or () if mc.barcode_key(b) not in listed | tags)
     if not left or (args is not None and not getattr(args, "use_shops", True)):
         return set()
@@ -1997,6 +1999,7 @@ def audio_evidence(infos):
     """What the audio itself says about its source.
 
     hires: more than 16 bits or 48 kHz, so not from a CD (a vinyl rip or a download).
+    sacd: every file is DSD, an SACD area, or 88.2/176.4 kHz (an SACD's DSD64 converted: MED-3).
     cd_frames: every lossless track at 44.1 kHz is a whole number of CD sectors
     (588 samples), which a CD rip is and a download almost never is."""
     lossless = [i for i in infos if i.get("lossless") and i.get("rate")]
@@ -2008,7 +2011,10 @@ def audio_evidence(infos):
     not_cd = (len(lossless) >= 2 and len(lossless) == len(infos) and not hires
               and all(i["rate"] == 44100 and i["samples"] for i in lossless)
               and sum(1 for i in lossless if i["samples"] % CD_FRAME == 0) == 0)
-    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd}
+    # MED-3: an SACD's audio - DSD, an SACD_AREA tag, or DSD64 converted to 88.2 or 176.4 kHz
+    sacd = bool(infos) and all(i.get("sacd_area") or i.get("rate") in (88200, 176400)
+                               or (i.get("rate") or 0) >= 2822400 for i in infos)
+    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd, "sacd": sacd}
 
 
 def disc_tocs(infos):
@@ -3799,6 +3805,7 @@ def mb_candidate(rel):
         "tracks": tracks, "pregap_tracks": pregaps, "disc_titles": disc_titles, "packaging": mc.packaging_kind(rel.get("packaging")),
         "formats": {k for k in (mc.media_kind(m.get("format")) for m in audio_media) if k},
         "hires_media": mc.hires_media(m.get("format") for m in audio_media),
+        "sacd_media": mc.sacd_media(m.get("format") for m in audio_media),        # MED-3
         "enhanced": any("enhanced" in str(m.get("format") or "").casefold() for m in rel.get("media") or []),
         "unofficial": str(rel.get("status") or "").casefold() == "bootleg",       # R9
         # (the release's and its group's genres, when the lookup carried them: what an album
@@ -4255,6 +4262,8 @@ def discogs_candidate(rel, dm):
         # an SACD's descriptions may name it ("CD" with "SACD", "Hybrid")
         "hires_media": mc.hires_media([f.get("name") for f in rel.get("formats") or []]
                                       + [d for f in rel.get("formats") or [] for d in f.get("descriptions") or []]),
+        "sacd_media": mc.sacd_media([f.get("name") for f in rel.get("formats") or []]         # MED-3
+                                    + [d for f in rel.get("formats") or [] for d in f.get("descriptions") or []]),
         "enhanced": "enhanced" in _format_words(rel),
         # Discogs marks a bootleg "Unofficial Release" among the format's descriptions (R9:
         # Kreator - Enemy Of God Revisited, the Russian 8382890; BTBAM - Alaska)
@@ -6262,10 +6271,17 @@ def scans_barcode_why(final, album, ocr_txt, results):
     seen = sorted(album.get("ocr_barcodes") or ()) + mc.barcodes_read_whole(ocr_txt or "", printed)
     listed = {mc.barcode_key(b) for res in results for s in (res or {}).get("scored") or ()
               for b in s["cand"].get("barcodes") or ()}
+    unlisted = {mc.barcode_key(x) for x in album.get("unlisted_barcodes") or ()}
+    ignored = ""
     for b in seen:
         if mc.valid_barcode(re.sub(r"\D", "", str(b))) and mc.barcode_key(b) not in listed:
+            # BAR-4: one searched and found on no release anywhere is ignored (a sticker); any
+            # other barcode of the scans still says another pressing
+            if mc.barcode_key(b) in unlisted:
+                ignored = ignored or f"scans show barcode {b}, on no release: ignored (BAR-4)"
+                continue
             return f"scans show barcode {b}, not on this release"
-    return ""
+    return ignored
 
 
 def notes_barcode_why(final, album):
@@ -6331,9 +6347,16 @@ def _copy_disagrees(final, album, ocr_txt, results):
     alone (R3/R9), or fewer tracks here than the tags' own track total (the rest of the
     album is elsewhere, R11)."""
     why = []
-    for note in (scans_barcode_why(final, album, ocr_txt, results), notes_barcode_why(final, album)):
-        if note:
-            why.append(note)
+    sticker = scans_barcode_why(final, album, ocr_txt, results)
+    if sticker.endswith("(BAR-4)") and (final or {}).get("best"):
+        # BAR-4: a barcode on your scans that no release anywhere carries (searched on both
+        # databases and in the shops) is ignored: told, never a reason to wait
+        final["best"]["notes"] = list(final["best"].get("notes") or []) + [sticker]
+    elif sticker:
+        why.append(sticker)              # (not searched, or a search failed: another pressing, perhaps)
+    note = notes_barcode_why(final, album)
+    if note:
+        why.append(note)
     total, here = album.get("tracktotal") or 0, len(album.get("tracks") or ())
     best = (final or {}).get("best") or {}
     if best.get("missing") and total == len(best["cand"].get("slots") or ()) + sum(
@@ -6631,7 +6654,8 @@ def process(row, http, cfg, dm, args):
     would skip the steps that can really tell the pressings apart (the scans,
     fingerprints, ISRCs)."""
     full_cfg = cfg
-    cfg = dict(cfg, preferred_countries=[])
+    # (evidence_pass: a pick by date or entry is held back for the country order: TIE-2)
+    cfg = dict(cfg, preferred_countries=[], evidence_pass=bool(full_cfg.get("preferred_countries")))
     out = _process(row, http, cfg, dm, args, full_cfg)
     return out
 
@@ -7055,6 +7079,12 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     final = _sure_if_no_album_only(final, album, cfg)
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
+    if (status == "auto" and not album.get("unlisted_barcodes")
+            and scans_barcode_why(final, album, ocr_txt, (mb_res, dg_res))
+            and both_databases_answered(use_mb, use_discogs, provider_errors)):
+        # BAR-4: a barcode on the scans no candidate carries is searched (databases, shops)
+        # before it is ignored as a sticker or kept as another pressing's
+        album["unlisted_barcodes"] = unlisted_scan_barcodes(http, album, (mb_res, dg_res), args)
     disagrees = _copy_disagrees(final, album, ocr_txt, (mb_res, dg_res)) if status == "auto" else []
     if disagrees:
         status = "review"

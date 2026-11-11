@@ -1,5 +1,18 @@
 # Release notes
 
+## 0.8.40
+
+**Collaborations keep every name (NAM-8)**
+- An album credited to equals - two bands ("Calexico and Iron & Wine"), several musicians ("Jon
+  Balke, Per Jørgensen, Audun Kleive"), a duo named after its members ("Jimmy Page & Robert
+  Plant") - keeps the whole credit as album artist and folder. Only a leader credited with their
+  own band ("Thomas Strønen & Time Is A Blind Guide") is filed under the leader, as before.
+
+**Wikipedia track listings read right (WEB-2)**
+- Linked titles are written as their text (never "[[Night Stalkers (song)"), and an article's
+  bonus-track sections are other editions of the album, not discs 2 and 3; an LP's "Side two"
+  still continues the album.
+
 ## 0.8.39
 
 **Your own number decides over names (BAR-8)**

@@ -218,33 +218,130 @@ def _wiki_value(box, field):
     return re.sub(r"\s+", " ", v).strip(" ,|")
 
 
+# a track listing's field value: [[link|text]] and {{templates}} whole (their "|" is no field's end)
+_WIKI_FIELD = re.compile(r"\|\s*(title|length)(\d+)\s*=\s*((?:\[\[[^\]]*\]\]|\{\{[^{}]*\}\}|[^\n|\[{]|[\[{](?![\[{]))*)",
+                         re.I)
+
+
+_NOTE_TEMPLATES = re.compile(r"^\s*(?:efn|refn|ref|sfn|r|cite\b|citation|note|nb|#tag)", re.I)
+
+
+def _unwrap_templates(v):
+    """WEB-2: {{nowrap|X}}, {{lang|fr|Titre}}, {{sup|b}} keep their text (the last unnamed part);
+    notes and citations ({{efn|...}}, {{cite web|...}}) go. Innermost first."""
+    def one(m):
+        parts = m.group(1).split("|")
+        if _NOTE_TEMPLATES.match(parts[0]):
+            return ""
+        args = [x for x in parts[1:] if "=" not in x]
+        return args[-1] if args else ""
+    for _ in range(5):
+        v2 = re.sub(r"\{\{([^{}]*)\}\}", one, v)
+        if v2 == v:
+            break
+        v = v2
+    return v
+
+
+def _wiki_blocks(text):
+    """WEB-2: the {{Track listing}} blocks of an article as [(first number, [(num, title, secs)])]."""
+    out = []
+    for listing in re.findall(r"\{\{\s*Track ?listing(.*?)\n\}\}", text, re.S | re.I):
+        rows = {}
+        for k, n, v in _WIKI_FIELD.findall(listing):
+            v = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", v)       # (a link: its text)
+            v = re.sub(r"<ref[^>]*/>|<ref[^>]*>.*?</ref>|<!--.*?-->", "", v, flags=re.S)
+            v = _unwrap_templates(v)
+            rows.setdefault(int(n), {})[k.lower()] = v.strip()
+        tracks = []
+        for n in sorted(rows):
+            ln = rows[n].get("length", "")
+            m = re.fullmatch(r"(?:(\d+):)?(\d+):(\d{2})", ln)
+            secs = (int(m.group(1) or 0) * 3600 + int(m.group(2)) * 60 + int(m.group(3))) if m else 0
+            tracks.append((n, rows[n].get("title", "").strip('"').strip(), float(secs)))
+        if tracks:
+            head = re.search(r"\|\s*headline\s*=\s*([^\n]*)", listing, re.I)
+            out.append((tracks[0][0], tracks, head.group(1) if head else ""))
+    return out
+
+
+# a section that is another edition's, by its headline ("Digital edition bonus tracks", "Japanese
+# bonus track", "Deluxe edition", "EMP & Target exclusive CD"); "Side two", "Part II" run on
+_EDITION_HEAD = re.compile(r"bonus|edition|deluxe|reissue|remaster|exclusive|digital|japan|limited|"
+                           r"special|expanded|anniversary|itunes|amazon|target|walmart|vinyl\b|cd\b|lp\b", re.I)
+
+
+def _wiki_editions(blocks):
+    """WEB-2: the editions an article's blocks make, each [(disc, num, title, secs)]. A block
+    numbered from 1 is a disc of its own ("Disc one", "Disc two"). A block numbered on from where
+    the album ends continues it ("Side two" 6-10, a section without a headline) - unless its
+    headline names an edition, or another section already took those numbers: then it is that
+    edition's bonus tracks, its own candidate ("Digital edition bonus tracks", "EMP & Target
+    exclusive CD bonus tracks", both 13-14), never stacked on the others; sections running on
+    from one another (13-14 then 15-16) together."""
+    discs, sections = [], []
+    for block in blocks:
+        first, tracks = block[0], block[1]
+        head = block[2] if len(block) > 2 else ""
+        if first == 1 or not discs:
+            discs.append(list(tracks))
+            continue
+        end = max(n for n, _t, _s in discs[-1])
+        if first == end + 1 and not _EDITION_HEAD.search(re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", head)) \
+                and not sections:
+            discs[-1].extend(tracks)                     # ("Side two": the album runs on)
+        else:
+            sections.append(tracks)
+    base = [(d, n, t, s) for d, tracks in enumerate(discs, 1) for n, t, s in tracks]
+    if not base:
+        return []
+    last = len(discs)
+
+    def end_of(edition):
+        return max((n for d, n, _t, _s in edition if d == last), default=0)
+    editions, prev, seen = [base], None, {tuple(base)}
+    for tracks in sections:
+        mine = [(last, n, t, s) for n, t, s in tracks]
+        if prev is not None and tracks[0][0] == end_of(prev) + 1:
+            prev = prev + mine                           # (runs on from the section before it)
+        elif tracks[0][0] == end_of(base) + 1:
+            prev = base + mine                           # (another edition's bonus tracks)
+        else:
+            continue                                     # (numbered otherwise: not placed)
+        if tuple(prev) not in seen:                      # (two sections of the same tracks: one)
+            seen.add(tuple(prev))
+            editions.append(prev)
+    return editions
+
+
 def wikipedia_album(http, page_title):
-    """An album article: its infobox and track listing (titles and lengths)."""
+    """An album article: its infobox and its standard edition's track listing (titles and
+    lengths); None without an album infobox."""
+    eds = wikipedia_editions(http, page_title)
+    return eds[0] if eds else None
+
+
+def wikipedia_editions(http, page_title):
+    """An album article's editions (WEB-2): its infobox and each edition's track listing (titles
+    and lengths), one candidate per edition."""
     data = http.get_json("https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&redirects=1"
                          f"&page={q(page_title)}", "wikipedia") or {}
     text = ((data.get("parse") or {}).get("wikitext") or {}).get("*", "")
     box = re.search(r"\{\{\s*Infobox album(.*?)\n\}\}", text, re.S | re.I)
     if not box:
-        return None
+        return []
     box = box.group(0)
-    tracks = []
-    for disc, listing in enumerate(re.findall(r"\{\{\s*Track ?listing(.*?)\n\}\}", text, re.S | re.I), 1):
-        rows = {}
-        for k, n, v in re.findall(r"\|\s*(title|length)(\d+)\s*=\s*([^\n|]*)", listing, re.I):
-            rows.setdefault(int(n), {})[k.lower()] = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", v).strip()
-        for n in sorted(rows):
-            ln = rows[n].get("length", "")
-            m = re.fullmatch(r"(?:(\d+):)?(\d+):(\d{2})", ln)
-            secs = (int(m.group(1) or 0) * 3600 + int(m.group(2)) * 60 + int(m.group(3))) if m else 0
-            tracks.append({"disc": disc, "num": n, "title": rows[n].get("title", "").strip('"'),
-                           "secs": float(secs), "artist": ""})
     name = _wiki_value(box, "name") or page_title
     released = _wiki_value(box, "released")
     m = re.search(r"\d{4}-\d{2}-\d{2}|\d{4}", released)
     url = "https://en.wikipedia.org/wiki/" + q(((data.get("parse") or {}).get("title") or page_title).replace(" ", "_"))
-    return _cand("wikipedia", url, url, _wiki_value(box, "artist"), name, m.group(0) if m else "",
-                 _wiki_value(box, "label").split(",")[0].strip(), "",
-                 [g for g in re.split(r"\s*[,;\u2022\n]\s*", _wiki_value(box, "genre")) if g], tracks)
+    out = []
+    for k, edition in enumerate(_wiki_editions(_wiki_blocks(text))):
+        tracks = [{"disc": d, "num": n, "title": t, "secs": s, "artist": ""} for d, n, t, s in edition]
+        out.append(_cand("wikipedia", url + (f"#edition-{k}" if k else ""), url, _wiki_value(box, "artist"), name,
+                         m.group(0) if m else "", _wiki_value(box, "label").split(",")[0].strip(), "",
+                         [g for g in re.split(r"\s*[,;\u2022\n]\s*", _wiki_value(box, "genre")) if g], tracks))
+    return out
 
 
 def wikipedia(http, artist, title):
@@ -252,9 +349,7 @@ def wikipedia(http, artist, title):
                          f"&srsearch={q(f'{title} {artist} album')}", "wikipedia") or {}
     out = []
     for hit in ((data.get("query") or {}).get("search") or [])[:3]:
-        c = wikipedia_album(http, hit.get("title", ""))
-        if c and c["tracks"]:
-            out.append(c)
+        out += [c for c in wikipedia_editions(http, hit.get("title", "")) if c and c["tracks"]]
     return out
 
 

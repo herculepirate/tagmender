@@ -22,6 +22,9 @@ LEAD = {"lead": True, "bands": True, "file_under": {}}
 A, B = "Lead Person", "Second Group Name"
 JOINT = f"{A}, {B}"
 TWO = [{"id": 11, "name": A, "anv": "", "join": ","}, {"id": 22, "name": B, "anv": "", "join": ""}]
+# (NAM-8: the joint credits below are a leader with their own band - Discogs lists the lead as a
+# member of artist 22; a collaboration of equals keeps the whole credit, NAM8 tests)
+BAND = {"id": 22, "title": "(artist)", "artists": [{"name": B}], "members": [{"id": 11, "name": A}]}
 
 
 def prof(**kw):
@@ -32,7 +35,9 @@ class Choose(unittest.TestCase):
     def test_a_credit_split_one_value_per_artist_is_cut_to_its_lead(self):
         t = {"albumartist": [A, B], "albumartists": [A, B], "musicbrainz_albumartistid": ["m1", "m2"],
              "~albumartists_sort": ["Person, Lead", B]}
-        self.assertEqual(aa.choose(t, prof(), lambda m: [])[:3], (A, "Person, Lead", "m1"))
+        band = lambda m: [(A, "Person, Lead", "m1")] if m == "m2" else []   # noqa: E731  (A leads B)
+        self.assertEqual(aa.choose(t, prof(), band)[:3], (A, "Person, Lead", "m1"))
+        self.assertIsNone(aa.choose(t, prof(), lambda m: []))       # (NAM-8: two equals - the credit)
 
     def test_split_values_alone_are_names_enough(self):
         self.assertEqual(aa.choose({"albumartist": [A, B]}, prof(), lambda m: [])[0], A)
@@ -52,6 +57,62 @@ class Choose(unittest.TestCase):
         self.assertIsNone(aa.choose({"albumartist": [A, B], "albumartists": [A, B]}, p, None))
 
 
+class NAM8(Base):
+    """NAM-8: a joint credit of equals - two bands, two musicians, neither in the other's act - is
+    the album artist as credited (Calexico and Iron & Wine - In the Reins); only a leader credited
+    with their own band is cut to the leader (NAM-1)."""
+
+    def test_NAM8_two_independent_acts_keep_the_whole_credit(self):
+        t = {"albumartist": ["Calexico", "Iron & Wine"], "albumartists": ["Calexico", "Iron & Wine"],
+             "musicbrainz_albumartistid": ["cal", "iaw"]}
+        sam = lambda m: [("Sam Beam", "Beam, Sam", "sb")] if m == "iaw" else []     # noqa: E731
+        self.assertIsNone(aa.choose(t, prof(), sam))
+        self.assertIsNone(aa.choose(t, prof(), lambda m: []))                     # (two musicians, too)
+
+    def test_NAM8_a_leader_with_their_band(self):
+        t = {"albumartist": ["Thomas Strønen", "Time Is A Blind Guide"],
+             "albumartists": ["Thomas Strønen", "Time Is A Blind Guide"], "musicbrainz_albumartistid": ["ts", "tbg"]}
+        band = lambda m: [("Thomas Strønen", "Strønen, Thomas", "ts")] if m == "tbg" else []   # noqa: E731
+        self.assertEqual(aa.choose(t, prof(), band)[0], "Thomas Strønen")
+
+    def test_NAM8_a_duo_named_after_its_members(self):
+        # (MusicBrainz's group "Jimmy Page & Robert Plant": its name is its members' names alone)
+        duo = [("Jimmy Page", "Page, Jimmy", "jp"), ("Robert Plant", "Plant, Robert", "rp")]
+        self.assertIsNone(aa.leader_of("Jimmy Page & Robert Plant", duo))
+        self.assertIsNone(aa.leader_of("Emerson, Lake & Palmer", [("Keith Emerson", "", ""), ("Greg Lake", "", ""),
+                                                                  ("Carl Palmer", "", "")]))
+        self.assertEqual(aa.leader_of("Tom Petty and the Heartbreakers", [("Tom Petty", "", ""), ("Mike Campbell", "", "")])[0],
+                         "Tom Petty")                                            # (a leader's band: as before)
+
+    def test_NAM8_unknown_when_a_database_cannot_be_asked(self):
+        t = {"albumartist": ["Calexico", "Iron & Wine"], "albumartists": ["Calexico", "Iron & Wine"],
+             "musicbrainz_albumartistid": ["cal", "iaw"]}
+        self.assertEqual(aa.choose(t, prof(), lambda m: None), aa.UNKNOWN)
+        self.assertEqual(aa.choose({"albumartist": ["Calexico", "Iron & Wine"]}, prof(), None)[0], "Calexico")
+        # (no IDs, nothing to ask: the first artist, as before)
+
+    def test_NAM8_a_database_not_asked_is_no_answer(self):
+        t = {"albumartist": ["Thomas Strønen", "Time Is A Blind Guide"],
+             "albumartists": ["Thomas Strønen", "Time Is A Blind Guide"], "~discogs_albumartist_id": ["1", "2"]}
+        self.assertEqual(aa.choose(t, prof(), None, lambda d: aa.NOT_ASKED)[0], "Thomas Strønen")   # (as before)
+
+    def test_NAM8_your_own_name_goes_first(self):
+        t = {"albumartist": ["Calexico", "Iron & Wine"], "albumartists": ["Calexico", "Iron & Wine"],
+             "musicbrainz_albumartistid": ["cal", "iaw"]}
+        self.assertEqual(aa.choose(t, prof(file_under={"Calexico": "Calexico Band"}), lambda m: [])[0], "Calexico Band")
+
+    def test_NAM8_the_in_names(self):
+        self.assertIsNone(aa.leader_of("Bono and The Edge", [("Bono", "", ""), ("The Edge", "", "")]))
+
+    def test_NAM8_a_discogs_collaboration_keeps_its_credit(self):
+        d = self.album(JOINT, "Quiet Record")
+        r = dg_release(557, JOINT, "Quiet Record")
+        r["artists"] = TWO
+        eng = self.engine(FakeHttp(dg=[r]), album_artist=LEAD)          # (artist 22 lists no members)
+        t = eng.proposals(d)[0].targets[0]
+        self.assertEqual(t["albumartist"], [JOINT], t)
+
+
 class FromDiscogs(Base):
     def release(self, title):
         r = dg_release(555, JOINT, title)
@@ -60,7 +121,7 @@ class FromDiscogs(Base):
 
     def test_a_joint_discogs_credit_files_under_its_lead(self):
         d = self.album(JOINT, "Quiet Record")
-        eng = self.engine(FakeHttp(dg=[self.release("Quiet Record")]), album_artist=LEAD)
+        eng = self.engine(FakeHttp(dg=[self.release("Quiet Record"), BAND]), album_artist=LEAD)
         p = eng.proposals(d)[0]
         self.assertEqual((p.status, p.provider), ("identified", "discogs"))
         t = p.targets[0]
@@ -71,7 +132,7 @@ class FromDiscogs(Base):
 
     def test_a_release_you_chose_follows_the_setting_too(self):
         d = self.album(JOINT, "Quiet Record")
-        eng = self.engine(FakeHttp(dg=[self.release("Quiet Record")]), album_artist=LEAD)
+        eng = self.engine(FakeHttp(dg=[self.release("Quiet Record"), BAND]), album_artist=LEAD)
         g = eng.albums_in(d)[0]
         p = eng._forced(g, "discogs:555")
         eng.apply_level(p)
@@ -87,7 +148,7 @@ class FromDiscogs(Base):
         d = self.album("L. Person, Second Group Name", "Quiet Record")
         r = dg_release(556, "L. Person, Second Group Name", "Quiet Record")
         r["artists"] = [{"id": 11, "name": A, "anv": "L. Person", "join": ","}, {"id": 22, "name": B, "join": ""}]
-        eng = self.engine(FakeHttp(dg=[r]), album_artist=LEAD)
+        eng = self.engine(FakeHttp(dg=[r, BAND]), album_artist=LEAD)
         self.assertEqual(eng.proposals(d)[0].targets[0]["albumartist"], ["L. Person"])
 
 
@@ -491,7 +552,9 @@ class PartialFromAMaster(tp.Base):
                 "discogs_id": "", "artist": joint, "title": "Album P"}
         rel, master = tp.dg_release(900, joint), tp.dg_master(500, joint)
         rel["artists"], master["artists"] = two, two
-        http = tp.FakeHttp(dg=[rel], masters=[master],
+        band = {"id": 22, "title": "(artist)", "artists": [{"name": "Second Group"}],
+                "members": [{"id": 11, "name": "Lead Person"}]}                  # (NAM-8: its leader)
+        http = tp.FakeHttp(dg=[rel, band], masters=[master],
                            versions={500: {"versions": [{"id": 900}], "pagination": {"pages": 1}}})
         e, p, _ = self.run_partial(http, tp.review(best), d=self.album(joint), album_artist=LEAD)
         e.apply_level(p)

@@ -112,7 +112,9 @@ class Builtin(Base):
         self.assertNotIn("discogs", cu.s["providers_enabled"] or [])
         eng = self.engine(FakeHttp())
         with unittest.mock.patch.object(engine.album_artist, "discogs_members") as asked:
-            self.assertEqual(eng._discogs_band_members("123"), [])
+            got = eng._discogs_band_members("123")
+        self.assertIs(got, engine.album_artist.NOT_ASKED)             # (NAM-8: no answer, not "no members")
+        self.assertFalse(got)
         self.assertFalse(asked.called)
 
     def test_coverup_off_looks_for_no_artist_photo(self):

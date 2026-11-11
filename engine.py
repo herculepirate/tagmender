@@ -2949,7 +2949,7 @@ class Engine:
         if dgid not in memo:
             asks = self.http is not None and companions.discogs_on() and \
                 bool(((self.profile.get("providers") or {}).get("discogs") or {}).get("enabled", True))
-            memo[dgid] = album_artist.discogs_members(self.http, dgid, self.log) if asks else []
+            memo[dgid] = album_artist.discogs_members(self.http, dgid, self.log) if asks else album_artist.NOT_ASKED
         return memo[dgid]
 
     def _band_ids(self, name, mbid):

@@ -34,6 +34,8 @@ import compilations
 # choose(): MusicBrainz could not be asked for a band's members - the album artist the files
 # already hold stays (a re-run during an outage neither renames nor moves a settled album)
 UNKNOWN = ("",)
+# a database not asked at all (Discogs off, no token): no answer - never "no members" (NAM-8)
+NOT_ASKED = ()
 
 # the most words after the member's name ("and His Orchestra", "& The Silver Bullet Band",
 # "and The Baron Von Bielski Orchestra")
@@ -72,6 +74,12 @@ def leader_of(band: str, members) -> tuple | None:
         if not name or not b.startswith(name + " "):
             continue
         if len(b[len(name):].split()) > MAX_TAIL_WORDS:
+            continue
+        # NAM-8: a duo or trio named after its equal members ("Jimmy Page & Robert Plant",
+        # MusicBrainz's group of the two): the rest of the name is the other members' names alone
+        rest = [x for x in re.split(r"\s*(?:\band\b|,)\s*", b[len(name):]) if x.strip()]
+        others = {_no_the(fold(o[0])) for o in members if fold(o[0]) != name}
+        if rest and all(_no_the(x.strip()) in others for x in rest):
             continue
         if best is None or len(name) > len(fold(best[0])):
             best = m
@@ -143,7 +151,13 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
     if band_at >= 0:
         aligned = lambda xs: xs[band_at] if len(xs) == len(names) else ""   # noqa: E731
         lead = (names[band_at], aligned(sorts), aligned(ids), aligned(dg))
-    elif len(names) >= 2:                               # a joint credit: its first artist
+    elif len(names) >= 2:                               # a joint credit: its first artist ...
+        # (your own name for its first artist goes first: file_under over the rules)
+        equals = None if mapped(names[0])[0] else _equals(names, ids, dg, members_of, discogs_members_of)
+        if equals is True:
+            return None              # ... NAM-8: unless a collaboration of equals - the whole credit
+        if equals == "unknown":
+            return UNKNOWN
         aligned = lambda xs: xs[0] if len(xs) == len(names) else ""   # noqa: E731
         lead = (names[0], aligned(sorts), aligned(ids), aligned(dg))
     else:
@@ -184,6 +198,38 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         elif unknown:
             return UNKNOWN
     return lead if changed(lead[0]) else None
+
+
+def _equals(names, ids, dg, members_of=None, discogs_members_of=None):
+    """NAM-8: a joint credit is a collaboration of equals (True: Calexico and Iron & Wine, two
+    bands; Paolo Fresu & Omar Sosa, two musicians) unless its first artist is a member of another
+    act it names - a leader credited with their own band (False: Thomas Strønen & Time Is A Blind
+    Guide, Strønen in the band). The other acts' members come from MusicBrainz (its "member of
+    band" relationships), else from Discogs. None when no database can be asked for any of them
+    (no IDs: the first artist leads, as before); "unknown" when one could not be reached."""
+    lead = fold(names[0])
+    # (and by its IDs: a name credited otherwise on the sleeve, Discogs's "L. Person" for "Lead Person")
+    lead_ids = {str(x) for x in ((ids[0] if len(ids) == len(names) else ""),
+                                 (dg[0] if len(dg) == len(names) else ""))} - {""}
+    asked = False
+    for k in range(1, len(names)):
+        mbid = ids[k] if len(ids) == len(names) else ""
+        dgid = dg[k] if len(dg) == len(names) else ""
+        members = None
+        for some_id, ask in ((mbid, members_of), (dgid, discogs_members_of)):
+            if some_id and ask:
+                got = ask(some_id)
+                if got is None:
+                    return "unknown"
+                if isinstance(got, tuple) and not got:
+                    continue                             # (NOT_ASKED: no answer either way)
+                members = list(got)
+                asked = True
+                if members:
+                    break
+        if members and any(fold(m[0]) == lead or (lead_ids & {str(x) for x in m[2:4] if x}) for m in members):
+            return False                                 # (the first artist leads this band)
+    return True if asked else None
 
 
 def _found(name, ids, members_of):

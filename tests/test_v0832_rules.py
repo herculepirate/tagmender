@@ -521,6 +521,8 @@ class BAR8(unittest.TestCase):
         self.assertFalse(mc.catno_printed(a, "4764590"))                         # (typed only)
         self.assertFalse(mc.catno_printed({"printed_text": "ECM12345", "typed_text": ""}, "ecm1234"))   # (inside)
         self.assertTrue(mc.catno_printed({"printed_text": "CHARRMCD03", "typed_text": ""}, "charrmcd3"))  # (a zero)
+        self.assertTrue(mc.catno_printed({"printed_text": "ECM New Series 2230/31", "typed_text": ""},
+                                         "ecmnewseries2230/31"))                       # (its "/" printed or not)
 
     def test_BAR8_never_another_album_under_a_barcode(self):
         s = pressing("other", "DE", title_sim=0.4, dur_frac=0.2, titles_agree=0, confidence=60.0)

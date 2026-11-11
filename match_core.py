@@ -931,7 +931,9 @@ def catno_printed(album, catno, text="") -> bool:
     parts maybe spaced ("476 4582"), never inside a longer one ("ecm1234" in "ecm12345")."""
     printed = album.get("printed_text")
     printed = text if printed is None and album.get("typed_text") is None else (printed or "")
-    want = norm_code(str(catno or ""))                 # ("charrmcd3" is "CHARRMCD03" printed)
+    def bare(x):                                       # ("charrmcd3" is "CHARRMCD03" printed; "2230/31" "2230 31")
+        return re.sub(r"[^a-z0-9]", "", norm_code(str(x or "")))
+    want = bare(catno)
     if not want:
         return False
     tokens = re.findall(r"[a-z0-9]+", printed.lower())
@@ -939,7 +941,7 @@ def catno_printed(album, catno, text="") -> bool:
         joined = ""
         for j in range(i, min(i + 5, len(tokens))):
             joined += tokens[j]
-            k = norm_code(joined)
+            k = bare(joined)
             if k == want:
                 return True
             if len(k) >= len(want) + 2:

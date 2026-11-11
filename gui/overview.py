@@ -1869,6 +1869,29 @@ class Overview(QWidget):
             self.summary.setText(tr("Identifying album {0} of {n}: {name}… nothing is changed while previewing.")
                                  .format(i + 1, n=n, name=Path(what).name))
 
+    def apply_news(self, news):
+        """What Apply's worker tells as it goes: ("file", album, j, n, path), the next file of an
+        album; ("album", album, result), an album finished."""
+        if news and news[0] == "album":
+            self.album_applied(*news[1:])
+        elif news and news[0] == "file":
+            self.file_progress(*news[1:])
+
+    def album_applied(self, i, r):
+        """Apply's album I (of the rows it was given) is finished: its row says so now (Done,
+        Failed...), not once the whole job ends. applied() says it again, the same."""
+        rows = getattr(self, "_applied_rows", None) or []
+        if not (self._applying and 0 <= i < len(rows) and self.plan and 0 <= rows[i] < len(self.plan["albums"])):
+            return
+        a = self.plan["albums"][rows[i]]
+        a["status"] = r.get("status") or a.get("status")
+        if r.get("status") in ("failed", "conflict"):
+            a["conflicts"] = [r.get("detail") or ""]
+        if r.get("label") in ("Ignored", "Skipped"):
+            a["label"] = r["label"]
+        self.states.pop(id(a), None)
+        self.model.refresh_rows()
+
     def file_progress(self, i, j, n, path):
         """Apply: file J (0-based) of the N its album I has to write or move, next."""
         if not (self._applying and self.running):
@@ -2141,7 +2164,8 @@ class Overview(QWidget):
                 o = next(at)
                 return executor.Executor(p, cancel=lambda: w.cancelled,
                                          progress=lambda i, _n, what: w.progress.emit(o + i, total, what),
-                                         file_progress=lambda i, j, n, f: w.partial.emit((o + i, j, n, f))).run()
+                                         file_progress=lambda i, j, n, f: w.partial.emit(("file", o + i, j, n, f)),
+                                         album_done=lambda i, r: w.partial.emit(("album", o + i, r))).run()
             return merge_results(plans, run, lambda: w.cancelled)
         self.states = {id(self.plan["albums"][i]): "waiting" for i in self._applied_rows}
         self.model.refresh_rows()
@@ -2149,7 +2173,7 @@ class Overview(QWidget):
         self._applying, self._apply_at = True, (0, total, "")
         self.summary.setText(tr("Applying…"))
         self.worker = start(self, work, self.applied, self.progress, self.apply_failed,
-                            partial=lambda x: self.file_progress(*x))
+                            partial=self.apply_news)
 
     def apply_failed(self, msg):
         """Apply stopped with an error: said as any failure; the albums a look-up was

@@ -372,8 +372,10 @@ class Scans(te.Base):
         _, ocr = self.run_it(False, provider_s=0.0, db_name="o.sqlite")
         _, seq = self.run_it(False, db_name="s.sqlite")
         _, con = self.run_it(True, db_name="c.sqlite")
-        # in turn: about the sum; together: well under it, about the longer one
-        self.assertLess(con, seq - 0.5 * min(prov, ocr), (prov, ocr, seq, con))
+        # in turn: about the sum; together: well under it, about the longer one. (The sum of
+        # the two measured alone, not the one sequential run: on a busy CI machine a single
+        # run's time is noise - 1.17 s in turn against 1.35 s for the databases alone)
+        self.assertLess(con, max(seq, prov + ocr) - 0.5 * min(prov, ocr), (prov, ocr, seq, con))
         self.assertLess(con, max(prov, ocr) + 0.5 * min(prov, ocr) + 0.3, (prov, ocr, seq, con))
 
     def test_a_failed_look_up_leaves_no_pool_running(self):

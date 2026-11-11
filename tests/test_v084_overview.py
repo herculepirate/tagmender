@@ -260,6 +260,47 @@ class V084Overview(tg.Gui):
         self.assertEqual(ov.states, {})
         self.assertNotIn("Applying", self.status("Album G"))
 
+    def test_an_album_is_done_as_soon_as_its_files_are(self):
+        """Each album's row says Done once its last file is written and moved, while the next is
+        applied - not only when the whole job ends."""
+        import executor
+        ov = self.ov
+        self.listed()
+        ov.look_up("profile", list(ov.plan["albums"]))
+        self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())
+        gate, step = threading.Event(), executor.Executor.file_step
+        held = []
+
+        def slow(e, i, j, fe, a, done):
+            if i == 1 and j == 0:                      # (the second album's first file waits)
+                held.append(True)
+                gate.wait(30)
+            return step(e, i, j, fe, a, done)
+        with mock.patch.object(executor.Executor, "file_step", slow), \
+                mock.patch.object(self.gui.sheets, "confirm", return_value=True), \
+                mock.patch.object(self.win, "show_run_report"):
+            ov.apply()
+            self.assertTrue(wait(lambda: held, self.app, timeout=30))
+            first = Path(ov.plan["albums"][ov._applied_rows[0]]["source_dir"]).name
+            second = Path(ov.plan["albums"][ov._applied_rows[1]]["source_dir"]).name
+            self.assertTrue(wait(lambda: self.status(first.split(" - ")[1]) == "Done", self.app, timeout=10),
+                            self.status(first.split(" - ")[1]))
+            self.assertEqual(self.status(second.split(" - ")[1]), "Applying…")
+            gate.set()
+            self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())
+
+    def test_the_executor_tells_each_album_finished(self):
+        import executor
+        e = engine.Engine(pf.load("Auto"))
+        plan = e.plan(str(self.d))
+        told = []
+        res = executor.Executor(plan, album_done=lambda i, r: told.append((i, r))).run()
+        self.assertEqual(told, [(r["index"], r) for r in res["albums"]])
+        again = e.plan(str(self.d))
+        again["job"] += "-again"
+        bad = executor.Executor(again, album_done=lambda i, r: 1 / 0).run()                    # (never stops it)
+        self.assertIn(bad["status"], ("done", "partial"))
+
     def test_the_executor_says_each_file_before_its_step(self):
         import executor
         e = engine.Engine(pf.load("Auto"))

@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.8.29
+
+**Done as soon as it is done**
+- While Apply runs, each album's row in the Overview turns to Done (or Failed) the moment its
+  last file is tagged and moved, instead of staying Ready until the whole job ends.
+
+**Build**
+- A timing test that failed on a busy build machine (the 0.8.28 packages were not published)
+  no longer depends on a single run's time.
+
 ## 0.8.28
 
 **Your rip log's disc ID proves the album (TOC-1)**

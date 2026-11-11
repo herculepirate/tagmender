@@ -1175,7 +1175,7 @@ def _put_back(data_from: Path, path: Path, owner_of=None):
 # executing
 # --------------------------------------------------------------------------
 class Executor:
-    def __init__(self, plan: dict, log=None, cancel=None, progress=None, file_progress=None):
+    def __init__(self, plan: dict, log=None, cancel=None, progress=None, file_progress=None, album_done=None):
         self.plan = plan
         self.job = plan["job"]
         self.jd = job_dir(self.job)
@@ -1187,6 +1187,9 @@ class Executor:
         self.progress = progress or (lambda *a: None)
         # (file_progress(album index, j, n, file): the j-th of the album's n files to write or move, next)
         self.file_progress = file_progress or (lambda *a: None)
+        # (album_done(album index, result): that album is finished - its files written, moved
+        # and journalled - as the job's result will say it; the app marks its row Done at once)
+        self.album_done = album_done or (lambda *a: None)
         self.rules = None
         self.results = []
         self.created = []
@@ -1258,6 +1261,10 @@ class Executor:
             self.results.append({"album": a["source_dir"], "index": i, "status": status, "label": label,
                                  "detail": detail})
             _record_album(self.job, a["source_dir"], status, label, detail)
+            try:
+                self.album_done(i, dict(self.results[-1]))
+            except Exception:                          # (telling the app never stops the job)
+                self.log.exception("album_done for %s", a.get("source_dir"))
         _sweep_stages(self.plan, self.job, self.log)
         final = "done" if not any(k in counts for k in ("failed", "cancelled")) else "partial"
         self.journal.write(ev="end", status=final, counts=counts)

@@ -925,6 +925,28 @@ def _keys(values):
     return {barcode_key(b) for b in values or ()} - {""}
 
 
+def catno_printed(album, catno, text="") -> bool:
+    """BAR-8: this catalogue number is printed on your copy - on a scan or a PDF booklet
+    (album["printed_text"]), never only in typed notes or a saved page - as a whole number, its
+    parts maybe spaced ("476 4582"), never inside a longer one ("ecm1234" in "ecm12345")."""
+    printed = album.get("printed_text")
+    printed = text if printed is None and album.get("typed_text") is None else (printed or "")
+    want = norm_code(str(catno or ""))                 # ("charrmcd3" is "CHARRMCD03" printed)
+    if not want:
+        return False
+    tokens = re.findall(r"[a-z0-9]+", printed.lower())
+    for i in range(len(tokens)):
+        joined = ""
+        for j in range(i, min(i + 5, len(tokens))):
+            joined += tokens[j]
+            k = norm_code(joined)
+            if k == want:
+                return True
+            if len(k) >= len(want) + 2:
+                break
+    return False
+
+
 def typed_only_barcode(album, barcode):
     """True when this barcode is in the album's text only where someone TYPED it: the
     ripper's notes (.txt, .nfo, .info, .md) or a saved web page, never on a scan, a PDF
@@ -2595,6 +2617,23 @@ def same_pressing_listed_twice(tied):
     codes = {tuple(sorted(barcode_key(b) for b in s["cand"].get("barcodes") or ())) for s in tied} - {()}
     # a jewel case and a digipak with the same numbers are two products, not one listed twice
     packs = {s["cand"].get("packaging") for s in tied} - {"", None}
+    # TIE-6: one disc entered several times in MusicBrainz, its label and number written
+    # otherwise ("Atlantic" / "Megaforce Worldwide", "7818252" / "7567818252": King's X - Out Of
+    # The Silent Planet): every entry carrying your barcode and your disc's exact disc ID, of one
+    # country and format, is that one pressing
+    same_disc = (len(tied) >= 2 and all(s["cand"].get("source") == "mb" for s in tied)
+                 and all(_carries_barcode(s) and (s.get("clues") or {}).get("disc TOC") for s in tied)
+                 # (one year, or undated: a reissue years later may reuse both, and its date is
+                 # what gets written)
+                 and len({s["cand"].get("year") for s in tied} - {None, 0, ""}) <= 1
+                 and len({tuple(sorted(barcode_key(b) for b in s["cand"].get("barcodes") or ())) for s in tied}) == 1
+                 and len({(country_code(s["cand"].get("country")), tuple(sorted(s["cand"].get("formats") or ())))
+                          for s in tied}) == 1)
+    if same_disc and len(packs) <= 1 and not any(s.get("clues_against") for s in tied):
+        pick = max(tied, key=lambda s: (s["confidence"], bool(s.get("year_ok")), len(str(s["cand"].get("date") or "")),
+                                        len(s["cand"].get("catnos") or ()), -tied.index(s)))
+        return pick, {"duplicate": "one disc entered several times (your barcode and disc ID on each); "
+                                   "the fuller entry is used"}
     if len(keys) != 1 or not k[0] or len(codes) > 1:
         return None
     # Packaging variants of one number: the packaging your scans show decides (Candlemass -
@@ -3005,6 +3044,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                 typed_note = True               # typed in the ripper's notes or log, not the folder
     # (also when only another tagger's barcode or number agrees: printed on your scans too,
     # it is your copy's own)
+    catno_on_copy = False
     if (not code or code in (TAGS_BARCODE, TAGS_CATNO)) and ocr_text:
         hay = norm_code(ocr_text)
         for c in cand["catnos"]:
@@ -3013,7 +3053,11 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             # matches a printed year, a phone number or a barcode fragment.
             if len(c) >= 5 and re.search(r"[a-z]", c) and re.search(r"\d", c) and c in hay:
                 code = "catalogue number (OCR)"
-                break
+                # (BAR-8: your own number only when printed - a scan, a booklet - and whole; a
+                # printed one of the release's numbers before one only typed)
+                if catno_printed(album, c, ocr_text):
+                    catno_on_copy = True
+                    break
         for b in cand["barcodes"]:
             if barcode_printed(ocr_text, b):
                 # typed in the notes, an .nfo or a saved page only: weighs as the folder name
@@ -3171,7 +3215,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
         "toc_lengths": toc_lengths(album, cand, tracks_ok),
         "lengths_missing": lengths_missing, "avail": avail,
-        "numbers_repeat": numbers_repeat(album), "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
+        "numbers_repeat": numbers_repeat(album), "code": code, "catno_on_copy": catno_on_copy, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
         "copy_hint": album.get("media_hint") or "",
         "copy_kind": copy_kind(album),
         "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
@@ -3703,6 +3747,7 @@ def classify(scored, cfg):
              "audio fingerprint" if (best.get("clues") or {}).get("fingerprint") else
              "barcode" if best["code"] == "barcode" else
              "catalogue number" if best["code"] in ("catalogue number", "catalogue number (folder name)")
+             or (best["code"] == "catalogue number (OCR)" and best.get("catno_on_copy"))   # (BAR-8: your scans')
              else "")
     if not proof and best.get("scans_name_artist") and best["title_sim"] >= cfg["exact_title_sim"]:
         proof = "the scans naming this artist"           # only for the artist credit, below
@@ -3737,9 +3782,20 @@ def classify(scored, cfg):
         why.append(f"artist similarity {best['artist_sim']:.2f} < {cfg['auto_min_artist']}"
                    + (f" (credit lacks {', '.join(best['lacks'])}; tagging from it would drop them)"
                       if best.get("lacks") else ""))
+    # BAR-8: your copy's own barcode on it, every track there, the artist agreeing: a title your
+    # tags write otherwise ("UFO/ Hinten", another tagger's two-on-one) is no reason to hold it
+    n_rel = len(best["cand"].get("tracks") or ())
+    by_barcode = bool(barcode_proves(best) and best["tracks_ok"] and not best.get("conflict")
+                      and best["artist_sim"] >= cfg["auto_min_artist"]
+                      # (the album itself, too: half its lengths or its track titles - never another
+                      # album of the artist's under a wrong barcode)
+                      and ((best.get("dur_frac") or 0) >= 0.5 or (best.get("titles_agree") or 0) * 2 >= n_rel > 0))
     if proven and best["title_sim"] < cfg["auto_min_title"]:
         best["notes"] = best["notes"] + [f"title differs from the folder's; {proof} proves the album, "
                                          f"so the database title is used ({best['cand'].get('title')})"]
+    elif by_barcode and best["title_sim"] < cfg["auto_min_title"]:
+        best["notes"] = best["notes"] + [f"title differs from your tags'; your barcode is this release's, "
+                                         f"so its title is used ({best['cand'].get('title')}) (BAR-8)"]
     elif best["title_sim"] < cfg["auto_min_title"]:
         why.append(f"title similarity {best['title_sim']:.2f} < {cfg['auto_min_title']}")
     barcode_decides = barcode_proves(best)
@@ -3785,12 +3841,14 @@ def classify(scored, cfg):
     # disc split differently) do not undo that proof (ISIS - Live I - VI, DYMC-150: 89.5).
     own_number = (proven and not split_credit and best["dur_frac"] is not None
                   and best["dur_frac"] >= min_dur and not best.get("conflict")
-                  and (barcode_decides or best["code"] in ("catalogue number", "catalogue number (folder name)")))
+                  and (barcode_decides or best["code"] in ("catalogue number", "catalogue number (folder name)")
+                       or (best["code"] == "catalogue number (OCR)" and best.get("catno_on_copy"))))   # (BAR-8)
     # BAR-7: your copy's own barcode on the release, every track there, decides it whatever the
     # lengths say (a remaster's, a CD's lengths printed otherwise: Egberto Gismonti - Árvore,
     # 4 of 8) - as an agreeing catalogue number already excuses them above (lengths_excused)
     if (not own_number and barcode_decides and best["tracks_ok"] and not best.get("conflict") and not split_credit
-            and best["artist_sim"] >= cfg["auto_min_artist"] and best["title_sim"] >= cfg["auto_min_title"]):
+            and best["artist_sim"] >= cfg["auto_min_artist"]
+            and (best["title_sim"] >= cfg["auto_min_title"] or by_barcode)):     # (BAR-8: a title your tags write otherwise)
         own_number = True
         if best["dur_frac"] is not None and best["dur_frac"] < cfg["auto_min_duration_frac"]:
             best["notes"] = best["notes"] + [f"only {best['dur_frac']:.0%} of track lengths agree, but your "
@@ -3809,7 +3867,12 @@ def classify(scored, cfg):
         # (which tracks of the release each version folder is rests on order or on CD-like
         # audio: the album may be right, the medium is not proven)
         why.append(f"which tracks of the release each version is is not proven: {best['cand']['version_unsure']}")
-    if best.get("other_version"):
+    if best.get("other_version") and barcode_proves(best) and not best.get("conflict") and best["tracks_ok"] and \
+            ((best.get("dur_frac") or 0) >= 0.5 or (best.get("titles_agree") or 0) * 2 >= n_rel > 0):
+        # BAR-8: your barcode names this version (Guru Guru - Live & Unreleased, the Spalax CD)
+        best["notes"] = best["notes"] + [f"the release is the {best['other_version']} version, which your folder "
+                                         "and tags do not say; your barcode is this release's (BAR-8)"]
+    elif best.get("other_version"):
         why.append(f"the release is the {best['other_version']} version, which your folder and tags do not say")
     if best.get("conflict"):
         why.append("barcode differs from the candidate's")

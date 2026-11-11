@@ -1,5 +1,19 @@
 # Release notes
 
+## 0.8.39
+
+**Your own number decides over names (BAR-8)**
+- When your barcode proves the release (and the album fits: half its lengths or track titles),
+  a title another tagger wrote otherwise ("UFO/ Hinten") or a version your folder does not name
+  (a live album) no longer holds it back.
+- A catalogue number printed on your scans or booklet counts as your own number, as one in your
+  folder name does (never one only typed in notes or a saved page).
+
+**One disc entered several times (TIE-6)**
+- MusicBrainz entries of one CD with your barcode and your disc's exact disc ID, whose label and
+  catalogue number are only written differently, are one pressing: the album is tagged in full
+  instead of with album-level tags only.
+
 ## 0.8.38
 
 **Nothing left behind, also for short titles (MOV-3)**

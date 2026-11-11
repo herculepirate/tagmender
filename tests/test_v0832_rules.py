@@ -485,6 +485,74 @@ class FIL2(unittest.TestCase):
         self.assertFalse(ma.summarize({"best": dict(b, lacks=["Someone"])})["number_proven"])   # (a credit dropped)
 
 
+class BAR8(unittest.TestCase):
+    """BAR-8: your copy's own number proves the release: a title your tags write otherwise
+    (Guru Guru - UFO, tagged "UFO/ Hinten") or a version your folder does not name (Live &
+    Unreleased, the Spalax CD) holds nothing back, and a catalogue number read off your scans is
+    your own number (Makarski & Jarrett - Bach, ECM 4764582, 89.6)."""
+
+    def test_BAR8_a_title_your_tags_write_otherwise(self):
+        s = pressing("ufo", "DE", title_sim=0.46, dur_frac=0.6, confidence=81.2)
+        r = mc.classify([s], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertTrue(any("BAR-8" in n for n in r["best"]["notes"]))
+        r = mc.classify([pressing("ufo", "DE", barcode="", title_sim=0.46, dur_frac=0.6, confidence=81.2)], CFG)
+        self.assertNotEqual(r["status"], "auto")                                    # (no barcode of yours)
+
+    def test_BAR8_a_version_your_barcode_names(self):
+        r = mc.classify([pressing("live", "FR", other_version="live")], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        r = mc.classify([pressing("live", "FR", barcode="", other_version="live")], CFG)
+        self.assertTrue(any("live version" in w for w in r["why"]))
+
+    def test_BAR8_your_scans_catalogue_number(self):
+        s = pressing("ecm", "DE", barcode="", code="catalogue number (OCR)", catno_on_copy=True, confidence=89.6,
+                     dur_frac=0.84)
+        r = mc.classify([s], CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertTrue(r["best"]["own_number"])
+        typed = pressing("ecm", "DE", barcode="", code="catalogue number (OCR)", catno_on_copy=False, confidence=89.6,
+                         dur_frac=0.84)                                            # (only in notes or a saved page)
+        self.assertFalse(mc.classify([typed], CFG)["best"]["own_number"])
+
+    def test_BAR8_printed_means_on_a_scan_and_whole(self):
+        a = {"printed_text": "ECM New Series 476 4582 made in Germany", "typed_text": "see ECM 4764590"}
+        self.assertTrue(mc.catno_printed(a, "4764582"))
+        self.assertFalse(mc.catno_printed(a, "4764590"))                         # (typed only)
+        self.assertFalse(mc.catno_printed({"printed_text": "ECM12345", "typed_text": ""}, "ecm1234"))   # (inside)
+        self.assertTrue(mc.catno_printed({"printed_text": "CHARRMCD03", "typed_text": ""}, "charrmcd3"))  # (a zero)
+
+    def test_BAR8_never_another_album_under_a_barcode(self):
+        s = pressing("other", "DE", title_sim=0.4, dur_frac=0.2, titles_agree=0, confidence=60.0)
+        self.assertNotEqual(mc.classify([s], CFG)["status"], "auto")
+        r = mc.classify([pressing("live", "FR", other_version="live", dur_frac=0.2, titles_agree=0)], CFG)
+        self.assertTrue(any("live version" in w for w in r["why"]))
+
+
+class TIE6(unittest.TestCase):
+    """TIE-6: one disc entered several times in MusicBrainz, its label and number written otherwise
+    (King's X - Out Of The Silent Planet): your barcode and exact disc ID on each - one pressing."""
+
+    def entries(self, toc=True):
+        clues = {"disc TOC": "disc ID matches"} if toc else {}
+        return [pressing("a", "US", catnos=("7567818252",), clues=clues, cand={"label": "Megaforce Worldwide"}),
+                pressing("b", "US", catnos=("7818252", "818252"), clues=clues, cand={"label": "Atlantic; Megaforce"}),
+                pressing("c", "US", catnos=("7818252", "818252"), clues=clues, cand={"label": "Atlantic", "date": ""})]
+
+    def test_TIE6_one_disc_entered_several_times(self):
+        got = mc.same_pressing_listed_twice(self.entries())
+        self.assertIn("one disc entered several times", got[1]["duplicate"])
+
+    def test_TIE6_not_without_the_disc_id(self):
+        self.assertIsNone(mc.same_pressing_listed_twice(self.entries(toc=False)))
+
+    def test_TIE6_not_across_years(self):
+        e = self.entries()
+        e[0]["cand"]["year"], e[1]["cand"]["year"] = 1988, 2005                  # (a reissue reusing both)
+        got = mc.same_pressing_listed_twice(e)
+        self.assertFalse(got and "one disc entered" in got[1].get("duplicate", ""))
+
+
 class CAT1(unittest.TestCase):
     def test_CAT1_an_sacd_audio_format_is_no_catalogue_number(self):
         # (Blood, Sweat & Tears: "[SACD DSD64 2ch Rip 24bit 352khz]" in the album tag)

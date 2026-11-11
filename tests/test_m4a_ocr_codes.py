@@ -143,6 +143,20 @@ class Barcodes(unittest.TestCase):
         self.assertEqual(ma.ocr_barcodes([self.tmp / "digi0000.jpg"], per_image_s=0.01, total_s=0.01),
                          {"5907785038684"})
 
+    @unittest.skipUnless(HAVE_ZBAR, "pyzbar not installed")
+    def test_a_barcode_with_a_dark_edge_close_after_it_is_decoded(self):
+        """Mekong Delta - Visions Fugitives (Zardoz Music): the white label ends 4 bar widths
+        after the bars and the dark spine starts there. Cut out in a white margin, that edge
+        is one more bar to zbar; the crop as cut reads."""
+        module = 6
+        page = Image.new("L", (3500, 2700), 60)
+        label = ean_label("4019521500582", module=module, height=200)
+        label = label.crop((0, 0, (11 + 95 + 4) * module, label.height))
+        page.paste(label, (2400, 2250))
+        p = self.tmp / "back.jpg"
+        page.save(p, quality=92)
+        self.assertEqual(ma.ocr_barcodes([p], per_image_s=0.01, total_s=0.01), {"4019521500582"})
+
     def test_a_big_barcode_found_in_pieces_is_one_patch(self):
         """Lamb of God - Omens: 13-pixel bars; its wide black bars have no edges inside, so the
         patch came out as two or three pieces, none of them a whole code."""
@@ -452,16 +466,31 @@ class Investigation(unittest.TestCase):
         finally:
             shutil.rmtree(d)
 
+    def test_an_older_reading_keeps_its_code_and_an_empty_one_is_read_again(self):
+        """barcodes2 -> barcodes3: a code an older reading decoded is kept as is; an empty
+        older reading is decoded again once (it was tried only in a white margin then)."""
+        import sqlite3
+        db = sqlite3.connect(":memory:")
+        a, b = ["/nonexistent/a.jpg"], ["/nonexistent/b.jpg"]
+        ma._cached(db, "barcodes2", ma.images_key(a), lambda: {"codes": ["111"], "from": {}})
+        ma._cached(db, "barcodes2", ma.images_key(b), lambda: [])
+        seen = []
+        with mock.patch.object(ma, "ocr_barcodes", lambda paths, *x, **k: seen.append(paths) or {"222"}):
+            self.assertEqual(ma.decoded_barcodes(db, a), {"111"})
+            self.assertEqual(ma.decoded_barcodes(db, b), {"222"})
+            self.assertEqual(ma.decoded_barcodes(db, b), {"222"})       # then cached
+        self.assertEqual(seen, [b])
+
     def test_the_first_pass_empty_decode_is_not_redone(self):
         """15 scans or fewer: the investigation's scans are the first pass's, and its empty
-        decode (cached as barcodes2) is reused, not searched again for up to ~100 s."""
+        decode (cached as barcodes3) is reused, not searched again for up to ~100 s."""
         import sqlite3
         d = Path(tempfile.mkdtemp())
         try:
             Image.new("L", (1200, 900), 200).save(d / "back.jpg")
             db = sqlite3.connect(":memory:")
             _imgs, key = ma.list_images(d, 15)
-            ma._cached(db, "barcodes2", key, lambda: [])            # the first pass read nothing
+            ma._cached(db, "barcodes3", key, lambda: [])            # the first pass read nothing
             seen = []
             album = {"barcodes": set(), "catno_search": [], "artist": "Alcest", "title": "Écailles De Lune"}
             with mock.patch.object(ma, "ocr_deep", lambda paths: ""), \

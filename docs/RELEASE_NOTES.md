@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.8.26
+
+**Barcodes close to a dark edge are read**
+- A barcode whose white label ends a few bar widths after the bars (a dark spine or picture
+  right beside it) is now decoded from the scan. Before, it was missed, the scans could not prove
+  the release, and an album whose sleeve track lengths differ from the disc was tagged in place
+  instead of filed.
+- Scans where an earlier version decoded no barcode are decoded once more; barcodes already
+  decoded are kept.
+
 ## 0.8.25
 
 **A missing track on a set numbered straight through (HF-5)**

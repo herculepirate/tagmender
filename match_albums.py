@@ -4854,17 +4854,28 @@ class _DiscogsAhead:
 
 
 def decoded_barcodes(db, images, log=None):
-    """ocr_barcodes(images), cached for exactly these scans ("barcodes2"), with the scan
-    each code was decoded on noted in log["barcodes"]."""
+    """ocr_barcodes(images), cached for exactly these scans ("barcodes3"), with the scan
+    each code was decoded on noted in log["barcodes"]. A code an older reading ("barcodes2")
+    decoded is kept; an older empty reading is read again once (the crops were tried only in
+    a white margin then: Mekong Delta - Visions Fugitives, bars up to the label's edge)."""
     images = [str(p) for p in images]
     if not images:
         return set()
+    key = images_key(images)
 
     def compute():
         codes = sorted(ocr_barcodes(images))           # (albums looked up at once share _DECODED_ON)
         where = {c: [p for p in list(_DECODED_ON.get(c, ())) if p in images] for c in codes}
         return {"codes": codes, "from": {c: min(images.index(p) for p in on) for c, on in where.items() if on}}
-    value = _cached(db, "barcodes2", images_key(images), compute)
+    if db is not None:
+        db.execute("CREATE TABLE IF NOT EXISTS ocr_cache (key TEXT PRIMARY KEY, value TEXT)")
+        row = db.execute("SELECT value FROM ocr_cache WHERE key=?", (f"barcodes2:{key}",)).fetchone()
+        old = json.loads(row[0]) if row else None
+        if isinstance(old, list):
+            old = {"codes": old, "from": {}}
+        if old and old.get("codes"):
+            compute = (lambda old=old: old)
+    value = _cached(db, "barcodes3", key, compute)
     if isinstance(value, list):                        # a reading stored as the codes alone
         value = {"codes": value, "from": {}}
     found = set(value.get("codes") or ())
@@ -5273,10 +5284,15 @@ def _bar_crops(g, box):
             c = g.crop((a, int(y0 + bh * inset), b, int(y1 - bh * inset)))
             if c.width < 8 or c.height < 4:
                 continue
+            bare = c
             c = ImageOps.expand(c, border=max(12, int((b - a) * 0.08)), fill=255)
             yield c
             if c.width < 900:
                 yield c.resize((c.width * 2, c.height * 2), Image.LANCZOS)
+            # as cut, too: a barcode with little white beside it (its label's edge a few bar
+            # widths away) is read as one more bar once a white margin is put round that edge
+            # (Mekong Delta - Visions Fugitives: the dark spine 4 bar widths after the bars)
+            yield bare
 
 
 def Image_from(arr):

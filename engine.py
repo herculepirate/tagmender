@@ -370,8 +370,10 @@ def _slots_of(album, cand, sc):
     (match_core.slot_view, as the matcher's missing-track match has them), so the files are
     tagged as those tracks and the rest noted as missing. {} when the files are not fewer or
     have no track numbers to place them by."""
-    view = sc["cand"] if sc.get("missing") and sc["cand"].get("slots") else mc.slot_view(album, cand)
-    if not view or not view.get("missing"):
+    # (TRK-2: or the files are its tracks in another order - each file's own track, none missing)
+    view = sc["cand"] if (sc["cand"].get("slots") is not None
+                          and (sc.get("missing") or sc["cand"].get("reordered"))) else mc.slot_view(album, cand)
+    if not view or not (view.get("missing") or view.get("reordered")):
         return {}
     return {"slots": list(view["slots"]), "missing": dict(view["missing"]),
             "release_tracks": view.get("full_tracks") or len(cand.get("tracks") or [])}
@@ -1538,7 +1540,7 @@ class Engine:
         why = [f"the release you chose ({ref}); the matcher scores it {sc.get('confidence', 0):.0f}"]
         fits = sc.get("tracks_ok") or (best.get("slots") and mc.score_candidate(
             album, mc.slot_view(album, cand) or cand, self.cfg).get("tracks_ok"))
-        if best.get("slots"):
+        if best.get("slots") and best.get("missing"):
             why.append(f"tracks {mc.missing_text(best['missing'])} of {best['release_tracks']} are not in the folder")
         if not fits:
             why.append("its track list does not fit the files well: check the preview")
@@ -4035,6 +4037,8 @@ def _dg_tracks(tracklist, parent_position=None) -> list:
     """A Discogs tracklist's audio entries in ma.flatten_tracklist's order, with each one's own
     artists (a split album's or a compilation's)."""
     out = []
+    if parent_position is None:
+        tracklist = ma.one_track_movements(tracklist)        # TRK-1
     for e in tracklist or []:
         if not isinstance(e, dict):
             continue
@@ -4201,6 +4205,8 @@ def parse_release_ref(ref: str):
 def _flatten_raw(tracklist, parent_position=None):
     """match_albums.flatten_tracklist, keeping each entry's own fields (artists...)."""
     out = []
+    if parent_position is None:
+        tracklist = ma.one_track_movements(tracklist)        # TRK-1
     for e in tracklist or []:
         if not isinstance(e, dict):
             continue
@@ -4329,6 +4335,7 @@ def discogs_parts(det, dm, http=None, s=None):
     import tagger_settings
     s = s or tagger_settings.enrichment()
     det = discogs_without_repeats(det, dm)
+    det = ma.discogs_one_track_movements(det)                # TRK-1: the plugin writes one track too
     album = shape_fields(dm.extract_discogs_fields(det), s, dm)
     if det.get("master_id") and http is not None:
         try:

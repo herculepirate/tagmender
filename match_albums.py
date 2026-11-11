@@ -4134,7 +4134,84 @@ def _digital_count(data, key, total_key, formats):
 _POS_DISC = re.compile(r"^\s*(?:[A-Za-z]{1,4})?(\d+)\s*[-.]\s*\d+")
 
 
-def flatten_tracklist(tracklist, dm, parent_position=None):
+def _row_kind(e) -> str:
+    return str(e.get("type_") or e.get("type") or "track").strip().casefold()
+
+
+# a movement's place within its work: "7.I", "7-II", "7a" - letters or roman numerals, never a
+# number ("2-2", "1.7": a disc's track)
+_MOVEMENT_REST = re.compile(r"^\s*(?:[.\-]\s*[ivxlc]+|\.?\s*[a-z])\s*$", re.I)   # (never a number: "2-2")
+
+
+def _movement_of(position, parent) -> bool:
+    """POSITION numbers a movement of the track at PARENT ("7.I", "7a" of "7"; never "10" of "1")."""
+    p, s = str(parent or "").strip(), str(position or "").strip()
+    # (only a track's own number has movements: "7", "1-7", "A7" - never "7.I", whose "7.II" follows)
+    return bool(p) and p[-1].isdigit() and s.startswith(p) and bool(_MOVEMENT_REST.match(s[len(p):]))
+
+
+def one_track_movements(tracklist) -> list:
+    """TRK-1: a work Discogs lists with its movements under it - an index entry with its own
+    length whose sub-tracks list none (Blood, Sweat & Tears - Mirror Image & New City: "Mirror
+    Image" 11:09, movements 7a-7d), or a track with its own length followed by rows of its
+    movements without lengths ("Symphony For The Devil" 7:49, then 7.I, 7.II, 7.III, on BS&T 3)
+    - is ONE track of the disc: the movements are index points or the sleeve's headings, not
+    tracks. A movement listing its own length keeps the work as listed (each its own track).
+    Every reader of a Discogs tracklist (the matcher, the tags written) uses this; applied twice
+    it changes nothing."""
+    rows = [e for e in tracklist or []]
+    out, i = [], 0
+    while i < len(rows):
+        e = rows[i]
+        if not isinstance(e, dict):
+            out.append(e)
+            i += 1
+            continue
+        kind = _row_kind(e)
+        if kind == "index":
+            subs = [s for s in e.get("sub_tracks") or [] if isinstance(s, dict) and _row_kind(s) == "track"]
+            if str(e.get("duration") or "").strip() and subs and not any(str(s.get("duration") or "").strip()
+                                                                           for s in subs):
+                pos = str(e.get("position") or "").strip()
+                if not pos:                          # ("" over 7a-7d: the work is track 7)
+                    m = re.match(r"^(.*\d)(?:[.\-]\s*[ivxlc]+|\.?\s*[a-z])\s*$", str(subs[0].get("position") or ""), re.I)
+                    pos = m.group(1) if m else ""
+                if not pos or not all(_movement_of(s.get("position"), pos) for s in subs):
+                    out.append(e)                    # (sub-tracks numbered as tracks: listed as they are)
+                    i += 1
+                    continue
+                one = {k: v for k, v in e.items() if k != "sub_tracks"}
+                one.update(type_="track", position=pos)
+                if not one.get("artists") and subs[0].get("artists"):
+                    one["artists"] = subs[0]["artists"]
+                out.append(one)
+                i += 1
+                continue
+        elif kind == "track" and str(e.get("duration") or "").strip():
+            j = i + 1
+            while (j < len(rows) and isinstance(rows[j], dict) and _row_kind(rows[j]) == "track"
+                   and not str(rows[j].get("duration") or "").strip()
+                   and _movement_of(rows[j].get("position"), e.get("position"))):
+                j += 1
+            out.append(e)
+            i = j                                    # (its movements: no tracks of their own)
+            continue
+        out.append(e)
+        i += 1
+    return out
+
+
+def discogs_one_track_movements(rel):
+    """REL with its tracklist read as TRK-1 has it (one_track_movements); REL itself when that
+    changes nothing."""
+    if not isinstance(rel, dict) or not rel.get("tracklist"):
+        return rel
+    flat = one_track_movements(rel["tracklist"])
+    return rel if len(flat) == len(rel["tracklist"]) and all(a is b for a, b in zip(flat, rel["tracklist"])) \
+        else dict(rel, tracklist=flat)
+
+
+def flatten_tracklist(tracklist, dm, parent_position=None, movements=True):
     """Audio tracks in order. Discogs 'index' entries (a work split into
     movements) carry their audio in nested sub_tracks; headings carry none.
     The plugin's parse_discs() skips index entries, so it cannot be used
@@ -4143,6 +4220,8 @@ def flatten_tracklist(tracklist, dm, parent_position=None):
     A sub-track's own position ("2.1", "2a") numbers it WITHIN its work, not
     a disc, so it takes its parent entry's position for disc numbering."""
     out = []
+    if parent_position is None and movements:
+        tracklist = one_track_movements(tracklist)          # TRK-1
     for e in tracklist or []:
         if not isinstance(e, dict):
             continue
@@ -4284,6 +4363,10 @@ def discogs_candidate(rel, dm):
     # The credit exactly as the plugin writes it (format_artist_credit honours
     # Discogs' "credited as" names and join words), plus the canonical names,
     # since files may carry either form.
+    # (the rows as Discogs lists them, a work's movements each counted: what a tagger that wrote
+    # the files' track total counted - _total_miscounted)
+    raw_rows = len(drop_video_tracks(flatten_tracklist(rel.get("tracklist"), dm, movements=False), rel))
+    rel = discogs_one_track_movements(rel)                  # TRK-1 (the plugin's disc split too)
     artists = dm.format_artist_credit(rel.get("artists"))
     canonical = " & ".join(dm.clean_artist_name(a.get("name")) for a in rel.get("artists", [])
                            if isinstance(a, dict))
@@ -4353,6 +4436,7 @@ def discogs_candidate(rel, dm):
                                                if l.get("catno") and str(l["catno"]).casefold() != "none")),
         "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks, "disc_titles": disc_titles,
         "video_only": video_only,
+        "rows": raw_rows,                                   # (TRK-1: the rows before movements are one track)
         # matrix / runout, SID and label codes: compared with what the disc scans read
         "matrix": [(str(i.get("type")), str(i["value"])) for i in rel.get("identifiers", [])
                    if str(i.get("type") or "").casefold() in mc.MATRIX_KINDS and i.get("value")],
@@ -6372,8 +6456,9 @@ def summarize(res):
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
             # tracks missing from the folder: each file's track of the release (0-based, in
             # the release's order), the missing ones {disc: [numbers]}, the release's count
-            **({"slots": list(c["slots"]), "missing": {str(d): v for d, v in b["missing"].items()},
-                "release_tracks": c.get("full_tracks")} if b.get("missing") else {}),
+            # (TRK-2: or your files are its tracks in another order: each file's track, none missing)
+            **({"slots": list(c["slots"]), "missing": {str(d): v for d, v in (b.get("missing") or {}).items()},
+                "release_tracks": c.get("full_tracks")} if b.get("missing") or c.get("reordered") else {}),
             # versions of one disc in folders of their own: each its own medium of the release
             # (match_core.version_view), tagged as that medium's tracks - nothing missing
             **({"version_tracks": [list(x) for x in c["version_tracks"]],
@@ -6478,7 +6563,7 @@ def _total_miscounted(final, album, here, total=0, results=()):
     if (len(mine) == 1 and str(cand.get("id")) in mine) or (final.get("mb_twin") and mb_ids == {final["mb_twin"]}):
         return True
     return bool(total) and any(
-        c.get("source") != cand.get("source") and len(c.get("tracks") or ()) == total
+        c.get("source") != cand.get("source") and (c.get("rows") or len(c.get("tracks") or ())) == total
         and _audio_rows(c) == here and not mc._stated_apart(c, cand)
         and (mc.same_pressing(c, cand) or mc.same_pressing(cand, c))
         for res in results or () for c in (s["cand"] for s in (res or {}).get("scored") or ()))

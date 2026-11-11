@@ -254,6 +254,142 @@ class MED13(unittest.TestCase):
         self.assertFalse(any("format=SACD" in u for u in asked))
 
 
+class TRK1(unittest.TestCase):
+    """TRK-1: a work listed with its movements under it is one track (BS&T 3: "Symphony For The
+    Devil" 7:49 then 7.I-7.III; Mirror Image: an index "Mirror Image" 11:09 over 7a-7d)."""
+
+    def rows(self, n, start=1):
+        return [{"position": str(i), "type_": "track", "title": f"T{i}", "duration": "3:00"} for i in range(start, n + 1)]
+
+    def bst3(self):
+        return (self.rows(6) + [{"position": "7", "type_": "track", "title": "Symphony", "duration": "7:49"}]
+                + [{"position": f"7.{r}", "type_": "track", "title": f"Mvt {r}", "duration": ""} for r in ("I", "II", "III")]
+                + self.rows(10, 8))
+
+    def mirror(self):
+        return (self.rows(6) + [{"position": "", "type_": "index", "title": "Mirror Image", "duration": "11:09",
+                                 "sub_tracks": [{"position": f"7{x}", "type_": "track", "title": f"Mvt {x}", "duration": ""}
+                                                for x in "abcd"]}] + self.rows(18, 8))
+
+    def test_TRK1_movements_without_lengths_are_one_track(self):
+        flat = ma.one_track_movements(self.bst3())
+        self.assertEqual([t["position"] for t in flat], [str(i) for i in range(1, 11)])
+        flat = ma.one_track_movements(self.mirror())
+        self.assertEqual(len(flat), 18)
+        self.assertEqual((flat[6]["position"], flat[6]["title"], flat[6]["duration"]), ("7", "Mirror Image", "11:09"))
+        self.assertEqual(ma.one_track_movements(flat), flat)                       # (twice: no change)
+
+    def test_TRK1_movements_with_lengths_stay_tracks(self):
+        rows = self.bst3()
+        rows[7]["duration"] = "2:00"                                               # (7.I has its own length)
+        self.assertEqual(len(ma.one_track_movements(rows)), 13)                   # (listed as Discogs has it)
+        m = self.mirror()
+        m[6]["sub_tracks"][0]["duration"] = "2:00"
+        self.assertEqual(len(ma.one_track_movements(m)), 18)                       # (the index entry kept as listed)
+        self.assertEqual(ma.one_track_movements(m)[6]["type_"], "index")
+
+    def test_TRK1_a_next_track_is_never_a_movement(self):
+        rows = [{"position": "1", "type_": "track", "title": "A", "duration": "3:00"},
+                {"position": "10", "type_": "track", "title": "B", "duration": ""},
+                {"position": "1a", "type_": "track", "title": "C", "duration": ""}]
+        self.assertEqual([t["title"] for t in ma.one_track_movements(rows)], ["A", "B", "C"])
+        self.assertTrue(ma._movement_of("7.I", "7") and ma._movement_of("7a", "7") and ma._movement_of("7-II", "7"))
+        self.assertFalse(ma._movement_of("10", "1") or ma._movement_of("7", "7") or ma._movement_of("8.I", "7")
+                         or ma._movement_of("7.II", "7.I"))
+
+    def test_TRK1_sub_tracks_numbered_as_tracks_stay_tracks(self):
+        def idx(positions):
+            return [{"position": "", "type_": "index", "title": "Sym 5", "duration": "31:00",
+                     "sub_tracks": [{"position": p, "type_": "track", "title": f"M{p}", "duration": ""} for p in positions]}]
+        for positions in (("2", "3", "4", "5"), ("2-2", "2-3"), ("1.7", "1.8")):    # (tracks; a disc's tracks)
+            flat = ma.one_track_movements(idx(positions))
+            self.assertEqual(flat[0]["type_"], "index", positions)
+        self.assertEqual(ma.one_track_movements(idx(("2-I", "2-II")))[0]["position"], "2")
+        self.assertFalse(ma._movement_of("2-2", "2") or ma._movement_of("7.1", "7"))
+
+    def test_TRK1_the_candidate_keeps_the_rows_as_listed(self):
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        rel = dict(release([{"name": "CD", "qty": "1"}]), tracklist=self.bst3())
+        c = ma.discogs_candidate(rel, dm)
+        self.assertEqual((len(c["tracks"]), c["rows"]), (10, 13))     # (a tagger's total of 13: _total_miscounted)
+
+    def test_TRK1_the_matcher_and_the_tags_count_ten(self):
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        rel = dict(release([{"name": "SACD", "qty": "1"}]), tracklist=self.bst3())
+        self.assertEqual(len(ma.discogs_candidate(rel, dm)["tracks"]), 10)
+        import engine
+        _album, per_track, _discs = engine.discogs_parts(rel, dm)
+        self.assertEqual([t.get("title") for t in per_track][6:8], ["Symphony", "T8"])
+
+
+class TRK2(unittest.TestCase):
+    """TRK-2: your files are the release's tracks in another order (BS&T - Child Is Father To The
+    Man, an SACD rip whose 001 is the release's track 11): each paired with its own track."""
+    REL = [("Overture", 92), ("I Love You More", 357), ("Morning Glory", 256), ("My Days Are Numbered", 199)]
+
+    def cand(self):
+        return {"source": "discogs", "id": 6316090, "artist": "AC/DC", "title": "Live At Donington", "barcodes": set(),
+                "catnos": set(), "tracks": [{"disc": 1, "title": t, "secs": s} for t, s in self.REL]}
+
+    def files(self, order, secs=None):
+        return {"tracks": [{"disc": 1, "num": i + 1, "title": self.REL[k][0], "secs": (secs or {}).get(k, self.REL[k][1])}
+                           for i, k in enumerate(order)]}
+
+    def test_TRK2_each_file_is_paired_with_its_own_track(self):
+        v = mc.order_view(self.files([3, 1, 0, 2]), self.cand())
+        self.assertEqual((v["slots"], v["missing"], v["full_tracks"]), ([3, 1, 0, 2], {}, 4))
+        self.assertEqual([t["title"] for t in v["tracks"]], ["My Days Are Numbered", "I Love You More", "Overture",
+                                                             "Morning Glory"])
+
+    def test_TRK2_not_in_order_already_nor_on_a_doubt(self):
+        self.assertIsNone(mc.order_view(self.files([0, 1, 2, 3]), self.cand()))         # (the order it has)
+        self.assertIsNone(mc.order_view(self.files([3, 1, 0, 2], secs={3: 260}), self.cand()))   # (a length off)
+        c = self.cand()
+        c["tracks"][2]["title"] = "Overture"                                             # (two tracks one title)
+        self.assertIsNone(mc.order_view(self.files([3, 1, 0, 2]), c))
+        f = self.files([3, 1, 0, 2])
+        f["tracks"][0]["title"] = ""
+        self.assertIsNone(mc.order_view(f, self.cand()))                                 # (a file without a title)
+
+    def test_TRK2_scored_on_the_pairing_and_exported_for_the_tags(self):
+        a = dict(album({"cd_frames": False, "not_cd": True, "hires": True, "lossless": True}),
+                 tracks=self.files([3, 1, 0, 2])["tracks"], title="Live At Donington")
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        rel = release([{"name": "SACD", "qty": "1"}])
+        rel["tracklist"] = [{"position": str(i + 1), "type_": "track", "title": t, "duration": f"{s // 60}:{s % 60:02d}"}
+                            for i, (t, s) in enumerate(self.REL)]
+        s = mc.score_candidate(a, ma.discogs_candidate(rel, dm), CFG)
+        self.assertEqual((s["dur_frac"], s["cand"]["slots"]), (1.0, [3, 1, 0, 2]))
+        self.assertTrue(any("TRK-2" in n for n in s["notes"]))
+        out = ma.summarize({"best": s})
+        self.assertEqual((out["slots"], out["missing"], out["release_tracks"]), ([3, 1, 0, 2], {}, 4))
+
+    def test_TRK2_a_release_you_choose_is_tagged_track_by_track(self):
+        import engine
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        rel = release([{"name": "SACD", "qty": "1"}])
+        rel["tracklist"] = [{"position": str(i + 1), "type_": "track", "title": t, "duration": f"{s // 60}:{s % 60:02d}"}
+                            for i, (t, s) in enumerate(self.REL)]
+        cand = ma.discogs_candidate(rel, dm)
+        a = self.files([3, 1, 0, 2])
+        sc = mc.score_candidate(dict(album({}), tracks=a["tracks"]), cand, CFG)
+        got = engine._slots_of(a, cand, sc)
+        self.assertEqual((got["slots"], got["missing"], got["release_tracks"]), ([3, 1, 0, 2], {}, 4))
+        in_order = self.files([0, 1, 2, 3])
+        self.assertEqual(engine._slots_of(in_order, cand, mc.score_candidate(dict(album({}), tracks=in_order["tracks"]),
+                                                                             cand, CFG)), {})
+
+    def test_TRK2_two_swapped_tracks_are_another_editions_order(self):
+        rel = self.REL + [(f"Song {i}", 200 + 20 * i) for i in range(6)]
+        cand = dict(self.cand(), id=1, tracks=[{"disc": 1, "title": t, "secs": s} for t, s in rel])
+        order = [1, 0] + list(range(2, 10))                       # (8 of 10 lengths agree as filed)
+        files = {"tracks": [{"disc": 1, "num": i + 1, "title": rel[k][0], "secs": rel[k][1]} for i, k in enumerate(order)]}
+        self.assertIsNone(mc.order_view(files, cand))             # (a few moved: decided as before)
+        whole = list(reversed(range(10)))                         # (a running order of its own)
+        files = {"tracks": [{"disc": 1, "num": i + 1, "title": rel[k][0], "secs": rel[k][1]} for i, k in enumerate(whole)]}
+        self.assertEqual(mc.order_view(files, cand)["slots"], whole)
+
+
 class CAT1(unittest.TestCase):
     def test_CAT1_an_sacd_audio_format_is_no_catalogue_number(self):
         # (Blood, Sweat & Tears: "[SACD DSD64 2ch Rip 24bit 352khz]" in the album tag)

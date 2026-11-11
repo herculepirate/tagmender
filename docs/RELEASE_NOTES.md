@@ -1,5 +1,18 @@
 # Release notes
 
+## 0.8.36
+
+**A work's movements are one track (TRK-1)**
+- A suite Discogs lists with its movements under it ("Symphony For The Devil" 7:49, then 7.I,
+  7.II, 7.III without lengths) is matched and tagged as the one track it is on the disc. Before,
+  each movement counted as a track and the album was held for "track count differs".
+
+**Your files in another running order (TRK-2)**
+- When your files are the release's own tracks numbered in another order (an SACD rip whose 001
+  is the release's track 11), each file is matched, tagged and numbered as its own track, by its
+  title and length. A few tracks moved (bonus tracks in another order) still means another
+  edition, as before.
+
 ## 0.8.35
 
 **SACD rips are found as SACDs (MED-13)**

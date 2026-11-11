@@ -2716,6 +2716,38 @@ def slot_view(album, cand):
                 full_tracks=len(tracks))
 
 
+def order_view(album, cand):
+    """TRK-2: the files are the release's tracks in another order (Blood, Sweat & Tears - Child
+    Is Father To The Man, an SACD rip numbered 001 "The Modern Adventures..." to 012, the release
+    opening with "Overture"): the release seen in the files' order, each file at the one track
+    whose title is its own and whose length agrees (within 3 s where both are known), every
+    track taken once. "slots" are those tracks' positions (as slot_view's), "missing" empty.
+    None unless one disc each, as many files as tracks (3 or more), every file titled and paired
+    with exactly one track, and at least half the tracks (3 or more) out of the files' order: a
+    running order of its own, not a few tracks moved (another edition's, decided as before)."""
+    files, tracks = album.get("tracks") or [], cand.get("tracks") or []
+    n = len(files)
+    if n < 3 or n != len(tracks) or any(t.get("video") for t in tracks) \
+            or len({t.get("disc") or 1 for t in tracks}) > 1 or len({f.get("disc") or 1 for f in files}) > 1:
+        return None
+    slots = []
+    for f in files:
+        title, secs = f.get("title") or "", f.get("secs")
+        if not title:
+            return None
+        fits = [i for i, t in enumerate(tracks) if track_titles_agree(title, t.get("title") or "")
+                and not (secs and t.get("secs") and abs(secs - t["secs"]) > 3)]
+        if len(fits) != 1:
+            return None
+        slots.append(fits[0])
+    moved = sum(1 for i, k in enumerate(slots) if i != k)
+    if len(set(slots)) != n or moved < max(3, (n + 1) // 2):
+        # (a few tracks moved - bonus tracks in another order, two swapped - is another edition's
+        # running order: the album's other pressings decide, as before)
+        return None
+    return dict(cand, tracks=[tracks[i] for i in slots], slots=slots, missing={}, full_tracks=n, reordered=True)
+
+
 def _slots_why_not(album, s):
     """Why the files cannot be tagged as their own tracks of this release with the rest
     missing, or "": the release must be proven by more than its name (a disc ID or TOC,
@@ -3105,6 +3137,17 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         # clue says, the files' disc ID came off a CD (_toc_maybe_download)
         "rip_log": bool(album.get("rip_log_toc") and not (album.get("audio") or {}).get("hires")),
     }
+    if tracks_ok and not box_note and cand.get("slots") is None and (
+            (dur_frac is not None and dur_frac < 1.0) or (titles_agree is not None and titles_agree < n_cand)):
+        # TRK-2: the release's own tracks in another running order: compared, and tagged, track
+        # by track
+        view = order_view(album, cand)
+        if view:
+            s = score_candidate(album, view, cfg, ocr_text)
+            if (s.get("dur_frac") or 0) > (dur_frac or 0) or (s.get("titles_agree") or 0) > (titles_agree or 0):
+                s["notes"] = s["notes"] + ["your files are this release's tracks in another order: each is "
+                                           "tagged as its own track, numbered as the release numbers it (TRK-2)"]
+                return s
     return _with_missing_tracks(album, cand, cfg, ocr_text, res) if not tracks_ok and not box_note else res
 
 
@@ -3463,7 +3506,8 @@ def classify(scored, cfg):
         return barcode_agrees(s) or s["code"] in ("catalogue number", "catalogue number (folder name)")
     # Ties go to the candidate whose barcode agrees, then to the one whose year does.
     # (then one your copy cannot be - a CD rip log against a 12" - after the others)
-    ranked = sorted(scored, key=lambda s: (-s["confidence"], bool(format_contradictions(s)) and not _carries_barcode(s),
+    ranked = sorted(scored, key=lambda s: (-s["confidence"], bool(s["cand"].get("reordered")),   # (TRK-2: in order first)
+                                           bool(format_contradictions(s)) and not _carries_barcode(s),
                                            not barcode_agrees(s),
                                            not number_agrees(s), not s["year_ok"],
                                            s.get("year_off") if s.get("year_off") is not None else 99))

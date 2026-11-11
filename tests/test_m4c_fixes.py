@@ -331,7 +331,10 @@ class BlindTrackTotals(unittest.TestCase):
               {"type_": "index", "title": "work", "duration": "9:00",
                "sub_tracks": [{"position": "2-I", "title": "i"}, {"position": "2-II", "title": "ii"}]},
               {"position": "DVD1-1", "title": "v", "duration": "4:00"}]
-        flat = ma.flatten_tracklist(tl, DM)
+        # (TRK-1: a work with its own length over untimed movements is one track; read as listed,
+        # its rows are marked as one work's)
+        self.assertEqual(len(ma.flatten_tracklist(tl, DM)), 3)
+        flat = ma.flatten_tracklist(tl, DM, movements=False)
         self.assertEqual([t.get("index") for t in flat], [None, 1, 1, None])
         self.assertTrue(ma._VIDEO_MEDIUM.match(flat[3]["position"]))
         self.assertEqual(ma._audio_rows({"tracks": [{"secs": 60.0}, {"secs": 0, "index": 1}, {"secs": 0, "index": 1},

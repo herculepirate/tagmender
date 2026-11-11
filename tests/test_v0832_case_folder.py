@@ -56,6 +56,33 @@ class NAM5(unittest.TestCase):
         self.assertEqual(self.planner._spelled(same, self.root), same)
 
 
+class NAM6(unittest.TestCase):
+    """NAM-6: MusicBrainz writes "King’s X", Discogs "King's X": one artist folder, as it is
+    spelled on disk."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="tm-nam6-"))
+        (self.root / "King's X" / "1988 - Out of the Silent Planet").mkdir(parents=True)
+
+    def test_NAM6_a_typographic_apostrophe_finds_the_plain_folder(self):
+        for compat in ("linux", "windows"):
+            prof = pf.default()
+            prof["filenames"]["compat"] = compat
+            got = pl.Planner(prof)._spelled(self.root / "King’s X" / "1990 - Faith Hope Love" / "01.flac", self.root)
+            self.assertEqual(got.parent.parent.name, "King's X", compat)
+            self.assertEqual(got.parent.name, "1990 - Faith Hope Love")
+
+    def test_NAM6_one_plan_keeps_its_first_spelling(self):
+        planner = pl.Planner(pf.default())
+        first = planner._spelled(self.root / "Guns N’ Roses" / "A" / "01.flac", self.root)
+        second = planner._spelled(self.root / "Guns N' Roses" / "B" / "01.flac", self.root)
+        self.assertEqual(first.parent.parent.name, second.parent.parent.name)
+
+    def test_NAM6_other_names_stay_apart(self):
+        got = pl.Planner(pf.default())._spelled(self.root / "Kings X" / "A" / "01.flac", self.root)
+        self.assertEqual(got.parent.parent.name, "Kings X")
+
+
 class MOV2(unittest.TestCase):
     """MOV-2: a second copy of one of the album's tracks ("005.TUILMOMF.flac" beside "005.TU.flac",
     Allan Holdsworth - Metal Fatigue) is no other album's music: the folder's scans, log and

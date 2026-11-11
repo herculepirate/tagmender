@@ -1,5 +1,16 @@
 # Release notes
 
+## 0.8.33
+
+**One artist folder, whatever the apostrophe (NAM-6)**
+- MusicBrainz writes "King’s X", Discogs "King's X": albums are now filed into the folder already
+  on disk instead of a second, look-alike artist folder beside it.
+
+**One disc of a set the database lists without lengths (BOX-3)**
+- A disc ripped alone ("CD 1" of a 2CD set) whose release has no track lengths is tagged and filed
+  as that disc of the set when your own barcode is the release's and every track title of exactly
+  one disc is yours, in order. Before, it was left Unresolved for its track count.
+
 ## 0.8.32
 
 **Box sets whose discs carry their own titles (DSC-2)**

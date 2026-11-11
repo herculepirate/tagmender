@@ -2613,15 +2613,32 @@ def _box_disc(album, cand):
     # Rise: disc 2 of the Japanese Conqueror): the ID hashes the whole TOC, lead-out too,
     # so with the same track count (2 or more) and every length within 0.1 s it is this disc
     on = (album.get("exact_toc_media") or {}).get(cand.get("id")) or ()
-    if cand.get("source") != "mb" or len(files) < 2:
+    if cand.get("source") == "mb" and len(files) >= 2:
+        for d in sorted(on):
+            tr = discs.get(d) or []
+            if (len(tr) == len(files) and all(t.get("secs") for t in tr)
+                    and max(abs(a["secs"] - t["secs"]) for a, t in zip(files, tr)) <= 0.1):
+                return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
+                            box_disc=d, box_title=cand.get("title") or "", box_proof="disc ID")
+    # BOX-3: a release that lists no lengths for the disc (Elvis Presley - The Wonderful World
+    # of Christmas, FTD 2CD, "CD 1" ripped alone): your copy's own barcode is the release's, and
+    # one disc alone - its track count and every title, in order - is your files; any length
+    # the release does give agrees. A barcode another tagger wrote, or one your scans contradict
+    # (another barcode printed on them), is no such proof. Every disc that fits is counted - one
+    # listing its lengths too (the mono disc beside an unlisted stereo one): two fit, none is chosen.
+    shared = ({barcode_key(b) for b in album.get("barcodes") or ()} - {""}) & \
+        ({barcode_key(b) for b in cand.get("barcodes") or ()} - {""})
+    scans = {barcode_key(b) for b in album.get("ocr_barcodes") or ()} - {""}
+    if not shared or len(files) < 3 or tagger_barcode(album, shared) or (scans and not scans & shared):
         return None
-    for d in sorted(on):
-        tr = discs.get(d) or []
-        if (len(tr) == len(files) and all(t.get("secs") for t in tr)
-                and max(abs(a["secs"] - t["secs"]) for a, t in zip(files, tr)) <= 0.1):
-            return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
-                        box_disc=d, box_title=cand.get("title") or "", box_proof="disc ID")
-    return None
+    fit = [d for d, tr in sorted(discs.items()) if len(tr) == len(files)
+           and all(title_sim(a.get("title") or "", t.get("title") or "") >= 0.85 for a, t in zip(files, tr))
+           and all(abs(a["secs"] - t["secs"]) <= 3 for a, t in zip(files, tr) if a.get("secs") and t.get("secs"))]
+    if len(fit) != 1 or all(t.get("secs") for t in discs[fit[0]]):
+        return None                       # (a disc with every length was for the routes above)
+    tr = discs[fit[0]]
+    return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
+                box_disc=fit[0], box_title=cand.get("title") or "", box_proof="barcode and titles")
 
 
 def compact_numbers(numbers):

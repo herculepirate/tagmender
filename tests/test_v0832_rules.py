@@ -78,6 +78,52 @@ class MED12(unittest.TestCase):
         self.assertFalse(mc.score_candidate(restored, c, CFG)["clues_against"])
 
 
+class BOX3(unittest.TestCase):
+    """BOX-3: one disc of a set whose release lists no lengths (Elvis Presley - FTD The Wonderful
+    World of Christmas, "CD 1" alone): your barcode is the release's and that disc's titles are
+    your files'."""
+    D1 = ["O Come All Ye Faithful", "The First Noel", "On a Snowy Christmas Night"]
+    D2 = ["Holly Leaves (take 3)", "Silver Bells (take 1)", "Winter Wonderland (take 2)"]
+
+    def cand(self, d1_secs=None):
+        tracks = [{"disc": 1, "title": t, "secs": d1_secs} for t in self.D1] + \
+                 [{"disc": 2, "title": t, "secs": None} for t in self.D2]
+        return {"source": "mb", "id": "e571", "title": "Elvis Sings the Wonderful World of Christmas",
+                "barcodes": ["5060209750316"], "tracks": tracks}
+
+    def album(self, titles, barcodes=("5060209750316",)):
+        return {"title": "The Wonderful World Of Christmas 1", "barcodes": set(barcodes),
+                "tracks": [{"disc": 1, "num": i + 1, "title": t, "secs": 200.0} for i, t in enumerate(titles)]}
+
+    def test_BOX3_the_disc_whose_titles_are_yours(self):
+        box = mc._box_disc(self.album(self.D1), self.cand())
+        self.assertEqual((box["box_disc"], box["box_proof"]), (1, "barcode and titles"))
+        self.assertEqual([t["title"] for t in box["tracks"]], self.D1)
+        self.assertEqual(mc._box_disc(self.album(self.D2), self.cand())["box_disc"], 2)
+
+    def test_BOX3_not_without_your_barcode_or_with_other_titles(self):
+        self.assertIsNone(mc._box_disc(self.album(self.D1, barcodes=()), self.cand()))
+        self.assertIsNone(mc._box_disc(self.album(self.D1, barcodes=("0000000000000",)), self.cand()))
+        self.assertIsNone(mc._box_disc(self.album(["Blue Christmas", "Santa Claus", "White Christmas"]), self.cand()))
+
+    def test_BOX3_two_discs_that_fit_choose_none(self):
+        c = self.cand()
+        c["tracks"] = [dict(t, disc=1, secs=None) for t in c["tracks"][:3]] + \
+                      [dict(t, disc=2, secs=200.0) for t in c["tracks"][:3]]   # (stereo unlisted, mono listed)
+        self.assertIsNone(mc._box_disc(self.album(self.D1), c))
+
+    def test_BOX3_not_when_your_scans_show_another_barcode(self):
+        a = dict(self.album(self.D1), ocr_barcodes={"5012982500220"})
+        self.assertIsNone(mc._box_disc(a, self.cand()))
+        a["ocr_barcodes"] = {"5060209750316"}
+        self.assertEqual(mc._box_disc(a, self.cand())["box_disc"], 1)
+
+    def test_BOX3_lengths_the_release_gives_must_agree(self):
+        c = self.cand()
+        c["tracks"][0]["secs"] = 100.0                     # (one length given: 100 s against 200 s)
+        self.assertIsNone(mc._box_disc(self.album(self.D1), c))
+
+
 class CAT1(unittest.TestCase):
     def test_CAT1_an_sacd_audio_format_is_no_catalogue_number(self):
         # (Blood, Sweat & Tears: "[SACD DSD64 2ch Rip 24bit 352khz]" in the album tag)

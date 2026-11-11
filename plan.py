@@ -970,6 +970,19 @@ def _pulled_small_front(entry, art, looks, p):
     return None
 
 
+# NAM-6: typographic quotes a database writes ("King’s X" on MusicBrainz) and the plain ones
+# another writes ("King's X" on Discogs) name one folder
+_QUOTES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "′": "'", "´": "'", "`": "'",
+                         "“": '"', "”": '"', "″": '"'})
+
+
+def _folder_key(name: str, windows: bool) -> str:
+    """How _spelled compares a folder's name with those on disk: one Unicode form, one kind of
+    quote mark (NAM-6), and, with Windows-compatible names, one letter case."""
+    key = unicodedata.normalize("NFC", name).translate(_QUOTES)
+    return key.casefold() if windows else key
+
+
 def _spelled_names(raw: dict, changes: dict) -> dict:
     """{field: its spelling} of the fields written whose name is not in lower case (a custom
     tag a tagger script made, "MyTag"): Picard writes such a tag as it is spelled."""
@@ -2495,7 +2508,8 @@ class Planner:
             # after the release is an album folder, also for a one-track release
             title = str(((prop.targets or [{}])[0].get("album") or [""])[0])
             as_named = fnm.safe_component(title, self.profile["filenames"].get("compat", "windows")) if title else ""
-            shared = len(prop.files) == 1 and not (as_named and fnm.fold(as_named)[:12] in fnm.fold(album_dir.name))
+            shared = len(prop.files) == 1 and not (as_named and fnm.fold(as_named.translate(_QUOTES))[:12] in
+                                                   fnm.fold(album_dir.name.translate(_QUOTES)))   # (NAM-6)
             ignore = self._planned
             clash = not shared and ((owner is not None and not (owner & me)) or
                                     (owner is None and _other_release_there(album_dir, me, ignore,
@@ -2550,8 +2564,9 @@ class Planner:
 
     def _spelled(self, path: Path, root: Path) -> Path:
         """path, with each folder below root spelled as it already is on disk when the only
-        difference is the Unicode form (and, with Windows-compatible names, letter case):
-        never a second, look-alike "Beyoncé" folder."""
+        difference is the Unicode form or the kind of quote mark (NAM-6: "King’s X" finds
+        "King's X") - and, with Windows-compatible names, letter case: never a second,
+        look-alike "Beyoncé" folder."""
         windows = self.profile["filenames"].get("compat") == "windows"
         cur = Path(root)
         rel = Path(path).relative_to(root)
@@ -2568,8 +2583,7 @@ class Planner:
                 cur = cur / comp
                 continue
             listing = self._listing(cur)
-            key = unicodedata.normalize("NFC", comp)
-            key = key.casefold() if windows else key
+            key = _folder_key(comp, windows)
             if key not in listing:
                 listing[key] = comp                      # later albums of this plan use this spelling
                 cur = cur / comp
@@ -2582,9 +2596,8 @@ class Planner:
             windows = self.profile["filenames"].get("compat") == "windows"
             out = {}
             try:
-                for name in os.listdir(d):
-                    k = unicodedata.normalize("NFC", name)
-                    out.setdefault(k.casefold() if windows else k, name)
+                for name in sorted(os.listdir(d)):        # (two look-alikes on disk: always the same one)
+                    out.setdefault(_folder_key(name, windows), name)
             except OSError:
                 pass
             self._dirs[d] = out

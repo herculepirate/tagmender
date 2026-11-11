@@ -107,6 +107,8 @@ class Proposal:
     lengths_missing: bool = False       # exact tier, and the release lists no track lengths to compare
     most_lengths: bool = False          # BAR-1b: the files are the release's tracks, half their lengths agree at least
     toc_proven: bool = False            # TOC-1: your disc's TOC is this release's (exact disc ID), its title agreeing
+    own_number: bool = False            # FIL-1: your copy's own barcode or catalogue number proves the release
+    guessed_pick: bool = False          # FIL-1: the pressing was picked by country order / original date (a guess)
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
@@ -186,13 +188,25 @@ def _files_on_evidence(prop, profile, conf) -> str:
     if tier == "exact" and lengths and conf >= 80.0 and (getattr(prop, "scans", None) or {}).get("printed"):
         # (a low score here is a folder name that does not say the artist, not doubt about the release)
         return "your scans show its barcode or catalogue number and every track length agrees"
-    if tier == "exact" and getattr(prop, "toc_proven", False) and prop.margin is not None and \
-            prop.margin >= _threshold(profile, "auto_min_margin"):
+    guessed = bool(getattr(prop, "guessed_pick", False))
+    if tier == "exact" and getattr(prop, "toc_proven", False) and not guessed:
         # TOC-1: the disc ID is a hash of your disc's whole TOC, and it fits your files to the
         # sector: the score is low only for an artist credited otherwise and lengths the
         # database lists wrong (Food - Food, filed as Iain Bellamy). Not when pressings sharing
         # the disc ID tied and the country order chose (no margin)
         return "your disc's table of contents is this release's (exact disc ID) and its title agrees"
+    if tier == "exact" and getattr(prop, "own_number", False) and lengths and not guessed:
+        # FIL-1: your copy's own catalogue number or barcode (its tags, the folder name) is on
+        # the release and every track length agrees: the score is low only for a folder title
+        # that says more than the database's (ABBA - GOLD. 40th Anniversary Edition (2014,
+        # Remastered, Deluxe Edition, 3CD, Polar, 060253740130): 87.4)
+        return "your copy's own catalogue number or barcode is on it and every track length agrees"
+    if tier == "exact" and lengths and not guessed and \
+            any("pressing chosen by disc ID" in str(e) for e in getattr(prop, "evidence", None) or ()):
+        # FIL-1: the disc ID chose this pressing over the others and every length agrees (a
+        # negative margin is the higher-scoring other pressings it ruled out: Allan Holdsworth -
+        # All Night Wrong, 94.7)
+        return "your disc ID chose this pressing and every track length agrees"
     sc = getattr(prop, "scans", None) or {}
     if tier == "exact" and conf >= max(90.0, _threshold(profile, "replace_min_confidence")) and \
             sc.get("printed") and sc.get("state") == "proven" and not sc.get("against") and \

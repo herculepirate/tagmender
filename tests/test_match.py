@@ -2956,7 +2956,8 @@ class RealWorldCases(unittest.TestCase):
         self.assertEqual([round(x) for x in sleeps if x >= 40], [40] * 6)   # 5 between attempts, 1 before the next
         self.assertGreaterEqual(opens[-1][1] - tried[-1][1], 40.0)      # and before the next request
 
-    def test_mb_delay_recovers_after_twenty_successes_but_never_below_its_base(self):
+    def test_mb_delay_recovers_after_five_successes_but_never_below_its_base(self):
+        # (SPD-1: after 5 answers in a row, not 20 - a run crawled at 3 s a request for hours)
         import urllib.error
 
         def busy_first(url, n):
@@ -2969,9 +2970,9 @@ class RealWorldCases(unittest.TestCase):
         raised = cfg["mb_delay"]
         self.assertGreater(raised, 1.1)
         ok = lambda u, n: "{}"
-        self._http_run(ok, reqs[1:19], http=http)                  # 19 answers since the 503 (its retry was the first)
+        self._http_run(ok, reqs[1:4], http=http)                   # 4 answers since the 503 (its retry was the first)
         self.assertEqual(cfg["mb_delay"], raised)
-        self._http_run(ok, reqs[19:20], http=http)
+        self._http_run(ok, reqs[4:5], http=http)
         self.assertLess(cfg["mb_delay"], raised)
         self._http_run(ok, reqs[20:], http=http)
         self.assertEqual(cfg["mb_delay"], 1.1)                     # back to its base, not under it

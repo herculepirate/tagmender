@@ -40,6 +40,35 @@ MIN_KEEP = 8
 SUFFIX_LEN = 6                       # " ~1a2b"
 
 
+_OPEN, _CLOSE = "([{", ")]}"
+
+
+def balance_brackets(s: str) -> str:
+    """NAM-4: a name cut short (the folder album name's word limit) can leave a bracket open:
+    "Gold (Greatest Hits) [40th Anniversary [2014 Reissue]". Each opener never closed is
+    dropped with the words after it, up to the next bracket: "Gold (Greatest Hits) [2014
+    Reissue]". A name whose brackets close is returned as it is."""
+    stack, cut = [], []
+    for i, ch in enumerate(s):
+        if ch in _OPEN:
+            stack.append(i)
+        elif ch in _CLOSE and stack and _OPEN[_CLOSE.index(ch)] == s[stack[-1]]:
+            stack.pop()
+    if not stack:
+        return s
+    out, skip_to = [], -1
+    opens = set(stack)
+    for i, ch in enumerate(s):
+        if i < skip_to:
+            continue
+        if i in opens:
+            j = next((k for k in range(i + 1, len(s)) if s[k] in _OPEN + _CLOSE), len(s))
+            skip_to = j
+            continue
+        out.append(ch)
+    return re.sub(r"\s{2,}", " ", "".join(out)).strip(" -_,;:.")
+
+
 def safe_component(text: str, compat="windows", file_stem=False) -> str:
     """One folder or file name, as Picard's make_save_path makes it: a leading dot becomes
     "_" ("...And Justice for All" -> "_..And Justice for All": never a hidden folder) and,
@@ -180,6 +209,10 @@ def make_path(dest_root, components, extension, limits: dict, suffix: str = ""):
     abbr = limits.get("abbreviations") or {}
     notes = []
     ext = extension if extension.startswith(".") or not extension else "." + extension
+    # NAM-4: the naming script's folder names never keep a bracket its word limit left open
+    # (your own subfolders - Scans, a version folder - keep their names: they never come here)
+    components = [c if i == len(components) - 1 else (balance_brackets(str(c)) or c)
+                  for i, c in enumerate(components)]
     parts = [safe_component(c, compat, file_stem=(i == len(components) - 1)) for i, c in enumerate(components)]
     if not parts:
         return None, ["the naming template gave an empty path"]

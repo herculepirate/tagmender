@@ -1655,6 +1655,14 @@ def unofficial_why(best):
     return ["the release is an unofficial one (a bootleg); nothing of your copy (barcode, matrix) says it is yours"]
 
 
+def _unofficial_backed(s) -> bool:
+    """TIE-4: your copy backs this unofficial release itself - its catalogue number (yours, not
+    another tagger's), the exact disc ID or the shop link - so it is not set below an official one."""
+    clues = s.get("clues") or {}
+    return bool((str(s.get("code") or "").startswith("catalogue number") and s.get("code") not in WEAK_BARCODES)
+                or "disc TOC" in clues or "source link" in clues)
+
+
 def cover_clue(cover_text, cand, clues):
     """The catalogue number or label read on the front cover embedded in the files (a folder
     with no scans). The embedded cover may come from the web, so it is one weak clue
@@ -3420,6 +3428,21 @@ def classify(scored, cfg):
                                            not barcode_agrees(s),
                                            not number_agrees(s), not s["year_ok"],
                                            s.get("year_off") if s.get("year_off") is not None else 99))
+    # TIE-4: an unofficial release (a bootleg, a CD-R) nothing of your copy backs never wins a
+    # tie against an official one that fits as well: bootlegs copy the official release's
+    # tracks and lengths (Allan Holdsworth - Flat Tire: a Russian CD-R tied with Megazoidal's CD)
+    if ranked and unofficial_why(dict(ranked[0], notes=list(ranked[0].get("notes") or []))) and \
+            not _unofficial_backed(ranked[0]):
+        top = ranked[0]
+        official = [s for s in ranked[1:] if not s["cand"].get("unofficial")
+                    and top["confidence"] - s["confidence"] < cfg["auto_min_margin"]
+                    and (s.get("tracks_ok") or not top.get("tracks_ok"))
+                    and (s.get("dur_frac") or 0) >= (top.get("dur_frac") or 0) - 0.05]
+        if official:
+            ranked.remove(official[0])
+            ranked.insert(0, official[0])
+            official[0]["notes"] = official[0]["notes"] + [
+                f"official release preferred to the unofficial {top['cand']['id']} that fits as well"]
     best = ranked[0]
     # TAG-1 / CHG-1: the release your files are tagged with (by TagMender, or your Change
     # Release) stands while it fits, unless a barcode or catalogue number of yours names another
@@ -3458,6 +3481,10 @@ def classify(scored, cfg):
             pick = scan_pick[0]
             ranked = [pick] + [s for s in ranked if s is not pick]
             best = pick
+            # (FIL-1: chosen among several by the country order or the original date - also
+            # among pressings that all carry your number - is a guess, never filed on that number)
+            if any(k in FALLBACK_PICKS for k in scan_pick[1]) and len(numbered or tied) > 1:
+                best["guessed_pick"] = True
     # Several tied pressings carry your barcode: it names them all. What else your copy shows
     # tells them apart first; what they are ripped to only for want of anything better (a hi-res
     # rip of the hybrid SACD and the CD of one barcode). A pressing that alone carries it is
@@ -3595,6 +3622,7 @@ def classify(scored, cfg):
     own_number = (proven and not split_credit and best["dur_frac"] is not None
                   and best["dur_frac"] >= min_dur and not best.get("conflict")
                   and (barcode_decides or best["code"] in ("catalogue number", "catalogue number (folder name)")))
+    best["own_number"] = bool(own_number and not lengths_excused)    # (FIL-1: filed on it)
     if best["confidence"] < cfg["auto_min_confidence"] and own_number and not lengths_excused:
         best["notes"] = best["notes"] + [f"confidence {best['confidence']} is under {cfg['auto_min_confidence']}, "
                                          f"but the {best['code']} proves this release"]
@@ -3649,6 +3677,9 @@ def classify(scored, cfg):
         said = "; ".join(scan_pick[1].values())
         best["notes"] = best["notes"] + [f"pressing chosen by {said} "
                                          f"(not on {', '.join(others[:3])})"]
+        # (FIL-1: a pressing your country order or the original date picked is a guess, never
+        # filed on proof that only names the album)
+        best["guessed_pick"] = any(k in FALLBACK_PICKS for k in scan_pick[1])
         if any(k in FALLBACK_PICKS for k in scan_pick[1]) and (cfg.get("evidence_pass") or not kind_fits(best)):
             # (the evidence pass: the country order is still to come, and decides first: TIE-2)
             why.append(f"runner-up {runner['cand']['id']} within {abs(margin):.1f} points "

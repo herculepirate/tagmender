@@ -116,8 +116,10 @@ class TOC1(unittest.TestCase):
         r = mc.classify([mc.score_candidate(a, c, cfg) for c in (cand(), cand(id="us", country="US"))], cfg)
         prop = pl.Proposal(source_dir="/x", files=["/x/1.flac"], targets=[{}], status="identified", tier="exact",
                            confidence=r["best"]["confidence"], margin=r["margin"],
-                           toc_proven=bool(r["best"].get("toc_proven")))
+                           toc_proven=bool(r["best"].get("toc_proven")),
+                           guessed_pick=bool(r["best"].get("guessed_pick")))
         self.assertEqual(r["margin"], 0.0)
+        self.assertTrue(prop.guessed_pick)                                 # (the country order chose: a guess)
         self.assertEqual(pl._files_on_evidence(prop, pf.default(), prop.confidence), "")
 
     def test_TOC1_a_fuzzy_disc_match_or_a_short_disc_proves_nothing(self):

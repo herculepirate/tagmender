@@ -1565,6 +1565,26 @@ class Engine:
         n = len(files)
         slots, missing = best.get("slots"), _missing_of(best)
         vtracks = best.get("version_tracks")
+        box = best.get("box_disc")
+        if box and not vtracks and not slots:
+            # BOX-2: one disc of a set in a folder of its own (Allan Holdsworth - Against the
+            # Clock, "Volume One Guitar" and "Volume Two Synthaxe" apart): that disc's tracks,
+            # numbered as the set numbers them (disc 1 of 2), tag its files. The disc number is
+            # the matched database's: the other database's tracks only where its discs are the
+            # same in number (a DVD listed first on one of them numbers the CDs otherwise)
+            box, src = int(box), best.get("source")
+            mb_media = len([m for m in (rel or {}).get("media") or []])
+            same = bool(rel and dparts and dparts[2] and mb_media == int(dparts[2]))
+            if rel and (src == "mb" or same):
+                whole = mb_tags.release_tags(rel, ps)
+                keys = mb_tags.track_keys(rel)
+                tags_mb = [whole[i] for i, (p, _k) in enumerate(keys) if int(p) == box] \
+                    if len(keys) == len(whole) else None
+            elif rel:
+                tags_mb = None
+            if dparts and dparts[1] is not None:
+                dparts = (dparts[0], [t for t in dparts[1] if str(t.get("discnumber")) == str(box)]
+                          if (src == "discogs" or same) else None, dparts[2])
         if vtracks and rel:
             # versions of one disc in folders of their own: each file its own track of the
             # medium its version is (an SACD's layer, a DVD's or Blu-ray's mix: match_core.
@@ -1678,7 +1698,8 @@ class Engine:
             why=list(out.get("why") or []), evidence=evidence_of(out, best),
             provenance=prov, release=self._release(best), tier="exact",
             all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")),
-            most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")))
+            most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")),
+            own_number=bool(best.get("own_number")), guessed_pick=bool(best.get("guessed_pick")))
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})

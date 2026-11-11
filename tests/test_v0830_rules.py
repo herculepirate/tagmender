@@ -13,8 +13,11 @@ from pathlib import Path  # noqa: E402
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
+import filenames as fnm  # noqa: E402
 import match_albums as ma  # noqa: E402
 import match_core as mc  # noqa: E402
+import plan as pl  # noqa: E402
+import profiles as pf  # noqa: E402
 
 CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])
 FILES = [234, 249, 240, 254, 344, 233, 180, 232, 259, 161]
@@ -69,6 +72,53 @@ class MED11(unittest.TestCase):
         rel["formats"] = [{"name": "CD", "qty": "3"}]                              # (3 CDs: all three count)
         rel["tracklist"][-1] = {"position": "CD3-1", "title": "E", "duration": "5:00", "type_": "track"}
         self.assertEqual(ma.discogs_candidate(rel, dm)["disc_count"], 3)
+
+
+class NAM4(unittest.TestCase):
+    def test_NAM4_a_bracket_the_word_limit_left_open_is_dropped(self):
+        self.assertEqual(fnm.balance_brackets("1996 - Gold (Greatest Hits) [40th Anniversary [2014 Reissue]"),
+                         "1996 - Gold (Greatest Hits) [2014 Reissue]")
+        self.assertEqual(fnm.balance_brackets("1979 - Die Nacht Der Seele (Tantric [2005 Reissue]"),
+                         "1979 - Die Nacht Der Seele [2005 Reissue]")
+        self.assertEqual(fnm.balance_brackets("1994 - A (b) [c]"), "1994 - A (b) [c]")
+        path, _notes = fnm.make_path("/lib", ["Band", "1996 - Gold (Greatest Hits) [40th Anniversary [2014 Reissue]",
+                                               "01 Song (Live"], ".flac", {"compat": "linux"})
+        self.assertEqual(str(path), "/lib/Band/1996 - Gold (Greatest Hits) [2014 Reissue]/01 Song (Live.flac")
+        self.assertEqual(fnm.safe_component("Scans (2"), "Scans (2")            # (your own subfolder keeps it)
+
+
+class FIL1(unittest.TestCase):
+    def prop(self, **kw):
+        return pl.Proposal(source_dir="/x", files=["/x/1.flac"], targets=[{}], status="identified", tier="exact",
+                           confidence=87.4, margin=9.9, all_lengths=True, **kw)
+
+    def test_FIL1_filed_on_your_own_number_and_every_length(self):
+        prof = pf.default()
+        self.assertIn("catalogue number", pl._files_on_evidence(self.prop(own_number=True), prof, 87.4))
+        self.assertEqual(pl._files_on_evidence(self.prop(own_number=True, guessed_pick=True), prof, 87.4), "")
+        self.assertEqual(pl._files_on_evidence(self.prop(own_number=False), prof, 87.4), "")
+        p = self.prop(own_number=True)
+        p.all_lengths = False
+        self.assertEqual(pl._files_on_evidence(p, prof, 87.4), "")
+
+    def test_FIL1_filed_when_the_disc_id_chose_the_pressing(self):
+        prof = pf.default()
+        p = self.prop(evidence=["pressing chosen by disc ID (track positions of the CD) matches"])
+        p.margin, p.confidence = -5.3, 94.7
+        self.assertIn("disc ID", pl._files_on_evidence(p, prof, 94.7))
+        p.guessed_pick = True
+        self.assertEqual(pl._files_on_evidence(p, prof, 94.7), "")
+
+
+class TIE4(unittest.TestCase):
+    def test_TIE4_an_official_release_beats_a_bootleg_that_fits_as_well(self):
+        a = album(FILES)
+        boot = dict(cand(FILES), id="boot", unofficial=True, country="Russia")
+        official = dict(cand(FILES), id="official", country="US")
+        r = mc.classify([mc.score_candidate(a, c, CFG) for c in (boot, official)], CFG)
+        self.assertEqual(r["best"]["cand"]["id"], "official")
+        r = mc.classify([mc.score_candidate(a, boot, CFG)], CFG)         # (the bootleg alone: doubted)
+        self.assertTrue(any("unofficial" in w for w in r["why"]))
 
 
 if __name__ == "__main__":

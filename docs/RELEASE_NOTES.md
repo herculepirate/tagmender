@@ -1,5 +1,27 @@
 # Release notes
 
+## 0.8.31
+
+**Albums your copy proves are filed (FIL-1)**
+- An album whose own catalogue number or barcode is on the release, or whose disc ID chose the
+  pressing, with every track length agreeing, is now filed into the library even when its score
+  is under the profile's threshold (a long folder title, other pressings the disc ID ruled out).
+  A pressing picked only by your country order is never filed this way.
+
+**One disc of a set in its own folder (BOX-2)**
+- A folder holding one disc of a 2-CD set ("Volume One", "Volume Two" apart) is tagged with that
+  disc's tracks and filed as disc 1 or 2 of the set, instead of being left Unresolved.
+
+**Bootlegs and folder names**
+- An unofficial release (a bootleg CD-R) no longer wins a tie against the official one unless
+  your copy points to it (TIE-4).
+- Folder names never keep a bracket the five-word limit cut open (NAM-4): "Gold (Greatest Hits)
+  [40th Anniversary [2014 Reissue]" is now "Gold (Greatest Hits) [2014 Reissue]". Albums already
+  filed under such a name are renamed the next time they are applied.
+
+**Faster look-ups**
+- After MusicBrainz says it is busy, TagMender returns to full speed much sooner (SPD-1).
+
 ## 0.8.30
 
 **Every file moves with the album (MOV-1)**

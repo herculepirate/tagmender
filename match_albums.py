@@ -3621,12 +3621,14 @@ class Http:
                 if host not in self.ANSWER_CHECKED:
                     down.pop(host, None)
                 if host == "mb":                           # a calm spell: the 503 slow-down wears off
+                    # (SPD-1: after 5 answers in a row, not 20 - MusicBrainz's 503 is a moment's load
+                    # shedding; at /1.1 per 20 answers a run crawled at 3 s a request for hours)
                     self._mb_ok = getattr(self, "_mb_ok", 0) + 1
-                    if self._mb_ok >= 20:
+                    if self._mb_ok >= 5:
                         self._mb_ok = 0
                         base = getattr(self, "_mb_base", 1.0)
                         if self.cfg["mb_delay"] > base:
-                            self.cfg["mb_delay"] = max(base, self.cfg["mb_delay"] / 1.1)
+                            self.cfg["mb_delay"] = max(base, self.cfg["mb_delay"] / 1.25)
                 self._health(host)
                 self.db.execute("INSERT OR REPLACE INTO http_cache (url, body, ts) VALUES (?,?,?)",
                                 (key, body, time.time()))
@@ -6278,12 +6280,16 @@ def summarize(res):
             "tracks": len(c["tracks"]), "confidence": b["confidence"],
             "artist_sim": b.get("artist_sim", 0), "title_sim": b.get("title_sim", 0),
             # (what lets a sure album be filed below the organize threshold: plan._files_on_evidence)
+            # (BOX-2: one disc of a set, its folder alone: that disc's tracks tag it)
+            **({"box_disc": int(c["box_disc"])} if c.get("box_disc") else {}),
             "all_lengths": bool(b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
                                 and not b.get("conflict") and not b.get("missing")),
             "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),
             # (BAR-1b: the release's tracks are the files', and at least half the lengths agree)
             # (TOC-1: your disc's TOC is this release's, its title agreeing: proof of the album)
             "toc_proven": bool(b.get("toc_proven")),
+            # (FIL-1: your copy's own barcode or catalogue number proves it; the pressing a guess)
+            "own_number": bool(b.get("own_number")), "guessed_pick": bool(b.get("guessed_pick")),
             "most_lengths": bool(b.get("tracks_ok") and (b.get("dur_frac") or 0) >= 0.5 and not b.get("conflict")
                                  and not b.get("missing")),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),

@@ -312,5 +312,128 @@ class MED10_PressedDiscsAndTheEU(unittest.TestCase):
         self.assertIn("(0.33, 0.42, False)", inspect.getsource(ma._hub_strips))
 
 
+class WEB2_TitleSearchLastResort(unittest.TestCase):
+    """WEB-2: the album's own name searched on the web once, last; only links are kept."""
+    CFG = dict(mc.DEFAULT_CFG, preferred_countries=[], web_search={"engines": ["marginalia"]})
+    PAGE = ("https://www.discogs.com/release/13883123-Brand-X-Live\n"
+            "https://musicbrainz.org/release/a3b90699-2f29-453b-b41a-38ff46ed566f\n"
+            "https://brandx.bandcamp.com/album/live-rites-of-spring/\nhttps://example.org/review")
+
+    def run_step(self, final=None, cfg=None, album=None):
+        album = album or {"artist": "Brand X", "title": "Live - The Rites Of Spring Festival 2018", "tracks": []}
+        out, asked, fetched = {}, [], []
+
+        def search(http, query, cfg=None, notes=None):
+            asked.append(query)
+            return self.PAGE, "marginalia"
+
+        def fetch(http, dm, ids, source, have):
+            fetched.append((source, list(ids)))
+            return []
+        with mock.patch.object(ma, "web_search", search), mock.patch.object(ma, "_fetch_linked", fetch):
+            r = ma.title_web_step(None, album, cfg or self.CFG, None, None, None, final or {"status": "review"},
+                                  "", True, True, out, [])
+        return r, out, asked, fetched, album
+
+    def test_links_only_and_once(self):
+        _r, out, asked, fetched, album = self.run_step()
+        title = mc.search_title("Live - The Rites Of Spring Festival 2018")
+        self.assertEqual(asked, [f'"{title}" "Brand X"'])
+        self.assertEqual(dict(fetched), {"discogs": ["13883123"], "mb": ["a3b90699-2f29-453b-b41a-38ff46ed566f"]})
+        self.assertEqual(out["web_bandcamp"], ["https://brandx.bandcamp.com/album/live-rites-of-spring"])
+        self.assertTrue(album["web_titled"])
+        # searched once only
+        _r, _o, asked2, _f, _a = self.run_step(album=album)
+        self.assertEqual(asked2, [])
+
+    def test_a_band_named_x_is_searched_whole(self):
+        self.assertEqual(mc.artist_parts("Brand X"), ["Brand X"])
+        self.assertEqual(mc.artist_parts("Malcolm X"), ["Malcolm X"])
+        self.assertEqual(mc.artist_parts("Artist A x Artist B"), ["Artist A", "Artist B"])
+
+    def test_no_engine_no_search(self):
+        _r, _o, asked, _f, _a = self.run_step(cfg=dict(self.CFG, web_search={"engines": []}))
+        self.assertEqual(asked, [])
+
+    def test_a_sure_pick_is_not_searched(self):
+        _r, _o, asked, _f, _a = self.run_step(final={"status": "auto"})
+        self.assertEqual(asked, [])
+
+
+class WEB2_BandcampFromTheSearch(Base):
+    def test_a_linked_bandcamp_page_is_a_web_album(self):
+        d = self.album("Band B", "Album B")
+        eng = self.engine(WebHttp([]), unresolved=MARK,
+                          providers={"web": {"enabled": True, "shops": False, "gnudb": False,
+                                             "sources": ["bandcamp"]}})
+        album = ma.read_album(str(d), "Band B", d.name)
+        files = [t["path"] for t in album["tracks"]]
+        cand = {"source": "bandcamp", "id": "b", "url": "https://bandb.bandcamp.com/album/album-b",
+                "artist": "Band B", "artist_alt": "", "title": "Album B", "year": 2005, "date": "2005",
+                "country": "", "label": "", "catnos": set(), "barcodes": set(), "disc_count": 1,
+                "tracks": [{"title": f"T{i}", "secs": s, "num": i + 1, "disc": 1} for i, s in enumerate((10, 20, 30))],
+                "formats": {"digital"}, "digital_only": True, "genre": [], "cover": ""}
+        with mock.patch("web_tag.bandcamp_album", lambda http, u: cand if "bandb" in u else None), \
+                mock.patch("web_tag.bandcamp", lambda http, a, t: []):
+            p = eng._web({"web_bandcamp": ["https://bandb.bandcamp.com/album/album-b"]}, album, files,
+                         dict(source_dir=str(d), files=files, provider_errors={}))
+        self.assertIsNotNone(p)
+        self.assertEqual((p.tier, p.provider), ("partial", "web:Bandcamp"))
+
+
+class EVI2_ADownloadWithoutACatalogueNumber(unittest.TestCase):
+    """John Mayer - Paradise Valley: the CD sleeve bundled with the 24-bit download prints the
+    CD's catalogue number; the download's entry lists none: unknown, not another number."""
+
+    def report(self, formats):
+        dl = {"cand": {"id": "dl", "source": "discogs", "catnos": set(), "barcodes": set(), "formats": formats}}
+        cd = {"cand": {"id": "cd", "source": "discogs", "catnos": {mc.norm_code("SICP 3887")}, "barcodes": set(),
+                       "formats": {"cd"}}}
+        album = {"barcodes": set(), "printed_text": ""}
+        return ma.scans_report(dl, album, "Columbia\nSICP-3887", [{"scored": [dl, cd]}], True)
+
+    def test_the_download_is_not_against_it(self):
+        self.assertNotIn("catalogue_number", self.report({"digital"})["against"])
+
+    def test_a_download_with_the_cds_barcode_is_not_proven(self):
+        dl = {"cand": {"id": "dl", "source": "discogs", "catnos": set(), "barcodes": {"886443927087"},
+                       "formats": {"digital"}}}
+        cd = {"cand": {"id": "cd", "source": "discogs", "catnos": {mc.norm_code("SICP 3887")},
+                       "barcodes": {"886443927087"}, "formats": {"cd"}}}
+        album = {"barcodes": set(), "printed_text": "", "ocr_barcodes": {"886443927087"}}
+        r = ma.scans_report(dl, album, "SICP-3887", [{"scored": [dl, cd]}], True)
+        self.assertNotEqual(r["state"], "proven")
+        self.assertNotIn("catalogue_number", r["against"])
+
+    def test_a_cd_entry_without_its_number_still_is(self):
+        self.assertIn("catalogue_number", self.report({"cd"})["against"])
+
+
+class BAR1_ProvenOnTheScansIsFiled(unittest.TestCase):
+    """Pallas - The Sentinel [VinylRip]: barcode and catalogue number printed on the scans, 4 of
+    6 vinyl lengths agreeing, 93.6: filed (organize_min_confidence 95)."""
+
+    def prop(self, **scans):
+        p = pl.Proposal(source_dir="/x", files=[], status="identified", tier="exact", confidence=93.6,
+                        most_lengths=scans.pop("most_lengths", True))
+        p.scans = dict({"state": "proven", "found": ["barcode", "catalogue_number"], "against": [],
+                        "printed": True}, **scans)
+        return p
+
+    def test_filed(self):
+        prof = pf.from_dict({"name": "t"})
+        self.assertIn("barcode or catalogue number", pl._files_on_evidence(self.prop(), prof, 93.6))
+
+    def test_not_when_the_scans_show_something_against_it(self):
+        prof = pf.from_dict({"name": "t"})
+        self.assertEqual(pl._files_on_evidence(self.prop(against=["country"]), prof, 93.6), "")
+        self.assertEqual(pl._files_on_evidence(self.prop(printed=False), prof, 93.6), "")
+        # (fewer than half the lengths agree, or tracks missing: another master or edition)
+        self.assertEqual(pl._files_on_evidence(self.prop(most_lengths=False), prof, 93.6), "")
+        self.assertEqual(pl._files_on_evidence(self.prop(), prof, 89.0), "")
+        self.assertEqual(pl._files_on_evidence(self.prop(), pf.from_dict(
+            {"name": "t", "matching": {"extra_careful": True}}), 93.6), "")
+
+
 if __name__ == "__main__":
     unittest.main()

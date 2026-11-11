@@ -64,7 +64,11 @@ are refused; asks closer than a second apart are answered 429.
 
 TagMender identifies with free official APIs only: MusicBrainz, Discogs, the shops' barcode lookups,
 gnudb, CTDB. A general web search is off unless a profile lists engines
-(`"providers": {"web": {"search": {"engines": ["mojeek", "marginalia"]}}}`, see PROFILES.md). No AI
+(`"providers": {"web": {"search": {"engines": ["mojeek", "marginalia"]}}}`, see PROFILES.md).
+With one set up, an album nothing else established is also searched once by its artist and title, as
+the last search (WEB-2 in MATCHING_RULES.md): only MusicBrainz, Discogs and Bandcamp album links in
+the results are used, each checked against your files like any other match. Marginalia's shared
+"public" key has a daily limit for everyone; a key of your own (free, on request) is more reliable. No AI
 search engine is used by default, and no search page is scraped: DuckDuckGo's HTML page answered with
 its bot check 480 times in 480, and web search decided none of 819 picks (measured 2026-10-31).
 

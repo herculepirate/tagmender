@@ -4910,7 +4910,7 @@ New: {after}
     </message>
     <message>
         <location line="+1"/>
-        <source>Your scans name another pressing: decide in Needs attention</source>
+        <source>Your scans name another pressing: choose the release with Album › Change Release</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

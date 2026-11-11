@@ -6235,6 +6235,9 @@ def summarize(res):
             "all_lengths": bool(b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
                                 and not b.get("conflict") and not b.get("missing")),
             "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),
+            # (BAR-1b: the release's tracks are the files', and at least half the lengths agree)
+            "most_lengths": bool(b.get("tracks_ok") and (b.get("dur_frac") or 0) >= 0.5 and not b.get("conflict")
+                                 and not b.get("missing")),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
             # tracks missing from the folder: each file's track of the release (0-based, in
             # the release's order), the missing ones {disc: [numbers]}, the release's count
@@ -6640,6 +6643,7 @@ def _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final, text, 
         if not dg_ids and not mb_ids and not strong and not state["titled"]:
             # no code to tie it to: the album's own name on the web, once
             state["titled"] = True
+            album["web_titled"] = True                 # (WEB-2 does not search it again)
             title = mc.search_title(album["title"])
             dg_ids, mb_ids = web_release_links(http, [f"{title}\" \"{first}"], "", limit=1, cfg=cfg, notes=notes)
     state["dg_ids"] += [x for x in dg_ids if x not in state["dg_ids"]]
@@ -6664,6 +6668,65 @@ def _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final, text, 
     state["found"] += len(found["mb"]) + len(found["discogs"])
     mb_res = _scored_again(mb_res, found["mb"], "mb", album, cfg, text)
     dg_res = _scored_again(dg_res, found["discogs"], "discogs", album, cfg, text)
+    return mb_res, dg_res, mc.combine(mb_res, dg_res) or final
+
+
+WEB_TITLE_LINKS = 3
+_WEB_BANDCAMP = re.compile(r"https?://[a-z0-9-]+\.bandcamp\.com/album/[A-Za-z0-9_-]+")
+
+
+def _fetch_linked(http, dm, ids, source, have):
+    """The candidates of the release IDs a web page linked (not already scored)."""
+    out = []
+    for rid in ids:
+        if rid in have:
+            continue
+        if source == "discogs":
+            det = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+            if det:
+                out.append(discogs_candidate(det, dm))
+        else:
+            det = http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+            if det:
+                out.append(mb_candidate(det))
+    return out
+
+
+def title_web_step(http, album, cfg, dm, mb_res, dg_res, final, text, use_mb, use_discogs, out, notes):
+    """WEB-2, the last search: an album still unsure after the databases, the scans, the
+    shops and gnudb (not even the album known) is searched once on the web by its own name,
+    with the engines the profile chose (none: skipped). Only links are kept: MusicBrainz and
+    Discogs release pages, fetched through their APIs and scored against the files like any
+    other candidate (they may prove the pressing as any match does), and Bandcamp album pages,
+    for the web step's Partial tags (out["web_bandcamp"]). Nothing is ever tagged from a
+    search result's own text."""
+    if (final or {}).get("status") == "auto" or album.get("web_titled") or not web_engines(cfg):
+        return mb_res, dg_res, final
+    if final and final.get("best") and mc.album_only(final, cfg, tie_source(album, final)):
+        return mb_res, dg_res, final
+    first = mc.artist_parts(album.get("artist") or "")[0].replace('"', "")
+    title = mc.search_title(album.get("title") or "").replace('"', "")
+    if not first or not title:
+        return mb_res, dg_res, final
+    album["web_titled"] = True
+    raw, engine = web_search(http, f'"{title}" "{first}"', cfg, notes)
+    raw = urllib.parse.unquote(raw or "")
+    # (a few of each: the databases' request limits are shared with every other album)
+    dg_ids = list(dict.fromkeys(_WEB_DISCOGS.findall(raw)))[:WEB_TITLE_LINKS]
+    mb_ids = list(dict.fromkeys(_WEB_MB.findall(raw)))[:WEB_TITLE_LINKS]
+    bandcamp = list(dict.fromkeys(u.rstrip("/") for u in _WEB_BANDCAMP.findall(raw)))[:2]
+    out["web_title_search"] = {"engine": engine, "discogs": dg_ids, "mb": mb_ids, "bandcamp": bandcamp}
+    if bandcamp:
+        out["web_bandcamp"] = bandcamp
+    new_dg = _fetch_linked(http, dm, dg_ids, "discogs", {str(s["cand"]["id"]) for s in (dg_res or {}).get("scored", [])}) \
+        if use_discogs else []
+    new_mb = _fetch_linked(http, dm, mb_ids, "mb", {s["cand"]["id"] for s in (mb_res or {}).get("scored", [])}) \
+        if use_mb else []
+    if not new_dg and not new_mb:
+        return mb_res, dg_res, final
+    mb_res = _scored_again(mb_res, new_mb, "mb", album, cfg, text) if new_mb else mb_res
+    dg_res = _scored_again(dg_res, new_dg, "discogs", album, cfg, text) if new_dg else dg_res
     return mb_res, dg_res, mc.combine(mb_res, dg_res) or final
 
 
@@ -7067,6 +7130,21 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                                           use_discogs, out, source_notes, shops_asked)
         _note_found(album, seen_ids, (mb_res, dg_res), "barcode_lookup")
 
+    # WEB-2: the album's own name on the web, the last search (an engine set up only). Only a
+    # database that answered this album is asked for what the web linked; a database that
+    # fails now is noted, never makes the album an outage (the step is optional)
+    down = getattr(args, "provider_errors", None) or {}
+    ask_mb = use_mb and mb_res is not None and not down.get("musicbrainz")
+    ask_dg = use_discogs and dg_res is not None and not down.get("discogs")
+    if ask_mb or ask_dg:
+        try:
+            mb_res, dg_res, final = title_web_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt,
+                                                   ask_mb, ask_dg, out, source_notes)
+        except AuthError:
+            raise
+        except Exception as exc:
+            source_notes.append(f"web search of the album's name failed ({type(exc).__name__}: {exc})")
+
     # Last resort: the country preference, between pressings nothing else told apart
     if final["status"] != "auto" and full_cfg.get("preferred_countries"):
         again = []
@@ -7258,19 +7336,27 @@ def scans_report(best, album, ocr_txt, results, had_scans):
     elif read and have:                           # (a release that lists no barcode contradicts none)
         add(against, "barcode")
     # a catalogue number read on the scans that another scored pressing carries, not this one
+    # (EVI-2: a download's entry that lists no catalogue number is unknown, not another number -
+    # the CD's sleeve bundled with a download names the CD: John Mayer - Paradise Valley)
+    unlisted_download = not cand.get("catnos") and set(cand.get("formats") or ()) == {"digital"}
+    others_number = False
     if "catalogue_number" not in found and ocr_txt:
         mine = [c for c in scan_catnos(mc.codes_from_ocr_text(ocr_txt)["catnos"]) if _distinctive(c)]
         theirs = cand.get("catnos") or ()
         others = [s["cand"].get("catnos") or () for res in results for s in (res or {}).get("scored") or ()
                   if s.get("cand") is not cand and str(s["cand"].get("id")) != str(cand.get("id"))]
-        if any(not mc.catnos_agree([c], theirs) and any(mc.catnos_agree([c], o) for o in others) for c in mine):
+        others_number = any(not mc.catnos_agree([c], theirs) and any(mc.catnos_agree([c], o) for o in others)
+                            for c in mine)
+        if others_number and not unlisted_download:
             add(against, "catalogue_number")
     for words in best.get("clues_against") or ():
         for prefix, kind in _SCAN_AGAINST_KINDS:
             if str(words).startswith(prefix):
                 add(against, kind)
     numbers = {"barcode", "catalogue_number"}
-    if set(found) & numbers and not set(against) & numbers:
+    if set(found) & numbers and not set(against) & numbers and not (unlisted_download and others_number):
+        # (a download's entry with no number of its own, while your scans print another
+        # pressing's: not against it, but not proof of it either - "agrees" at most)
         state = "proven"
     elif against:
         state = "differs"

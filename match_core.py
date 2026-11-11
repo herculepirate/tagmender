@@ -311,7 +311,9 @@ def artist_parts(artist):
     """'A & B', 'A; B', 'A / B', 'A and B', 'A, B' -> ['A', 'B'].
     Database artist fields hold collaborators separately, so a phrase search
     for the joined credit usually finds nothing; search one name instead."""
-    parts = re.split(r"\s*(?:;|/|,|&|\band\b|\bwith\b|\bfeat\.?|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*",
+    # (" x " only lowercase and between two names: "A x B" is a collaboration, "Brand X" a band
+    # - its "X" once made every search ask for "Brand")
+    parts = re.split(r"\s*(?:;|/|,|&|\band\b|\bwith\b|\bfeat\.?|\bfeaturing\b|\bvs\.?\b)\s*|(?<=\S)\s+(?-i:x)\s+(?=\S)",
                      str(artist or ""), flags=re.I)
     parts = [p.strip() for p in parts if p and p.strip()]
     return parts or [str(artist or "").strip()]

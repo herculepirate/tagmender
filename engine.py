@@ -1677,7 +1677,8 @@ class Engine:
             confidence=float(best.get("confidence") or 0), margin=out.get("margin"),
             why=list(out.get("why") or []), evidence=evidence_of(out, best),
             provenance=prov, release=self._release(best), tier="exact",
-            all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")))
+            all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")),
+            most_lengths=bool(best.get("most_lengths")))
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
@@ -2463,6 +2464,12 @@ class Engine:
         # with the rip's table of contents, is a web album like a shop's (established below
         # the same way: artist, title, lengths; its track titles must agree with the files')
         disc = gnudb_candidates(out, album)
+        # WEB-2: Bandcamp album pages the web search of the album's name linked (match_albums.
+        # title_web_step), read as the Bandcamp source reads one, established the same way
+        if (out or {}).get("web_bandcamp") and any(n == "Bandcamp" for n, _f in
+                                                    web_tag.chosen_sources(self._web_sources())):
+            album = dict(album, tag_urls=list(album.get("tag_urls") or []) +
+                         [u for u in out["web_bandcamp"] if u not in (album.get("tag_urls") or [])])
         try:
             found = disc + web_tag.album_candidates(self.http, album, self.log, self._web_sources(),
                                                     n_tracks=len(album.get("tracks") or ()), failed=failed)

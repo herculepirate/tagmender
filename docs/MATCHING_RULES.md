@@ -29,6 +29,7 @@ When rules point different ways, the earlier group wins:
 | ID | Rule | Status |
 |---|---|---|
 | BAR-1 | A barcode from your copy that matches a release makes that the release, even when the audio could not come from its media (a CD barcode on 24/96 files is still that CD). | in code (`classify`) |
+| BAR-1b | A release proven by your scans (its barcode or catalogue number printed on them, nothing on them against it) is filed even below organize_min_confidence when some track lengths differ (a vinyl rip's run-in and gaps), at a score of at least 90 (replace_min_confidence), when the files are the release's tracks (none missing) and at least half their lengths agree. Not with Extra-careful matching. | in code (`plan._files_on_evidence`); tests `BAR1_*` |
 | BAR-1a | When your barcode is on several releases (a hybrid SACD listed once as SACD and once as CD), the one whose media can hold your audio is taken. | in code (`classify`, `_yields_to_audio`) |
 | BAR-2 | Your barcode on one database's unsure pick beats the other database's sure pick that does not carry it, whatever the Sources preference: the barcode's release is taken. When two entries of that database share the barcode, HF-2 applies. When both picks carry the same barcode, the sure one stands. | in code (`_proof_left_unsure`, `_barcode_taken`); tests `BAR2_*`, `SurePickNotDisputed` |
 | BAR-3 | Two barcodes of yours naming two releases: the barcode read on the outer packaging (back cover, box, slipcase, o-card) wins over one on a disc, booklet or inlay. When that cannot be told, HF-2 applies. | in code (`barcode_on_outer`, `_outer_barcode_pick`); tests `BAR3_*` |
@@ -40,7 +41,7 @@ When rules point different ways, the earlier group wins:
 | ID | Rule | Status |
 |---|---|---|
 | EVI-1 | Weight of evidence, strongest first: barcode > catalogue number > disc ID / matrix (runout) > label or country printed on the scans > folder name > country order. | in code (`CLUE_WEIGHTS`); tests `EVI1_*` |
-| EVI-2 | Evidence shared by every candidate (a catalogue number on all editions) tells nothing apart; so does a release country (or media) in your tags that none of the tied pressings has (another tagger's GB on an album out only in DE and RU): it never outweighs your disc ID or stops the country order. A download entry that lists no catalogue number is unknown, not different. | in code (`_weigh`, `choose_pressing`); tests `ScansNumberAgainstAnUnlistedOne`, `EVI2_*` |
+| EVI-2 | Evidence shared by every candidate (a catalogue number on all editions) tells nothing apart; so does a release country (or media) in your tags that none of the tied pressings has (another tagger's GB on an album out only in DE and RU): it never outweighs your disc ID or stops the country order. A download entry that lists no catalogue number is unknown, not different - also when your scans (a CD sleeve bundled with a download) print another pressing's number. | in code (`_weigh`, `choose_pressing`); tests `ScansNumberAgainstAnUnlistedOne`, `EVI2_*` |
 | EVI-3 | Text read off the scans (for example "Made in EU") beats the country order. | in code |
 | EVI-4 | Poor OCR (few words of artist or title read) never lowers the confidence: scans only add evidence. | in code (`score_candidate`, OCR only adds); test `EVI4_*` |
 
@@ -109,6 +110,7 @@ When rules point different ways, the earlier group wins:
 | SRC-2 | An album only Discogs knows is tagged from Discogs in full; MusicBrainz IDs stay empty and are never invented. | in code |
 | WEB-1 | When neither database establishes the album, the web is searched next, also with Unresolved set to "leave". With "leave" what it finds is held: shown in the preview (HELD, unticked) and written only when you tick it and apply; a watched folder never applies it, and it keeps the Unresolved retry schedule. | in code (`engine` web step, `plan.held`); tests `WEB1_*` |
 | GNU-1 | A gnudb entry that is gnudb's exact match for your CD's table of contents (one disc; same track count, every track length agrees; at least 80% of your files' track titles agree in order) is a web album: Partial tags from it (album, artists, track titles, genre, year), never a release ID, label, barcode, catalogue number or media. A fuzzy gnudb match stays a clue only. | in code (`engine.gnudb_candidates`); tests `GNU1_*` |
+| WEB-2 | The last search, when nothing else established the album (not even album known): its artist and title searched once on the web with the profile's search engines (none set up: skipped). Only links are kept - MusicBrainz and Discogs release pages (3 of each at most, only from a database that answered for this album), fetched and scored like any other match, and Bandcamp album pages for WEB-1's Partial tags; nothing is taken from a result's own text. | in code (`match_albums.title_web_step`, `engine._web`); tests `WEB2_*` |
 
 ## Names and fields
 

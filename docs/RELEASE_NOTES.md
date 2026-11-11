@@ -1,5 +1,28 @@
 # Release notes
 
+## 0.8.24
+
+**Web search, the last resort (WEB-2)**
+- With a web search engine set up for a profile (Mojeek, Marginalia or Tavily), an album that
+  MusicBrainz, Discogs, your scans, the shops and gnudb could not establish is searched once by
+  its artist and title before it is left Unresolved.
+- Only links in the results are used: MusicBrainz and Discogs release pages are fetched and
+  checked against your files like any other match, and Bandcamp album pages can give Partial
+  tags. Nothing is tagged from the text of a search result.
+- Marginalia's shared "public" key often reaches its daily limit; a key of your own is more
+  reliable.
+- Fixed: a band whose name ends in "X" (Brand X, Malcolm X) was searched as "Brand" on the
+  web sources.
+
+**Albums proven by your scans**
+- A release whose barcode or catalogue number is printed on your scans, with nothing on them
+  against it, is now filed at a score of 90 or more even when some track lengths differ, as a
+  vinyl rip's do - at least half of them must agree (BAR-1b).
+- A CD sleeve that came with a download no longer makes the download "another pressing": a
+  download's entry without a catalogue number is unknown, not different (EVI-2).
+- The scans' tooltip in the preview now points to Album › Change Release; Needs attention lists
+  only albums already marked Unresolved.
+
 ## 0.8.23
 
 **The web is searched next, also with Unresolved set to "leave" (WEB-1)**

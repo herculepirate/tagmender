@@ -105,6 +105,7 @@ class Proposal:
     # list no lengths to score (album_only tier)
     all_lengths: bool = False
     lengths_missing: bool = False       # exact tier, and the release lists no track lengths to compare
+    most_lengths: bool = False          # BAR-1b: the files are the release's tracks, half their lengths agree at least
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
@@ -184,6 +185,15 @@ def _files_on_evidence(prop, profile, conf) -> str:
     if tier == "exact" and lengths and conf >= 80.0 and (getattr(prop, "scans", None) or {}).get("printed"):
         # (a low score here is a folder name that does not say the artist, not doubt about the release)
         return "your scans show its barcode or catalogue number and every track length agrees"
+    sc = getattr(prop, "scans", None) or {}
+    if tier == "exact" and conf >= max(90.0, _threshold(profile, "replace_min_confidence")) and \
+            sc.get("printed") and sc.get("state") == "proven" and not sc.get("against") and \
+            (lengths or getattr(prop, "most_lengths", False)):
+        # BAR-1: your scans print its barcode or catalogue number and show nothing against it:
+        # the release is proven though some lengths differ (a vinyl rip's run-in and gaps:
+        # Pallas - The Sentinel [VinylRip], 4 of 6 lengths, 93.6) - at a score its tags are
+        # replaced at (replace_min_confidence, 90 at least): a weaker one is not filed on them
+        return "your scans show its barcode or catalogue number and nothing against it"
     if tier == "exact" and (lengths or getattr(prop, "lengths_missing", False)) and \
             conf >= max(90.0, _threshold(profile, "auto_min_confidence")) and prop.margin is not None and \
             prop.margin >= _threshold(profile, "auto_min_margin"):

@@ -19,7 +19,7 @@ SCAN_KINDS = {"barcode": N_("Barcode"), "catalogue_number": N_("Cat. no."), "lab
 SCAN_MARK = {"proven": "✓", "agrees": "~", "differs": "✗"}
 SCAN_TIPS = {"proven": N_("Your scans show the barcode and catalogue number of this release: the pressing is proven"),
              "agrees": N_("Your scans agree with this release, but do not prove which pressing it is"),
-             "differs": N_("Your scans name another pressing: decide in Needs attention"),
+             "differs": N_("Your scans name another pressing: choose the release with Album › Change Release"),
              "unread": N_("Scans were read but no barcode or catalogue number was found")}
 # how a source was reached, after the database's name
 VIA_WORDS = {"disc_id": N_("disc ID"), "link": N_("your files' link"), "scan_search": N_("web search of your scans"),

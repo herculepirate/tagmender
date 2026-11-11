@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.38
+
+**Nothing left behind, also for short titles (MOV-3)**
+- An album folder named "2016 - 3 [SACD ...]" is recognised as album "3"'s own folder although
+  the naming script tags it "3 [HD]": its checksum files go with the album. A folder whose name
+  merely contains the word ("Music 2020", "Vol 3") keeps its other files.
+
 ## 0.8.37
 
 **Pressings your barcode and scans name (EVI-5, EVI-6, TIE-4)**

@@ -139,12 +139,17 @@ class MOV3(unittest.TestCase):
 
     def test_MOV3_a_folder_named_after_the_album(self):
         for folder, title, artist in (("2016 - 3 [SACD DSD64 24bit 352khz]", "3", "BS&T"),
+                                      ("2016 - 3 [SACD DSD64 24bit 352khz]", "3 [HD]", "BS&T"),   # (the script's mark)
+                                      ("2016 - 3 [SACD DSD64 24bit 352khz]", "3", "Blood, Sweat And Tears"),
                                       ("Popol Vuh - Sing", "Sing", "Popol Vuh"),
                                       ("Raising Sand", "Raising Sand", "Robert Plant"),
-                                      ("1981 - Folk Songs [ECM 1170]", "Folk Songs", "Charlie Haden")):
-            self.assertTrue(pl._named_after_album(Path(folder), self.prop(title, artist=artist)), folder)
+                                      ("1981 - Folk Songs [ECM 1170]", "Folk Songs", "Charlie Haden"),
+                                      ("Music (2000)", "Music", "Madonna"),
+                                      ("Blood, Sweat & Tears - 3", "3", "Blood, Sweat And Tears")):
+            self.assertTrue(pl._named_after_album(Path(folder), self.prop(title, year="1970", artist=artist)), folder)
         for folder, title in (("Downloads", "3"), ("2013", "3"), ("Singles", "Sing"), ("Album", ""),
-                              ("Music", "Music"), ("Vol 3", "3"), ("Live", "Live")):   # (one word, no year or artist)
+                              ("Music", "Music"), ("Vol 3", "3"), ("Live", "Live"),    # (one word, no year or artist)
+                              ("Music 2020", "Music"), ("Rips 2019 Vol 3", "3"), ("Downloads 2023", "3")):
             self.assertFalse(pl._named_after_album(Path(folder), self.prop(title, year="2000", artist="Madonna")),
                              folder)
 

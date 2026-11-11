@@ -753,25 +753,37 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
 
 
 def _named_after_album(folder, prop) -> bool:
-    """MOV-3: the folder's name holds the album's title as a whole word or words, and - for a
-    title of one word ("3", "Music", "Live") - the album's year or artist too ("2016 - 3 [SACD
-    DSD64 24bit 352khz]", "Popol Vuh - Sing"); never "Downloads", nor "Music" for Madonna's Music."""
+    """MOV-3: the folder's name holds the album's title as a whole word or words (without the
+    script's edition marks: "3 [HD]" is "3"), and - for a title of one word ("3", "Music", "Live") -
+    a year right beside it ("2016 - 3 [SACD DSD64 24bit 352khz]", "Music (2000)") or the album's
+    artist ("Popol Vuh - Sing"); never "Downloads", "Music 2020" nor "Rips 2019 Vol 3"."""
     t = (prop.targets or [{}])[0]
+    name = Path(folder).name
+
     def words(x):
         return " ".join(re.findall(r"\w+", fnm.fold(str(x or ""))))
-    have = words(Path(folder).name)
+    have = words(name)
 
     def has(x):
         w = words(x)
         return bool(w) and re.search(rf"(?<!\w){re.escape(w)}(?!\w)", have) is not None
-    title = str((t.get("album") or [""])[0]).strip()
+    full = str((t.get("album") or [""])[0]).strip()
+    title = full
+    while re.search(r"\s*[\[(][^\])]*[\])]\s*$", title):        # ("3 [HD]": the script's edition marks)
+        title = re.sub(r"\s*[\[(][^\])]*[\])]\s*$", "", title)
+    title = title.strip() or full
     if not has(title):
         return False
     if len(words(title).split()) >= 2:
         return True
-    years = {str(v)[:4] for k in ("date", "originaldate") for v in t.get(k) or () if str(v)[:4].isdigit()}
-    artists = [a for k in ("albumartist", "artist") for a in t.get(k) or ()]
-    return any(has(y) for y in years) or any(has(a) for a in artists)
+    w = re.escape(words(title))
+    beside = rf"^(?:19|20)\d\d\s+{w}(?!\w)|(?<!\w){w}\s+(?:19|20)\d\d$"   # (on the folded words)
+    if re.search(beside, have) and (re.match(r"^\s*(?:19|20)\d\d\s*[-\u2013.]", name)
+                                   or re.search(r"[\[(]\s*(?:19|20)\d\d\s*[\])]\s*$", name)):
+        return True
+    mine = _loose_key(name, True)
+    return any(_loose_key(a, True) and _loose_key(a, True) in mine
+               for k in ("albumartist", "artist") for a in t.get(k) or ())
 
 
 def _from_album_folder(comps, names, compat) -> list:

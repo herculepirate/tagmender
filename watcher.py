@@ -14,6 +14,8 @@ An album is processed when:
   - it is not remembered as Ignored (until its files or the rules change);
   - an unresolved album is looked up again every 10 minutes for its first day, then daily for
     the rest of its first week, then only when you ask (Look Up, `tagmender retry`) - HF-3;
+    and once more after each TagMender update, whatever its schedule (HF-8: the new version
+    may identify it);
     retry.after_days 0 (Never) leaves it for you at once. A Partial one is retried after
     retry.after_days, at most retry.max_attempts times; a provider outage or throttling is
     retried sooner, with growing pauses, and never decided on the other database alone (HF-4);
@@ -198,8 +200,9 @@ def _db():
 
 
 def match_of(entry) -> dict | None:
-    """What identification said of a plan album, for the Recently list: {"tier", "confidence",
-    "provider", "scans", "via"}; None when the plan does not say (a listed folder, no tier)."""
+    """What identification said of a plan album, for the Recently list and Needs attention:
+    {"tier", "confidence", "provider", "scans", "via", "codes", "reason"}; None when the plan
+    does not say (a listed folder, no tier)."""
     ident = (entry or {}).get("identification") or {}
     if not ident.get("tier"):
         return None
@@ -208,8 +211,67 @@ def match_of(entry) -> dict | None:
         conf = None if conf is None else float(conf)
     except (TypeError, ValueError):
         conf = None
-    return {"tier": ident.get("tier"), "confidence": conf, "provider": ident.get("provider") or "",
-            "scans": ident.get("scans") or None, "via": ident.get("via") or ""}
+    codes, words = list(ident.get("reason_codes") or []), ""
+    if ident.get("reason"):
+        try:
+            import reasons
+            parsed, words = reasons.parse(str(ident["reason"]))
+            codes = codes or list(parsed or [])
+        except Exception:
+            words = str(ident["reason"])
+    out = {"tier": ident.get("tier"), "confidence": conf, "provider": ident.get("provider") or "",
+           "scans": ident.get("scans") or None, "via": ident.get("via") or ""}
+    words = words or "; ".join(str(w) for w in ident.get("why") or [])
+    if codes or words:                                 # (why it is not filed: Needs attention, HF-8)
+        out.update(codes=codes, reason=words)
+    return out
+
+
+def version_since(db) -> float:
+    """When the TagMender version running now first ran here (table recheck_since)."""
+    db.execute("CREATE TABLE IF NOT EXISTS recheck_since (version TEXT PRIMARY KEY, since REAL)")
+    db.execute("INSERT OR IGNORE INTO recheck_since VALUES (?,?)", (VERSION, time.time()))
+    db.commit()
+    return float(db.execute("SELECT since FROM recheck_since WHERE version=?", (VERSION,)).fetchone()[0])
+
+
+def unresolved_records(path=None) -> list[dict]:
+    """The albums the watcher left Unresolved (HF-8: also with Unresolved set to "leave", when
+    nothing is written to their files), under PATH or anywhere: [{"folder", "codes", "reason",
+    "files", "mark", "profile", "since"}], those whose folder is still there."""
+    try:
+        db = _db()
+        rows = db.execute("SELECT p.folder, p.profile, p.ts, p.detail, m.match FROM processed p"
+                          " LEFT JOIN processed_match m ON m.folder = p.folder AND m.ts = p.ts"
+                          " WHERE p.status = 'unresolved' ORDER BY p.ts DESC").fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    root = os.path.normpath(str(path)) if path else None
+    out, seen = [], set()
+    for key, prof, ts, detail, raw in rows:
+        folder = str(planmod.db_path(key))
+        if "#" in folder and len(folder.rsplit("#", 1)[1]) == 12:     # one album of a mixed folder
+            folder = folder.rsplit("#", 1)[0]
+        here = os.path.normpath(folder)
+        if here in seen or not os.path.isdir(here):
+            continue
+        if root and here != root and not here.startswith(root.rstrip(os.sep) + os.sep):
+            continue
+        seen.add(here)
+        try:
+            match = json.loads(raw) if raw else {}
+        except ValueError:
+            match = {}
+        match = match if isinstance(match, dict) else {}
+        reason = match.get("reason") or ""
+        if not reason and match.get("confidence") is not None:
+            reason = f"best match scored {match['confidence']:g}" + \
+                (f" ({match['provider']})" if match.get("provider") else "")
+        out.append({"folder": here, "codes": list(match.get("codes") or []),
+                    "reason": reason or (detail or ""), "files": 0, "mark": "Unresolved",
+                    "profile": prof or "", "since": ts or 0, "watcher": True})
+    return out
 
 
 def _files_key(folder, files) -> str:
@@ -506,6 +568,8 @@ class Watcher:
         if prof["operation"] == "move" and status in LOOPED and (status != "partial" or prof["retry"]["after_days"]):
             return True, "retry"                     # (found but not filed: every pass until it is)
         if status == "unresolved":                   # HF-3 (its own schedule: no max_attempts)
+            if prof["retry"]["after_days"] and (ts or 0) < version_since(db):
+                return True, "retry"                 # HF-8: once after each update, whatever its schedule
             _since_table(db)
             hf3 = db.execute("SELECT 1 FROM unresolved_since WHERE folder=?", (key,)).fetchone()
             if not prof["retry"]["after_days"] or (next_try or 0) < 0 or \
@@ -685,10 +749,7 @@ class Watcher:
         if not prof["watch"].get("recheck_after_update") or prof["operation"] == "copy" or prof.name in self._rechecked:
             return []                              # (a copy would leave the album filed twice)
         self._rechecked.add(prof.name)
-        db.execute("CREATE TABLE IF NOT EXISTS recheck_since (version TEXT PRIMARY KEY, since REAL)")
-        db.execute("INSERT OR IGNORE INTO recheck_since VALUES (?,?)", (VERSION, time.time()))
-        since = db.execute("SELECT since FROM recheck_since WHERE version=?", (VERSION,)).fetchone()[0]
-        db.commit()
+        since = version_since(db)
         if not self.destination_ready(prof):       # (the library's share is out: looked at when it is back)
             return []
         rows = db.execute("SELECT folder, signature FROM processed WHERE profile=? AND status IN ('done','unchanged') "
@@ -713,6 +774,7 @@ class Watcher:
         seen = set()
         self.stop_pass = False
         self._rechecked = set()
+        version_since(db)                # (HF-8: from before any album this version looks at)
         later = []                       # HF-3: retries (and re-checks), after every new album of the pass
         for root, prof in self.roots():
             if self.stop or self.stop_pass:

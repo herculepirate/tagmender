@@ -1,5 +1,16 @@
 # Release notes
 
+## 0.8.27
+
+**Albums the watched folders could not identify are never out of sight (HF-8)**
+- Needs attention now lists the albums your watched folders left Unresolved, also when the
+  profile's Unresolved setting is "leave" and nothing was written to their files. With no folder
+  chosen there, it lists them wherever they are, the sidebar badge counts them, and a
+  notification tells you when there are new ones while TagMender is open.
+- After each TagMender update, every album a watched folder left Unresolved is looked up once
+  more, whatever its retry schedule (not when Retry is set to Never). New albums still go first.
+- `tagmender unresolved` and `tagmender retry` find these albums too.
+
 ## 0.8.26
 
 **Barcodes close to a dark edge are read**

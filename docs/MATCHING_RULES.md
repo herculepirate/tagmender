@@ -155,6 +155,7 @@ When rules point different ways, the earlier group wins:
 | HF-6 | Albums already filed are not looked up again after an update until the accuracy check on your known albums passes (the re-check option stays off). | in code (off by default) |
 | ACC-1 | Accuracy is measured against the databases: an album counts as right when its release is proven in the database (exact) with a TagMender score of 100. The re-check of filed albums (HF-6) is turned on only once that holds on your library. | not code: how accuracy is measured; decides when HF-6 may be turned on |
 | HF-7 | Not sure even of the album (artist matches, title partly, a few tracks agree): Unresolved and untouched; retried per HF-3. | in code |
+| HF-8 | An album a watched folder left Unresolved is looked up once more after each TagMender update, whatever its HF-3 schedule (not with Retry set to Never); its HF-3 week is not restarted. It is listed under Needs attention also when Unresolved is set to "leave" and nothing was written to its files: with no folder chosen there, the page lists every such album, keeps the badge, and a notification tells of new ones while the app is open. `tagmender unresolved` and `tagmender retry` find them too. | in code (`watcher.version_since`, `watcher.unresolved_records`, `gui/attention.py`); tests `test_v0826_needs_attention`, `test_v0821_retry_schedule` (HF-8) |
 
 ## Mixed folders
 

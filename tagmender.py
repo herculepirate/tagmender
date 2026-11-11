@@ -917,9 +917,15 @@ def _is_unresolved(g) -> bool:
 
 
 def _unresolved_albums(path):
+    """The albums marked Unresolved (or Partial) in their tags under PATH, and those the watcher
+    left Unresolved there without marking them (HF-8: Unresolved set to "leave"). No PATH: the
+    watcher's alone, wherever they are."""
     import engine
     import reasons
     import tagio
+    import watcher
+    if not path:
+        return watcher.unresolved_records()
     e = engine.Engine.__new__(engine.Engine)
     e.profile = pf.default()
     out = []
@@ -933,6 +939,8 @@ def _unresolved_albums(path):
             codes, words = reasons.parse((t.get("tagmender_reason") or [""])[0])
             out.append({"folder": str(g.folder), "codes": codes, "reason": words, "files": len(g.files),
                         "mark": mark.capitalize()})
+    marked = {os.path.normpath(r["folder"]) for r in out}
+    out += [r for r in watcher.unresolved_records(path) if r["folder"] not in marked]
     return out
 
 
@@ -963,8 +971,10 @@ def cmd_retry(args):
     import engine
     import plan as planmod
     prof = _profile(args)
-    folders = [Path(r["folder"]) for r in _unresolved_albums(args.path)
-               if not args.code or args.code in r["codes"]]
+    rows = [r for r in _unresolved_albums(args.path) if not args.code or args.code in r["codes"]]
+    folders = [Path(r["folder"]) for r in rows]
+    # (the watcher's Unresolved albums carry no mark in their tags: HF-8)
+    left = {os.path.normpath(r["folder"]) for r in rows if r.get("watcher")}
     if not folders:
         print("No unresolved albums there.")
         return EXIT_OK
@@ -974,8 +984,8 @@ def cmd_retry(args):
         _progress(i, len(folders), str(f))
         for g in e.albums_in(f):
             key = tuple(sorted(map(str, g.files)))
-            if key in seen or not _is_unresolved(g):        # only the unresolved albums, once each
-                continue
+            if key in seen or not (os.path.normpath(str(g.folder)) in left or _is_unresolved(g)):
+                continue                                # only the unresolved albums, once each
             seen.add(key)
             for prop in e.identify_all(g):          # (each disc of a set of different releases)
                 e.add_artwork(prop)                # artwork and tagging level, as `run` does

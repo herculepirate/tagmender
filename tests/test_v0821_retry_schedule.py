@@ -168,7 +168,10 @@ class Passes(unittest.TestCase):
                         (self.key(g), self.prof.name, watcher.snapshot(g.folder, g.files)[0], "unresolved",
                          6, 1.0, self.clock[0] - 200 * DAY, ""))
         self.db.commit()
-        self.assertEqual(self.passes([0, HOUR]), [], "its old tries were used up: left for you")
+        # HF-8: looked up once by the version running now (its record is older), then its old
+        # tries were used up: left for you
+        self.assertEqual(self.passes([0, HOUR, DAY]), ["Nobody"])
+        self.assertEqual(self.row(g)[2], watcher.ASK_ONLY)
 
     def test_record_from_before_hf3_tried_once_more_then_its_week_is_over(self):
         g = self.drop("Nobody")
@@ -178,6 +181,37 @@ class Passes(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.passes([0, HOUR, DAY]), ["Nobody"])
         self.assertEqual(self.row(g)[2], watcher.ASK_ONLY)
+
+    # --- HF-8: once more after each update --------------------------------------------------
+    def week_over(self, g, days=30):
+        old = self.clock[0] - days * DAY
+        self.db.execute("INSERT INTO processed VALUES (?,?,?,?,?,?,?,?)",
+                        (self.key(g), self.prof.name, watcher.snapshot(g.folder, g.files)[0], "unresolved",
+                         9, watcher.ASK_ONLY, old, ""))
+        self.db.execute("INSERT INTO unresolved_since VALUES (?,?,?)",
+                        (self.key(g), watcher.snapshot(g.folder, g.files)[0], old - 7 * DAY))
+        self.db.commit()
+
+    def test_an_update_looks_up_an_album_left_for_you_once(self):
+        g = self.drop("Nobody")
+        self.week_over(g)
+        self.assertEqual(self.passes([0, 11 * MIN, HOUR, DAY]), ["Nobody"])
+        self.assertEqual(self.row(g)[2], watcher.ASK_ONLY, "its week is over: left for you again")
+
+    def test_an_update_restarts_nothing_within_the_week(self):
+        """Left Unresolved 2 days ago by the version before: looked up now, then daily until its week ends."""
+        g = self.drop("Nobody")
+        self.week_over(g, days=2)
+        self.db.execute("DELETE FROM unresolved_since")
+        self.db.commit()
+        self.assertEqual(self.passes([0, 11 * MIN]), ["Nobody"])
+        self.assertEqual(self.row(g)[2], self.clock[0] - 11 * MIN + DAY)
+
+    def test_an_update_leaves_never_for_you(self):
+        self.prof["retry"]["after_days"] = 0
+        g = self.drop("Nobody")
+        self.week_over(g)
+        self.assertEqual(self.passes([0, HOUR]), [])
 
     # --- New albums go before retries -------------------------------------------------------
     def test_new_albums_go_before_retries(self):

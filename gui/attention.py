@@ -1,17 +1,19 @@
-"""gui/attention.py - The Needs attention page: albums marked Unresolved, by reason."""
+"""gui/attention.py - The Needs attention page: albums marked Unresolved, by reason. With no
+folder chosen, the albums the watched folders left Unresolved, wherever they are (HF-8), looked
+at again every few minutes: the badge, and a notification when there are more of them."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton,
                                QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from . import icons, sheets
 from .actions import plain
-from .common import (filter_table, folder_item, heading, left_header, open_folder, plural, popup_menu, reasons,
-                     search_web, status_cell)
+from .common import (filter_table, folder_item, heading, left_header, notify, open_folder, plural, popup_menu,
+                     reasons, search_web, status_cell)
 from .i18n import N_, tr
 from .widgets import ElidedPath, EmptyState, FlowLayout
 from .work import start
@@ -29,6 +31,9 @@ SHORT = {"no_candidate": N_("Not found"), "incomplete_album": N_("Track count di
          "missing_collaborator": N_("Credit incomplete"),
          "write_failed": N_("Not written"),
          "partially_tagged": N_("Partly tagged"), "other": N_("Not identified")}
+
+
+WATCH_LOOK_MS = 5 * 60 * 1000
 
 
 def short_reason(code) -> str:
@@ -51,7 +56,7 @@ class Attention(QWidget):
         row = QHBoxLayout()                                 # the folder, as Overview shows its own
         self.folder_icon = QLabel()
         self.folder_icon.setPixmap(icons.icon("folder-open", "muted").pixmap(16, 16))
-        self.root = ElidedPath("", empty=tr("No folder chosen: choose the folder to look in"))
+        self.root = ElidedPath("", empty=tr("Watched folders: the albums they could not identify"))
         self.choose_btn = ch = QPushButton(tr("Choose…"))
         ch.setAccessibleName(tr("Choose a folder to look in"))
         self.chosen = False                  # (a folder you chose stays; one taken from a preview follows the next)
@@ -69,8 +74,9 @@ class Attention(QWidget):
         lay.addLayout(row)
         self.views = QStackedWidget()
         self.empty = EmptyState("circle-check", tr("Nothing needs attention here."),
-                                tr("Choose a folder and press Find Albums: albums an earlier run marked Unresolved are "
-                                   "listed with the reason."))
+                                tr("Albums the watched folders could not identify are listed here with the reason. "
+                                   "Choose a folder and press Find Albums to look for albums an earlier run marked "
+                                   "Unresolved."))
         self.views.addWidget(self.empty)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels([tr("Reason"), tr("Album folder"), tr("What was found")])
@@ -120,6 +126,19 @@ class Attention(QWidget):
         self.quiet = False                                  # (a look for the badge: no busy bar, no message)
         self.looks = 0                                      # (a newer look or list drops an older answer)
         self.again = None                                   # (asked to look while looking: quiet or not)
+        self.watched_seen = None                            # (the watched folders' Unresolved albums last seen)
+        # HF-8: no folder chosen, the watched folders' Unresolved albums: at start, then every few minutes
+        self.watch_timer = QTimer(self)
+        self.watch_timer.setInterval(WATCH_LOOK_MS)
+        self.watch_timer.timeout.connect(self.look_at_watched)
+        if win is not None:
+            QTimer.singleShot(0, self.look_at_watched)
+            self.watch_timer.start()
+
+    def look_at_watched(self):
+        """The watched folders' Unresolved albums, quietly, while no folder is chosen here."""
+        if not self.root.text().strip() and not self.scanning:
+            self.scan(quiet=True)
 
     def filter(self, text):
         filter_table(self.table, text)
@@ -140,11 +159,7 @@ class Attention(QWidget):
         self.fit_reason()
 
     def scan(self, quiet=False):
-        path = self.root.text().strip()
-        if not path:
-            if not quiet and self.choose_btn.isEnabled():
-                self.choose_btn.click()
-            return
+        path = self.root.text().strip()                  # ("": the watched folders' Unresolved albums)
         if self.scanning:
             # (one look at a time: another follows once it ends - the folder may have changed since,
             # or the albums in it; quiet only when every look asked for was)
@@ -269,15 +284,28 @@ class Attention(QWidget):
             self.table.setItem(i, 2, QTableWidgetItem(r["reason"]))
         self.table.setSortingEnabled(True)
         self.fit_reason()
+        if not self.root.text().strip():
+            self.tell_new_watched(rows)
         if not rows:
             self.empty.set_text(tr("Nothing needs attention here."),
-                                tr("No album in this folder is marked Unresolved."))
+                                tr("No album in this folder is marked Unresolved.") if self.root.text().strip()
+                                else tr("The watched folders have no album they could not identify."))
         self.views.setCurrentIndex(1 if rows else 0)
         self.report_btn.setEnabled(bool(rows))
         self.win.set_badge("Needs attention", len(rows))
         if not self.scanning:
             self.pick()
             self.want = None                                     # (one try per look: no later one jumps)
+
+    def tell_new_watched(self, rows):
+        """A notification when the watched folders left more albums Unresolved than last seen
+        (not at the first look: those were there before TagMender opened)."""
+        now = {r["folder"] for r in rows if r.get("watcher")}
+        new = now - self.watched_seen if self.watched_seen is not None else set()
+        self.watched_seen = now
+        if new and self.win is not None:
+            notify(self.win, "watch", tr("Needs attention"),
+                   plural(len(new), tr("album could not be identified"), tr("albums could not be identified")))
 
     def row(self):
         r = self.table.currentRow()

@@ -179,7 +179,9 @@ class Due(unittest.TestCase):
                         " attempts INTEGER, next_try REAL, ts REAL, detail TEXT)")
 
     def due(self, status, operation="move", next_try=0.0, retry=None):
-        self.db.execute("INSERT OR REPLACE INTO processed VALUES ('/a','t','sig',?,1,?,1,'')", (status, next_try))
+        # (looked at now: a record older than the version running is looked up once more, HF-8)
+        self.db.execute("INSERT OR REPLACE INTO processed VALUES ('/a','t','sig',?,1,?,?,'')",
+                        (status, next_try, time.time() + 1))
         data = {"name": "t", "operation": operation, "destination": "/nonexistent/library"}
         if retry:
             data["retry"] = retry

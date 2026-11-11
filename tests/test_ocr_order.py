@@ -331,7 +331,7 @@ class Parallel(unittest.TestCase):
             Image.new("L", (4000, 2000), 255).save(d / "spread.png")
             calls = []
 
-            def tess(img, psm, langs=None, tsv=False, only=""):
+            def tess(img, psm, langs=None, tsv=False, only="", deadline=None):
                 calls.append((psm, langs))
                 return ""
             with mock.patch.object(ma, "_tess", tess), mock.patch.object(ma, "ocr_langs", lambda: "eng+jpn"):

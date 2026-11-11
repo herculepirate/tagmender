@@ -1672,6 +1672,10 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     headers = [log["header"] for log in ripped if log.get("header")]
     cdtocs = tag_tocs(infos)
     tocs = merge_tocs(infos, log_toc, cue_tocs(album_dir, infos), cdtocs)
+    # TOC-1: the discs whose TOC fits their files to the sector (a log made of another rip or
+    # pressing does not): only their disc ID speaks for the files' own lengths
+    tocs_fit = sorted(d for d, t in tocs.items()
+                      if toc_fits_audio(t, [i for _p, i in infos if i.get("disc_eff", 1) == d]))
     hint, hint_from = _media_hint(album_dir, album_folder, files, infos, top("artist") or artist_folder,
                                   bool(log_toc))
     # The files name a release in their ID tags, and TagMender did not write them: another
@@ -1741,6 +1745,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # per disc: the rip log's TOC first (the disc itself, its pregaps and the data track
         # of an Enhanced CD), then a cue sheet's, then the one rebuilt from the tracks' lengths
         "tocs": tocs,
+        "tocs_fit": tocs_fit,
         "rip_log_toc": bool(log_toc),
         # discs whose hidden track before track 1 (a file numbered 0) a rip log's or CDTOC tag's
         # TOC shows in its first pregap: the disc itself has it (match_core.with_pregap)
@@ -2585,7 +2590,7 @@ def toc_releases(http, album):
     MusicBrainz releases a disc ID of these files is attached to), album["exact_toc_media"]
     ({release: {medium positions carrying that disc ID}}) and, for a lookup that failed,
     album["clue_failures"] ({what: error}); returns MusicBrainz ids."""
-    found, discogs, discids, exact_found, media = set(), set(), [], set(), {}
+    found, discogs, discids, exact_found, media, on = set(), set(), [], set(), {}, {}
     for toc in (album.get("tocs") or {}).values():
         did = mb_discid(toc)
         failed = False
@@ -2599,7 +2604,7 @@ def toc_releases(http, album):
         # (not "no such disc ID": no attach link is offered for it)
         exact = None if failed else bool(data and data.get("id") == did)
         discids.append((did, toc, exact))
-        _discid_releases(data, did, exact, found, exact_found, media)
+        _discid_releases(data, did, exact, found, exact_found, media, toc, on)
         get_text = getattr(http, "get_text", None)
         if get_text:
             try:
@@ -2618,6 +2623,7 @@ def toc_releases(http, album):
     album["discids"] = discids
     album["exact_toc_releases"] = exact_found
     album["exact_toc_media"] = media
+    album["exact_toc_on"] = on
     return found
 
 
@@ -2625,8 +2631,9 @@ def _discid_url(did, toc):
     return f"https://musicbrainz.org/ws/2/discid/{did}?toc={toc.replace(' ', '+')}&cdstubs=no&fmt=json"
 
 
-def _discid_releases(data, did, exact, found, exact_found, media):
-    """Add the releases of a disc ID answer to found / exact_found / media (toc_releases)."""
+def _discid_releases(data, did, exact, found, exact_found, media, toc=None, on=None):
+    """Add the releases of a disc ID answer to found / exact_found / media (toc_releases), and
+    to ON ({release: {toc: medium positions}}: which medium each TOC's disc ID is on, TOC-1)."""
     for r in (data or {}).get("releases", []):
         if r.get("id"):
             found.add(r["id"])
@@ -2635,6 +2642,8 @@ def _discid_releases(data, did, exact, found, exact_found, media):
                 for m in r.get("media") or ():
                     if any(d.get("id") == did for d in m.get("discs") or ()) and m.get("position"):
                         media.setdefault(r["id"], set()).add(int(m["position"]))
+                        if on is not None and toc:
+                            on.setdefault(r["id"], {}).setdefault(toc, set()).add(int(m["position"]))
 
 
 def retry_disc_ids(http, album):
@@ -2649,6 +2658,7 @@ def retry_disc_ids(http, album):
     found = set(album.get("toc_releases") or ())
     exact_found = set(album.get("exact_toc_releases") or ())
     media = {k: set(v) for k, v in (album.get("exact_toc_media") or {}).items()}
+    on = {k: {t: set(p) for t, p in v.items()} for k, v in (album.get("exact_toc_on") or {}).items()}
     answered = []
     for did, toc, exact in discids:
         if exact is not None:
@@ -2664,9 +2674,10 @@ def retry_disc_ids(http, album):
             return False
         exact = bool(data and data.get("id") == did)
         answered.append((did, toc, exact))
-        _discid_releases(data, did, exact, found, exact_found, media)
+        _discid_releases(data, did, exact, found, exact_found, media, toc, on)
     del fails["musicbrainz disc ID"]
-    album.update(discids=answered, toc_releases=found, exact_toc_releases=exact_found, exact_toc_media=media)
+    album.update(discids=answered, toc_releases=found, exact_toc_releases=exact_found, exact_toc_media=media,
+                 exact_toc_on=on)
     return True
 
 
@@ -5477,20 +5488,22 @@ def _rim_strips(g, cx, cy, r):
 _CODE_LIKE = re.compile(r"(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9-]{5,}|\d[\d ]{9,}\d")
 
 
-def _tess(img, psm, langs=None, tsv=False, only=""):
-    """tesseract's reading of one image; `only` limits it to those characters."""
+def _tess(img, psm, langs=None, tsv=False, only="", deadline=None):
+    """tesseract's reading of one image; `only` limits it to those characters. DEADLINE (a
+    time.time()): stopped then, at 180 s at most (TimeoutExpired, as at 180 s)."""
     import subprocess
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
         img.save(tmp.name)
         cmd = ["tesseract", tmp.name, "stdout", "--psm", str(psm)] + (["-l", langs] if langs else [])
         cmd += ["-c", "tessedit_char_whitelist=" + only] if only else []
-        r = _tesseract(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=180,
+        timeout = 180.0 if deadline is None else max(1.0, min(180.0, deadline - time.time()))
+        r = _tesseract(cmd + (["tsv"] if tsv else []), capture_output=True, text=True, timeout=timeout,
                            env=_tess_env())
     return r.stdout
 
 
-def ocr_located_codes(im):
+def ocr_located_codes(im, deadline=None):
     """Codes re-read where they are: tesseract finds the lines on a reduced copy (in
     every orientation), and each line holding something code-like is cut from the
     FULL-resolution scan and read alone. Small print that page OCR mangles reads
@@ -5499,12 +5512,14 @@ def ocr_located_codes(im):
     chunks = []
     g = im.convert("L")
     for angle in (0, 90, 270, 180):
+        if deadline is not None and time.time() >= deadline:
+            break                              # (the investigation's time is used up: OCR-1)
         full = g if angle == 0 else g.rotate(angle, expand=True)
         small = full.copy()
         small.thumbnail((2400, 2400))
         sc = full.width / max(small.width, 1)
         try:
-            rows = _tess(small, 11, tsv=True).splitlines()[1:]
+            rows = _tess(small, 11, tsv=True, deadline=deadline).splitlines()[1:]
         except Exception:
             continue
         lines = {}
@@ -5524,13 +5539,16 @@ def ocr_located_codes(im):
             hgt = (y1 - y0) * sc
             boxes.append((int(max(0, x0 * sc - hgt)), int(max(0, y0 * sc - hgt * 0.5)),
                           int(min(full.width, x1 * sc + hgt)), int(min(full.height, y1 * sc + hgt * 0.5))))
-        chunks += [c for c in _pmap(lambda box: _tess_or_empty(full.crop(box), 7), boxes) if c is not None]
+        chunks += [c for c in _pmap(lambda box: _tess_or_empty(full.crop(box), 7, deadline), boxes)
+                   if c is not None]
     return "\n".join(chunks)
 
 
-def _tess_or_empty(img, psm):
+def _tess_or_empty(img, psm, deadline=None):
+    if deadline is not None and time.time() >= deadline:
+        return None
     try:
-        return _tess(img, psm)
+        return _tess(img, psm, deadline=deadline)
     except Exception:
         return None
 
@@ -5544,8 +5562,11 @@ def ocr_deep(paths, max_images=80, budget_s=900):
     except ImportError:
         return ""
     started, chunks = time.time(), []
+    # OCR-1: the budget holds within a scan too (a grainy photograph read sideways took
+    # tesseract minutes a turn: Food - Food's 19 scans ran far past it)
+    deadline = started + budget_s
     for p in list(paths)[:max_images]:
-        if time.time() - started > budget_s:
+        if time.time() > deadline:
             chunks.append("(investigation stopped: time budget used)")
             break
         try:
@@ -5564,9 +5585,9 @@ def ocr_deep(paths, max_images=80, budget_s=900):
             # the tiles hunt codes (Latin letters and digits): English only, which reads
             # them as well as eng+rus+jpn in a third of the time; the page text keeps
             # your languages for the words (label names, titles)
-            chunks += [c for c in _pmap(lambda box: _tess_or_empty(g.crop(box), 11), boxes) if c]
+            chunks += [c for c in _pmap(lambda box: _tess_or_empty(g.crop(box), 11, deadline), boxes) if c]
         try:
-            chunks.append(ocr_located_codes(g))
+            chunks.append(ocr_located_codes(g, deadline))
         except Exception:
             pass
     chunks.append(ocr_barcode_digits(paths, max_images=max_images))
@@ -6252,6 +6273,8 @@ def summarize(res):
                                 and not b.get("conflict") and not b.get("missing")),
             "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),
             # (BAR-1b: the release's tracks are the files', and at least half the lengths agree)
+            # (TOC-1: your disc's TOC is this release's, its title agreeing: proof of the album)
+            "toc_proven": bool(b.get("toc_proven")),
             "most_lengths": bool(b.get("tracks_ok") and (b.get("dur_frac") or 0) >= 0.5 and not b.get("conflict")
                                  and not b.get("missing")),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),

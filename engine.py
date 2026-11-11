@@ -1678,7 +1678,7 @@ class Engine:
             why=list(out.get("why") or []), evidence=evidence_of(out, best),
             provenance=prov, release=self._release(best), tier="exact",
             all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")),
-            most_lengths=bool(best.get("most_lengths")))
+            most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")))
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})

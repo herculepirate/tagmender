@@ -106,6 +106,7 @@ class Proposal:
     all_lengths: bool = False
     lengths_missing: bool = False       # exact tier, and the release lists no track lengths to compare
     most_lengths: bool = False          # BAR-1b: the files are the release's tracks, half their lengths agree at least
+    toc_proven: bool = False            # TOC-1: your disc's TOC is this release's (exact disc ID), its title agreeing
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
@@ -185,6 +186,13 @@ def _files_on_evidence(prop, profile, conf) -> str:
     if tier == "exact" and lengths and conf >= 80.0 and (getattr(prop, "scans", None) or {}).get("printed"):
         # (a low score here is a folder name that does not say the artist, not doubt about the release)
         return "your scans show its barcode or catalogue number and every track length agrees"
+    if tier == "exact" and getattr(prop, "toc_proven", False) and prop.margin is not None and \
+            prop.margin >= _threshold(profile, "auto_min_margin"):
+        # TOC-1: the disc ID is a hash of your disc's whole TOC, and it fits your files to the
+        # sector: the score is low only for an artist credited otherwise and lengths the
+        # database lists wrong (Food - Food, filed as Iain Bellamy). Not when pressings sharing
+        # the disc ID tied and the country order chose (no margin)
+        return "your disc's table of contents is this release's (exact disc ID) and its title agrees"
     sc = getattr(prop, "scans", None) or {}
     if tier == "exact" and conf >= max(90.0, _threshold(profile, "replace_min_confidence")) and \
             sc.get("printed") and sc.get("state") == "proven" and not sc.get("against") and \

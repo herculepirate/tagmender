@@ -1,5 +1,17 @@
 # Release notes
 
+## 0.8.28
+
+**Your rip log's disc ID proves the album (TOC-1)**
+- When your rip log's table of contents fits your files exactly and MusicBrainz has that disc ID
+  on the release, the album is identified and filed even if the database lists slightly
+  different track lengths, or your folder names the artist differently (a band member instead
+  of the band). The album title must still agree, and the track titles too when the artist differs.
+
+**The scan investigation keeps to its time limit (OCR-1)**
+- The last look at every scan before an album is left Unresolved now stops at its time limit
+  inside a scan too. Grainy photographs read sideways could keep it going far longer.
+
 ## 0.8.27
 
 **Albums the watched folders could not identify are never out of sight (HF-8)**

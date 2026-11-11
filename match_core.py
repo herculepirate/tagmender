@@ -1668,6 +1668,31 @@ def exact_disc_id(album, cand):
             and cand.get("id") in (album.get("exact_toc_releases") or ()))
 
 
+def toc_lengths(album, cand, tracks_ok) -> bool:
+    """TOC-1: the release's lengths are your files' own, whatever lengths it lists: every disc
+    of these files has a TOC that fits its files to the sector, and MusicBrainz has each of
+    those disc IDs attached to this release (a disc ID is a hash of the whole TOC: every
+    track's start and the lead-out). Its listed lengths may be typed or rounded (Food - Food,
+    Feral Records: each listed 4 s short of the disc). Three tracks or more, the track counts
+    the same."""
+    tocs = album.get("tocs") or {}
+    if not tracks_ok or len(album.get("tracks") or ()) < 3 or not tocs or not exact_disc_id(album, cand):
+        return False
+    # every disc of the files has a TOC, and each fits (a disc without one, lossy or not cut on
+    # sectors, has nothing to prove its lengths)
+    discs = {t.get("disc") or 1 for t in album.get("tracks") or ()}
+    if set(tocs) != discs or set(album.get("tocs_fit") or ()) != discs:
+        return False
+    # and each disc's own disc ID is on the release's medium of that disc (or, one disc of a
+    # box, on the disc of the box the album is: _box_disc)
+    on = (album.get("exact_toc_on") or {}).get(cand.get("id")) or {}
+    for d, toc in tocs.items():
+        want = cand["box_disc"] if cand.get("box_disc") and len(discs) == 1 else d
+        if want not in (on.get(toc) or ()):
+            return False
+    return True
+
+
 def short_disc_proven(album, cand, cfg=None):
     """A one- or two-track disc whose disc ID is attached to this very release, under the
     album's own title (Bell Witch - Mirror Reaper: one 48-minute track per disc). An exact
@@ -2989,6 +3014,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     res = {"barcode_outer": outer,
         "confidence": conf, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
+        "toc_lengths": toc_lengths(album, cand, tracks_ok),
         "lengths_missing": lengths_missing, "avail": avail,
         "numbers_repeat": numbers_repeat(album), "code": code, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
         "copy_hint": album.get("media_hint") or "",
@@ -3472,8 +3498,19 @@ def classify(scored, cfg):
         proof = "the scans naming this artist"           # only for the artist credit, below
     if not proof and best.get("files_name_artist") and best["title_sim"] >= cfg["exact_title_sim"]:
         proof = "your files' own tags and notes naming this artist"   # likewise
-    proven = bool(proof and best["tracks_ok"] and best["dur_frac"] is not None
-                  and best["dur_frac"] >= cfg["auto_min_duration_frac"] and not best.get("conflict"))
+    # TOC-1: an exact disc ID that fits your files is the lengths' proof too, when the title
+    # agrees (a disc ID attached to the wrong release names another album)
+    # ...and with the artist credited otherwise, the track titles too (a disc ID attached to
+    # the wrong "Greatest Hits" in MusicBrainz names another artist's album)
+    n_tracks = len(best["cand"].get("tracks") or ())
+    toc_proof = bool(best.get("toc_lengths") and proof == "disc ID"
+                     and best["title_sim"] >= cfg["auto_min_title"]
+                     and (best["artist_sim"] >= cfg["auto_min_artist"]
+                          or (n_tracks and (best.get("titles_agree") or 0) >= 0.8 * n_tracks)))
+    proven = bool(proof and best["tracks_ok"] and not best.get("conflict")
+                  and ((best["dur_frac"] is not None and best["dur_frac"] >= cfg["auto_min_duration_frac"])
+                       or toc_proof))
+    best["toc_proven"] = bool(toc_proof and proven)      # (plan._files_on_evidence: filed on it)
     split_credit = bool(best.get("lacks"))     # a collaborator would be dropped: never
     if not best["tracks_ok"]:
         why.append("track count differs")
@@ -3515,6 +3552,9 @@ def classify(scored, cfg):
               else "disc ID points to this release" if (best.get("clues") or {}).get("disc TOC")
               else "the shop page your files' tags link to is this release" if (best.get("clues") or {}).get("source link")
               else "vinyl rip of a vinyl release (a manual rip's lengths differ)" if vinyl else "")
+    if not excuse and toc_proof and best["tracks_ok"] and not best.get("conflict"):
+        # TOC-1: your disc's table of contents is this release's; the artist may differ
+        excuse = "your disc's table of contents is this release's (exact disc ID), not its listed lengths"
     lengths_excused = False
     if not barcode_decides:
         if best["dur_frac"] is None or best["dur_frac"] < min_dur:

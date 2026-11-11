@@ -1,5 +1,25 @@
 # Release notes
 
+## 0.8.34
+
+**Your barcode decides (BAR-6, BAR-7)**
+- An album whose own barcode is on the release is no longer held back by track lengths that
+  disagree (a remaster, lengths printed otherwise) or by the lower score they cause.
+- A track total in your files' tags that counts something else (the DVD in the set, another
+  edition) no longer holds back an album your barcode proves, when the release holds exactly your
+  folder's tracks.
+
+**Runner-ups your copy rules out (TIE-5)**
+- A bootleg already set aside, or a vinyl or download release when your files are a CD rip
+  (whole CD sectors, a rip log), no longer keeps the CD you have in review.
+- An album whose pressing alone is open is tagged as Album only when most of its track lengths
+  agree, as an automatic pick needs, not only when every one does (ALB-3).
+
+**One artist folder (NAM-7)**
+- "Blood, Sweat & Tears", "Blood, Sweat And Tears" and "Blood Sweat & Tears": albums are filed
+  into the artist folder the library already keeps under one of these spellings (the one holding
+  the most), instead of a folder for each database's spelling.
+
 ## 0.8.33
 
 **One artist folder, whatever the apostrophe (NAM-6)**

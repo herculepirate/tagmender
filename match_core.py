@@ -3463,6 +3463,7 @@ def classify(scored, cfg):
     # TIE-4: an unofficial release (a bootleg, a CD-R) nothing of your copy backs never wins a
     # tie against an official one that fits as well: bootlegs copy the official release's
     # tracks and lengths (Allan Holdsworth - Flat Tire: a Russian CD-R tied with Megazoidal's CD)
+    set_aside = []                              # (TIE-4's bootleg: no runner-up either, below)
     if ranked and unofficial_why(dict(ranked[0], notes=list(ranked[0].get("notes") or []))) and \
             not _unofficial_backed(ranked[0]):
         top = ranked[0]
@@ -3473,6 +3474,7 @@ def classify(scored, cfg):
         if official:
             ranked.remove(official[0])
             ranked.insert(0, official[0])
+            set_aside.append(top)
             official[0]["notes"] = official[0]["notes"] + [
                 f"official release preferred to the unofficial {top['cand']['id']} that fits as well"]
     best = ranked[0]
@@ -3538,6 +3540,18 @@ def classify(scored, cfg):
             best, scan_pick, audio_split = fits_audio[0], None, [s for s in barcoded if s is not fits_audio[0]]
         if audio_split or barcode_split:
             ranked = [best] + [s for s in ranked if s is not best]
+    # TIE-5: no runner-up your copy rules out holds the pick back - a bootleg TIE-4 set aside
+    # (Egberto Gismonti - Orfeo Novo: a Brazilian CD-R), a vinyl or download release against a
+    # CD rip (whole CD sectors, a rip log: the 1971 LP) - unless the pick is ruled out as well
+    # (only your CD rip rules a release out: hi-res audio against a CD says nothing for a vinyl
+    # pick - an unlisted download fits as well, MED-2)
+    best_fits = not format_contradictions(best) and "cd" in (best["cand"].get("formats") or ())
+
+    def ruled_out(s):
+        against = format_contradictions(s)
+        return any(s is x for x in set_aside) or bool(
+            best_fits and against and all(str(x).startswith("your folder has") for x in against)
+            and not _carries_barcode(s) and not number_agrees(s))   # (your number on it: a person decides)
     runner = next((s for s in ranked[1:] if not s.get("unproven_media")), None)
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
     # One release fits every track exactly where the pick misses every one, and nothing
@@ -3654,6 +3668,15 @@ def classify(scored, cfg):
     own_number = (proven and not split_credit and best["dur_frac"] is not None
                   and best["dur_frac"] >= min_dur and not best.get("conflict")
                   and (barcode_decides or best["code"] in ("catalogue number", "catalogue number (folder name)")))
+    # BAR-7: your copy's own barcode on the release, every track there, decides it whatever the
+    # lengths say (a remaster's, a CD's lengths printed otherwise: Egberto Gismonti - Árvore,
+    # 4 of 8) - as an agreeing catalogue number already excuses them above (lengths_excused)
+    if (not own_number and barcode_decides and best["tracks_ok"] and not best.get("conflict") and not split_credit
+            and best["artist_sim"] >= cfg["auto_min_artist"] and best["title_sim"] >= cfg["auto_min_title"]):
+        own_number = True
+        if best["dur_frac"] is not None and best["dur_frac"] < cfg["auto_min_duration_frac"]:
+            best["notes"] = best["notes"] + [f"only {best['dur_frac']:.0%} of track lengths agree, but your "
+                                             "barcode is this release's: it decides (BAR-7)"]
     best["own_number"] = bool(own_number and not lengths_excused)    # (FIL-1: filed on it)
     if best["confidence"] < cfg["auto_min_confidence"] and own_number and not lengths_excused:
         best["notes"] = best["notes"] + [f"confidence {best['confidence']} is under {cfg['auto_min_confidence']}, "
@@ -3729,6 +3752,13 @@ def classify(scored, cfg):
         what = "barcode" if barcode_decided else "catalogue number"
         best["notes"] = best["notes"] + [f"pressing chosen by {what} (runner-up "
                                          f"{runner['cand']['id']} does not share it)"]
+    elif margin < cfg["auto_min_margin"] and runner is not None and ruled_out(runner) and not any(
+            not ruled_out(s) and best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
+            for s in ranked[1:] if s is not runner and not s.get("unproven_media")):
+        # TIE-5: every pressing as close is one your copy rules out (TIE-4's bootleg, a vinyl
+        # or download release against a CD rip): no runner-up holds the pick back
+        best["notes"] = best["notes"] + [f"{runner['cand']['id']} scored as close, but your copy cannot be it "
+                                         "(an unofficial release set aside, or media your audio rules out)"]
     elif margin < cfg["auto_min_margin"]:
         # A pressing that is the ONLY one agreeing with the files' year is
         # accepted on a smaller margin; a tie on year still needs a human.
@@ -3752,6 +3782,8 @@ def classify(scored, cfg):
         best["notes"] = best["notes"] + ["kept the release your files are tagged with (TAG-1)"]
     if not why:
         rival = _fits_to_the_ms(best, scored, cfg)
+        if rival and ruled_out(rival[0]):
+            rival = None                       # (TIE-5: a release your copy rules out fits no better)
         if rival and (not _carries_barcode(best) or _carries_barcode(rival[0])):   # (your barcode names the release)
             runner, margin = rival[0], best["confidence"] - rival[0]["confidence"]
             why.append(f"{rival[0]['cand']['id']} fits every track to the millisecond ({rival[1]}); "
@@ -4503,8 +4535,10 @@ def album_only(final, cfg, source=""):
     no_lengths = _no_lengths_tie(best, why)
     if not no_lengths and (not why or not all(_TIE_WHY.match(w) for w in why)):
         return None
+    # (ALB-3: the lengths an automatic pick needs, not every one - Egberto Gismonti - Corações
+    # Futuristas: 7 of 8, two EMI CDs whose numbers nothing of your copy shows)
     if not no_lengths and (best["confidence"] < cfg["auto_min_confidence"] or not best.get("tracks_ok")
-                           or (best.get("dur_frac") or 0) < 1.0 or best.get("conflict")):
+                           or (best.get("dur_frac") or 0) < cfg["auto_min_duration_frac"] or best.get("conflict")):
         return None
     n = len(best["cand"]["tracks"])
     close = [s for s in final.get("scored") or [best] if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]

@@ -6475,6 +6475,15 @@ def _copy_disagrees(final, album, ocr_txt, results):
             len(v) for v in best["missing"].values()):
         return why                                     # the missing tracks are known and told
     if total > here and not _total_miscounted(final, album, here, total, results):
+        if best and (mc.barcode_proves(best) or best.get("own_number")) and not best.get("missing") \
+                and _audio_rows(best["cand"]) == here:
+            # BAR-6: your own barcode (or catalogue number) proves the release, and the release
+            # holds just your files' audio tracks: the tags' total counted something else (a DVD
+            # in the set, another edition) - told, never a reason to wait
+            what = "barcode" if mc.barcode_proves(best) else str(best.get("code") or "catalogue number")
+            best["notes"] = list(best.get("notes") or []) + [
+                f"the files' tags say {total} tracks; the release your {what} names has {here}, as this folder"]
+            return why
         why.append(f"the files' tags say the album has {total} tracks; this folder holds {here}")
     return why
 

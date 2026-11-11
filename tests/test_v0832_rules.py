@@ -124,6 +124,78 @@ class BOX3(unittest.TestCase):
         self.assertIsNone(mc._box_disc(self.album(self.D1), c))
 
 
+class BAR6(unittest.TestCase):
+    """BAR-6: your barcode proves the release and it holds just your 20 audio tracks; the tags'
+    track total of 30 (Blood, Sweat & Tears - 3 & 4, DIAB 8056) counted something else."""
+
+    def final(self, code):
+        cand = {"source": "mb", "id": "bfa9", "tracks": [{"disc": 1, "title": f"T{i}", "secs": 200.0} for i in range(20)]}
+        return {"best": {"code": code, "cand": cand, "notes": []}}
+
+    def album(self):
+        return {"tracktotal": 30, "tracks": [{"disc": 1, "num": i + 1} for i in range(20)], "barcodes": set()}
+
+    def test_BAR6_the_barcodes_release_outweighs_the_tags_total(self):
+        f = self.final("barcode")
+        self.assertEqual(ma._copy_disagrees(f, self.album(), "", []), [])
+        self.assertTrue(any("the release your barcode names has 20" in n for n in f["best"]["notes"]))
+
+    def test_BAR6_without_your_own_number_the_total_still_holds_it(self):
+        for code in ("", ma.mc.TAGS_BARCODE):
+            why = ma._copy_disagrees(self.final(code), self.album(), "", [])
+            self.assertTrue(any("tags say the album has 30 tracks" in w for w in why), code)
+
+    def test_BAR6_a_release_with_more_tracks_than_the_folder_is_no_excuse(self):
+        f = self.final("barcode")
+        f["best"]["cand"]["tracks"] += [{"disc": 2, "title": "X", "secs": 100.0}]
+        self.assertTrue(ma._copy_disagrees(f, self.album(), "", []))
+
+
+class BAR7_TIE5_ALB3(unittest.TestCase):
+    """BAR-7: your barcode decides whatever the lengths say (Egberto Gismonti - Árvore, 4 of 8).
+    TIE-5: no runner-up your copy rules out (a bootleg set aside, a vinyl against a CD rip)
+    holds the pick back. ALB-3: album only on the lengths an automatic pick needs."""
+
+    def setUp(self):
+        self.dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+
+    def cand(self, rid, durations, formats=None, barcode=None, **kw):
+        rel = dict(release(formats or [{"name": "CD", "qty": "1"}]), id=rid, **kw)
+        rel["tracklist"] = [dict(t, duration=d) for t, d in zip(rel["tracklist"], durations)]
+        if barcode:
+            rel["identifiers"] = [{"type": "Barcode", "value": barcode}]
+        return ma.discogs_candidate(rel, self.dm)
+
+    def rip(self, **audio):
+        a = album(dict({"cd_frames": True, "not_cd": False, "hires": False, "lossless": True}, **audio))
+        return dict(a, year=2003)
+
+    def test_BAR7_your_barcode_decides_whatever_the_lengths(self):
+        a = dict(self.rip(), barcodes={"5099750936625"})
+        c = self.cand(1, ["2:00"] * 5, barcode="5099750936625")          # (no length agrees: 300 s files)
+        out = mc.classify([mc.score_candidate(a, c, CFG)], CFG)
+        self.assertEqual(out["status"], "auto", out["why"])
+        self.assertTrue(any("BAR-7" in n for n in out["best"]["notes"]))
+        c2 = self.cand(1, ["2:00"] * 5, barcode="0000000000000")         # (not your barcode: held)
+        self.assertNotEqual(mc.classify([mc.score_candidate(dict(a), c2, CFG)], CFG)["status"], "auto")
+
+    def test_TIE5_a_vinyl_runner_up_never_holds_a_cd_rip(self):
+        a = self.rip()
+        cd = self.cand(1, ["5:00"] * 5)
+        lp = self.cand(2, ["5:00"] * 5, formats=[{"name": "Vinyl", "qty": "1", "descriptions": ["LP"]}])
+        out = mc.classify([mc.score_candidate(a, cd, CFG), mc.score_candidate(dict(a), lp, CFG)], CFG)
+        self.assertEqual((out["status"], str(out["best"]["cand"]["id"])), ("auto", "1"), out["why"])
+
+    def test_ALB3_album_only_on_most_lengths(self):
+        best = {"confidence": 92.1, "artist_sim": 1.0, "title_sim": 1.0, "tracks_ok": True, "dur_frac": 0.875,
+                "dur_cov": 1.0, "conflict": None, "cand": {"id": 1, "source": "discogs", "title": "A", "tracks": [{}] * 8}}
+        other = dict(best, confidence=87.2, dur_frac=0.5, cand=dict(best["cand"], id=2))
+        f = {"status": "review", "best": best, "scored": [best, other],
+             "why": ["runner-up 2 within 4.9 points (likely another pressing)"]}
+        self.assertEqual([t["id"] for t in mc.album_only(f, CFG)["tied"]], ["1", "2"])
+        self.assertIsNone(mc.album_only(dict(f, best=dict(best, dur_frac=0.75)), CFG))
+
+
 class CAT1(unittest.TestCase):
     def test_CAT1_an_sacd_audio_format_is_no_catalogue_number(self):
         # (Blood, Sweat & Tears: "[SACD DSD64 2ch Rip 24bit 352khz]" in the album tag)

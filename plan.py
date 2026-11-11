@@ -983,6 +983,22 @@ def _folder_key(name: str, windows: bool) -> str:
     return key.casefold() if windows else key
 
 
+def _loose_key(name: str, windows: bool = False) -> str:
+    """NAM-7: an artist folder's name as its spellings across databases and sleeves share it:
+    one Unicode form, one kind of quote, "and", "&" and "+" alike (in any letter case),
+    commas and full stops left out ("Blood, Sweat And Tears", "Blood Sweat & Tears", "R.E.M."
+    and "REM"); letter case only with Windows-compatible names ("Air" and "AIR" are two acts)."""
+    k = unicodedata.normalize("NFC", name).translate(_QUOTES)
+    k = re.sub(r"\s*(?:&|\+|\b[Aa][Nn][Dd]\b)\s*", " & ", k)
+    k = " ".join(re.sub(r",", " ", k).replace(".", "").split())
+    return k.casefold() if windows else k
+
+
+# NAM-7: each folder's subfolders by _loose_key, kept while the folder is unchanged (its
+# modification time): one library root read once, not once per album planned
+_LOOSE_CACHE: dict = {}
+
+
 def _spelled_names(raw: dict, changes: dict) -> dict:
     """{field: its spelling} of the fields written whose name is not in lower case (a custom
     tag a tagger script made, "MyTag"): Picard writes such a tag as it is spelled."""
@@ -1859,7 +1875,13 @@ class Planner:
                         dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), self._name_limits(dest_root))
                     made = dst
                     if dst is not None and not renaming:
-                        dst = self._spelled(dst, dest_root)
+                        # (NAM-7: only an artist's own folder, as the script's first level names it)
+                        who = [fnm.safe_component(str(v[0]), p["filenames"].get("compat", "windows"))
+                               for k_ in ("albumartist", "artist") for v in [names.get(k_)] if v]
+                        top = made.relative_to(dest_root).parts[0] if not flat else ""
+                        artist_level = bool(top) and len(made.relative_to(dest_root).parts) > 2 and any(
+                            _loose_key(top) == _loose_key(w) for w in who)
+                        dst = self._spelled(dst, dest_root, artist_level)
                         if not vsplit:                   # (a split's folder already there is a conflict)
                             dst = self._own_album_dir(dst, prop, kept, album_dirs)
                         # (Windows path shortening cuts each track's folders by its own path's
@@ -2562,7 +2584,7 @@ class Planner:
             return Path(os.path.relpath(real, best))
         return Path(folder.parent.name) / folder.name
 
-    def _spelled(self, path: Path, root: Path) -> Path:
+    def _spelled(self, path: Path, root: Path, artist_level: bool = False) -> Path:
         """path, with each folder below root spelled as it already is on disk when the only
         difference is the Unicode form or the kind of quote mark (NAM-6: "King’s X" finds
         "King's X") - and, with Windows-compatible names, letter case: never a second,
@@ -2572,6 +2594,8 @@ class Planner:
         rel = Path(path).relative_to(root)
         parts = list(rel.parts)
         for k, comp in enumerate(parts[:-1]):
+            if k == 0 and artist_level:
+                comp = self._usual_folder(cur, comp)     # NAM-7
             if (cur / comp).is_dir():
                 # NAM-5: a share that sees one name in two letter cases (SMB) finds "Best of"
                 # when "Best Of" is on disk - and moving the files there would move each onto
@@ -2590,6 +2614,55 @@ class Planner:
                 continue
             cur = cur / listing[key]
         return cur / parts[-1]
+
+    def _usual_folder(self, d: Path, name: str) -> str:
+        """NAM-7: the top folder (the artist's, as the naming script files albums) the library
+        already keeps under another spelling of NAME - "Blood, Sweat & Tears" for MusicBrainz's
+        name, "Blood, Sweat And Tears" for Discogs', "Blood Sweat & Tears" as a sleeve credits it
+        (_loose_key): the one of them holding the most entries, so the albums gather in one
+        folder. NAME itself when no such folder is there; within one plan, the first spelling."""
+        windows = self.profile["filenames"].get("compat") == "windows"
+        loose = self.__dict__.setdefault("_loose", {})
+        if d not in loose:
+            try:
+                stamp = os.stat(d).st_mtime_ns
+            except OSError:
+                stamp = None
+            hit = _LOOSE_CACHE.get((str(d), windows))
+            if stamp is not None and hit and hit[0] == stamp:
+                groups = {k: list(v) for k, v in hit[1].items()}
+            else:
+                groups = {}
+                try:
+                    with os.scandir(d) as it:
+                        entries = sorted(it, key=lambda e: e.name)
+                except OSError:
+                    entries = []
+                for e in entries:
+                    try:
+                        if not e.name.startswith(".") and e.is_dir():
+                            groups.setdefault(_loose_key(e.name, windows), []).append(e.name)
+                    except OSError:
+                        continue                         # (one entry unreadable: the others still count)
+                if stamp is not None:
+                    _LOOSE_CACHE[(str(d), windows)] = (stamp, {k: list(v) for k, v in groups.items()})
+            loose[d] = groups
+        names = loose[d].setdefault(_loose_key(name, windows), [])
+        if not names:
+            names.append(name)                           # (later albums of this plan: this spelling)
+            return name
+        if len(names) == 1:
+            return names[0]
+        sizes = self.__dict__.setdefault("_sizes", {})
+
+        def size(n):
+            if (d, n) not in sizes:
+                try:
+                    sizes[(d, n)] = len(os.listdir(d / n))
+                except OSError:
+                    sizes[(d, n)] = 0
+            return sizes[(d, n)]
+        return max(names, key=lambda n: (size(n), n == name))
 
     def _listing(self, d: Path) -> dict:
         if d not in self._dirs:

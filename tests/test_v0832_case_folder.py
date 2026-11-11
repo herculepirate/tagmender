@@ -83,6 +83,50 @@ class NAM6(unittest.TestCase):
         self.assertEqual(got.parent.parent.name, "Kings X")
 
 
+class NAM7(unittest.TestCase):
+    """NAM-7: "Blood, Sweat & Tears" (MusicBrainz), "Blood, Sweat And Tears" (Discogs) and
+    "Blood Sweat & Tears" (a sleeve's credit) are one artist folder: the one holding the most."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="tm-nam7-"))
+        for n in ("1968 - A", "1969 - B", "1970 - C"):
+            (self.root / "Blood, Sweat & Tears" / n).mkdir(parents=True)
+        (self.root / "Blood, Sweat And Tears" / "2013 - Rare").mkdir(parents=True)
+        self.planner = pl.Planner(pf.default())
+
+    def spelled(self, *parts):
+        return self.planner._spelled(self.root.joinpath(*parts), self.root, artist_level=True)
+
+    def test_NAM7_every_spelling_goes_to_the_folder_holding_most(self):
+        for name in ("Blood, Sweat And Tears", "Blood Sweat & Tears", "Blood, Sweat + Tears", "Blood, Sweat & Tears"):
+            got = self.spelled(name, "2013 - Rare", "01.flac")
+            self.assertEqual(got.parent.parent.name, "Blood, Sweat & Tears", name)
+
+    def test_NAM7_other_names_and_album_folders_stay_as_they_are(self):
+        self.assertEqual(self.spelled("Blood Sweat Tears", "A", "01.flac").parent.parent.name, "Blood Sweat Tears")
+        self.assertEqual(self.spelled("Andy", "A", "01.flac").parent.parent.name, "Andy")
+        (self.root / "Blood, Sweat & Tears" / "3 and 4").mkdir()
+        got = self.spelled("Blood, Sweat & Tears", "3 & 4", "01.flac")
+        self.assertEqual(got.parent.name, "3 & 4")                              # (album folders: not folded)
+        got = self.planner._spelled(self.root / "Blood Sweat And Tears - A" / "01.flac", self.root)
+        self.assertEqual(got.parent.name, "Blood Sweat And Tears - A")          # (no artist level: not folded)
+        got = self.planner._spelled(self.root / "Blood, Sweat And Tears" / "A" / "01.flac", self.root)
+        self.assertEqual(got.parent.parent.name, "Blood, Sweat And Tears")      # (not called as the artist's)
+
+    def test_NAM7_letter_case_and_full_stops(self):
+        prof = pf.default()
+        prof["filenames"]["compat"] = "linux"                         # (Windows names fold case anyway)
+        self.planner = pl.Planner(prof)
+        (self.root / "Air" / "A").mkdir(parents=True)
+        (self.root / "R.E.M" / "A").mkdir(parents=True)
+        self.assertEqual(self.spelled("AIR", "B", "01.flac").parent.parent.name, "AIR")   # (two acts on Linux)
+        self.assertEqual(self.spelled("REM", "B", "01.flac").parent.parent.name, "R.E.M")
+
+    def test_NAM7_a_new_artist_keeps_the_scripts_spelling_for_the_whole_plan(self):
+        a = self.spelled("Simon And Garfunkel", "A", "01.flac")
+        b = self.spelled("Simon & Garfunkel", "B", "01.flac")
+        self.assertEqual((a.parent.parent.name, b.parent.parent.name), ("Simon And Garfunkel",) * 2)
+
 class MOV2(unittest.TestCase):
     """MOV-2: a second copy of one of the album's tracks ("005.TUILMOMF.flac" beside "005.TU.flac",
     Allan Holdsworth - Metal Fatigue) is no other album's music: the folder's scans, log and

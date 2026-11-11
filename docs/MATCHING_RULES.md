@@ -40,7 +40,7 @@ When rules point different ways, the earlier group wins:
 | ID | Rule | Status |
 |---|---|---|
 | EVI-1 | Weight of evidence, strongest first: barcode > catalogue number > disc ID / matrix (runout) > label or country printed on the scans > folder name > country order. | in code (`CLUE_WEIGHTS`); tests `EVI1_*` |
-| EVI-2 | Evidence shared by every candidate (a catalogue number on all editions) tells nothing apart. A download entry that lists no catalogue number is unknown, not different. | in code (`_weigh`); tests `ScansNumberAgainstAnUnlistedOne` |
+| EVI-2 | Evidence shared by every candidate (a catalogue number on all editions) tells nothing apart; so does a release country (or media) in your tags that none of the tied pressings has (another tagger's GB on an album out only in DE and RU): it never outweighs your disc ID or stops the country order. A download entry that lists no catalogue number is unknown, not different. | in code (`_weigh`, `choose_pressing`); tests `ScansNumberAgainstAnUnlistedOne`, `EVI2_*` |
 | EVI-3 | Text read off the scans (for example "Made in EU") beats the country order. | in code |
 | EVI-4 | Poor OCR (few words of artist or title read) never lowers the confidence: scans only add evidence. | in code (`score_candidate`, OCR only adds); test `EVI4_*` |
 
@@ -65,6 +65,7 @@ When rules point different ways, the earlier group wins:
 | MED-7 | No vinyl or cassette evidence and a CD fits: the CD. | in code (0.8.20) |
 | MED-8 | Grouping: HD Audio for lossless above 16 bits or 44.1 kHz (DSD included); Vinyl Rip; Tape Rip. Written only when Grouping is empty. | in code (`marks.py`) |
 | MED-9 | Lossy files (MP3, AAC, Opus): the same rules, without the audio as a clue; no Grouping mark. | in code |
+| MED-10 | Lossless files (FLAC, ALAC, WAV) are never a download sold only as MP3, AAC or another lossy codec: such downloads leave a tie, and a download whose format names your files' kind agrees. A CD-R lists no moulded matrix: a pressed matrix read on your disc that another tied pressing lists counts against it. "Made in the EU" on your scans agrees with a UK, German or other European pressing. | in code (`file_clues`, `choose_pressing`, `pressing_clues`); tests `MED10_*` |
 
 ## Editions, box sets, singles
 
@@ -91,6 +92,7 @@ When rules point different ways, the earlier group wins:
 |---|---|---|
 | TIE-1 | Pressings tie and nothing of yours tells them apart: the country order picks one and it is tagged in full (not album known). Only when the country order, the original date and your preferred release types and formats all leave a tie, or when your copy's kind (CD, download, vinyl) is not among the tied pressings, is it album known. | in code (`classify`, `combine`); tests `TIE_*` |
 | TIE-2 | The country order comes before the original release date; the date breaks a tie only within one country. All other evidence is weighed before either (the evidence pass). | in code (`prefer_country`, `choose_pressing`, `evidence_pass`); tests `TIE_*` |
+| TIE-3 | Discogs's "UK" and "EU" are GB and XE for the country order and for "Made in ..." on your scans. | in code (`country_code`); tests `TIE3_*` |
 
 ## Earlier tags
 
@@ -105,6 +107,8 @@ When rules point different ways, the earlier group wins:
 |---|---|---|
 | SRC-1 | The preferred database's sure pick stands against the other's unsure pick, except where BAR-2 applies. | in code (`_proof_left_unsure`) |
 | SRC-2 | An album only Discogs knows is tagged from Discogs in full; MusicBrainz IDs stay empty and are never invented. | in code |
+| WEB-1 | When neither database establishes the album, the web is searched next, also with Unresolved set to "leave". With "leave" what it finds is held: shown in the preview (HELD, unticked) and written only when you tick it and apply; a watched folder never applies it, and it keeps the Unresolved retry schedule. | in code (`engine` web step, `plan.held`); tests `WEB1_*` |
+| GNU-1 | A gnudb entry that is gnudb's exact match for your CD's table of contents (one disc; same track count, every track length agrees; at least 80% of your files' track titles agree in order) is a web album: Partial tags from it (album, artists, track titles, genre, year), never a release ID, label, barcode, catalogue number or media. A fuzzy gnudb match stays a clue only. | in code (`engine.gnudb_candidates`); tests `GNU1_*` |
 
 ## Names and fields
 

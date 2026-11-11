@@ -108,6 +108,14 @@ class Proposal:
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
+    # WEB-1: why the album is planned but held (unresolved.action "leave": a web album found
+    # is shown, unticked, and applied only when you tick it); "" when it is not held
+    held: str = ""
+
+
+def held(entry: dict) -> bool:
+    """WEB-1: the album is held - planned, but applied only once you ticked it (held_ok)."""
+    return bool(entry.get("held")) and not entry.get("held_ok")
 
 
 def _fp(path):
@@ -1157,6 +1165,9 @@ class Planner:
                  # (every file of the album as found: for a release the user chooses for it)
                  "album_files": sorted({str(x) for x in (getattr(prop, "group_files", None) or prop.files or [])})}
         entry["notes"].extend(getattr(prop, "notes", None) or [])
+        if getattr(prop, "held", "") and prop.status == "identified":     # WEB-1
+            entry["held"] = prop.held
+            entry["notes"].insert(0, prop.held)
         if getattr(prop, "scans", None):
             entry["identification"]["scans"] = dict(prop.scans)
         if getattr(prop, "via", None) is not None:
@@ -2706,7 +2717,8 @@ def preview(plan: dict, verbose=False) -> str:
         out.append(plan["discogs_settings"])
     for a in plan["albums"]:
         ident = a["identification"]
-        head = f"\n[{a['status'].upper()}] {a['source_dir']}"
+        shown = "HELD" if a["status"] == "ready" and held(a) else a["status"].upper()   # WEB-1
+        head = f"\n[{shown}] {a['source_dir']}"
         if a["status"] == "excluded":
             head += f"\n    {a['label']} by rule '{a['rule']['name']}' (matched {a['rule']['matched']})"
         elif ident.get("status") == "identified":

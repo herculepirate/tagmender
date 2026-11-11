@@ -494,6 +494,12 @@ _EUROPE = {"DE", "GB", "FR", "NL", "BE", "AT", "CH", "IT", "ES", "PT", "SE", "NO
            "GR", "IE", "HU", "LU", "XE"}
 
 
+# a download's codecs as Discogs names them among a "File" format's descriptions
+LOSSLESS_CODECS = {"flac", "alac", "wav", "aiff", "ape", "wavpack", "dsd", "dff", "dsf", "mqa"}
+LOSSY_CODECS = {"mp3", "aac", "ogg vorbis", "ogg-vorbis", "opus", "wma", "m4a"}
+LOSSY_ONLY_AGAINST = "your files are lossless, this download is "
+
+
 _FMT_WORD = r"(?:\d?\s?CDs?|DVD|LP|BD|Blu-?ray|Box|Digi\w*|Ltd)"
 _FORMATS_AFTER = re.compile(rf"\s+{_FMT_WORD}(?:\s*[+&/]\s*{_FMT_WORD})*\s*$", re.I)
 
@@ -1088,7 +1094,9 @@ def country_code(name):
     """ISO-like code for a release country given either way ("DE" or "Germany")."""
     raw = str(name or "").strip()
     if re.fullmatch(r"[A-Z]{2}", raw):
-        return raw
+        # (Discogs writes "UK" and "EU": the codes GB and XE, as MusicBrainz and your country
+        # order have them - a UK pressing was never GB in the country order or the EU checks)
+        return {"UK": "GB", "EU": "XE"}.get(raw, raw)
     return _COUNTRY_NAMES.get(re.sub(r"[^a-z ]", " ", raw.casefold()).strip().replace("  ", " "), "")
 
 
@@ -1471,6 +1479,9 @@ def pressing_clues(ocr_text, cand, ring_text=""):
     if printed and mine and mine != "XW":
         if mine == "XE" and printed & _EUROPE and mine not in printed:
             pass        # a European pressing with a German or Dutch address: consistent, but no clue
+        elif printed == {"XE"} and mine in _EUROPE and mine != "XE":
+            pass        # "Made in the EU" on a UK or German pressing: where it was pressed, not against it
+                        # (Pallas - wearewhoweare, a UK CD pressed in the EU)
         elif mine in printed:
             name = cand.get("country") or ""
             if len(name) == 2:
@@ -1564,6 +1575,8 @@ CLUE_WEIGHTS = {"disc TOC": 3, "disc TOC (fuzzy)": 1, "barcode": 5, "barcode (no
 
 def _readable_country(code_or_name):
     name = str(code_or_name or "")
+    if name in ("GB", "UK"):
+        return "the UK"               # (not "England": the first long name listed for GB)
     if len(name) == 2:
         name = next((n for n, c in _COUNTRY_NAMES.items() if c == name and len(n) > 3), name)
         name = name.upper() if name in ("us", "uk", "eu") else name.title()
@@ -1811,6 +1824,15 @@ def file_clues(album, cand, clues, against, cfg=None):
             # whatever the files were converted to since (Nile - Amongst the Catacombs: opus)
             clues.setdefault("format", "CD (the folder's rip log has the disc's table of contents)")
         format_against(album, formats, against)
+        # a download sold only in a lossy codec is not your lossless files (an MP3 entry and a
+        # FLAC entry of one download: Pallas - The Edge Of Time); one in your files' kind agrees
+        codecs = set(cand.get("file_codecs") or ())
+        if codecs and formats == {"digital"} and audio.get("lossless"):
+            if codecs <= LOSSY_CODECS:
+                against.append(f"{LOSSY_ONLY_AGAINST}{'/'.join(sorted(codecs)).upper()} only")
+            elif codecs & LOSSLESS_CODECS:
+                clues.setdefault("format", f"lossless download ({'/'.join(sorted(codecs & LOSSLESS_CODECS)).upper()}), "
+                                           "like your files")
         store = download_store(album.get("folder"))
         if store and hint != "vinyl":
             # a shop named in the folder ("[ProStudioMasters]"): bought as a download
@@ -2290,7 +2312,67 @@ def no_media_evidence(tied):
     return [s for s in tied if unproven(s)]
 
 
+def _against_key(text):
+    """The part of a clue against a pressing that is about your copy ("tags say GB" of
+    "tags say GB, this pressing is from DE"): only your tags' own country or media."""
+    text = str(text or "")
+    return text.split(", this pressing", 1)[0] if text.startswith("tags say ") else None
+
+
+def _recordable(cand):
+    """The pressing is a CD-R (recordable, burned): it carries no moulded matrix."""
+    names = [str(f).casefold().replace("-", "") for f in cand.get("media_formats") or ()]
+    return bool(names) and all(n in ("cdr", "cdrw") for n in names)
+
+
 def choose_pressing(tied, preferred_countries=None, prefs=None):
+    """_choose_pressing on what tells the tied pressings apart:
+
+    - without what your tags say against EVERY tied pressing alike (EVI-2: evidence shared
+      by every candidate tells nothing apart - a release country in your tags that none of
+      them is, written by another tagger, must not outweigh your exact disc ID or keep the
+      country order from choosing);
+    - with a pressed matrix your disc shows, read for a tied pressing, against a tied CD-R
+      that lists none (a burned disc carries no moulded runout: Pallas - wearewhoweare's
+      "398478 @1 MTS5503" is the jewel-case CD, not the CD-R of the same release).
+
+    The pick returned is the caller's own entry."""
+    if len(tied) < 2:
+        return _choose_pressing(tied, preferred_countries, prefs)
+    keys = [{_against_key(a) for a in s.get("clues_against") or ()} - {None} for s in tied]
+    shared = set.intersection(*keys) if keys else set()
+    matrix = next((s["clues"]["matrix"] for s in tied if (s.get("clues") or {}).get("matrix")), "")
+    burned = {id(s) for s in tied if matrix and _recordable(s["cand"])
+              and not any(c == "matrix" for c, _v in cand_matrices(s["cand"]))}
+    # MED-10: your lossless files are none of the downloads sold only in a lossy codec: those
+    # leave the tie (an MP3 and a FLAC entry of one download: Pallas - The Edge Of Time)
+    lossy = [s for s in tied if any(str(a).startswith(LOSSY_ONLY_AGAINST) for a in s.get("clues_against") or ())]
+    if lossy and len(lossy) < len(tied):
+        rest = [s for s in tied if not any(s is x for x in lossy)]
+        # (one left: it, only when nothing of yours is against it either - your catalogue
+        # number on none of them, hi-res audio and a CD - else the whole tie decides as before)
+        if len(rest) == 1 and not rest[0].get("clues_against") and \
+                not all(s.get("own_catno_absent") for s in tied):
+            why = next(a for a in lossy[0]["clues_against"] if str(a).startswith(LOSSY_ONLY_AGAINST))
+            return rest[0], {"format": f"{why}; this one is not"}
+        if len(rest) > 1:
+            return choose_pressing(rest, preferred_countries, prefs)
+    if not shared and not burned:
+        return _choose_pressing(tied, preferred_countries, prefs)
+    view = []
+    for s in tied:
+        against = [a for a in s.get("clues_against") or () if _against_key(a) not in shared]
+        if id(s) in burned:
+            against.append(f"your disc shows a pressed {matrix.split(' on the scans')[0]}; this pressing is a CD-R")
+        view.append(dict(s, clues_against=against))
+    back = {id(v): s for v, s in zip(view, tied)}
+    got = _choose_pressing(view, preferred_countries, prefs)
+    if not got:
+        return None
+    return (back.get(id(got[0]), got[0]),) + tuple(got[1:])
+
+
+def _choose_pressing(tied, preferred_countries=None, prefs=None):
     """Among pressings that score the same, the one the evidence points to, or None.
 
     prefs (release_preferences): Picard's preferred release types and formats, the very

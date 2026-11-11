@@ -355,7 +355,7 @@ class Scans(te.Base):
                  for k in b["cached"]]
         self.assertEqual(kinds.count("text"), 3)
         self.assertEqual(kinds.count("spines"), 3)
-        self.assertEqual(kinds.count("disc-rings"), n_scans)
+        self.assertEqual(kinds.count("disc-rings-2"), n_scans)
         self.assertEqual(kinds.count("barcode-digits"), n_scans)
         texts = b["log"]["text"]
         self.assertTrue(all(sum(1 for v in vs if v.startswith("TEXT")) <= 1 for vs in texts.values()))

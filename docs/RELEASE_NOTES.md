@@ -1,5 +1,35 @@
 # Release notes
 
+## 0.8.23
+
+**The web is searched next, also with Unresolved set to "leave" (WEB-1)**
+- When neither MusicBrainz nor Discogs establishes an album, TagMender now always searches the
+  web next. With Unresolved set to "leave", what it finds is held: the album shows as HELD in the
+  preview, unticked, and nothing is written unless you tick it and apply. A watched folder never
+  applies a held album and keeps looking it up on the Unresolved schedule.
+
+**gnudb can name an album no database lists (GNU-1)**
+- When gnudb holds an exact match for your CD's table of contents - the same track count, every
+  track length agreeing and your track titles agreeing - the album gets Partial tags from it:
+  album, artists, track titles, genre and year, with the gnudb page as its source. No release ID,
+  label, barcode, catalogue number or media is written from it. A near match stays a clue only.
+
+**Your disc ID is no longer outvoted by an old country tag (EVI-2)**
+- A release country in your files' tags that none of the matching pressings has (written by
+  another tagger: "GB" on an album released only in Germany and Russia) counted against every
+  pressing alike, so even your exact disc ID could not choose one and the album stayed Album
+  only. It now tells nothing apart: the disc ID decides, or else your country order.
+
+**More pressings told apart**
+- Discogs's "UK" pressings now count as GB in your country order; before, a UK pressing was
+  never picked by it.
+- "Made in the EU" on your scans no longer counts against a UK or German pressing.
+- The matrix printed round a disc's hub is read on more scans (a wider ring), and a CD-R entry
+  is not taken for your pressed disc when another tied pressing lists that matrix. Disc scans
+  are read again once for this.
+- Lossless files are never a download sold only as MP3: of a FLAC and an MP3 entry of one
+  download, the FLAC one is picked (MED-10).
+
 ## 0.8.22
 
 **Folder names that did not change**

@@ -455,6 +455,56 @@ def web_genres(profile, cand) -> list:
     return web_tag.genre_list(cand.get("genre"))
 
 
+def gnudb_candidates(out, album) -> list:
+    """GNU-1: [("gnudb", candidate)] - the gnudb entries the matcher found for a one-disc
+    album, as web albums (engine._web): only an entry gnudb gives as an exact match for your
+    disc's table of contents (not a fuzzy one), with your disc's track count, every track length agreeing with the rip's
+    table of contents (match_albums.gnudb_fits), artist, title and a title for every track.
+    Its track lengths are the entry's own; its page is gnudb.org's. Free text someone once
+    typed in: never a release, so only Partial tags come of it (no release IDs, label,
+    barcode, catalogue number or media)."""
+    tocs = (album or {}).get("tocs") or {}
+    tracks_in = (album or {}).get("tracks") or []
+    # (one disc: one table of contents, and no file of another disc)
+    if len(tocs) != 1 or len({t.get("disc") or 1 for t in tracks_in}) > 1:
+        return []
+    only = next(iter(tocs))
+    import web_tag
+    found = []
+    for e in (out or {}).get("gnudb") or []:
+        offsets = list(e.get("offsets") or [])
+        if not (e.get("exact") and e.get("artist") and e.get("title") and offsets and e.get("seconds")
+                and len(e.get("tracks") or []) == len(offsets) == len(tracks_in) and all(e["tracks"])
+                and e.get("disc", only) == only):
+            continue
+        ends = offsets[1:] + [int(e["seconds"]) * 75]
+        tracks = [{"title": t, "secs": (b - a) / 75, "num": k + 1, "disc": 1}
+                  for k, (t, a, b) in enumerate(zip(e["tracks"], offsets, ends))]
+        cat, discid = str(e.get("category") or ""), str(e.get("discid") or "")
+        cand = web_tag._cand("gnudb", f"{cat}/{discid}",
+                             f"https://gnudb.org/cd/{cat[:2]}{discid}" if cat and discid else "",
+                             e["artist"], ma.gnudb_title(e), e.get("year") or "", genre=e.get("genre") or "",
+                             tracks=tracks)
+        cand["formats"] = {"cd"}             # (a CD's table of contents; never written as media)
+        found.append(("gnudb", cand))
+    return found
+
+
+def _gnudb_titles_miss(album, cand, sc) -> str:
+    """GNU-1: why a gnudb album's track titles do not confirm it ("" when they do): it must
+    fit by the track lengths, and of your files that have a title, at least 80% must agree
+    with its track's title, in order (a disc ID and lengths alone fit another album now and
+    then; untitled files: the lengths decide)."""
+    if sc.get("mode") != "lengths":
+        return "gnudb's entry fits by its titles only, not its lengths"
+    files, ct = album.get("tracks") or [], cand.get("tracks") or []
+    titled = [(i, j) for i, j in sc.get("map") or [] if files[i].get("title")]
+    agree = sum(1 for i, j in titled if mc.track_titles_agree(files[i]["title"], ct[j].get("title")))
+    if titled and agree < 0.8 * len(titled):
+        return f"only {agree} of gnudb's {len(titled)} track titles agree with your files'"
+    return ""
+
+
 def _refresh_days() -> int:
     """This computer's network.refresh_days (0: saved lookups are kept for ever)."""
     try:
@@ -995,12 +1045,18 @@ class Engine:
             p = self._single(Path(files[0]), base)
             if p:
                 return p
-        # (unresolved.action "leave" writes nothing on an album whose release is not proven:
-        # no Partial tags either)
+        # (unresolved.action "leave" writes nothing on an album whose release is not proven
+        # unless you tick it: WEB-1 below)
         ur = self.profile["unresolved"]
         partial_ok = ur.get("allow_partial", True) and ur.get("action") != "leave" and \
             not _provider_failed(errors) and self._accepts("partial")
-        if partial_ok and not alone and out and out.get("status") in PARTIAL_FROM and out.get("best"):
+        # WEB-1: with unresolved.action "leave" the web is still searched; what it establishes
+        # is planned but held - shown in the preview, unticked, never applied unless you tick
+        # it (a watched folder never applies it). Never for one disc or version of a set (a
+        # held part must not let the set's other parts be filed)
+        hold = (not partial_ok and ur.get("action") == "leave" and ur.get("allow_partial", True)
+                and not _provider_failed(errors) and self._accepts("partial") and not alone)
+        if (partial_ok or hold) and not alone and out and out.get("status") in PARTIAL_FROM and out.get("best"):
             # the album is established though its release is not: what every pressing shares
             # (never while MusicBrainz or Discogs failed: the album is retried, it may be matched
             # exactly once both answer)
@@ -1013,14 +1069,21 @@ class Engine:
             except Exception as exc:                      # never more than the fallback it is
                 self.log.warning("partial tags for %s failed: %s", g.folder, exc)
                 p = None
-            if p:
+            if p and partial_ok:
                 return p
+            if p:
+                # (WEB-1: a database established the album: "leave" leaves it as it is, and
+                # the web, which would only rival that album, is not asked)
+                hold = False
         # the album on the web only (MusicBrainz and Discogs established nothing): Partial. (A
         # web-only EP holding a track and its remix is matched here, before the folder is
         # called two versions mixed, below)
-        if partial_ok and self.web_partial_on() and album["tracks"]:
+        if (partial_ok or hold) and self.web_partial_on() and album["tracks"]:
             p = self._web(out, album, files, base, by_lengths=alone)
             if p:
+                if hold:
+                    p.held = (f"held: found on {p.provider.split(':', 1)[-1]}, but Unresolved is set to "
+                              f"\"leave\" in this profile: nothing is written unless you tick it and apply")
                 return p
         # titles twice, once with a version's mark ("Twilight" and "Twilight (Remix 2024)"),
         # in a folder no release and no web album fits: two versions of the album rather than
@@ -2396,9 +2459,13 @@ class Engine:
         None when no web album is established, or two different ones are."""
         import web_tag
         failed = []
+        # GNU-1: a gnudb entry for your disc's exact disc ID, whose every track length agrees
+        # with the rip's table of contents, is a web album like a shop's (established below
+        # the same way: artist, title, lengths; its track titles must agree with the files')
+        disc = gnudb_candidates(out, album)
         try:
-            found = web_tag.album_candidates(self.http, album, self.log, self._web_sources(),
-                                             n_tracks=len(album.get("tracks") or ()), failed=failed)
+            found = disc + web_tag.album_candidates(self.http, album, self.log, self._web_sources(),
+                                                    n_tracks=len(album.get("tracks") or ()), failed=failed)
         except Exception as exc:
             self.log.warning("web lookup failed: %s", exc, extra={"provider": "web"})
             base.setdefault("provider_errors", {})["web"] = "outage"   # (not "no match": nobody answered)
@@ -2474,6 +2541,8 @@ class Engine:
             if not c.get("tracks"):
                 continue
             sc, miss = self._established(album, c, name)
+            if not miss and c.get("source") == "gnudb":          # GNU-1
+                miss = _gnudb_titles_miss(album, c, sc)
             if miss:
                 near = near or f"{name} \"{c.get('title', '')}\": {miss}"
                 continue

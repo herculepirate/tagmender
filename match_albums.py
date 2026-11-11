@@ -2014,7 +2014,9 @@ def audio_evidence(infos):
     # MED-3: an SACD's audio - DSD, an SACD_AREA tag, or DSD64 converted to 88.2 or 176.4 kHz
     sacd = bool(infos) and all(i.get("sacd_area") or i.get("rate") in (88200, 176400)
                                or (i.get("rate") or 0) >= 2822400 for i in infos)
-    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd, "sacd": sacd}
+    # every file lossless (FLAC, ALAC, WAV...): a download sold only as MP3 is not this copy
+    every_lossless = bool(infos) and all(i.get("lossless") for i in infos)
+    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd, "sacd": sacd, "lossless": every_lossless}
 
 
 def disc_tocs(infos):
@@ -2935,8 +2937,11 @@ def _gnudb_refused(http, cmd, first):
     raise GnudbRefused(first)
 
 
-def gnudb_matches(http, toc, user):
-    """[(category, disc ID)] gnudb holds for this table of contents (exact and fuzzy)."""
+def gnudb_matches(http, toc, user, exact=None):
+    """[(category, disc ID)] gnudb holds for this table of contents (exact and fuzzy). exact:
+    a set the (category, disc ID) of gnudb's exact matches are added to (its reply 200 or
+    210; 211 is fuzzy) - gnudb files a disc whose ID another disc has under an ID of its
+    own, so the ID alone does not say it."""
     nums = [int(x) for x in toc.split()]
     cmd = "+".join(["cddb", "query", cddb_discid(toc), str(nums[1])] + [str(x) for x in nums[3:]]
                    + [str(nums[2] // 75)])
@@ -2952,6 +2957,8 @@ def gnudb_matches(http, toc, user):
         parts = row.split()
         if len(parts) >= 2 and re.fullmatch(r"[0-9a-fA-F]{8}", parts[1]):
             out.append((parts[0].lower(), parts[1].lower()))
+    if exact is not None and code in (200, 210):
+        exact.update(out)
     return out
 
 
@@ -3021,13 +3028,18 @@ def gnudb_lookup(http, album, cfg, user, discs=2, per_disc=3):
     for disc in sorted(album.get("tocs") or {})[:discs]:
         toc = album["tocs"][disc]
         try:
-            for category, discid in gnudb_matches(http, toc, user)[:per_disc]:
+            exact = set()
+            rows = gnudb_matches(http, toc, user, exact)
+            # (more exact entries than are read: a rival unread may disagree - none is exact)
+            crowded = len(exact) > per_disc
+            for category, discid in rows[:per_disc]:
                 if (category, discid) in seen:
                     continue
                 seen.add((category, discid))
                 entry = gnudb_entry(http, category, discid, user)
                 if entry and entry["title"] and gnudb_fits(toc, entry, cfg):
-                    found.append(dict(entry, disc=disc))
+                    # (exact: gnudb's exact match for this table of contents, not a fuzzy one - GNU-1)
+                    found.append(dict(entry, disc=disc, exact=(category, discid) in exact and not crowded))
         except AuthError:
             raise
         except GnudbRefused as exc:                    # it answered, but not with an entry
@@ -3133,6 +3145,7 @@ def note_gnudb(out, album, final):
     entries = album.get("gnudb") or []
     if not entries:
         return
+    out["gnudb"] = list(entries)                 # (GNU-1: the engine's web step may use them)
     cand = ((final or {}).get("best") or {}).get("cand")
     out["gnudb_notes"] = [gnudb_note(e, cand) for e in entries] + list(out.get("gnudb_notes") or [])
 
@@ -4265,6 +4278,10 @@ def discogs_candidate(rel, dm):
         "sacd_media": mc.sacd_media([f.get("name") for f in rel.get("formats") or []]         # MED-3
                                     + [d for f in rel.get("formats") or [] for d in f.get("descriptions") or []]),
         "enhanced": "enhanced" in _format_words(rel),
+        # a download's codecs as its format names them ("File: FLAC", "File: MP3, 320 kbps")
+        "file_codecs": {d for f in rel.get("formats") or [] if str(f.get("name") or "").casefold() == "file"
+                        for d in (str(x).strip().casefold() for x in f.get("descriptions") or [])
+                        if d in mc.LOSSLESS_CODECS or d in mc.LOSSY_CODECS},
         # Discogs marks a bootleg "Unofficial Release" among the format's descriptions (R9:
         # Kreator - Enemy Of God Revisited, the Russian 8382890; BTBAM - Alaska)
         "unofficial": "unofficial release" in _format_words(rel),
@@ -4702,7 +4719,7 @@ class _ScanReads:
 
     Its own read-only connection to the cache (so a scan read before is not read again)."""
 
-    BUDGETS = {"barcode-digits": 120.0, "disc-rings": 60.0}
+    BUDGETS = {"barcode-digits": 120.0, "disc-rings-2": 60.0}
 
     @classmethod
     def start(cls, db, images, want_digits):
@@ -4731,11 +4748,11 @@ class _ScanReads:
         spines = "spines" if langs == "eng" else f"spines-{langs}"
         reads = {text: lambda p: ocr_text([p]), spines: lambda p: ocr_spines([p]),
                  "barcode-digits": lambda p: ocr_barcode_digits([p]),
-                 "disc-rings": lambda p: ocr_disc_rings([p])}
+                 "disc-rings-2": lambda p: ocr_disc_rings([p])}
         # what _process reads for sure first (the first three scans' page text, which is all
         # it reads when the decoded barcode settles the album, every disc), the rest after
         order = [(text, p) for p in images[:3]] + [(spines, p) for p in images[:3]]
-        order += [("disc-rings", p) for p in images[:40]]
+        order += [("disc-rings-2", p) for p in images[:40]]
         if want_digits:
             order += [("barcode-digits", p) for p in images[:15]]
         order += [(text, p) for p in images[3:]] + [(spines, p) for p in images[3:]]
@@ -5411,7 +5428,9 @@ def _hub_strips(g, cx, cy, r):
     """The ring round the hub laid flat, twice, and once for text running the other way."""
     from PIL import Image
     out = []
-    for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True)):
+    # (a band a little further out too: a printed hub line on a wide clamping ring sits there,
+    # and the inner bands cut through it - Pallas - wearewhoweare: "398478 @1 MTS5503")
+    for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True), (0.33, 0.42, False)):
         if flip:                                   # text running the other way round
             strip = unwrap_ring(g.transpose(Image.FLIP_LEFT_RIGHT), g.width - cx, cy, r * f0, r * f1)
             strip = strip.rotate(180) if strip is not None else None
@@ -6531,7 +6550,7 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
             deep += "\n(investigation stopped: time budget used)"
         if stage and state["rings"]:
             # the disc rings on their own as well: a matrix that clearly differs is told from them only
-            rings = _joined(each_scan(db, "disc-rings", stage[:40], lambda p: ocr_disc_rings([p]), log,
+            rings = _joined(each_scan(db, "disc-rings-2", stage[:40], lambda p: ocr_disc_rings([p]), log,
                                       budget_s=60.0))
             if rings:
                 album["ring_text"] = _joined([album.get("ring_text") or "", rings])
@@ -6881,7 +6900,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 text = text + "\n" + digits
                 album["printed_text"] += "\n" + digits
         # every disc read, also when the barcode settled it: a matrix that differs is told only here
-        rings = _joined(each_scan(db, "disc-rings", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
+        rings = _joined(each_scan(db, "disc-rings-2", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
                                   budget_s=60.0, ahead=scans_ahead))
         if scans_ahead is not None:
             scans_ahead.close()                        # what was read ahead and not needed: dropped

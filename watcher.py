@@ -583,7 +583,8 @@ class Watcher:
         status = ("excluded" if a["status"] == "excluded" or outcome == "excluded" else
                   "provider_error" if retryable else
                   "blocked" if a["status"] == "blocked" or outcome == "blocked" else
-                  "unresolved" if prop.status == "unresolved" else
+                  # (WEB-1: a held album was not written: it keeps the Unresolved schedule)
+                  "unresolved" if prop.status == "unresolved" or planmod.held(a) else
                   "partial" if _is_partial(a) and outcome not in ("failed", "conflict") else outcome)
         if status == "blocked" and not self.destination_ready(prof):
             status = "waiting_destination"      # tried again once it is back

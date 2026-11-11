@@ -1281,6 +1281,8 @@ class Executor:
                 ex.State().log_raw(self.job, a["source_dir"], a["label"], a["rule"]["id"], a["rule"]["name"],
                                    a["rule"]["matched"])
             return a["status"], label, detail
+        if planmod.held(a):          # WEB-1: planned but held; applied only once you ticked it
+            return "skipped", "Held", a.get("held") or "held"
         # rules again, now (they may have changed since the plan was made)
         files = [Path(fe["src"]) for fe in a["files"]]
         dec = ex.evaluate(files, self.rules, release=a.get("release") or None, overrides=ex.State().overrides())

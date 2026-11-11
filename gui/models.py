@@ -164,13 +164,22 @@ class PlanModel(QAbstractTableModel):
         self.set_left_out([self.albums[idx.row()]], Qt.CheckState(value) != Qt.Checked)
         return True
 
+    @classmethod
+    def left_out(cls, a) -> bool:
+        """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it)."""
+        import plan as planmod
+        return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
+
     def set_left_out(self, albums, out):
         for a in albums:
             if can_apply(a):
                 if out:
                     a[self.LEAVE_OUT] = True
+                    a.pop("held_ok", None)
                 else:
                     a.pop(self.LEAVE_OUT, None)
+                    if a.get("held"):          # (WEB-1: ticked - you chose to apply it)
+                        a["held_ok"] = True
         self.dataChanged.emit(self.index(0, 0), self.index(max(0, len(self.albums) - 1), len(self.COLS) - 1))
         self.ticked.emit()
 
@@ -318,7 +327,7 @@ class PlanModel(QAbstractTableModel):
         if role == Qt.AccessibleTextRole and c == 0:
             return label_for(a)[1]
         if role == Qt.CheckStateRole and c == 1 and can_apply(a):
-            return Qt.Unchecked if a.get(self.LEAVE_OUT) else Qt.Checked
+            return Qt.Unchecked if self.left_out(a) else Qt.Checked
         if role == Qt.UserRole:
             return a
         return None

@@ -315,7 +315,9 @@ class Partial(Base):
         a = plan["albums"][0]
         self.assertEqual((a["status"], a["identification"]["tier"]), ("unresolved", "unresolved"))
         self.assertFalse(any(f["changes"] for f in a["files"]))
-        self.assertFalse(any("/ws/2/release" in u for _h, u in http.calls))
+        # (WEB-1: the release is looked up - a database that establishes the album keeps the
+        # web from being asked - but nothing is written and nothing is held)
+        self.assertNotIn("held", a)
 
     def test_an_error_is_retried_not_partial(self):
         http = FakeHttp(mb=[mb_release("mb-a")])

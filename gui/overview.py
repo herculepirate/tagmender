@@ -732,9 +732,9 @@ class Overview(QWidget):
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
                                     self.apply_selected, any(can_apply(a) for a in chosen) and self.may_apply_now()),
                                    (tr("Leave Out of Apply"), lambda: self.leave_out(True),
-                                    any(can_apply(a) and not a.get(PlanModel.LEAVE_OUT) for a in chosen)),
+                                    any(can_apply(a) and not PlanModel.left_out(a) for a in chosen)),
                                    (tr("Include in Apply"), lambda: self.leave_out(False),
-                                    any(a.get(PlanModel.LEAVE_OUT) for a in chosen)),
+                                    any(PlanModel.left_out(a) for a in chosen)),
                                    (tr("Remove from List"), self.remove_selected, not self.running)):
                 act = QAction(text, self)
                 act.setEnabled(on)
@@ -2020,9 +2020,9 @@ class Overview(QWidget):
         rows you highlighted, only those of them, even one (the others stay as they are: a row
         highlighted only to show it, show_row, chooses nothing; nor does one just unticked)."""
         albums = [a for a in (self.plan or {}).get("albums", [])
-                  if can_apply(a) and not a.get(PlanModel.LEAVE_OUT)]
+                  if can_apply(a) and not PlanModel.left_out(a)]
         chosen = self.selected_albums() if hasattr(self, "table") and getattr(self, "_rows_chosen", False) else []
-        if chosen and not all(a.get(PlanModel.LEAVE_OUT) for a in chosen):
+        if chosen and not all(PlanModel.left_out(a) for a in chosen):
             ids = {id(a) for a in chosen}
             albums = [a for a in albums if id(a) in ids]
         return albums

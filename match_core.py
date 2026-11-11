@@ -970,6 +970,19 @@ def barcode_variants(value):
     return out
 
 
+def sleeve_times(known) -> bool:
+    """LEN-1: [(file secs, listed secs)] where the release lists EVERY track a few seconds short
+    of your file - none more than a second longer, none more than 8 s shorter, most of them
+    short at all - as times copied off a sleeve are (Popol Vuh - Kailash, Soul Jazz: each track
+    0-6 s longer than Discogs lists). Another edit or version is not short on every track. Four
+    tracks at least."""
+    if len(known) < 4:
+        return False
+    # (8 s at most, and 4% of the track: on a 40 s interlude 8 s is another edit, not a misprint)
+    return all(-1.0 <= f - c <= min(8.0, max(3.0, 0.04 * c)) for f, c in known) and \
+        sum(1 for f, c in known if f - c >= 0.5) >= 0.75 * len(known)
+
+
 def duration_ok(file_secs, cand_secs, cfg):
     tol = max(cfg["duration_tol_s"], cfg["duration_tol_pct"] * cand_secs)
     return abs(file_secs - cand_secs) <= tol
@@ -2898,10 +2911,16 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         dur_cov = len(known) / n_cand
         if known and dur_cov >= cfg["min_duration_coverage"]:
             good = sum(1 for f, c in known if duration_ok(f, c, cfg))
+            sleeve = good < len(known) and sleeve_times(known)
+            if sleeve:                        # LEN-1: every length listed a few seconds short of the file's
+                notes.append(f"durations {good}/{len(known)} agree as listed, and every one is listed a few "
+                             f"seconds short of your file (times printed on the sleeve): taken as agreeing")
+                good = len(known)
             dur_frac = good / len(known)
             pts += cfg["w_durations"] * dur_frac
             avail += cfg["w_durations"]
-            notes.append(f"durations {good}/{len(known)} agree")
+            if not sleeve:
+                notes.append(f"durations {good}/{len(known)} agree")
     # Track counts differ by a few: do the lengths still line up in order?
     aligned = False
     if not tracks_ok and n_file and n_cand and abs(n_file - n_cand) <= 3:

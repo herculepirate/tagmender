@@ -1,5 +1,25 @@
 # Release notes
 
+## 0.8.30
+
+**Every file moves with the album (MOV-1)**
+- An identified album that is moved or copied now takes every file in its own folders with it,
+  whatever the file type (an .auCDtect report, a .toc, an .nfo), so the folder it leaves is empty
+  and removed. Folders shared with other music, artist folders and loose tracks in a watched or
+  downloads folder keep their own files, as before.
+
+**Apply while albums are looked up (APL-1)**
+- Apply during a Look Up no longer stops the look-up: the ready albums are applied beside it, so
+  the disks and the databases work at once. Only when an album to apply shares a folder with one
+  still being looked up does the look-up stop first.
+- Clear Done works while a look-up or Apply runs, and a cover or tag can be edited for any album
+  the running work is not busy with (before, the choice was silently dropped).
+
+**Better matching**
+- Sleeve times (LEN-1): a release that lists every track a few seconds short of your files is
+  taken as agreeing on lengths.
+- A DVD in a CD set (MED-11) no longer counts as a missing disc of your CD rip.
+
 ## 0.8.29
 
 **Done as soon as it is done**

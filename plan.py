@@ -517,7 +517,7 @@ SHARED_FOLDER_NOTE = "folder holds other music too; only each track's own files 
 
 
 def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist="",
-                single=False, extra=()):
+                single=False, extra=(), everything=False):
     """([(companion, destination)], why not): the non-audio files that go with an album
     that moves or is copied, as Picard's "move additional files" and foobar2000's "move
     entire source folder content" do:
@@ -528,7 +528,10 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         folder, a bonus album in a subfolder), nor from below it.
     Each goes to the same place relative to where the music lands. Hidden files and
     symbolic links stay. moved: {source file: destination file}. extra: more extensions that
-    go from the music's folders (the covers and misc folders' pictures and papers)."""
+    go from the music's folders (the covers and misc folders' pictures and papers).
+    everything: MOV-1 - an identified album whose folder is no watched or library root takes
+    every file of its own folders, whatever its extension (else only the companion types: a
+    downloads folder of loose tracks keeps its other files)."""
     exts = {e.lower() for e in profile["companions"]} | set(extra)
     moved = {Path(k): Path(v) for k, v in moved.items()}
     dmap = {}
@@ -589,7 +592,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
             return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only, artist=artist,
-                               single=single, extra=extra)[0], \
+                               single=single, extra=extra, everything=everything)[0], \
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
@@ -642,6 +645,13 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             if q == src_dir:              # (the album's own folder: its music in it, or in its disc folders)
                 return (src_dir in ours or discs_here) and not src_shared
             q = q.parent
+    def whole(d):
+        """MOV-1: a folder of this album alone (its music in it or below, no other album's,
+        not an artist folder): EVERY file in it goes with the album - not only the profile's
+        companion extensions - so the folder it leaves is empty (Popol Vuh - Sing, for Song
+        Drives Away the Wolves: its .auCDtect report was left behind)."""
+        return everything and not tracks_only and not foreign and not (artist_folder and d == src_dir) and \
+            shared_ok(d) and (d in ours or d != src_dir)
     out = []
     for d, here in tree:
         if artist_folder and d != src_dir and d.relative_to(src_dir).parts[0].lower() in _artwork.ARTIST_ART_DIRS:
@@ -654,7 +664,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         for p in sorted(here):
             if p.is_symlink() or not p.is_file() or p.suffix.lower() in AUDIO_EXT:
                 continue
-            if d in music_below and p.suffix.lower() not in exts:
+            if d in music_below and p.suffix.lower() not in exts and not whole(d):
                 continue
             track = by_stem.get((d, p.stem))                # "01 a.lrc" goes with "01 a.flac"
             if tracks_only and not track:
@@ -1925,9 +1935,10 @@ class Planner:
                                                         extra=tidy.extensions(sub))
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
             else:
+                whole = bool(identified) and real_src not in self.roots() and real_src not in self.library_roots()
                 comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
                                              artist=[who] + sort,
-                                             single=single, extra=tidy.extensions(sub))
+                                             single=single, extra=tidy.extensions(sub), everything=whole)
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
                 # DSC-1: a set joined from disc folders side by side ("Album CD1", "Album CD2"):
                 # each other disc folder's scans, logs and cue sheets go with its music
@@ -1938,7 +1949,7 @@ class Planner:
                         continue                     # (never a watched or library folder itself)
                     mine = {f: d for f, d in pairs.items() if Path(f).parent == od}
                     more, why2 = _companions(od, mine, p, artist=[who] + sort, single=single,
-                                             extra=tidy.extensions(sub))
+                                             extra=tidy.extensions(sub), everything=bool(identified))
                     comps += [c for c in more if c not in comps]
                     if why2 == SHARED_FOLDER_NOTE:       # (that folder's own: told, and marked one by one)
                         own_from |= {c for c, _w in more}

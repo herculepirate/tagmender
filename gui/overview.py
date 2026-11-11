@@ -331,6 +331,9 @@ class Overview(QWidget):
         # and the albums the running look-up has (album key -> (profile, sources))
         self.queue = {}
         self.looking = {}
+        # APL-1: the Apply run beside a look-up (its worker, its albums in order) and whether the
+        # look-up ended meanwhile (the work ends with the Apply then)
+        self.apply_worker, self._side, self._ended_meanwhile = None, None, False
         # folders dropped (or chosen with Add Folder) while work runs: their albums join this list
         # when it ends, and are looked up then (List first: listed only)
         self.later = []
@@ -782,8 +785,15 @@ class Overview(QWidget):
         self._take_out([a for a in self.model.albums if a.get("status") == "done"])
 
     def _take_out(self, chosen):
-        if not chosen or self.running:
+        if not chosen:
             return
+        if self.running:
+            # CLR-1: while work runs, only albums it has done with (Done) come out: nothing it
+            # still has in hand (Apply follows its albums themselves, the look-up its keys)
+            chosen = [a for a in chosen if a.get("status") == "done" and not self.album_busy(a)
+                      and not any(a is b for b in self.applied_albums() if self.states.get(id(b)))]
+            if not chosen:
+                return
         ids = {id(a) for a in chosen}
         left = [a for a in self.model.albums if id(a) not in ids]
         if self.plan:
@@ -834,6 +844,15 @@ class Overview(QWidget):
     def busy(self, on):
         """Preview and Apply are enabled by the window (on this page only); while work runs a
         folder dropped or chosen waits (add_later), and joins the list when the work ends."""
+        if not on and getattr(self, "apply_worker", None) is not None:
+            # APL-1: the look-up ended, the Apply beside it goes on: the work ends with it
+            self._ended_meanwhile = True
+            self._lookup_n = 0
+            side = {id(a) for a in getattr(self, "_side", None) or []}
+            self.states = {k: v for k, v in self.states.items() if k in side}
+            self.model.refresh_rows()
+            self.win.update_album_actions()
+            return
         self.running = on
         self.show_ready()
         if hasattr(self, "model"):
@@ -871,7 +890,9 @@ class Overview(QWidget):
         held = {os.path.realpath(str(p)) for p in self.later + self._reading}
         new = [p for p in new if os.path.realpath(str(p)) not in held]
         applying = getattr(self, "_applying", False)
-        if new and (self.looking or (applying and not self.touches_apply(new))) and self.read_now(new):
+        side = getattr(self, "apply_worker", None) is not None      # (APL-1: an Apply beside the look-up)
+        if new and ((self.looking and not (side and self.touches_apply(new))) or
+                    (applying and not self.touches_apply(new))) and self.read_now(new):
             msg = (tr("{0}: added to the list; not looked up yet.") if self._later_list_only or _list_first()
                    else tr("{0}: added to the list; looked up when Apply ends.") if applying
                    else tr("{0}: added to the list; looked up next.")).format(manual_match._names(new))
@@ -937,9 +958,8 @@ class Overview(QWidget):
         def inside(a, b):
             return a == b or b.startswith(a.rstrip(os.sep) + os.sep)
         busy = set()
-        for i in getattr(self, "_applied_rows", None) or ():
-            if 0 <= i < len((self.plan or {}).get("albums") or []):
-                a = self.plan["albums"][i]
+        for a in self.applied_albums() + list(getattr(self, "_side", None) or []):
+            if True:
                 busy.add(os.path.realpath(a["source_dir"]))
                 busy.update(os.path.realpath(os.path.dirname(fe["dst"])) for fe in a.get("files") or []
                             if isinstance(fe, dict) and fe.get("dst"))
@@ -1698,6 +1718,16 @@ class Overview(QWidget):
         self.states.pop(key, None)
         found = list(new["albums"])
         keys = {key} | {self.album_key(a) for a in found}
+        side = getattr(self, "_side", None) or []
+        if any(self.album_key(a) in keys and (a.get("status") == "done" or any(a is b for b in side))
+               for a in self.model.albums):
+            # APL-1: an album applied beside the look-up (or applied already) keeps its row: a
+            # look-up's word on it is from before Apply wrote it
+            return
+        gone = getattr(self, "removed", set()) or set()
+        if found and not any(self.album_key(a) in keys for a in self.model.albums) and \
+                all(os.path.realpath(a["source_dir"]) in gone for a in found):
+            return                                        # (CLR-1: taken out meanwhile - Clear Done)
         for a in found:
             self.planned_with[self.album_key(a)] = name
         self.remember_looked(found, stamp)
@@ -1877,19 +1907,24 @@ class Overview(QWidget):
         elif news and news[0] == "file":
             self.file_progress(*news[1:])
 
+    def applied_albums(self) -> list:
+        """The albums Apply was given, in the executor's order: the album entries themselves, so
+        rows taken out meanwhile (Clear Done) never shift them."""
+        mine = getattr(self, "_applied", None)
+        if isinstance(mine, list):
+            return list(mine)
+        rows = getattr(self, "_applied_rows", None)                 # (an older caller: row numbers)
+        rows = rows if isinstance(rows, list) else []
+        albums = (self.plan or {}).get("albums") or []
+        return [albums[i] for i in rows if 0 <= i < len(albums)]
+
     def album_applied(self, i, r):
         """Apply's album I (of the rows it was given) is finished: its row says so now (Done,
         Failed...), not once the whole job ends. applied() says it again, the same."""
-        rows = getattr(self, "_applied_rows", None) or []
-        if not (self._applying and 0 <= i < len(rows) and self.plan and 0 <= rows[i] < len(self.plan["albums"])):
+        mine = self.applied_albums()
+        if not (self._applying and 0 <= i < len(mine)):
             return
-        a = self.plan["albums"][rows[i]]
-        a["status"] = r.get("status") or a.get("status")
-        if r.get("status") in ("failed", "conflict"):
-            a["conflicts"] = [r.get("detail") or ""]
-        if r.get("label") in ("Ignored", "Skipped"):
-            a["label"] = r["label"]
-        self.states.pop(id(a), None)
+        self.mark_applied(mine[i], r)
         self.model.refresh_rows()
 
     def file_progress(self, i, j, n, path):
@@ -1906,10 +1941,10 @@ class Overview(QWidget):
 
     def applying_row(self, i):
         """Apply's album I (of the rows it was given) is the one being applied now."""
-        rows = getattr(self, "_applied_rows", None) or []
-        if not (0 <= i < len(rows) and self.plan and 0 <= rows[i] < len(self.plan["albums"])):
+        mine = self.applied_albums()
+        if not 0 <= i < len(mine):
             return
-        me = id(self.plan["albums"][rows[i]])
+        me = id(mine[i])
         if self.states.get(me) != "applying":
             self.states = {k: v for k, v in self.states.items() if v != "applying"}   # (the one before: done)
             self.states[me] = "applying"
@@ -2023,8 +2058,8 @@ class Overview(QWidget):
 
     def edited(self, album):
         """Your edit in the inspector changed an album of the preview: its row, the counts and Apply."""
-        if not self.plan or self.running or not any(a is album for a in self.plan["albums"]):
-            return
+        if not self.plan or self.album_busy(album) or not any(a is album for a in self.plan["albums"]):
+            return                                        # (EDT-1: an album the work has not in hand: now)
         for r, a in enumerate(self.model.albums):
             if a is album:
                 self.model.dataChanged.emit(self.model.index(r, 0),
@@ -2093,7 +2128,10 @@ class Overview(QWidget):
                 tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), tr("Apply {n} {0}").format(word, n=n))
 
     def may_apply_now(self) -> bool:
-        """Apply can be asked: nothing runs, or a look-up does (it stops after its album first)."""
+        """Apply can be asked: nothing runs, or a look-up does (APL-1: alongside it, or it stops
+        after its album first); not while an Apply runs alongside a look-up already."""
+        if getattr(self, "apply_worker", None) is not None:
+            return False
         if not self.running:
             return True
         w = self.worker
@@ -2105,12 +2143,188 @@ class Overview(QWidget):
         the albums not reached wait (queued), Apply asks as usual, then they are looked up."""
         if not self.may_apply_now() or not self.running:
             return False
+        if self.apply_alongside():
+            return True
         self._apply_next = True
         self.worker.cancelled = True
         self.summary.setText(tr("Stopping the look-up after the current album to apply; the albums not yet "
                                 "looked up are looked up afterwards."))
         self.win.update_album_actions()
         return True
+
+    def apply_plans(self, chosen):
+        """The plans Apply runs for the albums CHOSEN: one job per profile they were previewed
+        with, in order. Returns (plans, the albums in the order the executor gets them)."""
+        groups = {}
+        for a in chosen:
+            groups.setdefault(self.planned_with.get(self.album_key(a)), []).append(a)
+        plans = []
+        for g in groups.values():
+            plan = self.plan_for(g)
+            plan["job"] = self.fresh_job(plan.get("job") or "")
+            plans.append(plan)
+        return plans, [a for g in groups.values() for a in g]
+
+    def album_busy(self, a) -> bool:
+        """EDT-1: the work running now has album A in hand, so an edit of it (a cover, a tag)
+        waits: an Apply (the whole of it, or A's own beside a look-up), a preview of the folder
+        (it replaces the list), or A's own look-up. Another album, a look-up running, can be
+        edited: the look-up only replaces the rows it looks up."""
+        if not self.running or a is None:
+            return False
+        if any(a is b for b in getattr(self, "_side", None) or []):
+            return True
+        if self._applying or not self.looking:
+            return True
+        return self.album_key(a) in self.still_looked_up() or \
+            self.states.get(id(a)) in ("waiting", "looking", "applying")
+
+    def still_looked_up(self) -> set:
+        """The keys of the albums the look-up has still to do (waiting, or on it now), and those
+        queued after it."""
+        return {k for k in self.looking if self.states.get(k) in ("waiting", "looking")} | set(self.queue)
+
+    def looked_up_dirs(self) -> list:
+        """The folders of the albums being looked up, or queued to be."""
+        keys = self.still_looked_up()
+        return [os.path.realpath(a["source_dir"]) for a in self.model.albums if self.album_key(a) in keys]
+
+    def apply_alongside(self) -> bool:
+        """APL-1: Apply asked while albums are looked up: the albums ready are applied by a worker
+        of their own while the look-up goes on (the network and the disks at work at once). Not
+        when an album to apply is in a folder an album still looked up is in, or holds it (its
+        scans and logs may move away under the look-up): then the look-up stops first. True
+        when Apply was asked here (applied, or not confirmed)."""
+        if getattr(self, "apply_worker", None) is not None or not self.running or not self.looking:
+            return False
+        busy = set(self.looked_up_dirs())
+        keys = self.still_looked_up()
+        chosen = self.to_apply()
+        if not chosen or any(self.album_key(a) in keys for a in chosen):
+            return False
+
+        def near(d):
+            return any(d == b or d.startswith(b.rstrip(os.sep) + os.sep) or b.startswith(d.rstrip(os.sep) + os.sep)
+                       for b in busy)
+        if any(near(os.path.realpath(a["source_dir"])) for a in chosen):
+            return False
+        if getattr(self, "plan_library", "") != (self.library or "") or self.stale_profiles(chosen):
+            return False                                  # (apply() says why, once the look-up stopped)
+        if not sheets.confirm(self, *self.apply_words()) or self.edit_pending():
+            return True
+        keys = self.still_looked_up()
+        chosen = [a for a in self.to_apply() if self.album_key(a) not in keys]
+        if not chosen:
+            return True
+        busy = set(self.looked_up_dirs())                 # (a look-up started while you were asked)
+        if any(near(os.path.realpath(a["source_dir"])) for a in chosen):
+            self._apply_next = True                       # (then: stop it first, as before)
+            if self.worker is not None:
+                self.worker.cancelled = True
+            self.summary.setText(tr("Stopping the look-up after the current album to apply; the albums not yet "
+                                    "looked up are looked up afterwards."))
+            self.win.update_album_actions()
+            return True
+        if not self.running:                              # (the look-up ended while you were asked)
+            self.start_apply(chosen)
+            return True
+        self.release_files()
+        plans, order = self.apply_plans(chosen)
+        self._side = order
+        offs, total = [], 0
+        for p in plans:
+            offs.append(total)
+            total += len(p["albums"])
+
+        def work(w):
+            import executor
+            at = iter(offs)
+
+            def run(p):
+                o = next(at)
+                return executor.Executor(p, cancel=lambda: w.cancelled,
+                                         progress=lambda i, _n, what: w.partial.emit(("start", o + i, total, what)),
+                                         file_progress=lambda i, j, n, f: w.partial.emit(("file", o + i, j, n, f)),
+                                         album_done=lambda i, r: w.partial.emit(("album", o + i, r))).run()
+            return merge_results(plans, run, lambda: w.cancelled)
+        for a in order:
+            self.states[id(a)] = "waiting"
+        self.model.refresh_rows()
+        self.apply_worker = start(self, work, self.applied_alongside, None, self.apply_alongside_failed,
+                                  partial=self.alongside_news)
+        self.win.update_album_actions()
+        return True
+
+    def alongside_news(self, news):
+        """What the Apply beside a look-up tells as it goes (apply_news's, and which album starts)."""
+        side = getattr(self, "_side", None) or []
+        kind, i = (news[0], news[1]) if news else ("", -1)
+        if not 0 <= i < len(side):
+            return
+        a = side[i]
+        if kind == "start":
+            for b in side:
+                if self.states.get(id(b)) == "applying":
+                    self.states.pop(id(b))               # (the one before: finished, said by "album")
+            self.states[id(a)] = "applying"
+            self.model.refresh_rows()
+            self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name}")
+                                             .format(i + 1, n=news[2], name=Path(news[3]).name))
+        elif kind == "file":
+            _k, _i, j, n, f = news
+            self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name} — "
+                                                "file {1} of {m}").format(i + 1, j + 1, n=len(side),
+                                                                          name=Path(a["source_dir"]).name, m=n))
+        elif kind == "album":
+            self.mark_applied(a, news[2])
+            self.model.refresh_rows()
+
+    def mark_applied(self, a, r):
+        """Album A as Apply left it (r: the executor's result for it)."""
+        a["status"] = r.get("status") or a.get("status")
+        if r.get("status") in ("failed", "conflict"):
+            a["conflicts"] = [r.get("detail") or ""]
+        if r.get("label") in ("Ignored", "Skipped"):
+            a["label"] = r["label"]
+        self.states.pop(id(a), None)
+
+    def alongside_ended(self):
+        """The Apply beside the look-up is over: its rows, and the end of the work (busy) when
+        the look-up ended meanwhile."""
+        side, self._side, self.apply_worker = getattr(self, "_side", None) or [], None, None
+        for a in side:
+            self.states.pop(id(a), None)
+        self.model.refresh_rows()
+        if getattr(self, "_ended_meanwhile", False):
+            self._ended_meanwhile = False
+            self.busy(False)
+            self.service_status(force=True)
+            self.run_queue()
+        self.win.update_album_actions()
+
+    def applied_alongside(self, res):
+        side = list(getattr(self, "_side", None) or [])
+        by_index = {r["index"]: r for r in res["albums"] if "index" in r}
+        for i, a in enumerate(side):
+            if i in by_index:
+                self.mark_applied(a, by_index[i])
+        names = [n for n in dict.fromkeys(self.planned_with.get(Overview.album_key(x)) for x in side)
+                 if isinstance(n, str) and n]
+        rep = run_report(dict(self.plan or {}, albums=side, **({"profile": ", ".join(names)} if names else {})),
+                         res) if side else None
+        self.alongside_ended()
+        words = (tr("Job {0}: ").format(res["job"]) if res.get("job") else "") + \
+            (counts_text(res["counts"]) or tr("Nothing was changed"))
+        self.win.statusBar().showMessage(words, 10000)
+        notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))
+        self.win.pages["Jobs"].reload()
+        self.win.refresh_attention_badge(self.path)
+        if rep is not None:
+            self.win.show_run_report(rep)
+
+    def apply_alongside_failed(self, msg):
+        self.alongside_ended()
+        sheets.warning(self, tr("That did not work."), msg)
 
     def apply(self):
         n = self.actionable()
@@ -2135,21 +2349,17 @@ class Overview(QWidget):
         # always asked here: the profile's "Apply without asking" is for its watched folders only
         if not sheets.confirm(self, *self.apply_words()) or self.edit_pending():
             return
-        chosen = self.to_apply()
+        self.start_apply(self.to_apply())
+
+    def start_apply(self, chosen):
+        """Apply the albums CHOSEN (confirmed), nothing else running."""
         self.release_files()
         # (only the ticked albums go to the executor, one job per profile they were previewed
         # with; what it reports is mapped back to the list)
-        rows = [i for i, a in enumerate(self.plan["albums"]) if any(a is c for c in chosen)]
-        groups = {}
-        for i in rows:
-            a = self.plan["albums"][i]
-            groups.setdefault(self.planned_with.get(self.album_key(a)), []).append(i)
-        self._applied_rows = [i for g in groups.values() for i in g]
-        plans = []
-        for g in groups.values():
-            plan = self.plan_for([self.plan["albums"][i] for i in g])
-            plan["job"] = self.fresh_job(plan.get("job") or "")
-            plans.append(plan)
+        plans, order = self.apply_plans(chosen)
+        at = {id(a): i for i, a in enumerate(self.plan["albums"])}
+        self._applied = list(order)
+        self._applied_rows = [at[id(a)] for a in order]           # (as given: applied_albums reads _applied)
 
         offs, total = [], 0                               # (album i of all the plans: counted on)
         for p in plans:
@@ -2167,7 +2377,7 @@ class Overview(QWidget):
                                          file_progress=lambda i, j, n, f: w.partial.emit(("file", o + i, j, n, f)),
                                          album_done=lambda i, r: w.partial.emit(("album", o + i, r))).run()
             return merge_results(plans, run, lambda: w.cancelled)
-        self.states = {id(self.plan["albums"][i]): "waiting" for i in self._applied_rows}
+        self.states = {id(a): "waiting" for a in self._applied}
         self.model.refresh_rows()
         self.busy(True)
         self._applying, self._apply_at = True, (0, total, "")
@@ -2213,18 +2423,17 @@ class Overview(QWidget):
         return True
 
     def applied(self, res):
-        rows = getattr(self, "_applied_rows", None)
-        if not isinstance(rows, list) or not rows:          # (the whole plan was given)
-            rows = list(range(len(self.plan["albums"])))
-        done_albums = [self.plan["albums"][i] for i in rows]
+        given = Overview.applied_albums(self) or list(self.plan["albums"])   # (none: the whole plan was given)
+        self._applied, self._applied_rows = None, None
+        done_albums = given
         names = [n for n in dict.fromkeys((getattr(self, "planned_with", None) or {}).get(Overview.album_key(x))
                                           for x in done_albums) if isinstance(n, str) and n]
         rep = run_report(dict(self.plan, albums=done_albums, **({"profile": ", ".join(names)} if names else {})), res)
-        # (the executor's index is into the albums it was given: the list's own row here)
-        by_index = {rows[r["index"]]: r for r in res["albums"] if "index" in r and r["index"] < len(rows)}
+        # (the executor's index is into the albums it was given)
+        by_index = {id(given[r["index"]]): r for r in res["albums"] if "index" in r and r["index"] < len(given)}
         by = {a["album"]: a for a in res["albums"]}
-        for i, a in enumerate(self.plan["albums"]):
-            r = by_index.get(i) if by_index else by.get(a["source_dir"])
+        for a in self.plan["albums"]:
+            r = by_index.get(id(a)) if by_index else by.get(a["source_dir"])
             if r:
                 a["status"] = {"done": "done"}.get(r["status"], r["status"])
                 if r["status"] in ("failed", "conflict"):
@@ -2257,6 +2466,8 @@ class Overview(QWidget):
             self.run_queue()
 
     def cancel(self):
+        if getattr(self, "apply_worker", None) is not None:
+            self.apply_worker.cancelled = True              # (APL-1: the Apply beside it stops too)
         if self.worker:
             self.worker.cancelled = True
             self._apply_next, self._apply_only = False, None   # (Cancel stops it all, Apply too)

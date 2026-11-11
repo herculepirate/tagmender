@@ -45,6 +45,7 @@ When rules point different ways, the earlier group wins:
 | EVI-3 | Text read off the scans (for example "Made in EU") beats the country order. | in code |
 | EVI-4 | Poor OCR (few words of artist or title read) never lowers the confidence: scans only add evidence. | in code (`score_candidate`, OCR only adds); test `EVI4_*` |
 | TOC-1 | Your disc's table of contents (from the rip log or cue sheet) fits your files to the sector on every disc, and MusicBrainz has each of those disc IDs attached to the release: the release is proven though the lengths it lists differ (typed or rounded) and though the folder names the artist otherwise (credited as the database does). Every disc of your files needs its TOC, and each disc ID must be on that disc of the release. Its title must agree with yours (and, when the artist is credited otherwise, its track titles too), three tracks or more, the track counts the same; a fuzzy disc match or a log of another rip is no proof. Filed on it below organize_min_confidence when it is clear of the runner-up (not when pressings sharing the disc ID tie and the country order chose), never with Extra-careful matching. | in code (`match_core.toc_lengths`, `classify`, `plan._files_on_evidence`); tests `TOC1_*` |
+| LEN-1 | A release that lists EVERY track a few seconds short of your files (none more than 1 s longer or 8 s shorter, most of them short at all, four tracks or more) agrees on lengths: times copied off a sleeve. Another edit or version is not short on every track. | in code (`match_core.sleeve_times`); tests `LEN1_*` |
 
 ## Album known or full pressing
 
@@ -68,6 +69,7 @@ When rules point different ways, the earlier group wins:
 | MED-8 | Grouping: HD Audio for lossless above 16 bits or 44.1 kHz (DSD included); Vinyl Rip; Tape Rip. Written only when Grouping is empty. | in code (`marks.py`) |
 | MED-9 | Lossy files (MP3, AAC, Opus): the same rules, without the audio as a clue; no Grouping mark. | in code |
 | MED-10 | Lossless files (FLAC, ALAC, WAV) are never a download sold only as MP3, AAC or another lossy codec: such downloads leave a tie, and a download whose format names your files' kind agrees. A CD-R lists no moulded matrix: a pressed matrix read on your disc that another tied pressing lists counts against it. "Made in the EU" on your scans agrees with a UK, German or other European pressing. | in code (`file_clues`, `choose_pressing`, `pressing_clues`); tests `MED10_*` |
+| MED-11 | A DVD, Blu-ray or VHS in a set (its film or videos, not audio) is no disc of a CD rip: the disc count compared is that of the discs with audio tracks (Popol Vuh - Kailash: 2 CDs and a DVD, ripped as 2 CDs). | in code (`match_albums.discogs_candidate`); tests `MED11_*` |
 
 ## Editions, box sets, singles
 
@@ -158,6 +160,9 @@ When rules point different ways, the earlier group wins:
 | HF-7 | Not sure even of the album (artist matches, title partly, a few tracks agree): Unresolved and untouched; retried per HF-3. | in code |
 | HF-8 | An album a watched folder left Unresolved is looked up once more after each TagMender update, whatever its HF-3 schedule (not with Retry set to Never); its HF-3 week is not restarted. It is listed under Needs attention also when Unresolved is set to "leave" and nothing was written to its files: with no folder chosen there, the page lists every such album, keeps the badge, and a notification tells of new ones while the app is open. `tagmender unresolved` and `tagmender retry` find them too. | in code (`watcher.version_since`, `watcher.unresolved_records`, `gui/attention.py`); tests `test_v0826_needs_attention`, `test_v0821_retry_schedule` (HF-8) |
 | OCR-1 | The investigation of the scans (every scan, every zone, before an album is left Unresolved) keeps to its time budget within a scan too: no reading starts after it, and tesseract is given only the time left. | in code (`match_albums.ocr_deep`, `ocr_located_codes`); tests `OCR1_*` |
+| MOV-1 | An album moved or copied takes EVERY file of its own folders with it, whatever its extension (an .auCDtect report, a .toc), so the folder it leaves is empty and removed. A folder shared with another album's music, and an artist folder, keep their own files; there only the profile's companion types that belong to the album's tracks go. | in code (`plan._companions`); tests `MOV1_*` |
+| APL-1 | Apply asked while albums are looked up runs beside the look-up (the network and the disks at work at once), unless an album to apply shares a folder with one still to be looked up: then the look-up stops first. Each album's row says Done as soon as its files are; a look-up never replaces the row of an album applied, nor brings back one taken out. | in code (`gui/overview.py` apply_alongside); tests `APL1_*` |
+| EDT-1 | While a look-up runs, an album it is not looking up can be edited (cover, tags); one it still has in hand waits, and you are told. Clear Done takes Done albums out of the list while work runs (CLR-1). | in code (`Overview.album_busy`, `_take_out`); tests `EDT1_*`, `CLR1_*` |
 
 ## Mixed folders
 

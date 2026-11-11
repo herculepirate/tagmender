@@ -24,9 +24,10 @@ import plan as pl  # noqa: E402
 import profiles as pf  # noqa: E402
 
 CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])
-# Food - Food (Feral Records, 1999): the disc's own lengths, and MusicBrainz's, each 4 s short
+# Food - Food (Feral Records, 1999): the disc's own lengths, and the database's, off by 5-6 s
+# either way (were they all short, LEN-1 alone would take them as sleeve times)
 DISC = [219.0, 450.0, 539.0, 186.0, 330.0, 470.0, 288.0, 245.0, 238.0, 115.0]
-LISTED = [s - 4.0 for s in DISC]
+LISTED = [s + (6.0 if i % 2 else -6.0) for i, s in enumerate(DISC)]
 TOC = "1 10 231407 150 16575 50325 90747 104642 129450 164850 186450 204825 222900"
 
 

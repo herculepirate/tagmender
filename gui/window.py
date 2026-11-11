@@ -463,7 +463,7 @@ class Main(QMainWindow):
         ov = self.pages["Overview"]
         kind, x = self.album()
         insp = self.inspector
-        here = kind == "overview" and not ov.running and insp.album is x
+        here = kind == "overview" and not ov.album_busy(x) and insp.album is x       # (EDT-1)
         tv, art = insp.tags, insp.art
         tags_on = here and tv.editable()
         for k, b in (("edit_tag", "edit"), ("revert_tag", "revert"), ("use_suggested", "suggested"),

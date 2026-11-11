@@ -4246,6 +4246,15 @@ def discogs_candidate(rel, dm):
                 if n < len(tracks):
                     tracks[n]["disc"] = d["number"]
                 n += 1
+    # MED-11: a DVD or Blu-ray in the set (its film, its videos) is no disc of a CD rip: the
+    # discs counted are those with audio tracks (Popol Vuh - Kailash, Soul Jazz: 2 CDs and a
+    # DVD, scored "disc count 2 vs 3" against the 2 CDs ripped)
+    audio_discs = {t["disc"] for t in tracks if not t.get("video")}
+    video = any(re.search(r"\b(?:dvd|blu-?ray|hd-?dvd|vhs)\b", str(f.get("name") or ""), re.I)
+                and not re.search(r"audio", " ".join(f.get("descriptions") or []), re.I)
+                for f in rel.get("formats") or [])
+    if video and audio_discs and len(audio_discs) < disc_count:
+        disc_count = len(audio_discs)
     # a box set's discs named by the heading rows before them ("The Legacy", "The New Order")
     disc_titles, heading = {}, ""
     for row in rel.get("tracklist") or []:

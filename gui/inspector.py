@@ -412,7 +412,7 @@ class TagsView(QWidget):
         return sorted(out, key=lambda r: (not change(r), r.get("by") != planmod.BY_YOU, r["field"]))
 
     def editable(self) -> bool:
-        return self.owner is not None and not self.owner.busy() and bool((self.album or {}).get("files")) and \
+        return self.owner is not None and not self.owner.busy(self.album) and bool((self.album or {}).get("files")) and \
             (self.album or {}).get("status") in planmod.EDITABLE
 
     def fill(self, *_):
@@ -805,7 +805,7 @@ class ArtworkView(QWidget):
             self.buttons[key].setIcon(icons.icon(icon, "ink"))
 
     def editable(self) -> bool:
-        return not self.owner.busy() and bool((self.album or {}).get("files")) and \
+        return not self.owner.busy(self.album) and bool((self.album or {}).get("files")) and \
             (self.album or {}).get("status") in planmod.EDITABLE
 
     def show_album(self, album):
@@ -1259,12 +1259,17 @@ class Inspector(QDockWidget):
         self.setVisible(on)
 
     # ---- your edits (entry points for the window) -------------------------------------------
-    def busy(self) -> bool:
-        """A preview or Apply is running (Apply reads the plan on a worker): no edit until it ends."""
-        return bool(getattr((getattr(self.win, "pages", None) or {}).get("Overview"), "running", False))
+    def busy(self, album=None) -> bool:
+        """A preview or Apply is running (Apply reads the plan on a worker): no edit until it ends.
+        Of ALBUM: only when the work has that album in hand (EDT-1: Overview.album_busy) - during
+        a look-up, the albums it is not looking up can be edited."""
+        ov = (getattr(self.win, "pages", None) or {}).get("Overview")
+        if album is not None and ov is not None and hasattr(ov, "album_busy"):
+            return bool(ov.album_busy(album))
+        return bool(getattr(ov, "running", False))
 
     def can_edit(self, album) -> bool:
-        return bool(album) and album.get("status") in planmod.EDITABLE and not self.busy()
+        return bool(album) and album.get("status") in planmod.EDITABLE and not self.busy(album)
 
     def pending(self) -> bool:
         """An edit or a cover is still on its way to the preview (Apply waits for it)."""
@@ -1373,6 +1378,9 @@ class Inspector(QDockWidget):
         """Your image (stage_cover's dict) as the album's new cover."""
         album = album or self.album
         if not self.can_edit(album):
+            if album and self.busy(album):                # (never dropped without a word)
+                self.win.statusBar().showMessage(tr("This album is being looked up or applied: choose its "
+                                                    "cover again when that is done."), 8000)
             return
         self.remember()
         self.edit_of(album, create=True)["cover"] = cover
@@ -1415,7 +1423,7 @@ class Inspector(QDockWidget):
                 return                                   # (a later edit of it is on its way)
             self._wanted.pop(id(album), None)
             ov = (getattr(self.win, "pages", None) or {}).get("Overview")
-            if self.busy() or album.get("status") not in planmod.EDITABLE or \
+            if self.busy(album) or album.get("status") not in planmod.EDITABLE or \
                     (plan is not None and ov is not None and plan is not getattr(ov, "plan", None)) or \
                     (plan is not None and not any(a is album for a in plan.get("albums") or [])):
                 if self.album is album:                  # (applied, or a new preview: this plan is gone)
@@ -1464,7 +1472,7 @@ class Inspector(QDockWidget):
             ov = (getattr(self.win, "pages", None) or {}).get("Overview")
             gone = plan is not self.plan or not any(a is album for a in (plan or {}).get("albums") or []) or \
                 (ov is not None and plan is not getattr(ov, "plan", None))
-            if self.busy() or gone:                      # (Apply runs, or a new preview: this plan is gone)
+            if self.busy(album) or gone:                 # (Apply runs, or a new preview: this plan is gone)
                 self.win.statusBar().showMessage(tr("The cover was not used: the preview changed while it "
                                                     "was being read."), 6000)
                 return

@@ -203,6 +203,8 @@ _NOT_CATNO_WORD = re.compile(
     r"expanded|limited|bonus|track|tracks|with|and|anniversary|version|complete|album|included|"
     r"\d*cds?|\d*lps?|vinyl|rip|ripped|web|digital|flac|mp3|sacd\S*|dvda?\S*|dts|\d*ch|"
     r"surround|stereo|mono|boxset|box|set|hi-?res|lossless|\+|"
+    # CAT-1: an SACD's audio format ("DSD64", "DST64", "DXD", "2ch", "ISO"), never a number
+    r"ds[dt]\d*|dxd|pcm|lpcm|iso|mch|multi-?ch(?:annel)?|"
     # a bit depth and sample rate ("ECM 24-96", "[24/192]", "16-44.1"): the audio, not a number
     r"(?:16|20|24|32)\s*[-/]\s*(?:44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384))$", re.I)
 # words that, followed by a number, mean something else ("Volume 5", "Live 1996")
@@ -1872,6 +1874,16 @@ def file_clues(album, cand, clues, against, cfg=None):
             # whatever the files were converted to since (Nile - Amongst the Catacombs: opus)
             clues.setdefault("format", "CD (the folder's rip log has the disc's table of contents)")
         format_against(album, formats, against)
+    # MED-12: a CD rip is never the DVD or Blu-ray of a concert (its chapters listed as tracks)
+    # (not when the folder name says DVD or Blu-ray, nor on whole sectors that are also whole PAL
+    # video frames without a rip log: the sound of a DVD cut at its chapters)
+    by_log = bool(album.get("rip_log_toc"))
+    by_sectors = audio.get("cd_frames") and not audio.get("pal_frames")
+    if cand.get("video_only") and hint in ("", "cd") and (by_log or by_sectors) and \
+            not _VIDEO_FOLDER.search(str(album.get("folder") or "")):
+        why = "a CD rip log" if by_log and not by_sectors else "tracks that are whole CD sectors"
+        against.append(f"your folder has {why}, so not this video (DVD/Blu-ray) release")
+    if formats:
         # a download sold only in a lossy codec is not your lossless files (an MP3 entry and a
         # FLAC entry of one download: Pallas - The Edge Of Time); one in your files' kind agrees
         codecs = set(cand.get("file_codecs") or ())
@@ -1923,6 +1935,9 @@ def hires_media(names):
 
 SECTOR_CLUE = "CD (tracks are whole CD sectors, as ripped from a disc)"
 SECTOR_LOG_CLUE = "CD (tracks are whole CD sectors, and the folder's rip log has the disc's table of contents)"
+
+
+_VIDEO_FOLDER = re.compile(r"\b(?:dvd|bd|blu-?ray|hd-?dvd|vhs|laserdisc)(?:[-\s]?rip)?\b", re.I)
 
 
 def format_against(album, formats, against):

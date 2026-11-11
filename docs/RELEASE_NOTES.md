@@ -1,5 +1,27 @@
 # Release notes
 
+## 0.8.32
+
+**Box sets whose discs carry their own titles (DSC-2)**
+- A set filed as "CD1" ... "CD4" folders, each disc tagged with a title of its own (the remix,
+  the live show, the outtakes), is now matched and filed as one release. Before, each disc was
+  an album of its own and one could be filed away from the others.
+
+**Network shares that ignore letter case (NAM-5)**
+- On an SMB share, a folder the naming script spells "Best of" where "Best Of" already exists is
+  used as it is spelled on disk, instead of every track getting a "~1a2b" name beside itself.
+
+**Leftover folders (MOV-2)**
+- A second copy of one of the album's tracks (the same audio under another name) no longer keeps
+  the album's scans, log and cover behind in the old folder: they move with the album, and the
+  copy stays where it is with its own sidecar files.
+
+**Fewer wrong picks**
+- A concert DVD or Blu-ray release (songs as chapters, no audio disc) is no longer chosen for a
+  CD rip: tracks of whole CD sectors or a CD rip log argue against it (MED-12).
+- An SACD's audio format in the album title ("DSD64", "DST64", "DXD", "2ch") is no longer read as
+  a catalogue number (CAT-1).
+
 ## 0.8.31
 
 **Albums your copy proves are filed (FIL-1)**

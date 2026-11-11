@@ -268,6 +268,37 @@ def _disc_sets(groups, metas) -> list:
     return [g for g in groups if id(g) not in joined]
 
 
+def _one_box(folder, files, keys, metas) -> bool:
+    """DSC-2: a set's disc folders ("CD1" ... "CD4" in "Holy Diver [2022 RM DLX 4CD]") whose
+    discs each carry their own album title ("Holy Diver [2022 Barresi RMX]", "... Live In
+    Fresno", "... Outtakes, Singles & B-Sides") are still one release: every file lies in a
+    disc folder of FOLDER, each disc folder is tagged as one album, all by one same album
+    artist, and no two disc folders' tags name the same disc number. A folder with tracks of
+    its own beside them, an untagged disc, or two artists' albums are left as they are."""
+    by_dir = {}
+    for f in files:
+        d = Path(f).parent
+        if d.parent != folder or not is_disc_dir(d):
+            return False
+        by_dir.setdefault(d, []).append(f)
+    if len(by_dir) < 2:
+        return False
+    artists, numbers = set(), []
+    for d, fs in by_dir.items():
+        ks = {keys[f] for f in fs}
+        if len(ks) != 1:
+            return False                                   # (a disc folder of two albums)
+        k = next(iter(ks))
+        if k[0] != "tags" or not k[1]:
+            return False
+        artists.add(k[1])
+        nums = {_first(metas.get(f) or {}, "discnumber").partition("/")[0].strip().lstrip("0") for f in fs} - {""}
+        if len(nums) != 1:
+            return False                                   # (no disc number: nothing says it is a disc of one set)
+        numbers.extend(nums)
+    return len(artists) == 1 and len(numbers) == len(set(numbers))
+
+
 def version_dirs(parent: Path, metas=None, skips=None) -> list:
     """The folders of parent that hold versions of one disc of one album, each named after
     its channel layout ("2.0/" and "5.0/", "Stereo/" and "Multichannel/": an SACD's two areas,
@@ -788,6 +819,8 @@ class Engine:
             spans_discs = len({f.parent for f in files}) > 1
             if len(by_album) > 1 and spans_discs and len(tagged) <= 1:
                 by_album = {(tagged or [("folder", str(folder))])[0]: files}   # one disc set, partly tagged
+            elif len(by_album) > 1 and _one_box(folder, files, keys, metas):
+                by_album = {tagged[0]: files}                                  # DSC-2
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1))
                 continue

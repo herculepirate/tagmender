@@ -1562,6 +1562,30 @@ def album_tag_discs(infos) -> tuple:
     return found, min(bases)
 
 
+def _set_title(infos, folder_title) -> str:
+    """DSC-2: the title a set is searched by when its disc folders each carry an album title of
+    their own ("Holy Diver [2022 Barresi RMX]", "Holy Diver Live In Fresno CA 1983", ...): the
+    words they all begin with ("Holy Diver"), else the folder's title. "" when the files are
+    no such set (one folder, or one album title)."""
+    by_dir = {}
+    for p, i in infos:
+        if i.get("album"):
+            by_dir.setdefault(p.parent, set()).add(i["album"])
+    if len(by_dir) < 2 or any(len(v) != 1 for v in by_dir.values()):
+        return ""
+    titles = [next(iter(v)) for v in by_dir.values()]
+    if len({t.casefold() for t in titles}) < 2:
+        return ""
+    words = [re.findall(r"[^\s\[\]\(\)\{\}:,\-–]+", t) for t in titles]
+    common = []
+    for ws in zip(*words):
+        if len({w.casefold() for w in ws}) != 1:
+            break
+        common.append(ws[0])
+    shared = " ".join(common)
+    return shared if len(shared) >= 4 else folder_title   # (never "The" alone)
+
+
 def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     """blind=True (validate.py): the files were tagged already, so their release IDs,
     ISRCs, label, catalogue number, barcode, country, date and year came FROM a release
@@ -1638,7 +1662,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
 
     m = re.match(r"\s*(\d{4})\s*-\s*(.*)", album_folder)
     year = top("year") or (int(m.group(1)) if m else 0)
-    title = tag_title or top("album") or (m.group(2) if m else album_folder)
+    title = tag_title or _set_title(infos, m.group(2) if m else album_folder) or top("album") or \
+        (m.group(2) if m else album_folder)
     n_discs = len({i["disc_eff"] for _p, i in infos}) or 1
     folder_hints = mc.catno_hints(album_folder) + [h for h in mc.catno_hints(title)
                                                    if h not in mc.catno_hints(album_folder)]
@@ -2021,7 +2046,11 @@ def audio_evidence(infos):
                                or (i.get("rate") or 0) >= 2822400 for i in infos)
     # every file lossless (FLAC, ALAC, WAV...): a download sold only as MP3 is not this copy
     every_lossless = bool(infos) and all(i.get("lossless") for i in infos)
-    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd, "sacd": sacd, "lossless": every_lossless}
+    # MED-12: whole PAL video frames too (1764 samples at 44.1 kHz, 3 sectors): a concert
+    # DVD's sound cut at its chapters is whole sectors as well (a CD rip: by chance, rarely)
+    pal_frames = cd_frames and all(i["samples"] % (3 * CD_FRAME) == 0 for i in lossless)
+    return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd, "sacd": sacd, "lossless": every_lossless,
+            "pal_frames": pal_frames}
 
 
 def disc_tocs(infos):
@@ -4257,6 +4286,12 @@ def discogs_candidate(rel, dm):
                 for f in rel.get("formats") or [])
     if video and audio_discs and len(audio_discs) < disc_count:
         disc_count = len(audio_discs)
+    # MED-12: a release that is video only (the DVD of a concert, its songs listed as chapters
+    # without lengths: AC/DC - Live At Donington) is no CD's (match_core.file_clues)
+    video_only = bool(rel.get("formats")) and all(
+        re.search(r"\b(?:dvd|blu-?ray|hd-?dvd|vhs|laserdisc|umd)\b", str(f.get("name") or ""), re.I)
+        and not re.search(r"audio", " ".join([str(f.get("name") or "")] + list(f.get("descriptions") or [])), re.I)
+        for f in rel.get("formats") or [])
     # a box set's discs named by the heading rows before them ("The Legacy", "The New Order")
     disc_titles, heading = {}, ""
     for row in rel.get("tracklist") or []:
@@ -4285,6 +4320,7 @@ def discogs_candidate(rel, dm):
         "catno_shown": ", ".join(dict.fromkeys(l["catno"] for l in labels
                                                if l.get("catno") and str(l["catno"]).casefold() != "none")),
         "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks, "disc_titles": disc_titles,
+        "video_only": video_only,
         # matrix / runout, SID and label codes: compared with what the disc scans read
         "matrix": [(str(i.get("type")), str(i["value"])) for i in rel.get("identifiers", [])
                    if str(i.get("type") or "").casefold() in mc.MATRIX_KINDS and i.get("value")],

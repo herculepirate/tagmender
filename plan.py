@@ -530,8 +530,59 @@ SECOND_NAMES = 20                         # " (2)" ... " (21)": a second file of
 SHARED_FOLDER_NOTE = "folder holds other music too; only each track's own files (lyrics ...) go with it"
 
 
+def _audio_facts(f):
+    """(length in seconds, FLAC audio MD5 or "", title tag) of an audio file; None unreadable."""
+    try:
+        import mutagen
+        m = mutagen.File(str(f))
+        if m is None or not m.info:
+            return None
+        md5 = getattr(m.info, "md5_signature", 0) or 0
+        title = ""
+        try:
+            t = (m.tags or {}).get("title") or (m.tags or {}).get("TIT2") or (m.tags or {}).get("\xa9nam")
+            title = str(t[0] if isinstance(t, list) else (t.text[0] if hasattr(t, "text") else t or "")).strip()
+        except Exception:
+            title = ""
+        return float(m.info.length), (f"{md5:032x}" if md5 else ""), title.casefold()
+    except Exception:            # (an unreadable file: no copy of anything)
+        return None
+
+
+def _same_audio(a, b) -> bool:
+    """Two files of one recording: lengths within 0.05 s AND - FLAC's audio MD5 on both - the
+    same MD5; else the same title tag, or file names one of which begins the other's
+    ("005.TU" and "005.TUILMOMF"). Lengths alone are not enough (match_albums._same_copy)."""
+    (fa, (la, ma, ta)), (fb, (lb, mb, tb)) = a, b
+    if abs(la - lb) > 0.05:
+        return False
+    if ma and mb:
+        return ma == mb
+    sa, sb = fa.stem.casefold(), fb.stem.casefold()
+    return bool(ta and ta == tb) or sa.startswith(sb) or sb.startswith(sa)
+
+
+def second_copies(group, moved, folder) -> list:
+    """MOV-2: the album's files as found in folder that are not planned and are a second copy
+    of a track that is (_same_audio: "005.TUILMOMF.flac" beside "005.TU.flac", Allan Holdsworth
+    - Metal Fatigue). They are no other album's music: the folder's scans, log and cover
+    still go with the album; the copy itself, and its own files, are left where they are."""
+    planned = {str(s_) for s_ in moved}
+    rest = [Path(g) for g in group or () if str(g) not in planned and Path(g).parent == Path(folder)
+            and Path(g).is_file()]
+    if not rest:
+        return []
+    known = [(Path(s_), x) for s_ in moved if Path(s_).parent == Path(folder) for x in [_audio_facts(s_)] if x]
+    out = []
+    for g in rest:
+        x = _audio_facts(g)
+        if x and any(_same_audio((g, x), k) for k in known):
+            out.append(g)
+    return out
+
+
 def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist="",
-                single=False, extra=(), everything=False):
+                single=False, extra=(), everything=False, copies=()):
     """([(companion, destination)], why not): the non-audio files that go with an album
     that moves or is copied, as Picard's "move additional files" and foobar2000's "move
     entire source folder content" do:
@@ -574,7 +625,9 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                     and not p.name.startswith(".")]
         except OSError:
             return []
-    if any(p not in moved for p in audio_in(src_dir)):
+    copies = {Path(c) for c in copies}
+    copy_stems = {c.stem for c in copies}
+    if any(p not in moved and p not in copies for p in audio_in(src_dir)):
         # a shared folder (singles, a folder split into two albums): its own files stay, but each
         # moving track still takes its own "01 a.lrc" - else its lyrics are left behind, orphaned
         own = []
@@ -606,7 +659,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
             return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only, artist=artist,
-                               single=single, extra=extra, everything=everything)[0], \
+                               single=single, extra=extra, everything=everything, copies=copies)[0], \
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
@@ -678,6 +731,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         for p in sorted(here):
             if p.is_symlink() or not p.is_file() or p.suffix.lower() in AUDIO_EXT:
                 continue
+            if copy_stems and d == src_dir and p.stem in copy_stems:
+                continue                              # MOV-2: a second copy's own .cue, .lrc ... stay with it
             if d in music_below and p.suffix.lower() not in exts and not whole(d):
                 continue
             track = by_stem.get((d, p.stem))                # "01 a.lrc" goes with "01 a.flac"
@@ -1950,9 +2005,13 @@ class Planner:
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
             else:
                 whole = bool(identified) and real_src not in self.roots() and real_src not in self.library_roots()
+                copies = [] if at_root else second_copies(getattr(prop, "group_files", None), pairs, src_root)
                 comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
                                              artist=[who] + sort,
-                                             single=single, extra=tidy.extensions(sub), everything=whole)
+                                             single=single, extra=tidy.extensions(sub), everything=whole,
+                                             copies=copies)
+                for c in copies:
+                    entry["notes"].append(f"{c.name} is a second copy of one of the album's tracks: left where it is")
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
                 # DSC-1: a set joined from disc folders side by side ("Album CD1", "Album CD2"):
                 # each other disc folder's scans, logs and cue sheets go with its music
@@ -2499,6 +2558,13 @@ class Planner:
         parts = list(rel.parts)
         for k, comp in enumerate(parts[:-1]):
             if (cur / comp).is_dir():
+                # NAM-5: a share that sees one name in two letter cases (SMB) finds "Best of"
+                # when "Best Of" is on disk - and moving the files there would move each onto
+                # itself: the folder is used as it is spelled on disk
+                names = self._listing(cur).values()
+                if comp not in names:
+                    fold = unicodedata.normalize("NFC", comp).casefold()
+                    comp = next((n for n in names if unicodedata.normalize("NFC", n).casefold() == fold), comp)
                 cur = cur / comp
                 continue
             listing = self._listing(cur)

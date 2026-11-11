@@ -2604,10 +2604,22 @@ def slot_view(album, cand):
     for i, t in enumerate(tracks):
         by_disc.setdefault(t.get("disc") or 1, []).append(i)
     one_disc = len(by_disc) == 1
+    # numbers that run on over the discs (disc 2 numbered 19-36 after disc 1's 18): each file of
+    # such a disc counted from the disc's own start - when every file of that disc is past its
+    # tracks and all of them land on them once the earlier discs' tracks are taken off
+    # (Billy Joel - The Ultimate Collection: disc 1 lacks its track 18, disc 2 is 19-36)
+    shift = {}
+    if not one_disc:
+        for d in sorted(by_disc):
+            mine = [f.get("num") or 0 for f in files if (f.get("disc") or 1) == d]
+            before = sum(len(by_disc[e]) for e in by_disc if e < d)
+            if mine and before and all(n > len(by_disc[d]) for n in mine) and \
+                    all(1 <= n - before <= len(by_disc[d]) for n in mine):
+                shift[d] = before
     slots, taken = [], set()
     for f in files:
         disc = 1 if one_disc else (f.get("disc") or 1)
-        num = f.get("num") or 0
+        num = (f.get("num") or 0) - shift.get(disc, 0)
         pos = by_disc.get(disc) or []
         if num < 1 or num > len(pos) or (disc, num) in taken:
             return None

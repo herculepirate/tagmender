@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.25
+
+**A missing track on a set numbered straight through (HF-5)**
+- A 2-CD set whose second disc is numbered 19-36 instead of 1-18, with a track missing from the
+  first disc, is now tagged as its release (each file as its own track, the gap noted) instead
+  of being left Unresolved.
+
 ## 0.8.24
 
 **Web search, the last resort (WEB-2)**

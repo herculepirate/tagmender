@@ -435,5 +435,22 @@ class BAR1_ProvenOnTheScansIsFiled(unittest.TestCase):
             {"name": "t", "matching": {"extra_careful": True}}), 93.6), "")
 
 
+class HF5_NumbersThatRunOnOverTheDiscs(unittest.TestCase):
+    """Billy Joel - The Ultimate Collection: disc 1 lacks its track 18, disc 2 is numbered 19-36."""
+
+    def test_each_file_in_its_own_slot(self):
+        cand = {"id": "r", "tracks": [{"disc": d, "title": f"{d}-{n}", "secs": 100} for d in (1, 2) for n in range(1, 19)]}
+        files = [{"disc": 1, "num": n} for n in range(1, 18)] + [{"disc": 2, "num": n} for n in range(19, 37)]
+        v = mc.slot_view({"tracks": files}, cand)
+        self.assertIsNotNone(v)
+        self.assertEqual(v["missing"], {1: [18]})
+        self.assertEqual(v["slots"][17], 18)                  # (disc 2's first file: the release's 19th track)
+
+    def test_a_number_past_its_disc_otherwise_still_refuses(self):
+        cand = {"id": "r", "tracks": [{"disc": d, "title": f"{d}-{n}", "secs": 100} for d in (1, 2) for n in range(1, 19)]}
+        files = [{"disc": 1, "num": n} for n in range(1, 18)] + [{"disc": 2, "num": 5}, {"disc": 2, "num": 40}]
+        self.assertIsNone(mc.slot_view({"tracks": files}, cand))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.8.35
+
+**SACD rips are found as SACDs (MED-13)**
+- Hi-res files ripped from an SACD (converted to 24/96) are recognised by "SACD" or "DSD64" in the
+  folder's name or by the SACD ripping tool's log in the folder, which stays when the folder is
+  renamed. Discogs is then searched for the SACD itself (it files SACDs under their own format,
+  not CD), and an SACD found is always looked at, however many LPs of the album's year rank first.
+
 ## 0.8.34
 
 **Your barcode decides (BAR-6, BAR-7)**

@@ -196,6 +196,64 @@ class BAR7_TIE5_ALB3(unittest.TestCase):
         self.assertIsNone(mc.album_only(dict(f, best=dict(best, dur_frac=0.75)), CFG))
 
 
+class MED13(unittest.TestCase):
+    """MED-13: an SACD rip at 24/96 (DSD converted) - "SACD" in the folder's name or an SACD
+    tool's log (which stays when the folder is renamed) - is searched on Discogs as an SACD, and
+    the SACD found is fetched however the LPs of the tags' year rank (Blood, Sweat & Tears -
+    B, S & T 4, Analogue Productions CAPP 088 SA)."""
+
+    def test_MED13_the_folder_name_or_an_sacd_rip_log_says_sacd(self):
+        import tempfile
+        d = Path(tempfile.mkdtemp(prefix="tm-med13-"))
+        self.assertEqual(ma.sacd_marks(d, "2016 - B S & T 4 [SACD 2ch DSD64 24bit 352khz]"), "folder name")
+        self.assertEqual(ma.sacd_marks(d, "1971 - B, S & T; 4 [HD]"), "")
+        (d / "misc").mkdir()
+        (d / "misc" / "sacd_log.txt").write_text("16908363[0x102004b]: SACD-Ripper Version 0.21\n")
+        self.assertEqual(ma.sacd_marks(d, "1971 - B, S & T; 4 [HD]"), "an SACD rip log (sacd_log.txt)")
+        self.assertEqual(ma.sacd_marks(d, "Sacdecal"), "an SACD rip log (sacd_log.txt)")
+        (d / "misc" / "sacd_log.txt").write_text("my notes\n")
+        self.assertEqual(ma.sacd_marks(d, "Album"), "")
+        for name in ("DST", "Album DST-2", "Pseudo-DSD", "DSD-Remastered"):     # (no format: a word)
+            self.assertEqual(ma.sacd_marks(d, name), "", name)
+        self.assertEqual(ma.sacd_marks(d, "Kind of Blue [DSD128]"), "folder name")
+
+    def test_MED13_an_sacd_release_gets_the_clue_only_for_hi_res_audio(self):
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        sacd = ma.discogs_candidate(release([{"name": "SACD", "qty": "1", "descriptions": ["Hybrid"]}]), dm)
+        hires = {"cd_frames": False, "not_cd": True, "hires": True, "lossless": True, "sacd": False}
+        a = dict(album(hires), sacd_hint="an SACD rip log (sacd_log.txt)", media_hint="")
+        self.assertTrue(str(mc.score_candidate(a, sacd, CFG)["clues"].get("format", "")).startswith("SACD ("))
+        cd_audio = dict(a, audio={"cd_frames": True, "not_cd": False, "hires": False, "lossless": True})
+        self.assertFalse(str(mc.score_candidate(cd_audio, sacd, CFG)["clues"].get("format", "")).startswith("SACD ("))
+        vinyl = dict(a, media_hint="vinyl")
+        self.assertFalse(str(mc.score_candidate(vinyl, sacd, CFG)["clues"].get("format", "")).startswith("SACD ("))
+        named = dict(a, sacd_hint="folder name", media_hint="cd")                # ("[SACD]" reads as cd too)
+        self.assertTrue(str(mc.score_candidate(named, sacd, CFG)["clues"].get("format", "")).startswith("SACD ("))
+
+    def test_MED13_the_sacd_search_is_asked_first_and_its_find_fetched(self):
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        asked, fetched = [], []
+
+        class Http:
+            def get_json(self, url, host):
+                if "database/search" in url:
+                    asked.append(url)
+                    if "format=SACD" in url:
+                        return {"results": [{"id": 37008981, "title": "Blood, Sweat & Tears - B, S & T 4", "year": "2016"}]}
+                    return {"results": [{"id": 100 + i, "title": "Blood, Sweat & Tears - B, S & T 4", "year": "1971"}
+                                        for i in range(12)]}
+                fetched.append(url.rsplit("/", 1)[-1])
+                return release([{"name": "SACD", "qty": "1"}])
+        a = {"title": "B, S & T 4", "artist": "Blood, Sweat & Tears", "year": 1971, "barcodes": set(),
+             "tracks": [], "sacd_hint": "an SACD rip log (sacd_log.txt)", "pressing_year": 1971}
+        ma.discogs_search(Http(), a, dict(CFG, discogs_detail_fetch=5), dm)
+        self.assertIn("format=SACD", asked[0])
+        self.assertIn("37008981", fetched)
+        asked.clear()
+        ma.discogs_search(Http(), dict(a, sacd_hint=""), dict(CFG, discogs_detail_fetch=5), dm)
+        self.assertFalse(any("format=SACD" in u for u in asked))
+
+
 class CAT1(unittest.TestCase):
     def test_CAT1_an_sacd_audio_format_is_no_catalogue_number(self):
         # (Blood, Sweat & Tears: "[SACD DSD64 2ch Rip 24bit 352khz]" in the album tag)

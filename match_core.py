@@ -1846,6 +1846,11 @@ def file_clues(album, cand, clues, against, cfg=None):
     hint = album.get("media_hint") or ""
     audio = album.get("audio") or {}
     if formats:
+        if album.get("sacd_hint") and audio.get("hires") and hint != "vinyl" and cand.get("sacd_media") \
+                and not audio.get("sacd"):
+            # MED-13: an SACD rip by the folder's name or an SACD tool's log, ahead of "cd (folder
+            # name)" (the hint reads "SACD" as cd): the SACD itself, not any CD of the album
+            clues.setdefault("format", f"SACD (hi-res audio, and {album['sacd_hint']} says SACD)")
         if hint and hint in formats:
             clues.setdefault("format", f"{hint} release (folder name)")
         elif not hint and "cassette" in formats and _CASSETTE_HINT.search(str(album.get("folder") or "")):
@@ -1856,6 +1861,8 @@ def file_clues(album, cand, clues, against, cfg=None):
             if audio.get("sacd") and cand.get("sacd_media"):
                 # MED-3: DSD, or 88.2/176.4 kHz (DSD64 converted), is an SACD rip
                 clues.setdefault("format", SACD_AUDIO_CLUE)
+            elif album.get("sacd_hint") and cand.get("sacd_media"):
+                pass                               # (MED-13: told above, DSD converted to 24/96)
             elif "digital" in formats:
                 clues.setdefault("format", HIRES_DIGITAL_CLUE)
             elif formats == {"cd"} and not cand.get("hires_media"):
@@ -2231,7 +2238,7 @@ def _weigh(tied):
     # lack such a link (Alcest - Les Chants de l'aurore: the Brazilian licence was picked
     # over Nuclear Blast's own CD). So among Discogs pressings it tells nothing apart.
     # MED-3: an SACD that fits SACD-rate audio among them: "not a CD" no longer says download
-    if any(str((x.get("clues") or {}).get("format") or "") == SACD_AUDIO_CLUE for x in tied):
+    if any(str((x.get("clues") or {}).get("format") or "").startswith("SACD (") for x in tied):   # (MED-3, MED-13)
         for x in tied:
             if allc[id(x)].get("format") == HIRES_DIGITAL_CLUE:
                 allc[id(x)].pop("format")

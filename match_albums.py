@@ -1753,6 +1753,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                | set(typed_search)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title) or _log_year(album_dir, logs),
         "media_hint": hint, "media_hint_from": hint_from,
+        "sacd_hint": sacd_marks(album_dir, album_folder),     # MED-13
         # the album named in the rip logs' headers ("Jesu / Conqueror (Japanese Bonus Disc)"):
         # searched too when the folder's title finds nothing sure (one disc of a box)
         "log_titles": [h for h in headers if mc.fold(h[1]) != mc.fold(title)],
@@ -1945,6 +1946,37 @@ def _media_hint(album_dir, album_folder, files, infos, artist, rip_log):
     if bandcamp_names(album_dir, artist, len(infos)):
         return "digital", "Bandcamp's file names in a checker's log"
     return "", ""
+
+
+_SACD_NAME = re.compile(r"(?<![A-Za-z0-9])(?:SACD|DS[DT]\d+)(?![A-Za-z])", re.I)   # ("DSD64", never "DST")
+_SACD_TOOL = re.compile(r"SACD[- ]?Ripper|sacd_extract|SACD[- ]?Extract|ISO2DSD|DSD2PCM|SACD ISO", re.I)
+
+
+def sacd_marks(album_dir, album_folder) -> str:
+    """MED-13: what says the copy was ripped from an SACD, else "": "SACD" or "DSD64" in the
+    folder's name, or the log an SACD ripping tool wrote in the folder ("misc/sacd_log.txt":
+    SACD-Ripper, sacd_extract, ISO2DSD) - which stays when the folder is renamed. Only small
+    text files are read, and only those named for the SACD or a log."""
+    if _SACD_NAME.search(str(album_folder or "")):
+        return "folder name"
+    try:
+        found = [p for p in Path(album_dir).rglob("*") if p.suffix.lower() in (".log", ".txt")
+                 and ("sacd" in p.name.lower() or p.suffix.lower() == ".log")][:20]
+    except OSError:
+        return ""
+    for p in found:
+        try:
+            if p.stat().st_size > 512 * 1024:
+                continue
+            with open(p, "rb") as fh:
+                head = fh.read(4096)
+        except OSError:
+            continue
+        text = head.decode("utf-16", "ignore") if head[:2] in (b"\xff\xfe", b"\xfe\xff") else \
+            head.decode("utf-8", "ignore")
+        if _SACD_TOOL.search(text):
+            return f"an SACD rip log ({p.name})"
+    return ""
 
 
 def _track_total(infos):
@@ -4391,6 +4423,10 @@ def discogs_search(http, album, cfg, dm):
     wide = [f"label={q(label)}&catno={q(c)}" for label, c in label_catnos(album)]
     wide += [f"catno={q(c)}" for c in catnos]
     searches += wide
+    if album.get("sacd_hint") and album.get("media_hint") != "vinyl":
+        # MED-13: an SACD rip - Discogs files an SACD under its own format, never under CD; asked
+        # before the title searches, whose first results (the LPs of its year) would end the loop
+        searches.append(f"artist={q(first)}&release_title={q(title)}&format=SACD")
     if album.get("pressing_year"):
         searches.append(f"artist={q(first)}&release_title={q(title)}&year={album['pressing_year']}")
     dfmt = {"vinyl": "Vinyl", "cd": "CD", "digital": "File"}.get(album.get("media_hint") or "")
@@ -4407,6 +4443,7 @@ def discogs_search(http, album, cfg, dm):
     if short != title:
         searches.append(f"artist={q(first)}&release_title={q(short)}")
     seen, results = set(), []
+    must = []                       # (MED-13: the SACD search's own finds: always fetched, below)
     # numbers read off scans: the wider searches only when the artist's found nothing (as mb_search)
     skip_wide = set(wide) if album.get("narrow_codes_first") and narrow else set()
     narrow_found = False
@@ -4420,6 +4457,8 @@ def discogs_search(http, album, cfg, dm):
             if r["id"] not in seen:
                 seen.add(r["id"])
                 results.append(r)
+                if s.endswith("&format=SACD"):
+                    must.append(r)
         if len(results) >= 8:
             break
 
@@ -4430,7 +4469,9 @@ def discogs_search(http, album, cfg, dm):
 
     results.sort(key=pre, reverse=True)
     out = []
-    for r in results[:cfg["discogs_detail_fetch"]]:
+    picked = results[:cfg["discogs_detail_fetch"]]
+    picked += [r for r in must[:3] if r not in picked]       # (a 2016 SACD among the 1971 LPs)
+    for r in picked:
         if pre(r) < 0.5 and not album["barcodes"] and not album.get("catno_search"):
             continue
         det = http.get_json(f"https://api.discogs.com/releases/{r['id']}", "discogs")

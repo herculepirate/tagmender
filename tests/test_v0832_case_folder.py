@@ -127,6 +127,34 @@ class NAM7(unittest.TestCase):
         b = self.spelled("Simon & Garfunkel", "B", "01.flac")
         self.assertEqual((a.parent.parent.name, b.parent.parent.name), ("Simon And Garfunkel",) * 2)
 
+class MOV3(unittest.TestCase):
+    """MOV-3: the album folder you named (planned on its own, a watched album re-checked) gives
+    up every file, as MOV-1 has it - its .md5 and .sfv too (Blood, Sweat & Tears - 2016 - 3
+    [SACD DSD64 24bit 352khz] was left holding them); a named folder of another name
+    ("Downloads") keeps its files."""
+
+    def prop(self, title, year="2016", artist="Blood, Sweat & Tears"):
+        return pl.Proposal(source_dir="/x", files=[], status="identified", tier="exact",
+                           targets=[{"album": [title], "originaldate": [year], "albumartist": [artist]}])
+
+    def test_MOV3_a_folder_named_after_the_album(self):
+        for folder, title, artist in (("2016 - 3 [SACD DSD64 24bit 352khz]", "3", "BS&T"),
+                                      ("Popol Vuh - Sing", "Sing", "Popol Vuh"),
+                                      ("Raising Sand", "Raising Sand", "Robert Plant"),
+                                      ("1981 - Folk Songs [ECM 1170]", "Folk Songs", "Charlie Haden")):
+            self.assertTrue(pl._named_after_album(Path(folder), self.prop(title, artist=artist)), folder)
+        for folder, title in (("Downloads", "3"), ("2013", "3"), ("Singles", "Sing"), ("Album", ""),
+                              ("Music", "Music"), ("Vol 3", "3"), ("Live", "Live")):   # (one word, no year or artist)
+            self.assertFalse(pl._named_after_album(Path(folder), self.prop(title, year="2000", artist="Madonna")),
+                             folder)
+
+    def test_MOV3_a_named_folder_is_no_fixed_root(self):
+        root = Path(tempfile.mkdtemp(prefix="tm-mov3-"))
+        planner = pl.Planner(pf.default(), extra_roots=[root])
+        self.assertIn(os.path.realpath(root), planner.roots())
+        self.assertNotIn(os.path.realpath(root), planner.fixed_roots())
+
+
 class MOV2(unittest.TestCase):
     """MOV-2: a second copy of one of the album's tracks ("005.TUILMOMF.flac" beside "005.TU.flac",
     Allan Holdsworth - Metal Fatigue) is no other album's music: the folder's scans, log and

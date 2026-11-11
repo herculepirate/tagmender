@@ -1,5 +1,24 @@
 # Release notes
 
+## 0.8.37
+
+**Pressings your barcode and scans name (EVI-5, EVI-6, TIE-4)**
+- A hi-res download carrying the CD's barcode is tagged as that CD pressing (your barcode names
+  the release): what the audio says against every CD alike no longer stops the choice.
+- When your scans' catalogue number is on some of the tied pressings only, your country order
+  chooses among those, never the others.
+- A bootleg never wins a tie-break against an official release that fits as well, also when it
+  lists its lengths more exactly; one you chose yourself stays.
+
+**Filed on your own number (FIL-2)**
+- An album your folder's, tags' or scans' catalogue number or barcode proves is filed even when
+  the release lists no track lengths (its score is low only for the lengths it cannot compare).
+
+**Nothing left behind (MOV-3)**
+- An album folder you open on its own (or that the watcher re-checks) now gives up every file,
+  its .md5 and .sfv too, when the folder is named after the album; a folder of another name keeps
+  its other files.
+
 ## 0.8.36
 
 **A work's movements are one track (TRK-1)**

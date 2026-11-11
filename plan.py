@@ -108,6 +108,7 @@ class Proposal:
     most_lengths: bool = False          # BAR-1b: the files are the release's tracks, half their lengths agree at least
     toc_proven: bool = False            # TOC-1: your disc's TOC is this release's (exact disc ID), its title agreeing
     own_number: bool = False            # FIL-1: your copy's own barcode or catalogue number proves the release
+    number_proven: bool = False         # FIL-2: ... on it, every track there, and it lists no lengths
     guessed_pick: bool = False          # FIL-1: the pressing was picked by country order / original date (a guess)
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
@@ -201,6 +202,11 @@ def _files_on_evidence(prop, profile, conf) -> str:
         # that says more than the database's (ABBA - GOLD. 40th Anniversary Edition (2014,
         # Remastered, Deluxe Edition, 3CD, Polar, 060253740130): 87.4)
         return "your copy's own catalogue number or barcode is on it and every track length agrees"
+    if tier == "exact" and getattr(prop, "number_proven", False) and not guessed:
+        # FIL-2: your copy's own number proves it and the release lists no track lengths: nothing
+        # disagrees, and the score is low only for the lengths it cannot compare (Mark Nauseef -
+        # Sura, JICK-89728: 76.9)
+        return "your copy's own catalogue number or barcode is on it, and the release lists no track lengths"
     if tier == "exact" and lengths and not guessed and \
             any("pressing chosen by disc ID" in str(e) for e in getattr(prop, "evidence", None) or ()):
         # FIL-1: the disc ID chose this pressing over the others and every length agrees (a
@@ -744,6 +750,28 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 continue                                    # the artist folder's own photo and art
             out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
     return out, ""
+
+
+def _named_after_album(folder, prop) -> bool:
+    """MOV-3: the folder's name holds the album's title as a whole word or words, and - for a
+    title of one word ("3", "Music", "Live") - the album's year or artist too ("2016 - 3 [SACD
+    DSD64 24bit 352khz]", "Popol Vuh - Sing"); never "Downloads", nor "Music" for Madonna's Music."""
+    t = (prop.targets or [{}])[0]
+    def words(x):
+        return " ".join(re.findall(r"\w+", fnm.fold(str(x or ""))))
+    have = words(Path(folder).name)
+
+    def has(x):
+        w = words(x)
+        return bool(w) and re.search(rf"(?<!\w){re.escape(w)}(?!\w)", have) is not None
+    title = str((t.get("album") or [""])[0]).strip()
+    if not has(title):
+        return False
+    if len(words(title).split()) >= 2:
+        return True
+    years = {str(v)[:4] for k in ("date", "originaldate") for v in t.get(k) or () if str(v)[:4].isdigit()}
+    artists = [a for k in ("albumartist", "artist") for a in t.get(k) or ()]
+    return any(has(y) for y in years) or any(has(a) for a in artists)
 
 
 def _from_album_folder(comps, names, compat) -> list:
@@ -2039,7 +2067,13 @@ class Planner:
                                                         extra=tidy.extensions(sub))
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
             else:
-                whole = bool(identified) and real_src not in self.roots() and real_src not in self.library_roots()
+                # MOV-3: the folder you named (planned on its own, a watched album re-checked) is the
+                # album's own folder when its name is the album's ("2016 - 3 [SACD DSD64]" for "3"):
+                # every file goes. A named folder of another name ("Downloads") keeps its files, as a
+                # watched or library folder always does
+                whole = bool(identified) and real_src not in self.fixed_roots() and \
+                    real_src not in self.library_roots() and \
+                    (real_src not in self.extra_roots or _named_after_album(src_root, prop))
                 copies = [] if at_root else second_copies(getattr(prop, "group_files", None), pairs, src_root)
                 comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
                                              artist=[who] + sort,
@@ -2789,14 +2823,19 @@ class Planner:
                 r.append(os.path.realpath(os.path.expanduser(d)))
         return r
 
-    def roots(self):
+    def fixed_roots(self):
+        """The profile's own roots: its sources (watched folders), filing roots and the folder
+        unresolved albums go to - never the folder a plan was asked for (roots() adds those)."""
         import profiles
         p = self.profile
         r = [os.path.realpath(os.path.expanduser(s["path"])) for s in p["sources"]]
         for d in profiles.filing_roots(getattr(p, "data", p)) + [p["unresolved"].get("move_to")]:
             if d:
                 r.append(os.path.realpath(os.path.expanduser(d)))
-        return list(dict.fromkeys(r + self.extra_roots))
+        return list(dict.fromkeys(r))
+
+    def roots(self):
+        return list(dict.fromkeys(self.fixed_roots() + self.extra_roots))
 
 
 # what says a file was tagged from one release already

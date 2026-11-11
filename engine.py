@@ -1734,7 +1734,8 @@ class Engine:
             provenance=prov, release=self._release(best), tier="exact",
             all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")),
             most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")),
-            own_number=bool(best.get("own_number")), guessed_pick=bool(best.get("guessed_pick")))
+            own_number=bool(best.get("own_number")), guessed_pick=bool(best.get("guessed_pick")),
+            number_proven=bool(best.get("number_proven")))
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})

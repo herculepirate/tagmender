@@ -2015,6 +2015,22 @@ def _relative_clues(tied):
     return extra
 
 
+def _country_listed_twice(tied, order):
+    """EVI-6: the first country of your order that has entries among them, when those entries
+    are one pressing listed twice (Raising Sand: Rounder 11661-9075-2, US, entered twice): the
+    fuller entry. None otherwise."""
+    for code in order or ():
+        hits = [s for s in tied if not s.get("clues_against") and country_code(s["cand"].get("country")) == code]
+        if not hits:
+            continue
+        dup = same_pressing_listed_twice(hits) if len(hits) > 1 else None
+        if not dup:
+            return None
+        return dup[0], {"country preference": f"your preferred country order puts {_readable_country(code)} "
+                                              f"first", **dup[1]}
+    return None
+
+
 def prefer_country(tied, order):
     """Last resort, as Picard's 'preferred release countries': among pressings
     nothing else tells apart, the one from the first country in `order`."""
@@ -2326,6 +2342,26 @@ def copy_kind(album) -> str:
     return ""
 
 
+def _officials_in_tie(tied, kept=None):
+    """TIE-4 throughout the tie: an unofficial pressing nothing of yours backs takes no part in a
+    tie-break (its lengths copied to the second, its country: Raising Sand's Russian CD over
+    Rounder's CDs) when an official one in the tie fits as well (its track count no worse, its
+    lengths within 5 points). A bootleg that fits better than every official one stays, and a
+    person decides; so does the release your files are tagged with or you chose (KEPT: TAG-1).
+    (tied left, the pressings dropped)."""
+    def unbacked(s):
+        return s["cand"].get("unofficial") and not _unofficial_backed(s) and s is not kept
+
+    def as_well(o, s):
+        return (o.get("tracks_ok") or not s.get("tracks_ok")) and \
+            (o.get("dur_frac") or 0) >= (s.get("dur_frac") or 0) - 0.05
+    officials = [o for o in tied if not o["cand"].get("unofficial")]
+    out = [s for s in tied if not (unbacked(s) and any(as_well(o, s) for o in officials))]
+    if not out:
+        return tied, []
+    return out, [s for s in tied if not any(s is x for x in out)]
+
+
 def kind_fits(s) -> bool:
     """TIE-1: the pick is of the kind your copy is (or either is unknown). When it is not,
     your pressing is not listed among the tied ones: the album is known, not the pressing."""
@@ -2389,6 +2425,11 @@ def _against_key(text):
     return text.split(", this pressing", 1)[0] if text.startswith("tags say ") else None
 
 
+# what your audio says against a CD (EVI-5: set aside when your barcode is on every tied pressing)
+_MEDIA_AGAINST = {"hi-res audio cannot come from this CD",
+                  "lossless tracks are not whole CD sectors, so not ripped from this CD"}
+
+
 def _recordable(cand):
     """The pressing is a CD-R (recordable, burned): it carries no moulded matrix."""
     names = [str(f).casefold().replace("-", "") for f in cand.get("media_formats") or ()]
@@ -2411,6 +2452,14 @@ def choose_pressing(tied, preferred_countries=None, prefs=None):
         return _choose_pressing(tied, preferred_countries, prefs)
     keys = [{_against_key(a) for a in s.get("clues_against") or ()} - {None} for s in tied]
     shared = set.intersection(*keys) if keys else set()
+    # EVI-5 (BAR-1): your barcode on every tied pressing names one product whatever the audio:
+    # what your audio says against them all alike ("hi-res audio cannot come from this CD":
+    # Robert Plant & Alison Krauss - Raising Sand, a 24/96 download with the CD's UPC) tells
+    # none apart. Without your barcode on them all it stands (an unlisted download: album only).
+    media_shared = set()
+    if all(_carries_barcode(s) for s in tied):
+        media = [{a for a in s.get("clues_against") or () if a in _MEDIA_AGAINST} for s in tied]
+        media_shared = set.intersection(*media) if media else set()
     matrix = next((s["clues"]["matrix"] for s in tied if (s.get("clues") or {}).get("matrix")), "")
     burned = {id(s) for s in tied if matrix and _recordable(s["cand"])
               and not any(c == "matrix" for c, _v in cand_matrices(s["cand"]))}
@@ -2427,11 +2476,11 @@ def choose_pressing(tied, preferred_countries=None, prefs=None):
             return rest[0], {"format": f"{why}; this one is not"}
         if len(rest) > 1:
             return choose_pressing(rest, preferred_countries, prefs)
-    if not shared and not burned:
+    if not shared and not burned and not media_shared:
         return _choose_pressing(tied, preferred_countries, prefs)
     view = []
     for s in tied:
-        against = [a for a in s.get("clues_against") or () if _against_key(a) not in shared]
+        against = [a for a in s.get("clues_against") or () if _against_key(a) not in shared and a not in media_shared]
         if id(s) in burned:
             against.append(f"your disc shows a pressed {matrix.split(' on the scans')[0]}; this pressing is a CD-R")
         view.append(dict(s, clues_against=against))
@@ -2504,10 +2553,18 @@ def _choose_pressing(tied, preferred_countries=None, prefs=None):
         if len(mine) == 1:
             return mine[0], {"tagged release": "the release your files are tagged with; "
                                                "nothing tells the tied pressings apart"}
+        # EVI-6: evidence of yours on some of them only (your scans' catalogue number on the US
+        # and ZA entries, not the CA one): the guesses choose among those, never the others
+        group = tied
+        if weight > 0:
+            top = [s for w, _t, s in scored if w == weight and not s.get("clues_against")]
+            if len(top) >= 2 and len(top) < len(tied):
+                group = top
         # TIE-2: the country order before the original release date
-        return (same_pressing_listed_twice(tied) or prefer_country(tied, preferred_countries)
-                or prefer_original(tied)
-                or (prefer_type_and_format(tied, prefs) if preferred_countries else None))
+        return (same_pressing_listed_twice(group) or prefer_country(group, preferred_countries)
+                or _country_listed_twice(group, preferred_countries)
+                or prefer_original(group)
+                or (prefer_type_and_format(group, prefs) if preferred_countries else None))
     if all(s.get("own_catno_absent") for s in tied) and weight < CLUE_WEIGHTS["disc TOC"]:
         return None              # your copy's catalogue number is on none of them: only hard proof decides
     return pick, telling
@@ -3538,6 +3595,11 @@ def classify(scored, cfg):
     # Pressings that score the same: what the scans show can tell them apart
     # (a label, "Made in Germany", a catalogue number printed on the back).
     tied = [s for s in ranked if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+    tied, dropped = _officials_in_tie(tied, kept_choice)
+    set_aside += dropped                                   # (TIE-5: no runner-up either)
+    if tied and not any(s is best for s in tied):          # (TIE-4: the bootleg pick gave way)
+        best = tied[0]
+        ranked = [best] + [s for s in ranked if s is not best]
     # No vinyl or cassette without evidence for it: they are out of the tie, while they stay
     # listed for Change Release
     for s in scored:
@@ -3553,7 +3615,12 @@ def classify(scored, cfg):
         unproven += out
         ranked = [x for x in ranked if not x.get("unproven_media")]
         best = ranked[0]
-        tied = [x for x in ranked if best["confidence"] - x["confidence"] < cfg["auto_min_margin"]]
+        tied, dropped = _officials_in_tie(
+            [x for x in ranked if best["confidence"] - x["confidence"] < cfg["auto_min_margin"]], kept_choice)
+        set_aside += dropped
+        if tied and not any(x is best for x in tied):      # (TIE-4, as above)
+            best = tied[0]
+            ranked = [best] + [x for x in ranked if x is not best]
     ranked += unproven
     scan_pick = None
     # A number decides only when it is the ONLY one that agrees. When several tied
@@ -3786,7 +3853,9 @@ def classify(scored, cfg):
         # (FIL-1: a pressing your country order or the original date picked is a guess, never
         # filed on proof that only names the album)
         best["guessed_pick"] = any(k in FALLBACK_PICKS for k in scan_pick[1])
-        if any(k in FALLBACK_PICKS for k in scan_pick[1]) and (cfg.get("evidence_pass") or not kind_fits(best)):
+        # (BAR-1: a pick carrying your barcode is of your kind, whatever the audio - EVI-5)
+        if any(k in FALLBACK_PICKS for k in scan_pick[1]) and (
+                cfg.get("evidence_pass") or not (kind_fits(best) or _carries_barcode(best))):
             # (the evidence pass: the country order is still to come, and decides first: TIE-2)
             why.append(f"runner-up {runner['cand']['id']} within {abs(margin):.1f} points "
                        f"(likely another pressing)")

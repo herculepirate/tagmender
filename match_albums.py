@@ -6451,6 +6451,13 @@ def summarize(res):
             "toc_proven": bool(b.get("toc_proven")),
             # (FIL-1: your copy's own barcode or catalogue number proves it; the pressing a guess)
             "own_number": bool(b.get("own_number")), "guessed_pick": bool(b.get("guessed_pick")),
+            # (FIL-2: your copy's own barcode or catalogue number on it, every track there, and the
+            # release lists no lengths at all to compare)
+            "number_proven": bool((mc.barcode_proves(b) or b.get("code") in ("catalogue number",
+                                                                              "catalogue number (folder name)"))
+                                  and b.get("tracks_ok") and not b.get("conflict") and not b.get("missing")
+                                  and not b.get("lacks")                 # (a collaborator dropped: never)
+                                  and b.get("dur_frac") is None and not b.get("dur_cov")),
             "most_lengths": bool(b.get("tracks_ok") and (b.get("dur_frac") or 0) >= 0.5 and not b.get("conflict")
                                  and not b.get("missing")),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),

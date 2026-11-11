@@ -390,6 +390,101 @@ class TRK2(unittest.TestCase):
         self.assertEqual(mc.order_view(files, cand)["slots"], whole)
 
 
+def pressing(cid, country, catnos=("1166190752",), barcode="11661907522", against=(), clues=None, **kw):
+    cand = {"source": "mb", "id": cid, "country": country, "formats": {"cd"}, "barcodes": {barcode} if barcode else set(),
+            "catnos": set(catnos), "label": "Rounder", "date": "2007-10-23", "year": 2007,
+            "tracks": [{"disc": 1, "title": f"T{i}", "secs": 200.0} for i in range(13)]}
+    cand.update(kw.pop("cand", {}))
+    s = {"cand": cand, "confidence": 100.0, "code": "barcode" if barcode else "", "conflict": None, "year_ok": True,
+         "clues": dict(clues or {}), "clues_against": list(against), "notes": [], "tracks_ok": True,
+         "artist_sim": 1.0, "title_sim": 1.0, "dur_frac": 1.0, "dur_cov": 1.0}
+    s.update(kw)
+    return s
+
+
+class EVI5_EVI6(unittest.TestCase):
+    """Robert Plant & Alison Krauss - Raising Sand: a 24/96 download carrying the CD's UPC. The CDs
+    of that barcode tie; your scans' catalogue number is on the US (listed twice) and ZA entries,
+    not the CA one (EVI-5: the audio's doubt they all share tells none apart; EVI-6: the guesses
+    choose among the pressings your evidence is on)."""
+    HIRES = "hi-res audio cannot come from this CD"
+    CAT = {"catalogue number": "catalogue number 1166190752 on the scans"}
+    ORDER = ["CA", "US", "XW", "XE", "GB", "DE"]
+
+    def tied(self, barcode="11661907522"):
+        return [pressing("us-1", "US", barcode=barcode, against=[self.HIRES], clues=self.CAT),
+                pressing("us-2", "US", barcode=barcode, against=[self.HIRES], clues=self.CAT, cand={"packaging": "jewel"}),
+                pressing("za", "ZA", barcode=barcode, against=[self.HIRES], clues=self.CAT),
+                pressing("ca", "CA", catnos=("1166190762",), barcode=barcode, against=[self.HIRES])]
+
+    def test_EVI5_EVI6_the_pressing_your_evidence_names(self):
+        got = mc.choose_pressing(self.tied(), self.ORDER)
+        self.assertEqual(got[0]["cand"]["id"], "us-1")
+        self.assertIn("listed twice", " ".join(got[1].values()))
+
+    def test_EVI5_not_without_your_barcode_on_them_all(self):
+        self.assertIsNone(mc.choose_pressing(self.tied(barcode=""), self.ORDER))   # (an unlisted download, perhaps)
+
+    def test_EVI5_a_hi_res_copy_takes_the_pressing_its_barcode_names(self):
+        tied = self.tied()
+        for s in tied:
+            s["copy_kind"] = "digital"                                  # (24/96: no CD's audio)
+        r = mc.classify(tied, dict(CFG, preferred_countries=self.ORDER))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us-1"), r["why"])
+
+    def test_TIE4_the_vinyl_step_keeps_the_bootleg_out(self):
+        vinyl = pressing("lp", "US", barcode="", cand={"formats": {"vinyl"}, "title": "A"}, confidence=100.0)
+        boot = pressing("ru", "RU", barcode="", cand={"unofficial": True, "title": "A"}, confidence=99.5)
+        cd = pressing("cd", "GB", barcode="", confidence=99.5, cand={"title": "A"})
+        r = mc.classify([vinyl, boot, cd], dict(CFG, preferred_countries=["RU", "GB"]))
+        self.assertNotEqual(r["best"]["cand"]["id"], "ru", r["why"])
+
+    def test_TIE4_your_own_choice_of_a_bootleg_stands(self):
+        boot = pressing("ru", "RU", barcode="", cand={"unofficial": True}, tagged=True)
+        off = pressing("o", "US", barcode="")
+        self.assertEqual(mc._officials_in_tie([boot, off], kept=boot)[1], [])
+        self.assertEqual(mc._officials_in_tie([boot, off])[1], [boot])
+
+    def test_TIE4_a_bootleg_in_the_tie_is_never_the_country_orders_pick(self):
+        boot = pressing("ru", "RU", barcode="", cand={"unofficial": True}, dur_frac=1.0)
+        offs = [pressing(f"o{i}", c, barcode="", dur_frac=0.85, confidence=99.0) for i, c in enumerate(["GB", "US"])]
+        r = mc.classify([boot] + offs, dict(CFG, preferred_countries=["RU", "US"]))
+        self.assertFalse(r["status"] == "auto" and r["best"]["cand"]["id"] == "ru", r["why"])    # (fits better: a person)
+        offs = [pressing(f"o{i}", c, barcode="", dur_frac=1.0, confidence=99.0) for i, c in enumerate(["GB", "US"])]
+        r = mc.classify([boot] + offs, dict(CFG, preferred_countries=["RU", "US"]))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "o1"), r["why"])      # (fits as well: out)
+
+    def test_TIE4_a_bootleg_never_wins_a_tie_break(self):
+        official = pressing("rounder", "US", barcode="", against=[], clues={})
+        bootleg = pressing("ru", "Russia", barcode="", against=[], clues={}, cand={"unofficial": True})
+        r = mc.classify([bootleg, official], dict(CFG, preferred_countries=["RU", "US"]))
+        self.assertEqual(str(r["best"]["cand"]["id"]), "rounder", r.get("why"))
+
+
+class FIL2(unittest.TestCase):
+    """FIL-2: your copy's own number proves the release and it lists no track lengths: filed
+    (Mark Nauseef - Sura, JICK-89728: 76.9)."""
+
+    def test_FIL2_filed_on_your_number_when_no_lengths_are_listed(self):
+        import plan as pl
+        import profiles as pf
+        prop = pl.Proposal(source_dir="/x", files=[], status="identified", tier="exact", number_proven=True)
+        self.assertIn("lists no track lengths", pl._files_on_evidence(prop, pf.default(), 76.9))
+        self.assertEqual(pl._files_on_evidence(pl.Proposal(source_dir="/x", files=[], status="identified", tier="exact",
+                                                           number_proven=True, guessed_pick=True), pf.default(), 76.9), "")
+        self.assertEqual(pl._files_on_evidence(pl.Proposal(source_dir="/x", files=[], status="identified", tier="exact"),
+                                               pf.default(), 76.9), "")
+
+    def test_FIL2_the_flag_needs_your_number_and_no_lengths(self):
+        b = pressing("jick", "JP", catnos=("JICK-89728",), barcode="", code="catalogue number (folder name)",
+                     dur_frac=None, dur_cov=0, missing=None)
+        b["cand"].update(url="", artist="Mark Nauseef", title="Sura", label="Jimco")
+        self.assertTrue(ma.summarize({"best": b})["number_proven"])
+        self.assertFalse(ma.summarize({"best": dict(b, dur_frac=0.5, dur_cov=1.0)})["number_proven"])
+        self.assertFalse(ma.summarize({"best": dict(b, code="")})["number_proven"])
+        self.assertFalse(ma.summarize({"best": dict(b, lacks=["Someone"])})["number_proven"])   # (a credit dropped)
+
+
 class CAT1(unittest.TestCase):
     def test_CAT1_an_sacd_audio_format_is_no_catalogue_number(self):
         # (Blood, Sweat & Tears: "[SACD DSD64 2ch Rip 24bit 352khz]" in the album tag)

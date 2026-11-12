@@ -34,14 +34,18 @@ jobs:
           curl -fsSL -o lept.tgz "https://github.com/DanBloomberg/leptonica/releases/download/$LEPTONICA/leptonica-$LEPTONICA.tar.gz"
           curl -fsSL -o tess.tgz "https://github.com/tesseract-ocr/tesseract/archive/refs/tags/$TESSERACT.tar.gz"
           curl -fsSL -o zbar.tgz "https://github.com/mchehab/zbar/archive/refs/tags/$ZBAR.tar.gz"
-          sha256sum lept.tgz tess.tgz zbar.tgz
+          sha256sum -c - <<'SUMS'
+          2b3e1254b1cca381e77c819b59ca99774ff43530209b9aeb511e1d46588a64f6  lept.tgz
+          141afc12b34a14bb691a939b4b122db0d51bd38feda7f41696822bacea7710c7  tess.tgz
+          212dfab527894b8bcbcc7cd1d43d63f5604a07473d31a5f02889e372614ebe28  zbar.tgz
+          SUMS
           tar xzf lept.tgz && tar xzf tess.tgz && tar xzf zbar.tgz
           cmake -S leptonica-$LEPTONICA -B b-lept -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=ON -DSW_BUILD=OFF -DBUILD_PROG=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_SHARED_LIBS=ON -DSW_BUILD=OFF -DBUILD_PROG=OFF \
             -DENABLE_WEBP=OFF -DENABLE_OPENJPEG=OFF -DENABLE_GIF=OFF
           cmake --build b-lept -j"$(nproc)" && cmake --install b-lept
           cmake -S tesseract-$TESSERACT -B b-tess -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$P -DBUILD_SHARED_LIBS=ON -DSW_BUILD=OFF -DBUILD_TRAINING_TOOLS=OFF \
+            -DCMAKE_PREFIX_PATH=$P -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_SHARED_LIBS=ON -DSW_BUILD=OFF -DBUILD_TRAINING_TOOLS=OFF \
             -DDISABLE_CURL=ON -DDISABLE_ARCHIVE=ON -DGRAPHICS_DISABLED=ON -DOPENMP_BUILD=OFF \
             -DENABLE_LTO=OFF -DBUILD_TESTS=OFF
           cmake --build b-tess -j"$(nproc)" && cmake --install b-tess

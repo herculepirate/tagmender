@@ -133,6 +133,7 @@ def _int(v):
 
 
 _ID_KEYS = ("musicbrainzalbumid", "discogsreleaseid")
+_ID_FIELDS = {"musicbrainzalbumid": "musicbrainz_albumid", "discogsreleaseid": "discogs_release_id"}
 _LOSSLESS_EXT = {".flac", ".wav", ".aiff", ".aif", ".wv", ".ape", ".alac"}
 CD_FRAME = 588          # a CD sector holds 588 stereo samples at 44.1 kHz
 # catalogue number tag names used by Picard, JRiver (LABELNO), foobar2000, Mp3tag and others
@@ -747,6 +748,10 @@ def _release_id(t, key, value):
     and score like any other, never as proof (the tags may be wrong)."""
     t["has_ids"] = True
     value = str(value or "").strip()
+    # (TAG-3: the value as it stands, whatever its spelling - "r123", "[r123]" - for the
+    # plan's one release per file: engine._one_release reads it normalised)
+    if value:
+        t["id_tags"] = dict(t.get("id_tags") or {}, **{_ID_FIELDS[key]: value})
     if key == "musicbrainzalbumid" and _MBID.fullmatch(value.lower()):
         t["mb_albumid"] = value.lower()
     elif key == "discogsreleaseid" and value.isdigit():
@@ -817,8 +822,11 @@ def _own_job_files(job):
             if not fe.get("dst"):
                 continue
             rows = [r for r in fe.get("diff") or () if r.get("field")]
+            # (an ID row whose value the job left as it was - "kept (confidence below replace
+            # threshold)", preserved, locked - is no ID it wrote: the file kept the one it had)
             after = {r.get("field"): str((r.get("after") or [""])[0] or "") for r in rows
-                     if r.get("field") in ("musicbrainz_albumid", "discogs_release_id")}
+                     if r.get("field") in ("musicbrainz_albumid", "discogs_release_id")
+                     and _norm_values(r.get("before")) != _norm_values(r.get("after"))}
             ids = []
             for field in ("musicbrainz_albumid", "discogs_release_id"):
                 if field in after:          # written: only an ID of the release it identified
@@ -830,12 +838,14 @@ def _own_job_files(job):
             # REP-1: the pressing details the job wrote, as they were before it and as it left them
             wrote = {r["field"]: (tuple(str(x) for x in r.get("before") or ()),
                                   tuple(str(x) for x in r.get("after") or ()))
-                     for r in rows if r["field"] in REPLAN_FIELDS}
+                     for r in rows if r["field"] in REPLAN_FIELDS or pressing_field(r["field"])}
             # REP-1: the file named a release before this job: an ID row whose value before is not
             # empty (whose, _own_index decides). Never inferred from a missing row: a job writes
             # none for an ID it left alone, held or not (a preserved empty field, a source left out)
             named = any(r.get("before") for r in rows if r["field"] in ("musicbrainz_albumid", "discogs_release_id"))
-            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote, named))
+            # (which IDs the job left as the file had them: an earlier job's own ID stays its own)
+            kept = tuple(f not in after for f in ("musicbrainz_albumid", "discogs_release_id"))
+            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote, named, kept))
         albums.append((a.get("source_dir"), exact, files))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)
@@ -886,7 +896,7 @@ def _own_index():
         for folder, exact, files in _own_job_files(job):
             if folder not in done[job]:
                 continue
-            for src, dst, op, mb, dg, fields, named in files:
+            for src, dst, op, mb, dg, fields, named, kept in files:
                 carried = owned.get(src)
                 # (release IDs the file had before this job that were not TagMender's: another
                 # tagger's - what it wrote beside them stays another tagger's word, REP-1)
@@ -896,7 +906,12 @@ def _own_index():
                         owned.pop(src, None)
                     owned[dst] = carried
                 if exact and (mb or dg):
-                    owned[dst] = (mb, dg)
+                    # REP-1: an ID an earlier job of TagMender's wrote, which this job left as it
+                    # was (its pick below the replace threshold kept it), is still TagMender's own -
+                    # never another tagger's because a later job did not write it again
+                    was = carried or (frozenset(), frozenset())
+                    owned[dst] = (mb | (was[0] if kept[0] else frozenset()),
+                                  dg | (was[1] if kept[1] else frozenset()))
                 prior = wrote.get(src)
                 if src != dst and prior is not None and op != "copy":
                     wrote.pop(src, None)
@@ -964,9 +979,43 @@ def tagmender_originals(paths):
         # job is named after its first disc - DSC-1)
         top, own = os.path.normpath(str(folder or "")), os.path.normpath(str(first_dir or ""))
         folders.add(os.path.basename(top) if own == top or own.startswith(top + os.sep) else None)
-        out[str(p)] = fields
+        out[str(p)] = {f: v for f, v in fields.items() if f in REPLAN_FIELDS}
     one = folders.pop() if len(folders) == 1 else None
     return one or "", out, foreign
+
+
+# TAG-3: the fields of one pressing a job of TagMender's may have written (its release IDs, its
+# release track IDs, barcode, catalogue number, label, country, media, ASIN, the Discogs
+# plugin's fields of one release): what an album found album only again takes back
+RESTORE_FIELDS = ("musicbrainz_albumid", "musicbrainz_trackid", "discogs_release_id", "barcode", "catalognumber",
+                  "label", "releasecountry", "media", "asin")
+DG_ALBUM_FIELDS = ("discogs_master_id", "discogs_artist_id", "discogs_albumartist_id", "discogs_style")
+
+
+def pressing_field(field) -> bool:
+    """TAG-3: a field of one pressing (RESTORE_FIELDS, or a Discogs field of one release)."""
+    f = str(field or "")
+    return f in RESTORE_FIELDS or (f.startswith("discogs_") and f not in DG_ALBUM_FIELDS)
+
+
+def tagmender_pressing_writes(paths) -> dict:
+    """TAG-3: {path: {field: (value before TagMender, value it left)}} of the pressing fields
+    TagMender's own jobs wrote in these files (pressing_field), as tagmender_originals reads
+    the history; {} when TagMender's jobs did not tag every one of them."""
+    if not paths:
+        return {}
+    _own_index()
+    with _OWN_LOCK:
+        wrote = _OWN_INDEX[2] if len(_OWN_INDEX) > 2 else {}
+    out = {}
+    for p in paths:
+        hit = wrote.get(str(p)) or wrote.get(os.path.realpath(str(p)))
+        if hit is None:
+            return {}
+        # (and the date: a pressing's own date is taken back only when it is the losing one's -
+        # engine._restore_own decides)
+        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f) or f == "date"}
+    return out
 
 
 def _norm_values(values):
@@ -1022,6 +1071,7 @@ def read_file(path, before=None):
          "rate": 0, "bits": 0, "samples": 0, "lossless": False,  # the audio itself
          "has_ids": False,      # already carries a MusicBrainz or Discogs release ID
          "mb_albumid": "", "discogs_releaseid": "",    # ... and which (a candidate, not evidence)
+         "id_tags": {},         # ... as written: {field: value} (TAG-3, engine._one_release)
          "audio_md5": 0,        # FLAC's checksum of the decoded audio (0 = unknown)
          "isrc": "", "clue_text": "",   # ISRC, and comments/URLs/store IDs left by shops and rippers
          "download_marker": "",         # the shop those comments name (kept when blind)
@@ -1346,7 +1396,7 @@ def _drop_duplicate_tracks(files, info):
 
 
 BLIND_KEYS = ("barcode", "barcode_from", "asin", "catno", "label", "country", "media", "date", "isrc", "clue_text", "credit",
-              "mb_albumid", "discogs_releaseid")
+              "mb_albumid", "discogs_releaseid", "id_tags")
 
 
 def notes_text(album_dir, limit=20000):
@@ -1883,7 +1933,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
     headers = [log["header"] for log in ripped if log.get("header")]
     cdtocs = tag_tocs(infos)
-    tocs = merge_tocs(infos, log_toc, cue_tocs(album_dir, infos), cdtocs)
+    cue_toc = cue_tocs(album_dir, infos)
+    tocs = merge_tocs(infos, log_toc, cue_toc, cdtocs)
     # TOC-1: the discs whose TOC fits their files to the sector (a log made of another rip or
     # pressing does not): only their disc ID speaks for the files' own lengths
     tocs_fit = sorted(d for d, t in tocs.items()
@@ -1973,6 +2024,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # per disc: the rip log's TOC first (the disc itself, its pregaps and the data track
         # of an Enhanced CD), then a cue sheet's, then the one rebuilt from the tracks' lengths
         "tocs": tocs,
+        # TAG-3: the discs whose TOC was READ - from a rip log, or a cue sheet carrying more than
+        # the files' lengths (an image's track starts, its pregaps) - and fits their files: the
+        # disc's real TOC, pregaps and all. A TOC rebuilt from the files' lengths always fits
+        # them and may lack the pregaps a rip left out: never evidence against a disc ID
+        "tocs_read": tocs_read(tocs, tocs_fit, log_toc, cue_toc, disc_tocs(infos)),
         "tocs_fit": tocs_fit,
         "rip_log_toc": bool(log_toc),
         # discs whose hidden track before track 1 (a file numbered 0) a rip log's or CDTOC tag's
@@ -1988,6 +2044,10 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tag_mb_links": tag_mb_links, "tag_discogs_links": tag_discogs_links, "tag_urls": tag_urls,
         # release IDs the files were tagged with, and the release links in their tags (another
         # tagger's word, like the ID tags): fetched and scored, not evidence
+        # TAG-3: the release ID tags the files hold, as written ({field: [values]}; empty when
+        # blind): what the plan would leave beside the release it writes (engine._one_release)
+        "file_release_ids": {f: sorted({i["id_tags"][f] for _p, i in infos if (i.get("id_tags") or {}).get(f)})
+                             for f in _ID_FIELDS.values()},
         "tag_release_mb": tag_release_mb | tag_mb_links,
         "tag_release_discogs": tag_release_discogs | tag_discogs_links,
         "total_releases": total_releases,
@@ -2405,6 +2465,14 @@ def merge_tocs(infos, *sources):
                 out[disc] = toc
                 taken.add(disc)
     return out
+
+
+def tocs_read(tocs, fit, logs, cues, rebuilt):
+    """TAG-3: {disc: TOC} of the discs whose TOC fits their files and was read from a rip log,
+    or from a cue sheet whose TOC is not the one the files' lengths give (read_album)."""
+    logs = set((logs or {}).values())
+    cues = set((cues or {}).values()) - set((rebuilt or {}).values())
+    return {d: tocs[d] for d in fit or () if tocs.get(d) and (tocs[d] in logs or tocs[d] in cues)}
 
 
 # An Enhanced CD (CD-Extra) has its data track in a second session, 11400 sectors after
@@ -6741,6 +6809,82 @@ def summarize(res):
             **({"discogs_id": res["dg_twin"]} if res.get("dg_twin") and not c.get("discogs_id") else {})}
 
 
+RELEASE_ID_FIELDS = ("musicbrainz_albumid", "discogs_release_id")
+
+
+def norm_release_id(field, value) -> str:
+    """TAG-3: a release ID as compared: trimmed, case-folded; a Discogs one without its "r" or
+    brackets ("[r123]", "r123" -> "123")."""
+    v = str(value or "").strip().casefold()
+    if field == "discogs_release_id":
+        v = v.strip("[]").strip()
+        v = v[1:] if v[:1] == "r" and v[1:].isdigit() else v
+    return v
+
+
+def release_facts(cand) -> dict:
+    """TAG-3: what tells one release from another (engine._one_release): its barcodes,
+    catalogue numbers, format families (cd / vinyl / digital / cassette), and for a MusicBrainz
+    release the Discogs releases it links to; with its label, country, year and layout (album
+    only's tied pressings). A field the database lacks is empty: no evidence either way."""
+    c = cand or {}
+    mb = c.get("source") == "mb"
+    return {"source": c.get("source") or "", "id": str(c.get("id") or ""),
+            "barcodes": sorted({mc.barcode_key(b) for b in c.get("barcodes") or ()} - {""}),
+            # (MusicBrainz's "[none]", Discogs's "none": no number at all - no evidence)
+            "catnos": sorted({mc.norm_code(x) for x in mc._catnos(c)} - {""}),
+            # (as the database writes them: a range "SICP 10151~4" is compared as one, catnos_agree)
+            "catnos_raw": [x.strip() for x in str(c.get("catno_shown") or "").split(",")
+                           if x.strip() and mc.norm_code(x) not in mc._NO_CATNO],
+            "formats": sorted(set(c.get("formats") or ()) - {""}),
+            "links": sorted({norm_release_id("discogs_release_id", x) for x in mc.linked_discogs(c)} - {""})
+            if mb else [],
+            "label": c.get("label") or "", "country": c.get("country") or "", "year": c.get("year"),
+            "layout": mc.disc_layout(c)}
+
+
+def release_ids_view(final, results, album):
+    """TAG-3 (engine._one_release): the pick's facts and its twins (mb_twin / dg_twin), the
+    facts of each scored candidate your files' release ID names ("cands": {field: {id: facts}}),
+    and which MusicBrainz releases link each Discogs release ("mb_links": {Discogs id: [MB ids]})
+    among those scored. Whether two releases are two pressings is decided from these, on
+    positive differences only (engine._pressings_differ)."""
+    best = (final or {}).get("best")
+    if not best:
+        return {}
+    field_of = {"mb": "musicbrainz_albumid", "discogs": "discogs_release_id"}
+    have = {f: {norm_release_id(f, v) for v in ((album or {}).get("file_release_ids") or {}).get(f) or ()}
+            for f in RELEASE_ID_FIELDS}
+    cands, links = {f: {} for f in RELEASE_ID_FIELDS}, {}
+    for res in results:
+        for s in (res or {}).get("scored") or ():
+            c = s["cand"]
+            f = field_of.get(c.get("source"))
+            if not f:
+                continue
+            facts = release_facts(c)
+            if norm_release_id(f, c.get("id")) in have[f]:
+                cands[f][norm_release_id(f, c.get("id"))] = facts
+            for d in facts["links"]:
+                links.setdefault(d, set()).add(norm_release_id(f, c.get("id")))
+    # every scored release of the other database that is the pick's pressing (match_core.
+    # same_pressing): MusicBrainz may list one pressing twice, and the twin written is one of them
+    pick = best["cand"]
+    twins = {f: set() for f in RELEASE_ID_FIELDS}
+    for res in results:
+        for s in (res or {}).get("scored") or ():
+            c = s["cand"]
+            if c.get("source") == "mb" and pick.get("source") == "discogs" and mc.same_pressing(c, pick):
+                twins["musicbrainz_albumid"].add(norm_release_id("musicbrainz_albumid", c.get("id")))
+            elif c.get("source") == "discogs" and pick.get("source") == "mb" and mc.same_pressing(pick, c):
+                twins["discogs_release_id"].add(norm_release_id("discogs_release_id", c.get("id")))
+    return {"pick": release_facts(pick), "twins": {f: sorted(v) for f, v in twins.items() if v},
+            "mb_twin": norm_release_id("musicbrainz_albumid", final.get("mb_twin") or ""),
+            "dg_twin": norm_release_id("discogs_release_id", final.get("dg_twin") or ""),
+            "cands": {f: v for f, v in cands.items() if v},
+            "mb_links": {d: sorted(v) for d, v in links.items()}}
+
+
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
     scored = [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands]
@@ -7722,7 +7866,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     sure_picks = {name: str(res["best"]["cand"]["id"]) for name, res in (("mb", mb_res), ("discogs", dg_res))
                   if res and res.get("status") == "auto" and res.get("best")}
     out.update(status=status, why=why, best=summarize(final), alts=alts, pool=pool, choices=release_choices((mb_res, dg_res)),
-               sure_picks=sure_picks,
+               sure_picks=sure_picks, release_ids=release_ids_view(final, (mb_res, dg_res), album),
                margin=final.get("margin"), version=result_version(), checked=round(time.time()))
     note_barcode_sources(out, album)
     note_gnudb(out, album, final)

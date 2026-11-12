@@ -148,11 +148,13 @@ class PreferenceOnlyBreaksTies(unittest.TestCase):
 class OtherDatabaseIds(Base):
     """engine.follow_source in a preferred mode: what of the other database's tags goes."""
 
-    def prop(self, d, written=None, sure=None):
+    def prop(self, d, written=None, sure=None, differs=lambda f, v: True):
+        # (differs: whether the release the files' ID names is another pressing by evidence -
+        # Engine._another_pressing in a run; here, by default, it is)
         f = d / "01.flac"
         t = {"album": ["A"], "discogs_release_id": ["901"], **(written or {})}
         p = pl.Proposal(source_dir=str(d), files=[str(f)], status="identified", targets=[t], tier="exact")
-        engine.follow_source(p, "discogs_preferred", sure=sure)
+        engine.follow_source(p, "discogs_preferred", sure=sure, differs=differs)
         return p.targets[0].get("~remove") or []
 
     def tagged(self):
@@ -163,6 +165,12 @@ class OtherDatabaseIds(Base):
     def test_a_sure_musicbrainz_pick_of_another_release_removes_its_release_and_track_ids(self):
         gone = self.prop(self.tagged(), sure={"mb": "mb-y", "discogs": "901"})
         self.assertEqual(sorted(gone), ["musicbrainz_albumid", "musicbrainz_trackid"])
+
+    def test_no_evidence_of_two_pressings_removes_nothing(self):
+        # (the Sources setting chooses whose release is written: an ID of the same pressing, or one
+        # nothing is known of, stays)
+        self.assertEqual(self.prop(self.tagged(), sure={"mb": "mb-y"}, differs=lambda f, v: False), [])
+        self.assertEqual(self.prop(self.tagged(), sure={"mb": "mb-y"}, differs=None), [])
 
     def test_the_disc_id_release_group_and_recordings_stay(self):
         gone = self.prop(self.tagged(), sure={"mb": "mb-y"})

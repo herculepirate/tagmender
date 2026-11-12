@@ -116,6 +116,12 @@ class Proposal:
     own_number: bool = False            # FIL-1: your copy's own barcode or catalogue number proves the release
     number_proven: bool = False         # FIL-2: ... on it, every track there, and it lists no lengths
     guessed_pick: bool = False          # FIL-1: the pressing was picked by country order / original date (a guess)
+    # TAG-3: the release ID fields your files hold for another release, which your copy proves
+    # this one over (engine._one_release): the plan writes the release at the replace threshold
+    release_proven_over: list = field(default_factory=list)
+    # TAG-3 / REP-1: {file: {field: value before TagMender's job}} an album found album only
+    # takes back (engine._restore_own): the pressing fields TagMender's earlier job wrote
+    restore: dict = field(default_factory=dict)
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
@@ -1473,6 +1479,11 @@ class Planner:
         targets = {Path(f): t for f, t in zip(files, prop.targets or [{}] * len(files))}
         identified = prop.status == "identified"
         conf = float(prop.confidence or 0)
+        if identified and tier_of(prop) == "exact" and getattr(prop, "release_proven_over", None):
+            # TAG-3: your copy proves this release over the one your files' IDs name: its tags
+            # replace that release's (edition, folder name and all, from here on)
+            conf = max(conf, _threshold(p, "replace_min_confidence"))
+        tag_conf = conf                    # (the custom tags' gate: the score, or TAG-3's raise)
         organize_ok = identified and not partial and conf >= _threshold(p, "organize_min_confidence")
         op = p["operation"]
         evidence = _files_on_evidence(prop, p, conf) if identified and not partial and not organize_ok else ""
@@ -1813,8 +1824,25 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
+            back = (getattr(prop, "restore", None) or {}).get(str(f)) if album_only else None
+            for k_, v_ in (back or {}).items():
+                # TAG-3 / REP-1: what TagMender's earlier job wrote of a pressing, taken back on an
+                # album only (as it was before that job; removed when it was empty)
+                if p.policy(k_) in ("preserve", "lock"):
+                    rows.append({"field": k_, "before": _vals(before.get(k_)), "after": _vals(before.get(k_)),
+                                 "action": "kept (your field policy)"})
+                    continue
+                v_ = _vals(v_)
+                if not v_ and k_ == "date":
+                    # (a date empty before TagMender's job: the album only's own date - the album's
+                    # original date - where it has one, as on a file with no date)
+                    v_ = _vals(target.get("date"))
+                changes[k_] = v_ or None
+                rows = [r for r in rows if r.get("field") != k_]
+                rows.append({"field": k_, "before": _vals(before.get(k_)), "after": v_,
+                             "action": "restored (as before TagMender's job)" if v_ else "removed"})
             import levels as _lv
-            if identified and float(prop.confidence or 0) >= _threshold(p, "replace_min_confidence") \
+            if identified and tag_conf >= _threshold(p, "replace_min_confidence") \
                     and _lv.level(p) != "basic":
                 join_ = tagio.v23_join(f, fmt) if cust_set else None
                 for k_, v_ in cust_set.items():

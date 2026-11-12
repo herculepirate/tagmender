@@ -1,5 +1,32 @@
 # Release notes
 
+## 0.8.47
+
+**One release per file (TAG-3)**
+- Your files no longer end up naming two pressings. A MusicBrainz or Discogs release ID already in
+  your files that names another pressing than the one TagMender identifies is corrected - but only
+  on evidence that they are two pressings: a different barcode, catalogue numbers that do not
+  agree, another format (CD, vinyl, download), MusicBrainz linking other Discogs entries, or a
+  MusicBrainz disc ID that fits no disc of your copy (read from its rip log or cue sheet).
+  Missing data or a database outage never removes or replaces an ID; IDs of the same pressing in
+  the two databases stay as they are.
+- When your copy proves the new release (the barcode on your scans, or your own number or disc
+  with every track length agreeing), its tags replace the old pressing's - date, media, country,
+  label and catalogue number included - even below the replace threshold. When nothing proves it
+  and the score is below that threshold, only the album's own tags are written (album only), and
+  pressing tags TagMender itself wrote earlier for the other pressing are taken back.
+- The Sources setting ("MusicBrainz/Discogs preferred") chooses whose release is written; it
+  removes the other database's ID only by the same evidence.
+- A second plan of an album keeps IDs a later TagMender run left unchanged as TagMender's own
+  (REP-1), instead of reading them as another tagger's.
+
+**What your scans say (MED-10, EVI-7)**
+- "Made in Holland", "England", "Finland", "Poland", "Switzerland" and "Ireland" are read as
+  countries again, also when more text follows on the next line.
+- "Made in the EU" agrees with a UK, German or other European pressing as much as with one listed
+  as "Europe": it no longer picks one of two European pressings over the other.
+- A label named as the album's artist is no clue: the artist's name is printed on every sleeve.
+
 ## 0.8.46
 
 **The edition your copy names (EDN-2)**

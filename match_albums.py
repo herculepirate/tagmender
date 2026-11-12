@@ -4211,6 +4211,11 @@ def discogs_one_track_movements(rel):
         else dict(rel, tracklist=flat)
 
 
+# TRK-3: a position that names its disc with a hyphen ("2-3", "CD2-3"): a disc's track, never a
+# movement's number within its work ("3.1", "2a")
+_HYPHEN_DISC = re.compile(r"^\s*(?:[A-Za-z]{1,4})?\d+\s*-\s*\d+")
+
+
 def flatten_tracklist(tracklist, dm, parent_position=None, movements=True):
     """Audio tracks in order. Discogs 'index' entries (a work split into
     movements) carry their audio in nested sub_tracks; headings carry none.
@@ -4237,6 +4242,8 @@ def flatten_tracklist(tracklist, dm, parent_position=None, movements=True):
                 out.extend(dict(t, index=t.get("index", n)) for t in subs)
                 continue
         pos = parent_position if parent_position is not None else (e.get("position") or "")
+        if parent_position == "" and _HYPHEN_DISC.match(str(e.get("position") or "")):
+            pos = str(e.get("position"))                   # (TRK-3: "2-3" of a work with no position)
         out.append({"position": pos, "title": e.get("title", ""),
                     "secs": dm._parse_duration(e.get("duration"))})
     return out

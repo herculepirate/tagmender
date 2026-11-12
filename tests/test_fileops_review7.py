@@ -100,10 +100,17 @@ class R7_01_SuffixedCopyBlocksEveryLaterRun(Lossy):
         props = lambda: [self.proposal(),
                          self.proposal(source_dir=str(dup), files=[str(dup / "01 a.mp3"), str(dup / "02 b.mp3")])]
         res = executor.Executor(pl.build(props(), prof)).run()
-        self.assertEqual(res["counts"], {"done": 2}, res)
+        # (MOV-4: the second copy of the release is not copied beside the first under "~xxxx" names)
+        self.assertEqual(res["counts"], {"done": 1, "skipped": 1}, res)
         before = tree(self.dest)
         p2 = pl.build(props(), prof)
-        self.assertEqual(work(p2), [], f"the second run; the first left {before}")
+        # (the second run does nothing: no file to copy, move or tag; the second copy is reported
+        # as skipped, the same each run - MOV-4)
+        self.assertEqual([a["source_dir"] for a in p2["albums"] if pl.has_work(a)], [],
+                         f"the second run; the first left {before}")
+        left = [a for a in p2["albums"] if a["status"] == "skipped"]
+        self.assertEqual(len(left), 1)
+        self.assertTrue(any("MOV-4" in n for n in left[0]["notes"]))
 
 
 # ---------------------------------------------------------------------------------------

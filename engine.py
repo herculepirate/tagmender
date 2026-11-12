@@ -4052,6 +4052,8 @@ def _dg_tracks(tracklist, parent_position=None) -> list:
                 out.extend(subs)
                 continue
         pos = parent_position if parent_position is not None else (e.get("position") or "")
+        if parent_position == "" and ma._HYPHEN_DISC.match(str(e.get("position") or "")):
+            pos = str(e.get("position"))                   # (TRK-3: "2-3" of a work with no position)
         out.append({"position": pos, "title": e.get("title", ""), "artists": e.get("artists") or [],
                     "duration": e.get("duration") or ""})
     return out
@@ -4221,6 +4223,8 @@ def _flatten_raw(tracklist, parent_position=None):
                 continue
         d = dict(e)
         d["position"] = parent_position if parent_position is not None else (e.get("position") or "")
+        if parent_position == "" and ma._HYPHEN_DISC.match(str(e.get("position") or "")):
+            d["position"] = str(e.get("position"))         # (TRK-3)
         out.append(d)
     return out
 

@@ -160,6 +160,52 @@ class MOV3(unittest.TestCase):
         self.assertNotIn(os.path.realpath(root), planner.fixed_roots())
 
 
+class MOV4(unittest.TestCase):
+    """MOV-4: a second copy of a release already filed from another folder (Robin Trower -
+    Compendium 1987-2013, two rips) is tagged where it is, never put beside the first copy as
+    "101.IO ~c916.flac"; one disc of a set in its own folder still joins its set (BOX-2)."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="tm-mov4-")).resolve()
+        self.filed = self.root / "Robin Trower" / "2013 - Compendium"
+        (self.filed / "Disc 01").mkdir(parents=True)
+        (self.filed / "Disc 01" / "101.IO.flac").write_bytes(b"x")
+        self.other = self.root / "Robin Trower" / "2013 - Compendium copy"
+        (self.other / "Disc 01").mkdir(parents=True)
+        self.planner = pl.Planner(pf.default())
+        self.planner._resident = [(pl.fnm.fold(self.filed), frozenset({"mb:rel"}), str(self.filed))]
+        self.planner._res_discs = {pl.fnm.fold(self.filed): {"1"}}
+
+    def prop(self, disc):
+        return pl.Proposal(source_dir=str(self.other), files=[str(self.other / "Disc 01" / "101.IO.flac")],
+                           status="identified", tier="exact",
+                           targets=[{"musicbrainz_albumid": ["rel"], "discnumber": [disc], "album": ["Compendium"]}] * 2)
+
+    def test_MOV4_a_second_copy_stays_where_it_is(self):
+        cache = {}
+        dst = self.filed / "Disc 01" / "101.IO.flac"
+        with mock.patch.object(pl, "_ids_of", lambda t: {"mb:" + t["musicbrainz_albumid"][0]}):
+            with self.assertRaises(pl._DuplicateCopy) as got:          # (the album is planned again, in place)
+                self.planner._own_album_dir(dst, self.prop("1"), [], cache)
+        self.assertIn("MOV-4", str(got.exception))
+
+    def test_MOV4_a_copy_already_filed_on_disk(self):
+        # (a new rip arriving in a watched folder: the library's copy is in no plan, only on disk)
+        tagged = {"musicbrainz_albumid": ["rel"], "discnumber": ["1"]}
+        with mock.patch.object(pl.tagio, "read", lambda p: tagged), \
+                mock.patch.object(pl, "_ids_of", lambda t: {"mb:" + t["musicbrainz_albumid"][0]}):
+            self.assertTrue(pl._same_release_there(self.filed, frozenset({"mb:rel"}), set(), {"1"}))
+            self.assertFalse(pl._same_release_there(self.filed, frozenset({"mb:rel"}), set(), {"2"}))   # (BOX-2)
+            self.assertFalse(pl._same_release_there(self.filed, frozenset({"mb:other"}), set(), {"1"}))
+
+    def test_MOV4_one_disc_of_the_set_still_joins_it(self):
+        cache = {}
+        dst = self.filed / "Disc 02" / "201.X.flac"
+        with mock.patch.object(pl, "_ids_of", lambda t: {"mb:" + t["musicbrainz_albumid"][0]}):
+            got = self.planner._own_album_dir(dst, self.prop("2"), [], cache)
+        self.assertEqual(got, dst)
+
+
 class MOV2(unittest.TestCase):
     """MOV-2: a second copy of one of the album's tracks ("005.TUILMOMF.flac" beside "005.TU.flac",
     Allan Holdsworth - Metal Fatigue) is no other album's music: the folder's scans, log and

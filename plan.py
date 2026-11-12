@@ -752,6 +752,41 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     return out, ""
 
 
+class _DuplicateCopy(Exception):
+    """MOV-4: the album is a second copy of a release already filed in its destination folder."""
+
+
+def _prop_discs(prop) -> set:
+    """MOV-4: the disc numbers an album brings (its targets' disc numbers; "1" when none)."""
+    return {str((t.get("discnumber") or ["1"])[0]).partition("/")[0].strip() or "1" for t in prop.targets or [{}]}
+
+
+def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set) -> bool:
+    """MOV-4: album_dir already holds, on disk and outside this plan, music tagged as this very
+    release (a release ID shared) on one of these discs: another copy of the album (a new rip
+    arriving in a watched folder while the library has it)."""
+    if not album_dir.is_dir():
+        return False
+    for dirpath, dirs, names in os.walk(album_dir):
+        dirs[:] = [d for d in dirs if _DISC_NAME.match(d)]
+        for n in names:
+            pth = os.path.join(dirpath, n)
+            if Path(n).suffix.lower() not in AUDIO_EXT or n.startswith("."):
+                continue
+            try:
+                st = os.stat(pth)
+                if pth in ignore or (st.st_dev, st.st_ino) in ignore:
+                    continue
+                t = tagio.read(pth)
+            except Exception:
+                continue
+            if _ids_of(t) & me:
+                d = str((t.get("discnumber") or ["1"])[0]).partition("/")[0].strip() or "1"
+                if d in discs:
+                    return True
+    return False
+
+
 def _named_after_album(folder, prop) -> bool:
     """MOV-3: the folder's name holds the album's title as a whole word or words (without the
     script's edition marks: "3 [HD]" is "3"), and - for a title of one word ("3", "Music", "Live") -
@@ -1193,6 +1228,7 @@ class Planner:
         self._inodes = {}
         self._album_dirs = {}
         self._planned = set()
+        self._album_claims = {}           # MOV-4: album folder -> [(release IDs, source folder, discs)]
         self._resident = []
         self._split_roots = set()  # folders a split's versions are made in, beside their folder
 
@@ -1315,7 +1351,15 @@ class Planner:
     def album(self, prop: Proposal) -> dict:
         """The plan for one album. Its files are opened once for all the reads below (tagio.reading)."""
         with tagio.reading(), ex.meta_memo():
-            return self._album(prop)
+            try:
+                return self._album(prop)
+            except _DuplicateCopy as dup:
+                # MOV-4: another copy of this release is already filed there: tagged where it is
+                self._in_place_note = str(dup)
+                try:
+                    return self._album(prop)
+                finally:
+                    self._in_place_note = None
 
     def _album(self, prop: Proposal) -> dict:
         self._win_album = f"{prop.source_dir}#{sorted(map(str, prop.files))}"   # (one of several albums of a folder)
@@ -1444,6 +1488,13 @@ class Planner:
                                   + ("not copied" if op == "copy" else "tagged in place, not moved")
                                   + "; split the set into a folder per release first (its cover, log, "
                                     "cue sheet and scans are the whole set's)")
+            if op == "copy":
+                entry["status"] = "skipped"
+                entry["label"] = "Skipped"
+                return entry
+            op = "in_place"
+        elif op in ("copy", "move") and getattr(self, "_in_place_note", None):
+            entry["notes"].append(self._in_place_note)                          # (MOV-4)
             if op == "copy":
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"
@@ -2583,6 +2634,29 @@ class Planner:
                                     (owner is None and _other_release_there(album_dir, me, ignore,
                                                               lambda: self._digests_of(own_files))))
             new = album_dir
+            # MOV-4: another copy of this release, from another folder, already files these discs
+            # there (Robin Trower - Compendium 1987-2013, two rips): this one is tagged where it is,
+            # never merged into that folder beside it ("101.IO ~c916.flac"). One disc of a set
+            # joining its set's folder brings other discs: it shares the folder (BOX-2)
+            mine = _prop_discs(prop)
+            claims = self.__dict__.setdefault("_album_claims", {})
+            dup = None
+            here = fnm.fold(album_dir) == fnm.fold(Path(prop.source_dir))
+            if not clash and not shared and not here:
+                if any(ids & me and src != str(prop.source_dir) and discs & mine
+                       for ids, src, discs in claims.get(key, ())):
+                    dup = album_dir                      # (another copy claimed it in this plan)
+                elif owner is not None and owner & me and any(
+                        d == key and ids & me and self.__dict__.get("_res_discs", {}).get(d, set()) & mine
+                        for d, ids, _src in self._resident):
+                    dup = album_dir                      # (another copy of this plan sits there)
+                elif owner is None and _same_release_there(album_dir, me, ignore, mine):
+                    dup = album_dir                      # (a copy already filed there, on disk)
+            if dup is not None:
+                raise _DuplicateCopy(f"another copy of this release is filed in {dup.name}: this one is "
+                                     "tagged where it is, not put beside it (MOV-4)")
+            if not shared:
+                claims.setdefault(fnm.fold(album_dir), []).append((me, str(prop.source_dir), mine))
             if clash:
                 tag = fnm.collision_suffix(" ".join(sorted(me)))
                 limits = self.profile["filenames"]
@@ -2806,9 +2880,11 @@ class Planner:
                     self._planned.add((st.st_dev, st.st_ino))
                 except OSError:
                     pass
+        res_discs = self.__dict__.setdefault("_res_discs", {})
         for pr in proposals:
             if pr.status == "identified" and len(pr.files) > 1:
                 self._resident.append((fnm.fold(pr.source_dir), _release_ids(pr), pr.source_dir))
+                res_discs.setdefault(fnm.fold(pr.source_dir), set()).update(_prop_discs(pr))   # (MOV-4)
         albums = [self.album(pr) for pr in proposals]
         _split_together(albums)
         for a in albums:                                  # (your edits: kept by a new preview)

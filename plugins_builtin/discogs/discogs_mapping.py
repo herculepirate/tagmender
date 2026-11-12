@@ -952,6 +952,14 @@ def parse_discs(release: dict[str, Any]) -> list[dict]:
                 disc['title'] = heading
         return discs
 
+    # --- convention 1b: a medium's name and the track's number ("CD-1" ... "CD-11", "DVD") --
+    # TRK-3: one disc per medium named, in order; headings between ("Bonus Track") are sections
+    # of that disc, never discs of their own (Mogwai - Mr. Beast, Blu-spec CD + DVD: the bonus
+    # track was numbered 1 of a second disc)
+    by_medium = _split_by_medium(tracklist)
+    if by_medium is not None:
+        return by_medium
+
     # --- convention 2: heading rows ------------------------------------
     current: dict | None = None
     for entry in tracklist:
@@ -989,6 +997,40 @@ def parse_discs(release: dict[str, Any]) -> list[dict]:
     if not discs:
         return []
     return discs
+
+
+_MEDIUM_POSITION_RE = re.compile(r'^\s*(cd|dvd|bd|blu-?ray|sacd|vhs|cdr?|hdcd)\s*(?:[-.]\s*(\d+))?\s*$', re.IGNORECASE)
+
+
+def _split_by_medium(tracklist: list[dict]) -> list[dict] | None:
+    """TRK-3: discs by the medium each track's position names ("CD-1" ... "CD-11", "DVD"):
+    one disc per medium, in the order they first come; None unless every track's position is
+    of that form (a disc-numbered "CD1-1" or a plain "1" is read by the other conventions)."""
+    tracks = [e for e in tracklist if (e.get('type_') or 'track') == 'track']
+    if not tracks:
+        return None
+    keys = []
+    for entry in tracks:
+        m = _MEDIUM_POSITION_RE.match(str(entry.get('position') or ''))
+        if not m:
+            return None
+        keys.append(m.group(1).lower().replace('-', ''))
+    if not any(_MEDIUM_POSITION_RE.match(str(e.get('position') or '')).group(2) for e in tracks):
+        return None                                      # (no track numbers at all: not this form)
+    last = {}
+    for entry, key in zip(tracks, keys):                 # (numbers restarting: "CD-1, CD-2, CD-1" is
+        m = _MEDIUM_POSITION_RE.match(str(entry.get('position') or ''))   # two CDs - not this form)
+        if m.group(2):
+            if int(m.group(2)) <= last.get(key, 0):
+                return None
+            last[key] = int(m.group(2))
+    order, discs = [], {}
+    for entry, key in zip(tracks, keys):
+        if key not in discs:
+            order.append(key)
+            discs[key] = {'number': len(order), 'title': '', 'tracks': []}
+        discs[key]['tracks'].append(entry)
+    return [discs[k] for k in order]
 
 
 _DISC_NUMBER_WORDS = ('one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve'

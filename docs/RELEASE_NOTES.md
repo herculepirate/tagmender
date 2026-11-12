@@ -1,5 +1,17 @@
 # Release notes
 
+## 0.8.41
+
+**Track numbers from Discogs read right (TRK-3)**
+- A release numbered by its medium ("CD-1" ... "CD-11", "DVD") keeps its bonus track's number
+  (11, not 1 of a second disc), and the parts of a work listed under a heading without a number
+  of its own ("2-3" ... "2-6") stay on their own disc.
+
+**A second copy stays apart (MOV-4)**
+- A second copy of an album already in the library - two rips of one release, or a new rip of one
+  you have - is tagged where it is, with a note, instead of being put beside the first under
+  "~xxxx" names.
+
 ## 0.8.40
 
 **Collaborations keep every name (NAM-8)**

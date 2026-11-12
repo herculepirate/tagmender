@@ -348,7 +348,8 @@ class R6_09_SuffixedAlbumFolderTooLong(Base):
             f = audio(alb / "01.flac", freq, album=f"x{n}")
             title = " ".join([w] * 5 + [f"Vol.{n}"])
             props.append(self.proposal(source_dir=str(alb), files=[str(f)], release_id=str(n),
-                                       targets=[target(1, f"S{n}", album=title, artist="X", totaltracks=["1"])]))
+                                       targets=[target(1, f"S{n}", album=title, artist="X", totaltracks=["1"],
+                                                       discogs_release_id=[str(n)])]))   # (two releases)
         prof = self.profile(operation="move", destination=str(self.dest))
         p = pl.build(props, prof)
         for a in p["albums"]:

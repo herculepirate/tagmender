@@ -229,6 +229,24 @@ class Plans(Base):
                          naming={"preset": "tagmender", "album_editions": "edition_year"}))
         self.assertEqual([f["op"] for f in again["albums"][0]["files"]], ["none", "none"])  # once, not twice
 
+    def test_ED6_a_generic_remastered_mark_gives_way_to_the_edition(self):
+        # (Robin Trower - Bridge Of Sighs: Discogs "Remastered" as the version and the 1999 CD
+        # edition - "[Remastered] [1999 Remaster]" said it twice)
+        cd = dict(media=["CD, Album, Reissue, Remastered"], date=["1999"], originaldate=["1974"])
+        for mark in ("I [Remastered]", "I (Remastered)", "I [Digitally Remastered]", "I (Remastered Edition)"):
+            p = self.plan([self.t(1, "A", album=[mark], **cd), self.t(2, "B", album=[mark], **cd)],
+                          album_editions="edition_year")
+            self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [1999 Remaster]"], mark)
+        # (a version that says more stays: "2009 Remaster", "Deluxe Edition", "Mono")
+        for mark in ("I [2009 Remaster]", "I [Deluxe Edition]", "I (Mono)"):
+            p = self.plan([self.t(1, "A", album=[mark], **cd), self.t(2, "B", album=[mark], **cd)],
+                          album_editions="edition_year")
+            self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], [f"{mark} [1999 Remaster]"], mark)
+        # (a vinyl edition is no remaster: the mark stays)
+        p = self.plan([self.t(1, "A", album=["I [Remastered]"]), self.t(2, "B", album=["I [Remastered]"])],
+                      album_editions="edition_year")
+        self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [Remastered] [2019 Vinyl Rip]"])
+
     def test_two_pressings_of_one_edition_still_kept_apart(self):
         a = self.plan([self.t(1, "A"), self.t(2, "B")], editions="edition_year")
         self.assertEqual(executor.Executor(a).run()["counts"], {"done": 1})

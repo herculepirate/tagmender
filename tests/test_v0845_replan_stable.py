@@ -312,9 +312,222 @@ class IDEM_ReviewFixes(_Copies):
         m.assert_not_called()
         # ... while TagMender's marker alone (an album-only job writes no release ID) does
         retag(d / "01.flac", tagmender="Partial")
-        with mock.patch.object(ma, "tagmender_originals", return_value=("", {})) as m:
+        with mock.patch.object(ma, "tagmender_originals", return_value=("", {}, False)) as m:
             self.read(d)
         m.assert_called_once()
+
+
+class IDEM_AnotherTaggersValuesStayHis(_Copies):
+    """REP-1: details read as before TagMender keep the standing they had then. Beside another
+    tagger's release IDs they are that tagger's word (weak), while TagMender's own IDs keep
+    their release in a tie (Robin Trower - Bridge Of Sighs: "release country Europe in the
+    tags", another tagger's, picked the EU entry on the second plan)."""
+
+    def copy_with(self, id_before):
+        d = self.tmp / "lib" / "Band" / "2008 - Fifteen"
+        fs = [flac(d / f"{i:02d}.flac", title=f"S{i}", tracknumber=str(i), **RIPPED) for i in (1, 2)]
+        entries = []
+        for f in fs:
+            rows = [{"field": "musicbrainz_albumid", "before": id_before, "after": [MB_X], "action": "changed"},
+                    {"field": "discogs_release_id", "before": [], "after": [DG_X], "action": "added"},
+                    {"field": "releasecountry", "before": ["US"], "after": ["GB"], "action": "changed"}]
+            retag(f, musicbrainz_albumid=MB_X, discogs_release_id=DG_X, releasecountry="GB")
+            entries.append((f, f, "tag", rows))
+        self.job("j1", d, entries, merged_ident())
+        return d
+
+    def test_IDEM_values_beside_another_taggers_ids_stay_his(self):
+        a = self.read(self.copy_with(["99999999-0000-0000-0000-000000000000"]))
+        self.assertEqual(a["tag_country"], "US")                         # read as before ...
+        self.assertTrue(a["tag_values_by_tagger"])                       # ... as another tagger's word
+        self.assertFalse(a["tags_by_tagger"])                            # TagMender's IDs: TAG-1 keeps them
+        clues, _against = mc.pressing_clues("", {"source": "mb", "id": "us", "country": "US"})
+        s = mc.score_candidate(dict(a, folder=a["folder"]), {
+            "source": "mb", "id": "us", "url": "", "artist": "Band", "title": "Fifteen", "year": 2008,
+            "country": "US", "label": "", "catnos": set(), "barcodes": set(), "disc_count": 1,
+            "tracks": [{"disc": 1, "title": f"S{i}", "secs": 1.0} for i in (1, 2)]}, mc.DEFAULT_CFG)
+        self.assertNotIn("country", s["clues"])
+        self.assertFalse(s["tagger_tagged"])
+
+    def test_IDEM_values_of_a_copy_without_ids_are_its_own(self):
+        a = self.read(self.copy_with([]))
+        self.assertEqual(a["tag_country"], "US")
+        self.assertFalse(a["tag_values_by_tagger"])
+
+    def test_IDEM_a_missing_id_row_is_never_another_taggers(self):
+        # (a job writes no row for an ID it left alone: a copy without IDs keeps its own barcode)
+        d = self.tmp / "lib" / "Band" / "2008 - NoIds"
+        fs = [flac(d / f"{i:02d}.flac", title=f"S{i}", tracknumber=str(i),
+                   **dict(RIPPED, releasecountry="GB", barcode="5099749000013")) for i in (1, 2)]
+        rows = [{"field": "musicbrainz_albumid", "before": [], "after": [MB_X], "action": "added"},
+                {"field": "releasecountry", "before": ["US"], "after": ["GB"], "action": "changed"}]
+        for f in fs:
+            retag(f, musicbrainz_albumid=MB_X)
+        self.job("j1", d, [(f, f, "tag", rows) for f in fs], merged_ident())
+        a = self.read(d)
+        self.assertEqual(a["tag_country"], "US")
+        self.assertFalse(a["tag_values_by_tagger"])
+        self.assertFalse(mc.tagger_barcode(a, mc._keys(a["tag_barcodes"])))
+
+    def test_IDEM_one_file_another_tagger_tagged_does_not_make_the_rest_his(self):
+        d = self.tmp / "lib" / "Band" / "2008 - Mixed"
+        fs = [flac(d / f"{i:02d}.flac", title=f"S{i}", tracknumber=str(i), **dict(RIPPED, releasecountry="GB"))
+              for i in (1, 2, 3)]
+        entries = []
+        for n, f in enumerate(fs):
+            rows = [{"field": "musicbrainz_albumid", "before": (["99999999-0000-0000-0000-000000000000"] if n == 2 else []),
+                     "after": [MB_X], "action": "changed"},
+                    {"field": "releasecountry", "before": ["US"], "after": ["GB"], "action": "changed"}]
+            retag(f, musicbrainz_albumid=MB_X)
+            entries.append((f, f, "tag", rows))
+        self.job("j1", d, entries, merged_ident())
+        self.assertFalse(self.read(d)["tag_values_by_tagger"])
+
+
+
+class IDEM_DiscNumbersAsBefore(_History):
+    """REP-1: the disc numbers TagMender gave from the release's media (a bonus disc numbered 3
+    after a DVD the files lack) are read as they were, so the album is laid out as the first
+    plan saw it (Mogwai - Special Moves: its "Disc 03" matched as a release of its own)."""
+
+    def test_IDEM_disc_number_its_job_wrote_is_read_as_before(self):
+        src = self.tmp / "lib" / "Band" / "2010 - Moves (digital)"
+        dst = self.tmp / "lib" / "Band" / "2010 - Moves"
+        entries = []
+        for disc, n in ((1, 1), (1, 2), (2, 1)):
+            f = flac(dst / f"Disc 0{1 if disc == 1 else 3}" / f"{disc}{n:02d}.flac", title=f"S{disc}{n}",
+                     tracknumber=str(n), discnumber=str(1 if disc == 1 else 3), musicbrainz_albumid=MB_X)
+            rows = id_rows()[:1] + ([{"field": "discnumber", "before": ["2"], "after": ["3"], "action": "changed"}]
+                                    if disc == 2 else [])
+            entries.append((src / f.name, f, "move", rows))
+        self.job("j1", src, entries, merged_ident())
+        # (read file by file: the files share one audio, which read_album takes for second copies)
+        _folder, before, _foreign = ma.tagmender_originals([e[1] for e in entries])
+        discs = sorted(ma.read_file(e[1], before[str(e[1])])["disc"] for e in entries)
+        self.assertEqual(discs, [1, 1, 2])
+        self.assertEqual(sorted(ma.read_file(e[1])["disc"] for e in entries), [1, 1, 3])   # (as they are)
+
+    def test_IDEM_totals_are_read_as_before_too(self):
+        f = flac(self.tmp / "v" / "01.flac", title="S1", tracknumber="5", totaltracks="11", tracktotal="11")
+        before = {"tracknumber": (("3",), ("5",)), "totaltracks": (("9",), ("11",))}
+        t = ma.read_file(f, before)
+        self.assertEqual((t["num"], t["tracktotal"]), (3, 9))
+
+    def test_IDEM_id3_number_with_its_total_is_read_as_before(self):
+        from mutagen.id3 import ID3, TRCK, TPOS
+        base = self.tmp / "a.mp3"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                        "-c:a", "libmp3lame", str(base), "-y"], check=True)
+        before = {"tracknumber": (("3",), ("5",)), "discnumber": (("1",), ("2",)), "totaltracks": (("9",), ("11",))}
+        t = ID3()
+        t.add(TRCK(encoding=3, text="5/11"))
+        t.add(TPOS(encoding=3, text="2/2"))
+        t.save(base)
+        r = ma.read_file(base, before)
+        self.assertEqual((r["num"], r["disc"], r["tracktotal"]), (3, 1, 9))
+
+
+def _cand(**kw):
+    c = {"source": "discogs", "id": "x", "url": "", "artist": "Band", "title": "Bridge", "year": 1999,
+         "country": "US", "label": "Chrysalis", "catnos": {mc.norm_code("72435-20811-2-7")}, "barcodes": set(),
+         "disc_count": 1, "formats": {"cd"},
+         "tracks": [{"disc": 1, "title": f"T{i}", "secs": s} for i, s in enumerate((200, 305, 410))]}
+    c.update(kw)
+    return c
+
+
+def _album(**kw):
+    a = {"artist": "Band", "title": "Bridge", "year": 1999, "discs": 1, "folder": "1999 - Bridge",
+         "tracks": [{"disc": 1, "num": i + 1, "title": f"T{i}", "secs": s} for i, s in enumerate((200.0, 305.0, 410.0))],
+         "barcodes": set(), "catnos": set()}
+    a.update(kw)
+    return a
+
+
+class IDEM_ClubEditionAgainstYourBarcode(unittest.TestCase):
+    """BAR-9: MusicBrainz's release lists no barcode, the Discogs entries it links to carry
+    another (a club edition's "D131674"), and your scans' barcode is on other Discogs entries:
+    MusicBrainz's release is not your pressing, whatever disc ID it carries."""
+
+    def results(self, link_barcodes):
+        cfg = dict(mc.DEFAULT_CFG, preferred_countries=["US"])
+        upc = "724352081127"
+        a = _album(barcodes={upc}, ocr_barcodes=[upc], toc_releases={"club-mb"}, exact_toc_releases={"club-mb"})
+        def res(cands):                 # (as match_albums keeps them: the result and its scored list)
+            scored = [mc.score_candidate(a, c, cfg) for c in cands]
+            return dict(mc.classify(scored, cfg), scored=scored)
+        mb = res([_cand(source="mb", id="club-mb", discogs_ids=["club-dg"],
+                        catnos={mc.norm_code("72435 20811 2 7"), "d131674"})])
+        dg = res([_cand(id="club-dg", barcodes=set(link_barcodes)), _cand(id="retail", barcodes={upc}),
+                  _cand(id="eu", country="Europe", barcodes={upc})])
+        return mb, dg, cfg
+
+    def test_IDEM_a_club_edition_musicbrainz_lists_without_barcode_is_not_your_pressing(self):
+        mb, dg, cfg = self.results({"D131674"})
+        self.assertEqual(mb["status"], "auto")
+        out = mc.combine(mb, dg, cfg["preferred_countries"])
+        self.assertNotEqual(out["best"]["cand"]["id"], "club-mb", out.get("why"))
+        self.assertTrue(any("another product" in w for w in mc._yields_to_linked_barcode(mb, dg)["why"]))
+
+    def test_IDEM_a_linked_entry_not_scored_keeps_musicbrainz(self):
+        # (one of its Discogs links was not looked at: it may carry your barcode)
+        cfg = dict(mc.DEFAULT_CFG, preferred_countries=["US"])
+        upc = "724352081127"
+        a = _album(barcodes={upc}, ocr_barcodes=[upc])
+        def res(cands):
+            scored = [mc.score_candidate(a, c, cfg) for c in cands]
+            return dict(mc.classify(scored, cfg), scored=scored)
+        mb = res([_cand(source="mb", id="club-mb", discogs_ids=["club-dg", "unseen"])])
+        dg = res([_cand(id="club-dg", barcodes={"D131674"}), _cand(id="eu", country="Europe", barcodes={upc})])
+        self.assertIs(mc._yields_to_linked_barcode(mb, dg), mb)
+
+    def test_IDEM_musicbrainz_stands_when_its_discogs_entry_carries_your_barcode(self):
+        mb, dg, _cfg = self.results({"724352081127"})
+        self.assertIs(mc._yields_to_linked_barcode(mb, dg), mb)
+
+
+class IDEM_NoLengthsNoTitles(unittest.TestCase):
+    """LEN-2: a release listing no track lengths is excused for them only when its track titles
+    are your files' (half at least)."""
+
+    def score(self, titles):
+        cfg = dict(mc.DEFAULT_CFG, preferred_countries=[])
+        a = _album(tracks=[{"disc": 1, "num": i + 1, "title": t, "secs": s}
+                           for i, (t, s) in enumerate(zip(("Yes", "Shame", "Helicon"), (348.0, 390.0, 520.0)))])
+        c = _cand(formats={"vinyl"}, tracks=[{"disc": 1, "title": t, "secs": 0} for t in titles])
+        r = mc.classify([mc.score_candidate(a, c, cfg)], cfg)
+        return r
+
+    def test_IDEM_other_titles_without_lengths_are_not_excused(self):
+        r = self.score(("Herod", "Megasnake", "Rights"))
+        self.assertNotEqual(r["status"], "auto")
+        self.assertFalse(r["best"].get("lengths_free"))
+
+    def test_IDEM_your_titles_without_lengths_are_excused(self):
+        r = self.score(("Yes", "Shame", "Helicon"))
+        self.assertTrue(r["best"].get("lengths_free"))
+
+
+class IDEM_OneStereoDiscIsNoVersion(unittest.TestCase):
+    """MIX-2: a media tag naming a layout makes a version of a disc only beside another disc
+    naming another layout."""
+
+    def infos(self, *media):
+        return [(Path(f"/x/{d}/{n}.flac"), {"disc_eff": d, "media": m, "sacd_area": ""})
+                for d, m in enumerate(media, 1) for n in (1, 2)]
+
+    def test_IDEM_one_disc_whose_media_says_stereo_is_the_album(self):
+        self.assertEqual(ma.version_discs_by_tags(self.infos("CD, Album, Limited Edition, Stereo")), {})
+
+    def test_IDEM_a_lone_disc_naming_its_mix_stays_a_version(self):
+        for media, area in (("SACD", "Multichannel"), ("DVD-Audio (5.1)", ""),
+                            ("Hybrid SACD (SACD layer, 6 channels)", ""), ("Hybrid SACD (SACD layer, 2 channels)", "")):
+            infos = [(Path(f"/x/{n}.flac"), {"disc_eff": 1, "media": media, "sacd_area": area}) for n in (1, 2)]
+            self.assertTrue(ma.version_discs_by_tags(infos), media)
+
+    def test_IDEM_two_discs_naming_two_layouts_are_versions(self):
+        got = ma.version_discs_by_tags(self.infos("DVD-Video (Stereo)", "DVD-Video (5.1)"))
+        self.assertEqual(sorted(v[0] for v in got.values()), ["multichannel", "stereo"])
 
 
 if __name__ == "__main__":

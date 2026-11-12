@@ -1,5 +1,30 @@
 # Release notes
 
+## 0.8.45
+
+**A second run confirms the first (REP-1)**
+- An album TagMender tagged before is planned again on what your copy showed before it was
+  tagged: the catalogue number, country, date and edition TagMender wrote - and its own folder
+  name - are no longer read back as new evidence, so a second run keeps the same pressing (or
+  corrects it the way the first run should have) instead of switching to another one. Your own
+  later edits still count, and values another tagger wrote keep their weaker standing.
+
+**Your barcode over a club edition (BAR-9)**
+- A MusicBrainz release without a barcode (a record club's edition) gives way when the Discogs
+  release it links to carries another barcode and Discogs has the pressing with yours: a disc ID
+  proves the master, not which pressing of it you own.
+
+**Safer matching**
+- A release listing no track lengths is no longer taken on its name alone: half its titles must
+  be your files' (LEN-2).
+- A single disc whose media tag says "Stereo" is not a version folder; a lone multichannel or
+  5.1 disc still is (MIX-2).
+- "[Remastered] [1999 Remaster]" says it once: "[1999 Remaster]" (ED-6).
+
+**AppImage**
+- Scan OCR (tesseract, with English, Japanese and Russian) and barcode reading (zbar) are
+  bundled, built for glibc 2.28 and newer: no system packages needed.
+
 ## 0.8.44
 
 **Check what was written: `tagmender check`**

@@ -53,6 +53,12 @@ CUE_LIKE = {".cue", ".m3u", ".m3u8"}
 EMBEDDABLE = {".flac", ".mp3", ".m4a", ".mp4", ".aiff", ".aif", ".wav", ".ogg", ".oga", ".opus"}
 
 
+
+# ED-6: the version marks that only say "remastered" or "reissued" (a year-named "2009 Remaster"
+# or "Remix 2024" says more and stays)
+_GENERIC_VERSION_MARK = re.compile(r"\s*[\(\[](?:digitally\s+)?(?:remastered|remaster|reissue|reissued)"
+                                   r"(?:\s+edition|\s+version)?[\)\]]\s*$", re.I)
+
 def _shop_page(values):
     """A TAGMENDER_SOURCE that is a web shop's or encyclopedia's page (Deezer, iTunes,
     Bandcamp, Wikipedia...), not a database's (Discogs, MusicBrainz) release page."""
@@ -1710,6 +1716,10 @@ class Planner:
             # media tag)
             if identified and (not unproven or tag_ed == "HD") and tag_ed and (target.get("album") or [""])[0]:
                 album = str(target["album"][0])
+                if re.search(r"(?:Remaster|Reissue)(?: HD)?$", tag_ed):
+                    # ED-6: a version mark as general as "Remastered" says no more than the edition
+                    # ("Bridge Of Sighs [Remastered]" + "1999 Remaster"): the edition takes its place
+                    album = _GENERIC_VERSION_MARK.sub("", album) or album
                 if not album.endswith(f" [{tag_ed}]"):      # "I" -> "I [2019 Vinyl]", once
                     target["album"] = [f"{album} [{tag_ed}]"] + list(target["album"][1:])
             if held:

@@ -715,7 +715,7 @@ def medium_layout(fmt):
     the format does not say (a plain CD, an SACD without its area, a DVD or Blu-ray, which
     holds every mix on one medium)."""
     f = str(fmt or "").casefold()
-    if re.search(r"multi-?channel|surround|\b[4-7]\.[01]\b|\bquad", f):
+    if re.search(r"multi-?channel|surround|\b[4-7]\.[01]\b|\bquad|\b[3-8] ?ch(?:annels?)?\b", f):
         return "multichannel"
     if re.search(r"\b2 ?ch(?:annels?)?\b|\bstereo\b|\b2\.0\b", f):
         return "stereo"
@@ -978,11 +978,18 @@ def typed_only_barcode(album, barcode):
     return k in _keys(album.get("note_barcodes"))
 
 
+def tag_values_by_tagger(album) -> bool:
+    """The pressing details in the files' tags are another tagger's word: the files name a
+    release TagMender did not choose, or (REP-1) TagMender chose one but the details were read
+    as they were before it, when they stood beside another tagger's release IDs."""
+    return bool(album.get("tags_by_tagger") or album.get("tag_values_by_tagger"))
+
+
 def tagger_barcode(album, keys):
     """True when the barcodes agreeing (keys) came only from tags another tagger wrote
     (album["tags_by_tagger"]: the files name a release, and not by TagMender's own job),
     not decoded off a scan as well."""
-    if not album.get("tags_by_tagger") or not keys:
+    if not tag_values_by_tagger(album) or not keys:
         return False
     tags = _keys(album.get("tag_barcodes"))
     return keys <= tags and not keys & _keys(album.get("ocr_barcodes"))
@@ -991,7 +998,7 @@ def tagger_barcode(album, keys):
 def tagger_catno(album, shared):
     """True when the catalogue numbers agreeing (shared) came only from tags another tagger
     wrote (as tagger_barcode), not from the folder name or the ripper's notes as well."""
-    if not album.get("tags_by_tagger") or not shared:
+    if not tag_values_by_tagger(album) or not shared:
         return False
     tags = {norm_code(c) for c in album.get("tag_catnos") or ()}
     return shared <= tags and not shared & set(album.get("catnos_from_folder") or ())
@@ -1804,7 +1811,7 @@ def file_clues(album, cand, clues, against, cfg=None):
     # files name a release in their ID tags or links, and TagMender did not write them): their
     # label, country, date and media came FROM that release and only confirm it, never tell
     # its pressings apart (match_albums.read_album "tags_by_tagger").
-    by_tagger = bool(album.get("tags_by_tagger"))
+    by_tagger = tag_values_by_tagger(album)          # (REP-1: also details read as before TagMender)
     label = None if by_tagger else album.get("tag_label")
     if label:
         mine = [w for w in fold(label).split() if w not in _LABEL_FILLER]
@@ -3522,6 +3529,14 @@ def _missing_lengths_free(scored, cfg):
     if cfg.get("lengths_required") or any(_lengths_back_it(s) for s in scored):
         return
     for s in scored:
+        # LEN-2: excused only when the release's track titles are your files' (half of them at
+        # least, as BAR-8's album fit): a release listing neither lengths nor your titles shows
+        # nothing of being these tracks (Mogwai - Special Moves, five bonus tracks against the
+        # test pressing of the LP's sides C and D, none of its titles theirs)
+        n = len((s.get("cand") or {}).get("tracks") or ())
+        fit = s.get("titles_loose") if s.get("titles_loose") is not None else s.get("titles_agree")
+        if fit is not None and n and fit * 2 < n:
+            continue
         if s.get("lengths_missing") and not s.get("lengths_free") and s.get("avail", 0) > cfg["w_durations"]:
             s["lifted_from"] = s["confidence"]
             s["confidence"] = min(100.0, round(s["confidence"] * s["avail"] / (s["avail"] - cfg["w_durations"]), 1))
@@ -4599,6 +4614,33 @@ def _yields_to_cd(res, other, prefs=None):
                    f"and {theirs['cand']['id']} is a CD"])
 
 
+def _yields_to_linked_barcode(mb_result, dg_result):
+    """BAR-1/BAR-5 across the databases: MusicBrainz's sure pick lists no barcode of its own,
+    every Discogs release it links to carries another barcode than your copy's, and a Discogs
+    release carries yours (decoded off your scans or in your own tags): MusicBrainz's release
+    is that other product, not your pressing (Robin Trower - Bridge Of Sighs: MusicBrainz's
+    BMG club edition, its Discogs entries "D131674", against the retail EAN 0724352081127 on
+    your back cover). A disc ID it carries names the master both share (TOC-1 proves the album
+    on the disc, not which pressing of it), so it does not stand against the barcode. Unsure
+    then: the pressings carrying your barcode decide."""
+    best = (mb_result or {}).get("best")
+    if not (mb_result and dg_result and mb_result["status"] == "auto" and best) or best["cand"].get("barcodes"):
+        return mb_result
+    links = linked_discogs(best["cand"])
+    scored = [s for s in (dg_result.get("scored") or [dg_result.get("best")]) if s]
+    linked = [s for s in scored if str(s["cand"].get("id")) in links]
+    mine = [s for s in scored if _carries_barcode(s)]
+    # (every Discogs release it links to was scored: one not looked at may carry your barcode)
+    if {str(s["cand"].get("id")) for s in linked} != links:
+        return mb_result
+    if not (linked and mine and all(s.get("conflict") and s["cand"].get("barcodes") for s in linked)):
+        return mb_result
+    return dict(mb_result, status="review", why=list(mb_result.get("why") or []) + [
+        f"MusicBrainz's {best['cand']['id']} lists no barcode, and the Discogs releases it links to "
+        f"({', '.join(sorted(str(s['cand']['id']) for s in linked))}) carry another than your copy's: "
+        f"another product (BAR-1)"])
+
+
 def combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
@@ -4618,6 +4660,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     mb_result, dg_result = _yields_to_lengths(mb_result, dg_result), _yields_to_lengths(dg_result, mb_result)
     mb_result, dg_result = _yields_to_audio(mb_result, dg_result), _yields_to_audio(dg_result, mb_result)
     mb_result, dg_result = _yields_to_cd(mb_result, dg_result, prefs), _yields_to_cd(dg_result, mb_result, prefs)
+    mb_result = _yields_to_linked_barcode(mb_result, dg_result)
     # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
     disputed = _proof_left_unsure(mb_result, dg_result, prefer)
     if disputed:

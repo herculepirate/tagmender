@@ -756,9 +756,17 @@ def _release_id(t, key, value):
 # REP-1: the pressing details (and the album title holding the edition) a job of TagMender's
 # wrote, read again as they were before it when its own album is planned again
 # (not ISRCs: they name the recordings, shared by every pressing, and never pick one - Q4)
-REPLAN_FIELDS = ("barcode", "catalognumber", "label", "releasecountry", "media", "date", "album", "asin")
+# ... and the disc and track numbers it gave them (from the release's media: a bonus disc
+# numbered 3 after a DVD the files lack), which lay out the discs it is matched by
+# (and their totals, so restored numbers never sit beside TagMender's totals; MP4's trkn/disk
+# pairs are not restored: read as they are)
+REPLAN_FIELDS = ("barcode", "catalognumber", "label", "releasecountry", "media", "date", "album", "asin",
+                 "discnumber", "tracknumber", "totaltracks", "totaldiscs")
+# Vorbis names TagMender writes a field under besides its own (TOTALTRACKS and TRACKTOTAL)
+_VORBIS_ALIASES = {"totaltracks": ("tracktotal",), "totaldiscs": ("disctotal",)}
 # ... where read_file finds them in ID3 and MP4 files (Vorbis comments: by the field's name)
-_ID3_FIELD = {"TPUB": "label", "TMED": "media", "TDRC": "date", "TDRL": "date", "TALB": "album"}
+_ID3_FIELD = {"TPUB": "label", "TMED": "media", "TDRC": "date", "TDRL": "date", "TALB": "album",
+              "TPOS": "discnumber", "TRCK": "tracknumber"}
 _ID3_TXXX_FIELD = {"catalognumber": "catalognumber", "barcode": "barcode", "asin": "asin",
                    "musicbrainzalbumreleasecountry": "releasecountry"}
 _MP4_FIELD = {"\xa9alb": "album", "\xa9day": "date", "catalognumber": "catalognumber", "barcode": "barcode",
@@ -823,7 +831,11 @@ def _own_job_files(job):
             wrote = {r["field"]: (tuple(str(x) for x in r.get("before") or ()),
                                   tuple(str(x) for x in r.get("after") or ()))
                      for r in rows if r["field"] in REPLAN_FIELDS}
-            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote))
+            # REP-1: the file named a release before this job: an ID row whose value before is not
+            # empty (whose, _own_index decides). Never inferred from a missing row: a job writes
+            # none for an ID it left alone, held or not (a preserved empty field, a source left out)
+            named = any(r.get("before") for r in rows if r["field"] in ("musicbrainz_albumid", "discogs_release_id"))
+            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote, named))
         albums.append((a.get("source_dir"), exact, files))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)
@@ -874,8 +886,11 @@ def _own_index():
         for folder, exact, files in _own_job_files(job):
             if folder not in done[job]:
                 continue
-            for src, dst, op, mb, dg, fields in files:
+            for src, dst, op, mb, dg, fields, named in files:
                 carried = owned.get(src)
+                # (release IDs the file had before this job that were not TagMender's: another
+                # tagger's - what it wrote beside them stays another tagger's word, REP-1)
+                foreign = bool(named) and carried is None
                 if src != dst and carried is not None:
                     if op != "copy":
                         owned.pop(src, None)
@@ -888,14 +903,15 @@ def _own_index():
                 # (the folder the file lay in itself before TagMender's first job on it: the
                 # album folder only when that is the job's own folder, not one disc folder of a
                 # set the job planned under its first disc's name)
-                first_folder, first_dir, earlier = prior if prior else (folder, os.path.dirname(src), {})
+                first_folder, first_dir, earlier, was_foreign = prior if prior else (folder, os.path.dirname(src), {},
+                                                                                     foreign)
                 # the earliest job's "before" stands while the chain is unbroken; a later job that
                 # found the field otherwise than the earlier one left it (you edited it in between)
                 # starts it again from what it found
                 merged = {f: (earlier[f][0] if f in earlier and _same_values(earlier[f][1], b) else b, a)
                           for f, (b, a) in fields.items()}
                 merged.update({f: v for f, v in earlier.items() if f not in merged})
-                wrote[dst] = (first_folder, first_dir, merged)
+                wrote[dst] = (first_folder, first_dir, merged, was_foreign)
     with _OWN_LOCK:
         _OWN_INDEX[:] = [sig, owned, wrote]
     return owned
@@ -927,20 +943,22 @@ def tagmender_wrote(files):
 def tagmender_originals(paths):
     """REP-1: what TagMender's own jobs changed in these files, to read them as the copy was
     before TagMender tagged it: (the album folder name before TagMender's first job on them,
-    {path: {field: (value before TagMender, value it left)}}). read_file uses a value before
+    {path: {field: (value before TagMender, value it left)}}, {path: whether that file named
+    another tagger's release before TagMender's first job on it}). read_file uses a value before
     only where the field still holds what TagMender left (a field edited since is yours, and
     read as it is). Only when TagMender's jobs tagged every one of the files; else ("", {})."""
     if not paths:
-        return "", {}
+        return "", {}, {}
     _own_index()
     with _OWN_LOCK:
         wrote = _OWN_INDEX[2] if len(_OWN_INDEX) > 2 else {}
-    folders, out = set(), {}
+    folders, out, foreign = set(), {}, {}
     for p in paths:
         hit = wrote.get(str(p)) or wrote.get(os.path.realpath(str(p)))
         if hit is None:
-            return "", {}
-        folder, first_dir, fields = hit
+            return "", {}, {}
+        folder, first_dir, fields, by_tagger = hit
+        foreign[str(p)] = bool(by_tagger)
         # (a folder name only when every file lay in the job's own album folder or a disc folder
         # inside it: never a disc folder of a set side by side, "Album CD1" / "Album CD2", whose
         # job is named after its first disc - DSC-1)
@@ -948,7 +966,7 @@ def tagmender_originals(paths):
         folders.add(os.path.basename(top) if own == top or own.startswith(top + os.sep) else None)
         out[str(p)] = fields
     one = folders.pop() if len(folders) == 1 else None
-    return one or "", out
+    return one or "", out, foreign
 
 
 def _norm_values(values):
@@ -1060,6 +1078,18 @@ def read_file(path, before=None):
             def fr(fid):
                 x = tags.getall(fid)
                 cur = [str(s) for s in x[0].text] if x else []
+                if fid in ("TRCK", "TPOS") and before:
+                    # (the number with its total, "5/11": TagMender wrote the number alone, "5", and
+                    # the total as its own field; the total read back is the job's or the one before)
+                    num = [c.split("/")[0].strip() for c in cur]
+                    field = _ID3_FIELD[fid]
+                    total = "totaltracks" if fid == "TRCK" else "totaldiscs"
+                    was = _before_tagmender(before, field, num)
+                    if was is not None:
+                        tot = _before_tagmender(before, total, [c.split("/")[1] for c in cur if "/" in c])
+                        tot = tot if tot is not None else [c.split("/")[1] for c in cur if "/" in c]
+                        return _txt([f"{was[0]}/{tot[0]}" if was and tot and tot[0] else (was[0] if was else "")])
+                    return _txt(cur)
                 was = _before_tagmender(before, _ID3_FIELD.get(fid, ""), cur) if before else None
                 return _txt(was if was is not None else cur)
             def names(fid):
@@ -1093,7 +1123,7 @@ def read_file(path, before=None):
             every.setdefault(re.sub(r"[\s_\-]", "", str(k).lower()), []).extend(
                 v if isinstance(v, (list, tuple)) else [v])
         for field in before or ():
-            for key in (re.sub(r"[\s_\-]", "", field.lower()), _ASF_FIELD.get(field)):
+            for key in (re.sub(r"[\s_\-]", "", field.lower()), _ASF_FIELD.get(field), *_VORBIS_ALIASES.get(field, ())):
                 if not key or (key != field and key not in every):
                     continue
                 was = _before_tagmender(before, field, [str(x) for x in every.get(key) or ()])
@@ -1733,7 +1763,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                 if p.suffix.lower() in AUDIO_EXT and str(p) not in exclude:
                     files.append(p)
     info = {p: read_file(p) for p in files}
-    title_written = []
+    title_written, before_by_tagger, before = [], {}, {}
     if not blind:
         # REP-1: an album TagMender tagged (and perhaps renamed) before is read as the copy was
         # before it: the pressing details its job wrote (and nobody changed since) as they were,
@@ -1745,7 +1775,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # (only files that may be TagMender's: release IDs or its TAGMENDER marker - the job
         # history is not read for an album never tagged)
         maybe = any(i.get("has_ids") or i.get("tm_mark") for i in info.values())
-        first_folder, before = tagmender_originals(files) if maybe else ("", {})
+        first_folder, before, before_by_tagger = tagmender_originals(files) if maybe else ("", {}, {})
         if before:
             # (the media tag as TagMender wrote it stays what names each version folder's disc - a
             # DVD's "Stereo/" and "5.1/" lost their disc word to the naming: it points at the release
@@ -1883,6 +1913,13 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tag_release_mb, tag_release_discogs = tag_release_ids([i for _p, i in infos])
     return {
         "tags_by_tagger": by_tagger,
+        # REP-1: the pressing details were read as before TagMender, and then they stood beside
+        # another tagger's release IDs: they are that tagger's word still (weak, as the first
+        # plan read them), while TagMender's own IDs keep their release in a tie (TAG-1)
+        # (file by file: only when every file whose details were read so stood beside another
+        # tagger's IDs - one bonus track another tagger tagged does not make the rest his)
+        "tag_values_by_tagger": by_tagger or (any(before.values()) and all(
+            before_by_tagger.get(k) for k, v in before.items() if v)),
         # REP-1: the album title the files hold now, when it was read as before TagMender ("")
         "title_written": title_written[0][0] if title_written else "",
         "artist": top("artist") or artist_folder, "title": title,
@@ -2011,13 +2048,22 @@ def version_discs_by_tags(infos):
     channels)", as TagMender wrote it), a different one each: versions of one disc already
     filed as discs of their release ("Disc 02/", "Disc 03/"). {} otherwise; never from the
     channel count alone."""
-    by = {}
+    by, plain = {}, {}
     for _p, i in infos:
-        lay = mc.layout_of_channels(0, i.get("sacd_area")) or mc.medium_layout(i.get("media_written", i.get("media")))
+        media = i.get("media_written", i.get("media"))
+        lay = mc.layout_of_channels(0, i.get("sacd_area")) or mc.medium_layout(media)
         by.setdefault(i["disc_eff"], set()).add(lay)
+        # (stereo read only off a CD's or a format description's media tag, no SACD area)
+        plain.setdefault(i["disc_eff"], set()).add(
+            lay == "stereo" and not i.get("sacd_area") and mc.medium_type(media) not in ("sacd", "video"))
     if not by or any(len(v) != 1 or "" in v for v in by.values()):
         return {}
     out = {d: next(iter(v)) for d, v in by.items()}
+    # MIX-2: one disc whose CD media tag says "Stereo" (Discogs's format "CD, Album, Limited
+    # Edition, Stereo", as TagMender wrote it: Spock's Beard - Day For Night) is the album, not
+    # a version of a disc; a lone SACD area, an SACD layer or a DVD-Audio mix stays a version
+    if len(out) == 1 and all(plain.get(d) == {True} for d in out):
+        return {}
     if len(set(out.values())) != len(out):
         return {}
     return {d: (lay, lay.title(), "") for d, lay in out.items()}

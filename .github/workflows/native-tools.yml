@@ -1,0 +1,105 @@
+# The native tools the AppImage bundles beside its own Python: tesseract (scan OCR, with
+# leptonica) and libzbar (barcodes on scans), built small - no curl, libarchive, X11, video or
+# D-Bus - on manylinux_2_28 (glibc 2.28, the AppImage's floor). Run by hand; the result is
+# attached to the "native-tools-N" release that packaging/build_appimage.sh downloads (pinned by
+# its checksum). Issue #4.
+# Actions are pinned to a commit (the version in the comment).
+name: native-tools
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-tools]
+permissions:
+  contents: read
+env:
+  LEPTONICA: "1.84.1"
+  TESSERACT: "5.3.4"
+  ZBAR: "0.23.93"
+  TESSDATA_FAST: "4.1.0"
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build packages
+        run: |
+          dnf install -y --setopt=install_weak_deps=False cmake make gcc-c++ autoconf automake libtool \
+            gettext-devel pkgconfig libpng-devel libjpeg-turbo-devel libtiff-devel zlib-devel
+      - name: Build leptonica, tesseract, zbar
+        run: |
+          set -eux
+          P=/opt/tm; mkdir -p $P src; cd src
+          curl -fsSL -o lept.tgz "https://github.com/DanBloomberg/leptonica/releases/download/$LEPTONICA/leptonica-$LEPTONICA.tar.gz"
+          curl -fsSL -o tess.tgz "https://github.com/tesseract-ocr/tesseract/archive/refs/tags/$TESSERACT.tar.gz"
+          curl -fsSL -o zbar.tgz "https://github.com/mchehab/zbar/archive/refs/tags/$ZBAR.tar.gz"
+          sha256sum lept.tgz tess.tgz zbar.tgz
+          tar xzf lept.tgz && tar xzf tess.tgz && tar xzf zbar.tgz
+          cmake -S leptonica-$LEPTONICA -B b-lept -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON -DSW_BUILD=OFF -DBUILD_PROG=OFF \
+            -DENABLE_WEBP=OFF -DENABLE_OPENJPEG=OFF -DENABLE_GIF=OFF
+          cmake --build b-lept -j"$(nproc)" && cmake --install b-lept
+          cmake -S tesseract-$TESSERACT -B b-tess -DCMAKE_INSTALL_PREFIX=$P -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=$P -DBUILD_SHARED_LIBS=ON -DSW_BUILD=OFF -DBUILD_TRAINING_TOOLS=OFF \
+            -DDISABLE_CURL=ON -DDISABLE_ARCHIVE=ON -DGRAPHICS_DISABLED=ON -DOPENMP_BUILD=OFF \
+            -DENABLE_LTO=OFF -DBUILD_TESTS=OFF
+          cmake --build b-tess -j"$(nproc)" && cmake --install b-tess
+          cd zbar-$ZBAR
+          autoreconf -vfi
+          ./configure --prefix=$P --without-x --disable-video --without-dbus --without-python \
+            --without-gtk --without-qt --without-imagemagick --without-graphicsmagick --without-java \
+            --without-xv --disable-doc
+          make -j"$(nproc)" && make install
+      - name: Bundle with their libraries
+        run: |
+          set -eux
+          P=/opt/tm; O=$PWD/native-tools; rm -rf $O; mkdir -p $O/bin $O/lib $O/share/tessdata
+          cp $P/bin/tesseract $O/bin/
+          cp -a $P/lib*/libtesseract.so* $P/lib*/libleptonica.so* $P/lib*/libzbar.so* $O/lib/ 2>/dev/null || true
+          cp -a $P/lib*/liblept*.so* $O/lib/ 2>/dev/null || true
+          # (the system libraries they need beyond glibc and the C++ runtime every Linux has)
+          for f in $O/bin/tesseract $O/lib/*.so*; do
+            ldd "$f" | awk '/=> \//{print $3}'
+          done | sort -u | grep -Ev '/(libc|libm|libdl|libpthread|librt|libgcc_s|libstdc\+\+|ld-linux)[.-]' \
+            | grep -v "^$P" | while read -r lib; do cp -L "$lib" $O/lib/; done
+          patchelf --set-rpath '$ORIGIN/../lib' $O/bin/tesseract
+          for f in $O/lib/*.so*; do [ -L "$f" ] || patchelf --set-rpath '$ORIGIN' "$f"; done
+          for l in eng jpn rus osd; do
+            curl -fsSL -o $O/share/tessdata/$l.traineddata \
+              "https://github.com/tesseract-ocr/tessdata_fast/raw/$TESSDATA_FAST/$l.traineddata"
+          done
+          cat > $O/NOTICE <<EOF
+          tesseract $TESSERACT (Apache-2.0) https://github.com/tesseract-ocr/tesseract
+          leptonica $LEPTONICA (BSD-2-Clause) https://github.com/DanBloomberg/leptonica
+          zbar $ZBAR (LGPL-2.1+) https://github.com/mchehab/zbar
+          tessdata_fast $TESSDATA_FAST eng jpn rus osd (Apache-2.0) https://github.com/tesseract-ocr/tessdata_fast
+          libpng, libjpeg-turbo, libtiff, zlib: their own licenses, as shipped by AlmaLinux 8
+          EOF
+          ls -la $O/bin $O/lib
+      - name: Check they run
+        run: |
+          set -eux
+          O=$PWD/native-tools
+          TESSDATA_PREFIX=$O/share/tessdata $O/bin/tesseract --version
+          TESSDATA_PREFIX=$O/share/tessdata $O/bin/tesseract --list-langs
+          PY=/opt/python/cp312-cp312/bin/python
+          $PY -m pip install -q pillow
+          $PY - <<'EOF'
+          from PIL import Image, ImageDraw, ImageFont
+          im = Image.new("L", (900, 160), 255)
+          ImageDraw.Draw(im).text((20, 40), "TAGMENDER 4712345", fill=0, font=ImageFont.load_default(size=64))
+          im.save("probe.png")
+          EOF
+          TESSDATA_PREFIX=$O/share/tessdata $O/bin/tesseract probe.png stdout -l eng | tee out.txt
+          grep -q 4712345 out.txt
+          $PY -c "import ctypes; z = ctypes.CDLL('$O/lib/libzbar.so.0'); print('zbar loads', z)"
+          tar czf native-tools-x86_64.tar.gz native-tools
+          sha256sum native-tools-x86_64.tar.gz | tee native-tools-x86_64.tar.gz.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-tools
+          if-no-files-found: error
+          path: |
+            native-tools-x86_64.tar.gz
+            native-tools-x86_64.tar.gz.sha256

@@ -956,7 +956,7 @@ def parse_discs(release: dict[str, Any]) -> list[dict]:
     # TRK-3: one disc per medium named, in order; headings between ("Bonus Track") are sections
     # of that disc, never discs of their own (Mogwai - Mr. Beast, Blu-spec CD + DVD: the bonus
     # track was numbered 1 of a second disc)
-    by_medium = _split_by_medium(tracklist)
+    by_medium = _split_by_medium(tracklist, release)
     if by_medium is not None:
         return by_medium
 
@@ -1002,10 +1002,20 @@ def parse_discs(release: dict[str, Any]) -> list[dict]:
 _MEDIUM_POSITION_RE = re.compile(r'^\s*(cd|dvd|bd|blu-?ray|sacd|vhs|cdr?|hdcd)\s*(?:[-.]\s*(\d+))?\s*$', re.IGNORECASE)
 
 
-def _split_by_medium(tracklist: list[dict]) -> list[dict] | None:
+def _medium_key(name: str) -> str:
+    """One name for a medium, as a position or a format writes it ("Blu-ray" / "BD")."""
+    key = re.sub(r'[\s\-]', '', str(name or '').casefold())
+    return {'bd': 'bluray', 'hdcd': 'cd'}.get(key, key)
+
+
+def _split_by_medium(tracklist: list[dict], release: dict | None = None) -> list[dict] | None:
     """TRK-3: discs by the medium each track's position names ("CD-1" ... "CD-11", "DVD"):
     one disc per medium, in the order they first come; None unless every track's position is
-    of that form (a disc-numbered "CD1-1" or a plain "1" is read by the other conventions)."""
+    of that form (a disc-numbered "CD1-1" or a plain "1" is read by the other conventions),
+    and unless each medium named is ONE disc: where the release lists formats, each medium
+    is there with quantity 1 (CD + DVD); where it lists none, two media or more are named.
+    A 2-CD set numbered "CD-1" ... "CD-12" across its discs is read by the other conventions
+    (its "CD 1" / "CD 2" headings), never merged into one disc."""
     tracks = [e for e in tracklist if (e.get('type_') or 'track') == 'track']
     if not tracks:
         return None
@@ -1014,7 +1024,21 @@ def _split_by_medium(tracklist: list[dict]) -> list[dict] | None:
         m = _MEDIUM_POSITION_RE.match(str(entry.get('position') or ''))
         if not m:
             return None
-        keys.append(m.group(1).lower().replace('-', ''))
+        keys.append(_medium_key(m.group(1)))
+    formats = [f for f in ((release or {}).get('formats') or []) if isinstance(f, dict)]
+    if formats:
+        qty: dict[str, int] = {}
+        for fmt in formats:
+            try:
+                n = int(str(fmt.get('qty') or '1').strip())
+            except (TypeError, ValueError):
+                n = 1
+            k = _medium_key(fmt.get('name'))
+            qty[k] = qty.get(k, 0) + n
+        if any(qty.get(k) != 1 for k in set(keys)):
+            return None                                  # (a medium of several discs, or unlisted)
+    elif release is not None and len(set(keys)) < 2:
+        return None                                      # (one medium, its disc count unknown)
     if not any(_MEDIUM_POSITION_RE.match(str(e.get('position') or '')).group(2) for e in tracks):
         return None                                      # (no track numbers at all: not this form)
     last = {}

@@ -1,5 +1,39 @@
 # Release notes
 
+## 0.8.42
+
+**Box sets numbered one way (TRK-4)**
+- When MusicBrainz and Discogs split the same tracks into discs differently, every file is
+  numbered by the one layout your files' own disc and track numbers agree with - never the disc
+  from one database and the track from the other.
+
+**Featured guests and lead artists (NAM-8)**
+- "Artist featuring Guest", "Artist with Guest", "Artist presents ...": the album is filed under
+  its lead artist. Partners credited before a guest keep the whole credit; a database that does not
+  answer no longer throws away the other's answer.
+
+**Safer evidence**
+- A barcode decides only for an album that fits it - half its lengths or its titles, or nothing
+  to compare (BAR-7); lengths still never stop a barcode when the titles agree.
+- A catalogue number on your scans counts only when it stands alone - never as the start of a
+  longer printed number such as "SICP 10151~4" or "ECM 1064/65" (BAR-8).
+- A release listing your tracks in your files' own order wins a tie against one in another order;
+  one track moved is counted as one (TRK-2).
+- A 2-CD Discogs release numbered "CD-1" ... "CD-12" stays two discs (TRK-3); a work's movements
+  are merged only when none has a length of its own (TRK-1).
+
+**Folders and copies**
+- "M.I.A." and "MIA." are two artists; "Mr. Big" and "Mr Big" are still one folder (NAM-7).
+- A second copy is held apart only when it brings no disc the filed copy lacks; disc numbers
+  "01" and "1" are the same (MOV-4).
+
+**Wikipedia**
+- Bonus sections go on the disc they continue, a deluxe edition's bonus disc leaves a standard
+  edition beside it, nested and display templates read right (WEB-2).
+
+**AppImage**
+- fpcalc (AcoustID fingerprints) is bundled: Chromaprint's own static 1.5.1 release.
+
 ## 0.8.41
 
 **Track numbers from Discogs read right (TRK-3)**

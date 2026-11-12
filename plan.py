@@ -756,17 +756,32 @@ class _DuplicateCopy(Exception):
     """MOV-4: the album is a second copy of a release already filed in its destination folder."""
 
 
+def _disc_no(value):
+    """MOV-4: a disc number as an integer ("01" and "1/2" are 1); None when not a number."""
+    v = str(value if value is not None else "").partition("/")[0].strip()
+    return int(v) if v.isdigit() else None
+
+
+def _disc_nos(values) -> set:
+    """The integer disc numbers among VALUES (non-numeric ones ignored)."""
+    return {n for n in map(_disc_no, values or ()) if n is not None}
+
+
 def _prop_discs(prop) -> set:
-    """MOV-4: the disc numbers an album brings (its targets' disc numbers; "1" when none)."""
-    return {str((t.get("discnumber") or ["1"])[0]).partition("/")[0].strip() or "1" for t in prop.targets or [{}]}
+    """MOV-4: the disc numbers an album brings, as integers (its targets' disc numbers; 1 when
+    none is a number)."""
+    return _disc_nos(str((t.get("discnumber") or ["1"])[0]) for t in prop.targets or [{}]) or {1}
 
 
 def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set) -> bool:
     """MOV-4: album_dir already holds, on disk and outside this plan, music tagged as this very
-    release (a release ID shared) on one of these discs: another copy of the album (a new rip
-    arriving in a watched folder while the library has it)."""
+    release (a release ID shared) on every one of these discs: another copy of the album (a new
+    rip arriving in a watched folder while the library has it). A copy bringing a disc the
+    folder lacks is not a duplicate (it joins its set: BOX-2)."""
+    want = _disc_nos(discs) or {1}
     if not album_dir.is_dir():
         return False
+    found = set()
     for dirpath, dirs, names in os.walk(album_dir):
         dirs[:] = [d for d in dirs if _DISC_NAME.match(d)]
         for n in names:
@@ -781,8 +796,8 @@ def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set)
             except Exception:
                 continue
             if _ids_of(t) & me:
-                d = str((t.get("discnumber") or ["1"])[0]).partition("/")[0].strip() or "1"
-                if d in discs:
+                found |= _disc_nos([(t.get("discnumber") or ["1"])[0]])
+                if want <= found:
                     return True
     return False
 
@@ -1060,12 +1075,16 @@ def _folder_key(name: str, windows: bool) -> str:
 
 def _loose_key(name: str, windows: bool = False) -> str:
     """NAM-7: an artist folder's name as its spellings across databases and sleeves share it:
-    one Unicode form, one kind of quote, "and", "&" and "+" alike (in any letter case),
-    commas and full stops left out ("Blood, Sweat And Tears", "Blood Sweat & Tears", "R.E.M."
-    and "REM"); letter case only with Windows-compatible names ("Air" and "AIR" are two acts)."""
+    one Unicode form, one kind of quote, "and", "&" and "+" alike (in any letter case), commas
+    left out ("Blood, Sweat And Tears", "Blood Sweat & Tears"), and a full stop closing a word of
+    two or more letters (one before a space or at the end: "Mr. Beast" and "Mr Beast") left out;
+    every other full stop separates, as a space would - initials stay initials ("M.I.A." and
+    "M I A" share, "MIA" and "MIA." are another name; "t.A.T.u." is not "Tatu"); letter case
+    only with Windows-compatible names ("Air" and "AIR" are two acts)."""
     k = unicodedata.normalize("NFC", name).translate(_QUOTES)
     k = re.sub(r"\s*(?:&|\+|\b[Aa][Nn][Dd]\b)\s*", " & ", k)
-    k = " ".join(re.sub(r",", " ", k).replace(".", "").split())
+    k = re.sub(r"(?<![^\W\d_])([^\W\d_]{2,})\.(?=\s|$)", r"\1", k)   # ("Mr." -> "Mr"; "A." stays)
+    k = " ".join(re.sub(r"[,.]", " ", k).split())
     return k.casefold() if windows else k
 
 
@@ -1352,14 +1371,29 @@ class Planner:
         """The plan for one album. Its files are opened once for all the reads below (tagio.reading)."""
         with tagio.reading(), ex.meta_memo():
             try:
-                return self._album(prop)
+                entry = self._album(prop)
             except _DuplicateCopy as dup:
                 # MOV-4: another copy of this release is already filed there: tagged where it is
                 self._in_place_note = str(dup)
                 try:
-                    return self._album(prop)
+                    entry = self._album(prop)
                 finally:
                     self._in_place_note = None
+            # MOV-4: an album folder is claimed for this album's discs only once its placement
+            # is decided - an album blocked, skipped or not moved claims none
+            if not (entry.get("status") in ("ready", "unchanged") and
+                    any(fe.get("op") in ("copy", "move") for fe in entry.get("files") or [])):
+                self._unclaim_album_dirs(prop)
+            return entry
+
+    def _unclaim_album_dirs(self, prop):
+        """MOV-4: this album's claims on album folders, given up (it is not filed there)."""
+        src, me = str(prop.source_dir), _release_ids(prop)
+        claims = self.__dict__.get("_album_claims") or {}
+        for k in list(claims):
+            claims[k] = [c for c in claims[k] if not (c[1] == src and c[0] == me)]
+            if not claims[k]:
+                del claims[k]
 
     def _album(self, prop: Proposal) -> dict:
         self._win_album = f"{prop.source_dir}#{sorted(map(str, prop.files))}"   # (one of several albums of a folder)
@@ -2642,19 +2676,25 @@ class Planner:
             claims = self.__dict__.setdefault("_album_claims", {})
             dup = None
             here = fnm.fold(album_dir) == fnm.fold(Path(prop.source_dir))
+            # (a duplicate brings no disc the other copy lacks: a full set arriving where the
+            # library has disc 1 alone joins it, BOX-2; disc numbers compared as integers)
+            planned = False
             if not clash and not shared and not here:
-                if any(ids & me and src != str(prop.source_dir) and discs & mine
-                       for ids, src, discs in claims.get(key, ())):
-                    dup = album_dir                      # (another copy claimed it in this plan)
-                elif owner is not None and owner & me and any(
-                        d == key and ids & me and self.__dict__.get("_res_discs", {}).get(d, set()) & mine
-                        for d, ids, _src in self._resident):
+                claimed = set().union(*[discs for ids, src, discs in claims.get(key, ())
+                                        if ids & me and src != str(prop.source_dir)])
+                resident = set().union(*[_disc_nos(self.__dict__.get("_res_discs", {}).get(d, ()))
+                                         for d, ids, _src in self._resident if d == key and ids & me])
+                if claimed and mine <= claimed:
+                    # (another copy claimed it in this plan: it is filed there only when that
+                    # album's plan is carried out)
+                    dup, planned = album_dir, True
+                elif owner is not None and owner & me and resident and mine <= resident:
                     dup = album_dir                      # (another copy of this plan sits there)
                 elif owner is None and _same_release_there(album_dir, me, ignore, mine):
                     dup = album_dir                      # (a copy already filed there, on disk)
             if dup is not None:
-                raise _DuplicateCopy(f"another copy of this release is filed in {dup.name}: this one is "
-                                     "tagged where it is, not put beside it (MOV-4)")
+                raise _DuplicateCopy(f"another copy of this release is {'planned to be filed' if planned else 'filed'} "
+                                     f"in {dup.name}: this one is tagged where it is, not put beside it (MOV-4)")
             if not shared:
                 claims.setdefault(fnm.fold(album_dir), []).append((me, str(prop.source_dir), mine))
             if clash:

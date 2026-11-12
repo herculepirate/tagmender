@@ -120,7 +120,10 @@ class NAM7(unittest.TestCase):
         (self.root / "Air" / "A").mkdir(parents=True)
         (self.root / "R.E.M" / "A").mkdir(parents=True)
         self.assertEqual(self.spelled("AIR", "B", "01.flac").parent.parent.name, "AIR")   # (two acts on Linux)
-        self.assertEqual(self.spelled("REM", "B", "01.flac").parent.parent.name, "R.E.M")
+        # (0.8.42: initials stay initials - "R.E.M." is "R.E.M" or "R E M", never "REM")
+        self.assertEqual(self.spelled("R.E.M.", "B", "01.flac").parent.parent.name, "R.E.M")
+        self.assertEqual(self.spelled("R E M", "B", "01.flac").parent.parent.name, "R.E.M")
+        self.assertEqual(self.spelled("REM", "B", "01.flac").parent.parent.name, "REM")
 
     def test_NAM7_a_new_artist_keeps_the_scripts_spelling_for_the_whole_plan(self):
         a = self.spelled("Simon And Garfunkel", "A", "01.flac")

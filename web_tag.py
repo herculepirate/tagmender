@@ -218,23 +218,60 @@ def _wiki_value(box, field):
     return re.sub(r"\s+", " ", v).strip(" ,|")
 
 
-# a track listing's field value: [[link|text]] and {{templates}} whole (their "|" is no field's end)
-_WIKI_FIELD = re.compile(r"\|\s*(title|length)(\d+)\s*=\s*((?:\[\[[^\]]*\]\]|\{\{[^{}]*\}\}|[^\n|\[{]|[\[{](?![\[{]))*)",
-                         re.I)
+def _wiki_fields(listing):
+    """WEB-2: the titleN/lengthN fields of a {{Track listing}} as [(key, number, value)]: a field
+    runs to the next "|" or line end outside [[links]] and {{templates}}, nested ones too
+    ("{{nowrap|{{lang|fr|Chanson}} d'amour}}")."""
+    parts, depth, cur, i = [], 0, [], 0
+    while i < len(listing):
+        two = listing[i:i + 2]
+        if two in ("{{", "[["):
+            depth += 1
+            cur.append(two)
+            i += 2
+            continue
+        if two in ("}}", "]]") and depth:
+            depth -= 1
+            cur.append(two)
+            i += 2
+            continue
+        c = listing[i]
+        if depth == 0 and c in "|\n":
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    parts.append("".join(cur))
+    out = []
+    for part in parts:
+        m = re.match(r"\s*(title|length)(\d+)\s*=(.*)\Z", part, re.S | re.I)
+        if m:
+            out.append((m.group(1), m.group(2), m.group(3).strip()))
+    return out
 
 
-_NOTE_TEMPLATES = re.compile(r"^\s*(?:efn|refn|ref|sfn|r|cite\b|citation|note|nb|#tag)", re.I)
+# notes and citations: gone with their text. "r" is the template named exactly "r" ({{r|a}}),
+# never {{ruby|...}}
+_NOTE_TEMPLATES = re.compile(r"^\s*(?:efn|refn|ref|sfnp?|rp?(?=\s*(?:\||$))|cite\b|citation|note|nb|#tag)", re.I)
+# templates shown as their first unnamed part: {{abbr|No.|Number}} "No.", {{nihongo|English|日本|
+# romaji}} "English", {{ruby|雪|ゆき}} "雪"; the others ({{nowrap|X}}, {{lang|fr|Titre}}) as their last
+_FIRST_ARG_TEMPLATES = {"abbr", "abbrlink", "nihongo", "nihongo2", "nihongo3", "nihongo foot", "ruby", "ruby-ja",
+                        "tooltip", "hover title", "h:title"}
 
 
 def _unwrap_templates(v):
-    """WEB-2: {{nowrap|X}}, {{lang|fr|Titre}}, {{sup|b}} keep their text (the last unnamed part);
-    notes and citations ({{efn|...}}, {{cite web|...}}) go. Innermost first."""
+    """WEB-2: {{nowrap|X}}, {{lang|fr|Titre}}, {{sup|b}} keep their text (the last unnamed part;
+    {{abbr|No.|Number}}, {{nihongo|...}}, {{ruby|...}} the first); notes and citations
+    ({{efn|...}}, {{cite web|...}}, {{r|...}}) go. Innermost first."""
     def one(m):
         parts = m.group(1).split("|")
         if _NOTE_TEMPLATES.match(parts[0]):
             return ""
         args = [x for x in parts[1:] if "=" not in x]
-        return args[-1] if args else ""
+        if not args:
+            return ""
+        return args[0] if " ".join(parts[0].split()).casefold() in _FIRST_ARG_TEMPLATES else args[-1]
     for _ in range(5):
         v2 = re.sub(r"\{\{([^{}]*)\}\}", one, v)
         if v2 == v:
@@ -248,9 +285,9 @@ def _wiki_blocks(text):
     out = []
     for listing in re.findall(r"\{\{\s*Track ?listing(.*?)\n\}\}", text, re.S | re.I):
         rows = {}
-        for k, n, v in _WIKI_FIELD.findall(listing):
-            v = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", v)       # (a link: its text)
+        for k, n, v in _wiki_fields(listing):
             v = re.sub(r"<ref[^>]*/>|<ref[^>]*>.*?</ref>|<!--.*?-->", "", v, flags=re.S)
+            v = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", v)       # (a link: its text)
             v = _unwrap_templates(v)
             rows.setdefault(int(n), {})[k.lower()] = v.strip()
         tracks = []
@@ -271,46 +308,84 @@ _EDITION_HEAD = re.compile(r"bonus|edition|deluxe|reissue|remaster|exclusive|dig
                            r"special|expanded|anniversary|itunes|amazon|target|walmart|vinyl\b|cd\b|lp\b", re.I)
 
 
+# a block numbered from 1 that is an edition's extra disc, by its headline ("Deluxe edition bonus
+# disc", "Bonus disc", "2010 reissue"); never a medium's own name ("CD 2", "Disc two")
+_EXTRA_DISC_HEAD = re.compile(r"bonus|edition|deluxe|reissue|expanded|anniversary|limited|special|exclusive", re.I)
+# an LP side's headline: "Side one", "Side B", "Side 2" - even sides run on from the side before
+_SIDE_HEAD = re.compile(r"^\W*side\s+(one|two|three|four|five|six|seven|eight|[a-h]|[1-8])\b", re.I)
+_SIDES = {w: k for k, w in enumerate("one two three four five six seven eight".split(), 1)} | \
+    {c: k for k, c in enumerate("abcdefgh", 1)} | {str(k): k for k in range(1, 9)}
+
+
+def _link_text(s):
+    return re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", s or "")
+
+
 def _wiki_editions(blocks):
     """WEB-2: the editions an article's blocks make, each [(disc, num, title, secs)]. A block
-    numbered from 1 is a disc of its own ("Disc one", "Disc two"). A block numbered on from where
-    the album ends continues it ("Side two" 6-10, a section without a headline) - unless its
-    headline names an edition, or another section already took those numbers: then it is that
-    edition's bonus tracks, its own candidate ("Digital edition bonus tracks", "EMP & Target
-    exclusive CD bonus tracks", both 13-14), never stacked on the others; sections running on
-    from one another (13-14 then 15-16) together."""
-    discs, sections = [], []
-    for block in blocks:
-        first, tracks = block[0], block[1]
-        head = block[2] if len(block) > 2 else ""
-        if first == 1 or not discs:
-            discs.append(list(tracks))
-            continue
-        end = max(n for n, _t, _s in discs[-1])
-        if first == end + 1 and not _EDITION_HEAD.search(re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]", r"\1", head)) \
-                and not sections:
-            discs[-1].extend(tracks)                     # ("Side two": the album runs on)
-        else:
-            sections.append(tracks)
-    base = [(d, n, t, s) for d, tracks in enumerate(discs, 1) for n, t, s in tracks]
-    if not base:
-        return []
-    last = len(discs)
+    numbered from 1 is a disc of its own ("Disc one", "Disc two") - unless it is an LP's even
+    side ("Side two" numbered from 1 again: the disc runs on, numbered on), or its headline names
+    an edition ("Deluxe edition bonus disc"): that disc is another edition's, so the standard
+    edition without it is a candidate too. A block numbered on from where a disc ends continues
+    it ("Side two" 6-10, a section without a headline) - unless its headline names an edition, or
+    another section already took those numbers: then it is that edition's bonus tracks on that
+    disc (the disc whose numbers it continues: "Disc one bonus tracks" after disc two), its own
+    candidate ("Digital edition bonus tracks", "EMP & Target exclusive CD bonus tracks", both
+    13-14), never stacked on the others; sections running on from one another (13-14 then 15-16)
+    together."""
+    discs, sections = [], []                     # discs: [tracks, extra]; sections: (disc index, tracks)
 
-    def end_of(edition):
-        return max((n for d, n, _t, _s in edition if d == last), default=0)
-    editions, prev, seen = [base], None, {tuple(base)}
-    for tracks in sections:
-        mine = [(last, n, t, s) for n, t, s in tracks]
-        if prev is not None and tracks[0][0] == end_of(prev) + 1:
-            prev = prev + mine                           # (runs on from the section before it)
-        elif tracks[0][0] == end_of(base) + 1:
-            prev = base + mine                           # (another edition's bonus tracks)
+    def end(k):
+        return max(n for n, _t, _s in discs[k][0])
+    for block in blocks:
+        first, tracks = block[0], list(block[1])
+        head = _link_text(block[2] if len(block) > 2 else "")
+        side = _SIDE_HEAD.match(head)
+        if first == 1 and discs and side and _SIDES[side.group(1).casefold()] % 2 == 0:
+            e = end(len(discs) - 1)
+            discs[-1][0].extend((n + e, t, s) for n, t, s in tracks)     # ("Side two" from 1: runs on)
+            continue
+        if first == 1 or not discs:
+            extra = bool(discs) and (bool(_EXTRA_DISC_HEAD.search(head)) or discs[-1][1])
+            discs.append([tracks, extra])
+            continue
+        at = next((k for k in range(len(discs) - 1, -1, -1) if first == end(k) + 1), None)
+        if at == len(discs) - 1 and not _EDITION_HEAD.search(head) and not sections:
+            discs[-1][0].extend(tracks)                  # ("Side two": the album runs on)
+        else:
+            sections.append((at, tracks))
+    if not discs:
+        return []
+    order = [k for k in range(len(discs)) if not discs[k][1]] + [k for k in range(len(discs)) if discs[k][1]]
+    number = {k: d for d, k in enumerate(order, 1)}           # (an edition's extra discs after the others)
+
+    def lay(ks):
+        return [(number[k], n, t, s) for k in ks for n, t, s in discs[k][0]]
+    base = lay([k for k in order if not discs[k][1]])
+    whole = lay(order)
+
+    def end_of(edition, disc):
+        return max((n for d, n, _t, _s in edition if d == disc), default=0)
+    editions, seen = [], set()
+
+    def add(edition):
+        edition = sorted(edition, key=lambda x: (x[0], x[1]))
+        if edition and tuple(edition) not in seen:     # (two sections of the same tracks: one)
+            seen.add(tuple(edition))
+            editions.append(edition)
+    add(base)
+    if whole != base:
+        add(whole)                                       # (with the edition's extra disc)
+    prev = prev_disc = None
+    for at, tracks in sections:
+        if prev is not None and tracks[0][0] == end_of(prev, prev_disc) + 1:
+            prev = prev + [(prev_disc, n, t, s) for n, t, s in tracks]   # (runs on from the section before it)
+        elif at is not None:
+            prev_disc = number[at]
+            prev = (whole if discs[at][1] else base) + [(prev_disc, n, t, s) for n, t, s in tracks]
         else:
             continue                                     # (numbered otherwise: not placed)
-        if tuple(prev) not in seen:                      # (two sections of the same tracks: one)
-            seen.add(tuple(prev))
-            editions.append(prev)
+        add(prev)
     return editions
 
 

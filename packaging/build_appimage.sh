@@ -16,8 +16,9 @@
 #
 # Needs: uv (pip install uv) unless --python points at an unpacked python-build-standalone,
 # and appimagetool (downloaded to ./.cache when missing).
-# Runs on x86_64 Linux with glibc 2.28 or newer (PySide6 wheels); ffmpeg, fpcalc and tesseract
-# are used from the system when present (not bundled).
+# Runs on x86_64 Linux with glibc 2.28 or newer (PySide6 wheels). fpcalc is bundled (Chromaprint's
+# static release, checksum-pinned); ffmpeg and tesseract are used from the system when present
+# (not bundled yet: issue #4).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC=$PWD
@@ -44,6 +45,16 @@ if [ ! -x "$TOOL" ]; then
   curl -fsSL -o "$TOOL" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
   chmod +x "$TOOL"
 fi
+# fpcalc (AcoustID fingerprints): Chromaprint's own static release, pinned (LGPL-2.1+; it brings
+# FFmpeg's decoders, LGPL-2.1+). Sources: https://github.com/acoustid/chromaprint/releases/tag/v1.5.1
+FPCALC_VER=1.5.1
+FPCALC_SHA=4d7433a7f778e5946d7225230681cbcd634e153316ecac87c538c33ac32387a5
+FPCALC_TGZ=$CACHE/chromaprint-fpcalc-$FPCALC_VER-linux-x86_64.tar.gz
+if [ ! -f "$FPCALC_TGZ" ]; then
+  curl -fsSL -o "$FPCALC_TGZ" \
+    "https://github.com/acoustid/chromaprint/releases/download/v$FPCALC_VER/chromaprint-fpcalc-$FPCALC_VER-linux-x86_64.tar.gz"
+fi
+echo "$FPCALC_SHA  $FPCALC_TGZ" | sha256sum -c --quiet - || { echo "fpcalc download does not match its checksum" >&2; exit 1; }
 
 APPDIR=$(mktemp -d)/TagMender.AppDir
 trap 'rm -rf "$(dirname "$APPDIR")"' EXIT
@@ -74,6 +85,10 @@ if [ "$PLAYER" = 1 ]; then          # the rest of PySide6-Addons: not used
 fi
 find "$APPDIR/usr/python" -name __pycache__ -prune -exec rm -rf {} +
 LIBDISCID=$(ldconfig -p 2>/dev/null | sed -n 's/.*libdiscid\.so\.0 (libc6,x86-64) => //p' | head -1)
+install -D -m 0755 /dev/null "$APPDIR/usr/tools/bin/fpcalc"
+tar xzf "$FPCALC_TGZ" -O "chromaprint-fpcalc-$FPCALC_VER-linux-x86_64/fpcalc" > "$APPDIR/usr/tools/bin/fpcalc"
+printf 'fpcalc %s: Chromaprint (LGPL-2.1+, https://github.com/acoustid/chromaprint), statically linked with FFmpeg (LGPL-2.1+, https://ffmpeg.org); unmodified release binary.\n' \
+  "$FPCALC_VER" > "$APPDIR/usr/tools/NOTICE"
 if [ -n "$LIBDISCID" ]; then        # its own folder: AppRun puts only this one on LD_LIBRARY_PATH
   install -D -m 0644 "$(readlink -f "$LIBDISCID")" "$APPDIR/usr/lib/discid/libdiscid.so.0"
 else
@@ -93,6 +108,7 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE=$(dirname "$(readlink -f "$0")")
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
 export LD_LIBRARY_PATH="$HERE/usr/lib/discid${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"   # libdiscid only
+export PATH="$HERE/usr/tools/bin:$PATH"     # the bundled fpcalc first; the system's other tools after it
 [ $# -eq 0 ] && set -- gui
 exec "$HERE/usr/python/bin/python3" "$HERE/usr/lib/tagmender/tagmender.py" "$@"
 EOF

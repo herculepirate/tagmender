@@ -336,33 +336,33 @@ class TRK2(unittest.TestCase):
                            for i, k in enumerate(order)]}
 
     def test_TRK2_each_file_is_paired_with_its_own_track(self):
-        v = mc.order_view(self.files([3, 1, 0, 2]), self.cand())
-        self.assertEqual((v["slots"], v["missing"], v["full_tracks"]), ([3, 1, 0, 2], {}, 4))
-        self.assertEqual([t["title"] for t in v["tracks"]], ["My Days Are Numbered", "I Love You More", "Overture",
-                                                             "Morning Glory"])
+        v = mc.order_view(self.files([3, 2, 1, 0]), self.cand())
+        self.assertEqual((v["slots"], v["missing"], v["full_tracks"]), ([3, 2, 1, 0], {}, 4))
+        self.assertEqual([t["title"] for t in v["tracks"]], ["My Days Are Numbered", "Morning Glory", "I Love You More",
+                                                             "Overture"])
 
     def test_TRK2_not_in_order_already_nor_on_a_doubt(self):
         self.assertIsNone(mc.order_view(self.files([0, 1, 2, 3]), self.cand()))         # (the order it has)
-        self.assertIsNone(mc.order_view(self.files([3, 1, 0, 2], secs={3: 260}), self.cand()))   # (a length off)
+        self.assertIsNone(mc.order_view(self.files([3, 2, 1, 0], secs={3: 260}), self.cand()))   # (a length off)
         c = self.cand()
         c["tracks"][2]["title"] = "Overture"                                             # (two tracks one title)
-        self.assertIsNone(mc.order_view(self.files([3, 1, 0, 2]), c))
-        f = self.files([3, 1, 0, 2])
+        self.assertIsNone(mc.order_view(self.files([3, 2, 1, 0]), c))
+        f = self.files([3, 2, 1, 0])
         f["tracks"][0]["title"] = ""
         self.assertIsNone(mc.order_view(f, self.cand()))                                 # (a file without a title)
 
     def test_TRK2_scored_on_the_pairing_and_exported_for_the_tags(self):
         a = dict(album({"cd_frames": False, "not_cd": True, "hires": True, "lossless": True}),
-                 tracks=self.files([3, 1, 0, 2])["tracks"], title="Live At Donington")
+                 tracks=self.files([3, 2, 1, 0])["tracks"], title="Live At Donington")
         dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
         rel = release([{"name": "SACD", "qty": "1"}])
         rel["tracklist"] = [{"position": str(i + 1), "type_": "track", "title": t, "duration": f"{s // 60}:{s % 60:02d}"}
                             for i, (t, s) in enumerate(self.REL)]
         s = mc.score_candidate(a, ma.discogs_candidate(rel, dm), CFG)
-        self.assertEqual((s["dur_frac"], s["cand"]["slots"]), (1.0, [3, 1, 0, 2]))
+        self.assertEqual((s["dur_frac"], s["cand"]["slots"]), (1.0, [3, 2, 1, 0]))
         self.assertTrue(any("TRK-2" in n for n in s["notes"]))
         out = ma.summarize({"best": s})
-        self.assertEqual((out["slots"], out["missing"], out["release_tracks"]), ([3, 1, 0, 2], {}, 4))
+        self.assertEqual((out["slots"], out["missing"], out["release_tracks"]), ([3, 2, 1, 0], {}, 4))
 
     def test_TRK2_a_release_you_choose_is_tagged_track_by_track(self):
         import engine
@@ -371,10 +371,10 @@ class TRK2(unittest.TestCase):
         rel["tracklist"] = [{"position": str(i + 1), "type_": "track", "title": t, "duration": f"{s // 60}:{s % 60:02d}"}
                             for i, (t, s) in enumerate(self.REL)]
         cand = ma.discogs_candidate(rel, dm)
-        a = self.files([3, 1, 0, 2])
+        a = self.files([3, 2, 1, 0])
         sc = mc.score_candidate(dict(album({}), tracks=a["tracks"]), cand, CFG)
         got = engine._slots_of(a, cand, sc)
-        self.assertEqual((got["slots"], got["missing"], got["release_tracks"]), ([3, 1, 0, 2], {}, 4))
+        self.assertEqual((got["slots"], got["missing"], got["release_tracks"]), ([3, 2, 1, 0], {}, 4))
         in_order = self.files([0, 1, 2, 3])
         self.assertEqual(engine._slots_of(in_order, cand, mc.score_candidate(dict(album({}), tracks=in_order["tracks"]),
                                                                              cand, CFG)), {})

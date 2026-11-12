@@ -152,8 +152,13 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         aligned = lambda xs: xs[band_at] if len(xs) == len(names) else ""   # noqa: E731
         lead = (names[band_at], aligned(sorts), aligned(ids), aligned(dg))
     elif len(names) >= 2:                               # a joint credit: its first artist ...
-        # (your own name for its first artist goes first: file_under over the rules)
-        equals = None if mapped(names[0])[0] else _equals(names, ids, dg, members_of, discogs_members_of)
+        # (your own name for its first artist goes first: file_under over the rules; a
+        # "feat."/"with"/"presents" credit names its lead first, whatever the members say)
+        joined = credit if not split else ""
+        if not mapped(names[0])[0] and guest_after_partners(joined, names):
+            return None              # (partners first, a guest after: the whole credit)
+        equals = None if mapped(names[0])[0] or lead_credit(joined, names) \
+            else _equals(names, ids, dg, members_of, discogs_members_of)
         if equals is True:
             return None              # ... NAM-8: unless a collaboration of equals - the whole credit
         if equals == "unknown":
@@ -200,36 +205,115 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
     return lead if changed(lead[0]) else None
 
 
+# NAM-8: the join phrases that credit a lead with a guest or an accompanying act ("Robin Trower
+# featuring Sari Schorr", "Ella Fitzgerald with Count Basie Orchestra", "X presents Y"): the
+# first artist is the album artist whatever the member lists say. "&", "and", ",", "/", "x",
+# "vs" join equals.
+_LEAD_JOIN = re.compile(r"(?<![^\W\d_])(?:feat\.?|featuring|ft\.?|with|w/|presents|pres\.|introducing)"
+                        r"(?![^\W\d_])", re.I)
+
+
+def joins(credit, names):
+    """The join phrases between NAMES as the credit text spells them ([] for one name; None
+    when the names cannot be found in order in the text, e.g. a credit written one value per
+    artist)."""
+    low, pos, out = str(credit or "").casefold(), 0, []
+    for k, n in enumerate(names):
+        n = str(n or "").casefold()
+        i = low.find(n, pos) if n else -1
+        if i < 0:
+            return None
+        if k:
+            out.append(str(credit)[pos:i])
+        pos = i + len(n)
+    return out
+
+
+def lead_credit(credit, names) -> bool:
+    """NAM-8: a credit whose first artist is joined to the rest by a lead phrase ("feat.",
+    "featuring", "ft.", "with", "presents", "introducing")."""
+    js = joins(credit, names) if credit and len(names) >= 2 else None
+    return bool(js) and bool(_LEAD_JOIN.search(js[0]))
+
+
+def guest_after_partners(credit, names) -> bool:
+    """NAM-8: equal partners before a guest ("Pat Metheny & Lyle Mays with Nana Vasconcelos"):
+    a lead join after the first. The whole credit is kept - never cut to the first partner."""
+    js = joins(credit, names) if credit and len(names) >= 3 else None
+    return bool(js) and not _LEAD_JOIN.search(js[0]) and any(_LEAD_JOIN.search(j) for j in js[1:])
+
+
+class Members(list):
+    """A database's answer for one artist: its members, and kind - "person", "group" or ""
+    (the database did not say)."""
+    kind = ""
+
+    def __init__(self, items=(), kind=""):
+        super().__init__(items)
+        self.kind = kind
+
+
+def _kind(got) -> str:
+    return getattr(got, "kind", "") or ""
+
+
+def _answer(mbid, dgid, members_of, discogs_members_of):
+    """One artist's answer from MusicBrainz, else Discogs: ("members", list) when members are
+    known; ("person", []) a person; ("group", []) a group neither lists members for; ("none",
+    []) no database answered; ("down", []) none answered and one could not be reached. A
+    definitive answer stands though the other database is unreachable (NAM-8)."""
+    state, down = "none", False
+    for some_id, ask in ((mbid, members_of), (dgid, discogs_members_of)):
+        if not some_id or not ask:
+            continue
+        got = ask(some_id)
+        if got is None:
+            down = True                                  # (unreachable: maybe the other knows)
+            continue
+        if isinstance(got, tuple) and not got:
+            continue                                     # (NOT_ASKED / not known: no answer)
+        if got:
+            return "members", list(got)
+        kind = _kind(got)
+        if kind == "group":
+            state = "group"                              # (no members here: maybe the other)
+        elif state != "group":
+            # (an empty list: a person - MusicBrainz's type says so, or a stand-in that says nothing)
+            return ("person", []) if kind in ("person", "") else ("none", [])
+    if state == "group":
+        return "group", []
+    return ("down", []) if down else ("none", [])
+
+
 def _equals(names, ids, dg, members_of=None, discogs_members_of=None):
     """NAM-8: a joint credit is a collaboration of equals (True: Calexico and Iron & Wine, two
     bands; Paolo Fresu & Omar Sosa, two musicians) unless its first artist is a member of another
     act it names - a leader credited with their own band (False: Thomas Strønen & Time Is A Blind
-    Guide, Strønen in the band). The other acts' members come from MusicBrainz (its "member of
-    band" relationships), else from Discogs. None when no database can be asked for any of them
-    (no IDs: the first artist leads, as before); "unknown" when one could not be reached."""
+    Guide, Strønen in the band) - or a person credited with a group no database lists members
+    for (False: the person leads, as before NAM-8). The other acts' members come from
+    MusicBrainz (its "member of band" relationships), else from Discogs. None when no database
+    answered for any of them (no IDs: the first artist leads, as before); "unknown" when the
+    answer depends on an artist no database could be reached for."""
     lead = fold(names[0])
+    same = len(ids) == len(names), len(dg) == len(names)
     # (and by its IDs: a name credited otherwise on the sleeve, Discogs's "L. Person" for "Lead Person")
-    lead_ids = {str(x) for x in ((ids[0] if len(ids) == len(names) else ""),
-                                 (dg[0] if len(dg) == len(names) else ""))} - {""}
-    asked = False
-    for k in range(1, len(names)):
-        mbid = ids[k] if len(ids) == len(names) else ""
-        dgid = dg[k] if len(dg) == len(names) else ""
-        members = None
-        for some_id, ask in ((mbid, members_of), (dgid, discogs_members_of)):
-            if some_id and ask:
-                got = ask(some_id)
-                if got is None:
-                    return "unknown"
-                if isinstance(got, tuple) and not got:
-                    continue                             # (NOT_ASKED: no answer either way)
-                members = list(got)
-                asked = True
-                if members:
-                    break
-        if members and any(fold(m[0]) == lead or (lead_ids & {str(x) for x in m[2:4] if x}) for m in members):
+    lead_ids = {str(x) for x in ((ids[0] if same[0] else ""), (dg[0] if same[1] else ""))} - {""}
+    answers = [_answer(ids[k] if same[0] else "", dg[k] if same[1] else "", members_of, discogs_members_of)
+               for k in range(1, len(names))]
+    for state, members in answers:
+        if state == "members" and any(fold(m[0]) == lead or (lead_ids & {str(x) for x in m[2:4] if x})
+                                      for m in members):
             return False                                 # (the first artist leads this band)
-    return True if asked else None
+    if any(state == "group" for state, _m in answers):
+        # (a group without member data: led by the first artist when that one is a person)
+        first = _answer(ids[0] if same[0] else "", dg[0] if same[1] else "", members_of, discogs_members_of)
+        if first[0] == "person":
+            return False
+        if first[0] == "down":
+            return "unknown"
+    if any(state == "down" for state, _m in answers):
+        return "unknown"
+    return True if any(state != "none" for state, _m in answers) else None
 
 
 def _found(name, ids, members_of):
@@ -324,9 +408,13 @@ def band_members(http, mbid, log=None):
         if log:
             log.info("album artist: members of %s not read: %s", mbid, exc)
         return None
-    if not isinstance(det, dict) or det.get("type") == "Person":
-        return []
-    out = []
+    if not isinstance(det, dict):
+        return NOT_ASKED               # (no such artist, a 404: not known - never "a person")
+    kind = {"person": "person", "group": "group", "orchestra": "group", "choir": "group"}.get(
+        str(det.get("type") or "").casefold(), "")
+    if kind == "person":
+        return Members((), "person")
+    out = Members((), kind)
     for r in det.get("relations") or []:
         a = r.get("artist") or {}
         if r.get("type") == "member of band" and r.get("direction") == "backward" and a.get("name"):
@@ -351,4 +439,4 @@ def discogs_members(http, dgid, log=None):
         name = re.sub(r"\s*\(\d+\)$", "", str(m.get("name") or "")).strip()
         if name:
             out.append((name, "", "", str(m.get("id") or "")))
-    return out
+    return Members(out, "group" if out else "")

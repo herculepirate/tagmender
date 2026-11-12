@@ -16,6 +16,7 @@ candidate (what MusicBrainz / Discogs says):
      "catnos": set[str], "barcodes": set[str], "disc_count": int,
      "tracks": [{"disc": int, "title": str, "secs": float}]}   # secs 0 = unknown
 """
+import bisect
 import difflib
 import functools
 import math
@@ -928,7 +929,8 @@ def _keys(values):
 def catno_printed(album, catno, text="") -> bool:
     """BAR-8: this catalogue number is printed on your copy - on a scan or a PDF booklet
     (album["printed_text"]), never only in typed notes or a saved page - as a whole number, its
-    parts maybe spaced ("476 4582"), never inside a longer one ("ecm1234" in "ecm12345")."""
+    parts maybe spaced ("476 4582"), never inside a longer one ("ecm1234" in "ecm12345"), never
+    the start of one printed on ("SICP 10151~4", "ECM 1064/65") and never joined across lines."""
     printed = album.get("printed_text")
     printed = text if printed is None and album.get("typed_text") is None else (printed or "")
     def bare(x):                                       # ("charrmcd3" is "CHARRMCD03" printed; "2230/31" "2230 31")
@@ -936,17 +938,27 @@ def catno_printed(album, catno, text="") -> bool:
     want = bare(catno)
     if not want:
         return False
-    tokens = re.findall(r"[a-z0-9]+", printed.lower())
-    for i in range(len(tokens)):
-        joined = ""
-        for j in range(i, min(i + 5, len(tokens))):
-            joined += tokens[j]
-            k = bare(joined)
-            if k == want:
-                return True
-            if len(k) >= len(want) + 2:
-                break
+    # (one line at a time: "CD" ending a line and "12345" opening the next are no number; and a
+    # number followed by more of itself - "SICP 10151~4", "ECM 1064/65", "SRCS-1234-5" - is the
+    # longer one's start, not yours)
+    for line in printed.lower().splitlines():
+        tokens = list(re.finditer(r"[a-z0-9]+", line))
+        for i in range(len(tokens)):
+            joined = ""
+            for j in range(i, min(i + 5, len(tokens))):
+                joined += tokens[j].group()
+                k = bare(joined)
+                if k == want:
+                    if not _CATNO_GOES_ON.match(line, tokens[j].end()):
+                        return True
+                    break
+                if len(k) >= len(want) + 2:
+                    break
     return False
+
+
+# BAR-8: what continues a printed catalogue number past its end ("~4", "/65", "-5")
+_CATNO_GOES_ON = re.compile(r"[ \t]?[~/\-][ \t]?\d{1,3}(?!\d)")
 
 
 def typed_only_barcode(album, barcode):
@@ -2814,6 +2826,18 @@ def slot_view(album, cand):
                 full_tracks=len(tracks))
 
 
+def _longest_increasing(seq):
+    """Length of the longest strictly increasing subsequence of seq (TRK-2's tracks in order)."""
+    tails = []
+    for x in seq:
+        i = bisect.bisect_left(tails, x)
+        if i == len(tails):
+            tails.append(x)
+        else:
+            tails[i] = x
+    return len(tails)
+
+
 def order_view(album, cand):
     """TRK-2: the files are the release's tracks in another order (Blood, Sweat & Tears - Child
     Is Father To The Man, an SACD rip numbered 001 "The Modern Adventures..." to 012, the release
@@ -2821,8 +2845,9 @@ def order_view(album, cand):
     whose title is its own and whose length agrees (within 3 s where both are known), every
     track taken once. "slots" are those tracks' positions (as slot_view's), "missing" empty.
     None unless one disc each, as many files as tracks (3 or more), every file titled and paired
-    with exactly one track, and at least half the tracks (3 or more) out of the files' order: a
-    running order of its own, not a few tracks moved (another edition's, decided as before)."""
+    with exactly one track, and at least half the tracks (3 or more) moved - all but the longest
+    run already in the release's order: a running order of its own, not a few tracks moved
+    (another edition's, decided as before; one bonus track put first moves one track)."""
     files, tracks = album.get("tracks") or [], cand.get("tracks") or []
     n = len(files)
     if n < 3 or n != len(tracks) or any(t.get("video") for t in tracks) \
@@ -2838,7 +2863,9 @@ def order_view(album, cand):
         if len(fits) != 1:
             return None
         slots.append(fits[0])
-    moved = sum(1 for i, k in enumerate(slots) if i != k)
+    # tracks moved: all but the longest run of files already in the release's order (one bonus
+    # track put first moves one track, not every position after it)
+    moved = n - _longest_increasing(slots)
     if len(set(slots)) != n or moved < max(3, (n + 1) // 2):
         # (a few tracks moved - bonus tracks in another order, two swapped - is another edition's
         # running order: the album's other pressings decide, as before)
@@ -3668,6 +3695,27 @@ def classify(scored, cfg):
             best = tied[0]
             ranked = [best] + [x for x in ranked if x is not best]
     ranked += unproven
+    # TRK-2: a release in your files' own running order, in the tie, goes before any that lists
+    # these tracks in another order: the reordered ones leave the tie (no country order or date
+    # picks them over it) and hold no pick back as runner-up - unless your barcode or catalogue
+    # number is on them (a number names the release whatever the order)
+    order_out = []
+    # (an in-order rival only when it fits every track; a reordered one with a disc TOC or the
+    # files' own source link stays: either names the release whatever the order)
+    if not kept_choice and any(not s["cand"].get("reordered") and s.get("tracks_ok") and not s.get("missing")
+                               for s in tied):
+        order_out = [s for s in tied if s["cand"].get("reordered") and not number_agrees(s)
+                     and not _carries_barcode(s)
+                     and not any(k in (s.get("clues") or {}) for k in ("disc TOC", "source link"))]
+        if order_out:
+            tied = [s for s in tied if not any(s is x for x in order_out)]
+            if not any(s is best for s in tied):
+                best = tied[0]
+            ranked = [best] + [s for s in ranked if s is not best and not any(s is x for x in order_out)] \
+                + order_out
+            best["notes"] = best["notes"] + [
+                f"your files are in this release's running order; {', '.join(str(s['cand']['id']) for s in order_out[:3])} "
+                "lists these tracks in another order (TRK-2)"]
     scan_pick = None
     # A number decides only when it is the ONLY one that agrees. When several tied
     # pressings each match a number (King Diamond: the tags carry Metal Blade's
@@ -3716,7 +3764,8 @@ def classify(scored, cfg):
         return any(s is x for x in set_aside) or bool(
             best_fits and against and all(str(x).startswith("your folder has") for x in against)
             and not _carries_barcode(s) and not number_agrees(s))   # (your number on it: a person decides)
-    runner = next((s for s in ranked[1:] if not s.get("unproven_media")), None)
+    runner = next((s for s in ranked[1:] if not s.get("unproven_media")
+                   and not any(s is x for x in order_out)), None)        # (TRK-2: not one reordered)
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
     # One release fits every track exactly where the pick misses every one, and nothing
     # else decides: the lengths are that release's own, so it is the pick. Millisecond
@@ -3787,11 +3836,12 @@ def classify(scored, cfg):
     # BAR-8: your copy's own barcode on it, every track there, the artist agreeing: a title your
     # tags write otherwise ("UFO/ Hinten", another tagger's two-on-one) is no reason to hold it
     n_rel = len(best["cand"].get("tracks") or ())
+    # (the album itself, too: half its lengths or its track titles - never another album of the
+    # artist's under a wrong barcode; BAR-7 and BAR-8 alike)
+    album_fits = ((best.get("dur_frac") or 0) >= 0.5 or (best.get("titles_agree") is None and best.get("dur_frac") is None)
+                  or (best.get("titles_agree") or 0) * 2 >= n_rel > 0)   # (no titles and no lengths: nothing disagrees)
     by_barcode = bool(barcode_proves(best) and best["tracks_ok"] and not best.get("conflict")
-                      and best["artist_sim"] >= cfg["auto_min_artist"]
-                      # (the album itself, too: half its lengths or its track titles - never another
-                      # album of the artist's under a wrong barcode)
-                      and ((best.get("dur_frac") or 0) >= 0.5 or (best.get("titles_agree") or 0) * 2 >= n_rel > 0))
+                      and best["artist_sim"] >= cfg["auto_min_artist"] and album_fits)
     if proven and best["title_sim"] < cfg["auto_min_title"]:
         best["notes"] = best["notes"] + [f"title differs from the folder's; {proof} proves the album, "
                                          f"so the database title is used ({best['cand'].get('title')})"]
@@ -3847,9 +3897,12 @@ def classify(scored, cfg):
                        or (best["code"] == "catalogue number (OCR)" and best.get("catno_on_copy"))))   # (BAR-8)
     # BAR-7: your copy's own barcode on the release, every track there, decides it whatever the
     # lengths say (a remaster's, a CD's lengths printed otherwise: Egberto Gismonti - Árvore,
-    # 4 of 8) - as an agreeing catalogue number already excuses them above (lengths_excused)
+    # 4 of 8) - as an agreeing catalogue number already excuses them above (lengths_excused).
+    # The album must fit as BAR-8's does (half its lengths or half its track titles): a barcode
+    # on a release whose tracks are neither is another album's (a wrong barcode, a compilation
+    # of one name), never decided over every length and title
     if (not own_number and barcode_decides and best["tracks_ok"] and not best.get("conflict") and not split_credit
-            and best["artist_sim"] >= cfg["auto_min_artist"]
+            and best["artist_sim"] >= cfg["auto_min_artist"] and album_fits
             and (best["title_sim"] >= cfg["auto_min_title"] or by_barcode)):     # (BAR-8: a title your tags write otherwise)
         own_number = True
         if best["dur_frac"] is not None and best["dur_frac"] < cfg["auto_min_duration_frac"]:
@@ -3870,7 +3923,8 @@ def classify(scored, cfg):
         # audio: the album may be right, the medium is not proven)
         why.append(f"which tracks of the release each version is is not proven: {best['cand']['version_unsure']}")
     if best.get("other_version") and barcode_proves(best) and not best.get("conflict") and best["tracks_ok"] and \
-            ((best.get("dur_frac") or 0) >= 0.5 or (best.get("titles_agree") or 0) * 2 >= n_rel > 0):
+            ((best.get("dur_frac") or 0) >= 0.5 or (best.get("titles_agree") is None and best.get("dur_frac") is None)
+             or (best.get("titles_agree") or 0) * 2 >= n_rel > 0):
         # BAR-8: your barcode names this version (Guru Guru - Live & Unreleased, the Spalax CD)
         best["notes"] = best["notes"] + [f"the release is the {best['other_version']} version, which your folder "
                                          "and tags do not say; your barcode is this release's (BAR-8)"]

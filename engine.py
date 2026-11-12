@@ -1656,6 +1656,11 @@ class Engine:
             dparts = None if not tags_mb else (dparts[0], None, dparts[2])
         if tags_mb and dparts and es["merge_mode"] == "mb_only":
             dparts = None
+        layout_note = ""
+        if tags_mb and dparts and dparts[1] is not None and not vtracks:
+            # TRK-4: the two databases split the same tracks into discs otherwise
+            tags_mb, dg_tracks, layout_note = settle_disc_layout(tags_mb, dparts[1], album.get("tracks") or [])
+            dparts = (dparts[0], dg_tracks, dparts[2])
         if not tags_mb and dparts and dparts[1] is not None:
             tags_dg = discogs_only_tags(*dparts[:2])
         if not tags_mb and not tags_dg:
@@ -1739,6 +1744,8 @@ class Engine:
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
+        if layout_note:
+            prop.notes = list(getattr(prop, "notes", None) or []) + [layout_note]
         if missing:
             # HF-5: the gaps go to the album's notes (plan, job report: report._gaps reads this
             # wording), never into the files
@@ -4372,6 +4379,72 @@ def discogs_parts(det, dm, http=None, s=None):
         t["discnumber"], t["totaldiscs"] = str(disc), str(total_discs)
         tracks.append(t)
     return album, tracks, total_discs
+
+
+_POSITION = ("discnumber", "totaldiscs", "tracknumber", "totaltracks")
+_MEDIUM_KEYS = ("discsubtitle", "media", "musicbrainz_discid")
+
+
+def _num(v) -> int:
+    s = str((v if not isinstance(v, list) else (v or [""])[0]) or "").partition("/")[0].strip()
+    return int(s) if s.isdigit() else 0
+
+
+def settle_disc_layout(tags_mb: list, tracks_dg: list, files: list):
+    """TRK-4: MusicBrainz's and Discogs's tracks of one release, the same in number and
+    order, split into discs otherwise (Robin Trower - The Studio Albums 1973-1983:
+    MusicBrainz 8 + 10 on discs 4 and 5, Discogs 9 + 9). The plugin's merge takes the disc
+    number from MusicBrainz and the track number from Discogs - a file of neither's layout
+    (disc 5, track 9). The layout the files' own disc and track numbers agree with numbers
+    every file, in both (most of the files' numbers, and more of them than the other's);
+    else MusicBrainz's. A file moved to
+    another disc takes that disc's own fields (its title, media) from MusicBrainz.
+    (tags_mb, tracks_dg, note); note "" when the layouts are the same."""
+    pos = lambda t: (_num(t.get("discnumber")) or 1, _num(t.get("tracknumber")))   # noqa: E731
+    mb, dg = [pos(t) for t in tags_mb], [pos(t) for t in tracks_dg]
+    if mb == dg:
+        return tags_mb, tracks_dg, ""
+    count = lambda lay: {d: sum(1 for x, _k in lay if x == d) for d, _k in lay}   # noqa: E731
+    cm, cd = count(mb), count(dg)
+    if set(cm) != set(cd) or len(cm) < 2 or any(min(k for x, k in lay if x == d) != 1
+                                                for lay, c in ((mb, cm), (dg, cd)) for d in c):
+        # (not the same discs split otherwise: a DVD numbered first on one of them, a set listed
+        # as one disc, a hidden track 0 - the plugin's merge as before)
+        return tags_mb, tracks_dg, ""
+    own = [((f.get("disc") or 1), f.get("num") or 0) for f in files] if len(files) == len(mb) else []
+    numbered = [i for i, (_d, k) in enumerate(own) if k]
+    agree = lambda lay: sum(1 for i in numbered if own[i] == lay[i])   # noqa: E731
+    # (most of the files: one file already numbered otherwise - an earlier run's - does not
+    # outvote the rest)
+    fits = lambda lay, other: 2 * agree(lay) > len(numbered) and agree(lay) > agree(other)   # noqa: E731
+    follow = "discogs" if fits(dg, mb) else "musicbrainz"
+    if follow == "discogs":
+        medium = {}
+        for t in tags_mb:
+            medium.setdefault(_num(t.get("discnumber")) or 1, {k: t[k] for k in _MEDIUM_KEYS if k in t})
+        out = []
+        for t, d in zip(tags_mb, tracks_dg):
+            t = dict(t)
+            moved = pos(t)[0] != pos(d)[0]
+            for k in _POSITION:
+                if d.get(k):
+                    t[k] = d[k] if isinstance(d[k], list) else [str(d[k])]
+            if moved and pos(d)[0] in medium:
+                for k in _MEDIUM_KEYS:
+                    t.pop(k, None)
+                t.update(medium[pos(d)[0]])
+            out.append(t)
+        return out, tracks_dg, ("MusicBrainz and Discogs split the discs differently: numbered as Discogs "
+                                "and your files number them (TRK-4)")
+    out = []
+    for t, d in zip(tags_mb, tracks_dg):
+        d = dict(d)
+        for k in _POSITION:
+            if t.get(k):
+                d[k] = (t[k] or [""])[0] if isinstance(t[k], list) else str(t[k])
+        out.append(d)
+    return tags_mb, out, ("MusicBrainz and Discogs split the discs differently: numbered as MusicBrainz"
+                          + (" and your files number them" if fits(mb, dg) else "") + " (TRK-4)")
 
 
 def _as_tags(d: dict) -> dict:

@@ -4156,7 +4156,8 @@ def one_track_movements(tracklist) -> list:
     Image" 11:09, movements 7a-7d), or a track with its own length followed by rows of its
     movements without lengths ("Symphony For The Devil" 7:49, then 7.I, 7.II, 7.III, on BS&T 3)
     - is ONE track of the disc: the movements are index points or the sleeve's headings, not
-    tracks. A movement listing its own length keeps the work as listed (each its own track).
+    tracks. Any movement listing its own length keeps the work as listed (each its own track,
+    never half merged).
     Every reader of a Discogs tracklist (the matcher, the tags written) uses this; applied twice
     it changes nothing."""
     rows = [e for e in tracklist or []]
@@ -4190,11 +4191,15 @@ def one_track_movements(tracklist) -> list:
         elif kind == "track" and str(e.get("duration") or "").strip():
             j = i + 1
             while (j < len(rows) and isinstance(rows[j], dict) and _row_kind(rows[j]) == "track"
-                   and not str(rows[j].get("duration") or "").strip()
                    and _movement_of(rows[j].get("position"), e.get("position"))):
                 j += 1
             out.append(e)
-            i = j                                    # (its movements: no tracks of their own)
+            # (its movements: no tracks of their own - only when NONE lists a length; one that
+            # does keeps the work as listed, every row its own track, never half merged)
+            if not any(str(r.get("duration") or "").strip() for r in rows[i + 1:j]):
+                i = j
+            else:
+                i += 1
             continue
         out.append(e)
         i += 1

@@ -978,7 +978,9 @@ class Engine:
         if prop.status == "identified" and prop.targets:
             other = "musicbrainz" if self.source.startswith("discogs") else "discogs"
             follow_source(prop, self.source, asked=(self.use_mb if other == "musicbrainz" else self.use_discogs)
-                          and not (prop.provider_errors or {}).get(other), sure=getattr(prop, "sure_picks", None))
+                          and not (prop.provider_errors or {}).get(other), sure=getattr(prop, "sure_picks", None),
+                          differs=lambda f, v: bool(self._another_pressing(
+                              prop, getattr(prop, "release_view", None), f, v)[0]))
         # every audio file of the album as found (its second copies too: "01 a.flac" and
         # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)
         disc = getattr(prop, "disc_folder", None)          # (one disc of a set, as its own album)
@@ -1091,7 +1093,7 @@ class Engine:
         if out and out.get("status") == "auto" and out.get("best"):
             prov = {"mb": "musicbrainz"}.get(out["best"]["source"], out["best"]["source"])
             try:
-                return self._identified(out, album, files, base)
+                return self._one_release(self._identified(out, album, files, base), out, album)
             except ma.ProviderUnavailable as exc:             # fetching the release failed: retry later
                 self.log.warning("tags for %s: %s", g.folder, exc)
                 errors[prov] = exc.kind
@@ -1825,6 +1827,7 @@ class Engine:
                 # its country is yours
                 t.pop("label", None)
                 t.pop("releasecountry", None)
+            if info.get("edition") or info.get("doubt"):
                 # (an "original" date that is only the other pressing's own - a Discogs release
                 # without a master - is no date of yours either)
                 first = t.get("originaldate") or t.get("originalyear")
@@ -1833,7 +1836,7 @@ class Engine:
                     for k in ("originaldate", "originalyear"):
                         t.pop(k, None)
             if len(years) == 1 and None not in years and "" not in years and not info.get("scans") \
-                    and not info.get("edition"):
+                    and not info.get("edition") and not info.get("doubt"):
                 t["date"] = [str(next(iter(years)))]
             else:
                 first = t.get("originaldate") or t.get("originalyear")
@@ -1854,13 +1857,258 @@ class Engine:
         p.no_lengths_tie = bool(info.get("no_lengths"))
         kept = {k for t in p.targets for k in t}
         p.provenance = {k: v for k, v in p.provenance.items() if k in kept}
-        doubt = ("your scans name another pressing" if info.get("scans")
+        doubt = (info["doubt"] if info.get("doubt")
+                 else "your scans name another pressing" if info.get("scans")
                  else info["edition"] if info.get("edition")
                  else f"{len(tied)} pressings fit equally")
         p.why = list(p.why) + [f"pressing unknown ({doubt}): album tags only; "
                                "release IDs, catalogue number, barcode and every field of one pressing left empty"] \
             + isrc_note
         return p
+
+    def _one_release(self, p, out, album):
+        """TAG-3: one release per file. The files may already hold a release ID (either
+        database's) of another pressing than the pick; below replace_min_confidence the plan
+        keeps existing values and only fills empty fields, which would leave them naming two
+        pressings (Robin Trower - Back It Up: MusicBrainz's 1983 release kept beside the 1991 US
+        CD your scans' barcode proves). Which IDs clash: _clashing (positive differences only).
+        - your copy proves the pick (_copy_proves): its tags replace the old pressing's from the
+          start (release_proven_over: the plan writes it at the replace threshold), and what of
+          the old pressing the pick has no value for is removed (_losing_fields);
+        - nothing proves it and its score is below the replace threshold: album only (the
+          album's own fields; the release tags your files hold stay - but what TagMender's own
+          earlier job wrote of a pressing is taken back, REP-1: restore);
+        - nothing proves it, its score at the threshold: replaced as ever, the old pressing's
+          fields removed with it.
+        No answer about a release (lookup failed, its database off, an old result without the
+        matcher's view) is no clash: missing information never removes or demotes anything."""
+        if p.status != "identified" or planmod.tier_of(p) != "exact" or not p.targets:
+            return p
+        view = (out or {}).get("release_ids") or {}
+        p.release_view = view                 # (follow_source asks the same: _another_pressing)
+        if not view.get("pick"):
+            return p
+        clash, facts = self._clashing(p, view, (album or {}).get("file_release_ids") or {})
+        if not clash:
+            return p
+        names = " and ".join(planmod.RELEASE_ID_WORDS[f] for f in clash)
+        ids = "; ".join(f"{x}: {why}" for v in clash.values() for x, why in v.items())
+        pick = view["pick"]
+        for x in facts:
+            x["shares_number"] = bool(_catnos_agree(pick, x)
+                                      or set(pick["barcodes"]) & set(x.get("barcodes") or ()))
+        proof = self._copy_proves(p, out, facts)
+        replace = planmod._threshold(self.profile, "replace_min_confidence")
+        conf = float(p.confidence or 0)
+        if not proof and conf < replace:
+            doubt = (f"your files' {names} names another pressing ({ids}), and nothing on your copy proves "
+                     f"this one over it (score {conf:.1f} below the replace threshold {replace:g}; TAG-3)")
+            if not self._accepts("album"):
+                return planmod.Proposal(source_dir=p.source_dir, files=p.files, provider_errors=p.provider_errors,
+                                        status="unresolved", reason_codes=["ambiguous_release"],
+                                        reason=f"pressing not established: {doubt}", why=list(p.why) + [doubt],
+                                        candidates=list(getattr(p, "candidates", None) or []))
+            pick_info = {k: pick.get(k) for k in ("source", "id", "label", "country", "formats", "year", "layout")}
+            tied = [pick_info] + [{k: x.get(k) for k in pick_info} for x in facts]
+            # (the pick's own date is not the album's: an "original" date that is only the pick's -
+            # a Discogs release without a master - is left out with it, as EDN-2's)
+            p = self._album_only(p, {"tied": tied, "doubt": doubt, "pick_year": pick.get("year")})
+            back = self._restore_own(p.files, clash, facts, pick, self._pick_side(p, view))
+            if back:
+                p.restore = back
+            p.notes = list(getattr(p, "notes", None) or []) + [
+                doubt + ": only the album's own tags are written; the release tags your files hold stay"
+                + (", but what TagMender's earlier job wrote of a pressing is taken back" if back else "")]
+            return p
+        gone, kept = self._losing_fields(p, clash, facts)
+        if proof:
+            p.release_proven_over = sorted(clash)
+        words = f"your files' {names} names another pressing ({ids}); " + (f"{proof}, so " if proof else "") + \
+            "this release's tags replace that pressing's"
+        if gone:
+            words += "; removed where this release has none: " + ", ".join(gone)
+        if kept:
+            words += "; kept by your field policy: " + ", ".join(kept)
+        p.notes = list(getattr(p, "notes", None) or []) + [words + " (TAG-3)"]
+        return p
+
+    def _clashing(self, p, view, held):
+        """TAG-3: ({field: {id: why}}, [facts of each]) - your files' release IDs that name
+        another pressing than the pick. On the database whose ID the release writes (the pick's
+        own, or its twin there): any other ID. On the other database: only when that release (as
+        scored, else looked up by its ID) differs from the pick by evidence (_pressings_differ);
+        a release nothing is known of (lookup failed, database off) is no clash."""
+        clash, facts = {}, []
+        for f in ma.RELEASE_ID_FIELDS:
+            for x in sorted({ma.norm_release_id(f, v) for v in held.get(f) or ()} - {""}):
+                why, info = self._another_pressing(p, view, f, x)
+                if why:
+                    clash.setdefault(f, {})[x] = why
+                    facts.append(dict(info) if info else {"source": "mb" if f == "musicbrainz_albumid" else "discogs",
+                                                          "id": x, "unknown": True})
+        return clash, facts
+
+    def _another_pressing(self, p, view, field, rid):
+        """TAG-3 (and follow_source): (why, facts) when the release ID rid of field names another
+        pressing than p's pick; ("", facts or None) when nothing shows it does. On the database
+        whose ID p writes (the pick's own or its twin there): any other ID. On the other: the
+        release as scored, else looked up, compared on positive differences (_pressings_differ);
+        an ID nothing is known of is not another pressing."""
+        if not (view or {}).get("pick"):
+            return "", None
+        pick = view["pick"]
+        written = {f: {ma.norm_release_id(f, v) for t in p.targets for v in t.get(f) or ()} - {""}
+                   for f in ma.RELEASE_ID_FIELDS}
+        side = self._pick_side(p, view)
+        x = ma.norm_release_id(field, rid)
+        if not x or x in side[field]:
+            return "", None
+        info = ((view.get("cands") or {}).get(field) or {}).get(x) or self._release_facts(field, x)
+        if info and ma.norm_release_id(field, info.get("id")) in side[field]:
+            return "", info                  # (an old ID merged into the pick's, or its twin's)
+        own = {"mb": "musicbrainz_albumid"}.get(pick["source"], "discogs_release_id")
+        if written[field] and field == own:
+            return "another release than the one written", info
+        # (the other database: its ID written is one twin of the pick's among those that may list
+        # the pressing twice - another of them is the same release; anything else only by evidence)
+        return ("; ".join(_pressings_differ(pick, info, side, view.get("mb_links") or {})) if info else ""), info
+
+    @staticmethod
+    def _pick_side(p, view) -> dict:
+        """TAG-3: {field: the IDs that name the pick's own release}: the pick's, those written,
+        its twins on the other database (mb_twin / dg_twin, and every scored entry of its pressing)."""
+        pick = view["pick"]
+        side = {f: {ma.norm_release_id(f, v) for t in p.targets for v in t.get(f) or ()}
+                | set((view.get("twins") or {}).get(f) or ()) for f in ma.RELEASE_ID_FIELDS}
+        side["musicbrainz_albumid"].add(view.get("mb_twin") or "")
+        side["discogs_release_id"].add(view.get("dg_twin") or "")
+        side[{"mb": "musicbrainz_albumid"}.get(pick["source"], "discogs_release_id")].add(pick["id"])
+        return {f: v - {""} for f, v in side.items()}
+
+    def _release_facts(self, field, rid):
+        """TAG-3: ma.release_facts of a release your files' ID names that the matcher did not
+        score, looked up through the providers' clients (their cache and throttling); None when
+        its database is off or did not answer (no evidence)."""
+        try:
+            if field == "musicbrainz_albumid":
+                if not self.use_mb:
+                    return None
+                det = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                         "?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+                return ma.release_facts(ma.mb_candidate(det)) if det else None
+            if self.dm is None or not (self.use_discogs or self.token) or not str(rid).isdigit():
+                return None
+            det = self.http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+            return ma.release_facts(ma.discogs_candidate(det, self.dm)) if det else None
+        except Exception as exc:                    # (an outage, a rejected token: nothing known)
+            self.log.info("TAG-3: release %s %s not read: %s", field, rid, exc)
+            return None
+
+    def _losing_fields(self, p, clash, facts):
+        """TAG-3: the fields of the pressing that lost (removed, gone), and those your field
+        policy keeps (kept): its database's fields of one release (release IDs, release track
+        IDs, the Discogs plugin's fields of one release), and a barcode, catalogue number, label,
+        country, media or date that is that pressing's own - only where the pick writes none
+        (the pick's own values replace the rest)."""
+        import tagio
+        dbs = {"musicbrainz" if f == "musicbrainz_albumid" else "discogs" for f in clash}
+        gone_all, kept_all = [], []
+        for i, t in enumerate(p.targets):
+            try:
+                before = tagio.read(p.files[i]) if i < len(p.files) else {}
+            except Exception:
+                before = {}
+            have = [k for k, v in before.items() if v and k not in t]
+            out = []
+            for db in dbs:      # (other_source_tags: the fields of the database the source setting does not name)
+                out += other_source_tags("discogs_only" if db == "musicbrainz" else "musicbrainz_only", have, True)
+            first = {str(v)[:4] for k in ("originaldate", "originalyear") for v in
+                     list(t.get(k) or []) + list(before.get(k) or [])}
+            for k in ("barcode", "catalognumber", "label", "releasecountry", "media", "date"):
+                if k == "date" and {str(v)[:4] for v in before.get(k) or ()} & first:
+                    continue                 # (the album's original date: no pressing's own)
+                if k in have and any(_pressings_value(k, before[k], x) for x in facts if not x.get("unknown")):
+                    out.append(k)
+            out = list(dict.fromkeys(out))
+            pol = getattr(self.profile, "policy", None)
+            kept = [k for k in out if pol and pol(k) in ("preserve", "lock", "fill_missing")]
+            gone = [k for k in out if k not in kept]
+            if out:
+                t["~remove"] = list(dict.fromkeys(list(t.get("~remove") or []) + out))
+            gone_all += gone
+            kept_all += kept
+        return list(dict.fromkeys(gone_all)), list(dict.fromkeys(kept_all))
+
+    def _restore_own(self, files, clash, facts, pick, side) -> dict:
+        """TAG-3 / REP-1: {file: {field: value before TagMender}} for the pressing fields
+        TagMender's own earlier job wrote of the pressing that clashes, still holding what it left
+        - an album found album only takes them back ([] when the field was empty before: removed).
+        Only that pressing's: a release ID in the clash (with its release track IDs or Discogs
+        fields), or a barcode, catalogue number, label, country, media or ASIN that is its own and
+        not the pick's. Never the pick's or a twin's: what TagMender wrote of the release it picks
+        again stays (a second plan writes nothing to it)."""
+        import tagio
+        writes = ma.tagmender_pressing_writes(files)
+        known = [x for x in facts if not x.get("unknown")]
+        ids = {f: set(v) for f, v in clash.items()}
+
+        def losing_id(field, vals):
+            return any(ma.norm_release_id(field, v) in ids.get(field, ()) and
+                       ma.norm_release_id(field, v) not in side.get(field, ()) for v in vals or ())
+        out = {}
+        for f in files:
+            w = writes.get(str(f)) or {}
+            if not w:
+                continue
+            try:
+                now = tagio.read(f)
+            except Exception:
+                continue
+            mb_lost = losing_id("musicbrainz_albumid", (w.get("musicbrainz_albumid") or ((), ()))[1])
+            dg_lost = losing_id("discogs_release_id", (w.get("discogs_release_id") or ((), ()))[1])
+            back = {}
+            for k, (b, a) in w.items():
+                if tuple(b) == tuple(a) or not ma._same_values(now.get(k) or [], a):
+                    continue
+                if k == "musicbrainz_albumid" or k == "musicbrainz_trackid":
+                    ok = mb_lost
+                elif k.startswith("discogs_"):
+                    ok = dg_lost
+                else:
+                    ok = any(_pressings_value(k, a, x) for x in known) and not _pressings_value(k, a, pick)
+                if ok:
+                    back[k] = list(b)
+            if back:
+                out[str(f)] = back
+        return out
+
+    def _copy_proves(self, p, out, clashing) -> str:
+        """TAG-3: what of your copy proves the pick over the release your files' ID names, or
+        "". Never with Extra-Careful Matching, never a pick a guess made (country order,
+        original date: TIE-1). Your scans printing its barcode, proven with nothing against it,
+        prove it whatever the lengths say (BAR-1, BAR-7). A catalogue number on the scans, your
+        own number (own_number) or your disc ID (TOC-1, the disc ID choosing it) only as FIL-1
+        has them, every track length agreeing - and a number only when it is
+        not on the other release too (one every pressing carries proves none of them)."""
+        if (self.profile.get("matching") or {}).get("extra_careful") or getattr(p, "guessed_pick", False):
+            return ""
+        sc = (out or {}).get("scans") or {}
+        clean = bool(sc.get("printed") and sc.get("state") == "proven" and not sc.get("against"))
+        found = set(sc.get("found") or ())
+        if clean and "barcode" in found:
+            return "your scans show its barcode"
+        if not getattr(p, "all_lengths", False):
+            return ""
+        # (a release the matcher did not score: whether it carries the number is not known)
+        shared = any(i.get("unknown") or i.get("shares_number") for i in clashing)
+        if clean and "catalogue_number" in found and not shared:
+            return "your scans show its catalogue number and every track length agrees"
+        if (getattr(p, "own_number", False) or getattr(p, "number_proven", False)) and not shared:
+            return "your copy's own catalogue number or barcode is on it and every track length agrees"
+        if getattr(p, "toc_proven", False) or \
+                any("pressing chosen by disc ID" in str(e) for e in getattr(p, "evidence", None) or ()):
+            return "your disc ID is this release's and every track length agrees"
+        return ""
 
     def _tied_recordings_agree(self, tied, targets):
         """Every tied pressing is a release of the MusicBrainz release group the tags name,
@@ -3389,6 +3637,67 @@ OWN_COPY_TAGS = ("musicbrainz_discid",)
 DG_ALBUM_TAGS = ("discogs_master_id", "discogs_artist_id", "discogs_albumartist_id", "discogs_style")
 
 
+def _pressings_differ(pick, other, side, mb_links) -> list:
+    """TAG-3: what shows two releases of two databases are two pressings ([] when nothing
+    does). A link between them (MusicBrainz's release linking the Discogs one, or the pick
+    linking it) makes them one. Else: both list barcodes and share none; both list catalogue
+    numbers and none agrees; both name their format and the families differ (CD, vinyl,
+    digital, cassette); a MusicBrainz release linking only other Discogs releases than this
+    one's; a Discogs release another MusicBrainz release than this one links. What either
+    lacks is no evidence; a country alone is none (a CD made in the EU sold in the UK)."""
+    if other.get("source") == "mb" and set(other.get("links") or ()) & side["discogs_release_id"]:
+        return []
+    if other.get("source") == "discogs" and (other.get("id") in (pick.get("links") or ()) or
+                                             set(mb_links.get(other.get("id")) or ()) & side["musicbrainz_albumid"]):
+        return []
+    why = []
+    a, b = set(pick.get("barcodes") or ()), set(other.get("barcodes") or ())
+    if a and b and not a & b:
+        why.append(f"barcode {', '.join(sorted(b))}, not {', '.join(sorted(a))}")
+    if pick.get("catnos") and other.get("catnos") and not _catnos_agree(pick, other):
+        why.append(f"catalogue number {', '.join(other['catnos']).upper()}, not {', '.join(pick['catnos']).upper()}")
+    a, b = set(pick.get("formats") or ()), set(other.get("formats") or ())
+    if a and b and not a & b:
+        why.append(f"{'/'.join(sorted(b))}, not {'/'.join(sorted(a))}")
+    if other.get("source") == "mb" and other.get("links"):
+        why.append(f"MusicBrainz links it to Discogs {', '.join(other['links'])}")
+    if other.get("source") == "discogs":
+        by = [m for m in mb_links.get(other.get("id")) or () if m not in side["musicbrainz_albumid"]]
+        if by:
+            why.append(f"MusicBrainz's {', '.join(by)} links it")
+    return why
+
+
+def _catnos_agree(a, b) -> bool:
+    """TAG-3: two releases' catalogue numbers agree - as written (a range "SICP 10151~4" is
+    "SICP 10151-4", catnos_agree) or normalised."""
+    return bool(mc.catnos_agree(a.get("catnos_raw") or (), b.get("catnos_raw") or ())
+                or mc.catnos_agree(a.get("catnos") or (), b.get("catnos") or ()))
+
+
+def _pressings_value(field, values, facts) -> bool:
+    """TAG-3: the file's value of a generic field is the losing pressing's own (its barcode,
+    catalogue number, label, country, media family or year)."""
+    vals = [str(v) for v in values or () if str(v).strip()]
+    if not vals:
+        return False
+    if field == "barcode":
+        return any(mc.barcode_key(v) in set(facts.get("barcodes") or ()) for v in vals)
+    if field == "catalognumber":
+        return bool(mc.catnos_agree(vals, facts.get("catnos_raw") or ())
+                    or mc.catnos_agree([mc.norm_code(v) for v in vals], facts.get("catnos") or ()))
+    if field == "label":
+        return bool(facts.get("label")) and any(mc.fold(v) == mc.fold(facts["label"]) for v in vals)
+    if field == "releasecountry":
+        return bool(facts.get("country")) and any(mc.country_code(v) == mc.country_code(facts["country"])
+                                                  for v in vals)
+    if field == "media":
+        return bool(facts.get("formats")) and all(mc.media_kind(v) in facts["formats"] for v in vals)
+    if field == "date":
+        return bool(facts.get("year")) and any(str(v)[:4] == str(facts["year"]) for v in vals)
+    return False
+
+
 def other_source_tags(source: str, keys, release_only: bool) -> list:
     """The fields among keys that belong to the database the Sources setting does not prefer
     (MusicBrainz's under discogs_*, Discogs's under musicbrainz_*): every one of them, or, with
@@ -3399,7 +3708,7 @@ def other_source_tags(source: str, keys, release_only: bool) -> list:
     return [k for k in keys if k.startswith("discogs_") and (not release_only or k not in DG_ALBUM_TAGS)]
 
 
-def follow_source(prop, source: str, asked: bool = True, sure=None):
+def follow_source(prop, source: str, asked: bool = True, sure=None, differs=None):
     """The identified album's tags as the Sources setting has them, against the IDs already in
     its files. Those IDs helped find the release (the matcher scores the releases they name),
     but what the other database's IDs say is never a conflict:
@@ -3413,6 +3722,11 @@ def follow_source(prop, source: str, asked: bool = True, sure=None):
     "discogs": the release ID each database was sure of}, as the matcher found them): its
     silence or doubt then says nothing against the release ID your files already carry.
     The disc ID (OWN_COPY_TAGS) is never removed: it is your CD's own.
+    A preferred mode removes the other database's release only when it is another pressing by
+    evidence (differs(field, value): Engine._another_pressing, TAG-3's positive differences): a
+    release ID of the same pressing, or one nothing is known of (no differs given, data missing,
+    an outage), stays - the Sources setting chooses whose release is written; it deletes no ID
+    of your pressing.
     Removals are planned like any other change (shown in the preview, undoable)."""
     import tagio
     only = source.endswith("_only")
@@ -3431,6 +3745,8 @@ def follow_source(prop, source: str, asked: bool = True, sure=None):
                          or (getattr(prop, "tier", "") or "exact") != "exact"
                          or not sure_other or sure_other in written):
             continue
+        if not only and not (differs and any(differs(id_key, v) for v in had)):
+            continue                         # (no evidence of two pressings: kept)
         gone = [k for k in other_source_tags(source, [k for k, v in before.items() if v], release_only=not only)
                 if k not in t]
         if gone:

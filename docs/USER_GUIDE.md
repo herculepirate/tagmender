@@ -797,8 +797,8 @@ A profile's **Sources** setting (`source`; Preferences › Profiles in the app, 
 | Sources | Identifies | Tags written | IDs already in your files |
 |---|---|---|---|
 | **MusicBrainz only** (`musicbrainz_only`) | MusicBrainz; Discogs is not asked | MusicBrainz's only | every `DISCOGS_*` tag is removed |
-| **MusicBrainz preferred** (`musicbrainz_preferred`, the default) | MusicBrainz picks the release when it has your pressing; Discogs when MusicBrainz cannot | MusicBrainz's, Discogs filling the gaps | a Discogs release ID that differs is replaced by the Discogs entry of the chosen pressing, else removed with that release's other Discogs fields |
-| **Discogs preferred** (`discogs_preferred`; profiles from earlier versions keep it) | Discogs picks the release; MusicBrainz when Discogs cannot | MusicBrainz's base with Discogs's values winning | a MusicBrainz release ID that differs is replaced by the MusicBrainz release of the chosen pressing, else removed with its track IDs when MusicBrainz was sure of another release (its release-group, recording and disc IDs stay) |
+| **MusicBrainz preferred** (`musicbrainz_preferred`, the default) | MusicBrainz picks the release when it has your pressing; Discogs when MusicBrainz cannot | MusicBrainz's, Discogs filling the gaps | a Discogs release ID that differs is replaced by the Discogs entry of the chosen pressing, else removed with that release's other Discogs fields when it is another pressing by evidence (its barcode or catalogue number differs, another format, links to another release) |
+| **Discogs preferred** (`discogs_preferred`; profiles from earlier versions keep it) | Discogs picks the release; MusicBrainz when Discogs cannot | MusicBrainz's base with Discogs's values winning | a MusicBrainz release ID that differs is replaced by the MusicBrainz release of the chosen pressing, else removed with its track IDs when MusicBrainz was sure of another release and the release your ID names is another pressing by evidence (its barcode or catalogue number differs, another format, links to another release); an ID of the same pressing, or one nothing is known of, stays (its release-group, recording and disc IDs stay too) |
 | **Discogs only** (`discogs_only`) | Discogs; MusicBrainz is not asked | Discogs's only, no MusicBrainz IDs | every MusicBrainz ID is removed, except the disc ID (your CD's own) |
 
 Release IDs already in your files are evidence: the releases they name are looked up and
@@ -811,7 +811,9 @@ are already tagged with one of the two, that one is kept. Only then does the pre
 database's pick stand. When both list your pressing, they are merged, and the preferred
 database's values win where they differ. A preferred mode removes nothing when the other
 database was not asked, failed for the album (an outage, no Discogs token) or was not sure of
-another release, since that says nothing about your pressing. The disc ID is never removed.
+another release, since that says nothing about your pressing - nor when nothing shows that the
+release your ID names is another pressing (a field one database lacks is no difference). The
+disc ID is never removed.
 
 Every replaced or removed ID is shown in the preview. The plan's notes name it ("replaces your
 MusicBrainz release ID ...", "removes your Discogs release ID ..."), and undo puts it back.

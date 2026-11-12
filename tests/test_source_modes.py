@@ -245,10 +245,14 @@ class Modes(Base):
 
     def test_discogs_preferred_removes_a_musicbrainz_id_of_another_pressing_without_review(self):
         # MusicBrainz is sure of another pressing than the one your files name: Discogs decides,
-        # and your MusicBrainz release and track IDs go (its recordings and disc ID stay)
-        d = self.album("Band V", "Album V", MUSICBRAINZ_ALBUMID="mb-old", MUSICBRAINZ_RELEASETRACKID="old-track",
+        # and your MusicBrainz release and track IDs go (its recordings and disc ID stay) - the
+        # release they name being another pressing by evidence (its catalogue number OLD-1, not
+        # CAT-908: TAG-3's positive difference; an ID nothing is known of stays, below)
+        old = "0ddc0ddc-1111-4222-8333-444455556666"
+        d = self.album("Band V", "Album V", MUSICBRAINZ_ALBUMID=old, MUSICBRAINZ_RELEASETRACKID="old-track",
                        MUSICBRAINZ_TRACKID="old-rec", MUSICBRAINZ_DISCID="disc-own")
-        http = FakeHttp(mb=[mb_release("mb-v", "Band V", "Album V", catno="OTHER-1", country="US")],
+        http = FakeHttp(mb=[mb_release("mb-v", "Band V", "Album V", catno="OTHER-1", country="US"),
+                            mb_release(old, "Band V", "Album V (old)", catno="OLD-1", country="US")],
                         dg=[dg_release(908, "Band V", "Album V", catno="CAT-908")])
         eng = self.engine(http)
         eng.cfg["preferred_countries"] = ["US"]
@@ -263,7 +267,21 @@ class Modes(Base):
         self.assertIsNone(ch["musicbrainz_trackid"])          # (the release track's ID, as stored)
         self.assertNotIn("musicbrainz_recordingid", ch)
         self.assertNotIn("musicbrainz_discid", ch)
-        self.assertIn("removes your MusicBrainz release ID mb-old", a["notes"])
+        self.assertIn(f"removes your MusicBrainz release ID {old}", a["notes"])
+
+    def test_discogs_preferred_keeps_a_musicbrainz_id_nothing_is_known_of(self):
+        # (the same, the files' MusicBrainz release unknown to both lookups: no evidence of two
+        # pressings, so the Sources setting deletes nothing - missing data is no difference)
+        d = self.album("Band V", "Album V", MUSICBRAINZ_ALBUMID="mb-old", MUSICBRAINZ_RELEASETRACKID="old-track")
+        http = FakeHttp(mb=[mb_release("mb-v", "Band V", "Album V", catno="OTHER-1", country="US")],
+                        dg=[dg_release(908, "Band V", "Album V", catno="CAT-908")])
+        eng = self.engine(http)
+        eng.cfg["preferred_countries"] = ["US"]
+        a = eng.plan(d)["albums"][0]
+        ch = a["files"][0]["changes"]
+        self.assertEqual(ch["discogs_release_id"], ["908"])
+        self.assertNotIn("musicbrainz_albumid", ch)
+        self.assertNotIn("musicbrainz_trackid", ch)
 
     def test_discogs_preferred_keeps_musicbrainz_ids_when_musicbrainz_was_not_asked(self):
         d = self.album("Band W", "Album W", MUSICBRAINZ_ALBUMID="mb-w")
@@ -274,10 +292,12 @@ class Modes(Base):
         self.assertNotIn("musicbrainz_albumid", ch)              # (an outage says nothing about the pressing)
 
     def test_musicbrainz_preferred_decides_and_removes_a_discogs_id_of_another_pressing(self):
-        # (your files name a Discogs release neither database offers; Discogs is sure of 910)
+        # (your files name a Discogs release of another pressing - catalogue number CAT-900, not
+        # MusicBrainz's OTHER-1: TAG-3's positive difference; Discogs is sure of 910)
         d = self.album("Band X", "Album X", DISCOGS_RELEASE_ID="900", DISCOGS_CATALOGNUMBER="CAT-900")
         http = FakeHttp(mb=[mb_release("mb-x", "Band X", "Album X", catno="OTHER-1", country="US")],
-                        dg=[dg_release(910, "Band X", "Album X", catno="CAT-910")])
+                        dg=[dg_release(910, "Band X", "Album X", catno="CAT-910"),
+                            dg_release(900, "Band X", "Album X (other)", catno="CAT-900")])
         eng, p = self.plan(d, http, source="musicbrainz_preferred")
         a = p["albums"][0]
         ident = a["identification"]

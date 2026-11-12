@@ -3961,7 +3961,11 @@ def classify(scored, cfg):
     # a few lengths may be off (database lengths are often rounded or wrong).
     # A barcode typed in notes or written by another tagger (WEAK_BARCODES) is no number
     # of your copy: it counts as no code here and never excuses lengths that disagree.
-    strong_code = "" if best["code"] in WEAK_BARCODES else best["code"]
+    # A catalogue number OCR found only in typed notes, inside a longer printed number or as the
+    # start of a range ("LBL 51234~5") is no number of your copy either (BAR-8 catno_on_copy):
+    # it excuses no lengths, in the LEN-3 band or below it
+    strong_code = "" if best["code"] in WEAK_BARCODES or (
+        best["code"] == "catalogue number (OCR)" and not best.get("catno_on_copy")) else best["code"]
     min_dur = cfg["auto_min_duration_frac_with_code"] if strong_code else cfg["auto_min_duration_frac"]
     if not strong_code and best["title_sim"] < cfg["exact_title_sim"]:
         min_dur = max(min_dur, cfg["auto_min_duration_frac_partial_title"])

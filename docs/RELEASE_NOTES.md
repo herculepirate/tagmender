@@ -1,5 +1,24 @@
 # Release notes
 
+## 0.8.46
+
+**The edition your copy names (EDN-2)**
+- A folder naming its edition by year and label ("(2017 AP ISO)", "[2013 MFSL]") or an SACD
+  rip log naming its disc image after the label keeps a pressing of another label and year
+  from being tagged as yours: the album is tagged without that pressing's label, country and
+  date. A pick on the label you name stays.
+
+**Versions tagged apart are one album (MIX-3)**
+- A disc's stereo and multichannel folders whose tags differ only in a format mark ("[SACD 2ch
+  DSD64]" beside "[HD]") are planned together again, with the set's name, scans and log.
+
+**No barcode from a hex dump (OCR-2)**
+- A ripping tool's hex dump in its log is no longer read as a barcode.
+
+**Your catalogue number and the track lengths (LEN-3)**
+- A catalogue number printed on your copy excuses track lengths that disagree whether half or
+  most of them do; one only typed in notes, or part of a longer printed number, never does.
+
 ## 0.8.45
 
 **A second run confirms the first (REP-1)**

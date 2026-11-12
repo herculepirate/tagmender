@@ -258,5 +258,39 @@ class EDI_Album(Base):
             self.assertEqual(engine.version_dirs(top), [], (a, b))
 
 
+class LEN3_OnlyYourOwnNumber(unittest.TestCase):
+    """LEN-3 (review G): a catalogue number OCR found only in typed notes, inside a longer printed
+    number or as the start of a range excuses no lengths; the folder's or the scans' own does."""
+    N = 10
+
+    def album(self, **kw):
+        a = {"artist": "Band E", "title": "Album L", "year": 1990, "discs": 1, "folder": "Album L",
+             "tracks": [{"disc": 1, "num": i + 1, "title": f"Song {i}", "secs": 100.0 + i * 10} for i in range(self.N)],
+             "barcodes": set(), "catnos": set()}
+        a.update(kw)
+        return a
+
+    def cand(self, catnos=("lbl51234",)):
+        return {"source": "dg", "id": "r1", "title": "Album L", "artist": "Band E", "year": 2005, "label": "Lbl",
+                "barcodes": [], "catnos": set(catnos), "disc_count": 1, "formats": ["cd"],
+                "tracks": [{"disc": 1, "title": f"Song {i}", "secs": (100.0 + i * 10) if i < 6 else 400.0}
+                           for i in range(self.N)]}
+
+    def run_(self, album, cand, ocr=""):
+        cfg = dict(mc.DEFAULT_CFG)
+        return mc.classify([mc.score_candidate(album, cand, cfg, ocr)], cfg)
+
+    def test_EDI_LEN3_numbers_not_on_your_copy_excuse_no_lengths(self):
+        for printed, typed, catnos in (("", "Cat#: LBL51234", ("lbl51234",)),
+                                       ("LBL 51234", "", ("lbl5123",)),
+                                       ("LBL 51234~5", "", ("lbl51234",))):
+            out = self.run_(self.album(printed_text=printed, typed_text=typed), self.cand(catnos), printed or typed)
+            self.assertNotEqual(out["status"], "auto", (printed, typed))
+
+    def test_EDI_LEN3_your_folders_number_still_excuses_them(self):
+        out = self.run_(self.album(catnos={"lbl51234"}, catnos_from_folder={"lbl51234"}), self.cand())
+        self.assertEqual(out["status"], "auto", out["why"])
+
+
 if __name__ == "__main__":
     unittest.main()

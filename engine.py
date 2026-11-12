@@ -3857,7 +3857,9 @@ def _kept_own_version(targets, album, files):
     by_path = {t.get("path"): t for t in album.get("tracks") or []}
     for i, t in enumerate(targets):
         own = (by_path.get(files[i]) or {}) if i < len(files) else {}
-        for field, mine in (("album", own.get("album") or album.get("title")), ("title", own.get("title"))):
+        # (REP-1: the album title as the files hold it, not as read before TagMender tagged them)
+        mine_album = own.get("album") or album.get("title_written") or album.get("title")
+        for field, mine in (("album", mine_album), ("title", own.get("title"))):
             plain = (t.get(field) or [""])[0]
             kept = _marked_as(mine, plain)
             if kept:

@@ -1215,13 +1215,16 @@ _COUNTRY_NAMES = {
     "holland": "NL", "netherlands": "NL", "the netherlands": "NL", "sweden": "SE", "finland": "FI",
     "norway": "NO", "denmark": "DK", "italy": "IT", "spain": "ES", "portugal": "PT", "poland": "PL",
     "russia": "RU", "ukraine": "UA", "austria": "AT", "switzerland": "CH", "belgium": "BE",
-    "greece": "GR", "czech republic": "CZ", "czechia": "CZ", "hungary": "HU", "australia": "AU",
+    "greece": "GR", "ireland": "IE", "czech republic": "CZ", "czechia": "CZ", "hungary": "HU", "australia": "AU",
     "brazil": "BR", "mexico": "MX", "argentina": "AR", "korea": "KR", "south korea": "KR",
     "taiwan": "TW", "china": "CN", "hong kong": "HK", "israel": "IL", "turkey": "TR",
     "worldwide": "XW",
 }
 _MADE_IN = re.compile(r"\b(?:made|printed|manufactured|pressed|produced)\s+in\s+(?:the\s+)?"
-                      r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()]|\.(?:\s|$)|\s{2}|and\b|\bby\b|\d))", re.I)
+                      r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()]|\.(?:\s|$)|\s{2}|\band\b|\bby\b|\d))", re.I | re.M)
+# (re.M: OCR text is many lines; "MADE IN HOLLAND" ends its line, not the text)
+# (\band: "and" ends a name only as a word - "Made in Holland" / "England" / "Finland" were cut
+# to "Holl" / "Engl" / "Finl" and read as no country: Tangerine Dream - Rubycon, Made in Holland)
 _LABEL_FILLER = {"records", "recordings", "record", "music", "entertainment", "productions", "production",
                  "inc", "ltd", "llc", "gmbh", "co", "company", "label", "group", "the", "and", "media",
                  "distribution", "sound", "sounds", "audio", "international", "a", "of"}
@@ -1613,9 +1616,15 @@ def pressing_clues(ocr_text, cand, ring_text=""):
     # pressing is the one in the logo, the address and the catalogue number.
     no_rights = "\n".join(l for l in str(ocr_text).splitlines() if not _RIGHTS_LINE.search(l))
     text_words = " " + fold(_LICENSOR.sub(" ", no_rights)) + " "
+    # a label named as the artist (an artist's own imprint: Discogs's "Tangerine Dream" label on a
+    # promo) is read off the scans with the artist's name on every sleeve: no clue (EVI-7,
+    # Tangerine Dream - Winter In Hiroshima: the promo picked over the retail CD with your disc ID)
+    artist_phrase = " ".join(w for w in fold(str(cand.get("artist") or "")).split() if w not in _LABEL_FILLER)
     for label in str(cand.get("label") or "").split(";"):
         words = [w for w in fold(label).split() if w not in _LABEL_FILLER]
         phrase = " ".join(words)
+        if artist_phrase and phrase == artist_phrase:
+            continue
         if len(phrase) >= 4 and f" {phrase} " in text_words:
             agree["label"] = f"label {label.strip()} on the scans"
             break
@@ -1625,8 +1634,14 @@ def pressing_clues(ocr_text, cand, ring_text=""):
         if mine == "XE" and printed & _EUROPE and mine not in printed:
             pass        # a European pressing with a German or Dutch address: consistent, but no clue
         elif printed == {"XE"} and mine in _EUROPE and mine != "XE":
-            pass        # "Made in the EU" on a UK or German pressing: where it was pressed, not against it
-                        # (Pallas - wearewhoweare, a UK CD pressed in the EU)
+            # "Made in the EU" on a UK or German pressing: where it was pressed, not against it
+            # (Pallas - wearewhoweare, a UK CD pressed in the EU) - and it agrees with that pressing
+            # as much as with one Discogs files under "Europe" (MED-10): it tells the two apart no
+            # more than it tells them from a US or Japanese one (Tangerine Dream - Zeit: the 2011
+            # UK Esoteric CD and its undated "Europe" repress, one barcode and catalogue number)
+            agree["country"] = "made in the EU on the scans (a European pressing)"
+        elif printed == {"XE"} and mine == "XE":
+            agree["country"] = "made in the EU on the scans (a European pressing)"
         elif mine in printed:
             name = cand.get("country") or ""
             if len(name) == 2:

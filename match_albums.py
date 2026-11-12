@@ -1012,7 +1012,9 @@ def tagmender_pressing_writes(paths) -> dict:
         hit = wrote.get(str(p)) or wrote.get(os.path.realpath(str(p)))
         if hit is None:
             return {}
-        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f)}
+        # (and the date: a pressing's own date is taken back only when it is the losing one's -
+        # engine._restore_own decides)
+        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f) or f == "date"}
     return out
 
 

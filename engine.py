@@ -1918,7 +1918,8 @@ class Engine:
             # (the pick's own date is not the album's: an "original" date that is only the pick's -
             # a Discogs release without a master - is left out with it, as EDN-2's)
             p = self._album_only(p, {"tied": tied, "doubt": doubt, "pick_year": pick.get("year")})
-            back = self._restore_own(p.files, clash, facts, pick, self._pick_side(p, view))
+            first = {str(v)[:4] for t in p.targets for k in ("originaldate", "originalyear") for v in t.get(k) or ()}
+            back = self._restore_own(p.files, clash, facts, pick, self._pick_side(p, view), first)
             if back:
                 p.restore = back
             p.notes = list(getattr(p, "notes", None) or []) + [
@@ -2096,7 +2097,7 @@ class Engine:
             kept_all += kept
         return list(dict.fromkeys(gone_all)), list(dict.fromkeys(kept_all))
 
-    def _restore_own(self, files, clash, facts, pick, side) -> dict:
+    def _restore_own(self, files, clash, facts, pick, side, first=()) -> dict:
         """TAG-3 / REP-1: {file: {field: value before TagMender}} for the pressing fields
         TagMender's own earlier job wrote of the pressing that clashes, still holding what it left
         - an album found album only takes them back ([] when the field was empty before: removed).
@@ -2131,6 +2132,12 @@ class Engine:
                     ok = mb_lost
                 elif k.startswith("discogs_"):
                     ok = dg_lost
+                elif k == "date":
+                    # (the losing pressing's own date - its year, not the pick's nor the album's
+                    # original year (first): taken back as before the job; one empty before is
+                    # removed, and the album only's own date rule fills it - plan._album)
+                    ok = (any(_pressings_value(k, a, x) for x in known) and not _pressings_value(k, a, pick)
+                          and not {str(v)[:4] for v in a} & set(first or ()))
                 else:
                     ok = any(_pressings_value(k, a, x) for x in known) and not _pressings_value(k, a, pick)
                 if ok:

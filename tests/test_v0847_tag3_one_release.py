@@ -499,6 +499,72 @@ class TAG3_Engine(te.Base):
                                                "musicbrainz_albumid", adb)[0]
         self.assertIn("none of its disc IDs fits your disc's table of contents", why)
 
+    # ---- BS&T: the losing pressing's date taken back too -------------------------------------
+    def bst(self, date_before):
+        x = "5d5bc7a0-6d8a-4cc1-8653-1d2cf03c3df7"            # (the 1980 vinyl job ea73 wrote)
+        y = "25e2ef6e-8a11-4562-8b1d-5ab93a2ca570"            # (the 2017 AP SACD, picked now)
+        d = self.make(folder="1968 - BST (1968) [SACD] (2017 AP ISO)", MUSICBRAINZ_ALBUMID=x, DATE="1980",
+                      MEDIA="Vinyl, LP, Album, Remastered, Reissue")
+        files = sorted(str(f) for f in d.glob("*.flac"))
+        writes = {f: {"musicbrainz_albumid": ((), (x,)), "date": (date_before, ("1980",)),
+                      "media": ((), ("Vinyl, LP, Album, Remastered, Reissue",))} for f in files}
+        view = {"pick": {"source": "mb", "id": y, "barcodes": ["856276002343"], "catnos": ["capp086sa"],
+                         "formats": ["cd"], "links": [], "year": 2017, "label": "Analogue Productions",
+                         "country": "US", "layout": [3]},
+                "cands": {"musicbrainz_albumid": {x: {"source": "mb", "id": x, "barcodes": [], "catnos": ["sd16605"],
+                                                      "formats": ["vinyl"], "links": [], "year": 1980,
+                                                      "label": "Direct-Disk Labs", "country": "US", "layout": [3]}}},
+                "mb_links": {}}
+        album = {"file_release_ids": {"musicbrainz_albumid": [x]}}
+        targets = [{"album": ["Blood, Sweat & Tears"], "musicbrainz_albumid": [y], "date": ["2017-03-01"],
+                    "originaldate": ["1968"], "media": ["Hybrid SACD"], "title": [f"T{i}"]} for i in range(3)]
+        p = pl.Proposal(source_dir=str(d), files=files, status="identified", tier="exact", confidence=88.5,
+                        release_id=y, targets=targets)
+        e = self.eng(te.FakeHttp())
+        with mock.patch.object(ma, "tagmender_pressing_writes", return_value=writes):
+            p = e._one_release(p, {"release_ids": view}, album)
+        return e, p, files, x
+
+    def test_TAG3_bst_album_only_takes_back_the_vinyls_date(self):
+        e, p, files, _x = self.bst(("2016",))
+        self.assertEqual(p.tier, "album_only", p.notes)
+        self.assertEqual(p.restore[files[0]].get("date"), ["2016"])
+        plan = pl.build([p], e.profile)
+        ch = plan["albums"][0]["files"][0]["changes"]
+        self.assertEqual(ch.get("date"), ["2016"], "the date as it was before TagMender's job")
+        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"))
+        self.assertIsNone(ch.get("media", "kept"))
+        # a second plan: the files as the first left them, the history's date now as before
+        for f in files:
+            tagio.write(f, {"date": ["2016"]})
+        e2 = self.eng(te.FakeHttp())
+        again = pl.Proposal(source_dir=p.source_dir, files=files, status="identified", tier="exact",
+                            confidence=88.5, release_id="25e2ef6e-8a11-4562-8b1d-5ab93a2ca570",
+                            targets=[{"album": ["Blood, Sweat & Tears"], "date": ["2017-03-01"],
+                                      "originaldate": ["1968"]} for _f in files])
+        writes = {f: {"date": (("2016",), ("2016",))} for f in files}
+        with mock.patch.object(ma, "tagmender_pressing_writes", return_value=writes):
+            again = e2._one_release(again, {"release_ids": {"pick": {"source": "mb", "id": "y", "barcodes": [],
+                                                                     "catnos": [], "formats": [], "links": []}}},
+                                    {"file_release_ids": {}})
+        self.assertNotIn("date", pl.build([again], e2.profile)["albums"][0]["files"][0]["changes"])
+
+    def test_TAG3_bst_date_empty_before_is_the_albums_original_date(self):
+        e, p, files, _x = self.bst(())
+        self.assertEqual(p.restore[files[0]].get("date"), [])
+        ch = pl.build([p], e.profile)["albums"][0]["files"][0]["changes"]
+        self.assertEqual(ch.get("date"), ["1968"], "album only's own date rule, not a removal")
+
+    def test_TAG3_a_date_of_the_picks_year_or_the_original_year_is_never_taken_back(self):
+        e, p, files, x = self.bst(("2016",))
+        side = {"musicbrainz_albumid": {"y"}, "discogs_release_id": set()}
+        facts = [{"source": "mb", "id": x, "year": 1980}]
+        writes = {f: {"date": (("2016",), ("1980",))} for f in files}
+        with mock.patch.object(ma, "tagmender_pressing_writes", return_value=writes):
+            self.assertEqual(e._restore_own(files, {"musicbrainz_albumid": {x: "x"}}, facts, {"year": 1980}, side), {})
+            self.assertEqual(e._restore_own(files, {"musicbrainz_albumid": {x: "x"}}, facts, {"year": 2017}, side,
+                                            {"1980"}), {})
+
     # ---- review 3: missing numbers, twins, merged IDs, ranges, the original date ---------------
     def test_TAG3_none_catalogue_number_is_no_number(self):
         mbr = ma.release_facts({"source": "mb", "id": "m", "catnos": {"[none]"}, "catno_shown": "[none]"})

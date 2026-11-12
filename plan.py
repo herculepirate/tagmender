@@ -1832,10 +1832,15 @@ class Planner:
                     rows.append({"field": k_, "before": _vals(before.get(k_)), "after": _vals(before.get(k_)),
                                  "action": "kept (your field policy)"})
                     continue
-                changes[k_] = _vals(v_) or None
+                v_ = _vals(v_)
+                if not v_ and k_ == "date":
+                    # (a date empty before TagMender's job: the album only's own date - the album's
+                    # original date - where it has one, as on a file with no date)
+                    v_ = _vals(target.get("date"))
+                changes[k_] = v_ or None
                 rows = [r for r in rows if r.get("field") != k_]
-                rows.append({"field": k_, "before": _vals(before.get(k_)), "after": _vals(v_),
-                             "action": "restored (as before TagMender's job)" if _vals(v_) else "removed"})
+                rows.append({"field": k_, "before": _vals(before.get(k_)), "after": v_,
+                             "action": "restored (as before TagMender's job)" if v_ else "removed"})
             import levels as _lv
             if identified and tag_conf >= _threshold(p, "replace_min_confidence") \
                     and _lv.level(p) != "basic":

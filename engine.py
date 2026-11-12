@@ -2001,18 +2001,32 @@ class Engine:
             offsets = [int(x) for x in offsets]
             return [b - a for a, b in zip(offsets, offsets[1:] + [int(leadout)])]
 
-        compared = False
-        for m in (rel or {}).get("media") or ():
-            mine = copy_tocs.get(str(m.get("position") or ""))
-            theirs = [d for d in m.get("discs") or () if d.get("offsets") and d.get("sectors")]
-            if not mine or not theirs:
-                continue
-            nums = mine.split()
-            own = lengths(nums[3:], nums[2])
-            if any(len(own) == len(o) and all(abs(a - b) <= 1 for a, b in zip(own, o))
-                   for o in (lengths(d["offsets"], d["sectors"]) for d in theirs)):
-                return ""                    # (one of your discs is one of its discs: the same disc)
-            compared = True
+        media = [(m, [lengths(d["offsets"], d["sectors"]) for d in m.get("discs") or ()
+                      if d.get("offsets") and d.get("sectors")]) for m in (rel or {}).get("media") or ()]
+        own = {str(k): lengths(t.split()[3:], t.split()[2]) for k, t in copy_tocs.items()}
+        # any disc of yours fitting any of its disc IDs, on whichever medium: the same release
+        # (a DVD listed first numbers its CDs 2 and 3; one disc of a set in a folder of its own)
+        if any(len(o) == len(t) and all(abs(a - b) <= 1 for a, b in zip(o, t))
+               for o in own.values() for _m, theirs in media for t in theirs):
+            return ""
+
+        def cd_family(fmt):
+            # (CD, Hybrid SACD, Enhanced CD, CD-R; a medium of no format named that carries a disc
+            # ID is a CD too - MusicBrainz attaches disc IDs to CD media only: Back It Up's 1983)
+            f = str(fmt or "").casefold().strip()
+            return not f or (mc.media_kind(fmt) == "cd" and ("sacd" not in f or "hybrid" in f))
+
+        # compared only against the CD medium numbered as your disc, a disc ID of as many tracks
+        # as your disc's TOC: anything else leaves the medium your disc is unknown (no evidence)
+        # (and only where its CDs are numbered as yours: the n-th CD medium at position n - a DVD
+        # listed first shifts them, and its CD 1 may then be your disc 2's number)
+        cds = [m for m, _t in sorted(media, key=lambda x: int(x[0].get("position") or 0))
+               if cd_family(m.get("format"))]
+        nth = {str(m.get("position") or ""): k for k, m in enumerate(cds, 1)}
+        compared = any(cd_family(m.get("format")) and str(m.get("position") or "") in own and
+                       nth.get(str(m.get("position"))) == int(m.get("position") or 0) and
+                       any(len(t) == len(own[str(m["position"])]) for t in theirs)
+                       for m, theirs in media)
         return f"none of its disc IDs fits your disc's table of contents (from its rip log or cue sheet)" \
             if compared else ""
 

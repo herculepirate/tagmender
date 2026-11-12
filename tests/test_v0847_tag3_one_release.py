@@ -428,9 +428,45 @@ class TAG3_Engine(te.Base):
         p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
         self.assertEqual(e._another_pressing(p, dict(view, copy_tocs={"1": self.toc(self.BIU_COPY)}),
                                              "musicbrainz_albumid", adb)[0], "")
-        # (your disc 2's TOC against medium 2's disc ID: compared)
+        # (your disc 2's TOC against medium 2's disc ID, a CD: compared)
+        rel["media"][1]["format"] = "CD"
         self.assertIn("disc IDs", e._another_pressing(p, dict(view, copy_tocs={"2": self.toc(self.BIU_COPY)}),
                                                       "musicbrainz_albumid", adb)[0])
+
+    def test_TAG3_a_dvd_listed_first_is_no_false_difference(self):
+        # (MusicBrainz: 1 DVD, 2 CD1, 3 CD2; your copy numbers its CDs 1 and 2 - your disc 2 is
+        # its CD 2, never compared with CD 1's disc ID)
+        adb, http, view = self.biu()
+        rel = http.mb[adb]
+        cd1 = [17000, 17000, 17000, 17000, 17000, 17000, 17000, 17000, 17000]
+        disc = lambda ls: {"offsets": [int(x) for x in self.toc(ls).split()[3:]],  # noqa: E731
+                           "sectors": int(self.toc(ls).split()[2])}
+        rel["media"] = [{"format": "DVD-Video", "position": 1, "tracks": [], "discs": []},
+                        {"format": "CD", "position": 2, "tracks": [], "discs": [disc(cd1)]},
+                        {"format": "CD", "position": 3, "tracks": [], "discs": [disc(self.BIU_COPY)]}]
+        e = self.eng(http)
+        p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
+        tocs = {"1": self.toc([16000] * 9), "2": self.toc(self.BIU_COPY)}
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs=tocs), "musicbrainz_albumid", adb)[0], "")
+        # (only your disc 2, CD 2 listing no disc ID: never compared with CD 1 at position 2 -
+        # the DVD first shifts the numbers)
+        rel["media"][2]["discs"] = []
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs={"2": self.toc(self.BIU_COPY)}),
+                                             "musicbrainz_albumid", adb)[0], "")
+
+    def test_TAG3_one_disc_of_a_set_read_as_disc_one_is_no_false_difference(self):
+        # (a folder holding the set's second CD alone: read as disc 1, it fits CD 2's disc ID)
+        adb, http, view = self.biu()
+        rel = http.mb[adb]
+        other = {"offsets": [150, 20150, 40150, 60150, 80150, 100150, 120150, 140150, 160150], "sectors": 180150}
+        rel["media"] = [{"format": "CD", "position": 1, "tracks": [], "discs": [other]},
+                        {"format": "CD", "position": 2, "tracks": [], "discs": [
+                            {"offsets": self.BIU_OFFSETS, "sectors": self.BIU_LEADOUT}]}]
+        theirs = [b - a for a, b in zip(self.BIU_OFFSETS, self.BIU_OFFSETS[1:] + [self.BIU_LEADOUT])]
+        e = self.eng(http)
+        p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs={"1": self.toc(theirs)}),
+                                             "musicbrainz_albumid", adb)[0], "")
 
     def test_TAG3_a_toc_rebuilt_from_the_files_lengths_is_no_evidence(self):
         t = self.toc(self.BIU_COPY)

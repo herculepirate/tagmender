@@ -101,6 +101,7 @@ jobs:
 
   publish:
     needs: [tests, deb-appimage, flatpak]
+    if: github.ref == 'refs/heads/main'   # (a build run by hand on another branch publishes nothing)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

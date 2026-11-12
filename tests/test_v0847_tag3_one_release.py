@@ -362,6 +362,62 @@ class TAG3_Engine(te.Base):
         for k in ("musicbrainz_albumid", "label", "catalognumber", "discogs_release_id"):
             self.assertNotIn(k, ch, k)
 
+    # ---- Back It Up: the files' MusicBrainz release, its one disc ID not your disc -------------
+    BIU_OFFSETS = [150, 17707, 35072, 48345, 88302, 104802, 123117, 134882, 149120]
+    BIU_LEADOUT = 172832
+    BIU_COPY = [17637, 17318, 13217, 40058, 16607, 18225, 11805, 14208, 23130]
+
+    @staticmethod
+    def toc(lengths):
+        offs, pos = [], 150
+        for n in lengths:
+            offs.append(pos)
+            pos += n
+        return " ".join(str(x) for x in [1, len(lengths), pos] + offs)
+
+    def biu(self):
+        adb = "adb602df-0000-4000-8000-000000000001"
+        rel = _mb(adb, catno=None, barcode=None, fmt="")
+        rel["media"][0]["discs"] = [{"id": "fg9KiD2Ntc7Ne.1PatsLQgKl9wE-", "offset-count": 9,
+                                     "offsets": self.BIU_OFFSETS, "sectors": self.BIU_LEADOUT}]
+        sparse = {"source": "mb", "id": adb, "barcodes": [], "catnos": [], "formats": [], "links": []}
+        view = dict(self.view(id="4238649"), cands={"musicbrainz_albumid": {adb: sparse}})
+        return adb, te.FakeHttp(mb=[rel]), view
+
+    def test_TAG3_back_it_up_disc_id_that_fits_no_disc_of_yours_is_another_pressing(self):
+        adb, http, view = self.biu()
+        e = self.eng(http)
+        p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
+        why = e._another_pressing(p, dict(view, copy_tocs=[self.toc(self.BIU_COPY)]), "musicbrainz_albumid", adb)[0]
+        self.assertIn("none of its disc IDs fits your disc's table of contents", why)
+        # (your disc's TOC unknown: no evidence; your TOC that fits its disc ID: the same disc)
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs=[]), "musicbrainz_albumid", adb)[0], "")
+        theirs = [b - a for a, b in zip(self.BIU_OFFSETS, self.BIU_OFFSETS[1:] + [self.BIU_LEADOUT])]
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs=[self.toc(theirs)]),
+                                             "musicbrainz_albumid", adb)[0], "")
+        # (MusicBrainz down: nothing known)
+        down = self.eng(te.FakeHttp(mb_down=True))
+        self.assertEqual(down._another_pressing(p, dict(view, copy_tocs=[self.toc(self.BIU_COPY)]),
+                                                "musicbrainz_albumid", adb)[0], "")
+
+    def test_TAG3_back_it_up_end_to_end_proven_and_unproven(self):
+        adb, http, view = self.biu()
+        album = {"file_release_ids": {"musicbrainz_albumid": [adb]}, "tocs": {1: self.toc(self.BIU_COPY)},
+                 "tocs_fit": [1]}
+
+        def prop():
+            return pl.Proposal(source_dir="x", files=[], status="identified", tier="exact", confidence=87.6,
+                               release_id="4238649", targets=[{"album": ["Back It Up"],
+                                                               "discogs_release_id": ["4238649"]}])
+        e = self.eng(http)
+        proven = e._one_release(prop(), {"release_ids": view, "scans": dict(PROVEN)}, album)
+        self.assertEqual(proven.release_proven_over, ["musicbrainz_albumid"], proven.notes)
+        self.assertTrue(any("disc IDs" in n for n in proven.notes), proven.notes)
+        e._accepts = lambda tier: True
+        self.assertEqual(e._one_release(prop(), {"release_ids": view}, album).tier, "album_only")
+        # (no TOC of your copy: the sparse entry is no other pressing)
+        self.assertEqual(e._one_release(prop(), {"release_ids": view}, dict(album, tocs_fit=[])).tier, "exact")
+
     # ---- review 3: missing numbers, twins, merged IDs, ranges, the original date ---------------
     def test_TAG3_none_catalogue_number_is_no_number(self):
         mbr = ma.release_facts({"source": "mb", "id": "m", "catnos": {"[none]"}, "catno_shown": "[none]"})

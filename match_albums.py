@@ -822,8 +822,11 @@ def _own_job_files(job):
             if not fe.get("dst"):
                 continue
             rows = [r for r in fe.get("diff") or () if r.get("field")]
+            # (an ID row whose value the job left as it was - "kept (confidence below replace
+            # threshold)", preserved, locked - is no ID it wrote: the file kept the one it had)
             after = {r.get("field"): str((r.get("after") or [""])[0] or "") for r in rows
-                     if r.get("field") in ("musicbrainz_albumid", "discogs_release_id")}
+                     if r.get("field") in ("musicbrainz_albumid", "discogs_release_id")
+                     and _norm_values(r.get("before")) != _norm_values(r.get("after"))}
             ids = []
             for field in ("musicbrainz_albumid", "discogs_release_id"):
                 if field in after:          # written: only an ID of the release it identified
@@ -840,7 +843,9 @@ def _own_job_files(job):
             # empty (whose, _own_index decides). Never inferred from a missing row: a job writes
             # none for an ID it left alone, held or not (a preserved empty field, a source left out)
             named = any(r.get("before") for r in rows if r["field"] in ("musicbrainz_albumid", "discogs_release_id"))
-            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote, named))
+            # (which IDs the job left as the file had them: an earlier job's own ID stays its own)
+            kept = tuple(f not in after for f in ("musicbrainz_albumid", "discogs_release_id"))
+            files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote, named, kept))
         albums.append((a.get("source_dir"), exact, files))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)
@@ -891,7 +896,7 @@ def _own_index():
         for folder, exact, files in _own_job_files(job):
             if folder not in done[job]:
                 continue
-            for src, dst, op, mb, dg, fields, named in files:
+            for src, dst, op, mb, dg, fields, named, kept in files:
                 carried = owned.get(src)
                 # (release IDs the file had before this job that were not TagMender's: another
                 # tagger's - what it wrote beside them stays another tagger's word, REP-1)
@@ -901,7 +906,12 @@ def _own_index():
                         owned.pop(src, None)
                     owned[dst] = carried
                 if exact and (mb or dg):
-                    owned[dst] = (mb, dg)
+                    # REP-1: an ID an earlier job of TagMender's wrote, which this job left as it
+                    # was (its pick below the replace threshold kept it), is still TagMender's own -
+                    # never another tagger's because a later job did not write it again
+                    was = carried or (frozenset(), frozenset())
+                    owned[dst] = (mb | (was[0] if kept[0] else frozenset()),
+                                  dg | (was[1] if kept[1] else frozenset()))
                 prior = wrote.get(src)
                 if src != dst and prior is not None and op != "copy":
                     wrote.pop(src, None)

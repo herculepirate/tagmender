@@ -128,6 +128,42 @@ class IDEM_MergedPickIsTagMenders(_History):
         self.assertFalse(ma.tagmender_wrote([(f, MB_X, DG_X)]))
 
 
+class IDEM_KeptByALaterJob(_History):
+    """An ID an earlier job of TagMender's wrote, which a later job of its own left as it was (its
+    pick below the replace threshold: "kept"), stays TagMender's - never another tagger's
+    (Blood, Sweat & Tears - (1968) [SACD] (2017 AP ISO): job ea73 wrote MusicBrainz 5d5bc7a0 and
+    Discogs 5994280, job ffaa picked 25e2ef6e at 88.5 and kept them; a re-plan read them as
+    another tagger's and held the album as conflicting sources)."""
+
+    def test_IDEM_a_later_job_keeping_the_ids_leaves_them_tagmenders(self):
+        f = Path("/music/BST/1968 - BST/2ch_SACD/01.flac")
+        mb_y = "25e2ef6e-8a11-4562-8b1d-5ab93a2ca570"
+        self.job("j1", f.parent, [(f, f, "tag", id_rows() + [
+            {"field": "date", "before": ["2016"], "after": ["1980"], "action": "changed"}])], merged_ident(), ts=1.0)
+        kept = [{"field": "musicbrainz_albumid", "before": [MB_X], "after": [MB_X],
+                 "action": "kept (confidence below replace threshold)"},
+                {"field": "date", "before": ["1980"], "after": ["1980"],
+                 "action": "kept (confidence below replace threshold)"}]
+        self.job("j2", f.parent.parent, [(f, f, "none", kept)],
+                 {"tier": "exact", "provider": "musicbrainz", "release_id": mb_y,
+                  "url": f"https://musicbrainz.org/release/{mb_y}"}, ts=2.0)
+        self.assertTrue(ma.tagmender_wrote([(f, MB_X, DG_X)]), "the first job's IDs are still its own")
+        _folder, before, foreign = ma.tagmender_originals([f])
+        self.assertEqual(before[str(f)]["date"][0], ("2016",), "read as before the first job")
+        self.assertFalse(foreign[str(f)])
+
+    def test_IDEM_a_later_job_replacing_the_id_owns_the_new_one_only(self):
+        f = Path("/music/BST/1968 - BST/2ch_SACD/01.flac")
+        mb_y = "25e2ef6e-8a11-4562-8b1d-5ab93a2ca570"
+        self.job("j1", f.parent, [(f, f, "tag", id_rows())], merged_ident(), ts=1.0)
+        self.job("j2", f.parent, [(f, f, "tag", [{"field": "musicbrainz_albumid", "before": [MB_X], "after": [mb_y],
+                                                  "action": "changed"}])],
+                 {"tier": "exact", "provider": "musicbrainz", "release_id": mb_y,
+                  "url": f"https://musicbrainz.org/release/{mb_y}"}, ts=2.0)
+        self.assertTrue(ma.tagmender_wrote([(f, mb_y, "")]))
+        self.assertFalse(ma.tagmender_wrote([(f, MB_X, "")]))
+
+
 class _Copies(_History):
     def rip(self, folder, n=3):
         return [flac(folder / f"{i:02d}.flac", title=f"Song {i}", tracknumber=str(i), **RIPPED)

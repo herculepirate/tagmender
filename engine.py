@@ -1885,6 +1885,11 @@ class Engine:
         if p.status != "identified" or planmod.tier_of(p) != "exact" or not p.targets:
             return p
         view = (out or {}).get("release_ids") or {}
+        if view:
+            # (your copy's own table of contents, each disc's that fits its files to the sector:
+            # a release whose disc IDs none of them fit is another pressing - _disc_ids_differ)
+            tocs = (album or {}).get("tocs") or {}
+            view = dict(view, copy_tocs=[tocs[d] for d in (album or {}).get("tocs_fit") or () if tocs.get(d)])
         p.release_view = view                 # (follow_source asks the same: _another_pressing)
         if not view.get("pick"):
             return p
@@ -1971,7 +1976,39 @@ class Engine:
             return "another release than the one written", info
         # (the other database: its ID written is one twin of the pick's among those that may list
         # the pressing twice - another of them is the same release; anything else only by evidence)
-        return ("; ".join(_pressings_differ(pick, info, side, view.get("mb_links") or {})) if info else ""), info
+        discs = (lambda: self._disc_ids_differ(x, view.get("copy_tocs"))) if field == "musicbrainz_albumid" else None
+        return ("; ".join(_pressings_differ(pick, info, side, view.get("mb_links") or {}, discs))
+                if info else ""), info
+
+    def _disc_ids_differ(self, rid, copy_tocs) -> str:
+        """TAG-3: the MusicBrainz release rid lists disc IDs and your copy's own table of
+        contents (a disc whose TOC fits its files to the sector: whole-sector tracks, a rip log,
+        a cue sheet) fits none of them, each track within a sector as toc_fits_audio compares:
+        your disc is not that release's (Robin Trower - Back It Up: MusicBrainz's 1983 entry, its
+        one disc ID 80 to 582 sectors off each track of the copy). "" when your TOC is not
+        known, the release lists no disc ID, or MusicBrainz did not answer (no evidence)."""
+        if not copy_tocs or not self.use_mb:
+            return ""
+        try:
+            rel = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}?inc=discids&fmt=json", "mb")
+        except Exception as exc:
+            self.log.info("TAG-3: disc IDs of %s not read: %s", rid, exc)
+            return ""
+        theirs = [d for m in (rel or {}).get("media") or () for d in m.get("discs") or ()
+                  if d.get("offsets") and d.get("sectors")]
+        if not theirs:
+            return ""
+
+        def lengths(offsets, leadout):
+            offsets = [int(x) for x in offsets]
+            return [b - a for a, b in zip(offsets, offsets[1:] + [int(leadout)])]
+
+        mine = [lengths(t.split()[3:], t.split()[2]) for t in copy_tocs]
+        for d in theirs:
+            other = lengths(d["offsets"], d["sectors"])
+            if any(len(m) == len(other) and all(abs(a - b) <= 1 for a, b in zip(m, other)) for m in mine):
+                return ""
+        return "none of its disc IDs fits your disc's table of contents"
 
     @staticmethod
     def _pick_side(p, view) -> dict:
@@ -3637,13 +3674,14 @@ OWN_COPY_TAGS = ("musicbrainz_discid",)
 DG_ALBUM_TAGS = ("discogs_master_id", "discogs_artist_id", "discogs_albumartist_id", "discogs_style")
 
 
-def _pressings_differ(pick, other, side, mb_links) -> list:
+def _pressings_differ(pick, other, side, mb_links, discs=None) -> list:
     """TAG-3: what shows two releases of two databases are two pressings ([] when nothing
     does). A link between them (MusicBrainz's release linking the Discogs one, or the pick
     linking it) makes them one. Else: both list barcodes and share none; both list catalogue
     numbers and none agrees; both name their format and the families differ (CD, vinyl,
     digital, cassette); a MusicBrainz release linking only other Discogs releases than this
-    one's; a Discogs release another MusicBrainz release than this one links. What either
+    one's; a Discogs release another MusicBrainz release than this one links; a MusicBrainz
+    release whose disc IDs none fits your copy's own TOC (discs: Engine._disc_ids_differ). What either
     lacks is no evidence; a country alone is none (a CD made in the EU sold in the UK)."""
     if other.get("source") == "mb" and set(other.get("links") or ()) & side["discogs_release_id"]:
         return []
@@ -3665,6 +3703,11 @@ def _pressings_differ(pick, other, side, mb_links) -> list:
         by = [m for m in mb_links.get(other.get("id")) or () if m not in side["musicbrainz_albumid"]]
         if by:
             why.append(f"MusicBrainz's {', '.join(by)} links it")
+    if not why and discs is not None and other.get("source") == "mb":
+        # (asked last, and only then: it may cost a lookup - its disc IDs against your copy's TOC)
+        w = discs()
+        if w:
+            why.append(w)
     return why
 
 

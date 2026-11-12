@@ -268,6 +268,88 @@ _PRESSING_YEAR_RE = re.compile(
     r"|(?:\b(?:rm|remaster(?:ed)?|reissue|re-?release|domo)\b[^\]\)]*?\b(19[5-9]\d|20\d\d)\b)", re.I)
 
 
+# EDN-2: the audiophile reissue labels a folder names by their short form beside the edition's
+# year ("(2017 AP ISO)": Analogue Productions' 2017 SACD; "[2013 MFSL UDSACD]"). A small table of
+# such labels, never a guess at any other abbreviation; their full names count as well.
+EDITION_LABELS = {"AP": "Analogue Productions", "AF": "Audio Fidelity", "MFSL": "Mobile Fidelity Sound Lab",
+                  "MOFI": "Mobile Fidelity Sound Lab"}
+_EDITION_LABEL_NAMES = {"analogue productions": "Analogue Productions", "audio fidelity": "Audio Fidelity",
+                        "mobile fidelity": "Mobile Fidelity Sound Lab"}
+# "(2017 AP ISO)": a year beside such a label's short form or a disc image ("ISO") of it
+_EDITION_YEAR_RE = re.compile(r"\b(19[5-9]\d|20\d\d)\b")
+
+
+def _short_label(word):
+    """EDITION_LABELS' label for one word: "AP", "AF" in capitals only (never the word "ap");
+    "MFSL" and "MOFI" also as "MoFi" or "Mofi" (never all lower case)."""
+    if word in EDITION_LABELS:
+        return EDITION_LABELS[word]
+    if word.upper() in ("MFSL", "MOFI") and word != word.lower():
+        return EDITION_LABELS[word.upper()]
+    return ""
+
+
+def _edition_bracket_labels(content):
+    """The labels one bracket of a folder name names as EDITION_LABELS has them."""
+    out = [x for x in map(_short_label, re.findall(r"[A-Za-z]+", content)) if x]
+    folded = f" {fold(content)} "
+    out += [v for k, v in _EDITION_LABEL_NAMES.items() if f" {k} " in folded]
+    return list(dict.fromkeys(out))
+
+
+def edition_label_of(name):
+    """EDN-2: the EDITION_LABELS label a rip log's disc image names ("MFSL", "MoFi", "Analogue
+    Productions", "Mobile Fidelity Sound Lab"), else "" - no other string is taken for a label."""
+    name = str(name or "").strip()
+    short = _short_label(name)
+    if short:
+        return short
+    folded = fold(name)
+    return next((v for k, v in _EDITION_LABEL_NAMES.items() if folded == k or folded.startswith(k + " ")), "")
+
+
+def edition_labels(text):
+    """EDN-2: the labels a folder name's edition bracket names - a bracket holding a year
+    ("(2017 AP ISO)", "[Hybrid SACD 2016 Audio Fidelity AFZ241]"): ["Analogue Productions"]."""
+    out = []
+    for content in _BRACKETS_RE.findall(str(text or "")):
+        if _EDITION_YEAR_RE.search(content):
+            out += [x for x in _edition_bracket_labels(content) if x not in out]
+    return out
+
+
+def edition_year(text):
+    """EDN-2: the year of the edition a folder name's bracket names beside an EDITION_LABELS
+    label ("(2017 AP ISO)": 2017), else None. Read for EDN-2 only, never as pressing_year: a
+    database's date of that label's own pressing often differs from the one the folder gives
+    ("[2013 MFSL UDSACD]" on Mobile Fidelity's entry dated 2012), and the label says more."""
+    for content in _BRACKETS_RE.findall(str(text or "")):
+        years = _EDITION_YEAR_RE.findall(content)
+        if not years or not _edition_bracket_labels(content):
+            continue
+        if len(years) == 1:
+            return int(years[0])
+        # "[1969/2017 AP ISO]": the year beside the label, not the album's
+        for m in re.finditer(r"\b(19[5-9]\d|20\d\d)\b[\s,/-]*([A-Za-z]+(?:\s+[A-Za-z]+)?)", content):
+            if _edition_bracket_labels(m.group(2)):
+                return int(m.group(1))
+    return None
+
+
+def label_named(named, cand_label) -> bool:
+    """A label your copy names (EDITION_LABELS' full name, a rip log's ISO name) is one of the
+    release's labels ("Audio Fidelity" in "Audio Fidelity; Sony Music"). Whole names only:
+    "Audio Fidelity" is not "Mobile Fidelity Sound Lab"."""
+    n = fold(named)
+    if len(n) < 3:
+        return False
+    for x in str(cand_label or "").split(";"):
+        c = fold(re.sub(r"\(\d+\)", "", x))                # (Discogs's "Analogue Productions (2)")
+        if c and (f" {n} " in f" {c} " or f" {c} " in f" {n} "):
+            return True
+    return False
+
+
 def pressing_year(text):
     """The remaster/reissue year written in a bracket of the folder name, or None."""
     for content in _BRACKETS_RE.findall(str(text or "")):
@@ -436,6 +518,7 @@ _OCR_CATNO_RE = re.compile(
     r"(?![A-Za-z0-9])")
 # EMI's spaced form: "CDP 7 91186 2", "CDP 566-7 91186 2" (letters, a digit, five digits, a check digit)
 _OCR_SPACED_CATNO_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,5} (?:\d{3}[- ])?\d[ -]?\d{5}[ -]\d)(?![A-Za-z0-9])")
+_HEX_DUMP_RE = re.compile(r"(?<![0-9A-Za-z])(?:[0-9A-Fa-f]{2}[ \t]+){7,}[0-9A-Fa-f]{2}(?![0-9A-Za-z])")
 _OCR_BARCODE_RE = re.compile(r"(?<!\d)(\d(?:[ °'’·.]?\d){10,12})(?!\d)")
 
 
@@ -446,7 +529,9 @@ def codes_from_ocr_text(text, limit=5):
     year; label codes ("LC 01234"), work numbers ("BWV 1001"), track, disc and
     phone numbers are skipped. At most `limit` of each, in the order printed."""
     out = {"barcodes": [], "catnos": []}
-    text = str(text or "")
+    # (a ripping tool's hex dump - SACD-Ripper's "device_info: 80 00 00 00 10 13 de 70 ..." - is
+    # no print: its byte pairs would join into a "barcode" that passes the check digit)
+    text = _HEX_DUMP_RE.sub(" | ", str(text or ""))
     for m in _OCR_BARCODE_RE.finditer(text):
         code = re.sub(r"\D", "", m.group(1))      # "8°715392°18 2327" as OCR reads a barcode's digits
         if valid_barcode(code) and code not in out["barcodes"]:
@@ -1853,6 +1938,12 @@ def file_clues(album, cand, clues, against, cfg=None):
     td, cd = "" if by_tagger else str(album.get("tag_date") or ""), str(cand.get("date") or "")
     if len(td) >= 7 and len(cd) >= 7 and td[:len(cd)] == cd[:len(td)]:
         clues.setdefault("date", f"release date {cd} in the tags")
+    # EDN-2: a label your copy names as its edition's ("(2017 AP ISO)", an SACD rip log's
+    # "Analogue Productions - Title.iso")
+    for x in album.get("copy_labels") or ():
+        if label_named(x, cand.get("label")):
+            clues.setdefault("label", f"label {x} named by your folder name or SACD rip log")
+            break
     # folder name: "[Century Media, 9976158, Germany]"
     folder = _bracket_text(album.get("folder"), pressing_only=True)
     if folder:
@@ -3902,6 +3993,12 @@ def classify(scored, cfg):
                 pass                          # not compared: "track count differs" says why
             else:
                 why.append(f"only {best['dur_frac']:.0%} of durations agree")
+        elif strong_code and excuse and best["dur_frac"] < cfg["auto_min_duration_frac"]:
+            # LEN-3: lengths between the share a number needs and the share that proves the album
+            # without one are excused by that number as fewer would be (70% under your scans'
+            # catalogue number is never held where 50% was let through)
+            lengths_excused = True
+            best["notes"] = best["notes"] + [f"track lengths not compared ({best['dur_frac']:.0%} agree): {excuse}"]
     # Your copy's own number proves the album and the pressing: the files' barcode or the
     # catalogue number your folder or tags name, every track there, the lengths agreeing.
     # Points lost elsewhere (a folder year that is the recording years, "2004 - 2012"; a
@@ -4866,6 +4963,61 @@ def scans_name_another(final, report):
             if title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n
             and not s.get("unproven_media")]
     return {"source": "", "no_lengths": False, "other_kind": False, "scans": True,
+            "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+                      "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
+                      "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in same]}
+
+
+def edition_named_another(final, album, cfg, source=""):
+    """EDN-2: what album_only returns when the pick was sure but your copy names its edition
+    by a year and a label (the folder's "(2017 AP ISO)", an SACD-Ripper log's "Analogue
+    Productions - <Title>.iso") and the pick is on none of those labels and of another year:
+    the pick is another pressing of the album - one the
+    databases may not list. Not when anything of yours proves the pick (barcode, catalogue
+    number, disc ID, your files' link, your own earlier choice). None otherwise."""
+    best = (final or {}).get("best")
+    labels = list((album or {}).get("copy_labels") or ())
+    year = (album or {}).get("edition_year") or (album or {}).get("pressing_year")
+    if not best or not labels or not year:
+        return None
+    if final.get("status") != "auto":
+        # (held only because the year is not the folder's edition's, or a pressing as close:
+        # the album itself as sure as an automatic pick - album_only's bar)
+        why = [w for w in final.get("why") or [] if not w.startswith("investigated")]
+        if not all(w.startswith("folder name says this is the ") or _TIE_WHY.match(w) for w in why):
+            return None
+        if best["confidence"] < cfg["auto_min_confidence"] or not best.get("tracks_ok") or best.get("conflict") \
+                or (best.get("dur_frac") or 0) < cfg["auto_min_duration_frac"]:
+            return None
+    cand = best["cand"]
+    if not cand.get("year") or cand["year"] == year:
+        # (no pressing_year_tolerance here: beside a label your copy names that the pick is not
+        # on, a year near yours is no sign of your pressing - Audio Fidelity's 2015 SACD against
+        # "(2017 AP ISO)")
+        return None
+    if not cand.get("label") or any(label_named(x, cand["label"]) for x in labels):
+        return None                             # (a release listing no label says nothing against it)
+    if _carries_barcode(best) or (best.get("code") and best["code"] not in WEAK_BARCODES):
+        return None
+    clues = best.get("clues") or {}
+    if clues.get("disc TOC") == EXACT_TOC_CLUE or clues.get("source link") or \
+            (best.get("tagged") and not best.get("tagger_tagged")):
+        return None
+    n = len(cand["tracks"])
+    same = [s for s in final.get("scored") or [best]
+            if title_sim(s["cand"]["title"], cand["title"]) >= 0.85 and len(s["cand"]["tracks"]) == n
+            and not s.get("unproven_media")]
+    why = (f"your copy names the {year} {' / '.join(labels)} edition; {cand.get('label')} "
+           f"{cand['year']} is another pressing")
+    # (what your copy was made from narrows the pressings whose shared fields are written, as
+    # album_only: none of that media - their media and numbering are not yours)
+    other_kind = False
+    if source:
+        same_kind = [s for s in same if source in (s["cand"].get("formats") or ())]
+        other_kind = not same_kind and any(s["cand"].get("formats") for s in same)
+        same = same_kind or same
+    return {"source": source, "no_lengths": False, "other_kind": other_kind, "edition": why,
+            "pick_year": cand["year"],
             "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
                       "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
                       "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in same]}

@@ -335,11 +335,47 @@ def version_dirs(parent: Path, metas=None, skips=None) -> list:
         if f not in metas:
             metas[f] = ex.read_meta(f)
     keys = set(album_keys(files, parent, metas).values())
-    if len(keys) != 1 or next(iter(keys))[0] != "tags":
+    if not _one_album_titled(keys):
         return []
     if any(mc.fold(_first(metas[f], "album")) == mc.fold(f.parent.name) for f in files):
         return []
     return sorted(audio)
+
+
+def _one_album_titled(keys) -> bool:
+    """album_keys' keys are one album tagged by one artist: one key, or (versions of one disc
+    tagged apart) titles that differ only in a closing mark of their version or edition
+    ("Child Is Father To The Man [SACD 2ch DSD64]" beside "Child Is Father to the Man [HD]")."""
+    keys = set(keys)
+    if not keys or any(k[0] != "tags" for k in keys):
+        return False
+    if len(keys) == 1:
+        return True
+    bare = {_without_version_marks(k[2]) for k in keys}
+    return len({k[1] for k in keys}) == 1 and len(bare) == 1 and "" not in bare
+
+
+# MIX-3: the words a closing mark of a version or edition is made of - format, layout, audio
+# and edition year ("[SACD 2ch DSD64 24bit 352khz]", "[HD]", "[2015 Remaster]", "[1980 Vinyl Rip]" another
+# run wrote); never a title's
+# own words ("[Live]", "(Volume 1)") nor "Mono" / "Stereo" (an album may be named after its mix);
+# a catalogue number may stand beside them
+_MARK_WORD = re.compile(
+    r"sacd|hybrid|dsd\d*|dst\d*|dxd|pcm|mch|iso|flac|hd|hi-?res|uhd|\d+ch|[2-9]\.[01]|multi-?channel|"
+    r"surround|\d+-?bit|\d+(?:\.\d+)?-?k?hz|24-\d+|\d+-24|remaster(?:ed)?|rm|(?:19|20)\d\d|rip|disc|layer|vinyl|lp|cd|reissue")
+
+
+def _without_version_marks(title) -> str:
+    """The album title without the closing brackets that only mark its version or edition."""
+    t = str(title or "")
+    while True:
+        m = re.search(r"\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]\s*$", t)
+        words = re.findall(r"[a-z0-9.-]+", m.group(1).casefold()) if m else []
+        marks = [w for w in words if _MARK_WORD.fullmatch(w.strip(".-"))]
+        # (beside those words, only a catalogue number's parts: "[SACD AFZ5 198 2ch DSD64]")
+        if not marks or not all(w in marks or re.search(r"\d", w) for w in words):
+            return mc.fold(t)
+        t = t[:m.start()]
 
 
 def is_version_dir(d: Path, metas=None, skips=None) -> bool:
@@ -821,6 +857,8 @@ class Engine:
             spans_discs = len({f.parent for f in files}) > 1
             if len(by_album) > 1 and spans_discs and len(tagged) <= 1:
                 by_album = {(tagged or [("folder", str(folder))])[0]: files}   # one disc set, partly tagged
+            elif len(by_album) > 1 and sets.get(folder) and _one_album_titled(by_album):
+                by_album = {tagged[0]: files}            # versions of one disc tagged apart ("[HD]")
             elif len(by_album) > 1 and _one_box(folder, files, keys, metas):
                 by_album = {tagged[0]: files}                                  # DSC-2
             if len(by_album) == 1:
@@ -1145,6 +1183,9 @@ class Engine:
                     return q
             if p:
                 return self._discs_split(g, p)
+            # (the discs, read alone, left the matcher's last answer theirs: the album's own
+            # answer is what its proposal, candidates and scans report are of)
+            self._last_out = out
         known = self._known_from_own_tags(out, files, base) if partial_ok and not alone else None
         if known:
             return known
@@ -1779,7 +1820,20 @@ class Engine:
             # the year every tied pressing shares, else the album's first release: never the
             # day of one pressing
             # (and not the year of a pressing your scans contradict)
-            if len(years) == 1 and None not in years and "" not in years and not info.get("scans"):
+            if info.get("edition"):
+                # EDN-2: your copy names another label's edition: neither the pick's label nor
+                # its country is yours
+                t.pop("label", None)
+                t.pop("releasecountry", None)
+                # (an "original" date that is only the other pressing's own - a Discogs release
+                # without a master - is no date of yours either)
+                first = t.get("originaldate") or t.get("originalyear")
+                first = (first[0] if isinstance(first, list) and first else first) or ""
+                if info.get("pick_year") and str(first)[:4] == str(info["pick_year"]):
+                    for k in ("originaldate", "originalyear"):
+                        t.pop(k, None)
+            if len(years) == 1 and None not in years and "" not in years and not info.get("scans") \
+                    and not info.get("edition"):
                 t["date"] = [str(next(iter(years)))]
             else:
                 first = t.get("originaldate") or t.get("originalyear")
@@ -1801,6 +1855,7 @@ class Engine:
         kept = {k for t in p.targets for k in t}
         p.provenance = {k: v for k, v in p.provenance.items() if k in kept}
         doubt = ("your scans name another pressing" if info.get("scans")
+                 else info["edition"] if info.get("edition")
                  else f"{len(tied)} pressings fit equally")
         p.why = list(p.why) + [f"pressing unknown ({doubt}): album tags only; "
                                "release IDs, catalogue number, barcode and every field of one pressing left empty"] \

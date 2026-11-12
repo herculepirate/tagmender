@@ -1951,6 +1951,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title) or _log_year(album_dir, logs),
         "media_hint": hint, "media_hint_from": hint_from,
         "sacd_hint": sacd_marks(album_dir, album_folder),     # MED-13
+        # EDN-2: the labels your copy names as its edition's: the folder name's edition bracket
+        # ("(2017 AP ISO)"), an SACD-Ripper log's disc image ("Analogue Productions - Title.iso")
+        "edition_year": mc.edition_year(album_folder),
+        "copy_labels": list(dict.fromkeys(mc.edition_labels(album_folder) + iso_labels(
+            album_dir, album_folder, [title, m.group(2) if m else album_folder]))),
         # the album named in the rip logs' headers ("Jesu / Conqueror (Japanese Bonus Disc)"):
         # searched too when the folder's title finds nothing sure (one disc of a box)
         "log_titles": [h for h in headers if mc.fold(h[1]) != mc.fold(title)],
@@ -2183,6 +2188,48 @@ def sacd_marks(album_dir, album_folder) -> str:
         if _SACD_TOOL.search(text):
             return f"an SACD rip log ({p.name})"
     return ""
+
+
+# SACD-Ripper's line naming the disc image it wrote: "Queuing raw: /dev_usb000/Analogue
+# Productions - Child Is Father To The Man.iso, start_lsn: ..." (or a Windows path)
+_ISO_QUEUED = re.compile(r"Queuing raw:[ \t]*([^\r\n]*?)\.iso\b", re.I)
+
+
+def iso_labels(album_dir, album_folder, titles) -> list:
+    """EDN-2: the label an SACD-Ripper log names its disc image after ("<Label> - <Title>.iso"),
+    in the album's folder - or, for one version or disc of a set read with the set's name
+    (album_folder is not album_dir's own name), in the set's folder beside it. Only the
+    "<Label> - <Title>.iso" form whose title is the album's, and only a label EDITION_LABELS
+    knows ("Analogue Productions", "MFSL", "MoFi"): an artist, alias or catalogue number in
+    that place ("Blood, Sweat & Tears - ...", "Various - ...") names no label."""
+    album_dir = Path(album_dir)
+    tops = [album_dir] + ([album_dir.parent] if album_folder and album_folder != album_dir.name else [])
+    found = []
+    for top in tops:
+        try:
+            found += sorted(p for p in top.iterdir() if p.is_file() and p.suffix.lower() in (".log", ".txt"))[:20]
+        except OSError:
+            continue
+    want = {mc.fold(mc.strip_edition(mc.drop_trailing_brackets(t or ""))) for t in titles} - {""}
+    out = []
+    for p in found:
+        try:
+            if p.stat().st_size > 512 * 1024:
+                continue
+            text = p.read_bytes()[:64 * 1024].decode("utf-8", "ignore")
+        except OSError:
+            continue
+        if not _SACD_TOOL.search(text):
+            continue
+        for path in _ISO_QUEUED.findall(text):
+            name = re.split(r"[/\\]", path)[-1]
+            if " - " not in name:
+                continue
+            label, iso_title = name.split(" - ", 1)
+            label = mc.edition_label_of(label)
+            if label and mc.fold(iso_title) in want and label not in out:
+                out.append(label)
+    return out
 
 
 def _track_total(infos):
@@ -7707,10 +7754,20 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     if status != "auto":
         ao = mc.album_only(final, cfg, tie_source(album, final))
         if ao:
+            named = mc.edition_named_another(final, album, cfg)       # EDN-2
+            if named:
+                ao["edition"], ao["pick_year"] = named["edition"], named["pick_year"]
+        else:
+            # EDN-2: one pressing, another label's
+            ao = mc.edition_named_another(final, album, cfg, tie_source(album, final))
+        if ao:
             out["album_only"] = ao              # the album is certain, its pressing is not
     else:
-        ao = mc.scans_name_another(final, out.get("scans"))
-        if ao:                                  # (sure of a pressing your scans contradict)
+        # (sure of a pressing your scans contradict; EDN-2: or of one on another label and year
+        # than the edition your folder name or SACD rip log names)
+        ao = mc.scans_name_another(final, out.get("scans")) or \
+            mc.edition_named_another(final, album, cfg, tie_source(album, final))
+        if ao:
             out["album_only"], out["status"] = ao, "review"
     return out
 

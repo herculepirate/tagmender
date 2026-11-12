@@ -444,6 +444,17 @@ spreadsheet (Export as Web Page…, Export as CSV…).
   `tagmender plan FOLDER --release REF` (with `--profile NAME`, the job's profile), which
   previews; one version of a folder holding two is chosen in the app. Exit code 0 when nothing is left for you, 4 when an album needs your
   decision or could not finish, 1 when the job or plan cannot be read.
+- Checking the tags: `tagmender check JOB`, `tagmender check PLAN` or `tagmender check FOLDER`
+  reads the tags and changes nothing. A job: the files it wrote. A saved plan: the tags it would
+  leave (or, once applied, the files where it put them). A folder: every album below it, grouped as
+  `tagmender scan` groups them. It lists, album by album: a needed tag missing (album, album artist,
+  artist, title, track number), repeated or gapped track numbers (gaps are fine when the album
+  says tracks are not in the folder), a guest ("feat.", "presents") in the album artist, files left
+  behind in an album's old folder, an exact match that wrote no release ID, an album-only match
+  that wrote a pressing's details, and, as a note, a track artist that adds a name to the album
+  artist ("X & Y"), which may be right. `--json` prints it as JSON and `--csv PATH` saves it as a
+  spreadsheet. Exit code 0 when there is nothing but notes, 1 when anything else was found or the
+  target cannot be read.
 
 ## Ripping and naming habits that make every album match
 

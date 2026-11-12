@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.8.43" src="https://img.shields.io/badge/version-0.8.43-0f7b7b">
+  <img alt="Version 0.8.44" src="https://img.shields.io/badge/version-0.8.44-0f7b7b">
   <img alt="Licence GPL-2.0-or-later" src="https://img.shields.io/badge/licence-GPL--2.0--or--later-blue">
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
@@ -157,6 +157,7 @@ On the command line (`tagmender` once installed, `python3 tagmender.py` from a c
 tagmender plan ~/Music/Inbox              # identify and preview; changes nothing
 tagmender run  ~/Music/Inbox              # preview, confirm, apply
 tagmender undo JOB_ID                     # put a job back
+tagmender check JOB_ID                    # audit the tags a job wrote (or a plan, or a folder); changes nothing
 tagmender watch                           # process watched folders unattended
 tagmender doctor --connection             # check what is set up, and which services answer
 ```

@@ -15,6 +15,9 @@
   tagmender recover [JOB]                   tidy up after an interrupted job
   tagmender report [JOB|PLAN] [--html PATH] [--csv PATH]
                                             what a job or plan did, what needs your decision, what failed
+  tagmender check JOB|PLAN|PATH [--csv PATH]
+                                            audit the tags of what a job wrote, a plan would leave,
+                                            or the albums in a folder; changes nothing
   tagmender unresolved [PATH]               albums marked TAGMENDER=Unresolved, by reason code
   tagmender retry PATH                      plan the unresolved albums under PATH again
   tagmender formats                         what each audio format supports
@@ -902,6 +905,33 @@ def cmd_report(args):
     return EXIT_PARTIAL if c["decide"] or c["failed"] else EXIT_OK
 
 
+def cmd_check(args):
+    """Read-only audit of tags (check.py). A job ID: the files it wrote; a saved plan: the tags it
+    would leave (or the files, once applied); a folder: its albums as scan groups them."""
+    import check
+    import executor
+    import plan as planmod
+    target = args.target
+    try:
+        if os.path.isfile(target):
+            res = check.result(target, "plan", check.check_plan(planmod.load(target)))
+        elif os.path.isdir(target):
+            res = check.result(target, "folder", check.check_folder(target, _profile(args)))
+        else:
+            pj = executor.job_dir(target) / "plan.json"
+            if not pj.exists():
+                raise LookupError(f"{target} is not a folder, a saved plan or a job (tagmender jobs lists them)")
+            res = check.result(target, "job", check.check_plan(planmod.load(pj), applied=True))
+        if args.csv:
+            Path(args.csv).write_text(check.csv_text(res), encoding="utf-8", newline="")
+            _err(f"Findings saved to {args.csv}")
+    except (OSError, ValueError, LookupError) as exc:
+        _err(f"Not checked: {exc}")
+        return EXIT_ERR
+    print(check.json_text(res) if args.json else check.text(res))
+    return EXIT_ERR if res["problems"] else EXIT_OK
+
+
 # the marks of albums whose release is not proven: Unresolved, and Partial (the album known,
 # its release not - tried again too, it may be matched exactly once a provider has its barcode)
 UNPROVEN_MARKS = ("unresolved", "partial")
@@ -1253,6 +1283,14 @@ def work_parsers(sub):
     a.add_argument("--html", metavar="PATH", help="also save the report as a web page")
     a.add_argument("--csv", metavar="PATH", help="also save the report as a spreadsheet (CSV)")
     a.add_argument("--json", action="store_true")
+    a = sub.add_parser("check", help="audit the tags of what a job wrote, a saved plan would leave, or the albums "
+                                     "in a folder: missing tags, track numbers, guests in the album artist; "
+                                     "changes nothing")
+    a.add_argument("target", metavar="JOB|PLAN|PATH",
+                   help="a job's ID (tagmender jobs), a saved plan file, or a folder")
+    a.add_argument("--csv", metavar="PATH", help="also save the findings as a spreadsheet (CSV)")
+    a.add_argument("--json", action="store_true")
+    prof(a)
     a = sub.add_parser("artist-photos", help="artist photos kept between runs: list, or --forget [ID or folder]")
     a.add_argument("--forget", nargs="?", const="", metavar="MATCH",
                    help="forget all, or those whose MusicBrainz artist ID or folder contains MATCH")
@@ -1279,7 +1317,7 @@ def work_parsers(sub):
 
 WORK = {"scan": cmd_scan, "plan": cmd_plan, "apply": cmd_apply, "run": cmd_run, "jobs": cmd_jobs, "undo": cmd_undo,
         "recover": cmd_recover, "unresolved": cmd_unresolved, "retry": cmd_retry, "watch": cmd_watch,
-        "artist-photos": cmd_artist_photos, "report": cmd_report,
+        "artist-photos": cmd_artist_photos, "report": cmd_report, "check": cmd_check,
         "formats": cmd_formats, "gui": cmd_gui}
 
 

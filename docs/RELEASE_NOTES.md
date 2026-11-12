@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.8.44
+
+**Check what was written: `tagmender check`**
+- `tagmender check JOB|PLAN|PATH` reads the tags a job wrote, a plan would leave, or the albums in
+  a folder, and lists what looks wrong: a needed tag missing, track numbers repeated or skipped, a
+  guest named in the album artist, an exact album without a release ID, an album-only one carrying
+  a pressing's details, files left behind in a moved album's old folder. It changes nothing.
+  `--json` and `--csv PATH` for scripts and spreadsheets.
+
 ## 0.8.43
 
 **Featured guests also in a split credit (NAM-8)**

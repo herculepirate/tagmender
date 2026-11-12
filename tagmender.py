@@ -1331,7 +1331,22 @@ def _first_settings():
         pass
 
 
+def _bundled_zbar():
+    """The AppImage's own libzbar (TAGMENDER_LIBZBAR, set by its AppRun): pyzbar looks zbar up with
+    ctypes.util.find_library, which never sees a library bundled beside the app."""
+    path = os.environ.get("TAGMENDER_LIBZBAR")
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        import pyzbar.zbar_library as zl
+    except Exception:
+        return
+    found = zl.find_library
+    zl.find_library = lambda name: path if name == "zbar" else found(name)
+
+
 def main(argv=None):
+    _bundled_zbar()
     for stream in (sys.stdout, sys.stderr):      # a file name that is not valid UTF-8 is printed, not fatal
         try:
             stream.reconfigure(errors="backslashreplace")

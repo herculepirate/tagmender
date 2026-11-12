@@ -17,19 +17,22 @@
 # Needs: uv (pip install uv) unless --python points at an unpacked python-build-standalone,
 # and appimagetool (downloaded to ./.cache when missing).
 # Runs on x86_64 Linux with glibc 2.28 or newer (PySide6 wheels). fpcalc is bundled (Chromaprint's
-# static release, checksum-pinned); ffmpeg and tesseract are used from the system when present
-# (not bundled yet: issue #4).
+# static release, checksum-pinned); tesseract (+ eng/jpn/rus/osd) and libzbar from the
+# native-tools workflow's archive (--native-tools PATH, or .cache/native-tools-x86_64.tar.gz);
+# ffmpeg from the system.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC=$PWD
 OUT=$SRC/dist
 PYDIR=""
 PLAYER=0
+NATIVE=""                          # tesseract + leptonica + libzbar from the native-tools workflow
 while [ $# -gt 0 ]; do
   case "$1" in
     --python) PYDIR=$2; shift 2;;
     --out) OUT=$2; shift 2;;
     --with-player) PLAYER=1; shift;;
+    --native-tools) NATIVE=$2; shift 2;;
     *) echo "unknown option $1" >&2; exit 2;;
   esac
 done
@@ -89,6 +92,23 @@ install -D -m 0755 /dev/null "$APPDIR/usr/tools/bin/fpcalc"
 tar xzf "$FPCALC_TGZ" -O "chromaprint-fpcalc-$FPCALC_VER-linux-x86_64/fpcalc" > "$APPDIR/usr/tools/bin/fpcalc"
 printf 'fpcalc %s: Chromaprint (LGPL-2.1+, https://github.com/acoustid/chromaprint), statically linked with FFmpeg (LGPL-2.1+, https://ffmpeg.org); unmodified release binary.\n' \
   "$FPCALC_VER" > "$APPDIR/usr/tools/NOTICE"
+NATIVE=${NATIVE:-$CACHE/native-tools-x86_64.tar.gz}
+if [ -f "$NATIVE" ]; then         # (issue #4: OCR and barcodes on scans without the system's tools)
+  tar xzf "$NATIVE" -C "$APPDIR/usr/tools" --strip-components=1
+  mkdir -p "$APPDIR/usr/tools/libexec"
+  mv "$APPDIR/usr/tools/bin/tesseract" "$APPDIR/usr/tools/libexec/tesseract"
+  cat > "$APPDIR/usr/tools/bin/tesseract" <<'WRAP'
+#!/bin/sh
+# the bundled tesseract with its own language data (the system's tessdata is never mixed in)
+D=$(dirname "$(readlink -f "$0")")/..
+TESSDATA_PREFIX="$D/share/tessdata" exec "$D/libexec/tesseract" "$@"
+WRAP
+  chmod 0755 "$APPDIR/usr/tools/bin/tesseract"
+  "$APPDIR/usr/tools/bin/tesseract" --version >/dev/null 2>&1 \
+    || { echo "the bundled tesseract does not run" >&2; exit 1; }
+else
+  echo "warning: no native tools ($NATIVE; the native-tools workflow builds them): the AppImage uses the system's tesseract and zbar" >&2
+fi
 if [ -n "$LIBDISCID" ]; then        # its own folder: AppRun puts only this one on LD_LIBRARY_PATH
   install -D -m 0644 "$(readlink -f "$LIBDISCID")" "$APPDIR/usr/lib/discid/libdiscid.so.0"
 else
@@ -108,7 +128,8 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE=$(dirname "$(readlink -f "$0")")
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
 export LD_LIBRARY_PATH="$HERE/usr/lib/discid${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"   # libdiscid only
-export PATH="$HERE/usr/tools/bin:$PATH"     # the bundled fpcalc first; the system's other tools after it
+export PATH="$HERE/usr/tools/bin:$PATH"     # the bundled fpcalc and tesseract first; the system's after them
+[ -f "$HERE/usr/tools/lib/libzbar.so.0" ] && export TAGMENDER_LIBZBAR="$HERE/usr/tools/lib/libzbar.so.0"
 [ $# -eq 0 ] && set -- gui
 exec "$HERE/usr/python/bin/python3" "$HERE/usr/lib/tagmender/tagmender.py" "$@"
 EOF

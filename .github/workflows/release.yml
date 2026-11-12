@@ -9,7 +9,11 @@ on:
 permissions:
   contents: write
 jobs:
+  native-tools:
+    uses: ./.github/workflows/native-tools.yml
+
   release:
+    needs: native-tools
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -32,10 +36,13 @@ jobs:
         run: pip install -r packaging/requirements-appimage.txt uv
       - name: Every test suite
         run: ./run_tests.sh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: {name: native-tools, path: .cache}
       - name: Build the .deb and the AppImage
         run: |
+          (cd .cache && sha256sum -c native-tools-x86_64.tar.gz.sha256)
           packaging/build_deb.sh
-          packaging/build_appimage.sh --with-player
+          packaging/build_appimage.sh --with-player --native-tools .cache/native-tools-x86_64.tar.gz
       - name: Check what was built
         run: |
           cd dist

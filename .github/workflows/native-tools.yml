@@ -1,14 +1,13 @@
 # The native tools the AppImage bundles beside its own Python: tesseract (scan OCR, with
 # leptonica) and libzbar (barcodes on scans), built small - no curl, libarchive, X11, video or
-# D-Bus - on manylinux_2_28 (glibc 2.28, the AppImage's floor). Run by hand; the result is
-# attached to the "native-tools-N" release that packaging/build_appimage.sh downloads (pinned by
-# its checksum). Issue #4.
+# D-Bus - on manylinux_2_28 (glibc 2.28, the AppImage's floor). build.yml calls it; the archive is
+# cached by this file's contents, so it is built again only when this file changes, and handed to
+# packaging/build_appimage.sh --native-tools. Issue #4.
 # Actions are pinned to a commit (the version in the comment).
 name: native-tools
 on:
   workflow_dispatch:
-  push:
-    branches: [native-tools]
+  workflow_call:        # (build.yml: the AppImage bundles what this builds)
 permissions:
   contents: read
 env:
@@ -23,11 +22,20 @@ jobs:
     container: quay.io/pypa/manylinux_2_28_x86_64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: native-tools-${{ hashFiles('.github/workflows/native-tools.yml') }}
+          path: |
+            native-tools-x86_64.tar.gz
+            native-tools-x86_64.tar.gz.sha256
       - name: Build packages
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           dnf install -y --setopt=install_weak_deps=False cmake make gcc-c++ autoconf automake libtool \
             gettext-devel pkgconfig libpng-devel libjpeg-turbo-devel libtiff-devel zlib-devel
       - name: Build leptonica, tesseract, zbar
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -eux
           P=/opt/tm; mkdir -p $P src; cd src
@@ -56,6 +64,7 @@ jobs:
             --without-xv --disable-doc
           make -j"$(nproc)" && make install
       - name: Bundle with their libraries
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -eux
           P=/opt/tm; O=$PWD/native-tools; rm -rf $O; mkdir -p $O/bin $O/lib $O/share/tessdata
@@ -82,6 +91,7 @@ jobs:
           EOF
           ls -la $O/bin $O/lib
       - name: Check they run
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -eux
           O=$PWD/native-tools

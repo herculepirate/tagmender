@@ -154,7 +154,9 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
     elif len(names) >= 2:                               # a joint credit: its first artist ...
         # (your own name for its first artist goes first: file_under over the rules; a
         # "feat."/"with"/"presents" credit names its lead first, whatever the members say)
-        joined = credit if not split else ""
+        # (the credit as one text: the album artist itself, or - written one value per artist -
+        # the database's credit the engine passes along unwritten)
+        joined = credit if not split else _first(t, "~albumartist_credit")
         if not mapped(names[0])[0] and guest_after_partners(joined, names):
             return None              # (partners first, a guest after: the whole credit)
         equals = None if mapped(names[0])[0] or lead_credit(joined, names) \

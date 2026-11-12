@@ -1697,6 +1697,10 @@ class Engine:
                 merged.pop("tagmender", None)
             hidden = {k: v for k, v in (tags_mb[i] if tags_mb else {}).items() if k.startswith("~")}
             hidden.update(compilations.discogs_hints(det if dparts else None))   # (Various / Compilation on Discogs)
+            if tags_mb and rel and rel.get("artist-credit"):
+                # NAM-8: the credit as one text, its joins ("featuring", "&") kept for album_artist
+                # when the plugin writes the credit one value per artist
+                hidden["~albumartist_credit"] = [mb_tags.credit_info(rel["artist-credit"], ps)["name"]]
             if dparts and det:                     # (the credited Discogs artists: album_artist asks a
                 dg_ids = [str(a["id"]) for a in det.get("artists") or []   # band's members by them)
                           if isinstance(a, dict) and a.get("id")]
@@ -4139,6 +4143,7 @@ outage_notes = ma.outage_notes      # {host: note} for hosts whose every call fa
 
 
 ALBUM_ONLY_HIDDEN = {"~remove", "~multiartist", "~absolutetracknumber", "~totalalbumtracks", "~albumartists",
+                     "~albumartist_credit",
                      "~albumartistcomment", "~artists", "~artistcomment", "~artists_sort", "~artists_comments",
                      "~artists_countries", "~recordingtitle", "~recordingcomment", "~length", "~video", "~datatrack",
                      "~discpregap", "~silence", "~releasegroup", "~releasegroupcomment",

@@ -59,6 +59,16 @@ class NAM8(unittest.TestCase):
         # (a name holding a lead word is no join: "Withers" is not "with")
         self.assertIsNone(aa.choose(tags(["Bill Withers", "B"], ["a", "b"], "Bill Withers & B"), PROF, two))
 
+    def test_NAM8_a_split_credit_keeps_its_featuring_through_the_hidden_credit(self):
+        # (Robin Trower - Original Album Series Vol 2: the profile writes the credit one value per
+        # artist; MusicBrainz's "Robin Trower featuring Jack Bruce" still names the lead)
+        t = {"albumartist": ["Robin Trower", "Jack Bruce"], "albumartists": ["Robin Trower", "Jack Bruce"],
+             "musicbrainz_albumartistid": ["rt", "jb"], "~albumartist_credit": ["Robin Trower featuring Jack Bruce"]}
+        got = aa.choose(t, PROF, mb({"rt": PERSON(), "jb": PERSON()}), lambda d: aa.NOT_ASKED)
+        self.assertEqual(got[:3], ("Robin Trower", "", "rt"))
+        t["~albumartist_credit"] = ["Robin Trower & Jack Bruce"]
+        self.assertIsNone(aa.choose(t, PROF, mb({"rt": PERSON(), "jb": PERSON()}), lambda d: aa.NOT_ASKED))
+
     def test_NAM8_partners_before_a_guest_keep_the_whole_credit(self):
         # (review C: "Pat Metheny & Lyle Mays with Nana Vasconcelos" never cut to Pat Metheny)
         three = mb({"a": PERSON(), "b": PERSON(), "c": PERSON()})

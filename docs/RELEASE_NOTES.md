@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.43
+
+**Featured guests also in a split credit (NAM-8)**
+- A profile that writes a joint credit one value per artist ("Robin Trower; Jack Bruce") still
+  files "Robin Trower featuring Jack Bruce" under its lead: the database's credit text, with its
+  joins, is passed along unwritten.
+
 ## 0.8.42
 
 **Box sets numbered one way (TRK-4)**

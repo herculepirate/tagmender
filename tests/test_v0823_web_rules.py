@@ -292,6 +292,41 @@ class MED10_PressedDiscsAndTheEU(unittest.TestCase):
         agree, _against = mc.pressing_clues("Made in the EU", mc_cand(self.LENS, country="Europe"))
         self.assertIn("country", agree)
 
+    def test_made_in_the_eu_agrees_with_a_uk_pressing_as_with_a_europe_one(self):
+        # MED-10: "Made in the EU" agrees with a UK, German or other European pressing - it does
+        # not tell the 2011 UK CD from its undated "Europe" repress (Tangerine Dream - Zeit)
+        uk = mc_cand(self.LENS, id="uk", source="discogs", country="UK", year=2011,
+                     catnos={"ereacd21017"}, barcodes={"5013929711730"})
+        eu = mc_cand(self.LENS, id="eu", source="discogs", country="Europe", year=None,
+                     catnos={"ereacd21017"}, barcodes={"5013929711730"})
+        self.assertIn("country", mc.pressing_clues("Made in the EU", uk)[0])
+        a = mc_album(self.LENS, printed_text="EREACD 21017 Made in the EU", typed_text="",
+                     barcodes={"5013929711730"})
+        tied = [mc.score_candidate(a, c, self.CFG, "EREACD 21017 Made in the EU") for c in (uk, eu)]
+        pick = mc.choose_pressing(tied)
+        self.assertEqual(tied[0]["clues"].get("country"), tied[1]["clues"].get("country"), "one clue for both")
+        self.assertFalse(pick and "country" in pick[1], pick)     # (the EU text decides nothing)
+        self.assertFalse(mc.pressing_clues("Made in the EU", dict(uk, country="Japan"))[0].get("country"))
+
+    def test_made_in_names_ending_in_and(self):
+        # "and" ends a country name only as a word: "Holland" was cut to "Holl" and read as no
+        # country (Tangerine Dream - Rubycon: "MADE IN HOLLAND" on the disc, a Canadian pick)
+        for text, code in (("MADE IN HOLLAND", "NL"), ("Made in England", "GB"), ("Made in Finland", "FI"),
+                           ("Printed in Poland by Takt", "PL"), ("Made in Switzerland", "CH"),
+                           ("Made in Ireland.", "IE"), ("Made in Germany and the EU", "DE")):
+            self.assertIn(code, mc.countries_on_scans(text), text)
+            self.assertIn(code, mc.countries_on_scans(text + "\nBarcode 5 013929 711730"), text + " (more lines after)")
+        agree, against = mc.pressing_clues("TAND 6\nMADE IN HOLLAND", mc_cand(self.LENS, country="Canada"))
+        self.assertTrue([a for a in against if "made in" in a], against)
+
+    def test_a_label_named_as_the_artist_is_no_clue(self):
+        # EVI-7: "Tangerine Dream" on every sleeve is the artist, not the promo's label
+        promo = mc_cand(self.LENS, artist="Tangerine Dream", label="Eastgate; Tangerine Dream")
+        agree, _ = mc.pressing_clues("TANGERINE DREAM\nWinter In Hiroshima", promo)
+        self.assertNotIn("label", agree)
+        agree, _ = mc.pressing_clues("TANGERINE DREAM\nEastgate Music", promo)
+        self.assertIn("label", agree, "the real label still counts")
+
     def test_a_pressed_matrix_is_no_cd_r(self):
         a = mc_album(self.LENS, ring_text=self.MATRIX)
         jewel = mc_cand(self.LENS, id="jewel", source="discogs", country="UK", media_formats=["CD"],

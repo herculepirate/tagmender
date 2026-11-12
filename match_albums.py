@@ -1931,7 +1931,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
     headers = [log["header"] for log in ripped if log.get("header")]
     cdtocs = tag_tocs(infos)
-    tocs = merge_tocs(infos, log_toc, cue_tocs(album_dir, infos), cdtocs)
+    cue_toc = cue_tocs(album_dir, infos)
+    tocs = merge_tocs(infos, log_toc, cue_toc, cdtocs)
     # TOC-1: the discs whose TOC fits their files to the sector (a log made of another rip or
     # pressing does not): only their disc ID speaks for the files' own lengths
     tocs_fit = sorted(d for d, t in tocs.items()
@@ -2021,6 +2022,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # per disc: the rip log's TOC first (the disc itself, its pregaps and the data track
         # of an Enhanced CD), then a cue sheet's, then the one rebuilt from the tracks' lengths
         "tocs": tocs,
+        # TAG-3: the discs whose TOC was READ - from a rip log, or a cue sheet carrying more than
+        # the files' lengths (an image's track starts, its pregaps) - and fits their files: the
+        # disc's real TOC, pregaps and all. A TOC rebuilt from the files' lengths always fits
+        # them and may lack the pregaps a rip left out: never evidence against a disc ID
+        "tocs_read": tocs_read(tocs, tocs_fit, log_toc, cue_toc, disc_tocs(infos)),
         "tocs_fit": tocs_fit,
         "rip_log_toc": bool(log_toc),
         # discs whose hidden track before track 1 (a file numbered 0) a rip log's or CDTOC tag's
@@ -2457,6 +2463,14 @@ def merge_tocs(infos, *sources):
                 out[disc] = toc
                 taken.add(disc)
     return out
+
+
+def tocs_read(tocs, fit, logs, cues, rebuilt):
+    """TAG-3: {disc: TOC} of the discs whose TOC fits their files and was read from a rip log,
+    or from a cue sheet whose TOC is not the one the files' lengths give (read_album)."""
+    logs = set((logs or {}).values())
+    cues = set((cues or {}).values()) - set((rebuilt or {}).values())
+    return {d: tocs[d] for d in fit or () if tocs.get(d) and (tocs[d] in logs or tocs[d] in cues)}
 
 
 # An Enhanced CD (CD-Extra) has its data track in a second session, 11400 sectors after

@@ -1888,8 +1888,8 @@ class Engine:
         if view:
             # (your copy's own table of contents, each disc's that fits its files to the sector:
             # a release whose disc IDs none of them fit is another pressing - _disc_ids_differ)
-            tocs = (album or {}).get("tocs") or {}
-            view = dict(view, copy_tocs=[tocs[d] for d in (album or {}).get("tocs_fit") or () if tocs.get(d)])
+            # ({disc: TOC} read from a rip log or cue sheet only: match_albums.tocs_read)
+            view = dict(view, copy_tocs={str(d): t for d, t in ((album or {}).get("tocs_read") or {}).items()})
         p.release_view = view                 # (follow_source asks the same: _another_pressing)
         if not view.get("pick"):
             return p
@@ -1981,34 +1981,40 @@ class Engine:
                 if info else ""), info
 
     def _disc_ids_differ(self, rid, copy_tocs) -> str:
-        """TAG-3: the MusicBrainz release rid lists disc IDs and your copy's own table of
-        contents (a disc whose TOC fits its files to the sector: whole-sector tracks, a rip log,
-        a cue sheet) fits none of them, each track within a sector as toc_fits_audio compares:
-        your disc is not that release's (Robin Trower - Back It Up: MusicBrainz's 1983 entry, its
-        one disc ID 80 to 582 sectors off each track of the copy). "" when your TOC is not
-        known, the release lists no disc ID, or MusicBrainz did not answer (no evidence)."""
+        """TAG-3: the MusicBrainz release rid lists disc IDs for a medium, and the table of
+        contents of your copy's disc of that number - read from a rip log or a cue sheet
+        (match_albums.tocs_read: never one rebuilt from the files' lengths, which always fits
+        them and may lack the pregaps) - fits none of them, each track within a sector as
+        toc_fits_audio compares: your disc is not that release's (Robin Trower - Back It Up:
+        MusicBrainz's 1983 entry, its one disc ID 80 to 582 sectors off the copy's). Medium by
+        medium: a medium that lists no disc ID, or a disc of yours with no TOC read, says
+        nothing. "" too when MusicBrainz did not answer (no evidence)."""
         if not copy_tocs or not self.use_mb:
             return ""
         try:
-            rel = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}?inc=discids&fmt=json", "mb")
+            rel = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}?inc=discids+media&fmt=json", "mb")
         except Exception as exc:
             self.log.info("TAG-3: disc IDs of %s not read: %s", rid, exc)
-            return ""
-        theirs = [d for m in (rel or {}).get("media") or () for d in m.get("discs") or ()
-                  if d.get("offsets") and d.get("sectors")]
-        if not theirs:
             return ""
 
         def lengths(offsets, leadout):
             offsets = [int(x) for x in offsets]
             return [b - a for a, b in zip(offsets, offsets[1:] + [int(leadout)])]
 
-        mine = [lengths(t.split()[3:], t.split()[2]) for t in copy_tocs]
-        for d in theirs:
-            other = lengths(d["offsets"], d["sectors"])
-            if any(len(m) == len(other) and all(abs(a - b) <= 1 for a, b in zip(m, other)) for m in mine):
-                return ""
-        return "none of its disc IDs fits your disc's table of contents"
+        compared = False
+        for m in (rel or {}).get("media") or ():
+            mine = copy_tocs.get(str(m.get("position") or ""))
+            theirs = [d for d in m.get("discs") or () if d.get("offsets") and d.get("sectors")]
+            if not mine or not theirs:
+                continue
+            nums = mine.split()
+            own = lengths(nums[3:], nums[2])
+            if any(len(own) == len(o) and all(abs(a - b) <= 1 for a, b in zip(own, o))
+                   for o in (lengths(d["offsets"], d["sectors"]) for d in theirs)):
+                return ""                    # (one of your discs is one of its discs: the same disc)
+            compared = True
+        return f"none of its disc IDs fits your disc's table of contents (from its rip log or cue sheet)" \
+            if compared else ""
 
     @staticmethod
     def _pick_side(p, view) -> dict:

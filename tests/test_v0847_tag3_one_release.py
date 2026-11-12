@@ -388,22 +388,22 @@ class TAG3_Engine(te.Base):
         adb, http, view = self.biu()
         e = self.eng(http)
         p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
-        why = e._another_pressing(p, dict(view, copy_tocs=[self.toc(self.BIU_COPY)]), "musicbrainz_albumid", adb)[0]
+        why = e._another_pressing(p, dict(view, copy_tocs={"1": self.toc(self.BIU_COPY)}), "musicbrainz_albumid", adb)[0]
         self.assertIn("none of its disc IDs fits your disc's table of contents", why)
         # (your disc's TOC unknown: no evidence; your TOC that fits its disc ID: the same disc)
-        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs=[]), "musicbrainz_albumid", adb)[0], "")
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs={}), "musicbrainz_albumid", adb)[0], "")
         theirs = [b - a for a, b in zip(self.BIU_OFFSETS, self.BIU_OFFSETS[1:] + [self.BIU_LEADOUT])]
-        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs=[self.toc(theirs)]),
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs={"1": self.toc(theirs)}),
                                              "musicbrainz_albumid", adb)[0], "")
         # (MusicBrainz down: nothing known)
         down = self.eng(te.FakeHttp(mb_down=True))
-        self.assertEqual(down._another_pressing(p, dict(view, copy_tocs=[self.toc(self.BIU_COPY)]),
+        self.assertEqual(down._another_pressing(p, dict(view, copy_tocs={"1": self.toc(self.BIU_COPY)}),
                                                 "musicbrainz_albumid", adb)[0], "")
 
     def test_TAG3_back_it_up_end_to_end_proven_and_unproven(self):
         adb, http, view = self.biu()
         album = {"file_release_ids": {"musicbrainz_albumid": [adb]}, "tocs": {1: self.toc(self.BIU_COPY)},
-                 "tocs_fit": [1]}
+                 "tocs_fit": [1], "tocs_read": {1: self.toc(self.BIU_COPY)}}
 
         def prop():
             return pl.Proposal(source_dir="x", files=[], status="identified", tier="exact", confidence=87.6,
@@ -415,8 +415,53 @@ class TAG3_Engine(te.Base):
         self.assertTrue(any("disc IDs" in n for n in proven.notes), proven.notes)
         e._accepts = lambda tier: True
         self.assertEqual(e._one_release(prop(), {"release_ids": view}, album).tier, "album_only")
-        # (no TOC of your copy: the sparse entry is no other pressing)
-        self.assertEqual(e._one_release(prop(), {"release_ids": view}, dict(album, tocs_fit=[])).tier, "exact")
+        # (no TOC of your copy read from a log or cue - only the one its files' lengths give:
+        # the sparse entry is no other pressing)
+        self.assertEqual(e._one_release(prop(), {"release_ids": view}, dict(album, tocs_read={})).tier, "exact")
+
+    def test_TAG3_disc_ids_are_compared_medium_by_medium(self):
+        # (your copy is disc 1; MusicBrainz lists a disc ID for medium 2 only: nothing to compare)
+        adb, http, view = self.biu()
+        rel = http.mb[adb]
+        rel["media"][1]["discs"], rel["media"][0]["discs"] = rel["media"][0]["discs"], []
+        e = self.eng(http)
+        p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
+        self.assertEqual(e._another_pressing(p, dict(view, copy_tocs={"1": self.toc(self.BIU_COPY)}),
+                                             "musicbrainz_albumid", adb)[0], "")
+        # (your disc 2's TOC against medium 2's disc ID: compared)
+        self.assertIn("disc IDs", e._another_pressing(p, dict(view, copy_tocs={"2": self.toc(self.BIU_COPY)}),
+                                                      "musicbrainz_albumid", adb)[0])
+
+    def test_TAG3_a_toc_rebuilt_from_the_files_lengths_is_no_evidence(self):
+        t = self.toc(self.BIU_COPY)
+        other = self.toc([17637 + 150] + self.BIU_COPY[1:])
+        self.assertEqual(ma.tocs_read({1: t}, [1], {}, {1: t}, {1: t}), {}, "a cue that only repeats the files")
+        self.assertEqual(ma.tocs_read({1: t}, [1], {}, {}, {1: t}), {}, "the files' lengths alone")
+        self.assertEqual(ma.tocs_read({1: t}, [1], {1: t}, {}, {1: t}), {1: t}, "a rip log's TOC")
+        self.assertEqual(ma.tocs_read({1: other}, [1], {}, {1: other}, {1: t}), {1: other}, "a cue with its pregaps")
+        self.assertEqual(ma.tocs_read({1: other}, [], {1: other}, {}, {1: t}), {}, "one that fits no disc of yours")
+
+    def test_TAG3_back_it_up_toc_from_an_image_cue_sheet(self):
+        # (the disc's track starts from a cue sheet of one image file: its real TOC)
+        import tempfile as _tf
+        d = Path(_tf.mkdtemp(dir=str(self.tmp)))
+        starts, pos = [], 0
+        for n in self.BIU_COPY:
+            starts.append(pos)
+            pos += n
+        lines = ['FILE "Back It Up.flac" WAVE']
+        for k, st in enumerate(starts, 1):
+            lines += [f"  TRACK {k:02d} AUDIO", f"    INDEX 01 {st // 4500:02d}:{st // 75 % 60:02d}:{st % 75:02d}"]
+        (d / "Robin Trower - Back It Up.cue").write_text("\n".join(lines) + "\n")
+        infos = [(d / "Back It Up.flac", {"secs": pos / 75})]
+        cues = ma.cue_tocs(d, infos)
+        self.assertEqual(cues, {1: self.toc(self.BIU_COPY)})
+        read = ma.tocs_read(cues, [1], {}, cues, {})
+        adb, http, view = self.biu()
+        p = pl.Proposal(source_dir="x", files=[], targets=[{"discogs_release_id": ["4238649"]}])
+        why = self.eng(http)._another_pressing(p, dict(view, copy_tocs={str(k): v for k, v in read.items()}),
+                                               "musicbrainz_albumid", adb)[0]
+        self.assertIn("none of its disc IDs fits your disc's table of contents", why)
 
     # ---- review 3: missing numbers, twins, merged IDs, ranges, the original date ---------------
     def test_TAG3_none_catalogue_number_is_no_number(self):

@@ -658,13 +658,16 @@ def cached_ocr(db, base, max_images=15):
     """The text the matcher already read from the album's scans (page and spines)."""
     try:
         images, _key = ma.list_images(base, max_images)
+        # only the readings made the current way (OCR-3: page_kind): older ones ("text:",
+        # "text-eng+rus+jpn:", greyscale, every pack at once) are not this album's text
+        kinds = (ma.page_kind("text"), ma.page_kind("spines"))
         rows = []
         for p in images:                              # cached per scan (match_albums.each_scan)
-            rows += db.execute("SELECT key, value FROM ocr_cache WHERE key LIKE ?",
-                               (f"%:{ma.scan_key(p)}",)).fetchall()
+            rows += db.execute(f"SELECT key, value FROM ocr_cache WHERE key IN ({','.join('?' * len(kinds))})",
+                               [f"{k}:{ma.scan_key(p)}" for k in kinds]).fetchall()
     except Exception:
         return ""
-    texts = (json.loads(v) for k, v in rows if k.startswith(("text", "spines")) and v)
+    texts = (json.loads(v) for k, v in rows if v)
     return "\n".join(t for t in texts if isinstance(t, str) and t)
 
 

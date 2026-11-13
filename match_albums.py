@@ -5600,16 +5600,34 @@ def _latin_langs(langs):
     return "+".join([x for x in langs.split("+") if x not in _NON_LATIN] or ["eng"])
 
 
+def _open_reduced(path, box):
+    """A scan in colour (RGB), at most BOX pixels, reduced BEFORE it is converted (a JPEG
+    decoded at a fraction of its size, the rest shrunk first), so a 6000 x 6000 scan is never
+    held in colour at full size. Returns (image, its original size, its dpi or None)."""
+    from PIL import Image
+    with Image.open(path) as src:
+        size, dpi = src.size, src.info.get("dpi")
+        try:
+            src.draft("RGB", box)                     # (JPEG: decoded reduced; others: no-op)
+        except Exception:
+            pass
+        im = src
+        if im.mode not in ("1", "P"):                 # (palette images are shrunk in colour)
+            try:
+                im = im.copy()
+                im.thumbnail(box)
+            except Exception:
+                im = src
+        im = im.convert("RGB")
+    im.thumbnail(box)
+    return im, size, dpi
+
+
 def _page_image(path):
     """A scan as tesseract reads it best: in colour (tesseract picks the channel the print
     stands out in; a greyscale copy loses blue-on-black print: Popol Vuh's label) at most
     2400 pixels, with its resolution carried over. Returns (image, save options)."""
-    from PIL import Image
-    with Image.open(path) as src:
-        dpi = src.info.get("dpi")
-        im = src.convert("RGB")
-    w = im.size[0]
-    im.thumbnail((2400, 2400))
+    im, (w, _h), dpi = _open_reduced(path, (2400, 2400))
     opts = {}
     try:
         if dpi and float(dpi[0]) >= 50:
@@ -5694,8 +5712,39 @@ def _sure_chars(words):
                for n in [sum(ch.isalnum() and ch not in "ー〜・" for ch in w)] if n)
 
 
-_SCAN_LANGS = {}                  # (scan digest, language set) -> the packs its page was read in
-_SCAN_LANGS_GUARD = threading.Lock()
+# OCR-3: one decision per scan and language set, shared by its page text and its spines:
+# (scan digest, language set) -> (the packs chosen, the page text). The first to ask reads the
+# page (one OSD a scan); the other waits for it and takes its reading. The newest 256 kept.
+_SCAN_PAGES = {}
+_SCAN_PAGE_LOCKS = {}
+_SCAN_PAGES_GUARD = threading.Lock()
+_SCAN_PAGES_MAX = 256
+
+
+def _read_page(path):
+    """scan_page's reading, not shared: (packs chosen, text)."""
+    import tempfile
+    langs = ocr_langs()
+    latin = _latin_langs(langs)
+    im, opts = _page_image(path)
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        im.save(tmp.name, **opts)
+        if latin == langs:
+            return latin, _tess_page(tmp.name, latin)[0]
+        script = _osd_script(im, opts, tmp.name)
+        own = [x for x in langs.split("+") if x in _SCRIPT_PACKS.get(script, ())]
+        if script == "Latin":
+            return latin, _tess_page(tmp.name, latin)[0]
+        if own:
+            chosen = "+".join(own + ["eng"])
+            return chosen, _tess_page(tmp.name, chosen)[0]
+        text, words = _tess_page(tmp.name, latin)
+        if _latin_poor(words):
+            text_all, words_all = _tess_page(tmp.name, langs)
+            if _sure_chars(words_all) >= max(6, 1.5 * _sure_chars(words) + 1):
+                # the Latin reading is kept with it: what it read is never lost
+                return langs, text_all + "\n" + text
+        return latin, text
 
 
 def scan_page(path):
@@ -5704,58 +5753,36 @@ def scan_page(path):
     the Latin packs alone, another script in its packs and English; with no sure script, in
     the Latin packs first and, only when that reads too little, in every pack too, which is
     kept (with the Latin reading) when it reads clearly more for sure. A Latin cover is never
-    read only through every pack at once."""
-    import tempfile
-    langs = ocr_langs()
-    latin = _latin_langs(langs)
-    im, opts = _page_image(path)
-    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
-        im.save(tmp.name, **opts)
-        if latin == langs:
-            text, _w = _tess_page(tmp.name, latin)
-            chosen = latin
-        else:
-            script = _osd_script(im, opts, tmp.name)
-            own = [x for x in langs.split("+") if x in _SCRIPT_PACKS.get(script, ())]
-            if script == "Latin":
-                chosen = latin
-                text, _w = _tess_page(tmp.name, latin)
-            elif own:
-                chosen = "+".join(own + ["eng"])
-                text, _w = _tess_page(tmp.name, chosen)
-            else:
-                chosen = latin
-                text, words = _tess_page(tmp.name, latin)
-                if _latin_poor(words):
-                    text_all, words_all = _tess_page(tmp.name, langs)
-                    if _sure_chars(words_all) >= max(6, 1.5 * _sure_chars(words) + 1):
-                        # the Latin reading is kept with it: what it read is never lost
-                        chosen, text = langs, text_all + "\n" + text
-    with _SCAN_LANGS_GUARD:
-        if len(_SCAN_LANGS) > 2048:
-            _SCAN_LANGS.clear()
-        _SCAN_LANGS[(_scan_digest(path), langs)] = chosen
-    return chosen, text
+    read only through every pack at once. Read once a scan: its spines (scan_langs) take the
+    packs chosen here."""
+    key = (_scan_digest(path), ocr_langs())
+    with _SCAN_PAGES_GUARD:
+        lock = _SCAN_PAGE_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        with _SCAN_PAGES_GUARD:
+            got = _SCAN_PAGES.get(key)
+        if got is None:
+            got = _read_page(path)
+            with _SCAN_PAGES_GUARD:
+                _SCAN_PAGES[key] = got
+                while len(_SCAN_PAGES) > _SCAN_PAGES_MAX:
+                    old = next(iter(_SCAN_PAGES))
+                    _SCAN_PAGES.pop(old)
+                    _SCAN_PAGE_LOCKS.pop(old, None)
+    return got
 
 
 def scan_langs(path):
-    """The packs a scan's spines are read in: those its page was read in (scan_page), else
-    (the page text came from the cache) its script's by OSD, the Latin packs when unsure."""
+    """The packs a scan's spines are read in: those its page text was read in (scan_page,
+    which reads the page now when nobody has yet). Only Latin packs set: those, unread."""
     langs = ocr_langs()
     latin = _latin_langs(langs)
     if latin == langs:
         return latin
-    with _SCAN_LANGS_GUARD:
-        got = _SCAN_LANGS.get((_scan_digest(path), langs))
-    if got:
-        return got
     try:
-        im, opts = _page_image(path)
-        script = _osd_script(im, opts)
+        return scan_page(path)[0]
     except Exception:
         return latin
-    own = [x for x in langs.split("+") if x in _SCRIPT_PACKS.get(script, ())]
-    return "+".join(own + ["eng"]) if own and script != "Latin" else latin
 
 
 def ocr_spines(paths):
@@ -5771,12 +5798,22 @@ def ocr_spines(paths):
     chunks = []
     for p in paths:
         try:
-            im = Image.open(p).convert("RGB")         # in colour, as the page (OCR-3)
+            with Image.open(p) as src:
+                w, h = src.size
+        except Exception:
+            continue
+        spread = w / max(h, 1) >= 1.8 and w >= 1200
+        if not spread and (not (1.15 <= w / max(h, 1) <= 1.6) or w < 600):
+            continue                                   # tray cards are about 151 x 118 mm
+        try:
+            # in colour, as the page, and in the packs its page was read in (OCR-3); never
+            # larger than read (a spread at 3600, a tray card's strips at 3000 tall at most)
+            im = _open_reduced(p, (3600, 3600) if spread else (int(4000 * w / max(h, 1)), 4000))[0]
             langs = scan_langs(p)
         except Exception:
             continue
         w, h = im.size
-        if w / max(h, 1) >= 1.8 and w >= 1200:
+        if spread:
             # a digipak or booklet spread scanned open: its spine runs down the middle
             # (Cryptopsy - Tome II: "HHR 2018-23" only there). Read the whole spread sideways.
             whole = im.copy()
@@ -5791,8 +5828,6 @@ def ocr_spines(paths):
                 except Exception:
                     continue
             continue
-        if not (1.15 <= w / max(h, 1) <= 1.6) or w < 600:
-            continue                                   # tray cards are about 151 x 118 mm
         strip_w = max(int(w * 0.07), 30)
         for box in ((0, 0, strip_w, h), (w - strip_w, 0, w, h)):
             strip = im.crop(box)
@@ -6917,8 +6952,11 @@ def ocr_cover(data):
         with tempfile.NamedTemporaryFile(suffix=".img") as tmp:
             tmp.write(data)
             tmp.flush()
-            text = ocr_text([tmp.name])
-            codes = ocr_barcodes([tmp.name])
+            try:
+                text = ocr_text([tmp.name])
+                codes = ocr_barcodes([tmp.name])
+            finally:
+                _DIGESTS.pop(tmp.name, None)          # (a temporary file's: not kept per cover)
     except Exception:
         return {"text": "", "barcodes": []}
     return {"text": _LONG_NUMBER.sub(" ", text or ""),

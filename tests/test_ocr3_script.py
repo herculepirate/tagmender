@@ -61,13 +61,13 @@ def _render(path, lines, font, ink=(0, 0, 0), paper=(255, 255, 255), size=40):
 class _Langs(unittest.TestCase):
     def setUp(self):
         self._was = ma._LANGS
-        ma._SCAN_LANGS.clear()
+        ma._SCAN_PAGES.clear()
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
 
     def tearDown(self):
         ma._LANGS = self._was
-        ma._SCAN_LANGS.clear()
+        ma._SCAN_PAGES.clear()
         self.tmp.cleanup()
 
 
@@ -234,6 +234,101 @@ class OCR3Routing(_Langs):
         Image.new("RGB", (3000, 2000), (0, 0, 255)).save(p, dpi=(300, 300))
         im, opts = ma._page_image(p)
         self.assertEqual((im.mode, im.size, opts.get("dpi")), ("RGB", (2400, 1600), (240, 240)))
+
+
+class OCR3ReviewFixes(_Langs):
+    def _img(self, name, size, color=(255, 255, 255), **kw):
+        from PIL import Image
+        p = self.dir / name
+        Image.new("RGB", size, color).save(p, **kw)
+        return p
+
+    def _osd(self, calls):
+        return [c for c in calls if c[c.index("--psm") + 1] == "0"]
+
+    def test_OCR3_spines_of_a_scan_with_no_spine_run_no_tesseract(self):
+        ma._LANGS = "eng+rus+jpn"
+        run, calls = _fake("Latin", latin_words=["Garten"])
+        with mock.patch.object(ma, "_tesseract", run):
+            ma.ocr_spines([str(self._img("front.png", (1000, 1000)))])      # a square front: no spine
+        self.assertEqual(calls, [])
+
+    def test_OCR3_page_and_spines_share_one_decision_and_one_osd(self):
+        ma._LANGS = "eng+rus+jpn"
+        p = self._img("tray.png", (1380, 1080))
+        # no sure script, too little Latin, the reading in every pack richer: every pack chosen
+        run, calls = _fake("", latin_words=["K22P-123"], all_words=["日本コロムビア", "株式会社", "定価"])
+        with mock.patch.object(ma, "_tesseract", run):
+            ma.ocr_spines([str(p)])                                            # the spines ask first
+            langs, _t = ma.scan_page(p)
+        self.assertEqual(langs, "eng+rus+jpn")
+        self.assertEqual(len(self._osd(calls)), 1)
+        spine_langs = {c[c.index("-l") + 1] for c in calls if c[2] == "stdout" and "-l" in c}
+        self.assertEqual(spine_langs, {"eng+rus+jpn"})
+        self.assertEqual(len([c for c in calls if c[2] != "stdout" and "-l" in c]), 2)   # the page: read once
+
+    def test_OCR3_page_and_spines_at_once_read_the_page_once(self):
+        import threading
+        ma._LANGS = "eng+rus+jpn"
+        p = self._img("tray.png", (1380, 1080))
+        run, calls = _fake("Latin", latin_words=["Popol", "Garten", "Pharaos"])
+        with mock.patch.object(ma, "_tesseract", run):
+            ts = [threading.Thread(target=ma.ocr_spines, args=([str(p)],)),
+                  threading.Thread(target=ma.ocr_text, args=([str(p)],))]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+        self.assertEqual(len(self._osd(calls)), 1)
+        self.assertEqual(len([c for c in calls if c[2] != "stdout" and "-l" in c]), 1)
+
+    def test_OCR3_a_big_scan_is_reduced_before_it_is_converted(self):
+        from PIL import Image
+        p = self._img("huge.jpg", (6000, 4000), color=(0, 0, 200), dpi=(600, 600))
+        sizes = []
+        real = Image.Image.convert
+
+        def convert(im, *a, **k):
+            sizes.append(im.size)
+            return real(im, *a, **k)
+        with mock.patch.object(Image.Image, "convert", convert):
+            im, opts = ma._page_image(p)
+        self.assertEqual(im.size, (2400, 1600))
+        self.assertTrue(sizes and max(max(sz) for sz in sizes) <= 2400, sizes)
+        self.assertEqual(opts["dpi"], (240, 240))
+
+    def test_OCR3_the_embedded_cover_leaves_no_temporary_entry(self):
+        ma._LANGS = "eng"
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (300, 300), (255, 255, 255)).save(buf, "PNG")
+        before = set(ma._DIGESTS)
+        run, _calls = _fake("", latin_words=["Garten"])
+        with mock.patch.object(ma, "_tesseract", run), mock.patch.object(ma, "ocr_barcodes", return_value=set()):
+            ma.ocr_cover(buf.getvalue())
+        self.assertEqual(set(ma._DIGESTS) - before, set())
+
+    def test_OCR3_web_tag_reads_only_the_current_readings(self):
+        import sqlite3
+        import web_tag as wt
+        ma._LANGS = "eng+rus+jpn"
+        base = self.dir / "album"
+        base.mkdir()
+        from PIL import Image
+        Image.new("RGB", (400, 400), (255, 255, 255)).save(base / "back.png")
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE TABLE ocr_cache (key TEXT PRIMARY KEY, value TEXT)")
+        images, _k = ma.list_images(str(base), 15)
+        k = ma.scan_key(images[0])
+        for kind, val in (("text", "OLD GREY"), ("text-eng+rus+jpn", "る ご こ"), ("spines-eng+rus+jpn", "ンジ"),
+                          (ma.page_kind("text"), "Bestell-Nr. 20 21276-9"), (ma.page_kind("spines"), "SPINE 1")):
+            db.execute("INSERT INTO ocr_cache VALUES (?,?)", (f"{kind}:{k}", '"' + val + '"'))
+        got = wt.cached_ocr(db, str(base))
+        self.assertIn("21276-9", got)
+        self.assertIn("SPINE 1", got)
+        for old in ("OLD GREY", "る", "ンジ"):
+            self.assertNotIn(old, got)
 
 
 if __name__ == "__main__":

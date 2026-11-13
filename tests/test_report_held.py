@@ -58,6 +58,15 @@ class HeldAlbumReport(unittest.TestCase):
         r = [x for x in report.rows_of(a, {"status": "done"}, applied=True) if x["section"] == "failed"][0]
         self.assertIn("taken back", r["issue"])
 
+    def test_all_kept_by_your_policy_says_nothing_was_taken_back(self):
+        # (fix check: every restored field kept by a preserve/lock policy - the TAG-1 note stays, but
+        # the plan records nothing taken back)
+        a = album(notes=["what TagMender's earlier job wrote of that release is taken back (TAG-1)"],
+                  files=[{"src": "/x/Band/Album/01.flac", "dst": "/x/Band/Album/01.flac", "op": "tag",
+                          "changes": {"tagmender": ["Unresolved"]}, "taken_back": []}])
+        r = [x for x in report.rows_of(a, {"status": "done"}, applied=True) if x["section"] == "failed"][0]
+        self.assertNotIn("taken back", r["issue"])
+
 
 if __name__ == "__main__":
     unittest.main()

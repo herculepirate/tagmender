@@ -271,10 +271,12 @@ def _took_back(a) -> bool:
     planned with fields taken back - or, in a plan saved before that was recorded, a field
     "restored (as before TagMender's job)" or the album's note saying so. Never merely "has work":
     an Unresolved album's mark is work too, on a first run with nothing to take back."""
-    for fe in a.get("files") or []:
-        if fe.get("taken_back") or any(str(r.get("action", "")).startswith("restored (as before TagMender")
-                                       for r in fe.get("diff") or []):
-            return True
+    files = a.get("files") or []
+    if any("taken_back" in fe for fe in files):         # (a plan that records it: only what it took back)
+        return any(fe.get("taken_back") for fe in files)
+    if any(str(r.get("action", "")).startswith("restored (as before TagMender")
+           for fe in files for r in fe.get("diff") or []):
+        return True
     return any("taken back (TAG-1)" in str(n) for n in a.get("notes") or [])
 
 

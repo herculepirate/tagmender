@@ -1923,7 +1923,7 @@ class Planner:
                   "diff": rows, "fingerprint": _fp(f)}
             if mb_length:
                 fe["length"] = mb_length
-            if took_back and changes:
+            if back:                      # (recorded, even empty: the report tells new plans from old)
                 fe["taken_back"] = sorted(k_ for k_ in took_back if k_ in changes)
             if str(f) in self.__dict__.get("_unscripted", {}):
                 fe["unscripted"] = self._unscripted[str(f)]

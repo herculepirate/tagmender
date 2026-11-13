@@ -23,7 +23,8 @@ SCAN_TIPS = {"proven": N_("Your scans show the barcode and catalogue number of t
              "unread": N_("Scans were read but no barcode or catalogue number was found")}
 # how a source was reached, after the database's name
 VIA_WORDS = {"disc_id": N_("disc ID"), "link": N_("your files' link"), "scan_search": N_("web search of your scans"),
-             "barcode_lookup": N_("barcode lookup"), "fingerprint": N_("fingerprint")}
+             "barcode_lookup": N_("barcode lookup"), "fingerprint": N_("fingerprint"),
+             "mb_link": N_("MusicBrainz's link")}
 
 
 def _kinds(kinds) -> str:

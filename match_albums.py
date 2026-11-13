@@ -7038,6 +7038,12 @@ def summarize(res):
                                   and b.get("dur_frac") is None and not b.get("dur_cov")),
             "most_lengths": bool(b.get("tracks_ok") and (b.get("dur_frac") or 0) >= 0.5 and not b.get("conflict")
                                  and not b.get("missing")),
+            # (TAG-3, engine._copy_proves: a matrix of the pick read off your copy, its catalogue
+            # number printed on your copy, a vinyl rip of a vinyl release - lengths never compared)
+            "matrix_read": bool("matrix" in (b.get("clues") or {})
+                                and not any(str(w).startswith("disc ring reads ") for w in b.get("clues_against") or ())),
+            "catno_on_copy": bool(b.get("catno_on_copy")),
+            "vinyl_rip": str((b.get("clues") or {}).get("format", "")).startswith("vinyl"),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
             # tracks missing from the folder: each file's track of the release (0-based, in
             # the release's order), the missing ones {disc: [numbers]}, the release's count
@@ -7123,11 +7129,35 @@ def release_ids_view(final, results, album):
                 twins["musicbrainz_albumid"].add(norm_release_id("musicbrainz_albumid", c.get("id")))
             elif c.get("source") == "discogs" and pick.get("source") == "mb" and mc.same_pressing(pick, c):
                 twins["discogs_release_id"].add(norm_release_id("discogs_release_id", c.get("id")))
-    return {"pick": release_facts(pick), "twins": {f: sorted(v) for f, v in twins.items() if v},
+    # the pick's own entries (itself, its twins, the Discogs releases a MusicBrainz pick links):
+    # whether one of them carries a matrix read off your copy, and which other scored releases
+    # carry the pick's catalogue number too (a number they share proves none of them alone)
+    mine = {f: set(v) for f, v in twins.items()}
+    mine[field_of.get(pick.get("source"), "discogs_release_id")].add(norm_release_id(
+        field_of.get(pick.get("source"), ""), pick.get("id")))
+    mine["musicbrainz_albumid"].add(norm_release_id("musicbrainz_albumid", final.get("mb_twin") or ""))
+    mine["discogs_release_id"].add(norm_release_id("discogs_release_id", final.get("dg_twin") or ""))
+    mine["discogs_release_id"] |= set(release_facts(pick)["links"])
+    pf = release_facts(pick)
+    matrix, rivals = False, []
+    for res in results:
+        for s in (res or {}).get("scored") or ():
+            c = s["cand"]
+            f = field_of.get(c.get("source"))
+            cid = norm_release_id(f or "", c.get("id"))
+            if f and cid in mine[f]:
+                matrix = matrix or bool("matrix" in (s.get("clues") or {}) and not any(
+                    str(w).startswith("disc ring reads ") for w in s.get("clues_against") or ()))
+            elif f and pf["catnos"]:
+                cf = release_facts(c)
+                if mc.catnos_agree(pf["catnos_raw"], cf["catnos_raw"]) or mc.catnos_agree(pf["catnos"], cf["catnos"]):
+                    rivals.append(f"{c.get('source')}:{c.get('id')}")
+    return {"pick": pf, "twins": {f: sorted(v) for f, v in twins.items() if v},
             "mb_twin": norm_release_id("musicbrainz_albumid", final.get("mb_twin") or ""),
             "dg_twin": norm_release_id("discogs_release_id", final.get("dg_twin") or ""),
             "cands": {f: v for f, v in cands.items() if v},
-            "mb_links": {d: sorted(v) for d, v in links.items()}}
+            "mb_links": {d: sorted(v) for d, v in links.items()},
+            "matrix": matrix, "number_rivals": sorted(set(rivals))}
 
 
 def run_source(name, finder, album, cfg, ocr_txt=""):
@@ -7579,6 +7609,33 @@ def _fetch_linked(http, dm, ids, source, have):
     return out
 
 
+MB_LINKED_CANDIDATES = 3       # (the best MusicBrainz candidates whose Discogs links are fetched)
+MB_LINKED_FETCHES = 4          # (at most this many Discogs releases fetched for one album)
+
+
+def mb_linked_step(http, dm, album, cfg, mb_res, dg_res, final, text, notes):
+    """The Discogs releases the best MusicBrainz candidates link (url-rels) that Discogs's
+    search did not return: fetched (the client's cache and pacing) and scored with the others.
+    (dg_res, final), unchanged when there are none or the lookups fail."""
+    have = {str(s["cand"]["id"]) for s in (dg_res or {}).get("scored") or ()}
+    best = sorted(mb_res.get("scored") or (), key=lambda s: -(s.get("confidence") or 0))[:MB_LINKED_CANDIDATES]
+    ids = [d for s in best for d in sorted(mc.linked_discogs(s["cand"])) if d not in have]
+    ids = list(dict.fromkeys(ids))[:MB_LINKED_FETCHES]
+    if not ids:
+        return dg_res, final
+    try:
+        new = _fetch_linked(http, dm, ids, "discogs", have)
+    except Exception as exc:                  # (an outage: no evidence either way)
+        notes.append(f"Discogs lookup of releases MusicBrainz links failed ({exc})")
+        return dg_res, final
+    if not new:
+        return dg_res, final
+    seen_ids = _cand_ids(mb_res, dg_res)
+    dg_res = _scored_again(dg_res, new, "discogs", album, cfg, text)
+    _note_found(album, seen_ids, (mb_res, dg_res), "mb_link")
+    return dg_res, _combine(mb_res, dg_res)
+
+
 def title_web_step(http, album, cfg, dm, mb_res, dg_res, final, text, use_mb, use_discogs, out, notes):
     """WEB-2, the last search: an album still unsure after the databases, the scans, the
     shops and gnudb (not even the album known) is searched once on the web by its own name,
@@ -7922,6 +7979,13 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # Still unsure with a barcode (tags, scans, documents): the album the shops sell under
     # it, searched by the shop's own title and artist. The shop agreeing is a clue, never
     # barcode proof for a release that does not list the barcode itself.
+    # The Discogs releases the best MusicBrainz candidates link to, not found by the Discogs
+    # search: leads, fetched and scored like the others (the files' own IDs are, TAG-2) - a
+    # pressing Discogs's search does not return may be the one your scans prove (Popol Vuh - In
+    # Den Gärten Pharaos: Pilz's first edition, 525272, its matrix on the label scan). A few only
+    # (the requests are shared with every other album); a failed lookup is no evidence.
+    if use_discogs and dm is not None and mb_res and mb_res.get("scored"):
+        dg_res, final = mb_linked_step(http, dm, album, cfg, mb_res, dg_res, final, ocr_txt, source_notes)
     shops_asked = set()
     seen_ids = _cand_ids(mb_res, dg_res)
     mb_res, dg_res, final = shop_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, args, use_mb,
@@ -8276,7 +8340,8 @@ def scans_report(best, album, ocr_txt, results, had_scans):
 def found_via(best, album):
     """How BEST was found, when not by the plain search: "disc_id" (the disc ID / TOC),
     "link" (the files' shop or source link), "scan_search" (numbers read on the scans,
-    searched), "barcode_lookup" (a shop's barcode lookup), "fingerprint" (AcoustID); ""
+    searched), "barcode_lookup" (a shop's barcode lookup), "fingerprint" (AcoustID), "mb_link"
+    (a Discogs release a MusicBrainz candidate links); ""
     otherwise. Reporting only."""
     if not best:
         return ""

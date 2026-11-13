@@ -77,6 +77,10 @@ def _junk_country(before) -> bool:
     vals = [str(v).strip() for v in before.get("releasecountry") or [] if str(v).strip()]
     if not vals or any(match_core.country_code(v) or re.fullmatch(r"[A-Za-z]{2}", v) for v in vals):
         return False
+    # (a mark is one word in capitals, as rip groups write theirs: a country's name a short table
+    # does not know - "Bulgaria", "Yugoslavia" - is never one, whatever else the files say)
+    if not all(re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{2,}", v) for v in vals):
+        return False
     marks = {str(v).strip().casefold() for k in ("label", "comment", "encodedby", "encoder", "organization")
              for v in before.get(k) or [] if str(v).strip()}
     return all(v.casefold() in marks for v in vals)
@@ -1783,8 +1787,14 @@ class Planner:
                 # CTY-1: a "release country" that is no country - a rip group's name the files also
                 # carry as their label, comment or encoder ("PMEDIA") - goes, when the release named
                 # none to replace it (a country name or code of any kind stays)
+                # (only where this level writes a release country: never at Basic, never a field
+                # level_fields drops, never on an album only or Partial - and never one a preserve,
+                # lock or fill_missing policy, Picard's "Preserve these tags" too, keeps)
+                import levels as _lvc
+                tier_ = "album_only" if album_only else "partial" if partial else ""
                 if _junk_country(before) and not target.get("releasecountry") and \
-                        p.policy("releasecountry") not in ("preserve", "lock"):
+                        p.policy("releasecountry") not in ("preserve", "lock", "fill_missing") and \
+                        _lvc.restrict({"releasecountry": ["XW"]}, p, tier=tier_).get("releasecountry"):
                     removals.append("releasecountry")
             # what Picard would delete (compilation on a release not by Various Artists, what a
             # tagger script $delete-s) - never a field the profile preserves or locks

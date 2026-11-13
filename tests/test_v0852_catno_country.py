@@ -63,6 +63,24 @@ class CTY1_RipGroupMarkIsNoCountry(Base):
         fe = pl.build([self.proposal()], prof)["albums"][0]["files"][0]
         self.assertNotIn("releasecountry", fe["changes"])
 
+    def test_fill_missing_keeps_it(self):
+        # (review M1: Picard's "Preserve these tags" is fill_missing - the value stays)
+        prof = self.profile(field_policy={"default": "replace", "fields": {"releasecountry": "fill_missing"}})
+        self.assertNotIn("releasecountry", pl.build([self.proposal()], prof)["albums"][0]["files"][0]["changes"])
+
+    def test_a_level_that_does_not_write_it_keeps_it(self):
+        # (review M2: Basic, and a field level_fields drops, are never removed by the level)
+        for kw in ({"tag_level": "basic"}, {"level_fields": {"drop": ["releasecountry"]}}):
+            prof = self.profile(**kw)
+            ch = pl.build([self.proposal()], prof)["albums"][0]["files"][0]["changes"]
+            self.assertNotIn("releasecountry", ch, kw)
+
+    def test_a_country_name_in_the_comment_too_stays(self):
+        # (review minor: "Bulgaria" as country and comment is a country, not a mark)
+        for f in (self.f1, self.f2):
+            tagio.write(f, {"releasecountry": ["Bulgaria"], "comment": ["Bulgaria"]})
+        self.assertEqual(self.country_change(), "unchanged")
+
 
 if __name__ == "__main__":
     unittest.main()

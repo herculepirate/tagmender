@@ -1734,6 +1734,7 @@ class Engine:
                     if v:
                         merged[fld], where[fld] = v, name
                         break
+            merged, where = sorts_follow_names(merged, where, src)
             # HF-5: a partial album's missing tracks are no tag of their own (no TAGMENDER_MISSING):
             # "incomplete" is told in the proposal's notes (the plan's and the job report's) only
             if not self.profile["mark_resolved"]:
@@ -4916,6 +4917,38 @@ def settle_disc_layout(tags_mb: list, tracks_dg: list, files: list):
         out.append(d)
     return tags_mb, out, ("MusicBrainz and Discogs split the discs differently: numbered as MusicBrainz"
                           + (" and your files number them" if fits(mb, dg) else "") + " (TRK-4)")
+
+
+_NAME_SORTS = (("albumartist", "albumartistsort"), ("artist", "artistsort"))
+
+
+def sorts_follow_names(merged: dict, where: dict, src: dict):
+    """NAM-10: a sort name sorts the name beside it. When the two databases name the artist
+    differently and the name written is one database's, its sort name is that database's too
+    (or none): Tara Hugo Sings Philip Glass - MusicBrainz's "Philip Glass" beside Discogs's sort
+    "Tara Hugo Sings Philip Glass" was a sort name of another credit. Where both name the artist
+    alike nothing changes."""
+    for name, sort in _NAME_SORTS:
+        if name not in merged or sort not in merged:
+            continue
+        a, b = (src.get("musicbrainz") or {}).get(name), (src.get("discogs") or {}).get(name)
+        if not a or not b or _vals_eq(a, b):
+            continue
+        own = where.get(name)
+        if own not in src or where.get(sort) == own:
+            continue
+        theirs = (src.get(own) or {}).get(sort)
+        if theirs:
+            merged[sort], where[sort] = theirs, own
+        else:
+            merged.pop(sort, None)
+            where.pop(sort, None)
+    return merged, where
+
+
+def _vals_eq(a, b) -> bool:
+    as_list = lambda v: [str(x) for x in (v if isinstance(v, list) else [v])]   # noqa: E731
+    return as_list(a) == as_list(b)
 
 
 def _as_tags(d: dict) -> dict:

@@ -61,5 +61,42 @@ class NAM9_InitialsOfACreditedName(unittest.TestCase):
         self.assertEqual(mc.expand_initials("A & JS", "A; John Smith; Jane Stone"), "A & JS")
 
 
+import engine  # noqa: E402
+
+
+class NAM10_SortFollowsName(unittest.TestCase):
+    MB = {"albumartist": ["Philip Glass"], "albumartistsort": ["Glass, Philip"],
+          "artist": ["Philip Glass"], "artistsort": ["Glass, Philip"]}
+    DG = {"albumartist": ["Tara Hugo Sings Philip Glass"], "albumartistsort": ["Tara Hugo Sings Philip Glass"],
+          "artist": ["Tara Hugo Sings Philip Glass"], "artistsort": ["Tara Hugo Sings Philip Glass"]}
+
+    def merged(self):
+        m = {"albumartist": ["Philip Glass"], "albumartistsort": ["Tara Hugo Sings Philip Glass"],
+             "artist": ["Philip Glass"], "artistsort": ["Tara Hugo Sings Philip Glass"]}
+        w = {"albumartist": "musicbrainz", "albumartistsort": "discogs", "artist": "musicbrainz", "artistsort": "discogs"}
+        return m, w
+
+    def test_sort_of_the_name_written(self):
+        m, w = engine.sorts_follow_names(*self.merged(), {"musicbrainz": self.MB, "discogs": self.DG})
+        self.assertEqual(m["albumartistsort"], ["Glass, Philip"])
+        self.assertEqual(m["artistsort"], ["Glass, Philip"])
+        self.assertEqual(w["albumartistsort"], "musicbrainz")
+
+    def test_no_sort_of_that_source_none_written(self):
+        mb = {k: v for k, v in self.MB.items() if not k.endswith("sort")}
+        m, _w = engine.sorts_follow_names(*self.merged(), {"musicbrainz": mb, "discogs": self.DG})
+        self.assertNotIn("albumartistsort", m)
+        self.assertNotIn("artistsort", m)
+
+    def test_same_name_in_both_nothing_changes(self):
+        dg = dict(self.DG, albumartist=["Philip Glass"], artist=["Philip Glass"],
+                  albumartistsort=["Philip Glass"], artistsort=["Philip Glass"])
+        m = {"albumartist": ["Philip Glass"], "albumartistsort": ["Philip Glass"],
+             "artist": ["Philip Glass"], "artistsort": ["Philip Glass"]}
+        w = dict.fromkeys(m, "discogs")
+        out, _w = engine.sorts_follow_names(dict(m), dict(w), {"musicbrainz": self.MB, "discogs": dg})
+        self.assertEqual(out, m)
+
+
 if __name__ == "__main__":
     unittest.main()

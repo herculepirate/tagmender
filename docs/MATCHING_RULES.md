@@ -154,6 +154,7 @@ When rules point different ways, the earlier group wins:
 | NAM-2 | Compilations and classical albums are filed as the profile's naming script says. | in code (naming script) |
 | NAM-3 | Artist names and track titles are written as the database spells them, not as your files do. | in code; test `NAM3_*` |
 | NAM-9 | A name your tags give as capital initials ("Tania Maria & NHØP") is the one name of the release's credit whose words those initials spell in order ("Niels-Henning Ørsted Pedersen"): only capitals of 2 letters or more, only when exactly one credited name fits; otherwise nothing is assumed. | in code (`match_core.expand_initials`, `artist_sim`, `missing_collaborators`); tests `NAM9_*` |
+| NAM-10 | A sort name sorts the name beside it: when MusicBrainz and Discogs name the artist differently, the album artist's and track artist's sort names come from the database whose name is written (none when it has none) - never another credit's sort name (Tara Hugo Sings Philip Glass). Where both name the artist alike nothing changes. | in code (`engine.sorts_follow_names`); tests `NAM10_*` |
 | GEN-1 | Genre is filled as the profile's genre settings say. | in code |
 
 ## Fields and dates

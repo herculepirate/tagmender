@@ -4786,6 +4786,27 @@ def discogs_without_repeats(doc, dm=None):
     return out
 
 
+_BARCODE_TEXT = re.compile(r"[0-9][0-9 .\-]*[0-9]")
+
+
+def barcode_digits(values):
+    """BAR-10: a barcode is written as its digits ("72435-20811-27", "7 24352 08112 7" ->
+    "724352081127"), the form a scanner reads and Discogs's and MusicBrainz's barcode searches
+    find exactly (the spaced form matches loosely). Only a value of digits, spaces, dashes and
+    dots whose digits make an EAN-8, UPC-A, EAN-13 or GTIN-14 length is rewritten; anything else
+    ("none", a note) stays as it is. Repeats are written once."""
+    one = isinstance(values, str)
+    out = []
+    for v in ([values] if one else list(values or [])):
+        v = str(v).strip()
+        digits = re.sub(r"\D", "", v)
+        if _BARCODE_TEXT.fullmatch(v) and len(digits) in (8, 12, 13, 14):
+            v = digits
+        if v and v not in out:
+            out.append(v)
+    return (out[0] if out else "") if one and len(out) <= 1 else out
+
+
 def discogs_parts(det, dm, http=None, s=None):
     """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
     builds them: extract_discogs_fields shaped by the settings, then the master's original
@@ -4797,6 +4818,8 @@ def discogs_parts(det, dm, http=None, s=None):
     det = discogs_without_repeats(det, dm)
     det = ma.discogs_one_track_movements(det)                # TRK-1: the plugin writes one track too
     album = shape_fields(dm.extract_discogs_fields(det), s, dm)
+    if album.get("barcode"):
+        album["barcode"] = barcode_digits(album["barcode"])
     if det.get("master_id") and http is not None:
         try:
             master = http.get_json(f"https://api.discogs.com/masters/{det['master_id']}", "discogs")

@@ -1,5 +1,19 @@
 # Release notes
 
+## 0.8.52
+
+**A country in the folder name counts again when the title shares its word (FLD-1)**
+- A folder bracket is ignored as the release's own title only when the title itself has that same
+  bracket ("The Sessions Box Set (United Kingdom & Ireland 2022)"). "Made in Japan (Japan)" or
+  "Live in Germany [Germany]" again say where the copy was pressed.
+
+**The run report says "taken back" only when something was**
+- An album that could not be identified no longer reads "what an earlier run wrote for it was
+  taken back" when nothing was: only when an earlier run's tags really went back.
+
+**Matching rules**
+- The Wikipedia track-listing rule is now WEB-3 (WEB-2 named two rules).
+
 ## 0.8.51
 
 **The run report says what happened to an album held for you**

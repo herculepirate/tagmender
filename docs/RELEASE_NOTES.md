@@ -1,5 +1,19 @@
 # Release notes
 
+## 0.8.49
+
+**What your copy prints decides (TAG-3)**
+- A matrix / runout read whole on your copy's scans (a vinyl label, a disc) that the release - or
+  its Discogs twin - lists, and no other pressing, proves that release: its tags replace a
+  pressing your files named before. Never a matrix typed in notes, part of one, or one another
+  pressing lists too.
+- For a vinyl rip (its lengths are never compared): a catalogue number printed on your copy that
+  only one pressing carries proves it.
+- A release ID your files hold whose release lists another number than the one printed on your
+  copy is removed, also when the pressing itself stays unproven (album tags only).
+- Discogs releases that MusicBrainz's candidates link are looked up too when the result is unsure
+  or your files name another release: a pressing Discogs's search missed can now be found.
+
 ## 0.8.48
 
 **Your scans are read properly again (OCR-3)**

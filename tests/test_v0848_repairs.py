@@ -197,5 +197,19 @@ class TIE4_SharedBarcodeProvesNoBootleg(unittest.TestCase):
         self.assertEqual(mc.unofficial_why(sc[0], sc), [])
 
 
+import naming  # noqa: E402
+
+
+class ED7_BootlegIsNoRemaster(unittest.TestCase):
+    def test_unofficial_gets_no_remaster_word(self):
+        dates = {"date": ["1991"], "originaldate": ["1990"]}
+        self.assertEqual(naming.edition(dict(dates, media=["CD, Album, Unofficial Release"])), "")
+        self.assertEqual(naming.edition(dict(dates, media=["CD"], releasestatus=["bootleg"])), "")
+        self.assertEqual(naming.edition(dict(dates, media=["CD, Album, Unofficial Release"], **{"~edition_hd": ["1"]})), "HD")
+
+    def test_official_reissue_unchanged(self):
+        self.assertEqual(naming.edition({"date": ["1991"], "originaldate": ["1990"], "media": ["CD, Album"]}), "1991 Remaster")
+
+
 if __name__ == "__main__":
     unittest.main()

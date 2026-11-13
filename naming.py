@@ -125,6 +125,15 @@ def _reissue_word(tags) -> str:
     return "Reissue" if "reissue" in text and "remaster" not in text else "Remaster"
 
 
+def _unofficial(tags) -> bool:
+    """MusicBrainz's release status "bootleg", or Discogs's "Unofficial Release" in the media."""
+    def vals(k):
+        v = tags.get(k)
+        return [str(x) for x in (v if isinstance(v, list) else [v or ""])]
+    return any(x.strip().lower() == "bootleg" for x in vals("releasestatus")) or any(
+        "unofficial release" in x.lower() for k in ("media", "~edition_media") for x in vals(k))
+
+
 def edition(tags: dict, mode: str = "edition_year") -> str:
     """The edition text for a folder and the album tag (ED-1 to ED-4): an SACD, DVD-Audio or
     Blu-ray always "1999 SACD"; a vinyl or tape rip always "1977 Vinyl Rip", "1984 Tape Rip"
@@ -144,6 +153,10 @@ def edition(tags: dict, mode: str = "edition_year") -> str:
         return word if mode == "edition" else f"{_pressing_year(tags)} {word}".strip()
     if not kind or not reissue:
         return "HD" if hd else ""                   # the original CD or download: no suffix (ED-3), or HD (ED-5)
+    if _unofficial(tags):
+        # ED-7: a bootleg is no remaster or reissue of anything (Talking Heads - The Complete Gig:
+        # "[1991 Remaster]" for a 1991 bootleg of a 1990 show)
+        return "HD" if hd else ""
     word = _reissue_word(tags) + (" HD" if hd else "")
     return word if mode == "edition" else f"{reissue} {word}"
 

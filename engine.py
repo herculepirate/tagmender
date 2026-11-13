@@ -1904,6 +1904,13 @@ class Engine:
             x["shares_number"] = bool(_catnos_agree(pick, x)
                                       or set(pick["barcodes"]) & set(x.get("barcodes") or ()))
         proof = self._copy_proves(p, out, facts)
+        if not proof and _own_ids_clash(p.files, clash):
+            # TAG-3 + TAG-1: the IDs that clash are TagMender's own earlier pick, and the matcher
+            # left that release only because your copy points elsewhere (TAG-1 keeps it on a
+            # better score alone): correcting its own pick is no demotion - one run writes the
+            # release, and a second finds nothing to do (BS&T 1968 [SACD]: the vinyl IDs a batch
+            # wrote, the AP SACD your scans' catalogue number names)
+            proof = "the release IDs your files hold are TagMender's own earlier pick, and your copy points to this release (TAG-1)"
         replace = planmod._threshold(self.profile, "replace_min_confidence")
         conf = float(p.confidence or 0)
         if not proof and conf < replace:
@@ -4917,6 +4924,28 @@ def settle_disc_layout(tags_mb: list, tracks_dg: list, files: list):
         out.append(d)
     return tags_mb, out, ("MusicBrainz and Discogs split the discs differently: numbered as MusicBrainz"
                           + (" and your files number them" if fits(mb, dg) else "") + " (TRK-4)")
+
+
+def _own_ids_clash(files, clash) -> bool:
+    """Every clashing release ID on every file is one a job of TagMender's wrote (REP-1's
+    ownership index: written, or kept by a later job, never undone)."""
+    if not files or not clash:
+        return False
+    try:
+        owned = ma._own_index()
+    except Exception:
+        return False
+    if not owned:
+        return False
+    for path in files:
+        own = owned.get(str(path)) or owned.get(os.path.realpath(str(path)))
+        if not own:
+            return False
+        for field, ids in clash.items():
+            have = own[0] if field == "musicbrainz_albumid" else own[1]
+            if any(str(x).lower() not in {str(h).lower() for h in have} for x in ids):
+                return False
+    return True
 
 
 _NAME_SORTS = (("albumartist", "albumartistsort"), ("artist", "artistsort"))

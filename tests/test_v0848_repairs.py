@@ -98,5 +98,53 @@ class NAM10_SortFollowsName(unittest.TestCase):
         self.assertEqual(out, m)
 
 
+from unittest import mock  # noqa: E402
+import match_albums as ma  # noqa: E402
+import plan as pl  # noqa: E402
+import test_v0847_tag3_one_release as t3  # noqa: E402
+
+
+class TAG3_OwnEarlierPickOneRun(t3.te.Base):
+    """BS&T 1968 [SACD]: the clashing IDs are TagMender's own earlier (wrong) pick; the matcher
+    left it because the copy points elsewhere (TAG-1: your own catalogue number, here in the folder
+    name) without FIL-1 proof (one length off). One run must write the new release; it took two
+    (album only first) before. (A helper, not a subclass: the TAG-3 suite's tests run in their own file.)"""
+    FOLDER = "1991 - Album T (CAT-901)"
+
+    def setUp(self):
+        super().setUp()
+        self.h = t3.TAG3_Engine("test_TAG3_unproven_below_threshold_is_album_only_with_reason")
+        self.h.album, self.h.engine = self.album, self.engine
+
+    def owned(self, d, mb, every=True):
+        files = sorted(str(f) for f in Path(d).rglob("*.flac"))
+        idx = {f: ({mb}, set()) for f in (files if every else files[:1])}
+        return mock.patch.object(ma, "_own_index", return_value=idx)
+
+    def run_it(self, d, idx_patch):
+        http = t3.te.FakeHttp(mb=[t3._mb(t3.OLD_MB)], dg=[t3._dg(904, durs=("0:10", "0:20", "0:45"))])
+        with idx_patch:
+            return self.h.ident(d, http)
+
+    def test_own_ids_replaced_in_one_run(self):
+        d = self.h.make(folder=self.FOLDER, MUSICBRAINZ_ALBUMID=t3.OLD_MB, date="1983")
+        e, p = self.run_it(d, self.owned(d, t3.OLD_MB))
+        self.assertEqual(p.tier, "exact", (p.why, p.notes))
+        self.assertTrue(getattr(p, "release_proven_over", None), p.notes)
+        self.assertTrue(any("TagMender's own earlier pick" in n for n in p.notes), p.notes)
+        ch = pl.build([p], e.profile)["albums"][0]["files"][0]["changes"]
+        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"), "the earlier pick's ID goes in the same run")
+        self.assertEqual(ch.get("discogs_release_id"), ["904"])
+
+    def test_ids_of_another_tagger_still_album_only(self):
+        d = self.h.make(folder=self.FOLDER, MUSICBRAINZ_ALBUMID=t3.OLD_MB, date="1983")
+        _e, p = self.run_it(d, mock.patch.object(ma, "_own_index", return_value={}))
+        self.assertEqual(p.tier, "album_only", p.why)
+
+    def test_owned_on_some_files_only_is_no_own_pick(self):
+        d = self.h.make(folder=self.FOLDER, MUSICBRAINZ_ALBUMID=t3.OLD_MB, date="1983")
+        _e, p = self.run_it(d, self.owned(d, t3.OLD_MB, every=False))
+        self.assertNotEqual(getattr(p, "release_proven_over", None) or [], ["musicbrainz_albumid"], p.notes)
+
 if __name__ == "__main__":
     unittest.main()

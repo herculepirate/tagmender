@@ -2685,6 +2685,17 @@ def copy_kind(album) -> str:
     return ""
 
 
+def _barcode_unshared(s, pool) -> bool:
+    """R9 / TIE-4: your copy's barcode proves S (an unofficial release) and no official release
+    in POOL carries that same barcode. An official one listing no barcode (missing information)
+    or another barcode (another product) is no reason to set it aside: only the counterfeit
+    case - the official barcode on a bootleg - is."""
+    if not barcode_proves(s):
+        return False
+    mine = _keys(s["cand"].get("barcodes"))
+    return not any(not o["cand"].get("unofficial") and _keys(o["cand"].get("barcodes")) & mine for o in pool)
+
+
 def _officials_in_tie(tied, kept=None):
     """TIE-4 throughout the tie: an unofficial pressing nothing of yours backs takes no part in a
     tie-break (its lengths copied to the second, its country: Raising Sand's Russian CD over
@@ -2693,7 +2704,8 @@ def _officials_in_tie(tied, kept=None):
     person decides; so does the release your files are tagged with or you chose (KEPT: TAG-1).
     (tied left, the pressings dropped)."""
     def unbacked(s):
-        return s["cand"].get("unofficial") and not _unofficial_backed(s) and s is not kept
+        return s["cand"].get("unofficial") and not _unofficial_backed(s) and s is not kept \
+            and not _barcode_unshared(s, tied)
 
     def as_well(o, s):
         return (o.get("tracks_ok") or not s.get("tracks_ok")) and \
@@ -4434,6 +4446,8 @@ def same_pressing(a, b, sole_digital=False, disc_on_both=False):
     Veils It White: MusicBrainz 2013, Discogs 2003), so the year may then differ."""
     if str(b.get("id") or "") and str(b.get("id")) in linked_discogs(a):
         return True
+    if bool(a.get("unofficial")) != bool(b.get("unofficial")):
+        return False                    # (R9: an official release is never a bootleg's pressing)
     if not disc_on_both and links_other_discogs(a, b):
         return False
     # A CD and a download, a download and an LP, are two releases, whatever they share

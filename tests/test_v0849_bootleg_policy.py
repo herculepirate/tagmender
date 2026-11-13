@@ -209,6 +209,48 @@ class R9_ReviewProbes(unittest.TestCase):
         self.assertIn(f.get("mb_twin"), (None, "mb-boot"))
 
 
+class R9_BarcodeIsTheRelease(unittest.TestCase):
+    """A barcode match is the release: an official release of the album that fits as well blocks
+    a bootleg your barcode proves only when it carries that same barcode (the counterfeit case);
+    one listing no barcode (missing information) or another one (another product) does not."""
+    BOOT = dict(unofficial=True, barcodes={BC})
+
+    def both(self, **off):
+        a = album(ocr_barcodes=[BC])
+        dg = res(a, cand("boot", **self.BOOT))
+        mb = res(a, cand("off", source="mb", **off))
+        f = mc.unofficial_settled(mc.combine(mb, dg), (mb, dg), a, CFG)
+        return f["status"], f["best"]["cand"]["id"]
+
+    def one(self, **off):
+        a = album(ocr_barcodes=[BC])
+        r = res(a, cand("boot", **self.BOOT), cand("off", **off))
+        f = mc.unofficial_settled(r, (r,), a, CFG)
+        return f["status"], f["best"]["cand"]["id"]
+
+    def test_R9_official_listing_no_barcode_across_databases(self):
+        self.assertEqual(self.both(), ("auto", "boot"))
+
+    def test_R9_official_listing_no_barcode_in_the_same_database(self):
+        self.assertEqual(self.one(), ("auto", "boot"))
+
+    def test_R9_official_with_another_barcode(self):
+        self.assertEqual(self.both(barcodes={"5099912345678"}), ("auto", "boot"))
+        self.assertEqual(self.one(barcodes={"5099912345678"}), ("auto", "boot"))
+
+    def test_TIE4_official_with_the_same_barcode_wins(self):
+        self.assertEqual(self.both(barcodes={BC}), ("auto", "off"))
+        self.assertEqual(self.one(barcodes={BC}), ("auto", "off"))
+
+    def test_TIE4_names_and_lengths_only_bootleg_still_set_aside(self):
+        a = album()
+        r = res(a, cand("boot", unofficial=True), cand("off"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "off"), r["why"])
+
+    def test_R9_an_official_release_is_never_a_bootlegs_pressing(self):
+        self.assertFalse(mc.same_pressing(cand("off", source="mb"), cand("boot", unofficial=True)))
+
+
 class R9_Engine(Base):
     def make(self, folder):
         d = self.lib / "Band E" / folder

@@ -1141,7 +1141,9 @@ class Engine:
         if out and out.get("status") == "auto" and out.get("best"):
             prov = {"mb": "musicbrainz"}.get(out["best"]["source"], out["best"]["source"])
             try:
-                return self._one_release(self._identified(out, album, files, base), out, album)
+                p = self._identified(out, album, files, base)
+                withdrawn = self._own_guess_withdrawn(p, out)
+                return withdrawn if withdrawn is not None else self._one_release(p, out, album)
             except ma.ProviderUnavailable as exc:             # fetching the release failed: retry later
                 self.log.warning("tags for %s: %s", g.folder, exc)
                 errors[prov] = exc.kind
@@ -1156,11 +1158,18 @@ class Engine:
         if cv:
             # your copy names a version (an instrumental album) no release found is: held, never
             # tagged as the vocal album's release nor its album-only or Partial tags
-            return planmod.Proposal(**base, status="unresolved", reason_codes=["conflicting_sources"],
+            held = planmod.Proposal(**base, status="unresolved", reason_codes=["conflicting_sources"],
                                     reason=f"your folder or album title names the {cv} version, and no release "
                                            f"found is it (the best fit, {out['best'].get('id')}, is not): "
                                            "choose the release with Album > Change Release",
                                     why=list(out.get("why") or []))
+            # (TagMender's own earlier pick of that release is withdrawn: what its job wrote of the
+            # pressing goes back to what the files held before it)
+            held.restore = self._withdraw_own(held.files, out, pick=None)
+            if held.restore:
+                held.notes = list(held.notes or []) + [
+                    "what TagMender's earlier job wrote of that release is taken back (TAG-1)"]
+            return held
         if out and out.get("album_only") and out.get("best") and self._accepts("album") and \
                 not _provider_failed(errors):
             # the album is certain, only its pressing is not: tag what every pressing shares
@@ -1249,6 +1258,9 @@ class Engine:
         if known:
             return known
         prop = self._unresolved(out, files, base, errors)
+        if (out or {}).get("own_disproved"):
+            # (TagMender's own earlier pick lost its standing and nothing decides now: its writes go)
+            prop.restore = self._withdraw_own(prop.files, out, pick=None)
         note = getattr(self, "_set_note", "") if not alone and not names else ""
         if note:
             prop.why = list(prop.why or []) + [note]
@@ -1925,6 +1937,74 @@ class Engine:
             + isrc_note
         return p
 
+    def _own_guess_withdrawn(self, p, out):
+        """TAG-1: TagMender's own earlier pick lost its standing - the clue that decided it is no
+        longer found on your copy (match_core._still_decides) - and what was chosen in its place is
+        itself a guess (the country order, the original date): album only, as far as the
+        evidence goes, with what TagMender's job wrote of that pressing taken back. None when
+        that is not so (a fresh album keeps TIE-1; a pick your copy proves stays exact)."""
+        why = str((out or {}).get("own_disproved") or "")
+        best = (out or {}).get("best") or {}
+        if not why or p.status != "identified" or planmod.tier_of(p) != "exact" or not best.get("guessed_pick"):
+            return None
+        view = (out or {}).get("release_ids") or {}
+        clue = re.sub(r"\s*\(not on [^)]*\)\s*$", "", why[len("pressing chosen by "):]) \
+            if why.startswith("pressing chosen by ") else why
+        doubt = (f"TagMender chose this album's pressing earlier by {clue}, which your copy no longer shows, "
+                 "and nothing of your copy decides between the pressings now (TAG-1)")
+        pick = view.get("pick") or {}
+        pick_info = {k: pick.get(k) for k in ("source", "id", "label", "country", "formats", "year", "layout")}
+        own = [x for f, ids in (view.get("held") or {}).items() for x in
+               ((view.get("cands") or {}).get(f) or {}).values() if ma.norm_release_id(f, x.get("id")) in ids]
+        tied = [pick_info] + [{k: x.get(k) for k in pick_info} for x in own]
+        p = self._album_only(p, {"tied": tied, "doubt": doubt, "pick_year": pick.get("year")})
+        # (the pick is a guess: none of its values is proven, so none keeps a value TagMender wrote
+        # of the pressing it withdraws - only the album's original date stays)
+        first = {str(v)[:4] for t in p.targets for k in ("originaldate", "originalyear") for v in t.get(k) or ()}
+        p.restore = self._withdraw_own(p.files, out, first=first)
+        p.notes = list(getattr(p, "notes", None) or []) + [
+            doubt + ": only the album's own tags are written"
+            + ("; what TagMender's earlier job wrote of that pressing is taken back" if p.restore else "")]
+        return p
+
+    def _coded(self, facts) -> list:
+        """facts with each release's country as the Discogs plugin codes it (country_code)."""
+        conv = getattr(self.dm, "country_code", None) if self.dm is not None else None
+        out = []
+        for x in facts:
+            x = dict(x)
+            if conv and x.get("country") and not x.get("country_code"):
+                try:
+                    x["country_code"] = conv(x["country"]) or ""
+                except Exception:
+                    pass
+            out.append(x)
+        return out
+
+    def _withdraw_own(self, files, out, pick=None, side=None, first=()) -> dict:
+        """TAG-1 / REP-1: {file: {field: value before}} taking back what TagMender's own earlier job
+        wrote of the pressing your files' release IDs name, when that pick is withdrawn - as
+        _restore_own takes it back (only what its job wrote and nobody changed since; your field
+        policy's preserved and locked fields stay). pick / side: the release decided now, whose
+        own values stay (none when the album is held)."""
+        view = (out or {}).get("release_ids") or {}
+        side = side or {f: set() for f in ma.RELEASE_ID_FIELDS}
+        clash, facts = {}, []
+        for f, ids in (view.get("held") or {}).items():
+            for x in ids:
+                if x in side.get(f, ()):
+                    continue
+                clash.setdefault(f, {})[x] = "withdrawn"
+                info = ((view.get("cands") or {}).get(f) or {}).get(x)
+                if not info and ma.norm_release_id(f, (view.get("pick") or {}).get("id")) == x:
+                    info = view["pick"]
+                info = info or self._release_facts(f, x)
+                if info:
+                    facts.append(info)
+        if not clash:
+            return {}
+        return self._restore_own(files, clash, facts, pick or {}, side, first)
+
     def _one_release(self, p, out, album):
         """TAG-3: one release per file. The files may already hold a release ID (either
         database's) of another pressing than the pick; below replace_min_confidence the plan
@@ -2157,7 +2237,8 @@ class Engine:
             for k in ("barcode", "catalognumber", "label", "releasecountry", "media", "date"):
                 if k == "date" and {str(v)[:4] for v in before.get(k) or ()} & first:
                     continue                 # (the album's original date: no pressing's own)
-                if k in have and any(_pressings_value(k, before[k], x) for x in facts if not x.get("unknown")):
+                if k in have and any(_pressings_value(k, before[k], x) for x in self._coded(facts)
+                                     if not x.get("unknown")):
                     out.append(k)
             out = list(dict.fromkeys(out))
             pol = getattr(self.profile, "policy", None)
@@ -2187,7 +2268,7 @@ class Engine:
             return {}
         printed = ((out or {}).get("release_ids") or {}).get("on_copy") or {}
         bad = {}
-        for x in facts:
+        for x in self._coded(facts):
             if x.get("unknown") or x.get("shares_number"):
                 continue                     # (a twin sharing the barcode, the number written otherwise)
             if mc.catnos_agree(printed.get("catnos") or (), x.get("catnos") or ()) or \
@@ -2243,7 +2324,7 @@ class Engine:
         again stays (a second plan writes nothing to it)."""
         import tagio
         writes = ma.tagmender_pressing_writes(files)
-        known = [x for x in facts if not x.get("unknown")]
+        known = self._coded([x for x in facts if not x.get("unknown")])
         ids = {f: set(v) for f, v in clash.items()}
 
         def losing_id(field, vals):
@@ -3934,10 +4015,14 @@ def _pressings_value(field, values, facts) -> bool:
         return bool(mc.catnos_agree(vals, facts.get("catnos_raw") or ())
                     or mc.catnos_agree([mc.norm_code(v) for v in vals], facts.get("catnos") or ()))
     if field == "label":
-        return bool(facts.get("label")) and any(mc.fold(v) == mc.fold(facts["label"]) for v in vals)
+        # (a database's labels joined as one: "Mirage Records; Universal")
+        theirs = {mc.fold(x) for x in re.split(r"\s*;\s*", str(facts.get("label") or "")) if x.strip()}
+        return bool(theirs) and (all(mc.fold(v) in theirs for v in vals)
+                                 or any(mc.fold(v) == mc.fold(facts["label"]) for v in vals))
     if field == "releasecountry":
-        return bool(facts.get("country")) and any(mc.country_code(v) == mc.country_code(facts["country"])
-                                                  for v in vals)
+        # (the code the Discogs plugin gives the country - "Egypt" is EG - where it gave one)
+        code = facts.get("country_code") or mc.country_code(facts.get("country"))
+        return bool(code) and any(mc.country_code(v) == code for v in vals)
     if field == "media":
         return bool(facts.get("formats")) and all(mc.media_kind(v) in facts["formats"] for v in vals)
     if field == "date":

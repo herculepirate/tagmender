@@ -139,5 +139,85 @@ class OWN_CopyVersion(te.Base):
         self.assertEqual(p.status, "identified", (p.reason, p.why))
 
 
+
+from unittest import mock  # noqa: E402
+import plan as pl  # noqa: E402
+import tagio  # noqa: E402
+
+
+class OWN_Withdrawn(te.Base):
+    """The level the evidence supports: TagMender's own pick withdrawn and a guess in its place is
+    album only, an album held for it unresolved - and what TagMender's job wrote of the withdrawn
+    pressing is taken back (as before that job; removed when it was empty)."""
+    CASSETTE = {"source": "discogs", "id": "26572991", "catnos": ["636834"], "catnos_raw": ["063 683-4"],
+                "barcodes": ["44006368344"], "formats": ["cassette"], "links": [], "label": "Mirage Records; Universal",
+                "country": "Egypt", "year": 2003, "layout": [13]}
+    PICK = {"source": "discogs", "id": "470143", "catnos": ["770152"], "barcodes": [], "formats": ["cd"], "links": [],
+            "label": "Island Records; Mercury; Universal", "country": "Europe", "year": 2003, "layout": [13]}
+
+    def files(self):
+        d = self.album("Apocalyptica", "Reflections", n=2, DISCOGS_RELEASE_ID="26572991", CATALOGNUMBER="063 683-4",
+                       RELEASECOUNTRY="EG", MEDIA="Cassette, Album", DATE="2003", LABEL="Mirage Records")
+        files = sorted(str(f) for f in d.glob("*.flac"))
+        writes = {f: {"discogs_release_id": (("2044995",), ("26572991",)), "catalognumber": ((), ("063 683-4",)),
+                      "releasecountry": ((), ("EG",)), "media": ((), ("Cassette, Album",)),
+                      "date": (("2002",), ("2003",)), "label": ((), ("Mirage Records",))} for f in files}
+        return d, files, writes
+
+    def out(self, guessed=True, disproved=OCR_REASON):
+        return {"best": {"guessed_pick": guessed, "id": "470143"}, "own_disproved": disproved,
+                "release_ids": {"pick": dict(self.PICK), "held": {"discogs_release_id": ["26572991"]},
+                                "cands": {"discogs_release_id": {"26572991": dict(self.CASSETTE)}}, "mb_links": {}}}
+
+    def prop(self, d, files):
+        return pl.Proposal(source_dir=str(d), files=files, status="identified", tier="exact", confidence=93.1,
+                           release_id="470143", guessed_pick=True,
+                           targets=[{"album": ["Reflections"], "discogs_release_id": ["470143"], "date": ["2003"],
+                                     "originaldate": ["2002"], "catalognumber": ["077 015-2"], "title": [f"T{i}"]}
+                                    for i in range(2)])
+
+    def test_OWN_a_guess_in_place_of_a_disproved_own_pick_is_album_only_its_writes_taken_back(self):
+        d, files, writes = self.files()
+        e = self.engine(te.FakeHttp())
+        with mock.patch.object(ma, "tagmender_pressing_writes", return_value=writes):
+            p = e._own_guess_withdrawn(self.prop(d, files), self.out())
+        self.assertEqual((p.tier, p.release_id), ("album_only", ""))
+        self.assertIn("catalogue number 636834", " ".join(p.why))
+        ch = pl.build([p], e.profile)["albums"][0]["files"][0]["changes"]
+        self.assertEqual(ch.get("discogs_release_id"), ["2044995"], "as before TagMender's job (another tagger's)")
+        for k in ("catalognumber", "releasecountry", "media", "label"):
+            self.assertIsNone(ch.get(k, "kept"), k)
+        self.assertEqual(ch.get("date"), ["2002"])
+
+    def test_OWN_a_disproved_own_pick_your_copy_now_proves_otherwise_stays_exact(self):
+        d, files, _w = self.files()
+        e = self.engine(te.FakeHttp())
+        self.assertIsNone(e._own_guess_withdrawn(self.prop(d, files), self.out(guessed=False)))
+
+    def test_OWN_a_fresh_tie_without_an_own_pick_keeps_tie1(self):
+        d, files, _w = self.files()
+        e = self.engine(te.FakeHttp())
+        self.assertIsNone(e._own_guess_withdrawn(self.prop(d, files), self.out(disproved="")))
+
+    def test_OWN_an_album_held_for_its_instrumental_copy_takes_back_tagmenders_writes(self):
+        d = self.album("Band I", "Album I", folder="1990 - Album I (Instrumental)", MUSICBRAINZ_ALBUMID="mb-i",
+                       CATALOGNUMBER="CAT-1", MEDIA="Vinyl, LP")
+        files = sorted(str(f) for f in d.glob("*.flac"))
+        writes = {f: {"musicbrainz_albumid": ((), ("mb-i",)), "catalognumber": ((), ("CAT-1",)),
+                      "media": ((), ("Vinyl, LP",))} for f in files}
+        rel = te.mb_release("mb-i", "Band I", "Album I")
+        rel["media"][0]["format"] = '12" Vinyl'
+        e = self.engine(te.FakeHttp(mb=[rel]), unresolved={"action": "leave"})
+        with mock.patch.object(ma, "tagmender_pressing_writes", return_value=writes):
+            p = e.identify(e.albums_in(d)[0])
+        self.assertEqual(p.status, "unresolved", p.why)
+        a = pl.build([p], e.profile)["albums"][0]
+        ch = a["files"][0]["changes"]
+        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"))
+        self.assertIsNone(ch.get("catalognumber", "kept"))
+        self.assertIsNone(ch.get("media", "kept"))
+        self.assertNotIn("tagmender", ch, "Unresolved \"leave\": nothing new is written")
+
+
 if __name__ == "__main__":
     unittest.main()

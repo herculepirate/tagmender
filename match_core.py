@@ -3866,6 +3866,7 @@ def _still_decides(m, scored, cfg) -> bool:
         if note not in m["notes"]:
             m["notes"] = m["notes"] + [note]
         m["tagged"] = False              # (no standing left: never kept in a tie either)
+        m["own_disproved"] = reason      # (engine: a guess in its place is album only, its writes taken back)
     return not judged
 
 

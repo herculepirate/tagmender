@@ -5259,9 +5259,7 @@ class _ScanReads:
         self.conn, self.lock, self.closed = conn, threading.Lock(), False
         self.started = {}
         self.futures = {}
-        langs = ocr_langs()
-        text = "text" if langs == "eng" else f"text-{langs}"
-        spines = "spines" if langs == "eng" else f"spines-{langs}"
+        text, spines = page_kind("text"), page_kind("spines")
         reads = {text: lambda p: ocr_text([p]), spines: lambda p: ocr_spines([p]),
                  "barcode-digits": lambda p: ocr_barcode_digits([p]),
                  "disc-rings-2": lambda p: ocr_disc_rings([p])}
@@ -5577,6 +5575,189 @@ def ocr_langs():
     return _LANGS
 
 
+# OCR-3: each scan is read in its own script. The language packs of scripts other than the
+# Latin alphabet, by the script tesseract's OSD names; every other pack is a Latin one.
+_SCRIPT_PACKS = {"Cyrillic": {"rus", "ukr", "bul", "srp", "mkd", "bel"},
+                 "Japanese": {"jpn", "jpn_vert"}, "Hiragana": {"jpn", "jpn_vert"},
+                 "Katakana": {"jpn", "jpn_vert"},
+                 "Han": {"chi_sim", "chi_tra", "chi_sim_vert", "chi_tra_vert", "jpn", "jpn_vert"},
+                 "Hangul": {"kor", "kor_vert"}, "Greek": {"ell", "grc"}, "Arabic": {"ara", "fas", "urd"},
+                 "Hebrew": {"heb", "yid"}}
+_NON_LATIN = set().union(*_SCRIPT_PACKS.values())
+OSD_MIN_CONFIDENCE = 1.0      # under it OSD's script is a guess (a German label read as "Japanese, 0.25")
+PAGE_OCR = "p3"               # the page text's and spines' reading (OCR-3: colour, own script); in their kinds
+
+
+def page_kind(base):
+    """The cache kind of a page reading ("text", "spines", "cover"): the reading's version and
+    the language set, so readings made another way (greyscale, every pack at once) are not reused."""
+    return f"{base}-{PAGE_OCR}-{ocr_langs()}"
+
+
+def _latin_langs(langs):
+    """The Latin-alphabet packs of a language set ("eng+deu" of "eng+deu+rus+jpn"), English
+    at least."""
+    return "+".join([x for x in langs.split("+") if x not in _NON_LATIN] or ["eng"])
+
+
+def _page_image(path):
+    """A scan as tesseract reads it best: in colour (tesseract picks the channel the print
+    stands out in; a greyscale copy loses blue-on-black print: Popol Vuh's label) at most
+    2400 pixels, with its resolution carried over. Returns (image, save options)."""
+    from PIL import Image
+    with Image.open(path) as src:
+        dpi = src.info.get("dpi")
+        im = src.convert("RGB")
+    w = im.size[0]
+    im.thumbnail((2400, 2400))
+    opts = {}
+    try:
+        if dpi and float(dpi[0]) >= 50:
+            opts["dpi"] = (round(float(dpi[0]) * im.size[0] / max(w, 1)),) * 2
+    except (TypeError, ValueError, IndexError):
+        pass
+    return im, opts
+
+
+def scan_script(png):
+    """The script tesseract's OSD finds on an image file ("Latin", "Cyrillic", "Japanese"...),
+    or "" when it finds none (too little text) or is unsure (OSD_MIN_CONFIDENCE)."""
+    try:
+        r = _tesseract(["tesseract", str(png), "stdout", "--psm", "0"], capture_output=True, text=True,
+                       timeout=30, env=_tess_env())
+    except Exception:
+        return ""
+    m = re.search(r"^Script: (\w+)\s*$", r.stdout or "", re.M)
+    c = re.search(r"^Script confidence: ([\d.]+)", r.stdout or "", re.M)
+    if not m or not c or float(c.group(1)) < OSD_MIN_CONFIDENCE:
+        return ""
+    return m.group(1)
+
+
+def _osd_script(im, opts, png=None):
+    """scan_script of a page image (_page_image's), on a copy at most 1600 pixels: OSD on a
+    whole 2400-pixel back cover took over a second, on that copy about half."""
+    import tempfile
+    if png is not None and max(im.size) <= 1600:
+        return scan_script(png)
+    small = im.copy()
+    small.thumbnail((1600, 1600))
+    o = dict(opts)
+    if "dpi" in o:
+        o["dpi"] = (max(50, round(o["dpi"][0] * small.size[0] / max(im.size[0], 1))),) * 2
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        small.save(tmp.name, **o)
+        return scan_script(tmp.name)
+
+
+def _tess_page(png, langs, timeout=120):
+    """tesseract's sparse-text reading of an image file in LANGS: (text, words), words being
+    (confidence, word) of each word read."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "page")
+        _tesseract(["tesseract", str(png), out, "--psm", "11", "-l", langs, "txt", "tsv"],
+                   capture_output=True, text=True, timeout=timeout, env=_tess_env())
+        try:
+            text = Path(out + ".txt").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        words = []
+        try:
+            for row in Path(out + ".tsv").read_text(encoding="utf-8", errors="replace").splitlines()[1:]:
+                f = row.split("\t")
+                if len(f) >= 12 and f[0] == "5" and f[11].strip():
+                    try:
+                        words.append((float(f[10]), f[11].strip()))
+                    except ValueError:
+                        continue
+        except OSError:
+            pass
+    return text, words
+
+
+_LATIN_WORD = re.compile(r"[A-Za-z][a-z]{2,}|[A-Z]{3,}")
+
+
+def _latin_poor(words):
+    """Too little read in the Latin alphabet to trust: fewer than three sure (confidence 70)
+    words of three letters or codes."""
+    good = [w for c, w in words if c >= 70 and (_LATIN_WORD.fullmatch(w.strip(".,:;()'\"")) or
+                                                _CODE_LIKE.fullmatch(w.strip(".,:;()")))]
+    return len(good) < 3
+
+
+def _sure_chars(words):
+    """How much a reading read for sure: the letters and digits of its words of confidence 70
+    (not the long-vowel marks and dots noise reads as "ーー")."""
+    return sum(n for c, w in words if c >= 70
+               for n in [sum(ch.isalnum() and ch not in "ー〜・" for ch in w)] if n)
+
+
+_SCAN_LANGS = {}                  # (scan digest, language set) -> the packs its page was read in
+_SCAN_LANGS_GUARD = threading.Lock()
+
+
+def scan_page(path):
+    """OCR-3: one scan's page text, read in its own script. Returns (langs, text). With only
+    Latin packs set, it is read in those. Otherwise OSD names the script: Latin is read in
+    the Latin packs alone, another script in its packs and English; with no sure script, in
+    the Latin packs first and, only when that reads too little, in every pack too, which is
+    kept (with the Latin reading) when it reads clearly more for sure. A Latin cover is never
+    read only through every pack at once."""
+    import tempfile
+    langs = ocr_langs()
+    latin = _latin_langs(langs)
+    im, opts = _page_image(path)
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        im.save(tmp.name, **opts)
+        if latin == langs:
+            text, _w = _tess_page(tmp.name, latin)
+            chosen = latin
+        else:
+            script = _osd_script(im, opts, tmp.name)
+            own = [x for x in langs.split("+") if x in _SCRIPT_PACKS.get(script, ())]
+            if script == "Latin":
+                chosen = latin
+                text, _w = _tess_page(tmp.name, latin)
+            elif own:
+                chosen = "+".join(own + ["eng"])
+                text, _w = _tess_page(tmp.name, chosen)
+            else:
+                chosen = latin
+                text, words = _tess_page(tmp.name, latin)
+                if _latin_poor(words):
+                    text_all, words_all = _tess_page(tmp.name, langs)
+                    if _sure_chars(words_all) >= max(6, 1.5 * _sure_chars(words) + 1):
+                        # the Latin reading is kept with it: what it read is never lost
+                        chosen, text = langs, text_all + "\n" + text
+    with _SCAN_LANGS_GUARD:
+        if len(_SCAN_LANGS) > 2048:
+            _SCAN_LANGS.clear()
+        _SCAN_LANGS[(_scan_digest(path), langs)] = chosen
+    return chosen, text
+
+
+def scan_langs(path):
+    """The packs a scan's spines are read in: those its page was read in (scan_page), else
+    (the page text came from the cache) its script's by OSD, the Latin packs when unsure."""
+    langs = ocr_langs()
+    latin = _latin_langs(langs)
+    if latin == langs:
+        return latin
+    with _SCAN_LANGS_GUARD:
+        got = _SCAN_LANGS.get((_scan_digest(path), langs))
+    if got:
+        return got
+    try:
+        im, opts = _page_image(path)
+        script = _osd_script(im, opts)
+    except Exception:
+        return latin
+    own = [x for x in langs.split("+") if x in _SCRIPT_PACKS.get(script, ())]
+    return "+".join(own + ["eng"]) if own and script != "Latin" else latin
+
+
 def ocr_spines(paths):
     """Text printed along the spines of a CD tray card (catalogue numbers often
     appear only there), which page OCR misses: it runs sideways. Each side strip
@@ -5590,7 +5771,8 @@ def ocr_spines(paths):
     chunks = []
     for p in paths:
         try:
-            im = Image.open(p).convert("L")
+            im = Image.open(p).convert("RGB")         # in colour, as the page (OCR-3)
+            langs = scan_langs(p)
         except Exception:
             continue
         w, h = im.size
@@ -5603,7 +5785,7 @@ def ocr_spines(paths):
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                         whole.rotate(angle, expand=True).save(tmp.name)
-                        r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                        r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", langs],
                                            capture_output=True, text=True, timeout=120, env=_tess_env())
                     chunks.append(r.stdout)
                 except Exception:
@@ -5621,7 +5803,7 @@ def ocr_spines(paths):
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                         strip.rotate(angle, expand=True).save(tmp.name)
-                        r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
+                        r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", langs],
                                            capture_output=True, text=True, timeout=60, env=_tess_env())
                     chunks.append(r.stdout)
                 except Exception:
@@ -6657,23 +6839,15 @@ def variant_release_links(http, codes, known, use_mb=True, use_discogs=True, per
 
 
 def ocr_text(paths):
-    """OCR via the tesseract program itself (no pytesseract needed)."""
-    import subprocess
-    import tempfile
+    """OCR via the tesseract program itself (no pytesseract needed): each scan's page text."""
     try:
-        from PIL import Image
+        import PIL.Image  # noqa: F401
     except ImportError:
         return ""
     chunks = []
     for p in paths:
         try:
-            im = Image.open(p).convert("L")
-            im.thumbnail((2400, 2400))
-            with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
-                im.save(tmp.name)
-                r = _tesseract(["tesseract", tmp.name, "stdout", "--psm", "11", "-l", ocr_langs()],
-                                   capture_output=True, text=True, timeout=120, env=_tess_env())
-            chunks.append(r.stdout)
+            chunks.append(scan_page(p)[1])            # in colour, in its own script (OCR-3)
         except Exception:
             continue
     return "\n".join(chunks)
@@ -7475,7 +7649,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             cover_bytes, cover_key = embedded_cover(album)
             if cover_bytes:
                 # cached per language set, as the scans: a new language pack reads it again
-                kind = "cover" if ocr_langs() == "eng" else f"cover-{ocr_langs()}"
+                kind = page_kind("cover")
                 cover = _cached(db, kind, cover_key, lambda: ocr_cover(cover_bytes))
                 album["cover_text"] = cover.get("text") or ""
                 found = set(cover.get("barcodes") or ())
@@ -7580,7 +7754,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         if len(page_scans) < len(scans):
             out["scans_read"] = f"{len(page_scans)} of {len(scans)} (the decoded barcode found the release)"
         # cached per scan and language set: installing a language pack reads the scans again
-        kind = "text" if ocr_langs() == "eng" else f"text-{ocr_langs()}"
+        kind = page_kind("text")
         text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log, ahead=scans_ahead))
         # a file's name (a document's heading, a screenshot's title bar) is not print on the
         # copy: "SUNN200" in an RX window's title is no "catalogue number (OCR)" (R12)
@@ -7591,7 +7765,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         album["printed_text"] = printed_docs + "\n" + text
         text = drop_file_name_lines(docs_txt + "\n" + text, base).strip()
         # spreads are read sideways too
-        spines = _joined(each_scan(db, "spines" if ocr_langs() == "eng" else f"spines-{ocr_langs()}",
+        spines = _joined(each_scan(db, page_kind("spines"),
                                    page_scans, lambda p: ocr_spines([p]), scan_log, ahead=scans_ahead))
         if spines.strip():
             text = text + "\n" + spines

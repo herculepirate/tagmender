@@ -411,7 +411,9 @@ class EmbeddedCover(unittest.TestCase):
             ma.process(self.row(d), http, CFG, None, args)
         self.assertEqual(len(self.read), 2)                  # a new language set reads it again
         kinds = {k.split(":")[0] for (k,) in http.db.execute("SELECT key FROM ocr_cache")}
-        self.assertTrue({"cover", "cover-eng+jpn"} <= kinds, kinds)
+        # (OCR-3: the kind names the page-reading version too; the old greyscale readings,
+        # "cover" and "cover-eng+jpn", are not reused)
+        self.assertTrue({f"cover-{ma.PAGE_OCR}-eng", f"cover-{ma.PAGE_OCR}-eng+jpn"} <= kinds, kinds)
 
     def test_blind_runs_never_read_the_cover(self):
         ma.ocr_barcodes = lambda paths: set()

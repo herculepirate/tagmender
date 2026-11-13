@@ -55,7 +55,9 @@ class ForgetAllDropsTheDownloadRecord(R8):
         (self.album.parent / "artist.jpg").write_bytes(jpeg(400, 400, (1, 2, 3)))      # the user's own
         _p, res = self.run_one(mprof, self.prop())
         self.assertEqual(res["counts"], {"done": 1}, res)
-        moved = [f for f in self.dest.rglob("*.flac") if f.name not in ("01 p.flac", "02 q.flac")]
+        # (the moved album by its folder: naming may rename "01 p.flac" to "01.P.flac", and rglob's
+        # order is the filesystem's - CI listed the other album first)
+        moved = sorted(f for f in self.dest.rglob("*.flac") if "Some Album" in str(f) or "Real Album" in str(f))
         self.assertIn((8, (400, 400)), pictures(moved[0]),
                       f"after `artist-photos --forget` the download beats the user's own photo: {pictures(moved[0])}")
 

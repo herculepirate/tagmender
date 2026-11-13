@@ -58,7 +58,7 @@ class SameRunClaimBeatsUsersPhoto(R8):
         return p
 
     def moved_y(self):
-        ys = [f for f in self.dest.rglob("*.flac") if f.name not in ("01 p.flac", "02 q.flac")]
+        ys = sorted(f for f in self.dest.rglob("*.flac") if "Some Album" in str(f) or "Real Album" in str(f))  # (by its folder: the files may be renamed)
         self.assertTrue(ys, sorted(str(x) for x in self.dest.rglob("*")))
         return ys
 

@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.8.53
+
+**Build checks fixed**
+- Three artist-photo tests picked "the moved album's track" by its old file name. Since files are
+  renamed ("01 p.flac" -> "01.P.flac"), the other album's tracks could be picked instead, depending
+  on the order the build machine lists files - the cause of the failing builds of 0.8.48, 0.8.51 and
+  0.8.52. They now pick the moved album by its folder. TagMender's behaviour is unchanged.
+
 ## 0.8.52
 
 **A country in the folder name counts again when the title shares its word (FLD-1)**

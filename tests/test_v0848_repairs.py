@@ -184,6 +184,9 @@ class TIE4_SharedBarcodeProvesNoBootleg(unittest.TestCase):
 
     def test_official_sharing_the_barcode_wins_or_the_bootleg_is_doubted(self):
         sc = self.scored()
+        # (as scored for real: the official Discogs entries list no lengths - 84.2 - and the
+        # counterfeit does - 97.9)
+        sc = [dict(sc[0], confidence=97.9), dict(sc[1], confidence=84.2)]
         self.assertTrue(mc.barcode_proves(sc[0]) and mc.barcode_proves(sc[1]), [s.get("code") for s in sc])
         r = mc.classify(sc, r830.CFG)
         boot_auto = r["status"] == "auto" and r["best"]["cand"]["id"] == "boot"

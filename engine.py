@@ -268,6 +268,36 @@ def _disc_sets(groups, metas) -> list:
     return [g for g in groups if id(g) not in joined]
 
 
+# DSC-3: a disc folder holding two discs of a set ("CD02-03 1973 Out-Takes") and its
+# parts ("Part 1", "Part 2"): the range's discs in order
+# (written tight, "CD02-03" / "CD2-3": never "CD1 - 12 Inch Mixes" - no spaces around its
+# dash, no "12 inch", at most ten discs: box_part_disc)
+_DISC_RANGE = re.compile(r"^(?:cd|disc|disk)\s*[-_.]?\s*(?P<a>\d{1,2})[-–](?P<b>\d{1,2})(?!\d)"
+                         r"(?!\s*(?:inch|in\b|\"|''|'))", re.I)
+_PART_DIR = re.compile(r"^(?:part|pt\.?)\s*[-_.]?\s*(?P<n>\d{1,2})$", re.I)
+
+
+def box_part_disc(d: Path):
+    """DSC-3: the set's disc number a part folder of a disc-range folder holds ("CD02-03 .../
+    Part 2" -> 3), else None: the range counts up (b > a) and the part lies within it."""
+    d = Path(d)
+    m, r = _PART_DIR.match(d.name), _DISC_RANGE.match(d.parent.name)
+    if not m or not r:
+        return None
+    a, b, n = int(r["a"]), int(r["b"]), int(m["n"])
+    if not (1 <= a < b <= a + 9 and 1 <= n <= b - a + 1):
+        return None
+    return a + n - 1
+
+
+def _box_disc_dir(d: Path, folder: Path) -> bool:
+    """DSC-2 / DSC-3: d is one disc's folder of the set in folder - a disc folder of it
+    ("CD1", "CD01 1974 First Album"), or a part of a disc-range folder of it ("CD02-03 .../Part 1")."""
+    if d.parent == folder:
+        return is_disc_dir(d)
+    return d.parent.parent == folder and box_part_disc(d) is not None and is_disc_dir(d.parent)
+
+
 def _one_box(folder, files, keys, metas) -> bool:
     """DSC-2: a set's disc folders ("CD1" ... "CD4" in "Holy Diver [2022 RM DLX 4CD]") whose
     discs each carry their own album title ("Holy Diver [2022 Barresi RMX]", "... Live In
@@ -278,7 +308,7 @@ def _one_box(folder, files, keys, metas) -> bool:
     by_dir = {}
     for f in files:
         d = Path(f).parent
-        if d.parent != folder or not is_disc_dir(d):
+        if not _box_disc_dir(d, folder):
             return False
         by_dir.setdefault(d, []).append(f)
     if len(by_dir) < 2:
@@ -295,6 +325,9 @@ def _one_box(folder, files, keys, metas) -> bool:
         nums = {_first(metas.get(f) or {}, "discnumber").partition("/")[0].strip().lstrip("0") for f in fs} - {""}
         if len(nums) != 1:
             return False                                   # (no disc number: nothing says it is a disc of one set)
+        part = box_part_disc(d) if d.parent != folder else None
+        if part is not None and nums != {str(part)}:
+            return False                                   # (DSC-3: "CD02-03/Part 2" tagged as another disc than 3)
         numbers.extend(nums)
     return len(artists) == 1 and len(numbers) == len(set(numbers))
 
@@ -825,11 +858,26 @@ class Engine:
             if d.parent not in sets:
                 sets[d.parent] = version_dirs(d.parent, metas, skips)
             return d in sets[d.parent]
-        disc = {d: d != path and (is_disc_dir(d) or version_of(d)) for d in found}
+        # (DSC-3: "CD02-03 .../Part 1" too - a part of a disc-range folder is one of its discs)
+        disc = {d: d != path and (is_disc_dir(d) or version_of(d) or box_part_disc(d) is not None) for d in found}
         owner_of = {d: (d.parent if disc[d] else d) for d in found}
         for d in found:          # ("Album/Disc 02/5.1/": versions filed inside a disc folder)
             if disc[d] and version_of(d) and owner_of[d] != path and is_disc_dir(owner_of[d]):
                 owner_of[d] = owner_of[d].parent
+        # DSC-3: the box holding the disc-range folders ("Box (16CD)/CD02-03 .../Part 1"
+        # beside "CD01 1974 First Album"): its parts are its discs when the whole set is one
+        # box by DSC-2 (one album artist, each disc's own disc number, the parts' agreeing with
+        # the range) - else each range folder stays an album of its own
+        boxes = {owner_of[d].parent for d in found if box_part_disc(d) is not None and owner_of[d] == d.parent}
+        for box in sorted(boxes):
+            if box != path and path not in box.parents:
+                continue                                 # (only the range folder was asked for)
+            parts = [d for d in found if owner_of[d] == box or
+                     (box_part_disc(d) is not None and owner_of[d] == d.parent and d.parent.parent == box)]
+            fs = [f for d in parts for f in found[d]]
+            if _one_box(box, fs, album_keys(fs, box, metas), metas):
+                for d in parts:
+                    owner_of[d] = box
         own_key = {}
         for d in found:
             own_key.setdefault(owner_of[d], []).extend(found[d])
@@ -4858,7 +4906,52 @@ def discogs_parts(det, dm, http=None, s=None):
         t.update(dm.extract_track_fields(entry, seen[disc], per_disc[disc]))
         t["discnumber"], t["totaldiscs"] = str(disc), str(total_discs)
         tracks.append(t)
+    # MED-15: each track's media is its own disc's format, never every format of the release
+    # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
+    media = discogs_track_media(det, raw, discs)
+    if media is not None:
+        album.pop("media", None)
+        for t, m in zip(tracks, media):
+            if m:
+                t["media"] = m
     return album, tracks, total_discs
+
+
+# Discogs formats that are no medium of their own (the box, "All Media")
+_NO_CARRIER = {"box set", "all media"}
+_POSITION_KIND = re.compile(r"^\s*([A-Za-z][A-Za-z\- ]*?)\s*(\d+)\s*[-.:]", re.I)
+
+
+def discogs_track_media(det, raw, discs):
+    """MED-15: the media of each track's disc, as the Discogs plugin writes a format ("CD,
+    Album, Remastered"), or None when the release has one format only (the plugin's own value
+    stands). A track whose position names its carrier ("CD3-1", "Blu-ray2-4") is that
+    carrier's disc of that number; otherwise discs are the release's media in order, each
+    format counted by its quantity. A track no medium can be found for gets none ("")."""
+    entries = []
+    for f in det.get("formats") or []:
+        name = str(f.get("name") or "").strip()
+        if not name or name.casefold() in _NO_CARRIER:
+            continue
+        q = str(f.get("qty") or "1").strip()
+        q = int(q) if q.isdigit() and int(q) > 0 and name != "File" else 1   # (a download's qty counts files)
+        text = ", ".join(x for x in [name, *(str(d) for d in f.get("descriptions") or [])] if x)
+        entries += [(name, text)] * q
+    if len({t for _n, t in entries}) <= 1:
+        return None
+    by_kind = {}
+    for name, text in entries:
+        by_kind.setdefault(mc.fold(name), []).append(text)
+    out = []
+    for entry, disc in zip(raw, discs):
+        m = _POSITION_KIND.match(str((entry or {}).get("position") or ""))
+        kind = [v for k, v in by_kind.items() if m and (k == mc.fold(m.group(1)) or k.startswith(mc.fold(m.group(1))))]
+        if m and kind:
+            n = int(m.group(2))
+            out.append(kind[0][n - 1] if 1 <= n <= len(kind[0]) else "")
+        else:
+            out.append(entries[disc - 1][1] if disc and 1 <= disc <= len(entries) else "")
+    return out
 
 
 _POSITION = ("discnumber", "totaldiscs", "tracknumber", "totaltracks")

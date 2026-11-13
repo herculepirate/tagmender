@@ -1,5 +1,28 @@
 # Release notes
 
+## 0.8.50
+
+**TagMender's earlier choice is history, not evidence (TAG-1)**
+- A pressing TagMender chose before keeps its standing only while what decided it is still found
+  on your copy. A deciding code your scans no longer show (an OCR misreading) no longer holds the
+  album to that pressing: it is weighed afresh, and tagged only as far as your copy now proves -
+  album tags only when nothing decides, with the earlier pressing's tags taken back. A clue that
+  simply could not be checked this time (scans not read, a database down) keeps the choice.
+- A catalogue number of digits only counts when printed as that number, not inside a longer run
+  of digits the OCR produced from noise.
+- A folder or album title naming an instrumental or karaoke version that no release names is held
+  for you to choose, never tagged as the vocal album; what an earlier run wrote for it is taken back.
+
+**Disc numbers in one layout (TRK-4b)**
+- A set one database lists as one run (a 2LP's A1..D2) and the other disc by disc is numbered in
+  one layout - the one your files follow - never "disc 2, track 4 of 6". Disc numbers an earlier
+  run added are taken back; your own stay.
+
+**Barcode digits (OCR-5)**
+- Digit groups are joined into a barcode only when they sit on one line of one reading: no more
+  barcodes made up from two separate readings. Disc rings and barcode digits stay read in grey on
+  purpose: reading them in colour lost real codes and added false ones on real scans (OCR-4).
+
 ## 0.8.49
 
 **What your copy prints decides (TAG-3)**

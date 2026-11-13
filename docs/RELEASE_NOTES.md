@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.51
+
+**The run report says what happened to an album held for you**
+- An album held for your choice (not identified) whose job went through - an earlier run's tags
+  for a release TagMender withdrew taken back - is listed as "Unresolved", with what was taken
+  back, never as "Failed".
+
 ## 0.8.50
 
 **TagMender's earlier choice is history, not evidence (TAG-1)**

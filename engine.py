@@ -5079,9 +5079,11 @@ def _num(v) -> int:
 
 
 def _own_disc_writes(files) -> dict:
-    """{path: {"discnumber": before, "totaldiscs": before}} for the files whose disc number and
-    total a TagMender job wrote over an empty field and nobody changed since (REP-1's history,
-    match_albums.tagmender_originals); {} when not every file is so."""
+    """{path: {"discnumber": before, "totaldiscs": before}} for the files whose disc number or
+    total a TagMender job CHANGED (from empty, or from "1" to "2" - Palms) and nobody changed
+    since (REP-1's history, match_albums.tagmender_originals): back to the value before that
+    job. Files whose disc fields the job left as they were are not touched; any of the album's
+    disc fields changed since the job -> {} (yours)."""
     try:
         _folder, orig, _foreign = ma.tagmender_originals([str(f) for f in files])
     except Exception:
@@ -5097,13 +5099,15 @@ def _own_disc_writes(files) -> dict:
         for k in ("discnumber", "totaldiscs"):
             if k in fields:
                 before, left = fields[k]
-                if [str(x) for x in (now.get(k) or [])] != [str(x) for x in (left or [])]:
+                b = [str(x) for x in (before or []) if str(x).strip()]
+                l_ = [str(x) for x in (left or []) if str(x).strip()]
+                if [str(x) for x in (now.get(k) or []) if str(x).strip()] != l_:
                     return {}                  # (you changed the album's disc numbers since: yours)
-                if not [x for x in (before or []) if str(x).strip()]:
-                    back[k] = []
+                if b != l_:
+                    back[k] = b                # (the value before TagMender's job: "1", or none)
         if back:
             out[str(f)] = back
-    return out if len(out) == len(files) else {}
+    return out
 
 
 def _one_run_vs_discs(mb: list, dg: list) -> str:

@@ -110,6 +110,16 @@ class TRK4b_TagMendersOwnDiscNumbersGo(Base):
         with mock.patch.object(ma, "tagmender_originals", return_value=self.orig()):
             self.assertEqual(engine._own_disc_writes([self.f1, self.f2]), {})
 
+    def test_disc_one_before_the_job_goes_back_to_one(self):
+        # (review: files that had disc 1 before the job, which wrote "2" on the second half)
+        import engine
+        orig = ("", {str(self.f1): {"discnumber": (["1"], ["1"]), "totaldiscs": ([], ["2"])},
+                     str(self.f2): {"discnumber": (["1"], ["2"]), "totaldiscs": ([], ["2"])}}, {})
+        with mock.patch.object(ma, "tagmender_originals", return_value=orig):
+            back = engine._own_disc_writes([self.f1, self.f2])
+        self.assertEqual(back[str(self.f2)], {"discnumber": ["1"], "totaldiscs": []})
+        self.assertEqual(back[str(self.f1)], {"totaldiscs": []}, "disc 1 the job kept is not touched")
+
 
 if __name__ == "__main__":
     unittest.main()

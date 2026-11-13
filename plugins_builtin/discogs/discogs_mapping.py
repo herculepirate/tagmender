@@ -728,10 +728,14 @@ def extract_discogs_fields(release: dict[str, Any]) -> dict[str, str | list[str]
             out['catalognumber'] = catnos
             out['discogs_catalognumber'] = catnos
 
-    for identifier in release.get('identifiers') or []:
-        if identifier.get('type') == 'Barcode' and identifier.get('value'):
-            out['barcode'] = identifier['value'].replace(' ', '')
-            break
+    # BAR-11: the first Barcode entry whose digits make a barcode (EAN-8, UPC-A, EAN-13,
+    # GTIN-14); Discogs often lists the number printed under the bars first - "88561-1024-2",
+    # the catalogue number, as "Text" - and the scanned "088561102425" after it
+    codes = [str(i['value']).replace(' ', '') for i in release.get('identifiers') or []
+             if i.get('type') == 'Barcode' and i.get('value')]
+    real = [c for c in codes if len(re.sub(r'\D', '', c)) in (8, 12, 13, 14)]
+    if real or codes:
+        out['barcode'] = (real or codes)[0]
 
     # Discogs dates need normalising and a fallback. `released` is often
     # partial ("1987-07-00", "2020-00-00") because Discogs uses 00 for an

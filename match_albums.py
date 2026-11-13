@@ -135,6 +135,9 @@ def _int(v):
 _ID_KEYS = ("musicbrainzalbumid", "discogsreleaseid")
 _ID_FIELDS = {"musicbrainzalbumid": "musicbrainz_albumid", "discogsreleaseid": "discogs_release_id"}
 _LOSSLESS_EXT = {".flac", ".wav", ".aiff", ".aif", ".wv", ".ape", ".alac"}
+# a lossless file's codec as Discogs names a download's ("FLAC", "ALAC": match_core.LOSSLESS_CODECS)
+_CODEC_OF_EXT = {".flac": "flac", ".wav": "wav", ".aiff": "aiff", ".aif": "aiff", ".wv": "wavpack",
+                 ".ape": "ape", ".alac": "alac"}
 CD_FRAME = 588          # a CD sector holds 588 stereo samples at 44.1 kHz
 # catalogue number tag names used by Picard, JRiver (LABELNO), foobar2000, Mp3tag and others
 _CATNO_KEYS = ("catalognumber", "labelno", "catalogno", "catalog", "catno", "catalog#",
@@ -1145,6 +1148,7 @@ def read_file(path, before=None):
         t["samples"] = getattr(f.info, "total_samples", 0) or 0
         t["channels"] = getattr(f.info, "channels", 0) or 0
         t["lossless"] = path.suffix.lower() in _LOSSLESS_EXT
+        t["codec"] = _CODEC_OF_EXT.get(path.suffix.lower(), "")
         if t["lossless"] and not t["samples"] and t["rate"]:
             t["samples"] = round(t["secs"] * t["rate"])        # WAV/AIFF/WavPack: from the length
         tags = f.tags
@@ -2454,11 +2458,14 @@ def audio_evidence(infos):
                                or (i.get("rate") or 0) >= 2822400 for i in infos)
     # every file lossless (FLAC, ALAC, WAV...): a download sold only as MP3 is not this copy
     every_lossless = bool(infos) and all(i.get("lossless") for i in infos)
+    # the files' one lossless codec ("flac"), when every file is in it (CPT-1)
+    kinds = {i.get("codec") or "" for i in infos}
+    codecs = kinds if len(kinds) == 1 and "" not in kinds else set()
     # MED-12: whole PAL video frames too (1764 samples at 44.1 kHz, 3 sectors): a concert
     # DVD's sound cut at its chapters is whole sectors as well (a CD rip: by chance, rarely)
     pal_frames = cd_frames and all(i["samples"] % (3 * CD_FRAME) == 0 for i in lossless)
     return {"hires": hires, "cd_frames": cd_frames, "not_cd": not_cd, "sacd": sacd, "lossless": every_lossless,
-            "pal_frames": pal_frames}
+            "pal_frames": pal_frames, "codecs": sorted(codecs)}
 
 
 def disc_tocs(infos):
@@ -4346,6 +4353,9 @@ def fetch_kinds(album):
 # Versions of a Discogs master fetched: a few, or more when the album has a barcode or
 # catalogue number to tell them apart (each is one request; Discogs allows 60 a minute)
 MASTER_VERSIONS = 6
+# RET-1: releases a search by your own barcode or catalogue number finds are always fetched -
+# when that search found this many or fewer (a number shared by more names no pressing alone)
+RET_CODED_MAX = 6
 MASTER_VERSIONS_WITH_CODES = 25
 
 
@@ -4676,6 +4686,29 @@ _NOTES_PACKAGING = re.compile(r"\b(?:packaged|comes|housed|issued|sold)\s+in\s+(
                               r"(jewel[- ]?case|digi-?pa(?:c?k)|digi-?book|media-?book)", re.I)
 
 
+def discogs_club_marks(rel):
+    """CLB-1: the marks a Discogs club edition (format "Club Edition") lists as printed on its
+    sleeve or disc - "CRC" (Columbia House, "Back cover"), "BMG Direct" - a short word or two
+    from its Other identifiers. Ring text and long notes ("Made in USA - Digital Audio Disc
+    Corp.") are none. Empty for any other release."""
+    club = any("club edition" in str(d).casefold() for f in rel.get("formats") or []
+               for d in f.get("descriptions") or [])
+    if not club:
+        return []
+    out = []
+    for i in rel.get("identifiers") or []:
+        v, where = str(i.get("value") or "").strip(), str(i.get("description") or "").casefold()
+        # (a mark on the sleeve - back cover, spine, inlay - where your back cover's scan shows it;
+        # never a ring or disc text, nor a sentence: "Made in USA")
+        if str(i.get("type") or "").casefold() == "other" and \
+                re.search(r"back|cover|sleeve|spine|inlay|insert|tray", where) and \
+                not re.search(r"ring|disc|label|matrix|runout", where) and \
+                re.fullmatch(r"[A-Za-z][A-Za-z&.'-]*(?: [A-Za-z][A-Za-z&.'-]*)?", v) and len(v) <= 16 and \
+                not v.casefold().startswith(("made", "printed", "manufactured")) and v not in out:
+            out.append(v)
+    return out
+
+
 def discogs_packaging(rel):
     """A Discogs entry's packaging: its formats' descriptions, then their free text
     ("Digipak" typed there), then its notes ("Packaged in jewel case"; Sadist - Spellbound:
@@ -4837,6 +4870,9 @@ def discogs_candidate(rel, dm):
         # matrix / runout, SID and label codes: compared with what the disc scans read
         "matrix": [(str(i.get("type")), str(i["value"])) for i in rel.get("identifiers", [])
                    if str(i.get("type") or "").casefold() in mc.MATRIX_KINDS and i.get("value")],
+        # CLB-1: a club edition's own mark printed on its sleeve ("CRC" on the back cover: Columbia
+        # House), from its identifiers - its absence from a legibly read back is evidence
+        "club_marks": discogs_club_marks(rel),
         "packaging": discogs_packaging(rel),
         "formats": {k for k in (mc.media_kind(f.get("name")) for f in rel.get("formats") or []) if k},
         # the album (its master) and its format names, for Picard's preferred formats
@@ -4925,6 +4961,14 @@ def discogs_search(http, album, cfg, dm):
         searches.append(f"artist={q(first)}&release_title={q(short)}")
     seen, results = set(), []
     must = []                       # (MED-13: the SACD search's own finds: always fetched, below)
+    # RET-1: what a search by your copy's own barcode or catalogue number finds is always fetched
+    # - never cut by the title ranking below (Rick Wakeman - Zodiaque: the retail CD 5459861, found
+    # by barcode and catalogue number, ranked below title-only finds of 1988 and never compared)
+    # (the barcode, the number with the artist, the label with the number - never the bare number:
+    # other artists' releases sharing it are no candidates, and would count as its rivals)
+    coded_searches = {s for s in searches if s.startswith(("barcode=", "label="))
+                      or (s.startswith("catno=") and "&artist=" in s)}
+    coded = []
     # numbers read off scans: the wider searches only when the artist's found nothing (as mb_search)
     skip_wide = set(wide) if album.get("narrow_codes_first") and narrow else set()
     narrow_found = False
@@ -4934,12 +4978,17 @@ def discogs_search(http, album, cfg, dm):
         data = http.get_json(f"https://api.discogs.com/database/search?type=release&per_page=15&{s}", "discogs")
         if s in narrow and (data or {}).get("results"):
             narrow_found = True
-        for r in (data or {}).get("results", []):
+        hits = (data or {}).get("results", [])
+        for r in hits:
             if r["id"] not in seen:
                 seen.add(r["id"])
                 results.append(r)
                 if s.endswith("&format=SACD"):
                     must.append(r)
+            # (a number few releases carry: a common one - "catno=1" - names no pressing)
+            if s in coded_searches and len(hits) <= RET_CODED_MAX and r not in coded \
+                    and all(c["id"] != r["id"] for c in coded):
+                coded.append(r)
         if len(results) >= 8:
             break
 
@@ -4952,6 +5001,7 @@ def discogs_search(http, album, cfg, dm):
     out = []
     picked = results[:cfg["discogs_detail_fetch"]]
     picked += [r for r in must[:3] if r not in picked]       # (a 2016 SACD among the 1971 LPs)
+    picked += [r for r in coded[:RET_CODED_MAX] if all(p["id"] != r["id"] for p in picked)]   # (RET-1)
     for r in picked:
         if pre(r) < 0.5 and not album["barcodes"] and not album.get("catno_search"):
             continue

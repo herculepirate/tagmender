@@ -1659,6 +1659,32 @@ def matrix_clues(ocr_text, cand, ring_text="", agree=None, disagree=None):
     return agree, disagree
 
 
+CLUB_AGAINST = "a club edition: its mark "
+
+
+def club_mark_missing(album, ocr_text, cand) -> str:
+    """CLB-1: a club edition whose own sleeve mark ("CRC") is not on your back cover, though that
+    back was read: one scan both decoded this release's barcode off its bars and had its own text
+    read (Rick Wakeman - Zodiaque: the back's bars decode to 088561102425, its text reads
+    "PRESIDENT", "88561-1024-2", "Made in the U.S.A." - no "CRC"). Bars decoded on a scan whose
+    text was never read (a reading skipped once the barcode settled the pick, over its time
+    budget), text from notes, cue sheets or saved pages, a disc scan alone: no conclusion."""
+    marks = [m for m in cand.get("club_marks") or () if m]
+    if not marks or not ocr_text:
+        return ""
+    mine = {barcode_key(b) for b in cand.get("barcodes") or ()} - {""}
+    log = album.get("scan_log") or {}
+    texts = {str(p): " ".join(str(x) for x in v or ()) for p, v in (log.get("text") or {}).items()}
+    backs = [texts.get(str(p), "") for p, codes in (log.get("barcodes") or {}).items()
+             if mine & {barcode_key(c) for c in codes or ()}]
+    backs = [t for t in backs if len(fold(t).replace(" ", "")) >= 20]
+    if not backs:
+        return ""
+    if any(f" {fold(m)} " in f" {fold(t)} " for m in marks for t in backs + [ocr_text]):
+        return ""
+    return f"{CLUB_AGAINST}{marks[0]} is not on your back cover, whose bars decode to its barcode"
+
+
 def pressing_clues(ocr_text, cand, ring_text=""):
     """What the scans say about this particular pressing.
 
@@ -3632,6 +3658,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             del clues["barcode"]
             clues[NOTES_BARCODE] = f"barcode {printed[0]} typed in your rip's notes or a saved page"
     file_clues(album, cand, clues, clues_against, cfg)
+    club_against = club_mark_missing(album, ocr_text, cand)
+    if club_against:
+        clues_against.append(club_against)
     if "matrix" in clues:                    # a clue for telling pressings apart; no points
         notes.append(clues["matrix"].replace(" on the scans", " agrees (read on the scans)"))
     # A catalogue number the folder or tags name that this pressing does not carry:
@@ -3694,6 +3723,12 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         # left from an earlier CD rip, as format_against has it): whatever the format
         # clue says, the files' disc ID came off a CD (_toc_maybe_download)
         "rip_log": bool(album.get("rip_log_toc") and not (album.get("audio") or {}).get("hires")),
+        # a download sold in your files' own lossless codec (a flag, never a clue: it only tells
+        # which of a download's entries - the FLAC one, the ALAC one - is the counterpart of the
+        # other database's download, CPT-1)
+        "codec_like_files": bool(set((album.get("audio") or {}).get("codecs") or ())
+                                 & set(cand.get("file_codecs") or ())
+                                 and set(cand.get("formats") or ()) == {"digital"}),
     }
     if tracks_ok and not box_note and cand.get("slots") is None and (
             (dur_frac is not None and dur_frac < 1.0) or (titles_agree is not None and titles_agree < n_cand)):
@@ -4154,6 +4189,26 @@ def classify(scored, cfg):
             set_aside.append(top)
             official[0]["notes"] = official[0]["notes"] + [
                 f"official release preferred to the unofficial {top['cand']['id']} that fits as well"]
+    # CLB-1: a club edition whose own mark your legibly read scans do not show yields to the
+    # release carrying your barcode too that nothing of your copy argues against, when it fits
+    # your tracks as well and is behind only by the year (the folder's year is the album's,
+    # not the pressing's: Rick Wakeman - Zodiaque, the Columbia House "CRC" CD dated 1988 over
+    # the retail 88561-1024-2 of 1989)
+    if ranked and any(str(a).startswith(CLUB_AGAINST) for a in ranked[0].get("clues_against") or ()) \
+            and barcode_agrees(ranked[0]):
+        top = ranked[0]
+        retail = [s for s in ranked[1:] if barcode_agrees(s) and not s.get("clues_against")
+                  and not s.get("conflict") and s.get("tracks_ok")
+                  and (s.get("dur_frac") or 0) >= (top.get("dur_frac") or 0)
+                  and (s.get("titles_agree") or 0) >= (top.get("titles_agree") or 0)
+                  and top["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+        if retail:
+            ranked.remove(retail[0])
+            ranked.insert(0, retail[0])
+            set_aside.append(top)
+            retail[0]["notes"] = retail[0]["notes"] + [
+                f"your scans show its barcode without the club edition {top['cand']['id']}'s mark: "
+                f"the release that carries your barcode and nothing against it is taken (CLB-1)"]
     best = ranked[0]
     # TAG-1 / CHG-1: the release your files are tagged with (by TagMender, or your Change
     # Release) stands while it fits, unless a barcode or catalogue number of yours names another
@@ -4961,6 +5016,40 @@ def preferred_source(*results) -> str:
     return ""
 
 
+def _discogs_download_twin(mb_result, dg_result):
+    """CPT-1: the Discogs entry of MusicBrainz's sure download when Discogs itself was not sure
+    (I Am The Moon II: MusicBrainz's only download 6e439558, no Discogs link; Discogs tied its
+    vinyl and two downloads, FLAC and ALAC). Only one supported as that release: MusicBrainz
+    links it; or MusicBrainz's pick is the only download of its release group, and among
+    Discogs's downloads of the same year whose lengths agree and that nothing states apart,
+    exactly one is sold in your files' own codec (or exactly one exists). None otherwise - a
+    counterpart is never guessed."""
+    mb_best = mb_result.get("best") or {}
+    mb = mb_best.get("cand") or {}
+    scored = [s for s in (dg_result or {}).get("scored") or () if s.get("cand")]
+    linked = linked_discogs(mb)
+    if linked:
+        hit = [s for s in scored if str(s["cand"].get("id")) in linked]
+        return hit[0] if len(hit) == 1 else None
+    if set(mb.get("formats") or ()) != {"digital"} or mb.get("group_digital") != 1:
+        return None
+    # (nothing of your copy against it - never an MP3-only download for lossless files - and a
+    # year on both sides)
+    downloads = [s for s in scored if set(s["cand"].get("formats") or ()) == {"digital"}
+                 and bool(s["cand"].get("unofficial")) == bool(mb.get("unofficial"))
+                 and mb.get("year") and s["cand"].get("year") == mb.get("year")
+                 and _lengths_agree(s["cand"], mb) and not _stated_apart(s["cand"], mb)
+                 and not s.get("conflict") and not s.get("clues_against")]
+    # one in your files' codec; else the one download of its whole Discogs master (only the
+    # candidates fetched are scored: "the only one among them" is not "the only one")
+    like = [s for s in downloads if s.get("codec_like_files")]
+    if len(like) == 1:
+        return like[0]
+    if not like and len(downloads) == 1 and downloads[0]["cand"].get("master_digital") == 1:
+        return downloads[0]
+    return None
+
+
 def _musicbrainz_decides(mb_result, dg_result):
     """Sources "MusicBrainz preferred": MusicBrainz's sure pick decides. Discogs's sure pick of
     the same pressing comes along ("dg_twin", for its tags), one of another pressing does
@@ -4969,7 +5058,8 @@ def _musicbrainz_decides(mb_result, dg_result):
     mb_best = mb_result["best"]
     dg_best = (dg_result or {}).get("best")
     if not (dg_result and dg_result["status"] == "auto" and dg_best):
-        return mb_result
+        twin = _discogs_download_twin(mb_result, dg_result) if dg_result else None   # (CPT-1)
+        return dict(mb_result, dg_twin=str(twin["cand"]["id"])) if twin else mb_result
     if any(s is mb_best for s in mb_twins(mb_result, dg_result)):
         if mb_best["cand"].get("discogs_id"):
             return mb_result
@@ -5183,6 +5273,18 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
         # ID or the format against Discogs's own: mb_overrules, then _disputed for HF-2)
         overrule = mb_overrules(mb_result, dg_result, twins)
         if overrule:
+            # CPT-1: Discogs's pick taken (HF-2, Sources prefers Discogs) over MusicBrainz's
+            # disputed one - MusicBrainz's own entry of THAT pressing comes along, as on every
+            # Discogs pick (Let Me Get By: the EU abd0701c, which links 8139600, beside it; never
+            # the disputed US 4185f661, which links another Discogs entry)
+            dg_pick = overrule.get("best")
+            if twins and dg_pick and dg_pick.get("cand", {}).get("source") == "discogs" \
+                    and str(dg_pick["cand"].get("id")) == str(dg_result["best"]["cand"].get("id")) \
+                    and overrule.get("status") == "auto" and not overrule.get("mb_twin"):
+                rest = [s for s in twins if s is not mb_best]
+                if rest:
+                    overrule = dict(overrule, mb_twin=max(rest, key=lambda s: (_exact_toc(s), s["confidence"]))
+                                    ["cand"]["id"])
             return overrule
         if twins:
             # the release carrying your disc ID first (Stygian Bough: the CD with the
@@ -5255,6 +5357,9 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             # (its pressing is one of those tied; match_albums falls back on it when even the
             # album-only tags cannot be written: _sure_if_no_album_only)
             return dict(_guessed(dg_result, mb_result), sure_elsewhere=mb_result)
+        twin = _discogs_download_twin(mb_result, dg_result)
+        if twin:
+            return dict(mb_result, dg_twin=str(twin["cand"]["id"]))
         return mb_result
     order = {"review": 0, "nomatch": 1}
     options = [r for r in (mb_result, dg_result) if r and r["best"]]

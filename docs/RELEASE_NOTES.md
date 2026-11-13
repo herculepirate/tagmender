@@ -1,5 +1,32 @@
 # Release notes
 
+## 0.8.54
+
+**Both databases' entries of your release in one run (CPT-1)**
+- When Discogs's pick is taken over a disputed MusicBrainz one (Sources prefers Discogs), the
+  MusicBrainz entry of that same pressing - the one linking it - is written beside it at once,
+  not on a later run.
+- When MusicBrainz is sure and Discogs is not, Discogs's entry of the same release comes along
+  only when it is supported: MusicBrainz links it, or it is the one download of that release in
+  your files' own format (the FLAC entry, never an MP3-only one).
+
+**The release your barcode finds is always compared (RET-1)**
+- Releases a search by your own barcode or catalogue number finds are always looked at, however
+  their titles rank - a retail CD was missed while a club edition of the same barcode was taken.
+
+**The barcode written is a barcode (BAR-11)**
+- Where Discogs lists the number printed under the bars (a catalogue number) before the real
+  barcode, the real barcode is written.
+
+**Club editions (CLB-1)**
+- A club edition whose own mark ("CRC") is not on your back cover - read well enough that its
+  barcode was decoded and its text read - gives way to the release carrying your barcode with
+  nothing against it. A scan that is missing or was not read decides nothing.
+
+**Release checks**
+- A release now counts as verified only after GitHub's tests, packaging and publication pass for
+  the tested commit and the published AppImage is checked.
+
 ## 0.8.53
 
 **Build checks fixed**

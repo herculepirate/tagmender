@@ -7815,6 +7815,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             return out
 
     final = _sure_if_no_album_only(final, album, cfg)
+    # R9: an unofficial pick your copy proves (its own number printed, the disc ID, a link) is
+    # yours - decided against both databases' candidates, an official one keeps winning
+    final = mc.unofficial_settled(final, (mb_res, dg_res), album, cfg, ocr_txt)
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     if (status == "auto" and not album.get("unlisted_barcodes")
@@ -7904,6 +7907,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         else:
             # EDN-2: one pressing, another label's
             ao = mc.edition_named_another(final, album, cfg, tie_source(album, final))
+        if not ao:
+            # R9: an unofficial release nothing of your copy proves: the album, not the pressing
+            ao = mc.unofficial_album_only(final, cfg, tie_source(album, final), (mb_res, dg_res))
         if ao:
             out["album_only"] = ao              # the album is certain, its pressing is not
     else:

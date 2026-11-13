@@ -1826,6 +1826,10 @@ def unofficial_why(best, scored=()):
     # barcode, picked over the official pressings that list no track lengths)
     shared = any(not s["cand"].get("unofficial") and barcode_proves(s) for s in scored or ())
     if (barcode_proves(best) and not shared) or clues.get("matrix"):
+        note = ("the release is an unofficial one (a bootleg); your copy proves it: "
+                + ("its barcode" if barcode_proves(best) and not shared else "its matrix"))
+        if note not in (best.get("notes") or []):
+            best["notes"] = list(best.get("notes") or []) + [note]
         return []
     backed = (best["code"].startswith("catalogue number") and best["code"] not in WEAK_BARCODES) or any(
         k in clues for k in ("disc TOC", "source link"))
@@ -1833,7 +1837,12 @@ def unofficial_why(best, scored=()):
         best["notes"] = best["notes"] + ["the release is an unofficial one (a bootleg); kept: your files "
                                          "are tagged with it"]
         return []
-    return ["the release is an unofficial one (a bootleg); nothing of your copy (barcode, matrix) says it is yours"]
+    return [R9_HELD]
+
+
+R9_HELD = "the release is an unofficial one (a bootleg); nothing of your copy (barcode, matrix) says it is yours"
+# R9: the doubt an album-only bootleg is written with (engine._album_only, TAGMENDER_REASON)
+UNOFFICIAL_DOUBT = "unofficial release; nothing of your copy proves which pressing"
 
 
 def _unofficial_backed(s) -> bool:
@@ -1842,6 +1851,104 @@ def _unofficial_backed(s) -> bool:
     clues = s.get("clues") or {}
     return bool((str(s.get("code") or "").startswith("catalogue number") and s.get("code") not in WEAK_BARCODES)
                 or "disc TOC" in clues or "source link" in clues)
+
+
+def _copy_catnos(best, album, ocr_text=""):
+    """R9: the pick's own catalogue numbers your copy itself shows - printed on your scans or a
+    PDF booklet (BAR-8: whole, never only typed in notes) or in your folder name (not one the
+    ripper's notes typed). Never one only in your files' tags (another tagger's)."""
+    album = album or {}
+    folder = set(album.get("catnos_from_folder") or ()) - set(album.get("catnos_typed") or ())
+    return sorted(c for c in best["cand"].get("catnos") or ()
+                  if any(catno_same(c, f) for f in folder) or catno_printed(album, c, ocr_text or ""))
+
+
+def _same_album(s, best):
+    return (title_sim(s["cand"]["title"], best["cand"]["title"]) >= 0.85
+            and len(s["cand"]["tracks"]) == len(best["cand"]["tracks"]))
+
+
+def _unofficial_pool(final, results):
+    """Every candidate scored by either database (each source's whole list: classify's own
+    may have dropped an official release your folder's country rules out), each once."""
+    seen, pool = set(), []
+    for s in list((final or {}).get("scored") or ()) + [s for r in results or () for s in (r or {}).get("scored") or ()]:
+        k = (s["cand"].get("source"), str(s["cand"].get("id")))
+        if k not in seen:
+            seen.add(k)
+            pool.append(s)
+    return pool
+
+
+def unofficial_settled(final, results, album, cfg, ocr_text=""):
+    """R9 after combine, against both databases' candidates: an unofficial pick held ONLY for
+    being unofficial is your release when your copy proves it - the exact disc ID, your files'
+    shop link, or its own catalogue number printed on your scans or in your folder name with
+    every track length agreeing (FIL-1) - and no official release of the album, in either
+    database, carries that number (catno_same) or fits as well (TIE-4). Then FINAL is sure,
+    with a note; else FINAL unchanged (unofficial_album_only may make it Album only)."""
+    best = (final or {}).get("best")
+    if not best or final.get("status") == "auto" or not best["cand"].get("unofficial"):
+        return final
+    why = [w for w in final.get("why") or [] if not w.startswith("investigated")]
+    if why != [R9_HELD]:
+        return final
+    clues = best.get("clues") or {}
+    mine = []
+    if clues.get("disc TOC") == EXACT_TOC_CLUE:
+        proof = "your disc ID"
+    elif "source link" in clues:
+        proof = "your files' link"
+    else:
+        mine = _copy_catnos(best, album, ocr_text)
+        if not mine or not best.get("tracks_ok") or (best.get("dur_frac") or 0) < 0.999 or best.get("conflict"):
+            return final
+        proof = f"its own catalogue number {', '.join(mine)} on your copy, every track length agreeing"
+    for s in _unofficial_pool(final, results):
+        if s["cand"].get("unofficial") or not _same_album(s, best):
+            continue
+        shares = (any(catno_same(c, m) for c in s["cand"].get("catnos") or () for m in mine)
+                  or (not mine and clues.get("disc TOC") == EXACT_TOC_CLUE
+                      and (s.get("clues") or {}).get("disc TOC") == EXACT_TOC_CLUE)
+                  or (not mine and "source link" in clues and "source link" in (s.get("clues") or {})))
+        fits = (best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
+                and (s.get("tracks_ok") or not best.get("tracks_ok"))
+                and (s.get("dur_frac") or 0) >= (best.get("dur_frac") or 0) - 0.05)
+        if shares or fits:
+            return final                  # (TIE-4: the official release keeps winning)
+    best = dict(best, notes=list(best.get("notes") or []) + [
+        f"the release is an unofficial one (a bootleg); your copy proves it: {proof} (R9)"])
+    return dict(final, status="auto", best=best,
+                why=[w for w in final.get("why") or [] if w != R9_HELD])
+
+
+def unofficial_album_only(final, cfg, source="", results=()):
+    """R9: what album_only returns for an unofficial pick held only for being unofficial (and
+    perhaps a runner-up of the same album) that nothing of your copy proves: the album is as
+    sure as an automatic pick (score, lengths), its pressing is not. None otherwise."""
+    best = (final or {}).get("best")
+    if not best or final.get("status") == "auto" or not best["cand"].get("unofficial"):
+        return None
+    why = [w for w in final.get("why") or [] if not w.startswith("investigated")]
+    if R9_HELD not in why or not all(w == R9_HELD or _TIE_WHY.match(w) for w in why):
+        return None
+    if best["confidence"] < cfg["auto_min_confidence"] or not best.get("tracks_ok") \
+            or (best.get("dur_frac") or 0) < cfg["auto_min_duration_frac"] or best.get("conflict"):
+        return None
+    tied = [s for s in _unofficial_pool(final, results)
+            if _same_album(s, best) and best["confidence"] - s["confidence"] < cfg["auto_min_margin"]
+            and not s.get("unproven_media")]
+    if not any(s is best or s["cand"] is best["cand"] for s in tied):
+        tied = [best] + tied
+    other_kind = False
+    if source:
+        same_kind = [s for s in tied if source in (s["cand"].get("formats") or ())]
+        other_kind = not same_kind and any(s["cand"].get("formats") for s in tied)
+        tied = same_kind or tied
+    return {"source": source, "no_lengths": False, "other_kind": other_kind, "doubt": UNOFFICIAL_DOUBT,
+            "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+                      "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
+                      "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in tied]}
 
 
 def cover_clue(cover_text, cand, clues):

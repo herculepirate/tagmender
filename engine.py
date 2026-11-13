@@ -1165,7 +1165,7 @@ class Engine:
                                     why=list(out.get("why") or []))
             # (TagMender's own earlier pick of that release is withdrawn: what its job wrote of the
             # pressing goes back to what the files held before it)
-            held.restore = self._withdraw_own(held.files, out, pick=None)
+            held.restore = self._withdraw_own(held.files, out, pick=None, title=True)
             if held.restore:
                 held.notes = list(held.notes or []) + [
                     "what TagMender's earlier job wrote of that release is taken back (TAG-1)"]
@@ -1260,7 +1260,7 @@ class Engine:
         prop = self._unresolved(out, files, base, errors)
         if (out or {}).get("own_disproved"):
             # (TagMender's own earlier pick lost its standing and nothing decides now: its writes go)
-            prop.restore = self._withdraw_own(prop.files, out, pick=None)
+            prop.restore = self._withdraw_own(prop.files, out, pick=None, title=True)
         note = getattr(self, "_set_note", "") if not alone and not names else ""
         if note:
             prop.why = list(prop.why or []) + [note]
@@ -1981,7 +1981,7 @@ class Engine:
             out.append(x)
         return out
 
-    def _withdraw_own(self, files, out, pick=None, side=None, first=()) -> dict:
+    def _withdraw_own(self, files, out, pick=None, side=None, first=(), title=False) -> dict:
         """TAG-1 / REP-1: {file: {field: value before}} taking back what TagMender's own earlier job
         wrote of the pressing your files' release IDs name, when that pick is withdrawn - as
         _restore_own takes it back (only what its job wrote and nobody changed since; your field
@@ -2003,7 +2003,7 @@ class Engine:
                     facts.append(info)
         if not clash:
             return {}
-        return self._restore_own(files, clash, facts, pick or {}, side, first)
+        return self._restore_own(files, clash, facts, pick or {}, side, first, title)
 
     def _one_release(self, p, out, album):
         """TAG-3: one release per file. The files may already hold a release ID (either
@@ -2314,7 +2314,7 @@ class Engine:
                 out_[str(f)] = gone
         return out_
 
-    def _restore_own(self, files, clash, facts, pick, side, first=()) -> dict:
+    def _restore_own(self, files, clash, facts, pick, side, first=(), title=False) -> dict:
         """TAG-3 / REP-1: {file: {field: value before TagMender}} for the pressing fields
         TagMender's own earlier job wrote of the pressing that clashes, still holding what it left
         - an album found album only takes them back ([] when the field was empty before: removed).
@@ -2323,7 +2323,7 @@ class Engine:
         not the pick's. Never the pick's or a twin's: what TagMender wrote of the release it picks
         again stays (a second plan writes nothing to it)."""
         import tagio
-        writes = ma.tagmender_pressing_writes(files)
+        writes = ma.tagmender_pressing_writes(files, title=title) if title else ma.tagmender_pressing_writes(files)
         known = self._coded([x for x in facts if not x.get("unknown")])
         ids = {f: set(v) for f, v in clash.items()}
 
@@ -2356,6 +2356,10 @@ class Engine:
                     ok = mb_lost
                 elif k.startswith("discogs_"):
                     ok = dg_lost
+                elif k == "album":
+                    # (title: an album held, its pick withdrawn - the title TagMender's job wrote for
+                    # it, "Rust in Peace [1990 Vinyl Rip]", goes back to the files' own)
+                    ok = bool(title) and (mb_lost or dg_lost)
                 elif k == "date":
                     # (the losing pressing's own date - its year, not the pick's nor the album's
                     # original year (first): taken back as before the job; one empty before is

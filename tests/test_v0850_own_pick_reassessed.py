@@ -204,7 +204,8 @@ class OWN_Withdrawn(te.Base):
                        CATALOGNUMBER="CAT-1", MEDIA="Vinyl, LP")
         files = sorted(str(f) for f in d.glob("*.flac"))
         writes = {f: {"musicbrainz_albumid": ((), ("mb-i",)), "catalognumber": ((), ("CAT-1",)),
-                      "media": ((), ("Vinyl, LP",))} for f in files}
+                      "media": ((), ("Vinyl, LP",)), "album": (("Album I (Instrumental)",), ("Album I",))}
+                  for f in files}
         rel = te.mb_release("mb-i", "Band I", "Album I")
         rel["media"][0]["format"] = '12" Vinyl'
         e = self.engine(te.FakeHttp(mb=[rel]), unresolved={"action": "leave"})
@@ -217,6 +218,19 @@ class OWN_Withdrawn(te.Base):
         self.assertIsNone(ch.get("catalognumber", "kept"))
         self.assertIsNone(ch.get("media", "kept"))
         self.assertNotIn("tagmender", ch, "Unresolved \"leave\": nothing new is written")
+        self.assertEqual(ch.get("album"), ["Album I (Instrumental)"], "the title TagMender's job wrote goes back")
+        self.assertEqual(a["files"][0]["dst"], a["files"][0]["src"], "a held album is never renamed or moved")
+
+    def test_OWN_a_title_you_changed_since_stays(self):
+        d = self.album("Band I", "My Title", folder="1990 - Album I (Instrumental)", MUSICBRAINZ_ALBUMID="mb-i")
+        files = sorted(str(f) for f in d.glob("*.flac"))
+        writes = {f: {"musicbrainz_albumid": ((), ("mb-i",)), "album": (("Album I (Instrumental)",), ("Album I",))}
+                  for f in files}
+        e = self.engine(te.FakeHttp(mb=[te.mb_release("mb-i", "Band I", "Album I")]), unresolved={"action": "leave"})
+        with mock.patch.object(ma, "tagmender_pressing_writes", return_value=writes):
+            p = e.identify(e.albums_in(d)[0])
+        if p.status == "unresolved":
+            self.assertNotIn("album", (p.restore or {}).get(files[0], {}))
 
 
 if __name__ == "__main__":

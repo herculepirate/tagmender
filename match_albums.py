@@ -1021,7 +1021,7 @@ def pressing_field(field) -> bool:
     return f in RESTORE_FIELDS or (f.startswith("discogs_") and f not in DG_ALBUM_FIELDS)
 
 
-def tagmender_pressing_writes(paths) -> dict:
+def tagmender_pressing_writes(paths, title=False) -> dict:
     """TAG-3: {path: {field: (value before TagMender, value it left)}} of the pressing fields
     TagMender's own jobs wrote in these files (pressing_field), as tagmender_originals reads
     the history; {} when TagMender's jobs did not tag every one of them."""
@@ -1037,7 +1037,8 @@ def tagmender_pressing_writes(paths) -> dict:
             return {}
         # (and the date: a pressing's own date is taken back only when it is the losing one's -
         # engine._restore_own decides)
-        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f) or f == "date"}
+        # (title: the album title too - what a held album whose pick TagMender withdrew takes back)
+        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f) or f == "date" or (title and f == "album")}
     return out
 
 

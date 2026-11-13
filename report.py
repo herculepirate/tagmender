@@ -285,11 +285,16 @@ def rows_of(a, res=None, applied=False, undone=False) -> list:
                         else "Mixed" if MIXED in _reason(a)[1] else "Check", done))
     if failed:
         # (an Unresolved album moved aside: its link is where it went; one that failed or was
-        # stopped is still where it was)
+        # stopped is still where it was. An album held for your choice whose job went through -
+        # TagMender's earlier writes for a pick it withdrew taken back, TAG-1 - is "Unresolved",
+        # never "Failed")
+        held_done = applied and st == "done" and tier == "unresolved"
+        if held_done and planmod.has_work(a):
+            failed = failed + "; what an earlier run wrote for it was taken back"
         out.append(_row("failed", a, failed, _where(a, done),
-                        {"cancelled": "Stopped", "conflict": "Conflict"}.get(st, "Failed" if applied and st
-                                                                             else "Blocked" if "blocked" in failed
-                                                                             else "Unresolved"), done))
+                        {"cancelled": "Stopped", "conflict": "Conflict"}.get(
+                            st, "Unresolved" if held_done else "Failed" if applied and st
+                            else "Blocked" if "blocked" in failed else "Unresolved"), done))
     if tier != "unresolved" and not failed and a.get("status") in ("ready", "done") and planmod.has_work(a) \
             and (did or not applied):
         out.append(_row("done", a, _done_words(a, planned=not applied), _where(a, done),

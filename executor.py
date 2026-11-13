@@ -1838,6 +1838,29 @@ class Executor:
                     _inside(p, self.roots):
                 try:
                     inside = list(p.iterdir())
+                    # DIR-1: a folder inside it holding no file at all, at any depth - hidden ones
+                    # and links count as files - is empty too (a download's "Disc 2/Live albums/09
+                    # ..." left behind): removed deepest first, each one journaled, undo makes them
+                    # again. One file anywhere in it keeps it, and this folder, as they are.
+                    # (only when this folder goes with them: a folder that stays - an artist
+                    # folder with a file in it - keeps its empty folders; a tree holding one of
+                    # the profile's or library's own folders is kept whole)
+                    trees, keep_p = [], False
+                    for x in inside:
+                        if x.name in JUNK and x.is_file() and not x.is_symlink():
+                            continue
+                        tree = _fileless_tree(x)
+                        if not tree or any(os.path.realpath(str(t)) in roots for t in tree):
+                            keep_p = True
+                            break
+                        trees.append(tree)
+                    if keep_p:
+                        break
+                    for tree in trees:
+                        for sub in tree:
+                            sub.rmdir()
+                            self.journal.write(ev="dir_removed", album=i, path=str(sub))
+                    inside = list(p.iterdir())
                     if any(x.name not in JUNK or not x.is_file() or x.is_symlink() for x in inside):
                         break
                     for x in inside:
@@ -1862,6 +1885,22 @@ class Executor:
             except Exception as exc:
                 problems.append(str(exc))
         return problems
+
+
+def _fileless_tree(top: Path):
+    """DIR-1: the folders of `top` (itself last), deepest first, when nothing in it at any depth
+    is a file, a hidden file, a link or anything else but a plain folder; None otherwise (and for
+    a link to a folder, or a tree too deep or wide to be a leftover: 500 folders)."""
+    if top.is_symlink() or not top.is_dir():
+        return None
+    out = []
+    for dirpath, dirnames, filenames in os.walk(top, followlinks=False):
+        if filenames or any(os.path.islink(os.path.join(dirpath, d)) for d in dirnames):
+            return None
+        out.append(Path(dirpath))
+        if len(out) > 500:
+            return None
+    return sorted(out, key=lambda q: len(q.parts), reverse=True)
 
 
 def _sweep_stages(plan: dict, job, log=None) -> list:

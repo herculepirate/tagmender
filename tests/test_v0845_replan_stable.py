@@ -335,9 +335,11 @@ class IDEM_ReviewFixes(_Copies):
         self.assertTrue(ma._same_values(["IOM 290\x00SPV 79690 CD"], ("IOM 290", "SPV 79690 CD")))
         self.assertFalse(ma._same_values(["IOM 291/SPV 79690 CD"], ("IOM 290", "SPV 79690 CD")))
 
-    def test_IDEM_isrcs_are_not_restored(self):
-        # (they name the recordings every pressing shares: never a pressing's evidence)
-        self.assertNotIn("isrc", ma.REPLAN_FIELDS)
+    def test_IDEM_isrcs_restored_only_as_the_job_left_them(self):
+        # (PRV-1: an ISRC never picks a pressing, but read back as TagMender wrote it - from the
+        # release it chose - it proves that release's recordings as the album's. Restored only
+        # where the file still holds what the job wrote; an ISRC changed since is the file's own)
+        self.assertIn("isrc", ma.REPLAN_FIELDS)
 
     def test_IDEM_an_album_never_tagged_does_not_read_the_job_history(self):
         d = self.tmp / "lib" / "Band" / "2008 - Plain"

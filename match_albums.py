@@ -249,6 +249,12 @@ def _source_clues(path, t):
     parts, isrc = [], ""
     for k, v in tags.items():
         key = str(k).lower()
+        if "tagmender" in key:
+            # PRV-1: TagMender's own record (TAGMENDER_SOURCE: the shop page ITS web search found)
+            # is no link the files came with - read back, it would prove the release it led to
+            # ("the shop page your files' tags link to"): what TagMender wrote never corroborates
+            # itself (as REP-1 reads the pressing fields its jobs wrote as they were before)
+            continue
         vals = v if isinstance(v, list) else [v]
         text = " ".join(str(getattr(x, "text", x) if not isinstance(x, bytes) else x.decode("utf-8", "ignore"))
                         for x in vals)
@@ -768,7 +774,7 @@ def _release_id(t, key, value):
 # numbered 3 after a DVD the files lack), which lay out the discs it is matched by
 # (and their totals, so restored numbers never sit beside TagMender's totals; MP4's trkn/disk
 # pairs are not restored: read as they are)
-REPLAN_FIELDS = ("barcode", "catalognumber", "label", "releasecountry", "media", "date", "album", "asin",
+REPLAN_FIELDS = ("barcode", "catalognumber", "label", "releasecountry", "media", "date", "album", "asin", "isrc",
                  "discnumber", "tracknumber", "totaltracks", "totaldiscs")
 # Vorbis names TagMender writes a field under besides its own (TOTALTRACKS and TRACKTOTAL)
 _VORBIS_ALIASES = {"totaltracks": ("tracktotal",), "totaldiscs": ("disctotal",)}
@@ -1110,6 +1116,15 @@ def read_file(path, before=None):
          "credit": ""}                  # who the files say performed/wrote it: track artist, copyright, composer
     try:
         _source_clues(path, t)
+        # PRV-1: ISRCs TagMender's job wrote (from the release it chose) are read as they were
+        # before it - read back they would prove that release's recordings as the album's
+        hit = (before or {}).get("isrc")
+        if hit is not None and t.get("isrc"):
+            def _k(v):
+                return str(v or "").strip().upper().replace("-", "")
+            if t["isrc"] in {_k(v) for v in hit[1] or ()}:
+                was = [_k(v) for v in hit[0] or () if _k(v)]
+                t["isrc"] = was[0] if was and _ISRC.fullmatch(was[0]) else ""
         if path.suffix.lower() in (".m4a", ".mp4"):
             f = MP4(path)
             t["secs"] = f.info.length
@@ -4226,6 +4241,12 @@ def mb_sort_names(rel):
                      for a in rel.get("artist-credit", []) if isinstance(a, dict))
 
 
+def _year_of(date) -> int:
+    """The year of a database date ("1988-05-02", "1988"), 0 when there is none."""
+    d = str(date or "")
+    return int(d[:4]) if d[:4].isdigit() and d[:4] != "0000" else 0
+
+
 def mb_candidate(rel):
     tracks = []
     audio_media = [m for m in rel.get("media", [])
@@ -4264,6 +4285,8 @@ def mb_candidate(rel):
         # one album from other albums (match_core.same_album, Picard's preferred types/formats)
         "release_group": str(group.get("id") or ""), "release_types": mb_group_types(group),
         "discogs_master": mb_group_master(group),
+        # YR-1: the album's first release (its release group's), as against this pressing's year
+        "original_year": _year_of(group.get("first-release-date")),
         "media_formats": names if names and all(names) else [],
         # every medium (a DVD's and Blu-ray's too), its format and its audio tracks ("index": the
         # track's place on its medium): which tracks of it a version folder of yours is
@@ -4474,8 +4497,15 @@ def mb_search(http, album, cfg):
     # it (inc=release-groups would change every cached lookup's address).
     groups = {r["id"]: r["release-group"] for r in hits if (r.get("release-group") or {}).get("id")}
     if rg:
-        info = dict(next((g for g in groups.values() if g["id"] == rg), {}), id=rg,
-                    relations=_group_relations(http, rg, cfg))
+        # (YR-1: the album's first release - a folder year with no pressing named is the album's)
+        # (asked only when some pressing's own year differs from the folder's: one request then)
+        need_date = bool(album.get("year") and not album.get("pressing_year") and any(
+            str(h.get("date") or "")[:4] not in ("", str(album["year"]))
+            for h in list(hits) + list((data or {}).get("releases") or [])))
+        rels, first = _group_relations(http, rg, cfg, need_date=need_date)
+        info = dict(next((g for g in groups.values() if g["id"] == rg), {}), id=rg, relations=rels)
+        if first:
+            info["first-release-date"] = first
         groups.update({k: info for k, g in groups.items() if g["id"] == rg})
         groups.update({v["id"]: info for v in (data or {}).get("releases", []) if v.get("id")})
     out = []
@@ -4489,21 +4519,26 @@ def mb_search(http, album, cfg):
     return out
 
 
-def _group_relations(http, rg, cfg):
+def _group_relations(http, rg, cfg, need_date=False):
     """The release group's URL relationships (its Discogs master link: discogs_master),
     one request per album, not per pressing, and only when something can act on it: Picard's
     preferred formats, between a MusicBrainz and a Discogs pick (match_core.combine,
     same_album). The release types cannot (a Discogs pick has none: its types are unknown,
     and a discouraged MusicBrainz pick leaves one pressing, no choice), so they ask nothing.
-    Otherwise only an answer already in the cache is used, so no request is added."""
+    Otherwise only an answer already in the cache is used, so no request is added - unless
+    need_date (YR-1: the group's first release date is wanted). Returns (relations, first
+    release date or "")."""
     url = f"https://musicbrainz.org/ws/2/release-group/{rg}?inc=url-rels&fmt=json"
     try:
-        if mc.release_preferences(cfg)["formats"]:
-            return (http.get_json(url, "mb") or {}).get("relations") or []
-        row = http.db.execute("SELECT body FROM http_cache WHERE url=?", (url,)).fetchone()
-        return (json.loads(row[0]) or {}).get("relations") or [] if row and row[0] else []
+        if mc.release_preferences(cfg)["formats"] or need_date:
+            data = http.get_json(url, "mb") or {}
+        else:
+            row = http.db.execute("SELECT body FROM http_cache WHERE url=?", (url,)).fetchone()
+            data = (json.loads(row[0]) or {}) if row and row[0] else {}
+        data = data if isinstance(data, dict) else {}
+        return data.get("relations") or [], str(data.get("first-release-date") or "")
     except Exception:                                  # a missing link only leaves it unknown
-        return []
+        return [], ""
 
 
 def _digital_count(data, key, total_key, formats):
@@ -5060,7 +5095,35 @@ def discogs_search(http, album, cfg, dm):
                 found = found or code
     counts = _digital_count(data, "versions", None,
                             lambda v: v.get("major_formats") or [v.get("format") or ""])
-    return [dict(c, **counts.get(str(c["id"]), {})) for c in out]
+    out = [dict(c, **counts.get(str(c["id"]), {})) for c in out]
+    _master_years(http, album, out)
+    return out
+
+
+def _master_years(http, album, cands, limit=2):
+    """YR-1: a Discogs pressing's album year - its master's - where the folder gives a year
+    (no pressing year beside it) that this pressing's own does not match: a folder named by the
+    album's original year ("1988 - Zodiaque") against its 1989 reissue. At most `limit` masters
+    per album, each one request (cached)."""
+    want = album.get("year")
+    if not want or album.get("pressing_year"):
+        return
+    masters = {}
+    for c in cands:
+        mid = str(c.get("master_id") or "")
+        if not mid or c.get("year") == want or c.get("original_year"):
+            continue
+        if mid not in masters:
+            if len(masters) >= limit:
+                continue
+            try:                         # (an extra: a master not answering costs only it)
+                m = http.get_json(f"https://api.discogs.com/masters/{mid}", "discogs") or {}
+            except Exception:
+                m = {}
+            y = m.get("year") if isinstance(m, dict) else None
+            masters[mid] = int(y) if str(y or "").isdigit() else 0
+        if masters.get(mid):
+            c["original_year"] = masters[mid]
 
 
 # --------------------------------------------------------------------------

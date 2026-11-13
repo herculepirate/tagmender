@@ -3617,6 +3617,11 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         avail += cfg["w_year"]
         year_off = abs(want_year - cand["year"])
         tol = cfg.get("pressing_year_tolerance", 0) if album.get("pressing_year") else 0
+        # YR-1: a folder's year with no pressing named beside it is the album's year - most
+        # libraries name folders by the original release - so a reissue of that album agrees by
+        # its album's first year (Rick Wakeman - Zodiaque: "1988 -", the 1989 retail CD). The
+        # distance to the pressing's own year still orders ties (year_off).
+        original = cand.get("original_year") if not album.get("pressing_year") else 0
         if year_off <= tol:
             pts += cfg["w_year"]
             year_ok = True
@@ -3624,6 +3629,10 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                 notes.append(f"year {cand['year']} agrees with the {want_year} edition named in the folder"
                              if year_off else
                              f"year {want_year} agrees with the edition named in the folder")
+        elif original and original == want_year and original <= cand["year"]:
+            pts += cfg["w_year"]
+            year_ok = True
+            notes.append(f"year {want_year} is the album's first release (this pressing {cand['year']})")
         else:
             notes.append(f"year {want_year} vs {cand['year']}")
 

@@ -1,5 +1,25 @@
 # Release notes
 
+## 0.8.55
+
+**A folder's year is the album's year (YR-1)**
+- A folder named by the album's original year ("1988 - Zodiaque") no longer counts against a
+  reissue of that album: the reissue agrees through the album's first release (MusicBrainz's
+  release group, Discogs's master). A pressing year named in the folder ("[2004 RM]") is still
+  compared with the pressing's own year.
+
+**What TagMender wrote does not vouch for itself (PRV-1)**
+- The shop page TagMender's own web search found (TAGMENDER_SOURCE) is no longer read back as a
+  link your files came with, and ISRCs it wrote are read as they were before its job.
+
+**Empty folders left behind by a move (DIR-1)**
+- A move's clean-up also removes empty folder trees inside the folder it empties (a download's
+  empty "Disc 2/Live albums/..."). Any file in them, a hidden one too, keeps them; undo makes them
+  again.
+
+**Releasing**
+- The release checks every contributor follows are in docs/RELEASING.md.
+
 ## 0.8.54
 
 **Both databases' entries of your release in one run (CPT-1)**

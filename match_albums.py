@@ -6122,9 +6122,10 @@ def ocr_barcode_digits(paths, max_images=15, budget_s=120.0):
                     break
                 chunks += _digit_band_reads(frame, fbox)
     # the first digit sits apart and is often misread: complete 6+6 digit groups by
-    # the check digit
+    # the check digit - groups read on ONE line only (OCR-5): two crops each reading the left
+    # group "006759" once joined into an invented "2006759006759"
     text = "\n".join(chunks)
-    for m in re.finditer(r"(?<!\d)(\d{6})\D{0,3}(\d{6})(?!\d)", text):
+    for m in re.finditer(r"(?<!\d)(\d{6})[^\d\n]{0,3}(\d{6})(?!\d)", text):
         code = mc.complete_ean(m.group(1) + m.group(2))
         if code:
             chunks.append(mc.COMPLETED + code)

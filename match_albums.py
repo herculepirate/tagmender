@@ -838,7 +838,8 @@ def _own_job_files(job):
             # REP-1: the pressing details the job wrote, as they were before it and as it left them
             wrote = {r["field"]: (tuple(str(x) for x in r.get("before") or ()),
                                   tuple(str(x) for x in r.get("after") or ()))
-                     for r in rows if r["field"] in REPLAN_FIELDS or pressing_field(r["field"])}
+                     for r in rows if r["field"] in REPLAN_FIELDS or pressing_field(r["field"])
+                     or r["field"] in ("tagmender", "tagmender_reason")}
             # REP-1: the file named a release before this job: an ID row whose value before is not
             # empty (whose, _own_index decides). Never inferred from a missing row: a job writes
             # none for an ID it left alone, held or not (a preserved empty field, a source left out)
@@ -1038,7 +1039,8 @@ def tagmender_pressing_writes(paths, title=False) -> dict:
         # (and the date: a pressing's own date is taken back only when it is the losing one's -
         # engine._restore_own decides)
         # (title: the album title too - what a held album whose pick TagMender withdrew takes back)
-        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f) or f == "date" or (title and f == "album")}
+        out[str(p)] = {f: v for f, v in hit[2].items() if pressing_field(f) or f == "date"
+                       or (title and f in ("album", "tagmender", "tagmender_reason"))}
     return out
 
 
@@ -5260,15 +5262,17 @@ def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
         try:
             return read(images[i]) or ""
         except Exception:
-            return ""
+            return False                               # (failed: not read, not cached)
     got = ahead.take(kind, [images[i] for i in todo]) if ahead is not None and todo else {}
     rest = [i for i in todo if images[i] not in got]
     started = time.time()                              # (the budget of what is read here)
     done = dict(zip(rest, _pmap(one, rest)))
     for i in todo:
         v = got[images[i]] if images[i] in got else done[i]
-        if v is None:
-            vals[i] = ""                               # over the time budget: not read
+        if v is None or v is False:
+            vals[i] = ""                               # over the time budget, or failed: not read
+            if log is not None:
+                log.setdefault("unread", set()).add(images[i])
             continue
         vals[i] = v
         if db is not None:
@@ -7967,6 +7971,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         # cached per scan and language set: installing a language pack reads the scans again
         kind = page_kind("text")
         text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log, ahead=scans_ahead))
+        # TAG-1: every image of the folder read as an image now (none left out, none failing): only
+        # then is a clue an earlier reading found and this one does not disproved, not missing
+        album["scans_complete"] = bool(use_ocr and images and len(page_scans) == len(images)
+                                       and not (scan_log or {}).get("unread"))
         # a file's name (a document's heading, a screenshot's title bar) is not print on the
         # copy: "SUNN200" in an RX window's title is no "catalogue number (OCR)" (R12)
         # which barcodes were only typed (notes, .nfo, saved pages) and which printed on the

@@ -1398,17 +1398,31 @@ def _digit_runs(text):
     return tuple(tuple(re.findall(r"\d+", m.group(0))) for m in _DIGIT_RUN.finditer(text))
 
 
-_DIGIT_FOLD = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1"})
+_DIGIT_FOLD = str.maketrans({"O": "0", "o": "0", "D": "0", "I": "1", "l": "1", "|": "1", "B": "8", "S": "5"})
+# a number's digit groups as printed: spaces or a line break between them, dashes (en and em
+# too) with spaces round them, a dot, a degree sign or an apostrophe
+_PRINTED_RUN = re.compile(r"\d+(?:(?:[ \t]*\n?[ \t]*[-\u2010-\u2015][ \t]*\n?[ \t]*|[ \t]*\n[ \t]*|[ \t\u00b7.°'\u2019]{1,3})\d+)*")
+
+
+def _fold_digit_words(text):
+    """OCR's letters for digits (O for 0, B for 8, S for 5, I or l for 1), read as digits only
+    inside words that hold a digit already ("O63", "6B3-4") - never a word of letters ("SOLO")."""
+    return re.sub(r"[A-Za-z0-9|]+", lambda m: m.group(0).translate(_DIGIT_FOLD)
+                  if re.search(r"\d", m.group(0)) else m.group(0), str(text or ""))
+
+
+def _printed_groups(text):
+    return [re.findall(r"\d+", m.group(0)) for m in _PRINTED_RUN.finditer(_fold_digit_words(text))]
 
 
 def digits_printed(text, number) -> bool:
     """A catalogue number of digits only (normalised, norm_code) stands printed as one number:
-    whole digit groups of one run, joined, are it (leading zeros aside) - never a piece of a
-    longer digit group. O and I read for 0 and 1 count as digits."""
+    whole digit groups of one run, joined, are it (leading zeros aside) - "063 683-4", "063 - 683
+    - 4", "063\n683-4", "063 683–4", "O63 6B3-4" - never a piece of a longer digit group."""
     key = str(number or "").lstrip("0")
     if not key:
         return False
-    for groups in _digit_runs(str(text or "").translate(_DIGIT_FOLD)):
+    for groups in _printed_groups(text):
         for i in range(len(groups)):
             joined = ""
             for g in groups[i:]:
@@ -1418,6 +1432,14 @@ def digits_printed(text, number) -> bool:
                 if len(joined.lstrip("0")) >= len(key):
                     break
     return False
+
+
+def digits_in_noise(text, number) -> bool:
+    """The digits of a number of digits only stand inside ONE longer digit group - OCR noise
+    ("06400636834" holding 063 683-4): what the reading shows is no such number."""
+    key = str(number or "").lstrip("0")
+    return bool(key) and any(key in g.lstrip("0") and len(g.lstrip("0")) > len(key)
+                             for groups in _printed_groups(text) for g in groups)
 
 
 def barcode_printed(text, barcode):
@@ -3045,7 +3067,11 @@ _VERSION_WORDS = re.compile(r"\b(remix(?:ed|es)?|re-?recorded|re-?recording|inst
                             r"orchestral|demos?|karaoke|live|ambient|dub)\b", re.I)
 
 
-_COPY_VERSION_WORDS = re.compile(r"\b(instrumentals?|karaoke|a ?cappella)\b", re.I)
+# a version mark: in brackets of its own ("(Instrumental)", "[Instrumental Version]") or after a
+# dash at the end ("Rust In Peace - Instrumentals") - never a word of a genre ("(Instrumental Hip-Hop)")
+_COPY_VERSION_WORDS = re.compile(r"(?:[(\[]\s*(instrumentals?|karaoke|a ?cappella)(?:\s+(?:version|versions|edition|mix))?"
+                                 r"\s*[)\]]|[-\u2013\u2014]\s*(instrumentals?|karaoke|a ?cappella)(?:\s+version)?\s*$)",
+                                 re.I)
 
 
 def copy_version(album, cand):
@@ -3053,8 +3079,9 @@ def copy_version(album, cand):
     TagMender: REP-1) - "Rust In Peace (Instrumental)" - that the release names nowhere (its
     title, its comment, its track titles): your copy is not that release's recording, however
     well the lengths fit. Returns the word, or ""."""
-    mine = " ".join(str(album.get(k) or "") for k in ("title", "folder"))
-    words = {re.sub(r"s$", "", m.group(1).casefold().replace(" ", "")) for m in _COPY_VERSION_WORDS.finditer(mine)}
+    mine = "\n".join(str(album.get(k) or "") for k in ("title", "folder"))
+    words = {re.sub(r"s$", "", (m.group(1) or m.group(2)).casefold().replace(" ", ""))
+             for t in mine.split("\n") for m in _COPY_VERSION_WORDS.finditer(t.strip())}
     if not words:
         return ""
     theirs = fold(" ".join([str(cand.get("title") or ""), str(cand.get("comment") or ""),
@@ -3639,7 +3666,14 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         # (TAG-1: what decided it when TagMender's own job chose it; whether the scans were read
         # now - a clue of the scans not read now is missing, not disproved)
         "own_decided": str(album.get("own_decided") or "") if tagged_release(album, cand) else "",
-        "scans_read": bool(str(ocr_text or "").strip()),
+        # (every image of the folder read as an image now - not only its documents, not 3 of N,
+        # none failing: match_albums sets scans_complete; anything less leaves a clue missing)
+        "scans_read": bool(album.get("scans_complete")) and bool(str(ocr_text or "").strip()),
+        # (a digit-only catalogue number of its the earlier reading found by containment that the
+        # stricter reading neither finds printed nor sees inside OCR noise: unsure - missing)
+        "catno_unsure": any(re.search(r"\d", c) and not re.search(r"[a-z]", c) and norm_code(c) in norm_code(ocr_text)
+                            and not digits_printed(ocr_text, c) and not digits_in_noise(ocr_text, c)
+                            for c in cand.get("catnos") or ()) if ocr_text else False,
         "copy_version": copy_version(album, cand),
         # ... by another tagger, not by TagMender's own job (match_albums.tagmender_wrote)
         "tagger_tagged": bool(album.get("tags_by_tagger")) and tagged_release(album, cand),
@@ -3838,11 +3872,15 @@ def _still_decides(m, scored, cfg) -> bool:
     judged = False
     for part in (x.strip() for x in reason.split(";") if x.strip()):
         key = next((k for p, k in _SCAN_CLUE_OF if part.startswith(p)), None)
+        if key in ("matrix", "sid code", "label code"):
+            return True                              # (a disc ring's reading: not judged here)
         if key and "on the scans" in part:
             if not m.get("scans_read"):
-                return True                          # (the scans not read now: missing)
+                return True                          # (not every image read now: missing)
             if key in (m.get("clues") or {}):
                 return True
+            if key == "catalogue number" and m.get("catno_unsure"):
+                return True                          # (the earlier reading's, the stricter one unsure)
             judged = True
         elif part.startswith(("track lengths", "every track length")):
             if m.get("len_err") is None and not m.get("len_diffs"):

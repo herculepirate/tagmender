@@ -192,7 +192,9 @@ class OWN_Withdrawn(te.Base):
     def test_OWN_a_disproved_own_pick_your_copy_now_proves_otherwise_stays_exact(self):
         d, files, _w = self.files()
         e = self.engine(te.FakeHttp())
-        self.assertIsNone(e._own_guess_withdrawn(self.prop(d, files), self.out(guessed=False)))
+        p = self.prop(d, files)
+        p.evidence = ["pressing chosen by catalogue number 770152 on the scans"]
+        self.assertIsNone(e._own_guess_withdrawn(p, self.out(guessed=False)))
 
     def test_OWN_a_fresh_tie_without_an_own_pick_keeps_tie1(self):
         d, files, _w = self.files()
@@ -231,6 +233,86 @@ class OWN_Withdrawn(te.Base):
             p = e.identify(e.albums_in(d)[0])
         if p.status == "unresolved":
             self.assertNotIn("album", (p.restore or {}).get(files[0], {}))
+
+
+import executor  # noqa: E402
+
+WITHDRAWN = ("ambiguous_release: album known, pressing not established: pressing unknown (TagMender chose this "
+             "album's pressing earlier by catalogue number 636834 on the scans, which your copy no longer shows, "
+             "and nothing of your copy decides between the pressings")
+
+
+class OWN_Review(te.Base):
+    """The independent review's cases: what is missing is never disproved; a withdrawn pick never
+    stays by another path; a second plan confirms the first."""
+
+    def test_OWN_spaced_split_and_confusable_numbers_are_read(self):
+        for text in ("063 - 683 - 4", "063\n683-4", "063 683\u20134", "O63 6B3-4", "063 683 \u2014 4"):
+            self.assertTrue(mc.digits_printed(text, "636834"), repr(text))
+        self.assertFalse(mc.digits_printed("06400636834", "636834"))
+        self.assertTrue(mc.digits_in_noise("06400636834", "636834"))
+        self.assertFalse(mc.digits_printed("SOLO 683", "50683"), "letters of a word are no digits")
+
+    def test_OWN_a_clue_only_the_earlier_reading_found_is_missing(self):
+        mine = cand("26572991", tagged=True, own_decided=OCR_REASON, scans_read=True, catno_unsure=True)
+        scored = [cand("13771912"), mine]
+        self.assertIs(mc._kept_choice(scored[0], scored, CFG), mine)
+
+    def test_OWN_scans_not_all_read_as_images_is_missing(self):
+        album = {"tracks": [], "title": "A", "artist": "B", "scans_complete": False}
+        s = {"scans_read": bool(album.get("scans_complete")) and True}
+        self.assertFalse(s["scans_read"])
+        mine = cand("26572991", tagged=True, own_decided=OCR_REASON, scans_read=False)
+        self.assertIs(mc._kept_choice(cand("1"), [cand("1"), mine], CFG), mine)
+
+    def test_OWN_a_matrix_reason_is_not_judged(self):
+        mine = cand("26572991", tagged=True, scans_read=True,
+                    own_decided="pressing chosen by matrix A-0547 A/C 3 A on the scans")
+        self.assertIs(mc._kept_choice(cand("1"), [cand("1"), mine], CFG), mine)
+
+    def test_OWN_version_marks_not_genre_words(self):
+        album = {"title": "Beats (Instrumental Hip-Hop)", "folder": "2010 - Beats (Instrumental Hip-Hop)"}
+        self.assertEqual(mc.copy_version(album, {"title": "Beats", "tracks": []}), "")
+        album = {"title": "Rust In Peace - Instrumentals", "folder": ""}
+        self.assertEqual(mc.copy_version(album, {"title": "Rust In Peace", "tracks": []}), "instrumental")
+        album = {"title": "Album [Instrumental Version]", "folder": ""}
+        self.assertEqual(mc.copy_version(album, {"title": "Album", "tracks": []}), "instrumental")
+
+    def test_OWN_no_restore_while_a_database_is_out(self):
+        e = self.engine(te.FakeHttp())
+        out = {"release_ids": {"held": {"discogs_release_id": ["1"]}, "cands": {}, "pick": {}}}
+        self.assertEqual(e._withdraw_own(["/x/01.flac"], out, errors={"musicbrainz": "outage"}), {})
+
+    def test_OWN_a_withdrawn_guess_stays_album_only_plan_after_plan(self):
+        # (after the first plan made it album only: the files are marked Partial with its reason,
+        # TagMender's IDs gone - a later plan's guess is album only again, and writes nothing)
+        d = self.album("Band D2", "Album D2", TAGMENDER="Partial", TAGMENDER_REASON=WITHDRAWN)
+        def http():
+            return te.FakeHttp(mb=[te.mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
+                               dg=[te.dg_release(904, "Band D2", "Album D2", catno="CAT-901")])
+
+        def identify():
+            eng = self.engine(http())
+            eng.cfg["preferred_countries"] = ["US"]
+            eng.cfg["prefer_source"] = ""
+            return eng, eng.identify(eng.albums_in(d)[0])
+        eng, p = identify()
+        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
+        plan = pl.build([p], eng.profile)
+        executor.Executor(plan).run()
+        eng, p2 = identify()
+        self.assertEqual(p2.tier, "album_only")
+        again = pl.build([p2], eng.profile)["albums"][0]
+        self.assertEqual([fe["changes"] for fe in again["files"]], [{}] * len(again["files"]))
+
+    def test_OWN_a_fresh_album_tie_keeps_tie1_in_full(self):
+        d = self.album("Band D2", "Album D2")
+        eng = self.engine(te.FakeHttp(mb=[te.mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
+                                      dg=[te.dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
+        eng.cfg["preferred_countries"] = ["US"]
+        eng.cfg["prefer_source"] = ""
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual((p.tier, p.release_id), ("exact", "mb-d2"))
 
 
 if __name__ == "__main__":

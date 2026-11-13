@@ -1165,7 +1165,7 @@ class Engine:
                                     why=list(out.get("why") or []))
             # (TagMender's own earlier pick of that release is withdrawn: what its job wrote of the
             # pressing goes back to what the files held before it)
-            held.restore = self._withdraw_own(held.files, out, pick=None, title=True)
+            held.restore = self._withdraw_own(held.files, out, pick=None, title=True, errors=errors)
             if held.restore:
                 held.notes = list(held.notes or []) + [
                     "what TagMender's earlier job wrote of that release is taken back (TAG-1)"]
@@ -1175,8 +1175,11 @@ class Engine:
             # the album is certain, only its pressing is not: tag what every pressing shares
             # (never while MusicBrainz or Discogs failed: once both answer, the pressing may be proven)
             try:
-                return self._album_only(self._identified(out, album, files, base, versions=False),
-                                        out["album_only"])
+                ao = self._album_only(self._identified(out, album, files, base, versions=False), out["album_only"])
+                if out.get("own_disproved"):
+                    # (TagMender's own earlier pick lost its standing: its writes go, TAG-1)
+                    ao.restore = self._withdraw_own(ao.files, out, errors=errors)
+                return ao
             except Exception as exc:
                 self.log.warning("album-only tags for %s: %s", g.folder, exc)
         alone = getattr(self, "_disc_alone", False)       # (one disc of a set: _per_disc)
@@ -1211,6 +1214,9 @@ class Engine:
                 self.log.warning("partial tags for %s failed: %s", g.folder, exc)
                 p = None
             if p and partial_ok:
+                if (out or {}).get("own_disproved"):
+                    # (Partial on files that name TagMender's withdrawn pick: its writes go, not kept)
+                    p.restore = self._withdraw_own(p.files, out, title=True, errors=errors)
                 return p
             if p:
                 # (WEB-1: a database established the album: "leave" leaves it as it is, and
@@ -1260,7 +1266,7 @@ class Engine:
         prop = self._unresolved(out, files, base, errors)
         if (out or {}).get("own_disproved"):
             # (TagMender's own earlier pick lost its standing and nothing decides now: its writes go)
-            prop.restore = self._withdraw_own(prop.files, out, pick=None, title=True)
+            prop.restore = self._withdraw_own(prop.files, out, pick=None, title=True, errors=errors)
         note = getattr(self, "_set_note", "") if not alone and not names else ""
         if note:
             prop.why = list(prop.why or []) + [note]
@@ -1943,9 +1949,13 @@ class Engine:
         itself a guess (the country order, the original date): album only, as far as the
         evidence goes, with what TagMender's job wrote of that pressing taken back. None when
         that is not so (a fresh album keeps TIE-1; a pick your copy proves stays exact)."""
-        why = str((out or {}).get("own_disproved") or "")
+        why = str((out or {}).get("own_disproved") or "") or self._withdrawn_before(p.files)
         best = (out or {}).get("best") or {}
-        if not why or p.status != "identified" or planmod.tier_of(p) != "exact" or not best.get("guessed_pick"):
+        # (a guess: the pressing chosen by the country order or the original date - within one
+        # database, guessed_pick; between the two databases' sure picks, combine's TIE-1 notes)
+        guess = best.get("guessed_pick") or any(re.search(r"by your (?:preferred )?country order|original pressing",
+                                                          str(e)) for e in list(p.evidence or ()) + list(best.get("notes") or ()))
+        if not why or p.status != "identified" or planmod.tier_of(p) != "exact" or not guess:
             return None
         view = (out or {}).get("release_ids") or {}
         clue = re.sub(r"\s*\(not on [^)]*\)\s*$", "", why[len("pressing chosen by "):]) \
@@ -1961,11 +1971,31 @@ class Engine:
         # (the pick is a guess: none of its values is proven, so none keeps a value TagMender wrote
         # of the pressing it withdraws - only the album's original date stays)
         first = {str(v)[:4] for t in p.targets for k in ("originaldate", "originalyear") for v in t.get(k) or ()}
-        p.restore = self._withdraw_own(p.files, out, first=first)
+        p.restore = self._withdraw_own(p.files, out, first=first, errors=p.provider_errors)
         p.notes = list(getattr(p, "notes", None) or []) + [
             doubt + ": only the album's own tags are written"
             + ("; what TagMender's earlier job wrote of that pressing is taken back" if p.restore else "")]
         return p
+
+    @staticmethod
+    def _withdrawn_before(files) -> str:
+        """REP-1 / TAG-1: the reason an earlier plan of TagMender's withdrew its own pick of this
+        album - its TAGMENDER_REASON, written with the album only it made ("TagMender chose this
+        album's pressing earlier by ..., which your copy no longer shows") - while the files are
+        still marked Partial: a later guess stays album only, as the first plan made it, until
+        your copy decides. "" otherwise."""
+        import tagio
+        for f in files[:1]:
+            try:
+                t = tagio.read(f)
+            except Exception:
+                return ""
+            if str((t.get("tagmender") or [""])[0]).casefold() != "partial":
+                return ""
+            m = re.search(r"TagMender chose this album's pressing earlier by (.+?), which your copy no longer shows",
+                          " ".join(map(str, t.get("tagmender_reason") or ())))
+            return f"pressing chosen by {m.group(1)}" if m else ""
+        return ""
 
     def _coded(self, facts) -> list:
         """facts with each release's country as the Discogs plugin codes it (country_code)."""
@@ -1981,12 +2011,14 @@ class Engine:
             out.append(x)
         return out
 
-    def _withdraw_own(self, files, out, pick=None, side=None, first=(), title=False) -> dict:
+    def _withdraw_own(self, files, out, pick=None, side=None, first=(), title=False, errors=None) -> dict:
         """TAG-1 / REP-1: {file: {field: value before}} taking back what TagMender's own earlier job
         wrote of the pressing your files' release IDs name, when that pick is withdrawn - as
         _restore_own takes it back (only what its job wrote and nobody changed since; your field
         policy's preserved and locked fields stay). pick / side: the release decided now, whose
         own values stay (none when the album is held)."""
+        if _provider_failed(errors or {}):
+            return {}                    # (a database out: nothing is taken back until both answer)
         view = (out or {}).get("release_ids") or {}
         side = side or {f: set() for f in ma.RELEASE_ID_FIELDS}
         clash, facts = {}, []
@@ -2068,7 +2100,8 @@ class Engine:
             # a Discogs release without a master - is left out with it, as EDN-2's)
             p = self._album_only(p, {"tied": tied, "doubt": doubt, "pick_year": pick.get("year")})
             first = {str(v)[:4] for t in p.targets for k in ("originaldate", "originalyear") for v in t.get(k) or ()}
-            back = self._restore_own(p.files, clash, facts, pick, self._pick_side(p, view), first)
+            back = {} if _provider_failed(p.provider_errors or {}) else \
+                self._restore_own(p.files, clash, facts, pick, self._pick_side(p, view), first)
             gone = self._copy_contradicts(p, out, clash, facts, pick, self._pick_side(p, view))
             for f, fields in gone.items():
                 back.setdefault(f, {}).update({k: [] for k in fields if k not in back.get(f, {})})
@@ -2356,6 +2389,9 @@ class Engine:
                     ok = mb_lost
                 elif k.startswith("discogs_"):
                     ok = dg_lost
+                elif k in ("tagmender", "tagmender_reason"):
+                    # (title: an album held - the mark TagMender's job wrote for the pick it withdraws)
+                    ok = bool(title) and (mb_lost or dg_lost)
                 elif k == "album":
                     # (title: an album held, its pick withdrawn - the title TagMender's job wrote for
                     # it, "Rust in Peace [1990 Vinyl Rip]", goes back to the files' own)

@@ -7189,7 +7189,10 @@ def release_ids_view(final, results, album):
             "dg_twin": norm_release_id("discogs_release_id", final.get("dg_twin") or ""),
             "cands": {f: v for f, v in cands.items() if v},
             "mb_links": {d: sorted(v) for d, v in links.items()},
-            "matrix": matrix, "number_rivals": sorted(set(rivals)), "on_copy": on_copy}
+            "matrix": matrix, "number_rivals": sorted(set(rivals)), "on_copy": on_copy,
+            # (your copy's print itself, for a number written in a form the code reader misses -
+            # "20 21276-9": engine._printed_on_copy; a long OCR is cut, never a short one)
+            "printed": printed[:60000]}
 
 
 def run_source(name, finder, album, cfg, ocr_txt=""):

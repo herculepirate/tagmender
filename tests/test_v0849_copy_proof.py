@@ -127,6 +127,13 @@ class COPY_Proof(te.Base):
         e = self.eng(te.FakeHttp())
         self.assertEqual(e._copy_proves(self.prop(), {"release_ids": view}, [{"matrices": ["a0547ac3a"]}]), "")
 
+    def test_COPY_a_matrix_beside_a_release_that_could_not_be_looked_up_proves_nothing(self):
+        view = self.view_of("A-0547 A/C 3A")
+        e = self.eng(te.FakeHttp())
+        self.assertTrue(e._copy_proves(self.prop(), {"release_ids": view}, [{"matrices": []}]))
+        self.assertEqual(e._copy_proves(self.prop(), {"release_ids": view},
+                                        [{"source": "discogs", "id": "300937", "unknown": True}]), "")
+
     def test_COPY_a_matrix_with_your_scans_against_the_pick_proves_nothing(self):
         view = self.view_of("A-0547 A/C 3A")
         e = self.eng(te.FakeHttp())
@@ -174,6 +181,11 @@ class COPY_Proof(te.Base):
         # (your copy prints that release's number too: nothing contradicts it)
         both = {"scans": dict(CAT), "release_ids": {"on_copy": {"catnos": ["pldsq6009"], "barcodes": []}}}
         self.assertEqual(e._copy_contradicts(p, both, {"discogs_release_id": {"300937": "x"}}, [dict(self.PDU)],
+                                             self.PICK, side), {})
+        # (your copy prints that release's number too, spaced as the code reader misses it)
+        spaced = {"scans": dict(CAT), "release_ids": {"on_copy": {"catnos": [], "barcodes": []},
+                                                      "printed": "Bestell-Nr. 20 21276-9\nPld. SQ 6009"}}
+        self.assertEqual(e._copy_contradicts(p, spaced, {"discogs_release_id": {"300937": "x"}}, [dict(self.PDU)],
                                              self.PICK, side), {})
         # (nothing printed read on the copy: nothing contradicts it)
         self.assertEqual(e._copy_contradicts(p, {"scans": {"state": "agrees", "found": ["label"]}},

@@ -2179,7 +2179,8 @@ class Engine:
             if x.get("unknown") or x.get("shares_number"):
                 continue                     # (a twin sharing the barcode, the number written otherwise)
             if mc.catnos_agree(printed.get("catnos") or (), x.get("catnos") or ()) or \
-                    set(printed.get("barcodes") or ()) & set(x.get("barcodes") or ()):
+                    set(printed.get("barcodes") or ()) & set(x.get("barcodes") or ()) or \
+                    _printed_on_copy(x, ((out or {}).get("release_ids") or {}).get("printed")):
                 continue                     # (your copy prints its number too: nothing contradicts it)
             num = "catalogue_number" in found and pick.get("catnos") and x.get("catnos") and \
                 not _catnos_agree(pick, x)
@@ -2297,7 +2298,8 @@ class Engine:
         if clean and "barcode" in found:
             return "your scans show its barcode"
         own_matrix = set(view.get("matrix") or ()) - {k for i in clashing for k in i.get("matrices") or ()}
-        if own_matrix and sc.get("state") != "differs" and not sc.get("against"):
+        # (a release your files name that could not be looked up may list the same matrix: no proof)
+        if own_matrix and not any(i.get("unknown") for i in clashing) and sc.get("state") != "differs" and not sc.get("against"):
             # (R9: a matrix of the pick or its twin read WHOLE on your copy's print - its label, its
             # runout; never notes typed by someone - that neither the release your files name nor
             # any other pressing scored lists, with nothing on your scans against the pick, names
@@ -3885,6 +3887,20 @@ def _pressings_differ(pick, other, side, mb_links, discs=None) -> list:
         if w:
             why.append(w)
     return why
+
+
+def _printed_on_copy(facts, text) -> bool:
+    """TAG-3: one of this release's own numbers stands in your copy's print - a distinctive
+    catalogue number by containment in the folded text, however spaced ("20 21276-9"), as the
+    pick's are matched (pressing_clues); a barcode printed as one number (barcode_printed)."""
+    if not text:
+        return False
+    hay = mc.norm_code(text)
+    for c in facts.get("catnos") or ():
+        digits = re.sub(r"\D", "", c)
+        if ((len(c) >= 4 and re.search(r"[a-z]", c) and digits) or len(digits) >= 6) and c in hay:
+            return True
+    return any(mc.barcode_printed(text, b) for b in facts.get("barcodes") or ())
 
 
 def _catnos_agree(a, b) -> bool:

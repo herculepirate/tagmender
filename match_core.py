@@ -1807,7 +1807,7 @@ def enhanced_clue(album, cand, clues):
         clues.setdefault("enhanced", f"Enhanced CD ({album['enhanced']})")
 
 
-def unofficial_why(best):
+def unofficial_why(best, scored=()):
     """An unofficial release (Discogs "Unofficial Release", MusicBrainz "Bootleg") is never
     taken on names and lengths alone: only your barcode or a matrix read off your disc
     agreeing makes it your copy (R9: Kreator's Russian 8382890 for SPV 69848). Your files
@@ -1821,7 +1821,11 @@ def unofficial_why(best):
     if not best["cand"].get("unofficial"):
         return []
     clues = best.get("clues") or {}
-    if barcode_proves(best) or clues.get("matrix"):
+    # TIE-4: a barcode an OFFICIAL release agreeing with your copy carries too proves no bootleg
+    # (Gary Moore - Dark Days in Paradise: a counterfeit "Europe" CD listing the official
+    # barcode, picked over the official pressings that list no track lengths)
+    shared = any(not s["cand"].get("unofficial") and barcode_proves(s) for s in scored or ())
+    if (barcode_proves(best) and not shared) or clues.get("matrix"):
         return []
     backed = (best["code"].startswith("catalogue number") and best["code"] not in WEAK_BARCODES) or any(
         k in clues for k in ("disc TOC", "source link"))
@@ -3798,7 +3802,7 @@ def classify(scored, cfg):
     # tie against an official one that fits as well: bootlegs copy the official release's
     # tracks and lengths (Allan Holdsworth - Flat Tire: a Russian CD-R tied with Megazoidal's CD)
     set_aside = []                              # (TIE-4's bootleg: no runner-up either, below)
-    if ranked and unofficial_why(dict(ranked[0], notes=list(ranked[0].get("notes") or []))) and \
+    if ranked and unofficial_why(dict(ranked[0], notes=list(ranked[0].get("notes") or [])), scored) and \
             not _unofficial_backed(ranked[0]):
         top = ranked[0]
         official = [s for s in ranked[1:] if not s["cand"].get("unofficial")
@@ -4101,7 +4105,7 @@ def classify(scored, cfg):
     # release, and the audio says only what it was ripped to (BAR-1; BAR-1a above).
     if not (barcode_agrees(best) and not best.get("conflict")):
         why += [x for x in format_contradictions(best) if not any(x in w for w in why)]
-    why += unofficial_why(best)
+    why += unofficial_why(best, scored)
     # A file numbered 0 as long as the release's hidden track before track 1 is no proof that
     # the files are that disc: only the exact disc ID or a fitting rip log's or CDTOC tag's TOC
     # with the track in its pregap is (with_pregap). On its length alone, a person confirms.

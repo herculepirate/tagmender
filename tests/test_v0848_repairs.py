@@ -163,5 +163,36 @@ class NAM11_LatinSideOfTwoLanguageTitles(unittest.TestCase):
         self.assertEqual(out, {"album": ['"Forest" Suite'], "title": ["Sky"]})
 
 
+import test_v0830_rules as r830  # noqa: E402
+
+
+class TIE4_SharedBarcodeProvesNoBootleg(unittest.TestCase):
+    """Gary Moore - Dark Days in Paradise: a counterfeit "Europe" CD listing the official barcode
+    (and its track lengths) beat the official pressings, which list no lengths, because the
+    barcode on the scans "proved" it. A barcode an official release agreeing with the copy
+    carries too proves no bootleg."""
+    BAR = "724384416522"
+    OCR = "Printed in Holland\n7 24384 41652 2"
+
+    def scored(self, with_official=True):
+        a = r830.album(r830.FILES)
+        boot = dict(r830.cand(r830.FILES), id="boot", unofficial=True, country="Europe", barcodes={self.BAR})
+        official = dict(r830.cand(r830.FILES), id="official", country="Europe", barcodes={self.BAR},
+                        tracks=[dict(t, secs=0.0) for t in r830.cand(r830.FILES)["tracks"]])
+        cands = (boot, official) if with_official else (boot,)
+        return [mc.score_candidate(a, c, r830.CFG, self.OCR) for c in cands]
+
+    def test_official_sharing_the_barcode_wins_or_the_bootleg_is_doubted(self):
+        sc = self.scored()
+        self.assertTrue(mc.barcode_proves(sc[0]) and mc.barcode_proves(sc[1]), [s.get("code") for s in sc])
+        r = mc.classify(sc, r830.CFG)
+        boot_auto = r["status"] == "auto" and r["best"]["cand"]["id"] == "boot"
+        self.assertFalse(boot_auto, (r["status"], r["best"]["cand"]["id"], r.get("why")))
+
+    def test_a_bootleg_alone_with_its_own_barcode_still_proven(self):
+        sc = self.scored(with_official=False)
+        self.assertEqual(mc.unofficial_why(sc[0], sc), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -406,6 +406,10 @@ class Unofficial(unittest.TestCase):
         a["barcodes"] = {"4006030000000"}
         r = run(a, cand((200.0, 300.0, 400.0), source="discogs", id="8382890", unofficial=True,
                         barcodes={"4006030000000"}))
+        # (R9: the barcode's proof is checked against both databases' lists after combine)
+        self.assertEqual(r["why"], [mc.R9_PENDING])
+        r = mc.unofficial_settled(r, (None, r), a, CFG)
+        self.assertEqual(r["status"], "auto", r["why"])
         self.assertFalse(any("unofficial" in w for w in r["why"]))
 
     def test_bootleg_your_files_are_tagged_with_stays_exact(self):
@@ -416,6 +420,8 @@ class Unofficial(unittest.TestCase):
              "barcodes": set(), "catnos": {"peaias02"}, "catnos_from_folder": set(),
              "tag_release_mb": ["boot-1"]}
         r = run(a, cand((200.0, 300.0, 400.0), id="boot-1", unofficial=True, catnos={"peaias02"}))
+        self.assertEqual(r["why"], [mc.R9_PENDING])               # (R9: settled against both databases)
+        r = mc.unofficial_settled(r, (r,), a, CFG)
         self.assertEqual(r["status"], "auto", r["why"])
         self.assertTrue(any("unofficial" in n for n in r["best"]["notes"]))
         # another bootleg, not the one the files name: still held back

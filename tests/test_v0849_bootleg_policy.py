@@ -78,6 +78,8 @@ class R9_ProvenBootlegIsExact(unittest.TestCase):
     def test_R9_its_barcode_on_the_scans_is_exact_with_a_note(self):
         a = album(ocr_barcodes=["8012345678901"])
         r = res(a, cand("boot", unofficial=True, barcodes={"8012345678901"}))
+        self.assertEqual(r["why"], [mc.R9_PENDING])                       # (per source: pending)
+        r = mc.unofficial_settled(r, (None, r), a, CFG)
         self.assertEqual(r["status"], "auto", r["why"])
         self.assertTrue(any("unofficial" in n and "barcode" in n for n in r["best"]["notes"]), r["best"]["notes"])
 
@@ -146,6 +148,67 @@ class R9_OfficialKeepsWinning(unittest.TestCase):
         self.assertEqual(mc.unofficial_settled(r, (r, other), a, CFG, SCANS)["status"], "auto")
 
 
+BC = "8012345678901"
+
+
+class R9_ReviewProbes(unittest.TestCase):
+    """The independent review's probes: proof is decided against both databases' whole lists."""
+
+    def test_R9_barcode_an_official_on_the_other_database_carries_proves_no_bootleg(self):
+        a = album(ocr_barcodes=[BC])
+        dg = res(a, cand("boot", unofficial=True, barcodes={BC}))
+        mb = res(a, cand("off", source="mb", barcodes={BC}, country="UK"))
+        self.assertNotEqual(dg["status"], "auto")                         # (one database alone: pending)
+        f = mc.unofficial_settled(mc.combine(mb, dg), (mb, dg), a, CFG)
+        self.assertEqual((f["status"], f["best"]["cand"]["id"]), ("auto", "off"), f["why"])
+        f = mc.unofficial_settled(dg, (mb, dg), a, CFG)                   # (decided on the bootleg's side)
+        self.assertNotEqual(f["status"], "auto")
+        self.assertEqual(f["why"], [mc.R9_HELD])
+
+    def test_R9_barcode_with_the_official_dropped_by_the_folders_country(self):
+        a = album(ocr_barcodes=[BC], folder="Band - Album (2005) [Italy]")
+        r = res(a, cand("boot", unofficial=True, barcodes={BC}, country="Italy"),
+                cand("off", barcodes={BC}, country="UK"))
+        self.assertFalse(r["status"] == "auto" and r["best"]["cand"]["id"] == "boot", r["why"])
+        f = mc.unofficial_settled(r, (r,), a, CFG)
+        self.assertFalse(f["status"] == "auto" and f["best"]["cand"]["id"] == "boot", f["why"])
+
+    def test_R9_barcode_on_the_bootleg_alone_beats_the_other_databases_official(self):
+        a = album(ocr_barcodes=[BC])
+        dg = res(a, cand("boot", unofficial=True, barcodes={BC}))
+        mb = res(a, cand("off", source="mb", barcodes={"5099912345678"}, country="US", label="Other Label"))
+        f = mc.unofficial_settled(mc.combine(mb, dg), (mb, dg), a, CFG)
+        self.assertEqual((f["status"], f["best"]["cand"]["id"]), ("auto", "boot"), f["why"])
+
+    def test_R9_folder_number_an_official_of_another_track_count_carries(self):
+        spv = mc.norm_code("SPV 69848")
+        a = album(catnos={spv}, catnos_from_folder={spv})
+        dg = res(a, cand("boot", unofficial=True, catnos={spv}, country="Russia"))
+        mb = res(a, dict(r830.cand(list(FILES) + [200]), id="off", source="mb", catnos={spv}, country="Germany"))
+        f = mc.unofficial_settled(mc.combine(mb, dg), (mb, dg), a, CFG)
+        self.assertFalse(f["status"] == "auto" and f["best"]["cand"]["id"] == "boot", f["best"]["notes"])
+
+    def test_R9_tagged_bootleg_whose_number_an_official_carries_is_not_kept(self):
+        a = album(catnos={NUM}, tag_release_discogs={"boot"})
+        r = res(a, boot())
+        self.assertEqual(r["why"], [mc.R9_PENDING])
+        self.assertEqual(mc.unofficial_settled(r, (r,), a, CFG)["status"], "auto")
+        off = res(a, cand("off", OTHER, source="mb", catnos={NUM}, country="UK"))
+        self.assertNotEqual(mc.unofficial_settled(r, (off, r), a, CFG)["status"], "auto")
+
+    def test_R9_a_bootlegs_twin_is_never_an_official_release(self):
+        a = album(printed_text=SCANS)
+        dg = res(a, boot(), ocr=SCANS)
+        twin = dict(boot(source="mb"), id="mb-boot")
+        off = dict(boot(source="mb"), id="mb-off", unofficial=False)
+        self.assertEqual(mc.mb_twins(res(a, off, ocr=SCANS), dg), [])
+        mb = res(a, twin, ocr=SCANS)
+        self.assertEqual([s["cand"]["id"] for s in mc.mb_twins(mb, dg)], ["mb-boot"])
+        f = mc.unofficial_settled(mc.combine(mb, dg), (mb, dg), a, CFG, SCANS)
+        self.assertEqual(f["status"], "auto", f["why"])
+        self.assertIn(f.get("mb_twin"), (None, "mb-boot"))
+
+
 class R9_Engine(Base):
     def make(self, folder):
         d = self.lib / "Band E" / folder
@@ -183,6 +246,19 @@ class R9_Engine(Base):
         self.assertEqual(str(p.release_id), "4756736")
         self.assertTrue(any("unofficial" in str(n) for n in list(getattr(p, "evidence", []) or [])),
                         getattr(p, "evidence", None))
+
+    def test_R9_replan_of_an_exact_bootleg_writes_nothing(self):
+        import executor
+        rel = self.release(4756736)
+        d = self.make("2005 - Album E [WPCD 1155]")
+        plan = self.engine(FakeHttp(dg=[rel])).plan(d)
+        self.assertEqual(plan["albums"][0]["identification"]["tier"], "exact", plan["albums"][0]["identification"])
+        executor.Executor(plan).run()
+        dst = Path(plan["albums"][0]["files"][0].get("dst") or plan["albums"][0]["files"][0]["src"]).parent
+        again = self.engine(FakeHttp(dg=[rel])).plan(dst)
+        alb = again["albums"][0]
+        self.assertEqual(alb["identification"]["tier"], "exact", alb["identification"])
+        self.assertEqual([f["changes"] for f in alb["files"] if f.get("changes")], [], alb["files"][0])
 
     def test_R9_an_official_album_is_unaffected(self):
         p = self.identify("2005 - Album E", self.release(111, unofficial=False, catno="OFF 1"))

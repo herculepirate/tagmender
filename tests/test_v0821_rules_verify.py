@@ -196,7 +196,11 @@ class BOOT1_BootlegTaggedInFull(unittest.TestCase):
     extract_remaining_release_fields keeps Discogs' status as discogs_status only."""
 
     def test_bootleg_with_your_barcode_is_taken(self):
-        r = run(album(barcodes={CODE}), [cand(id="boot", unofficial=True, barcodes={CODE})])
+        a = album(barcodes={CODE})
+        r = run(a, [cand(id="boot", unofficial=True, barcodes={CODE})])
+        # (R9: classify leaves the barcode's proof to both databases' lists - unofficial_settled)
+        self.assertEqual(r["why"], [mc.R9_PENDING])
+        r = mc.unofficial_settled(r, (r,), a, CFG)
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "boot"))
 
     def test_musicbrainz_bootleg_status_written(self):

@@ -39,6 +39,15 @@ class FLD1_TitleBracketIsNoCountry(unittest.TestCase):
         _c, against = clues_of("Album [Century Media, 9976158, Germany]", title="Album", country="US")
         self.assertTrue([a for a in against if a.startswith("folder name says")], against)
 
+    def test_a_country_bracket_whose_word_is_in_the_title_still_counts(self):
+        # (review: the words of a bracket found anywhere in the title dropped it - "Made in Japan
+        # (Japan)" lost its country; only a bracket the title holds as a bracket is the title's)
+        for folder, title in (("1972 - Made in Japan (Japan)", "Made in Japan"),
+                              ("Anarchy in the UK (UK)", "Anarchy in the UK"),
+                              ("Live in Germany [Germany]", "Live in Germany")):
+            _c, against = clues_of(folder, title=title, country="US")
+            self.assertTrue([a for a in against if a.startswith("folder name says")], (folder, against))
+
 
 
 class NAM9_InitialsOfACreditedName(unittest.TestCase):

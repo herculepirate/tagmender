@@ -266,6 +266,18 @@ def _row(section, a, issue, folder, status, done=False) -> dict:
             "split": bool(a.get("split")) and not done}
 
 
+def _took_back(a) -> bool:
+    """The plan takes back what TagMender's earlier job wrote (TAG-1's withdrawn pick): a file
+    planned with fields taken back - or, in a plan saved before that was recorded, a field
+    "restored (as before TagMender's job)" or the album's note saying so. Never merely "has work":
+    an Unresolved album's mark is work too, on a first run with nothing to take back."""
+    for fe in a.get("files") or []:
+        if fe.get("taken_back") or any(str(r.get("action", "")).startswith("restored (as before TagMender")
+                                       for r in fe.get("diff") or []):
+            return True
+    return any("taken back (TAG-1)" in str(n) for n in a.get("notes") or [])
+
+
 def rows_of(a, res=None, applied=False, undone=False) -> list:
     """The report's rows for one album of a plan (res: what applying it did; undone: the job
     was undone since, so the album is back where it was: its folder and files are those)."""
@@ -289,7 +301,7 @@ def rows_of(a, res=None, applied=False, undone=False) -> list:
         # TagMender's earlier writes for a pick it withdrew taken back, TAG-1 - is "Unresolved",
         # never "Failed")
         held_done = applied and st == "done" and tier == "unresolved"
-        if held_done and planmod.has_work(a):
+        if held_done and _took_back(a):
             failed = failed + "; what an earlier run wrote for it was taken back"
         out.append(_row("failed", a, failed, _where(a, done),
                         {"cancelled": "Stopped", "conflict": "Conflict"}.get(

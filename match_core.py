@@ -1829,9 +1829,10 @@ def _bracket_text(folder, pressing_only=False, title=""):
         # "(Live at Roadburn 2011 - Holland)" says where it was played, not where it was pressed
         parts = [p for p in parts if not re.search(r"\blive\b|\brecorded\b|\b(?:at|in)\s+[A-Z]", p, re.I)]
         # FLD-1: a bracket that is part of the release's own title ("The Sessions Box Set (United
-        # Kingdom & Ireland 2022)", a German release) names no pressing
-        t = " " + fold(title) + " "
-        parts = [p for p in parts if not (fold(p).strip() and f" {fold(p).strip()} " in t)]
+        # Kingdom & Ireland 2022)", a German release) names no pressing - only a bracket the title
+        # itself holds as a bracket: "Made in Japan (Japan)" still says Japan
+        own = {fold(x).strip() for x in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(title or ""))} - {""}
+        parts = [p for p in parts if fold(p).strip() not in own]
     return " ".join(parts)
 
 

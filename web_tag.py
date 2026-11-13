@@ -219,7 +219,7 @@ def _wiki_value(box, field):
 
 
 def _wiki_fields(listing):
-    """WEB-2: the titleN/lengthN fields of a {{Track listing}} as [(key, number, value)]: a field
+    """WEB-3: the titleN/lengthN fields of a {{Track listing}} as [(key, number, value)]: a field
     runs to the next "|" or line end outside [[links]] and {{templates}}, nested ones too
     ("{{nowrap|{{lang|fr|Chanson}} d'amour}}")."""
     parts, depth, cur, i = [], 0, [], 0
@@ -261,7 +261,7 @@ _FIRST_ARG_TEMPLATES = {"abbr", "abbrlink", "nihongo", "nihongo2", "nihongo3", "
 
 
 def _unwrap_templates(v):
-    """WEB-2: {{nowrap|X}}, {{lang|fr|Titre}}, {{sup|b}} keep their text (the last unnamed part;
+    """WEB-3: {{nowrap|X}}, {{lang|fr|Titre}}, {{sup|b}} keep their text (the last unnamed part;
     {{abbr|No.|Number}}, {{nihongo|...}}, {{ruby|...}} the first); notes and citations
     ({{efn|...}}, {{cite web|...}}, {{r|...}}) go. Innermost first."""
     def one(m):
@@ -281,7 +281,7 @@ def _unwrap_templates(v):
 
 
 def _wiki_blocks(text):
-    """WEB-2: the {{Track listing}} blocks of an article as [(first number, [(num, title, secs)])]."""
+    """WEB-3: the {{Track listing}} blocks of an article as [(first number, [(num, title, secs)])]."""
     out = []
     for listing in re.findall(r"\{\{\s*Track ?listing(.*?)\n\}\}", text, re.S | re.I):
         rows = {}
@@ -322,7 +322,7 @@ def _link_text(s):
 
 
 def _wiki_editions(blocks):
-    """WEB-2: the editions an article's blocks make, each [(disc, num, title, secs)]. A block
+    """WEB-3: the editions an article's blocks make, each [(disc, num, title, secs)]. A block
     numbered from 1 is a disc of its own ("Disc one", "Disc two") - unless it is an LP's even
     side ("Side two" numbered from 1 again: the disc runs on, numbered on), or its headline names
     an edition ("Deluxe edition bonus disc"): that disc is another edition's, so the standard
@@ -397,7 +397,7 @@ def wikipedia_album(http, page_title):
 
 
 def wikipedia_editions(http, page_title):
-    """An album article's editions (WEB-2): its infobox and each edition's track listing (titles
+    """An album article's editions (WEB-3): its infobox and each edition's track listing (titles
     and lengths), one candidate per edition."""
     data = http.get_json("https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&redirects=1"
                          f"&page={q(page_title)}", "wikipedia") or {}

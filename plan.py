@@ -1827,6 +1827,7 @@ class Planner:
             # (filled by the engine only for: an album only (TAG-3's pressing fields), an album held
             # whose pick TagMender withdrew (TAG-1), TRK-4b's disc numbers TagMender's own job wrote)
             back = (getattr(prop, "restore", None) or {}).get(str(f))
+            took_back = []
             for k_, v_ in (back or {}).items():
                 # TAG-3 / REP-1: what TagMender's earlier job wrote of a pressing, taken back on an
                 # album only (as it was before that job; removed when it was empty)
@@ -1840,6 +1841,8 @@ class Planner:
                     # original date - where it has one, as on a file with no date)
                     v_ = _vals(target.get("date"))
                 changes[k_] = v_ or None
+                if v_ != _vals(before.get(k_)):          # (what the report says was taken back)
+                    took_back.append(k_)
                 rows = [r for r in rows if r.get("field") != k_]
                 rows.append({"field": k_, "before": _vals(before.get(k_)), "after": v_,
                              "action": "restored (as before TagMender's job)" if v_ else "removed"})
@@ -1920,6 +1923,8 @@ class Planner:
                   "diff": rows, "fingerprint": _fp(f)}
             if mb_length:
                 fe["length"] = mb_length
+            if took_back and changes:
+                fe["taken_back"] = sorted(k_ for k_ in took_back if k_ in changes)
             if str(f) in self.__dict__.get("_unscripted", {}):
                 fe["unscripted"] = self._unscripted[str(f)]
             if riff_copied:

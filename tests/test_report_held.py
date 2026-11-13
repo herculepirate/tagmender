@@ -16,7 +16,7 @@ def album(**kw):
          "identification": {"tier": "unresolved", "reason": "conflicting_sources: your folder names the instrumental version",
                             "reason_codes": ["conflicting_sources"]},
          "files": [{"src": "/x/Band/Album/01.flac", "dst": "/x/Band/Album/01.flac", "op": "tag",
-                    "changes": {"musicbrainz_albumid": None}}], "notes": []}
+                    "changes": {"musicbrainz_albumid": None}, "taken_back": ["musicbrainz_albumid"]}], "notes": []}
     a.update(kw)
     return a
 
@@ -37,6 +37,26 @@ class HeldAlbumReport(unittest.TestCase):
         a = album(identification={"tier": "exact", "reason": ""}, status="ready")
         rows = report.rows_of(a, {"status": "failed", "error": "disk full"}, applied=True)
         self.assertTrue(any(x["status"] == "Failed" for x in rows), rows)
+
+    def test_a_first_run_unresolved_album_says_nothing_was_taken_back(self):
+        # (review: every applied Unresolved album - its TAGMENDER mark is work too - was told "what an
+        # earlier run wrote for it was taken back", on a first run with nothing to take back)
+        a = album(files=[{"src": "/x/Band/Album/01.flac", "dst": "/x/Band/Album/01.flac", "op": "tag",
+                          "changes": {"tagmender": ["Unresolved"]}}],
+                  identification={"tier": "unresolved", "reason": "no_candidates: nothing found",
+                                  "reason_codes": ["no_candidates"]})
+        rows = report.rows_of(a, {"status": "done"}, applied=True)
+        r = [x for x in rows if x["section"] == "failed"][0]
+        self.assertEqual(r["status"], "Unresolved")
+        self.assertNotIn("taken back", r["issue"])
+
+    def test_a_plan_saved_before_the_record_still_says_so(self):
+        a = album(files=[{"src": "/x/Band/Album/01.flac", "dst": "/x/Band/Album/01.flac", "op": "tag",
+                          "changes": {"musicbrainz_albumid": None},
+                          "diff": [{"field": "musicbrainz_albumid", "before": ["x"], "after": [],
+                                    "action": "restored (as before TagMender's job)"}]}])
+        r = [x for x in report.rows_of(a, {"status": "done"}, applied=True) if x["section"] == "failed"][0]
+        self.assertIn("taken back", r["issue"])
 
 
 if __name__ == "__main__":

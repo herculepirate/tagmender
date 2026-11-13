@@ -1,6 +1,6 @@
 # 0.8.42 review B: NAM-8 (a "featuring"/"with" credit names its lead; a person with a group no
 # database lists members for leads it; MusicBrainz's answer stands through a Discogs outage),
-# NAM-7 (initials keep their full stops as separators), WEB-2 (nested templates; a section on an
+# NAM-7 (initials keep their full stops as separators), WEB-3 (nested templates; a section on an
 # earlier disc; an edition's bonus disc; LP sides from 1) and MOV-4 (discs as integers, a
 # duplicate brings no new disc, a claim only once an album is placed). Synthetic data, no network.
 import os as _os, tempfile as _tempfile  # noqa: E401

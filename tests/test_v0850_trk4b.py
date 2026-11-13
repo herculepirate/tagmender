@@ -99,7 +99,9 @@ class TRK4b_TagMendersOwnDiscNumbersGo(Base):
             t.pop("totaldiscs", None)
         p.restore = back
         prof = self.profile(thresholds={"organize_min_confidence": 95, "replace_min_confidence": 90})
-        ch = pl.build([p], prof)["albums"][0]["files"][1]["changes"]
+        fe = pl.build([p], prof)["albums"][0]["files"][1]
+        ch = fe["changes"]
+        self.assertEqual(fe.get("taken_back"), ["discnumber", "totaldiscs"], "recorded for the report")
         self.assertIn("discnumber", ch)
         self.assertIsNone(ch["discnumber"])
         self.assertIsNone(ch["totaldiscs"])

@@ -411,9 +411,36 @@ def _artist_tokens(text):
     return kept or words
 
 
+def _initials_of(name):
+    """"Niels-Henning Ørsted Pedersen" -> "nhop": the folded first letters of every word."""
+    words = [w for w in re.split(r"[\s\-]+", fold(name)) if w]
+    return "".join(w[0] for w in words) if len(words) >= 2 else ""
+
+
+def expand_initials(tag_artist, cand_artist):
+    """NAM-9: a name your tags give as capital initials ("Tania Maria & NHØP") read as the one
+    name of the candidate's credit those initials spell, word by word ("Niels-Henning Ørsted
+    Pedersen"). Only capitals of 2 letters or more, only when exactly one credited name has
+    them as its words' first letters - never a looser match (an ordinary short name such as
+    "Can" or "Yes" is not capitals; "ABBA" spells no credited name's words)."""
+    tag = str(tag_artist or "")
+    names = artist_parts(cand_artist)
+    out = tag
+    for part in artist_parts(tag):
+        letters = re.sub(r"[\W\d_]", "", part)
+        if len(letters) < 2 or letters != letters.upper() or " " in part.strip():
+            continue
+        key = fold(letters).replace(" ", "")
+        hits = [n for n in names if _initials_of(n) == key]
+        if len(hits) == 1:
+            out = re.sub(r"(?<!\w)" + re.escape(part) + r"(?!\w)", hits[0], out, count=1)
+    return out
+
+
 def artist_sim(tag_artist, cand_artist):
     """Order-insensitive; ignores joiners ("&", "and", "feat."), so
     'Max Corbacho; Bruno Sanfilippo' ~ 'Bruno Sanfilippo & Max Corbacho'."""
+    tag_artist = expand_initials(tag_artist, cand_artist)
     a, b = _artist_tokens(tag_artist), _artist_tokens(cand_artist)
     if not a or not b:
         return 0.0
@@ -448,6 +475,7 @@ def missing_collaborators(tag_artist, cand_credits):
             continue
         whole = fold(credit)
         names = [fold(n) for n in artist_parts(credit)]
+        parts = artist_parts(expand_initials(tag_artist, credit))     # (NAM-9: "NHØP")
         missing = [p for p in parts if fold(p) not in whole
                    and max((_ratio(fold(p), n) for n in names), default=0.0) < 0.85]
         if len(missing) == len(parts):

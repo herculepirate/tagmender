@@ -40,5 +40,26 @@ class FLD1_TitleBracketIsNoCountry(unittest.TestCase):
         self.assertTrue([a for a in against if a.startswith("folder name says")], against)
 
 
+
+class NAM9_InitialsOfACreditedName(unittest.TestCase):
+    CREDIT = "Tania Maria & Niels-Henning Ørsted Pedersen"
+
+    def test_initials_are_the_credited_name(self):
+        for tag in ("Tania Maria & NHØP", "Tania Maria & NHOP"):
+            self.assertEqual(mc.missing_collaborators(tag, [self.CREDIT]), [], tag)
+            self.assertGreaterEqual(mc.artist_sim(tag, self.CREDIT), 0.95, tag)
+
+    def test_no_unsupported_matches(self):
+        # capitals that spell no credited name, a band name in capitals, an ordinary short name
+        self.assertEqual(mc.missing_collaborators("Tania Maria & XYZ", [self.CREDIT]), ["XYZ"])
+        self.assertLess(mc.artist_sim("Tania Maria & XYZ", self.CREDIT), 0.85)
+        self.assertLess(mc.artist_sim("ABBA", "Agnetha Bjorn Benny Anni-Frid"), 0.85)
+        self.assertEqual(mc.expand_initials("Can", "Can"), "Can")
+        self.assertEqual(mc.expand_initials("JJ & Bob", "Jean Jacques Milteau; Bob Smith"), "JJ & Bob")
+
+    def test_two_credited_names_with_the_same_initials_decide_nothing(self):
+        self.assertEqual(mc.expand_initials("A & JS", "A; John Smith; Jane Stone"), "A & JS")
+
+
 if __name__ == "__main__":
     unittest.main()

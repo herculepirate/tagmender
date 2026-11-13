@@ -146,5 +146,22 @@ class TAG3_OwnEarlierPickOneRun(t3.te.Base):
         _e, p = self.run_it(d, self.owned(d, t3.OLD_MB, every=False))
         self.assertNotEqual(getattr(p, "release_proven_over", None) or [], ["musicbrainz_albumid"], p.notes)
 
+
+class NAM11_LatinSideOfTwoLanguageTitles(unittest.TestCase):
+    def test_latin_side_chosen(self):
+        self.assertEqual(engine.latin_side('「森の組曲」 = "Forest" Suite'), '"Forest" Suite')
+        self.assertEqual(engine.latin_side(["空 = Sky"]), ["Sky"])
+
+    def test_others_unchanged(self):
+        for v in ("Björk", "小瀬村晶", "Sky = Ciel", "Ólafur Arnalds"):
+            self.assertEqual(engine.latin_side(v), v, v)
+
+    def test_only_when_asked(self):
+        t = {"album": ['「森の組曲」 = "Forest" Suite'], "title": ["空 = Sky"]}
+        self.assertEqual(engine.latin_titles(dict(t), {}), t)
+        out = engine.latin_titles(dict(t), {"translate_album_titles": True, "translate_track_titles": True})
+        self.assertEqual(out, {"album": ['"Forest" Suite'], "title": ["Sky"]})
+
+
 if __name__ == "__main__":
     unittest.main()

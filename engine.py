@@ -1735,6 +1735,7 @@ class Engine:
                         merged[fld], where[fld] = v, name
                         break
             merged, where = sorts_follow_names(merged, where, src)
+            merged = latin_titles(merged, self.profile.picard_tags())
             # HF-5: a partial album's missing tracks are no tag of their own (no TAGMENDER_MISSING):
             # "incomplete" is told in the proposal's notes (the plan's and the job report's) only
             if not self.profile["mark_resolved"]:
@@ -4973,6 +4974,37 @@ def sorts_follow_names(merged: dict, where: dict, src: dict):
             merged.pop(sort, None)
             where.pop(sort, None)
     return merged, where
+
+
+def _latin_share(text) -> float:
+    letters = [c for c in str(text) if c.isalpha()]
+    return (sum(1 for c in letters if ord(c) < 0x250) / len(letters)) if letters else 0.0
+
+
+def latin_side(value):
+    """NAM-11: "「森の組曲」 = "Forest" Suite" -> '"Forest" Suite': of a title the database gives in
+    two languages joined by " = " (Discogs's way), the side in Latin script; a title wholly in
+    Latin script, or one without a Latin side, stays as it is."""
+    one = isinstance(value, str)
+    out = []
+    for v in ([value] if one else list(value or [])):
+        v = str(v)
+        if _latin_share(v) < 1.0 and " = " in v:          # (any letter not Latin: "森の組曲")
+            sides = [x.strip() for x in v.split(" = ")]
+            latin = next((x for x in sides if x and _latin_share(x) >= 0.5), None)
+            v = latin or v
+        out.append(v)
+    return out[0] if one else out
+
+
+def latin_titles(merged: dict, s: dict) -> dict:
+    """NAM-11: with album / track title translation asked for (the profile's tagger settings: an
+    English alias where MusicBrainz has one), a two-language title from either database is
+    written by its Latin side too."""
+    for key, flag in (("album", "translate_album_titles"), ("title", "translate_track_titles")):
+        if (s or {}).get(flag) and merged.get(key):
+            merged[key] = latin_side(merged[key])
+    return merged
 
 
 def _vals_eq(a, b) -> bool:

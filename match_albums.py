@@ -1977,7 +1977,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "artist": top("artist") or artist_folder, "title": title,
         "year": year or None, "discs": n_discs,
         "dropped_formats": dropped_formats, "dropped_tracks": dropped_tracks,
-        "tracks": [{"disc": i["disc_eff"], "num": i["num"], "title": i["title"],
+        "tracks": [{"disc": i["disc_eff"], "disc_tag": i["disc"] or 0, "num": i["num"], "title": i["title"],
                     "secs": i["secs"], "path": str(_p)} for _p, i in infos],
         # the tags' barcode, else one the ripper's notes name ("Barcode: 5013929020160")
         "barcodes": tags_barcodes,

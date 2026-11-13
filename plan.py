@@ -1824,7 +1824,9 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
-            back = (getattr(prop, "restore", None) or {}).get(str(f)) if album_only else None
+            # (album only: TAG-3's pressing fields; any tier: TRK-4b's disc numbers TagMender's own
+            # job wrote beside one run - the engine fills restore only in those two cases)
+            back = (getattr(prop, "restore", None) or {}).get(str(f))
             for k_, v_ in (back or {}).items():
                 # TAG-3 / REP-1: what TagMender's earlier job wrote of a pressing, taken back on an
                 # album only (as it was before that job; removed when it was empty)

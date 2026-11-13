@@ -1743,11 +1743,15 @@ def _readable_country(code_or_name):
     return name
 
 
-def _bracket_text(folder, pressing_only=False):
+def _bracket_text(folder, pressing_only=False, title=""):
     parts = re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(folder or ""))
     if pressing_only:
         # "(Live at Roadburn 2011 - Holland)" says where it was played, not where it was pressed
         parts = [p for p in parts if not re.search(r"\blive\b|\brecorded\b|\b(?:at|in)\s+[A-Z]", p, re.I)]
+        # FLD-1: a bracket that is part of the release's own title ("The Sessions Box Set (United
+        # Kingdom & Ireland 2022)", a German release) names no pressing
+        t = " " + fold(title) + " "
+        parts = [p for p in parts if not (fold(p).strip() and f" {fold(p).strip()} " in t)]
     return " ".join(parts)
 
 
@@ -1960,7 +1964,7 @@ def file_clues(album, cand, clues, against, cfg=None):
             clues.setdefault("label", f"label {x} named by your folder name or SACD rip log")
             break
     # folder name: "[Century Media, 9976158, Germany]"
-    folder = _bracket_text(album.get("folder"), pressing_only=True)
+    folder = _bracket_text(album.get("folder"), pressing_only=True, title=cand.get("title") or "")
     if folder:
         fw = " " + fold(folder) + " "
         for x in str(cand.get("label") or "").split(";"):

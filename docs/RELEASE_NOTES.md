@@ -11,6 +11,15 @@
 - An album that could not be identified no longer reads "what an earlier run wrote for it was
   taken back" when nothing was: only when an earlier run's tags really went back.
 
+**Catalogue numbers in three groups are read from folder names (CAT-2)**
+- "[A&M_75021 5350 2]", "75021-5350-2" or "31454 0123-2" (A&M, PolyGram and Universal US CDs)
+  now count as the catalogue number the folder names; an underscore stands for a space.
+
+**A rip group's name is no release country (CTY-1)**
+- A release country that is no country but the same word the files carry as their label or
+  comment ("PMEDIA") is removed when the album is tagged and its release names no country.
+  Real country names and codes are never touched.
+
 **Matching rules**
 - The Wikipedia track-listing rule is now WEB-3 (WEB-2 named two rules).
 

@@ -230,7 +230,8 @@ def catno_hints(text, variants=False):
     found, extra = [], []
     for content in _BRACKETS_RE.findall(str(text or "")):
         for segment in content.split(","):
-            words = [w.strip(".:") for w in segment.replace(";", " ").split()]
+            # ("A&M_75021 5350 2": an underscore stands for the space a folder name could not keep)
+            words = [w.strip(".:") for w in segment.replace(";", " ").replace("_", " ").split()]
             words = [w for w in words if w and not _NOT_CATNO_WORD.match(w)]
             skip = set()
             for i, w in enumerate(words):
@@ -238,8 +239,19 @@ def catno_hints(text, variants=False):
                     continue
                 nxt = words[i + 1] if i + 1 < len(words) else ""
                 prev = words[i - 1] if i > 0 else ""
+                nxt2 = words[i + 2] if i + 2 < len(words) else ""
+                # CAT-2: "75021 5350 2" / "31454 0123-2": a number in three groups (A&M, PolyGram,
+                # Universal US: 5 + 4 + 1 digits); "75021-5350-2" as one word too
+                if re.fullmatch(r"\d{5}", w) and re.fullmatch(r"\d{4}", nxt) and re.fullmatch(r"\d", nxt2):
+                    found.append(f"{w} {nxt} {nxt2}")
+                    skip.update((i + 1, i + 2))
+                elif re.fullmatch(r"\d{5}", w) and re.fullmatch(r"\d{4}-\d", nxt):
+                    found.append(f"{w} {nxt.replace('-', ' ')}")
+                    skip.add(i + 1)
+                elif re.fullmatch(r"\d{5}-\d{4}-\d", w):
+                    found.append(w.replace("-", " "))
                 # "479 7050": a number in two groups (Deutsche Grammophon style)
-                if re.fullmatch(r"\d{2,4}", w) and re.fullmatch(r"\d{3,5}", nxt) \
+                elif re.fullmatch(r"\d{2,4}", w) and re.fullmatch(r"\d{3,5}", nxt) \
                         and not _YEAR.match(w) and len(w + nxt) >= 6:
                     found.append(f"{w} {nxt}")
                     skip.add(i + 1)

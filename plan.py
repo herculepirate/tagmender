@@ -69,6 +69,19 @@ def _shop_page(values):
     return not any(host == d or host.endswith("." + d) for d in ("discogs.com", "musicbrainz.org"))
 
 
+def _junk_country(before) -> bool:
+    """CTY-1: the files' release country is no country - neither a code nor a country's name -
+    but a word they also carry as their label, comment or encoder: a rip group's mark copied into
+    every field it fitted ("PMEDIA" as country, label and comment)."""
+    import match_core
+    vals = [str(v).strip() for v in before.get("releasecountry") or [] if str(v).strip()]
+    if not vals or any(match_core.country_code(v) or re.fullmatch(r"[A-Za-z]{2}", v) for v in vals):
+        return False
+    marks = {str(v).strip().casefold() for k in ("label", "comment", "encodedby", "encoder", "organization")
+             for v in before.get(k) or [] if str(v).strip()}
+    return all(v.casefold() in marks for v in vals)
+
+
 @dataclass
 class Proposal:
     """One album (or single file) as identification left it."""
@@ -1767,6 +1780,12 @@ class Planner:
                 removals += [k for k in ("tagmender_missing", "tagmender_source")
                              if before.get(k) and not target.get(k) and p.policy(k) not in ("preserve", "lock")
                              and (k != "tagmender_source" or (exact and _shop_page(before[k])))]
+                # CTY-1: a "release country" that is no country - a rip group's name the files also
+                # carry as their label, comment or encoder ("PMEDIA") - goes, when the release named
+                # none to replace it (a country name or code of any kind stays)
+                if _junk_country(before) and not target.get("releasecountry") and \
+                        p.policy("releasecountry") not in ("preserve", "lock"):
+                    removals.append("releasecountry")
             # what Picard would delete (compilation on a release not by Various Artists, what a
             # tagger script $delete-s) - never a field the profile preserves or locks
             removals += [tagio.canonical(f, x) for x in (target.pop("~remove", None) or [])

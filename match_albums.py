@@ -846,7 +846,11 @@ def _own_job_files(job):
             # (which IDs the job left as the file had them: an earlier job's own ID stays its own)
             kept = tuple(f not in after for f in ("musicbrainz_albumid", "discogs_release_id"))
             files.append((str(fe.get("src") or fe["dst"]), str(fe["dst"]), fe.get("op"), *ids, wrote, named, kept))
-        albums.append((a.get("source_dir"), exact, files))
+        # REP-1 / TAG-1: what decided the pressing in this job ("pressing chosen by catalogue
+        # number 636834 on the scans", "... by track lengths closest ..."), or "": a later plan
+        # asks whether your copy still shows it (match_core._still_decides)
+        decided = next((str(e) for e in ident.get("evidence") or () if str(e).startswith("pressing chosen by ")), "")
+        albums.append((a.get("source_dir"), exact, files, decided))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)
     return albums
@@ -887,13 +891,13 @@ def _own_index():
     for i, (job, folder) in enumerate(rows):
         done.setdefault(job, set()).add(folder)
         last[job] = i
-    owned, wrote = {}, {}
+    owned, wrote, why = {}, {}, {}
     # Jobs in order: a file a job moved carries what was owned at its old path to the new one
     # (a copy to both); an album identified exactly owns the IDs that job left in its files.
     # REP-1: wrote[path] = (the album folder the file was in before TagMender's first job on
     # it, {field: (value before TagMender, value it left)}): the earliest job's "before" stands
     for job in sorted(done, key=last.get):
-        for folder, exact, files in _own_job_files(job):
+        for folder, exact, files, decided in _own_job_files(job):
             if folder not in done[job]:
                 continue
             for src, dst, op, mb, dg, fields, named, kept in files:
@@ -905,6 +909,12 @@ def _own_index():
                     if op != "copy":
                         owned.pop(src, None)
                     owned[dst] = carried
+                if src != dst and src in why:
+                    why[dst] = why.pop(src) if op != "copy" else why[src]
+                if exact and (mb or dg) and decided:
+                    why[dst] = decided           # (a job that only kept the release keeps its reason)
+                elif exact and (mb or dg) and not all(kept):
+                    why.pop(dst, None)           # (a release chosen anew, its reason not recorded)
                 if exact and (mb or dg):
                     # REP-1: an ID an earlier job of TagMender's wrote, which this job left as it
                     # was (its pick below the replace threshold kept it), is still TagMender's own -
@@ -928,8 +938,21 @@ def _own_index():
                 merged.update({f: v for f, v in earlier.items() if f not in merged})
                 wrote[dst] = (first_folder, first_dir, merged, was_foreign)
     with _OWN_LOCK:
-        _OWN_INDEX[:] = [sig, owned, wrote]
+        _OWN_INDEX[:] = [sig, owned, wrote, why]
     return owned
+
+
+def tagmender_decided(paths) -> str:
+    """REP-1 / TAG-1: what decided the pressing when TagMender's own job chose the release these
+    files carry ("pressing chosen by ..."), the same for every file; "" when no job recorded one
+    (a job before this was kept, a pick no clue of your copy decided) or the files disagree."""
+    if not paths:
+        return ""
+    _own_index()
+    with _OWN_LOCK:
+        why = _OWN_INDEX[3] if len(_OWN_INDEX) > 3 else {}
+    found = {why.get(str(p)) or why.get(os.path.realpath(str(p))) or "" for p in paths}
+    return found.pop() if len(found) == 1 else ""
 
 
 def tagmender_wrote(files):
@@ -1813,7 +1836,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                 if p.suffix.lower() in AUDIO_EXT and str(p) not in exclude:
                     files.append(p)
     info = {p: read_file(p) for p in files}
-    title_written, before_by_tagger, before = [], {}, {}
+    title_written, before_by_tagger, before, own_decided = [], {}, {}, ""
     if not blind:
         # REP-1: an album TagMender tagged (and perhaps renamed) before is read as the copy was
         # before it: the pressing details its job wrote (and nobody changed since) as they were,
@@ -1826,6 +1849,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # history is not read for an album never tagged)
         maybe = any(i.get("has_ids") or i.get("tm_mark") for i in info.values())
         first_folder, before, before_by_tagger = tagmender_originals(files) if maybe else ("", {}, {})
+        own_decided = tagmender_decided(files) if maybe else ""
         if before:
             # (the media tag as TagMender wrote it stays what names each version folder's disc - a
             # DVD's "Stereo/" and "5.1/" lost their disc word to the naming: it points at the release
@@ -1965,6 +1989,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tag_release_mb, tag_release_discogs = tag_release_ids([i for _p, i in infos])
     return {
         "tags_by_tagger": by_tagger,
+        # TAG-1 / REP-1: what decided the pressing when TagMender's job chose the release your
+        # files carry (its evidence line), while those IDs are still TagMender's own
+        "own_decided": own_decided if (id_files and not by_tagger) else "",
         # REP-1: the pressing details were read as before TagMender, and then they stood beside
         # another tagger's release IDs: they are that tagger's word still (weak, as the first
         # plan read them), while TagMender's own IDs keep their release in a tie (TAG-1)
@@ -4222,6 +4249,7 @@ def mb_candidate(rel):
         "source": "mb", "id": rel["id"], "url": f"https://musicbrainz.org/release/{rel['id']}",
         "discogs_id": mb_linked_discogs_id(rel),
         "discogs_ids": mb_linked_discogs_ids(rel),       # every one linked (same_pressing)
+        "comment": str(rel.get("disambiguation") or ""),   # (its disambiguation: "instrumental")
         # the album (release group), its types and its Discogs master: what tells pressings of
         # one album from other albums (match_core.same_album, Picard's preferred types/formats)
         "release_group": str(group.get("id") or ""), "release_types": mb_group_types(group),
@@ -7041,6 +7069,8 @@ def summarize(res):
             # (TAG-3, engine._copy_proves: its catalogue number printed on your copy, a vinyl rip
             # of a vinyl release - lengths never compared)
             "catno_on_copy": bool(b.get("catno_on_copy")),
+            # (your copy another version than the release: an instrumental album - engine holds it)
+            "copy_version": str(b.get("copy_version") or ""),
             "vinyl_rip": str((b.get("clues") or {}).get("format", "")).startswith("vinyl"),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
             # tracks missing from the folder: each file's track of the release (0-based, in

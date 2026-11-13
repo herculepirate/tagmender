@@ -1152,6 +1152,15 @@ class Engine:
                 self.log.warning("tags for %s: %s", g.folder, exc)
                 return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
                                         reason=f"matched, but the release's tracks do not line up with the files: {exc}")
+        cv = ((out or {}).get("best") or {}).get("copy_version") if out and out.get("status") != "auto" else ""
+        if cv:
+            # your copy names a version (an instrumental album) no release found is: held, never
+            # tagged as the vocal album's release nor its album-only or Partial tags
+            return planmod.Proposal(**base, status="unresolved", reason_codes=["conflicting_sources"],
+                                    reason=f"your folder or album title names the {cv} version, and no release "
+                                           f"found is it (the best fit, {out['best'].get('id')}, is not): "
+                                           "choose the release with Album > Change Release",
+                                    why=list(out.get("why") or []))
         if out and out.get("album_only") and out.get("best") and self._accepts("album") and \
                 not _provider_failed(errors):
             # the album is certain, only its pressing is not: tag what every pressing shares
@@ -1953,7 +1962,10 @@ class Engine:
             x["shares_number"] = bool(_catnos_agree(pick, x)
                                       or set(pick["barcodes"]) & set(x.get("barcodes") or ()))
         proof = self._copy_proves(p, out, facts)
-        if not proof and _own_ids_clash(p.files, clash):
+        if not proof and _own_ids_clash(p.files, clash) and not getattr(p, "guessed_pick", False):
+            # (not when the pick is itself a guess - the country order, the original date - as
+            # after TagMender's own pick lost its standing, its deciding clue no longer found: then
+            # the pick is no more proven than the one before it)
             # TAG-3 + TAG-1: the IDs that clash are TagMender's own earlier pick, and the matcher
             # left that release only because your copy points elsewhere (TAG-1 keeps it on a
             # better score alone): correcting its own pick is no demotion - one run writes the

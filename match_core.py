@@ -1398,6 +1398,28 @@ def _digit_runs(text):
     return tuple(tuple(re.findall(r"\d+", m.group(0))) for m in _DIGIT_RUN.finditer(text))
 
 
+_DIGIT_FOLD = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1"})
+
+
+def digits_printed(text, number) -> bool:
+    """A catalogue number of digits only (normalised, norm_code) stands printed as one number:
+    whole digit groups of one run, joined, are it (leading zeros aside) - never a piece of a
+    longer digit group. O and I read for 0 and 1 count as digits."""
+    key = str(number or "").lstrip("0")
+    if not key:
+        return False
+    for groups in _digit_runs(str(text or "").translate(_DIGIT_FOLD)):
+        for i in range(len(groups)):
+            joined = ""
+            for g in groups[i:]:
+                joined += g
+                if joined.lstrip("0") == key:
+                    return True
+                if len(joined.lstrip("0")) >= len(key):
+                    break
+    return False
+
+
 def barcode_printed(text, barcode):
     """True when the barcode stands printed as ONE number in the text: whole digit
     groups of one run, joined, are the barcode (leading zeros aside). Digits are never
@@ -1621,6 +1643,14 @@ def pressing_clues(ocr_text, cand, ring_text=""):
         distinctive = (len(c) >= 4 and re.search(r"[a-z]", c) and digits) or len(digits) >= 6
         core = re.sub(r"(cd|lp|dvd|sacd|mc|cdr|dg)$", "", c)        # "fo501cd" read as "FOSO1 cp"
         core_ok = len(core) >= 5 and re.search(r"[a-z]", core) and len(re.sub(r"\D", "", core)) >= 3
+        if distinctive and not re.search(r"[a-z]", c):
+            # a number of digits only stands printed as ONE number - whole digit groups of one
+            # run ("063 683-4", "LC 0309 063 683-4") - never as a piece of a longer one: OCR noise
+            # ("06400636834", a cassette's 063 683-4 read inside it) is no catalogue number
+            if digits_printed(ocr_text, c):
+                agree["catalogue number"] = f"catalogue number {c.upper()} on the scans"
+                break
+            continue
         if distinctive and (c in hay or ocr_confusable(c) in hay_c
                             or (core_ok and ocr_confusable(core) in hay_c)
                             or (len(c) >= 7 and _zeroless(c) in hay_z)):
@@ -3015,6 +3045,27 @@ _VERSION_WORDS = re.compile(r"\b(remix(?:ed|es)?|re-?recorded|re-?recording|inst
                             r"orchestral|demos?|karaoke|live|ambient|dub)\b", re.I)
 
 
+_COPY_VERSION_WORDS = re.compile(r"\b(instrumentals?|karaoke|a ?cappella)\b", re.I)
+
+
+def copy_version(album, cand):
+    """A word naming another version of the album in your folder name or album title (as before
+    TagMender: REP-1) - "Rust In Peace (Instrumental)" - that the release names nowhere (its
+    title, its comment, its track titles): your copy is not that release's recording, however
+    well the lengths fit. Returns the word, or ""."""
+    mine = " ".join(str(album.get(k) or "") for k in ("title", "folder"))
+    words = {re.sub(r"s$", "", m.group(1).casefold().replace(" ", "")) for m in _COPY_VERSION_WORDS.finditer(mine)}
+    if not words:
+        return ""
+    theirs = fold(" ".join([str(cand.get("title") or ""), str(cand.get("comment") or ""),
+                            str(cand.get("disambiguation") or "")]
+                           + [str(t.get("title") or "") for t in cand.get("tracks") or ()])).replace(" ", "")
+    for w in sorted(words):
+        if w not in theirs:
+            return w
+    return ""
+
+
 def other_version(album, cand):
     """A word naming another version of the album in the release title ("Traced in Air
     Remixed", "... (Instrumental)", "... Live") that neither your folder name nor your
@@ -3585,6 +3636,11 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos")
                                     and not catnos_agree(album.get("catnos_from_folder"), cand.get("catnos"))),
         "tagged": tagged_release(album, cand),
+        # (TAG-1: what decided it when TagMender's own job chose it; whether the scans were read
+        # now - a clue of the scans not read now is missing, not disproved)
+        "own_decided": str(album.get("own_decided") or "") if tagged_release(album, cand) else "",
+        "scans_read": bool(str(ocr_text or "").strip()),
+        "copy_version": copy_version(album, cand),
         # ... by another tagger, not by TagMender's own job (match_albums.tagmender_wrote)
         "tagger_tagged": bool(album.get("tags_by_tagger")) and tagged_release(album, cand),
         # an EAC/XLD log with the disc's table of contents (a log beside hi-res audio is
@@ -3744,11 +3800,15 @@ def _kept_choice(best, scored, cfg):
     catalogue number of your copy is on another candidate instead; else None. Another
     tagger's release IDs pick nothing (TAG-2)."""
     mine = [s for s in scored if s.get("tagged") and not s.get("tagger_tagged") and s.get("tracks_ok")
-            and not s.get("conflict") and not s.get("clues_against")
+            and not s.get("conflict") and not s.get("clues_against") and not s.get("copy_version")
             and s["confidence"] >= cfg["review_min_confidence"]]
-    if len(mine) != 1 or mine[0] is best:
+    if len(mine) != 1:
         return None
     m = mine[0]
+    if not _still_decides(m, scored, cfg):
+        return None                  # (its own reason disproved: reassessed as any other candidate)
+    if m is best:
+        return None
 
     def numbered(s):
         return barcode_proves(s) or s.get("code") in ("catalogue number", "catalogue number (folder name)",
@@ -3756,6 +3816,57 @@ def _kept_choice(best, scored, cfg):
     if not numbered(m) and any(numbered(s) for s in scored if s is not m):
         return None
     return m
+
+
+_SCAN_CLUE_OF = (("catalogue number", "catalogue number"), ("barcode", "barcode"), ("label code", "label code"),
+                 ("label ", "label"), ("matrix", "matrix"), ("SID code", "sid code"), ("made in", "country"))
+
+
+def _still_decides(m, scored, cfg) -> bool:
+    """TAG-1 / REP-1: TagMender's own earlier pick m keeps its standing while what decided it
+    then is still found on your copy now (its job's evidence: "pressing chosen by catalogue
+    number 636834 on the scans", "... by track lengths closest ..."). A clue of the scans read
+    now and no longer on m - an OCR invention the reading no longer makes - and lengths that no
+    longer tell m from the pressings tied with it are disproved: m is no more than any other
+    candidate then. A clue not looked for now (no scans read, no lengths to compare) is
+    missing, not disproved; a reason that is no clue of your copy (the country order, the
+    original date) or none recorded keeps the standing as before."""
+    reason = str(m.get("own_decided") or "")
+    if not reason.startswith("pressing chosen by "):
+        return True
+    reason = re.sub(r"\s*\(not on [^)]*\)\s*$", "", reason[len("pressing chosen by "):])
+    judged = False
+    for part in (x.strip() for x in reason.split(";") if x.strip()):
+        key = next((k for p, k in _SCAN_CLUE_OF if part.startswith(p)), None)
+        if key and "on the scans" in part:
+            if not m.get("scans_read"):
+                return True                          # (the scans not read now: missing)
+            if key in (m.get("clues") or {}):
+                return True
+            judged = True
+        elif part.startswith(("track lengths", "every track length")):
+            if m.get("len_err") is None and not m.get("len_diffs"):
+                return True                          # (no lengths compared now: missing)
+            tied = [s for s in scored if s.get("tracks_ok") and abs(s["confidence"] - m["confidence"])
+                    < cfg["auto_min_margin"]]
+            if m not in tied:
+                tied.append(m)
+            extra = _relative_clues(tied).get(id(m)) or {}
+            if extra.get("track lengths") or extra.get("exact lengths"):
+                return True
+            hit = exact_lengths(tied)
+            if hit and hit[0] is m:
+                return True
+            judged = True
+        else:
+            return True                              # (no clue of your copy, or one not judged here)
+    if judged:
+        note = (f"TagMender chose this pressing earlier by {reason}, which your copy no longer shows: "
+                "it is weighed afresh (TAG-1)")
+        if note not in m["notes"]:
+            m["notes"] = m["notes"] + [note]
+        m["tagged"] = False              # (no standing left: never kept in a tie either)
+    return not judged
 
 
 def _fits_to_the_ms(best, scored, cfg):
@@ -4273,6 +4384,11 @@ def classify(scored, cfg):
                                          "and tags do not say; your barcode is this release's (BAR-8)"]
     elif best.get("other_version"):
         why.append(f"the release is the {best['other_version']} version, which your folder and tags do not say")
+    if best.get("copy_version") and not barcode_proves(best):
+        # your folder or album title (as before TagMender) names an instrumental / karaoke version
+        # the release names nowhere: another recording, however well the lengths fit
+        why.append(f"your folder or album title names the {best['copy_version']} version, which this "
+                   "release is not")
     if best.get("conflict"):
         why.append("barcode differs from the candidate's")
     # Your copy cannot be this format (hi-res audio and a CD; a rip log and a download):

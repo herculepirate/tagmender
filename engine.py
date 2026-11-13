@@ -2168,12 +2168,19 @@ class Engine:
         import tagio
         sc = (out or {}).get("scans") or {}
         found = set(sc.get("found") or ())
-        if sc.get("state") != "proven" or sc.get("against") or not found & {"catalogue_number", "barcode"}:
+        # (the bar _copy_proves sets: printed on your copy, not only read somewhere - a fuzzy
+        # read or a typed note deletes nothing)
+        if sc.get("state") != "proven" or sc.get("against") or not sc.get("printed") or \
+                not found & {"catalogue_number", "barcode"}:
             return {}
+        printed = ((out or {}).get("release_ids") or {}).get("on_copy") or {}
         bad = {}
         for x in facts:
-            if x.get("unknown"):
-                continue
+            if x.get("unknown") or x.get("shares_number"):
+                continue                     # (a twin sharing the barcode, the number written otherwise)
+            if mc.catnos_agree(printed.get("catnos") or (), x.get("catnos") or ()) or \
+                    set(printed.get("barcodes") or ()) & set(x.get("barcodes") or ()):
+                continue                     # (your copy prints its number too: nothing contradicts it)
             num = "catalogue_number" in found and pick.get("catnos") and x.get("catnos") and \
                 not _catnos_agree(pick, x)
             bar = "barcode" in found and pick.get("barcodes") and x.get("barcodes") and \
@@ -2289,9 +2296,12 @@ class Engine:
         view = (out or {}).get("release_ids") or {}
         if clean and "barcode" in found:
             return "your scans show its barcode"
-        if (view.get("matrix") or best.get("matrix_read")) and "matrix" not in set(sc.get("against") or ()):
-            # (R9: a matrix read off your copy - its label, its runout - that the pick or its twin
-            # lists names the pressing itself; lengths say nothing more)
+        own_matrix = set(view.get("matrix") or ()) - {k for i in clashing for k in i.get("matrices") or ()}
+        if own_matrix and sc.get("state") != "differs" and not sc.get("against"):
+            # (R9: a matrix of the pick or its twin read WHOLE on your copy's print - its label, its
+            # runout; never notes typed by someone - that neither the release your files name nor
+            # any other pressing scored lists, with nothing on your scans against the pick, names
+            # the pressing itself; lengths say nothing more)
             return "your copy's matrix is this release's"
         if best.get("vinyl_rip") and sc.get("state") == "proven" and not sc.get("against") and \
                 "catalogue_number" in found and (sc.get("printed") or best.get("catno_on_copy")) and \

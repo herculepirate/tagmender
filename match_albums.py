@@ -7038,10 +7038,8 @@ def summarize(res):
                                   and b.get("dur_frac") is None and not b.get("dur_cov")),
             "most_lengths": bool(b.get("tracks_ok") and (b.get("dur_frac") or 0) >= 0.5 and not b.get("conflict")
                                  and not b.get("missing")),
-            # (TAG-3, engine._copy_proves: a matrix of the pick read off your copy, its catalogue
-            # number printed on your copy, a vinyl rip of a vinyl release - lengths never compared)
-            "matrix_read": bool("matrix" in (b.get("clues") or {})
-                                and not any(str(w).startswith("disc ring reads ") for w in b.get("clues_against") or ())),
+            # (TAG-3, engine._copy_proves: its catalogue number printed on your copy, a vinyl rip
+            # of a vinyl release - lengths never compared)
             "catno_on_copy": bool(b.get("catno_on_copy")),
             "vinyl_rip": str((b.get("clues") or {}).get("format", "")).startswith("vinyl"),
             "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
@@ -7091,7 +7089,31 @@ def release_facts(cand) -> dict:
             "links": sorted({norm_release_id("discogs_release_id", x) for x in mc.linked_discogs(c)} - {""})
             if mb else [],
             "label": c.get("label") or "", "country": c.get("country") or "", "year": c.get("year"),
-            "layout": mc.disc_layout(c)}
+            "layout": mc.disc_layout(c),
+            # (its matrix / runout codes, whole - their notes in brackets aside: whole_matrices)
+            "matrices": whole_matrices(c)}
+
+
+def whole_matrices(cand) -> list:
+    """TAG-3: a release's matrix / runout values as whole keys (folded as matrix_tokens, the
+    notes Discogs writes in brackets - "(Side B label)" - left out), the distinctive ones only."""
+    out = []
+    for kind, value in mc.cand_matrices(cand or {}):
+        if kind != "matrix":
+            continue
+        key = "".join(mc.matrix_tokens(re.sub(r"\([^)]*\)", " ", str(value))))
+        if mc._matrix_distinctive(key) and key not in out:
+            out.append(key)
+    return out
+
+
+def matrix_on_copy(text, keys) -> list:
+    """TAG-3: the whole matrix keys read in your copy's printed text (scans, disc rings,
+    booklets - never notes typed by someone): a key from the start of a word to the end of one."""
+    if not text or not keys:
+        return []
+    hay = mc._matrix_hay(str(text))
+    return [k for k in keys if mc._matrix_in(hay, k)]
 
 
 def release_ids_view(final, results, album):
@@ -7139,25 +7161,35 @@ def release_ids_view(final, results, album):
     mine["discogs_release_id"].add(norm_release_id("discogs_release_id", final.get("dg_twin") or ""))
     mine["discogs_release_id"] |= set(release_facts(pick)["links"])
     pf = release_facts(pick)
-    matrix, rivals = False, []
+    printed = str((album or {}).get("printed_text") or "")
+    read, others_keys, rivals = [], set(), []
     for res in results:
         for s in (res or {}).get("scored") or ():
             c = s["cand"]
             f = field_of.get(c.get("source"))
             cid = norm_release_id(f or "", c.get("id"))
             if f and cid in mine[f]:
-                matrix = matrix or bool("matrix" in (s.get("clues") or {}) and not any(
-                    str(w).startswith("disc ring reads ") for w in s.get("clues_against") or ()))
-            elif f and pf["catnos"]:
+                read += matrix_on_copy(printed, whole_matrices(c))
+            elif f:
                 cf = release_facts(c)
-                if mc.catnos_agree(pf["catnos_raw"], cf["catnos_raw"]) or mc.catnos_agree(pf["catnos"], cf["catnos"]):
+                others_keys |= set(cf["matrices"])
+                if pf["catnos"] and (mc.catnos_agree(pf["catnos_raw"], cf["catnos_raw"])
+                                     or mc.catnos_agree(pf["catnos"], cf["catnos"])):
                     rivals.append(f"{c.get('source')}:{c.get('id')}")
+    # (a matrix of the pick's, read whole on your copy's print and listed by no other pressing
+    # scored - represses sharing stampers list it too)
+    matrix = sorted(set(read) - others_keys)
+    # what your copy prints (scans, booklets, disc rings, a cue's CATALOG; never typed notes):
+    # its catalogue numbers and barcodes, folded (engine._copy_contradicts)
+    codes = mc.codes_from_ocr_text(printed, limit=50) if printed.strip() else {"catnos": [], "barcodes": []}
+    on_copy = {"catnos": sorted({mc.norm_code(x) for x in codes.get("catnos") or ()} - {""}),
+               "barcodes": sorted({mc.barcode_key(x) for x in codes.get("barcodes") or ()} - {""})}
     return {"pick": pf, "twins": {f: sorted(v) for f, v in twins.items() if v},
             "mb_twin": norm_release_id("musicbrainz_albumid", final.get("mb_twin") or ""),
             "dg_twin": norm_release_id("discogs_release_id", final.get("dg_twin") or ""),
             "cands": {f: v for f, v in cands.items() if v},
             "mb_links": {d: sorted(v) for d, v in links.items()},
-            "matrix": matrix, "number_rivals": sorted(set(rivals))}
+            "matrix": matrix, "number_rivals": sorted(set(rivals)), "on_copy": on_copy}
 
 
 def run_source(name, finder, album, cfg, ocr_txt=""):
@@ -7609,6 +7641,18 @@ def _fetch_linked(http, dm, ids, source, have):
     return out
 
 
+def _files_name_another(album, final) -> bool:
+    """The files' release ID tags name a release other than the pick (its own ID, its twin)."""
+    best = (final or {}).get("best") or {}
+    c = best.get("cand") or {}
+    pick = {norm_release_id("discogs_release_id" if c.get("source") == "discogs" else "musicbrainz_albumid",
+                            c.get("id")),
+            norm_release_id("musicbrainz_albumid", final.get("mb_twin") or ""),
+            norm_release_id("discogs_release_id", final.get("dg_twin") or "")} - {""}
+    held = {norm_release_id(f, v) for f, vs in ((album or {}).get("file_release_ids") or {}).items() for v in vs or ()}
+    return bool(held - pick)
+
+
 MB_LINKED_CANDIDATES = 3       # (the best MusicBrainz candidates whose Discogs links are fetched)
 MB_LINKED_FETCHES = 4          # (at most this many Discogs releases fetched for one album)
 
@@ -7623,11 +7667,14 @@ def mb_linked_step(http, dm, album, cfg, mb_res, dg_res, final, text, notes):
     ids = list(dict.fromkeys(ids))[:MB_LINKED_FETCHES]
     if not ids:
         return dg_res, final
-    try:
-        new = _fetch_linked(http, dm, ids, "discogs", have)
-    except Exception as exc:                  # (an outage: no evidence either way)
-        notes.append(f"Discogs lookup of releases MusicBrainz links failed ({exc})")
-        return dg_res, final
+    new = []
+    for rid in ids:                          # (each apart: one failing keeps those fetched)
+        try:
+            new += _fetch_linked(http, dm, [rid], "discogs", have)
+        except AuthError:
+            raise                            # (the token rejected: as every Discogs call site)
+        except Exception as exc:             # (an outage: no evidence either way)
+            notes.append(f"Discogs lookup of release {rid}, which MusicBrainz links, failed ({exc})")
     if not new:
         return dg_res, final
     seen_ids = _cand_ids(mb_res, dg_res)
@@ -7984,7 +8031,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # pressing Discogs's search does not return may be the one your scans prove (Popol Vuh - In
     # Den Gärten Pharaos: Pilz's first edition, 525272, its matrix on the label scan). A few only
     # (the requests are shared with every other album); a failed lookup is no evidence.
-    if use_discogs and dm is not None and mb_res and mb_res.get("scored"):
+    # (only while unsure, or while your files name a release other than the pick: a sure pick
+    # that is your files' own release needs no more leads)
+    if use_discogs and dm is not None and mb_res and mb_res.get("scored") and \
+            (final.get("status") != "auto" or _files_name_another(album, final)):
         dg_res, final = mb_linked_step(http, dm, album, cfg, mb_res, dg_res, final, ocr_txt, source_notes)
     shops_asked = set()
     seen_ids = _cand_ids(mb_res, dg_res)

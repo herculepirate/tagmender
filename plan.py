@@ -1509,7 +1509,7 @@ class Planner:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
             entry["status"] = "unresolved"
             entry["label"] = "Unresolved"
-            if ua == "leave" or op == "copy":
+            if (ua == "leave" or op == "copy") and not (getattr(prop, "restore", None) and op != "copy"):
                 for f in kept:
                     entry["files"].append({"src": str(f), "dst": str(f), "op": "none", "changes": {}, "diff": [],
                                            "fingerprint": _fp(f)})
@@ -1824,8 +1824,8 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
-            # (album only: TAG-3's pressing fields; any tier: TRK-4b's disc numbers TagMender's own
-            # job wrote beside one run - the engine fills restore only in those two cases)
+            # (filled by the engine only for: an album only (TAG-3's pressing fields), an album held
+            # whose pick TagMender withdrew (TAG-1), TRK-4b's disc numbers TagMender's own job wrote)
             back = (getattr(prop, "restore", None) or {}).get(str(f))
             for k_, v_ in (back or {}).items():
                 # TAG-3 / REP-1: what TagMender's earlier job wrote of a pressing, taken back on an

@@ -73,11 +73,19 @@ class TRK4(unittest.TestCase):
         for t in m:
             t["discnumber"] = [str(int(t["discnumber"][0]) + 1)]
             t["media"] = ["CD"]
-        cases = [(m, dg([3, 3])), (mb([3, 3]), dg([6])), (mb([6]), dg([3, 3]))]
+        cases = [(m, dg([3, 3]))]
         for tm0, td0 in cases:
             tm, td, note = engine.settle_disc_layout(tm0, td0, files([3, 3]))
             self.assertEqual(note, "")
             self.assertIs(tm, tm0)
+        # (a set one database lists as ONE run 1..6 and the other as discs 3 + 3 is no longer the
+        # plugin's merge "as before": that merge wrote disc 2 beside track 4 - Deftones - Palms.
+        # TRK-4b numbers it in the one layout the files follow: test_v0850_trk4b)
+        for tm0, td0 in ((mb([3, 3]), dg([6])), (mb([6]), dg([3, 3]))):
+            tm, td, note = engine.settle_disc_layout(tm0, td0, files([3, 3]))
+            self.assertIn("TRK-4b", note)
+            lay = [(t.get("discnumber"), t["tracknumber"]) for t in tm]
+            self.assertEqual(lay[3], (["2"], ["1"]), "files numbered disc by disc: the split, never disc 2 track 4")
         h = mb([4])
         for k, t in enumerate(h):
             t["tracknumber"] = [str(k)]

@@ -5071,6 +5071,75 @@ def _num(v) -> int:
     return int(s) if s.isdigit() else 0
 
 
+def _one_run_vs_discs(mb: list, dg: list) -> str:
+    """TRK-4b: the same tracks in the same order, one database numbering them as one run on one
+    disc (1..n: Discogs's A1..D2 of a 2LP, as the plugin numbers them) and the other split into
+    discs each numbered from 1 (MusicBrainz's 6 + 5). "dg" when Discogs is the one run, "mb"
+    when MusicBrainz is; "" otherwise."""
+    if len(mb) != len(dg) or len(mb) < 2:
+        return ""
+
+    def run(lay):
+        return len({d for d, _k in lay}) == 1 and [k for _d, k in lay] == list(range(1, len(lay) + 1))
+
+    def split(lay):
+        discs = sorted({d for d, _k in lay})
+        return len(discs) >= 2 and all([k for x, k in lay if x == d] == list(range(1, sum(1 for x, _k in lay if x == d) + 1))
+                                        for d in discs)
+    if run(dg) and split(mb):
+        return "dg"
+    if run(mb) and split(dg):
+        return "mb"
+    return ""
+
+
+def _settle_one_run(tags_mb: list, tracks_dg: list, files: list, which: str):
+    """TRK-4b: number every file of one layout, never disc from one database and track from the
+    other (Deftones - Palms 2LP: disc 2 with tracks 4-6 of 6; Tame Impala - Innerspeaker 2LP:
+    disc 2 track 7 of 11). The files' own numbers decide: numbered as one run (1..n, no disc
+    or all disc 1) -> one run, and no disc number or disc total the files do not have; numbered
+    disc by disc -> the split layout; else the split layout (MusicBrainz's discs, as before).
+    Existing numbers are never turned into a layout neither database nor the files have."""
+    n = len(tags_mb)
+    own = [((f.get("disc") or 1), f.get("num") or 0) for f in files] if len(files) == n else []
+    numbered = [x for x in own if x[1]]
+    as_run = bool(own) and len(numbered) == n and len({d for d, _k in own}) == 1 and \
+        [k for _d, k in own] == list(range(1, n + 1))
+    split_tags = tags_mb if which == "dg" else tracks_dg
+    if as_run:
+        # (disc numbers the files - as they were before TagMender, REP-1 - never had go: an
+        # earlier run's "disc 2 of 2" beside "track 4 of 6"; your own disc numbers stay)
+        no_discs = all(not f.get("disc_tag", f.get("disc")) for f in files)
+        out_mb, out_dg = [], []
+        for i, (t, d) in enumerate(zip(tags_mb, tracks_dg)):
+            t, d = dict(t), dict(d)
+            for x in (t, d):
+                x.pop("discnumber", None)
+                x.pop("totaldiscs", None)
+                x["tracknumber"] = [str(i + 1)] if x is t else str(i + 1)
+                x["totaltracks"] = [str(n)] if x is t else str(n)
+            if no_discs:
+                t["~remove"] = list(dict.fromkeys(list(t.get("~remove") or []) + ["discnumber", "totaldiscs"]))
+            out_mb.append(t)
+            out_dg.append(d)
+        return out_mb, out_dg, ("MusicBrainz and Discogs number the discs otherwise: numbered as one run, as your "
+                                "files are (TRK-4b)")
+    # the split layout in both (the merge then writes one layout)
+    src = split_tags
+    out_mb, out_dg = [], []
+    for t, d, s in zip(tags_mb, tracks_dg, src):
+        t, d = dict(t), dict(d)
+        for k in _POSITION:
+            v = s.get(k)
+            if v:
+                t[k] = v if isinstance(v, list) else [str(v)]
+                d[k] = (v[0] if isinstance(v, list) else str(v))
+        out_mb.append(t)
+        out_dg.append(d)
+    return out_mb, out_dg, ("MusicBrainz and Discogs number the discs otherwise: numbered disc by disc"
+                            + (", as your files are" if numbered else "") + " (TRK-4b)")
+
+
 def settle_disc_layout(tags_mb: list, tracks_dg: list, files: list):
     """TRK-4: MusicBrainz's and Discogs's tracks of one release, the same in number and
     order, split into discs otherwise (Robin Trower - The Studio Albums 1973-1983:
@@ -5087,6 +5156,9 @@ def settle_disc_layout(tags_mb: list, tracks_dg: list, files: list):
         return tags_mb, tracks_dg, ""
     count = lambda lay: {d: sum(1 for x, _k in lay if x == d) for d, _k in lay}   # noqa: E731
     cm, cd = count(mb), count(dg)
+    one = _one_run_vs_discs(mb, dg)
+    if one:
+        return _settle_one_run(tags_mb, tracks_dg, files, one)
     if set(cm) != set(cd) or len(cm) < 2 or any(min(k for x, k in lay if x == d) != 1
                                                 for lay, c in ((mb, cm), (dg, cd)) for d in c):
         # (not the same discs split otherwise: a DVD numbered first on one of them, a set listed

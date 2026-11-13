@@ -2006,6 +2006,10 @@ def file_clues(album, cand, clues, against, cfg=None):
             clues.setdefault("format", "cassette release (folder name)")
         elif hint in ("vinyl", "cd") and hint not in formats:
             against.append(f"folder name says {hint}, this pressing is {'/'.join(sorted(formats))}")
+        elif not hint and album.get("tags_media") == "cd" and "cd" in formats \
+                and not audio.get("hires") and not audio.get("not_cd"):
+            # MED-14: the album tags' "[... 10CD Box]": a clue for a CD, never against the others
+            clues.setdefault("format", f"cd release ({album.get('tags_media_from') or 'album tags'})")
         if audio.get("hires") and hint != "vinyl":
             if audio.get("sacd") and cand.get("sacd_media"):
                 # MED-3: DSD, or 88.2/176.4 kHz (DSD64 converted), is an SACD rip
@@ -2488,6 +2492,8 @@ def copy_kind(album) -> str:
         return "digital"
     if audio.get("cd_frames") or album.get("rip_log_toc"):
         return "cd"
+    if album.get("tags_media") == "cd" and not audio.get("hires"):
+        return "cd"                             # (MED-14: the album tags' "10CD", weakest)
     return ""
 
 

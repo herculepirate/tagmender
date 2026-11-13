@@ -1941,6 +1941,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                       if toc_fits_audio(t, [i for _p, i in infos if i.get("disc_eff", 1) == d]))
     hint, hint_from = _media_hint(album_dir, album_folder, files, infos, top("artist") or artist_folder,
                                   bool(log_toc))
+    box_tags = "" if hint else _tags_box_count(infos)
     # The files name a release in their ID tags, and TagMender did not write them: another
     # tagger did (Picard, an older tool, the shop). Their barcode, ISRCs, country, date and
     # label came FROM that release and only confirm it; they never outrank the folder name
@@ -2001,6 +2002,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                | set(typed_search)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title) or _log_year(album_dir, logs),
         "media_hint": hint, "media_hint_from": hint_from,
+        # MED-14: a CD count in every disc's album tag - weaker than the folder name and the
+        # audio (copy_source, match_core.copy_kind, file_clues): no media hint of its own
+        "tags_media": "cd" if box_tags else "", "tags_media_from": box_tags,
         "sacd_hint": sacd_marks(album_dir, album_folder),     # MED-13
         # EDN-2: the labels your copy names as its edition's: the folder name's edition bracket
         # ("(2017 AP ISO)"), an SACD-Ripper log's disc image ("Analogue Productions - Title.iso")
@@ -2216,9 +2220,6 @@ def _media_hint(album_dir, album_folder, files, infos, artist, rip_log):
         return "digital", f"{shops.most_common(1)[0][0]} comments or URLs in the tags"
     if bandcamp_names(album_dir, artist, len(infos)):
         return "digital", "Bandcamp's file names in a checker's log"
-    box = _tags_box_count(infos)
-    if box:
-        return "cd", box
     return "", ""
 
 
@@ -2230,8 +2231,10 @@ _BOX_COUNT = re.compile(r"(?<![A-Za-z0-9])(\d{1,2})\s*-?\s*CDs?(?![A-Za-z0-9])",
 def _tags_box_count(infos) -> str:
     """MED-14: why the copy is a CD set by its own album tags, or "": every file's album tag
     ends in a mark naming one count of CDs ("[... 10CD Box]", "(3 CD)") and that count is the
-    number of discs the files make (two or more). The tags' word, as a folder name's: never a
-    release ID, and no count the copy's own layout does not have."""
+    number of discs the files make (two or more). A weak clue (album tags are copied with the
+    titles): read only when the folder name says nothing, and below a rip log, the CD sectors
+    and the audio (hi-res or not whole sectors: never a CD). Never a release ID, and no count
+    the copy's own layout does not have."""
     counts, discs = set(), set()
     for _p, i in infos:
         m = re.search(r"[\(\[]([^\(\)\[\]]*)[\)\]]\s*$", str(i.get("album") or ""))
@@ -2368,6 +2371,8 @@ def copy_source(album):
         return "cd"
     if album.get("store_tracks") or audio.get("not_cd"):
         return "digital"
+    if album.get("tags_media") == "cd" and not audio.get("hires"):
+        return "cd"                                 # (MED-14: the album tags' "10CD", last)
     return ""
 
 

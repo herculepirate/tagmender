@@ -697,8 +697,11 @@ def _plugin():
 
 def discogs_media(det):
     """The release's format as Picard writes MEDIA: "CD", '12" Vinyl', "Cassette",
-    "Digital Media" (a Discogs "File"); the first format of a release names it."""
-    fmt = (det.get("formats") or [{}])[0] or {}
+    "Digital Media" (a Discogs "File"); the first format of a release that is a medium names
+    it (never its "Box Set" or "All Media" entry)."""
+    fmts = [f for f in det.get("formats") or [] if str((f or {}).get("name") or "").strip().casefold()
+            not in ("box set", "all media")]
+    fmt = (fmts or [{}])[0] or {}
     name = str(fmt.get("name") or "")
     if name == "File":
         return "Digital Media"

@@ -5,6 +5,7 @@
 # was an album of its own - identified to another release and filed into another folder than
 # the rest of the box - and a CD box's files tied with its download and fell to a web source.
 # The files' own Discogs ID stays a lead only (TAG-2): fetched and scored, never chosen for it.
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -14,6 +15,16 @@ import test_engine as te  # noqa: E402  (isolates XDG dirs and Picard.ini first)
 from test_v0821_engine_rules import flac  # noqa: E402
 import engine  # noqa: E402
 import match_albums as ma  # noqa: E402
+import match_core as mc  # noqa: E402
+
+
+def audio_file(d, name, secs, rate, bits, freq, **meta):
+    """A short sine file at this rate and bit depth (secs whole: whole CD sectors at 44.1 kHz)."""
+    d.mkdir(parents=True, exist_ok=True)
+    tags = sum((["-metadata", f"{k}={v}"] for k, v in meta.items()), [])
+    fmt = ["-sample_fmt", "s32", "-bits_per_raw_sample", "24"] if bits == 24 else ["-sample_fmt", "s16"]
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={secs}",
+                    "-ar", str(rate), "-ac", "1", *fmt, *tags, str(d / name), "-y"], check=True)
 
 
 def disc_folder(parent, name, n, album, artist):
@@ -54,6 +65,12 @@ class DSC3_DiscRangeParts(te.Base):
         self.assertIsNone(engine.box_part_disc(P("/b/CD02-03 Beta/Part 3")))       # (outside the range)
         self.assertIsNone(engine.box_part_disc(P("/b/Live At The Rainbow/Part 1")))  # (no disc range above)
         self.assertIsNone(engine.box_part_disc(P("/b/CD03-02 Beta/Part 1")))
+        # (a disc's title beginning with a number: no disc range)
+        self.assertIsNone(engine.box_part_disc(P("/b/CD1 - 12 Inch Mixes/Part 1")))
+        self.assertIsNone(engine.box_part_disc(P("/b/CD1-12 Inch Mixes/Part 1")))
+        self.assertIsNone(engine.box_part_disc(P("/b/CD1-12\" Mixes/Part 1")))
+        self.assertIsNone(engine.box_part_disc(P("/b/CD1-40 Greatest/Part 1")))
+        self.assertEqual(engine.box_part_disc(P("/b/CD2-3/Part 2")), 3)
 
     def test_DSC3_a_part_tagged_as_another_disc_keeps_the_box_apart(self):
         top = self.lib / "Band H" / "Box (3CD)"
@@ -98,26 +115,55 @@ class DSC4_AlbumWideTrackTotal(unittest.TestCase):
         self.assertEqual(ma._track_total(infos([2, 9, 6, 9], 30)), 120)    # (no exact sum: per disc)
 
 
-def dg_set(rid, fmt, durs, title="Album K", artist="Band K"):
+def dg_set(rid, fmt, durs, title="Album K", artist="Band K", codec="FLAC"):
     """A Discogs release of two discs, three tracks each, positions "1-1" ... "2-3"."""
     rel = te.dg_release(rid, artist, title)
     rel["formats"] = [{"name": "CD", "qty": "2", "descriptions": ["Album"]}] if fmt == "cd" else \
-        [{"name": "File", "qty": "6", "descriptions": ["FLAC", "Album"]}]
+        [{"name": "File", "qty": "6", "descriptions": [codec, "Album"]}]
     rel["tracklist"] = [{"type_": "track", "position": f"{n}-{i + 1}", "title": f"{'TU'[n - 1]}{i}", "duration": d}
                         for n in (1, 2) for i, d in enumerate(durs)]
     return rel
 
 
 class MED14_TheSetsOwnTags(te.Base):
-    def make(self, dg_id=""):
+    def make(self, dg_id="", rate=44100, bits=16, extra_secs=0.0):
+        """The set's six files: CD audio by default (44.1 kHz, 16 bits, whole sectors)."""
         top = self.lib / "Band K" / "2020 - Album K"
         for n, sub in ((1, "Alpha"), (2, "Beta")):
             for i in range(3):
                 extra = {"discogs_release_id": dg_id} if dg_id else {}
-                flac(top / f"CD0{n} - {sub}", f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 100 * n + 10 * i,
-                     title=f"{'TU'[n - 1]}{i}", album=f"{sub} [2020 Album K 2CD Box]", albumartist="Band K",
-                     artist="Band K", track=str(i + 1), disc=str(n), totaldiscs="2", **extra)
+                audio_file(top / f"CD0{n} - {sub}", f"{i + 1:02d}.flac", 10 * (i + 1) + extra_secs, rate, bits,
+                           300 + 100 * n + 10 * i, title=f"{'TU'[n - 1]}{i}", album=f"{sub} [2020 Album K 2CD Box]",
+                           albumartist="Band K", artist="Band K", track=str(i + 1), disc=str(n), totaldiscs="2",
+                           **extra)
         return top
+
+    def copy(self, **kw):
+        top = self.make(**kw)
+        album = ma.read_album(top, "Band K", top.name)
+        cd = mc.score_candidate(album, ma.discogs_candidate(dg_set(9101, "cd", ("0:10", "0:20", "0:30")),
+                                                            self.engine(te.FakeHttp()).dm), self.engine(te.FakeHttp()).cfg)
+        return album, cd
+
+    def test_MED14_the_audio_outranks_the_tags(self):
+        # hi-res audio, or CD-quality tracks that are no whole CD sectors: never a CD, whatever
+        # the album tags copied from the box's titles say
+        for kw, kind in (({"rate": 96000, "bits": 24}, ""), ({"extra_secs": 0.01}, "digital")):
+            with self.subTest(**kw):
+                album, cd = self.copy(**kw)
+                self.assertEqual(album["tags_media"], "cd")
+                self.assertEqual(album["media_hint"], "")                 # (never as the folder name)
+                self.assertEqual(mc.copy_kind(album), kind)
+                self.assertEqual(ma.copy_source(album), kind)
+                self.assertNotIn("cd release", str(cd.get("clues")))
+                for d in (self.lib / "Band K").iterdir():
+                    for f in d.rglob("*.flac"):
+                        f.unlink()
+
+    def test_MED14_cd_audio_and_the_tags(self):
+        album, cd = self.copy()
+        self.assertEqual((mc.copy_kind(album), album["media_hint"]), ("cd", ""))
+        self.assertIn("cd release", cd["clues"].get("format", ""))
 
     def identify(self, http):
         eng = self.engine(http)
@@ -136,11 +182,14 @@ class MED14_TheSetsOwnTags(te.Base):
                          "")                                                   # (one disc says nothing)
         self.assertEqual(ma._tags_box_count([(P("/b/01.flac"), {"album": "X [1CD]", "disc_eff": 1})]), "")
 
-    def test_MED14_a_cd_box_by_its_tags_is_not_its_download(self):
+    def test_MED14_a_weak_clue_against_a_download_like_the_files(self):
+        # a FLAC download fits FLAC files as well as the tags' "2CD" fits the CD: the album is
+        # known, its pressing is not - the download is never picked over the CD
         lens = ("0:10", "0:20", "0:30")
-        http = te.FakeHttp(dg=[dg_set(9101, "cd", lens), dg_set(9102, "file", lens)])
-        p = self.identify(http)
-        self.assertEqual((p.tier, p.release_id), ("exact", "9101"), p.why)
+        p = self.identify(te.FakeHttp(dg=[dg_set(9101, "cd", lens), dg_set(9102, "file", lens)]))
+        self.assertNotEqual(p.release_id, "9102", p.why)
+        self.assertEqual(p.tier, "album_only", p.why)
+        self.assertEqual({(t.get("media") or ["CD"])[0] for t in p.targets}, {"CD"})   # (the CD's, never "Digital Media")
         self.assertEqual([t["discnumber"][0] for t in p.targets], ["1"] * 3 + ["2"] * 3)
 
     def test_MED14_the_files_own_discogs_id_is_a_lead_not_a_proof(self):
@@ -157,9 +206,50 @@ class MED14_TheSetsOwnTags(te.Base):
 
     def setUp(self):
         super().setUp()
-        if not getattr(self, "_testMethodName", "").endswith("lead_not_a_proof"):
-            if "count_in_every" not in self._testMethodName:
-                self.make()
+        if self._testMethodName.endswith("like_the_files"):
+            self.make()
+
+
+class MED15_EachDiscItsOwnMedia(te.Base):
+    """MED-15: a box listing a Blu-ray before its CDs (and the box itself): the CD rip's files are
+    tagged "CD" each, never the release's formats joined, and the folder is no "Blu-ray" edition."""
+
+    def release(self):
+        rel = dg_set(9301, "cd", ("0:10", "0:20", "0:30"))
+        rel["year"], rel["released"] = 2019, "2019-03-01"
+        rel["formats"] = [{"name": "Blu-ray", "qty": "1", "descriptions": ["Blu-ray Audio", "Multichannel"]},
+                          {"name": "CD", "qty": "2", "descriptions": ["Album", "Remastered"]},
+                          {"name": "Box Set", "qty": "1", "descriptions": ["Compilation"]}]
+        rel["tracklist"] = [{"type_": "track", "position": f"CD{n}-{i + 1}", "title": f"{'TU'[n - 1]}{i}",
+                             "duration": d} for n in (1, 2) for i, d in enumerate(("0:10", "0:20", "0:30"))]
+        return rel
+
+    def test_MED15_the_track_media_of_its_own_disc(self):
+        eng = self.engine(te.FakeHttp())
+        album, tracks, n = engine.discogs_parts(self.release(), eng.dm)
+        self.assertNotIn("media", album)
+        self.assertEqual({t["media"] for t in tracks}, {"CD, Album, Remastered"})
+        # (no carrier named by the positions: the release's media in order, by quantity)
+        rel = self.release()
+        for t in rel["tracklist"]:
+            t["position"] = t["position"][2:]
+        rel["formats"] = rel["formats"][1:] + [{"name": "DVD", "qty": "1", "descriptions": ["DVD-Video"]}]
+        _a, tracks, _n = engine.discogs_parts(rel, eng.dm)
+        self.assertEqual({t["media"] for t in tracks}, {"CD, Album, Remastered"})
+
+    def test_MED15_a_cd_box_listing_a_blu_ray_is_no_blu_ray_edition(self):
+        top = self.lib / "Band K" / "Album K (2CD)"
+        for n in (1, 2):
+            for i in range(3):
+                audio_file(top / f"CD{n}", f"{i + 1:02d}.flac", 10 * (i + 1), 44100, 16, 300 + 100 * n + 10 * i,
+                           title=f"{'TU'[n - 1]}{i}", album="Album K", albumartist="Band K", artist="Band K",
+                           track=str(i + 1), disc=str(n))
+        eng = self.engine(te.FakeHttp(dg=[self.release()]))
+        p = eng.identify(eng.albums_in(self.lib)[0])
+        self.assertEqual((p.tier, p.release_id), ("exact", "9301"), p.why)
+        self.assertEqual({t["media"][0] for t in p.targets}, {"CD, Album, Remastered"})
+        import naming
+        self.assertNotIn("Blu-ray", naming.edition(dict(p.targets[0], **{"~edition_media": p.targets[0]["media"]})))
 
 
 if __name__ == "__main__":

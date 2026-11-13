@@ -1,5 +1,41 @@
 # Release notes
 
+## 0.8.48
+
+**Your scans are read properly again (OCR-3)**
+- Covers are read in colour at their own resolution: print in a single colour channel (a blue
+  vinyl label's catalogue number and matrix) was lost when scans were turned grey first.
+- Each scan is read in its own script: Latin covers with the Latin languages only, Japanese or
+  Cyrillic ones with their own language plus English - no more stray kana or Cyrillic in what is
+  read off a Latin sleeve. Every scan is read once more.
+
+**Box sets (DSC-3, DSC-4, MED-14, MED-15)**
+- Disc folders of a box written as "CD02-03 <title>/Part 1" and "Part 2" are discs 2 and 3 of the
+  box: the whole box is identified and filed as one album.
+- A track total every disc of a set repeats (74 on each of 10 discs) is the album's total.
+- "[... 10CD Box]" in every disc's album tag counts as a CD rip, unless the audio says otherwise.
+- Each disc of a Discogs release that mixes formats gets its own media (a CD box with Blu-rays
+  is no longer named or tagged "Blu-ray").
+
+**Bootlegs (R9, TIE-4, ED-7)**
+- A bootleg MusicBrainz or Discogs lists is tagged as far as your copy proves it: its own
+  barcode, catalogue number, matrix or disc ID makes it the release (with a note that it is
+  unofficial); without such proof only the album's own tags are written. An official release
+  carrying the same barcode or catalogue number always wins over a counterfeit.
+- A bootleg is not named "Remaster" or "Reissue".
+
+**Names and titles (NAM-9, NAM-10, NAM-11)**
+- Capital initials in your tags ("NHØP") are matched to the credited name they spell.
+- A sort name always comes from the same source as the name it sorts.
+- With title translation on, a title given in two languages ("「森の組曲」 = "Forest" Suite") is
+  written by its Latin side.
+
+**More**
+- A folder name bracket that is part of the release's own title is no country or label evidence
+  (FLD-1).
+- An earlier wrong pick of TagMender's own is corrected in one run (TAG-3).
+- Barcodes are written as their digits, the form Discogs and MusicBrainz searches find (BAR-10).
+
 ## 0.8.47
 
 **One release per file (TAG-3)**

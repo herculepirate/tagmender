@@ -1843,6 +1843,13 @@ class Engine:
         prop.sure_picks = dict(out.get("sure_picks") or {})
         if layout_note:
             prop.notes = list(getattr(prop, "notes", None) or []) + [layout_note]
+            if "one run" in layout_note:
+                # TRK-4b: the disc numbers an earlier TagMender job added beside one run ("disc 2"
+                # with "track 4 of 6") are taken back - at any score: TagMender corrects its own
+                # write (REP-1's history: written by its job, unchanged since); never yours
+                back = _own_disc_writes(prop.files)
+                if back:
+                    prop.restore = {**(getattr(prop, "restore", None) or {}), **back}
         if missing:
             # HF-5: the gaps go to the album's notes (plan, job report: report._gaps reads this
             # wording), never into the files
@@ -5069,6 +5076,34 @@ _MEDIUM_KEYS = ("discsubtitle", "media", "musicbrainz_discid")
 def _num(v) -> int:
     s = str((v if not isinstance(v, list) else (v or [""])[0]) or "").partition("/")[0].strip()
     return int(s) if s.isdigit() else 0
+
+
+def _own_disc_writes(files) -> dict:
+    """{path: {"discnumber": before, "totaldiscs": before}} for the files whose disc number and
+    total a TagMender job wrote over an empty field and nobody changed since (REP-1's history,
+    match_albums.tagmender_originals); {} when not every file is so."""
+    try:
+        _folder, orig, _foreign = ma.tagmender_originals([str(f) for f in files])
+    except Exception:
+        return {}
+    out = {}
+    for f in files:
+        fields = (orig or {}).get(str(f)) or {}
+        try:
+            now = tagio.read(str(f))
+        except Exception:
+            return {}
+        back = {}
+        for k in ("discnumber", "totaldiscs"):
+            if k in fields:
+                before, left = fields[k]
+                if [str(x) for x in (now.get(k) or [])] != [str(x) for x in (left or [])]:
+                    return {}                  # (you changed the album's disc numbers since: yours)
+                if not [x for x in (before or []) if str(x).strip()]:
+                    back[k] = []
+        if back:
+            out[str(f)] = back
+    return out if len(out) == len(files) else {}
 
 
 def _one_run_vs_discs(mb: list, dg: list) -> str:

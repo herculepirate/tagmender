@@ -69,5 +69,47 @@ class TRK4b_OneRunAgainstDiscs(unittest.TestCase):
         self.assertEqual(engine._one_run_vs_discs([(1, 1), (1, 2)], [(1, 1), (2, 1)]), "mb")
 
 
+from unittest import mock  # noqa: E402
+import match_albums as ma  # noqa: E402
+import plan as pl  # noqa: E402
+import tagio  # noqa: E402
+from test_executor import Base, target  # noqa: E402
+
+
+class TRK4b_TagMendersOwnDiscNumbersGo(Base):
+    """Deftones - Palms: an earlier job added discnumber 1/2 + totaldiscs 2 beside tracks 1-6 of 6.
+    A plan below the replace threshold takes them back (TagMender's own write), never yours."""
+    def setUp(self):
+        super().setUp()
+        for f, d in ((self.f1, "1"), (self.f2, "2")):
+            tagio.write(f, {"discnumber": [d], "totaldiscs": ["2"]})
+
+    def orig(self, left_disc=None):
+        return ("", {str(self.f1): {"discnumber": ([], [left_disc or "1"]), "totaldiscs": ([], ["2"])},
+                     str(self.f2): {"discnumber": ([], [left_disc or "2"]), "totaldiscs": ([], ["2"])}}, {})
+
+    def test_own_disc_writes_found_and_taken_back_below_the_threshold(self):
+        import engine
+        with mock.patch.object(ma, "tagmender_originals", return_value=self.orig()):
+            back = engine._own_disc_writes([self.f1, self.f2])
+        self.assertEqual(back[str(self.f2)], {"discnumber": [], "totaldiscs": []})
+        p = self.proposal(conf=79.0, targets=[target(1, "First"), target(2, "Second")])
+        for t in p.targets:
+            t.pop("discnumber", None)
+            t.pop("totaldiscs", None)
+        p.restore = back
+        prof = self.profile(thresholds={"organize_min_confidence": 95, "replace_min_confidence": 90})
+        ch = pl.build([p], prof)["albums"][0]["files"][1]["changes"]
+        self.assertIn("discnumber", ch)
+        self.assertIsNone(ch["discnumber"])
+        self.assertIsNone(ch["totaldiscs"])
+
+    def test_a_disc_number_changed_since_is_yours(self):
+        import engine
+        tagio.write(self.f2, {"discnumber": ["3"]})               # edited after the job
+        with mock.patch.object(ma, "tagmender_originals", return_value=self.orig()):
+            self.assertEqual(engine._own_disc_writes([self.f1, self.f2]), {})
+
+
 if __name__ == "__main__":
     unittest.main()

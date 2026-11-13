@@ -1977,6 +1977,9 @@ class Engine:
             p = self._album_only(p, {"tied": tied, "doubt": doubt, "pick_year": pick.get("year")})
             first = {str(v)[:4] for t in p.targets for k in ("originaldate", "originalyear") for v in t.get(k) or ()}
             back = self._restore_own(p.files, clash, facts, pick, self._pick_side(p, view), first)
+            gone = self._copy_contradicts(p, out, clash, facts, pick, self._pick_side(p, view))
+            for f, fields in gone.items():
+                back.setdefault(f, {}).update({k: [] for k in fields if k not in back.get(f, {})})
             if back:
                 p.restore = back
             p.notes = list(getattr(p, "notes", None) or []) + [
@@ -2154,6 +2157,70 @@ class Engine:
             kept_all += kept
         return list(dict.fromkeys(gone_all)), list(dict.fromkeys(kept_all))
 
+    def _copy_contradicts(self, p, out, clash, facts, pick, side) -> dict:
+        """TAG-3: {file: [fields]} to remove on an album only: the release IDs your files hold
+        whose release your copy's own printed evidence contradicts - the catalogue number or
+        barcode read on your scans is the pick's (scans proven, nothing against) and that release
+        lists another - with that pressing's fields (its database's fields of one release, a
+        barcode, catalogue number, label, country, media, date that is its own and not the
+        pick's). Never kept beside your copy's evidence, proven pick or not; never the pick's own
+        (the Discogs fields a TagMender job wrote of the pick's twin stay)."""
+        import tagio
+        sc = (out or {}).get("scans") or {}
+        found = set(sc.get("found") or ())
+        # (the bar _copy_proves sets: printed on your copy, not only read somewhere - a fuzzy
+        # read or a typed note deletes nothing)
+        if sc.get("state") != "proven" or sc.get("against") or not sc.get("printed") or \
+                not found & {"catalogue_number", "barcode"}:
+            return {}
+        printed = ((out or {}).get("release_ids") or {}).get("on_copy") or {}
+        bad = {}
+        for x in facts:
+            if x.get("unknown") or x.get("shares_number"):
+                continue                     # (a twin sharing the barcode, the number written otherwise)
+            if mc.catnos_agree(printed.get("catnos") or (), x.get("catnos") or ()) or \
+                    set(printed.get("barcodes") or ()) & set(x.get("barcodes") or ()) or \
+                    _printed_on_copy(x, ((out or {}).get("release_ids") or {}).get("printed")):
+                continue                     # (your copy prints its number too: nothing contradicts it)
+            num = "catalogue_number" in found and pick.get("catnos") and x.get("catnos") and \
+                not _catnos_agree(pick, x)
+            bar = "barcode" in found and pick.get("barcodes") and x.get("barcodes") and \
+                not set(pick["barcodes"]) & set(x["barcodes"])
+            if num or bar:
+                f = "musicbrainz_albumid" if x.get("source") == "mb" else "discogs_release_id"
+                if x.get("id") in (clash.get(f) or {}):
+                    bad.setdefault(f, []).append(x)
+        if not bad:
+            return {}
+        out_ = {}
+        for f in p.files:
+            try:
+                before = tagio.read(f)
+            except Exception:
+                continue
+            gone = []
+            for field, xs in bad.items():
+                if not before.get(field):
+                    continue
+                gone.append(field)
+                if field == "musicbrainz_albumid":
+                    gone += [k for k in ("musicbrainz_trackid",) if before.get(k)]
+                else:
+                    # (the Discogs fields of that release only: those of another one the file's
+                    # discogs_uri names - the pick's twin's - stay)
+                    uri = {m for v in before.get("discogs_uri") or () for m in re.findall(r"/release/(\d+)", str(v))}
+                    if not uri or uri & {x["id"] for x in xs}:
+                        gone += other_source_tags("musicbrainz_only", [k for k, v in before.items() if v], True)
+                for k in ("barcode", "catalognumber", "label", "releasecountry", "media", "date"):
+                    if before.get(k) and any(_pressings_value(k, before[k], x) for x in xs) and \
+                            not _pressings_value(k, before[k], pick):
+                        gone.append(k)
+            pol = getattr(self.profile, "policy", None)
+            gone = [k for k in dict.fromkeys(gone) if not (pol and pol(k) in ("preserve", "lock"))]
+            if gone:
+                out_[str(f)] = gone
+        return out_
+
     def _restore_own(self, files, clash, facts, pick, side, first=()) -> dict:
         """TAG-3 / REP-1: {file: {field: value before TagMender}} for the pressing fields
         TagMender's own earlier job wrote of the pressing that clashes, still holding what it left
@@ -2179,8 +2246,15 @@ class Engine:
                 now = tagio.read(f)
             except Exception:
                 continue
-            mb_lost = losing_id("musicbrainz_albumid", (w.get("musicbrainz_albumid") or ((), ()))[1])
-            dg_lost = losing_id("discogs_release_id", (w.get("discogs_release_id") or ((), ()))[1])
+            def wrote(field):
+                b_, a_ = w.get(field) or ((), ())
+                return a_ if tuple(b_) != tuple(a_) else ()     # (kept as it was: not this job's)
+            mb_lost = losing_id("musicbrainz_albumid", wrote("musicbrainz_albumid"))
+            # (the Discogs fields a job wrote are those of the release its discogs_uri names - the
+            # pick's twin's, beside another tagger's Discogs ID it kept, are not the losing one's)
+            uri = [m for v in wrote("discogs_uri") for m in re.findall(r"/release/(\d+)", str(v))]
+            dg_lost = losing_id("discogs_release_id", wrote("discogs_release_id")) if not uri else \
+                losing_id("discogs_release_id", uri)
             back = {}
             for k, (b, a) in w.items():
                 if tuple(b) == tuple(a) or not ma._same_values(now.get(k) or [], a):
@@ -2207,17 +2281,37 @@ class Engine:
         """TAG-3: what of your copy proves the pick over the release your files' ID names, or
         "". Never with Extra-Careful Matching, never a pick a guess made (country order,
         original date: TIE-1). Your scans printing its barcode, proven with nothing against it,
-        prove it whatever the lengths say (BAR-1, BAR-7). A catalogue number on the scans, your
-        own number (own_number) or your disc ID (TOC-1, the disc ID choosing it) only as FIL-1
-        has them, every track length agreeing - and a number only when it is
-        not on the other release too (one every pressing carries proves none of them)."""
+        prove it whatever the lengths say (BAR-1, BAR-7); so does a matrix read off your copy that
+        the pick or its twin lists (R9), and, for a vinyl rip (its lengths never compared), its
+        catalogue number printed on your copy when no other scored pressing carries it. A
+        catalogue number on the scans, your own number (own_number) or your disc ID (TOC-1, the
+        disc ID choosing it) otherwise only as FIL-1 has them, every track length agreeing - and
+        a number only when it is not on the other release too (one every pressing carries
+        proves none of them)."""
         if (self.profile.get("matching") or {}).get("extra_careful") or getattr(p, "guessed_pick", False):
             return ""
         sc = (out or {}).get("scans") or {}
         clean = bool(sc.get("printed") and sc.get("state") == "proven" and not sc.get("against"))
         found = set(sc.get("found") or ())
+        best = (out or {}).get("best") or {}
+        view = (out or {}).get("release_ids") or {}
         if clean and "barcode" in found:
             return "your scans show its barcode"
+        own_matrix = set(view.get("matrix") or ()) - {k for i in clashing for k in i.get("matrices") or ()}
+        # (a release your files name that could not be looked up may list the same matrix: no proof)
+        if own_matrix and not any(i.get("unknown") for i in clashing) and sc.get("state") != "differs" and not sc.get("against"):
+            # (R9: a matrix of the pick or its twin read WHOLE on your copy's print - its label, its
+            # runout; never notes typed by someone - that neither the release your files name nor
+            # any other pressing scored lists, with nothing on your scans against the pick, names
+            # the pressing itself; lengths say nothing more)
+            return "your copy's matrix is this release's"
+        if best.get("vinyl_rip") and sc.get("state") == "proven" and not sc.get("against") and \
+                "catalogue_number" in found and (sc.get("printed") or best.get("catno_on_copy")) and \
+                not view.get("number_rivals") and not any(i.get("unknown") or i.get("shares_number")
+                                                          for i in clashing):
+            # (a vinyl rip's lengths are never compared, so FIL-1's every length cannot be asked: its
+            # catalogue number printed on your copy, on the pick and on no other pressing scored)
+            return "your copy's catalogue number is printed on it and on no other pressing"
         if not getattr(p, "all_lengths", False):
             return ""
         # (a release the matcher did not score: whether it carries the number is not known)
@@ -3793,6 +3887,20 @@ def _pressings_differ(pick, other, side, mb_links, discs=None) -> list:
         if w:
             why.append(w)
     return why
+
+
+def _printed_on_copy(facts, text) -> bool:
+    """TAG-3: one of this release's own numbers stands in your copy's print - a distinctive
+    catalogue number by containment in the folded text, however spaced ("20 21276-9"), as the
+    pick's are matched (pressing_clues); a barcode printed as one number (barcode_printed)."""
+    if not text:
+        return False
+    hay = mc.norm_code(text)
+    for c in facts.get("catnos") or ():
+        digits = re.sub(r"\D", "", c)
+        if ((len(c) >= 4 and re.search(r"[a-z]", c) and digits) or len(digits) >= 6) and c in hay:
+            return True
+    return any(mc.barcode_printed(text, b) for b in facts.get("barcodes") or ())
 
 
 def _catnos_agree(a, b) -> bool:

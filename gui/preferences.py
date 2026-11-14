@@ -62,7 +62,7 @@ KEYS = {"discogs": (N_("Discogs token"), N_("Lets TagMender look albums up on Di
         "gnudb": (N_("gnudb e-mail"), N_("The e-mail you registered at gnudb.org, for disc lookups (optional)")),
         "mojeek": (N_("Mojeek key"), N_("Mojeek Search API: mojeek.com/services/search/web-search-api (optional)")),
         "marginalia": (N_("Marginalia key"), N_("Web search; without a key the shared public key is used (optional)")),
-        "tavily": (N_("Tavily key"), N_("A paid AI search, used only when a profile lists tavily (optional)")),
+        "tavily": (N_("Tavily key"), N_("A paid search service, used only when a profile lists tavily (optional)")),
         "mb_client_id": (N_("Client ID"),
                          N_("Of your own MusicBrainz application (step 1 above)")),
         "mb_client_secret": (N_("Client secret"), N_("Of the same application")),
@@ -74,13 +74,13 @@ KEYS = {"discogs": (N_("Discogs token"), N_("Lets TagMender look albums up on Di
                              "This is not the application key under Keys."))}
 KEYS.update({
     "image_api_key": (N_("Image service key"),
-                      N_("For AI covers (Album › Artwork › Find Covers…): the API key of your own image "
-                         "service, such as an OpenAI key from platform.openai.com/api-keys. Each cover "
+                      N_("For generated covers (Album › Artwork › Find Covers…): the API key of your own image "
+                         "generation service. Each cover "
                          "made is a request it may charge for; nothing is sent until you confirm.")),
     "image_api_url": (N_("Image service address"),
-                      N_("Leave empty for OpenAI (https://api.openai.com/v1), or give another service that "
+                      N_("Leave empty for the built-in default address, or give another service that "
                          "speaks the same images API.")),
-    "image_model": (N_("Image model"), N_("Leave empty for gpt-image-1."))})
+    "image_model": (N_("Image model"), N_("Leave empty for the built-in default model."))})
 # the keys entered on the Account pane, not under Keys (yours, not a provider's)
 ACCOUNT_KEYS = ("mb_client_id", "mb_client_secret", "acoustid_user")
 SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the environment"),
@@ -89,7 +89,7 @@ SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the en
 KEY_GROUPS = ((N_("Identification"), ("discogs", "acoustid", "gnudb")),
               (N_("Covers and artist photos"), ("fanart", "audiodb", "lastfm")),
               (N_("Web search (optional)"), ("mojeek", "marginalia", "tavily")),
-              (N_("AI covers (optional)"), ("image_api_key", "image_api_url", "image_model")))
+              (N_("Generated covers (optional)"), ("image_api_key", "image_api_url", "image_model")))
 # a check's state as every status in the app says it: icon, STATUS colour key and word
 CHECK_STATE = {"ok": ("circle-check", "done", N_("OK")), "warn": ("circle-alert", "unresolved", N_("Needs a look")),
                "fail": ("circle-x", "failed", N_("Problem"))}

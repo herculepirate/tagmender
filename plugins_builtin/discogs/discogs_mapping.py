@@ -173,10 +173,14 @@ COMPANY_ROLE_TO_SLUG = {
 def extract_credits(extraartists: list[dict]) -> dict[str, list[str]]:
     """Map Discogs extraartists credits onto Picard tags.
 
-    Per explicit instruction, track-scoped credits are imported the same
-    as release-wide ones (i.e. the `tracks` field on each credit is
-    ignored) — a credit that only applied to a few tracks may end up
-    attributed to the whole album. A Discogs role string can itself list
+    CRD-1: a credit that names the tracks it applies to (its `tracks`
+    field: "CD1-5, CD2-5", "A1 to A3") is written only on those tracks;
+    one without `tracks` is album-wide; one whose track list cannot be
+    matched to the release's tracks is left off, never spread to every
+    track. This function maps whatever credits it is given:
+    extract_discogs_fields() passes the album-wide ones only
+    (split_scoped_credits), and the scoped ones are mapped per track by
+    the caller (credit_track_positions). A Discogs role string can itself list
     several roles ("Producer, Written-By") and is split on commas — but
     only OUTSIDE any "[...]" qualifier, since those can contain their own
     commas (e.g. "Engineer [Brooklyn, NY]", "Guitar [Rhythm, Lead]").
@@ -220,6 +224,115 @@ def extract_credits(extraartists: list[dict]) -> dict[str, list[str]]:
             else:
                 out[tag].append(name)
     return out
+
+
+# ---------------------------------------------------------------------------
+# CRD-1: credits scoped to tracks
+# ---------------------------------------------------------------------------
+
+def split_scoped_credits(extraartists: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(album-wide credits, credits naming their tracks) of a release's
+    extraartists. A credit is scoped when its `tracks` field is not blank."""
+    wide, scoped = [], []
+    for credit in extraartists or []:
+        if not isinstance(credit, dict):
+            continue
+        (scoped if str(credit.get('tracks') or '').strip() else wide).append(credit)
+    return wide, scoped
+
+
+def normalize_position(position) -> str:
+    """A Discogs track position compared without case, spaces or leading
+    zeros ("CD1-05" and "cd1-5" are one position)."""
+    text = re.sub(r'\s+', '', str(position or '')).casefold()
+    return re.sub(r'(?<!\d)0+(?=\d)', '', text)
+
+
+def release_positions(tracklist) -> list[str]:
+    """Every position of a Discogs tracklist in release order, normalized:
+    tracks, index entries and their sub-tracks (a credit can name a
+    movement: "CD6-3a to CD6-3g"). Headings and blank positions are left out."""
+    out: list[str] = []
+    for entry in tracklist or []:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get('type_') or entry.get('type') or 'track').strip().casefold()
+        if kind != 'heading':
+            pos = normalize_position(entry.get('position'))
+            if pos:
+                out.append(pos)
+        out.extend(release_positions(entry.get('sub_tracks')))
+    return out
+
+
+_RANGE_WORD = re.compile(r'\s+to\s+|\s*[\u2013\u2014]\s*', re.I)
+_POSITION_TAIL = re.compile(r'\d+[a-z]?$')
+_MOVEMENT_TAIL = re.compile(r'^(?:[.\-][ivxlc]+|\.?[a-z])$')
+
+
+def _span(pos: str, index: dict, positions: list[str]) -> tuple[int, int] | None:
+    """Where POS lies in the release, as (first, last) index: the position
+    itself, or the movements listed under it when the release lists the work
+    by its movements only ("BD2-19" over "BD2-19a", "BD2-19b")."""
+    if pos in index:
+        return index[pos], index[pos]
+    if not pos or not pos[-1].isdigit():
+        return None
+    parts = [i for i, p in enumerate(positions)
+             if p.startswith(pos) and _MOVEMENT_TAIL.match(p[len(pos):])]
+    return (parts[0], parts[-1]) if parts else None
+
+
+def _range_end(left: str, right: str, index: dict, positions: list[str]) -> tuple[int, int] | None:
+    """The range's last position: RIGHT itself, or RIGHT on LEFT's medium
+    when it gives the track number only ("A1 to 3", "CD1-1 to 5")."""
+    tail = _POSITION_TAIL.search(left)
+    if tail and tail.start() and re.fullmatch(r'\d+[a-z]?', right):
+        found = _span(left[:tail.start()] + right, index, positions)
+        if found:
+            return found
+    return _span(right, index, positions)
+
+
+def credit_track_positions(spec, positions: list[str]) -> list[str] | None:
+    """CRD-1: the release positions a credit's `tracks` text names, or None
+    when any part of it names no position of the release (the credit is
+    then left off). POSITIONS: release_positions() of the release.
+
+    Parts are separated by commas (or ";" / "&"). A part is one position
+    ("CD1-5", "A3", "5") or a range, in release order, between two of them:
+    "A1 to A3", "CD1-1 to CD9-15", "A1\u2013A3", "1-3" (a hyphen is a range only
+    where the part is no position itself: "CD1-5" is disc 1's track 5). A
+    position naming a work the release lists by its movements names them."""
+    positions = list(positions or [])
+    index: dict[str, int] = {}
+    for i, pos in enumerate(positions):
+        index.setdefault(pos, i)
+    out: list[str] = []
+    parts = [p for p in re.split(r'\s*[,;&]\s*', str(spec or '')) if p.strip()]
+    if not parts:
+        return None
+    for part in parts:
+        whole = normalize_position(part)
+        one = _span(whole, index, positions)
+        if one:
+            out.extend(positions[one[0]:one[1] + 1])
+            continue
+        first = last = None
+        pieces = _RANGE_WORD.split(part.strip())
+        if len(pieces) == 2:
+            left, right = normalize_position(pieces[0]), normalize_position(pieces[1])
+            first, last = _span(left, index, positions), _range_end(left, right, index, positions)
+        else:
+            for m in re.finditer('-', whole):
+                left, right = whole[:m.start()], whole[m.end():]
+                first, last = _span(left, index, positions), _range_end(left, right, index, positions)
+                if first and last:
+                    break
+        if not first or not last or last[1] < first[0]:
+            return None
+        out.extend(positions[first[0]:last[1] + 1])
+    return list(dict.fromkeys(out))
 
 
 def extract_company_credits(companies: list[dict]) -> dict[str, list[str]]:
@@ -790,7 +903,8 @@ def extract_discogs_fields(release: dict[str, Any]) -> dict[str, str | list[str]
         # options page, since it can be noisy.
         out['discogs_notes'] = notes.strip()
 
-    out.update(extract_credits(release.get('extraartists', [])))
+    # CRD-1: album-wide credits only; credits naming their tracks go on those tracks
+    out.update(extract_credits(split_scoped_credits(release.get('extraartists', []))[0]))
     out.update(extract_company_credits(release.get('companies', [])))
     out.update(extract_remaining_release_fields(release))
 

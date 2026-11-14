@@ -109,9 +109,9 @@ def not_ready() -> str:
     """What is missing to make AI covers ("" when ready)."""
     try:
         if not service()["key"]:
-            return "an image service key (Preferences › Keys › AI covers)"
+            return "an image service key (Preferences › Keys › Generated covers)"
     except (CoverAIError, KeyError):
-        return "an image service key (Preferences › Keys › AI covers)"
+        return "an image service key (Preferences › Keys › Generated covers)"
     return ""
 
 
@@ -237,7 +237,7 @@ def generate(prompt: str, refs: list[bytes]) -> bytes:
     generations endpoint."""
     s = service()
     if not s["key"]:
-        raise CoverAIError("no image service key is set up (Preferences › Keys › AI covers)")
+        raise CoverAIError("no image service key is set up (Preferences › Keys › Generated covers)")
     head = {"Authorization": f"Bearer {s['key']}"}
     if refs:
         body, ctype = _multipart({"model": s["model"], "prompt": prompt, "size": SIZE, "n": "1"}, refs)

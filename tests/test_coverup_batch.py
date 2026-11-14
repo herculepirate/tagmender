@@ -591,7 +591,7 @@ class Generate(Base):
         audio(self.album / "01.flac", title="One", track=1)
         o = self.run_album(s=self.settings(ai_backend="none"))
         self.assertEqual(o["status"], "nothing")
-        self.assertIn("no AI service", o["note"])
+        self.assertIn("no image generation service", o["note"])
         self.assertFalse((self.album / "covers").exists())
 
     def test_band_font_in_artist_folder_is_used(self):

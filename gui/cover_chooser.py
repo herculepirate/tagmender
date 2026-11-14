@@ -60,8 +60,8 @@ class CoverChooser(QDialog):
         self.more.setAutoDefault(False)
         self.more.clicked.connect(self.search)
         row.addWidget(self.more)
-        self.ai = QPushButton(tr("Make AI Covers…"))
-        self.ai.setAccessibleName(tr("Make covers with your AI image service"))
+        self.ai = QPushButton(tr("Make Covers…"))
+        self.ai.setAccessibleName(tr("Make covers with your image generation service"))
         self.ai.setAutoDefault(False)
         self.ai.clicked.connect(self.make_ai)
         row.addWidget(self.ai)
@@ -161,11 +161,10 @@ class CoverChooser(QDialog):
 
     def make_ai(self):
         if getattr(self, "ai_missing", ""):
-            ans = sheets.ask(self, tr("AI covers need an image service"),
-                             tr("AI covers are made by an image service of your own, such as OpenAI's "
-                                "(platform.openai.com/api-keys): paste its key under Preferences › Keys › AI "
-                                "covers. Each cover is a request it may charge for. A Tavily key (Keys › Web "
-                                "search) adds the Creative and Art presets, which need reference images."),
+            ans = sheets.ask(self, tr("Generated covers need an image service"),
+                             tr("Generated covers are made by an image generation service of your own: paste its key "
+                                "under Preferences › Keys › Generated covers. Each cover is a request it may "
+                                "charge for. A Tavily key (Keys › Web search) adds the Creative and Art presets, which need reference images."),
                              buttons=(tr("Cancel"), tr("Open Preferences")), default=tr("Open Preferences"))
             if ans == tr("Open Preferences"):
                 win = self.inspector.window()
@@ -181,7 +180,7 @@ class CoverChooser(QDialog):
         own = [c for c in self.choices if c.kind == "own"]
         plan = covers_ai.plan(self.album, artist, title, own)
         body = "<ul>" + "".join(f"<li>{tr(p['preset_name'])}: {tr(p['what'])}</li>" for p in plan) + "</ul>"
-        if not sheets.confirm(self, tr("Make {0} AI covers?").format(len(plan)),
+        if not sheets.confirm(self, tr("Make {0} covers?").format(len(plan)),
                               tr("<p>Each is a request to your image service, which may charge for it:</p>") + body,
                               tr("The covers are only shown here; one is used only when you pick it."),
                               tr("Make Covers")):
@@ -259,7 +258,7 @@ class CoverChooser(QDialog):
         c = self.chosen()
         if c is None:
             return
-        label = c.source if c.kind != "ai" else tr("AI cover ({0})").format(c.source)
+        label = c.source if c.kind != "ai" else tr("Generated cover ({0})").format(c.source)
         # (an AI cover carries CoverUp's "generated" mark in its JPEG comment: a real one replaces it later)
         self.inspector._fetch(label, c.full, f"chosen:{c.kind}:{c.source}")
         self.accept()

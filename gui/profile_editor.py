@@ -72,7 +72,7 @@ DETAIL_CHOICES = ((True, N_("On")), (False, N_("Off")), ("audiophile", N_("At th
                   ("tagger", N_("Same as my existing tagger")))
 WEB_SOURCE_WORDS = {"deezer": N_("Deezer"), "itunes": N_("Apple (iTunes)"), "bandcamp": N_("Bandcamp"),
                     "wikipedia": N_("Wikipedia")}
-ENGINE_WORDS = {"mojeek": N_("Mojeek"), "marginalia": N_("Marginalia"), "tavily": N_("Tavily (paid AI search)")}
+ENGINE_WORDS = {"mojeek": N_("Mojeek"), "marginalia": N_("Marginalia"), "tavily": N_("Tavily (paid search service)")}
 FORMAT_WORDS = {f: f.upper() for f in pf.LOSSLESS + pf.LOSSY}
 CHOOSE = "__choose__"                                     # a pop-up's "Choose…": opens a list sheet
 
@@ -1085,10 +1085,10 @@ SETTINGS = [
     S("artwork.generate", N_("Make a cover when none is found"), "popup", "art_adv", attr="art_gen",
       choices=(("off", N_("Never: leave the album without one")),
                ("template", N_("Draw one with the artist and album name (on this computer)")),
-               ("ai", N_("Ask the AI image service you set up in CoverUp")),
+               ("ai", N_("Ask the image generation service you set up in CoverUp")),
                ("auto", N_("Try both, in the order set in CoverUp"))), enable=_needs_art,
       foot=N_("A last resort when no source has a cover. A made cover never replaces a real one, and "
-              "nothing is sent anywhere unless you set up an AI service yourself.")),
+              "nothing is sent anywhere unless you set up an image generation service yourself.")),
     S("artwork.min_px", N_("Smallest cover size"), "popup", "art_adv",
       choices=tuple((n, f"{n} px") for n in (500, 600, 1000, 1200)), enable=_needs_art,
       foot=N_("Measured on the short side. A cover found smaller than this is not used.")),

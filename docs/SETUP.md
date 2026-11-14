@@ -366,26 +366,26 @@ notices don't appear. How the engines are chained, and their monthly caps, are i
 |---|---|---|---|
 | Mojeek | `mojeek` · `TAGMENDER_MOJEEK_KEY` · `mojeek_key` | A Search API key from <https://www.mojeek.com/services/search/web-search-api/> | "Web search (mojeek) is off: no Mojeek API key. Add one in Setup (get it at https://www.mojeek.com/services/search/web-search-api/)." |
 | Marginalia | `marginalia` · `TAGMENDER_MARGINALIA_KEY` · `marginalia_key` | An API key from <https://about.marginalia-search.com/article/api/>. Without one, the shared public key is used, which is often busy | "Marginalia uses its shared key: no Marginalia API key. Add one in Setup for searches of your own (get it at https://about.marginalia-search.com/article/api/)." |
-| Tavily | `tavily` · `TAVILY_API_KEY` · `tavily_key` | An API key from <https://tavily.com>. Tavily is a paid AI search. It is used only when a profile names it, and never alone | "Web search (tavily) is off: no Tavily API key. Add one in Setup (get it at https://tavily.com)." |
+| Tavily | `tavily` · `TAVILY_API_KEY` · `tavily_key` | An API key from <https://tavily.com>. Tavily is a paid search service. It is used only when a profile names it, and never alone | "Web search (tavily) is off: no Tavily API key. Add one in Setup (get it at https://tavily.com)." |
 
 When an engine is not set up, the search goes to the next engine the profile lists.
 
-### AI covers (optional)
+### Generated covers (optional)
 
 Album › Artwork › Find Covers… shows every cover for an album: your own pictures, what the cover
-sources find, and, with an image service set up, **Make AI Covers…**. Four presets: *Faithful*
+sources find, and, with an image service set up, **Make Covers…**. Four presets: *Faithful*
 (restores your own small cover), *Creative* (a new cover in the artist's style), *Art* (a fan-art
 take) and *Era* (a cover in the style of the album's year and genre). The covers are made by your
-own OpenAI-compatible image service; Tavily, when set up, only finds the reference images Creative
+own image generation service; Tavily, when set up, only finds the reference images Creative
 and Art need. Each cover made is a request your service may charge for, and nothing is sent until
 the sheet listing them is confirmed. A made cover is marked as generated, so a real cover found
 later replaces it.
 
 | Key | Setup name · Variable · File | Get it |
 |---|---|---|
-| Image service key | `image_api_key` · `TAGMENDER_IMAGE_API_KEY` · `image_api_key` | An API key from <https://platform.openai.com/api-keys>, or from another service with the same images API |
-| Image service address | `image_api_url` · `TAGMENDER_IMAGE_API_URL` · `image_api_url` | Empty for OpenAI; another compatible service's address otherwise |
-| Image model | `image_model` · `TAGMENDER_IMAGE_MODEL` · `image_model` | Empty for gpt-image-1 |
+| Image service key | `image_api_key` · `TAGMENDER_IMAGE_API_KEY` · `image_api_key` | An API key from your image generation service (one that offers a standard images API) |
+| Image service address | `image_api_url` · `TAGMENDER_IMAGE_API_URL` · `image_api_url` | Empty for the built-in default address; another compatible service's address otherwise |
+| Image model | `image_model` · `TAGMENDER_IMAGE_MODEL` · `image_model` | Empty for the built-in default model |
 
 ### Programs and modules
 

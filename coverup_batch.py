@@ -757,11 +757,11 @@ def generation_plan(res, info, args, hamming_threshold):
     if best and best[1] >= floor:
         return None                               # a usable cover exists; enlarging handles it
     if best:
-        return {"ref": best[2], "kind": "rebuild", "describe": f"AI rebuild of the tiny {best[3]} cover"}
+        return {"ref": best[2], "kind": "rebuild", "describe": f"Generated rebuild of the tiny {best[3]} cover"}
     style = sibling_style_reference(info["dir"], info.get("year"))
     if style:
-        return {"ref": style[0], "kind": "style", "describe": f"AI cover in the style of {style[1]}"}
-    return {"ref": None, "kind": "new", "describe": "AI cover from the album details"}
+        return {"ref": style[0], "kind": "style", "describe": f"Generated cover in the style of {style[1]}"}
+    return {"ref": None, "kind": "new", "describe": "Generated cover from the album details"}
 
 
 def _square_jpeg(data, size):
@@ -820,11 +820,11 @@ def make_generated(pipe, res, q, info, s, args, g):
             if method == "ai":
                 backend = ai.make_backend(s["ai_backend"], pipe.http, s)
                 if backend is None:
-                    notes.append("no AI service set in CoverUp's options")
+                    notes.append("no image generation service set in CoverUp's options")
                     continue
                 remote = ai.is_remote(backend.url)
                 if remote and ai.host_of(backend.url) not in (s["ai_consented_hosts"] or []):
-                    notes.append(f"AI service {ai.host_of(backend.url)} not approved in CoverUp")
+                    notes.append(f"Image generation service {ai.host_of(backend.url)} not approved in CoverUp")
                     continue
                 size = int(s["ai_size"] or 1024)
                 ref, strength = g["ref"], (args.gen_ref_strength if g["kind"] == "rebuild" else args.gen_style_strength)
@@ -839,7 +839,7 @@ def make_generated(pipe, res, q, info, s, args, g):
                                     _square_jpeg(ref, size) if ref else None, strength)
                 imgs = backend.generate(req)
                 if not imgs:
-                    notes.append("AI returned no image")
+                    notes.append("the image generation service returned no image")
                     continue
                 bg = Image.open(io.BytesIO(imgs[0]))
                 bg.load()
@@ -1094,14 +1094,14 @@ def main():
     ap.add_argument("--no-generate", dest="generate", action="store_false",
                     help="never generate covers (default: generate for albums with no usable front)")
     ap.add_argument("--allow-template", action="store_true",
-                    help="also use CoverUp's offline template covers when AI is unavailable")
+                    help="also use CoverUp's offline template covers when image generation is unavailable")
     ap.add_argument("--title-font", help="one font file for every generated cover (a .ttf/.otf in the artist folder wins)")
     ap.add_argument("--fonts-dir", default=str(Path(__file__).resolve().parent / "coverup_fonts"),
                     help="folder of the bundled cover fonts")
     ap.add_argument("--gen-ref-strength", type=float, default=0.4,
-                    help="AI change allowed when rebuilding a tiny cover (0-1, lower = closer)")
+                    help="change allowed when rebuilding a tiny cover (0-1, lower = closer)")
     ap.add_argument("--gen-style-strength", type=float, default=0.7,
-                    help="AI change allowed from the band's other cover used as style (0-1)")
+                    help="change allowed from the band's other cover used as style (0-1)")
     ap.add_argument("--coverup-dir", default=DEFAULT_COVERUP)
     ap.add_argument("--tagger-ini", dest="picard_ini", metavar="PATH", default=DEFAULT_INI,
                     help="your tagger settings file, where CoverUp's settings are (default: found automatically)")

@@ -39,7 +39,7 @@ def auto_creative(pipeline, res, settings, template_dirs=()) -> tuple[Candidate 
                 notes.append("no fan art")
             elif method in ("ai", "template"):
                 if method == "ai" and settings["ai_backend"] == "none":
-                    notes.append("no AI backend configured")
+                    notes.append("no image generation service configured")
                     continue
                 logo = pick_logo(res, settings) if settings["creative_overlay_logo"] else None
                 opts = CreativeOptions(
@@ -57,7 +57,7 @@ def auto_creative(pipeline, res, settings, template_dirs=()) -> tuple[Candidate 
                 if made:
                     return made[0], f"{why}; generated ({made[0].extra.get('method')}, style {opts.template.name})"
         except ConsentRequired as exc:
-            notes.append(f"AI service {exc.host} not yet approved (generate once from the dialog to approve)")
+            notes.append(f"Image generation service {exc.host} not yet approved (generate once from the dialog to approve)")
         except Exception as exc:  # creative art must never break a batch
             log.warning("Creative method %s failed: %s", method, exc)
             notes.append(f"{method} failed: {exc}")

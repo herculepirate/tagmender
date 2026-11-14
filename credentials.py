@@ -51,15 +51,15 @@ LABELS = {"discogs": "Discogs personal access token (discogs.com/settings/develo
           "gnudb": "gnudb.org registered e-mail, for disc lookups (gnudb.org; optional)",
           "mojeek": "Mojeek Search API key (mojeek.com/services/search/web-search-api; optional)",
           "marginalia": "Marginalia Search API key (optional; without one the shared \"public\" key)",
-          "tavily": "Tavily API key (a paid AI search; optional, used only when a profile lists tavily)",
+          "tavily": "Tavily API key (a paid search service; optional, used only when a profile lists tavily)",
           "mb_client_id": "MusicBrainz application client ID (musicbrainz.org/account/applications, "
                           "an \"Installed application\"; optional, for collections and ratings)",
           "mb_client_secret": "MusicBrainz application client secret (the same application; optional)",
           "acoustid_user": "AcoustID user key, for sending fingerprints (acoustid.org/api-key; "
                            "not the application key; optional)",
-          "image_api_key": "API key of your AI image service, for AI covers (an OpenAI-compatible one; optional)",
-          "image_api_url": "address of your AI image service (default https://api.openai.com/v1; optional)",
-          "image_model": "the image model to use (default gpt-image-1; optional)"}
+          "image_api_key": "API key of your image generation service, for generated covers (one with a standard images API; optional)",
+          "image_api_url": "address of your image generation service (empty for the built-in default; optional)",
+          "image_model": "the image model to use (empty for the built-in default; optional)"}
 
 
 class CredentialError(RuntimeError):

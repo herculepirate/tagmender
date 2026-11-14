@@ -26,7 +26,7 @@ each key comes from, never the key.
 | Last.fm (CoverUp) | `lastfm` | `TAGMENDER_LASTFM_KEY` | `lastfm_key` |
 | Mojeek (web search) | `mojeek` | `TAGMENDER_MOJEEK_KEY` | `mojeek_key` |
 | Marginalia (web search; else the shared `public` key) | `marginalia` | `TAGMENDER_MARGINALIA_KEY` | `marginalia_key` |
-| Tavily (web search; a paid AI search) | `tavily` | `TAVILY_API_KEY` | `tavily_key` |
+| Tavily (web search; a paid search service) | `tavily` | `TAVILY_API_KEY` | `tavily_key` |
 
 CoverUp uses its keys only where its own options, in settings imported from an existing tagger
 installation, have none.
@@ -68,8 +68,8 @@ gnudb, CTDB. A general web search is off unless a profile lists engines
 With one set up, an album nothing else established is also searched once by its artist and title, as
 the last search (WEB-2 in MATCHING_RULES.md): only MusicBrainz, Discogs and Bandcamp album links in
 the results are used, each checked against your files like any other match. Marginalia's shared
-"public" key has a daily limit for everyone; a key of your own (free, on request) is more reliable. No AI
-search engine is used by default, and no search page is scraped: DuckDuckGo's HTML page answered with
+"public" key has a daily limit for everyone; a key of your own (free, on request) is more reliable. No paid
+search service is used by default, and no search page is scraped: DuckDuckGo's HTML page answered with
 its bot check 480 times in 480, and web search decided none of 819 picks (measured 2026-10-31).
 
 **A chain, tried in order.** `engines` is a list; each search goes to the first engine, and an
@@ -79,8 +79,8 @@ hands over to the next. The first answer that links a release ends the search. T
 `[]`: no engine and no request. The older `"engine": "mojeek"` (and `"search": "mojeek"`) still
 works as a one-item list.
 
-**Tavily is never the only engine** (user decision 2026-10-31: Tavily, an AI search, is kept only
-while free, non-AI search APIs back it up). When the chain names `tavily` and neither
+**Tavily is never the only engine** (user decision 2026-10-31: Tavily, a paid search service, is kept only
+while free search APIs back it up). When the chain names `tavily` and neither
 `mojeek` nor `marginalia`, `marginalia` is added at its end automatically, with `marginalia_key` when
 set, else the shared `public` key. `tagmender doctor` says when it was added.
 
@@ -88,7 +88,7 @@ set, else the shared `public` key. `tagmender doctor` says when it was added.
 |---|---|---|---|
 | `mojeek` | `mojeek_key` | `GET https://www.mojeek.com/search?fmt=json&api_key=..&q=..` | 1000 |
 | `marginalia` | `marginalia_key`, else the shared key `public` | `GET https://api2.marginalia-search.com/search?query=..` with an `API-Key` header | 500 |
-| `tavily` | `tavily_key` (a paid AI search; only when listed by name, and never alone: Marginalia is added after it) | `POST https://api.tavily.com/search` | 1000 |
+| `tavily` | `tavily_key` (a paid search service; only when listed by name, and never alone: Marginalia is added after it) | `POST https://api.tavily.com/search` | 1000 |
 
 What is searched: only for an album being investigated (still unsure, with scans), at most 3 codes,
 strongest first (barcodes decoded from the bars or printed whole, then catalogue numbers printed

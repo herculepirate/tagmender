@@ -1,5 +1,21 @@
 # Release notes
 
+## 0.8.60
+
+**Credits go on the tracks they are for (CRD-1)**
+- Discogs often limits a credit to some tracks ("Clare Torry - composer, tracks CD1-5, CD2-5,
+  CD3-4"). Such a credit is now written only on those tracks, not on every track of the album.
+  Position lists and ranges ("A1 to A3", "1-3, 5") are read; a work listed by its movements
+  covers them. A credit that names only discs you did not rip (a Blu-ray's chapters) is written
+  on no file, and one whose track list cannot be matched is left off rather than spread.
+- Credits for the whole release stay on every track, as before.
+- Where MusicBrainz names a track's composers, they are no longer replaced by a Discogs credit
+  meant for other tracks.
+
+**Plainer words**
+- Covers made by an image generation service are now called generated covers, and the setup
+  texts and guides describe your tagger settings without naming another program.
+
 ## 0.8.59
 
 **The right pressing of a box when two share a barcode (MED-16, CPT-1)**
@@ -1566,7 +1582,7 @@ Faster, with the same results: nothing about what is identified or written chang
 **Covers**
 - **Find Covers…** (Album › Artwork) shows your own pictures - including those in `Artwork/` and
   `Scans/` folders - and every cover found online, with its size and source, to pick one by eye.
-- **Make AI Covers…** makes covers from four presets (Faithful, Creative, Art, Era) with your own
+- **Make Covers…** makes covers from four presets (Faithful, Creative, Art, Era) with your own
   image service; their lettering is checked, and a real cover found later replaces them.
 - The album's own cover is also found in its picture folders, the largest front winning.
 - New profiles gather an album's pictures and scans into one `Artwork` folder.

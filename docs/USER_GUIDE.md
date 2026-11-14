@@ -54,7 +54,7 @@ database, gnudb.org and the Deezer and iTunes barcode lookups are asked, with th
 folder: tags, file names, folder names, rip logs and cue sheets (disc IDs), barcodes and catalogue
 numbers read from scans (OCR), links and codes left in tags, fingerprints. A general web search is
 **off by default**; a profile can list Mojeek or Marginalia, tried in order, and
-Tavily (a paid AI search) only when named and never alone. No search page is scraped.
+Tavily (a paid search service) only when named and never alone. No search page is scraped.
 
 **Uses the MusicBrainz tag mapping**, so files read the same in other taggers and players.
 File names come from TagMender scripts in the tagging script language ([scripting guide](SCRIPTING.md)), Discogs data and artwork
@@ -140,7 +140,7 @@ listed here have their own `-h`.
 | `mb_seed.py` | One page with a pre-filled MusicBrainz "Add release" form for every album tagged from Discogs or the web. | No |
 | `dupes_fp.py` | The same recording in different albums or libraries (MusicBrainz recording IDs, AcoustID with `--fingerprint`), with the copy to keep. | No — writes a CSV |
 | `health_report.py` | One HTML page per run: % tagged, matcher decisions, why albums wait, tagging runs. | No |
-| `coverup_batch.py` | Cover art in batch with CoverUp's own pipeline and your CoverUp settings: front, back and artist images, local hi-res scans first (an unfolded sleeve is cut to its front panel), online sources next, small images enlarged, and an AI-generated cover as a last resort for albums with no cover at all. | Writes image files and embeds the front, only with `--apply`; `--undo` restores |
+| `coverup_batch.py` | Cover art in batch with CoverUp's own pipeline and your CoverUp settings: front, back and artist images, local hi-res scans first (an unfolded sleeve is cut to its front panel), online sources next, small images enlarged, and a generated cover as a last resort for albums with no cover at all. | Writes image files and embeds the front, only with `--apply`; `--undo` restores |
 
 ## Matching rules worth knowing
 
@@ -224,14 +224,14 @@ Everything the folder holds is used as evidence, strongest first:
   scans that finds nothing is asked of MusicBrainz and Discogs again with its
   separators removed or added (`QDISS 0201 CDD`), O/0 and I/1 told apart, and
   through Discogs' free-text search, which reads notes and identifiers.
-- **Web search** (optional, off by default; no AI search engine and no
+- **Web search** (optional, off by default; no paid search service and no
   scraping): Mojeek or Marginalia, listed in a profile in
   the order to try them (`"web": {"search": {"engines": ["mojeek", "marginalia"]}}`;
   one that is not set up, fails, is at its cap or links no release hands over to
   the next), for at most 3 of an
   investigated album's strongest codes, never junk ones (`0000000000000`,
   fragments), with a monthly cap per engine (an engine that cannot be
-  reached uses none of it). Tavily, a paid AI search, only
+  reached uses none of it). Tavily, a paid search service, only
   when named, and never alone: Marginalia is added after it when no free
   engine is listed. Its key is entered with `tagmender setup` (or
   `--stdin mojeek`, `marginalia`, ...) or in the app's Preferences (Ctrl+,).

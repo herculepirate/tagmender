@@ -281,7 +281,7 @@ def web_search_checks() -> list[Check]:
             fix = fix or ("the cap is reached: this engine hands over to the next in the chain until next "
                           "month (providers.web.search.monthly_cap)")
         if engine == "tavily":
-            detail += " (a paid AI search)"
+            detail += " (a paid search service)"
         out.append(Check(f"web search {engine}", status, detail, fix))
     return out
 

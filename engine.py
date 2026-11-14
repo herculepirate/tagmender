@@ -1889,8 +1889,9 @@ class Engine:
                 if dparts:
                     album_f, tracks_f, dcount = dparts
                     track_i = tracks_f[i] if tracks_f else None
-                    dg_i = _as_tags({**album_f, **(track_i or {})})
-                    merged = enrich(merged, album_f, track_i, es, dcount, self.dm)
+                    album_i = with_track_credits(album_f, track_i)     # CRD-1: its own credits
+                    dg_i = _as_tags({**album_i, **(track_i or {})})
+                    merged = enrich(merged, album_i, track_i, es, dcount, self.dm)
                     where = {k: ("discogs" if dg_i.get(k) == v else "musicbrainz") for k, v in merged.items()}
             else:
                 dg_i = tags_dg[i]
@@ -5080,6 +5081,8 @@ def _flatten_raw(tracklist, parent_position=None):
                 out.extend(subs)
                 continue
         d = dict(e)
+        if parent_position is not None:
+            d["~own_position"] = e.get("position") or ""   # (a movement's own: CRD-1 credits can name it)
         d["position"] = parent_position if parent_position is not None else (e.get("position") or "")
         if parent_position == "" and ma._HYPHEN_DISC.match(str(e.get("position") or "")):
             d["position"] = str(e.get("position"))         # (TRK-3)
@@ -5210,6 +5213,49 @@ def barcode_digits(values):
     return (out[0] if out else "") if one and len(out) <= 1 else out
 
 
+def _credit_scope(det, dm):
+    """CRD-1: (the release's album-wide credits, [(credit, the normalized positions it names)]
+    for its credits that name their tracks). A credit whose track list cannot be matched to the
+    release's positions is left out - never spread to every track. None where the plugin cannot
+    read track lists (it then writes its credits as it always has)."""
+    if not hasattr(dm, "split_scoped_credits") or not isinstance(det, dict):
+        return None
+    wide, scoped = dm.split_scoped_credits(det.get("extraartists") or [])
+    positions = dm.release_positions(det.get("tracklist"))
+    named = []
+    for credit in scoped:
+        names = dm.credit_track_positions(credit.get("tracks"), positions)
+        if names:
+            named.append((credit, set(names)))
+    return wide, named
+
+
+def _track_credits(entry, scope, s, dm) -> dict:
+    """CRD-1: the credits naming this Discogs track (its position, its position within its
+    work, or one of its movements': "CD6-3a" names the work "CD6-3"), each tag with the
+    album-wide credits of that tag beside them, shaped as the album's fields are. {} when none
+    names it."""
+    if not scope or not scope[1]:
+        return {}
+    keys = {dm.normalize_position(entry.get(k)) for k in ("position", "~own_position")} - {""}
+    if not keys:
+        return {}
+    mine = [c for c, names in scope[1]
+            if keys & names or any(ma._movement_of(n, k) for n in names for k in keys)]
+    if not mine:
+        return {}
+    combined = dm.extract_credits(list(scope[0]) + mine)
+    own = {k: combined[k] for k in dm.extract_credits(mine) if k in combined}
+    return shape_fields(own, s, dm)
+
+
+def with_track_credits(album: dict, track) -> dict:
+    """CRD-1: a Discogs release's album fields with one track's own scoped credits (from
+    discogs_parts) in them - the fields that track is tagged with."""
+    extra = (track or {}).get("~credits") if isinstance(track, dict) else None
+    return {**album, **extra} if extra else album
+
+
 def discogs_parts(det, dm, http=None, s=None, whole_works=False):
     """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
     builds them: extract_discogs_fields shaped by the settings, then the master's original
@@ -5220,6 +5266,7 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
     import tagger_settings
     s = s or tagger_settings.enrichment()
     det = discogs_without_repeats(det, dm)
+    scope = _credit_scope(det, dm)              # (CRD-1: from the tracklist as listed, movements too)
     det = ma.discogs_one_track_movements(det, True) if whole_works else \
         ma.discogs_one_track_movements(det)                  # TRK-1: the plugin writes one track too
     album = shape_fields(dm.extract_discogs_fields(det), s, dm)
@@ -5253,6 +5300,9 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
         # release, which would give disc 2's first track number 11
         t.update(dm.extract_track_fields(entry, seen[disc], per_disc[disc]))
         t["discnumber"], t["totaldiscs"] = str(disc), str(total_discs)
+        credits = _track_credits(entry, scope, s, dm)
+        if credits:
+            t["~credits"] = credits
         tracks.append(t)
     # MED-15: each track's media is its own disc's format, never every format of the release
     # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
@@ -5574,7 +5624,7 @@ def discogs_only_tags(album: dict, tracks) -> list[dict]:
         return []
     out = []
     for t in tracks:
-        merged = dict(album)
+        merged = dict(with_track_credits(album, t))          # CRD-1: the track's own credits
         merged.update(t)
         merged.setdefault("artist", album.get("albumartist", ""))
         out.append(_as_tags(merged))

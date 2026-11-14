@@ -1,5 +1,16 @@
 # Release notes
 
+## 0.8.59
+
+**The right pressing of a box when two share a barcode (MED-16, CPT-1)**
+- Blu-ray chapters that Discogs numbers "BR-1", "BR-2" are no longer counted as tracks of your
+  CD rip, when the release lists a Blu-ray. Before, a box numbered that way looked like it had
+  extra tracks, and another country's pressing with the same barcode was picked instead. A
+  Blu-ray Audio keeps its tracks.
+- The MusicBrainz entry written beside a Discogs pick is the one that links that pick. An entry
+  that links another pressing comes after it, even when it carries your disc ID, and the
+  evidence now says so.
+
 ## 0.8.58
 
 **A set whose discs are different releases is stable after it is tagged (IDM-1)**

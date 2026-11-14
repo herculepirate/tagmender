@@ -2059,7 +2059,7 @@ def unofficial_settled(final, results, album, cfg, ocr_text=""):
     if best["cand"].get("source") == "discogs" and (mb_res or {}).get("scored"):
         twins = mb_twins(mb_res, out)
         if twins:
-            out["mb_twin"] = max(twins, key=lambda s: (_exact_toc(s), s["confidence"]))["cand"]["id"]
+            out["mb_twin"] = best_twin(twins, best["cand"])["cand"]["id"]
     return out
 
 
@@ -4917,6 +4917,28 @@ def mb_twins(mb_result, dg_result):
     return twins
 
 
+def best_twin(twins, dg):
+    """The MusicBrainz entry written beside the Discogs pick DG, of its twins (mb_twins): one
+    MusicBrainz does not say is another pressing first - a twin admitted only for your disc ID
+    while it links other Discogs releases loses to one that links the pick or none (Pink Floyd -
+    The Dark Side Of The Moon Immersion: your disc ID is on the GB 12fb801c, which links the
+    European 3142241; the CA 96a7097a links the pick, USA & Canada 3137117 - CPT-1); then the
+    release carrying your disc ID (Stygian Bough: the CD with the rip's disc ID, not the download
+    that shares its barcode), then the surest."""
+    return max(twins, key=lambda s: (not links_other_discogs(s["cand"], dg), _exact_toc(s), s["confidence"]))
+
+
+def twin_note(twins, chosen):
+    """CPT-1: in words, when the MusicBrainz entry carrying your disc ID was passed over because
+    it links another Discogs pressing (best_twin) - the disagreement shown, never hidden. None
+    when the twin chosen is the disc ID's own, or no twin carries it."""
+    toc = [s for s in twins if _exact_toc(s)]
+    if not toc or any(s is chosen for s in toc):
+        return None
+    return (f"your disc ID is on MusicBrainz {toc[0]['cand']['id']}, which links another Discogs pressing: "
+            f"MusicBrainz {chosen['cand']['id']}, which links this one, written instead")
+
+
 def _format_evidence(best):
     """What your copy shows about its format, on this pick: a format clue (hi-res audio,
     a shop, whole CD sectors, a rip log) or a disc ID."""
@@ -5308,13 +5330,21 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                     and overrule.get("status") == "auto" and not overrule.get("mb_twin"):
                 rest = [s for s in twins if s is not mb_best]
                 if rest:
-                    overrule = dict(overrule, mb_twin=max(rest, key=lambda s: (_exact_toc(s), s["confidence"]))
-                                    ["cand"]["id"])
+                    chosen = best_twin(rest, dg_result["best"]["cand"])
+                    overrule = dict(overrule, mb_twin=chosen["cand"]["id"])
+                    note = twin_note(rest, chosen)
+                    if note and overrule.get("best"):
+                        overrule["best"] = dict(overrule["best"],
+                                                notes=list(overrule["best"].get("notes") or []) + [note])
             return overrule
         if twins:
             # the release carrying your disc ID first (Stygian Bough: the CD with the
             # rip's disc ID, not the download that shares its barcode), then the surest
-            out["mb_twin"] = max(twins, key=lambda s: (_exact_toc(s), s["confidence"]))["cand"]["id"]
+            chosen = best_twin(twins, dg_result["best"]["cand"])
+            out["mb_twin"] = chosen["cand"]["id"]
+            note = twin_note(twins, chosen)
+            if note:
+                out["best"] = dict(out["best"], notes=list(out["best"].get("notes") or []) + [note])
         elif (mb_result and mb_result["status"] == "auto" and mb_best
               and not has_evidence(dg_result["best"], mb_best) and (has_evidence(mb_best, dg_result["best"])
                                                                          or countries)):

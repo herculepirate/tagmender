@@ -4712,17 +4712,38 @@ def drop_video_tracks(tracks, rel, boxed=True):
     # (Soft Machine - Slightly All The Time: 14 CDs and 3 Blu-rays of TV footage) - chapters,
     # never files of the CD rip, nor discs 1-3 of it. Kept where a video format says it holds
     # audio (a Blu-ray Audio, a DVD-Audio) and where nothing else would remain (MED-12)
-    audio_video = any(re.search(r"\b(?:dvd|bd|blu-?ray|hd-?dvd)\b", str(f.get("name") or ""), re.I)
-                      and re.search(r"audio", " ".join([str(f.get("name") or "")] +
-                                                         [str(d) for d in f.get("descriptions") or []]), re.I)
-                      for f in rel.get("formats") or [] if isinstance(f, dict))
+    audio_video = _audio_video(rel)
     # (BOXED false: the rows another tagger counted for its track total, chapters among them)
-    rest = [t for t in out if not _VIDEO_MEDIUM.match(str(t.get("position") or ""))]
+    rest = [t for t in out if not _video_medium(t.get("position"), rel)]
     return rest if boxed and rest and not audio_video else out
 
 
 # a position on a video disc of a box ("DVD1-3", "BD2-1"): a chapter, never an audio file
 _VIDEO_MEDIUM = re.compile(r"^\s*(?:dvd|bd|blu-?ray|hd-?dvd|vhs|video)\s*\d*\s*[-.]?\s*\d", re.I)
+# Discogs's other abbreviation of a Blu-ray's positions ("BR-1", "BR2-3"): read so only where
+# the release lists a Blu-ray (Pink Floyd - The Dark Side Of The Moon Immersion, USA & Canada
+# 3137117: its "BR-1".."BR-7" kept as audio tracks of the CD box, 43 for 36 files, while the
+# European 3142241's "BD-1-1".. were left out - so the pressing of your copy lost the tie)
+_BLURAY_POS = re.compile(r"^\s*br\s*\d*\s*[-.]?\s*\d", re.I)
+
+
+def _audio_video(rel) -> bool:
+    """MED-16: a video format of the release says it holds audio (a Blu-ray Audio, a DVD-Audio):
+    its positions ("BR-1", "DVD1-3") are audio tracks, never chapters."""
+    return any(re.search(r"\b(?:dvd|bd|blu-?ray|hd-?dvd)\b", str(f.get("name") or ""), re.I)
+               and re.search(r"audio", " ".join([str(f.get("name") or "")] +
+                                                [str(d) for d in f.get("descriptions") or []]), re.I)
+               for f in rel.get("formats") or [] if isinstance(f, dict))
+
+
+def _video_medium(position, rel) -> bool:
+    """MED-16: the position is on a video disc of the box ("DVD1-3", "BD2-1"; "BR-1" when the
+    release lists a Blu-ray)."""
+    pos = str(position or "")
+    if _VIDEO_MEDIUM.match(pos):
+        return True
+    return bool(_BLURAY_POS.match(pos)) and any(
+        re.search(r"blu-?ray", str(f.get("name") or ""), re.I) for f in rel.get("formats") or [] if isinstance(f, dict))
 
 
 # a vinyl or tape side: "A", "B2", "LP-C1", '10"-A1', "MC-B2" (Kreator - Gods Of Violence box)
@@ -4854,12 +4875,13 @@ def discogs_candidate(rel, dm, whole_works=False):
     tracks = []
     kinds = {mc.media_kind(f.get("name")) for f in rel.get("formats") or []} - {""}
     mixed_vinyl = bool(kinds & {"vinyl", "cassette"}) and bool(kinds & {"cd", "digital"})
+    audio_video = _audio_video(rel)                  # (MED-16: its "BR-1" are audio tracks, as listed)
     for t in flat:
         m = _POS_DISC.match(str(t["position"]))
         tracks.append({"disc": int(m.group(1)) if m else 1, "title": t["title"], "secs": t["secs"]})
         if "index" in t:
             tracks[-1]["index"] = t["index"]          # a sub-track of an index track
-        if _VIDEO_MEDIUM.match(str(t["position"])):
+        if not audio_video and _video_medium(t["position"], rel):
             tracks[-1]["video"] = True                # on a DVD or other video disc ("DVD1-3")
         if mixed_vinyl and _SIDE_POS.fullmatch(str(t["position"]).strip()):
             tracks[-1]["box_vinyl"] = True        # a 7" in a CD box: side A / B

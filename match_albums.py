@@ -1716,8 +1716,9 @@ def deluxe_sibling(album_dir):
     album_dir = Path(album_dir)
     rx = re.compile(re.escape(album_dir.name) + _DELUXE_DIR, re.I)
     try:
-        sib = next((d for d in sorted(album_dir.parent.iterdir()) if d.is_dir() and d != album_dir
-                    and rx.fullmatch(d.name)), None)
+        # (the name first: a stat for each sibling is slow in a large folder, once per album there)
+        sib = next((d for d in (album_dir.parent / n for n in sorted(
+            n for n in os.listdir(album_dir.parent) if rx.fullmatch(n))) if d != album_dir and d.is_dir()), None)
     except OSError:
         return None
     if sib is None:

@@ -1,5 +1,23 @@
 # Release notes
 
+## 0.8.62
+
+**Credits, more precisely (CRD-1)**
+- A credit whose track list is only partly right on Discogs (it names tracks the release does
+  not have) is now kept on the tracks it does name, rather than left off altogether. A range
+  that starts on a part of a work ("3a to 3k") stays within that work.
+- A credit for a video disc (Blu-ray or DVD authoring, a film or video director, editor or
+  producer) is no longer written on the files of a rip that has none of that disc. A credit that
+  also names an audio disc ("Mastered By [CD & DVD]") or a musical role ("Music By [Film]")
+  stays on every track.
+- Where MusicBrainz names a track's composers, lyricists or writers, those are written, and a
+  Discogs credit for the same track is added beside them under Combine, not instead of them.
+
+**Faster in a large flat folder**
+- Looking for an album's "(Deluxe Edition)" folder beside it now reads only the folder names,
+  instead of checking every entry of the folder above. In a library of many album folders side
+  by side, that was done once for each album.
+
 ## 0.8.61
 
 **Credits that no longer belong are taken off (REP-2)**

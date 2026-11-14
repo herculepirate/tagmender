@@ -85,7 +85,8 @@ class Positions(unittest.TestCase):
         self.assertEqual(DM.credit_track_positions("BD2-17 to BD2-19", pos), pos[:4])
 
     def test_CRD1_unmatched_lists_name_nothing(self):
-        for spec in ("Side C", "A1 to A9", "A3 to A1", "C1, A1", "", "  "):
+        # (CRD-1a: a list naming some positions keeps them - test_v0862_credit_refinements)
+        for spec in ("Side C", "A3 to A1", "C1, D1", "", "  "):
             self.assertIsNone(DM.credit_track_positions(spec, self.POS), spec)
 
 
@@ -109,7 +110,7 @@ class Scoped(unittest.TestCase):
         self.assertEqual([t.get("performer:bass") for t in out], [None] * 3 + [["Hugh Hopper"]] * 3)
 
     def test_CRD1_an_unmatched_track_list_is_left_off(self):
-        for spec in ("Bonus disc", "CD4-1", "CD1-1, CD9-9"):
+        for spec in ("Bonus disc", "CD4-1", "CD9-1, CD9-9"):
             rel = box([{"name": "Clare Torry", "role": "Composed By", "tracks": spec}])
             self.assertEqual(field(rel, "composer"), [None] * 6, spec)
 
@@ -186,14 +187,18 @@ class Merged(Base):
         return [t.get("composer") for t in p.targets], p.provenance.get("composer")
 
     def test_CRD1_musicbrainz_and_discogs_settle_a_scoped_field_as_an_album_wide_one(self):
-        # the merge mode decides on the credit's own track exactly as it decided for an album-wide
-        # credit before; the other tracks keep MusicBrainz's composer alone
+        # the merge mode decides on the credit's own track as it decided for an album-wide credit
+        # before - except Override (CRD-1c): a field Discogs gives for some tracks only never
+        # replaces MusicBrainz's value of that track; the other tracks keep MusicBrainz's alone
         for k, mode in enumerate(("combine", "fill_gaps", "override")):
             scoped, _w = self.composers(2 * k + 1, "3", mode)
             wide, _w2 = self.composers(2 * k + 2, "", mode)
             self.assertEqual(scoped[:2], [["Rick Wright"]] * 2, mode)
-            self.assertEqual(scoped[2], wide[2], mode)
-            expect = {"fill_gaps": ["Rick Wright"], "override": ["Clare Torry"]}.get(mode, ["Clare Torry", "Rick Wright"])
+            if mode != "override":
+                self.assertEqual(scoped[2], wide[2], mode)
+            else:
+                self.assertEqual(wide[2], ["Clare Torry"], mode)
+            expect = {"fill_gaps": ["Rick Wright"], "override": ["Rick Wright"]}.get(mode, ["Clare Torry", "Rick Wright"])
             self.assertEqual(sorted(scoped[2]), expect, (mode, scoped))
 
 

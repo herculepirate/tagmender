@@ -56,6 +56,8 @@ def interactive(root):
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")
 class Shell(unittest.TestCase):
+    stuck = []                                                        # (windows a thread outlived: never deleted)
+
     @classmethod
     def setUpClass(cls):
         import gui
@@ -78,16 +80,28 @@ class Shell(unittest.TestCase):
         settle(self.app)
 
     def tearDown(self):
-        end = time.time() + 30
-        while time.time() < end and self.win.threads():
+        Shell.dispose(self, self.win)                                 # (other files borrow this tearDown)
+        self.gui.style.apply(self.app, "light")
+
+    def dispose(self, win):
+        """Close WIN once its background work has ended, and delete it: a window left behind is
+        re-styled with every later one (each test slower than the last in one process), and its
+        timers start work of their own."""
+        end = time.time() + 120                                       # (a loaded machine: slow workers)
+        while time.time() < end and win.threads():
             settle(self.app, 2)
-        self.win.close()
-        if self.win.prefs_window is not None:
-            self.win.prefs_window.deleteLater()
-        self.win.deleteLater()                                        # (a closed window is still re-styled)
+        left = win.threads()
+        if left:
+            # (deleting the window under a running thread aborts the whole process: "QThread:
+            # Destroyed while thread is still running". Kept instead, and this test fails by name.)
+            Shell.stuck.append(win)
+            self.fail(f"{len(left)} background thread(s) still running 120 s after the test")
+        win.close()
+        if win.prefs_window is not None:
+            win.prefs_window.deleteLater()
+        win.deleteLater()                                             # (a closed window is still re-styled)
         from PySide6.QtCore import QEvent
         QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
-        self.gui.style.apply(self.app, "light")
 
     def plan(self):
         import gui_screens
@@ -498,9 +512,12 @@ class Shell(unittest.TestCase):
     def test_a_window_drop_takes_folders_and_music_never_images_or_links(self):
         from PySide6.QtCore import QMimeData, QPoint, QUrl
         from PySide6.QtGui import QDropEvent
-        cover = self.tmp / "cover.jpg"
+        here = self.tmp / "dropped"                       # (not loose in self.tmp: no album the
+        here.mkdir(exist_ok=True)                         # next test's look in it would find)
+        self.addCleanup(shutil.rmtree, here, True)
+        cover = here / "cover.jpg"
         cover.write_bytes(b"x")
-        song = self.tmp / "01.flac"
+        song = here / "01.flac"
         song.write_bytes(b"x")
 
         def drop(*urls):
@@ -511,7 +528,7 @@ class Shell(unittest.TestCase):
             return [c.args[0] for c in sp.call_args_list]
         self.assertEqual(drop(QUrl.fromLocalFile(str(cover))), [])
         self.assertEqual(drop(QUrl("https://example.org/cover.jpg")), [])
-        self.assertEqual(drop(QUrl.fromLocalFile(str(self.tmp))), [str(self.tmp)])
+        self.assertEqual(drop(QUrl.fromLocalFile(str(here))), [str(here)])
         self.assertEqual(drop(QUrl.fromLocalFile(str(song))), [str(song)])
 
     def test_the_summary_and_columns_speak_in_words(self):
@@ -695,7 +712,7 @@ class Shell(unittest.TestCase):
             self.assertIs(again.stack.currentWidget(), again.pages["Overview"])   # (never the last page)
             self.assertEqual(again.inspector.tabs.currentIndex(), self.gui.inspector.TABS.index("Evidence"))
         finally:
-            again.close()
+            self.dispose(again)                                       # (closed only once its work ended)
 
     def test_exclude_again_undoes_process_anyway(self):
         import exclusions as ex
@@ -1084,6 +1101,29 @@ class Shell(unittest.TestCase):
         self.assertEqual(asked.call_args.kwargs["default"], "Keep Waiting")
         self.win._closing = False
 
+    def test_closing_while_a_worker_runs_waits_for_it_and_leaves_no_thread(self):
+        # (the window deleted under a running QThread aborts the program: "QThread: Destroyed
+        # while thread is still running". Closing waits for the work, then closes.)
+        import threading
+        gate = threading.Event()
+        got = []
+        self.gui.start(self.win.pages["Needs attention"], lambda _w: gate.wait(30) and "done", got.append)
+        settle(self.app)
+        self.assertTrue(self.win.threads())
+        self.assertFalse(self.win.close())                                     # not under the work
+        self.assertTrue(self.win.isVisible())
+        settle(self.app, 30)
+        self.assertTrue(self.win.isVisible() and self.win.threads())           # (still waiting)
+        gate.set()
+        end = time.time() + 30
+        while time.time() < end and self.win.isVisible():
+            settle(self.app, 5)
+        self.assertFalse(self.win.isVisible())                                 # then closed by itself
+        self.assertEqual(got, ["done"])                                        # (the answer handled first)
+        self.assertEqual(self.win.threads(), [])
+        from PySide6.QtCore import QThread
+        self.assertFalse([th for th in self.win.findChildren(QThread) if self.gui._alive(th)])
+
     def test_the_profile_list_shows_where_the_focus_is(self):
         css = self.gui.style.stylesheet()
         self.assertIn("QListWidget#profileList::item:selected:focus", css)
@@ -1457,6 +1497,7 @@ class Shell(unittest.TestCase):
         bi = self.win.browser_integration
         self.assertIsNone(bi.server)                                          # (off by default: no port open)
         self.assertEqual(bi.status(), "Off: no requests are taken.")
+        self.wait(secs=120)                                                   # (a close waits for running work)
         with mock.patch.object(bi, "stop") as stop, mock.patch.object(self.win.player, "close_player") as close:
             self.win.close()
             settle(self.app)

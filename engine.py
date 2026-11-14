@@ -1891,7 +1891,7 @@ class Engine:
                     track_i = tracks_f[i] if tracks_f else None
                     album_i = with_track_credits(album_f, track_i)     # CRD-1: its own credits
                     dg_i = _as_tags({**album_i, **(track_i or {})})
-                    merged = enrich(merged, album_i, track_i, es, dcount, self.dm)
+                    merged = enrich(merged, album_f, track_i, es, dcount, self.dm)   # (it adds them)
                     where = {k: ("discogs" if dg_i.get(k) == v else "musicbrainz") for k, v in merged.items()}
             else:
                 dg_i = tags_dg[i]
@@ -5227,26 +5227,55 @@ def _credit_scope(det, dm):
         return None
     wide, scoped = dm.split_scoped_credits(det.get("extraartists") or [])
     positions = dm.release_positions(det.get("tracklist"))
-    named = []
+    named, video = [], []
     for credit in scoped:
+        if not str(credit.get("tracks") or "").strip():
+            # CRD-1b: a role naming a video disc, no tracks listed: that disc's tracks only
+            kind = dm.video_disc_of_role(credit.get("role")) if hasattr(dm, "video_disc_of_role") else ""
+            if kind:
+                video.append((credit, kind))
+            continue
         names = dm.credit_track_positions(credit.get("tracks"), positions)
         if names:
             named.append((credit, set(names)))
-    return wide, named
+    return wide, named, video
 
 
-def _track_credits(entry, scope, s, dm) -> dict:
+# CRD-1b: the Discogs format names of each kind of video disc a role can name
+_VIDEO_DISCS = {"blu-ray": ("blu-ray", "blu-ray-r", "bd"),
+                "dvd": ("dvd", "dvdr", "dvd-r", "hd dvd", "hd dvd-r")}
+
+
+_VIDEO_POS_KIND = re.compile(r"^\s*(?:(bd|blu-?ray|br)|((?:hd-?)?dvd))", re.I)
+
+
+def _video_kind_of(medium, position="", det=None) -> set:
+    """CRD-1b: the kinds of video disc a track is on: {"blu-ray", "video"}, {"dvd", "video"},
+    {"video"} or none - from its position where that names a video disc of the release
+    ("BD1-3", "DVD2-1", "BR-4": MED-16), else from its medium ("Blu-ray, Album, Stereo")."""
+    if position and isinstance(det, dict) and ma._video_medium(position, det):
+        m = _VIDEO_POS_KIND.match(str(position))
+        return {"blu-ray" if m and m.group(1) else "dvd" if m and m.group(2) else "video", "video"}
+    name = mc.fold(str(medium or "").split(",")[0])
+    for kind, names in _VIDEO_DISCS.items():
+        if name in {mc.fold(n) for n in names}:
+            return {kind, "video"}
+    return {"video"} if name in ("vhs", "laserdisc", "umd", "betamax", "video", "cdv", "vcd", "svcd") else set()
+
+
+def _track_credits(entry, scope, s, dm, medium="", det=None) -> dict:
     """CRD-1: the credits naming this Discogs track (its position, its position within its
-    work, or one of its movements': "CD6-3a" names the work "CD6-3"), each tag with the
-    album-wide credits of that tag beside them, shaped as the album's fields are. {} when none
-    names it."""
-    if not scope or not scope[1]:
+    work, or one of its movements': "CD6-3a" names the work "CD6-3"), and CRD-1b the video
+    roles of its own disc's kind (_video_kind_of: its position on DET, or MEDIUM, the track's
+    format "Blu-ray, ..."), each tag with the album-wide credits of that tag beside them, shaped
+    as the album's fields are. {} when none names it."""
+    if not scope or not (scope[1] or (len(scope) > 2 and scope[2])):
         return {}
     keys = {dm.normalize_position(entry.get(k)) for k in ("position", "~own_position")} - {""}
-    if not keys:
-        return {}
     mine = [c for c, names in scope[1]
-            if keys & names or any(ma._movement_of(n, k) for n in names for k in keys)]
+            if keys & names or any(ma._movement_of(n, k) for n in names for k in keys)] if keys else []
+    kinds = _video_kind_of(medium, entry.get("position"), det)
+    mine += [c for c, kind in (scope[2] if len(scope) > 2 else ()) if kind in kinds]
     if not mine:
         return {}
     combined = dm.extract_credits(list(scope[0]) + mine)
@@ -5309,21 +5338,25 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
     per_disc = {}
     for d in discs:
         per_disc[d] = per_disc.get(d, 0) + 1
+    # MED-15: each track's media is its own disc's format, never every format of the release
+    # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
+    media = discogs_track_media(det, raw, discs)
+    # (CRD-1b: a release of one format: every track is on it)
+    carriers = [str(f.get("name") or "") for f in det.get("formats") or []
+                if isinstance(f, dict) and str(f.get("name") or "").strip().casefold() not in _NO_CARRIER]
     seen, tracks = {}, []
-    for entry, disc in zip(raw, discs):
+    for i, (entry, disc) in enumerate(zip(raw, discs)):
         seen[disc] = seen.get(disc, 0) + 1
         t = dict(dm.extract_disc_fields({"number": disc}, total_discs))
         # numbered within each disc: the plugin's automatic path numbers through the whole
         # release, which would give disc 2's first track number 11
         t.update(dm.extract_track_fields(entry, seen[disc], per_disc[disc]))
         t["discnumber"], t["totaldiscs"] = str(disc), str(total_discs)
-        credits = _track_credits(entry, scope, s, dm)
+        medium = media[i] if media is not None else (carriers[0] if len(set(carriers)) == 1 else "")
+        credits = _track_credits(entry, scope, s, dm, medium, det)
         if credits:
             t["~credits"] = credits
         tracks.append(t)
-    # MED-15: each track's media is its own disc's format, never every format of the release
-    # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
-    media = discogs_track_media(det, raw, discs)
     if media is not None:
         album.pop("media", None)
         for t, m in zip(tracks, media):
@@ -5649,6 +5682,8 @@ def discogs_only_tags(album: dict, tracks) -> list[dict]:
 
 
 TRACK_ONLY = ("discnumber", "totaldiscs", "disctotal", "discsubtitle")
+# CRD-1c: the credits MusicBrainz gives of a track's work
+_WORK_CREDITS = ("composer", "lyricist", "writer")
 
 
 def enrich(mb: dict, album: dict, track: dict | None, s: dict, disc_count: int, dm) -> dict:
@@ -5657,6 +5692,16 @@ def enrich(mb: dict, album: dict, track: dict | None, s: dict, disc_count: int, 
     "Discogs only" clearing, then artist credits settled)."""
     meta = Meta(mb)
     mode = s["merge_mode"] or "combine"
+    # CRD-1c: the track's own scoped credits (discogs_parts) go in with the album's fields; a
+    # work credit (composer, lyricist, writer) Discogs gives for some tracks only (none
+    # album-wide) is no Discogs value of the album's field, so it never replaces MusicBrainz's
+    # value of that track (MusicBrainz's are its work's): Override fills only where MusicBrainz
+    # gives none, as on the album's other tracks (Pink Floyd - The Dark Side Of The Moon
+    # Immersion: Clare Torry, "Composed By [Vocals]" of "The Great Gig In The Sky", had taken
+    # MusicBrainz's Richard Wright and Clare Torry off those three tracks)
+    own = (track or {}).get("~credits") if isinstance(track, dict) else None
+    scoped_only = {k for k in (own or {}) if k not in album and k in _WORK_CREDITS}
+    album = with_track_credits(album, track)
     if s["split_collaborations"]:                      # done by the plugin on MusicBrainz's data
         try:
             dm.settle_artist_credits(meta, dm.snapshot_artist_credits(meta), (), True, None)
@@ -5676,6 +5721,8 @@ def enrich(mb: dict, album: dict, track: dict | None, s: dict, disc_count: int, 
                 meta[tf] = tv
             continue
         eff = "fill_gaps" if (boxset and f in dm.PROTECTED_IN_BOXSET) else mode
+        if eff == "override" and f in scoped_only:
+            eff = "fill_gaps"
         r = dm.resolve_field_value(meta.getall(f), v, eff, field=f)
         if r is not None:
             meta[f] = r

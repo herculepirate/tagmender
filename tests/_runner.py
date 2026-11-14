@@ -92,9 +92,15 @@ def run_one(t, scratch, py, timeout, ids=None):
     return t, rc, out.decode("utf-8", "replace"), time.monotonic() - start, env
 
 
-def details(t, rc, out, env, py):
+AGAIN_SECONDS = 120
+
+
+def details(t, rc, out, env, py, ids=None):
     """The failure lines run_tests.sh always printed: what failed and why; for a file that
-    crashed or was stopped, how it ended and, once more test by test, the last test it ran."""
+    crashed or was stopped, how it ended and, once more test by test, the last test it ran.
+    IDS: of a split file, the tests of the parts that failed: only those are run again (a part
+    that crashed may not crash again, or the whole file in one process may run far longer);
+    the run again is stopped after AGAIN_SECONDS."""
     lines = out.splitlines()
     shown = [x for x in lines if re.match(r"^(FAIL|ERROR):", x)][:10]
     shown += ["    " + x for x in lines if re.match(r"^[A-Za-z_.]*(Error|Exception)\b", x)][:10]
@@ -104,11 +110,18 @@ def details(t, rc, out, env, py):
         shown += ["    " + x for x in lines[-15:]]
         if rc != "timeout":
             shown.append("    -- again, naming each test:")
-            again = subprocess.run([py, "-W", "ignore", "-m", "unittest", "-v", t], cwd=ROOT, env=env,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=900)
-            keep = [x for x in again.stdout.decode("utf-8", "replace").splitlines()
-                    if re.search(r" \.\.\. |^(FAIL|ERROR|Traceback|  File|[A-Za-z]+Error)", x)]
-            shown += ["    " + x for x in keep[-25:]]
+            p = subprocess.Popen([py, "-W", "ignore", "-m", "unittest", "-v", *(ids or [t])], cwd=ROOT, env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                text, _ = p.communicate(timeout=AGAIN_SECONDS)
+                ended = f"(it ended with exit code {p.returncode})"
+            except subprocess.TimeoutExpired:
+                os.killpg(p.pid, signal.SIGKILL)
+                text, _ = p.communicate()
+                ended = f"(stopped after {AGAIN_SECONDS}s)"
+            keep = [x for x in text.decode("utf-8", "replace").splitlines()
+                    if re.search(r" \.\.\. |^(FAIL|ERROR|Traceback|  File|[A-Za-z]+Error|QThread)", x)]
+            shown += ["    " + x for x in keep[-25:]] + ["    " + ended]
     return shown
 
 
@@ -150,10 +163,12 @@ def main():
             else:
                 tasks.append((timings.get(t, PART_SECONDS), t, None))
         tasks.sort(key=lambda x: -x[0])                # (the longest first: nothing long starts last)
-        parts, work = {}, {}
+        parts, work, failed_ids = {}, {}, {}
         with ThreadPoolExecutor(max(1, a.jobs)) as pool:
-            for r in pool.map(lambda x: run_one(x[1], scratch, py, a.timeout, x[2]), tasks):
+            for task, r in zip(tasks, pool.map(lambda x: run_one(x[1], scratch, py, a.timeout, x[2]), tasks)):
                 parts.setdefault(r[0], []).append(r)
+                if r[1] != 0 and task[2]:
+                    failed_ids.setdefault(r[0], []).extend(task[2])   # (a split part's tests)
         for t, rs in parts.items():                    # (a split file: its parts as one)
             rcs = [r[1] for r in rs]
             rc = "timeout" if "timeout" in rcs else next((x for x in rcs if x != 0), 0)
@@ -177,7 +192,7 @@ def main():
             print(f"{t:<34} {ran[-1] if ran else 0:>4} tests  {last}  [{secs:.0f}s]")
             if rc != 0:
                 failed = True
-                for x in details(t, rc, out, env, py):
+                for x in details(t, rc, out, env, py, failed_ids.get(t)):
                     print(x)
         slow = sorted(((results[t][3], t) for t in files), reverse=True)[:5]
         print("slowest: " + ", ".join(f"{Path(t).name} {s:.0f}s" for s, t in slow))

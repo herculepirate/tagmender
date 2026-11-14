@@ -533,6 +533,18 @@ class SplitAlbums(unittest.TestCase):
         self.make(self.deluxe, (4, 5), total=0, TAGMENDER_REASON="write_failed: saved 3 of 5 files")
         self.assertEqual(ma.deluxe_sibling(self.main), self.deluxe)
 
+    def test_only_a_deluxe_named_sibling_is_looked_at(self):
+        # (a large folder: no stat for each of its other folders, once per album in it)
+        self.make(self.main, (1, 2, 3))
+        self.make(self.deluxe, (4, 5))
+        for i in range(50):
+            (self.main.parent / f"Other {i}").mkdir()
+        looked = []
+        real = Path.is_dir
+        with mock.patch.object(Path, "is_dir", lambda p: looked.append(p.name) or real(p)):
+            self.assertEqual(ma.deluxe_sibling(self.main), self.deluxe)
+        self.assertEqual(looked, [self.deluxe.name])
+
     def test_no_merge_when_the_tags_differ(self):
         self.make(self.main, (1, 2, 3))
         self.make(self.deluxe, (4, 5), artist="Someone Else")

@@ -232,13 +232,110 @@ def extract_credits(extraartists: list[dict]) -> dict[str, list[str]]:
 
 def split_scoped_credits(extraartists: list[dict]) -> tuple[list[dict], list[dict]]:
     """(album-wide credits, credits naming their tracks) of a release's
-    extraartists. A credit is scoped when its `tracks` field is not blank."""
+    extraartists. A credit is scoped when its `tracks` field is not blank, or
+    when it lists no tracks and its role names a video disc (CRD-1b:
+    "Authoring [Blu Ray Authoring]", "Film Director"): the caller writes that
+    one on the tracks of such a disc only (video_disc_of_role). A credit
+    listing several roles is split so only its video roles are scoped."""
     wide, scoped = [], []
     for credit in extraartists or []:
         if not isinstance(credit, dict):
             continue
-        (scoped if str(credit.get('tracks') or '').strip() else wide).append(credit)
+        if str(credit.get('tracks') or '').strip():
+            scoped.append(credit)
+            continue
+        roles = split_roles(credit.get('role'))
+        video = [r for r in roles if video_disc_of_role(r)]
+        if not video:
+            wide.append(credit)
+            continue
+        rest = [r for r in roles if r not in video]
+        if rest:
+            wide.append(dict(credit, role=', '.join(rest)))
+        scoped.extend(dict(credit, role=r) for r in video)
     return wide, scoped
+
+
+def split_roles(role_text) -> list[str]:
+    """A Discogs role text's roles, each with its own "[...]" qualifier:
+    "Producer, Directed By [Video]" -> ["Producer", "Directed By [Video]"]
+    (a comma inside a qualifier separates nothing)."""
+    out, depth, cur = [], 0, ''
+    for ch in str(role_text or ''):
+        depth += (ch == '[') - (ch == ']')
+        if ch == ',' and depth <= 0:
+            out.append(cur.strip())
+            cur = ''
+            continue
+        cur += ch
+    out.append(cur.strip())
+    return [r for r in out if r]
+
+
+# CRD-1b: roles that only a video disc has (the role itself, a carrier word before it taken off)
+VIDEO_ROLES = frozenset({
+    'film director', 'film editor', 'film producer', 'film technician', 'film crew',
+    'video director', 'video editor', 'video producer', 'video technician', 'video',
+    'authoring', 'authored by', 'menu design', 'menus', 'menu', 'subtitles', 'subtitled by',
+    'camera', 'camera operator', 'cameraman', 'cinematographer', 'cinematography',
+    'director of photography', 'video by', 'filmed by', 'videography by', 'videography',
+})
+# CRD-1b: roles a whole "[Video]" or "[Film]" qualifier makes a video disc's ("Directed By
+# [Video]"); after a musical role it stays album-wide ("Music By [Film]")
+_VIDEO_QUALIFIED_ROLES = frozenset({
+    'director', 'directed by', 'editor', 'edited by', 'producer', 'produced by',
+    'camera', 'photography direction', 'direction',
+})
+# a carrier named by a whole "[...]" qualifier ("[Blu-ray]", "[DVD-Video]", "[Blu Ray Authoring]")
+# or at the start of a role ("DVD Authoring"); "BD" alone only beside a video role
+_VIDEO_CARRIER = re.compile(
+    r'^\s*(?:(?P<bd>blu[\s\-]?ray|bd)|(?P<dvd>(?:hd[\s\-]?)?dvd(?:[\s\-]?video)?))'
+    r'(?:\s+(?:authoring|version|edition|discs?|only|menus?))?\s*$', re.I)
+_CARRIER_PREFIX = re.compile(r'^\s*(?:(?P<bd>blu[\s\-]?ray|bd)|(?P<dvd>(?:hd[\s\-]?)?dvd))\s+(?P<rest>\S.*)$', re.I)
+# an audio carrier or mix named anywhere in the role: then it is no video disc's only
+_AUDIO_WORD = re.compile(r'\b(?:cds?|vinyl|lps?|sacd|cassettes?|stereo|audio|5\.1|surround|mono)\b', re.I)
+
+
+def video_disc_of_role(role) -> str:
+    """CRD-1b: the kind of video disc ONE role is only for - "blu-ray"
+    ("Authoring [Blu Ray Authoring]", "Blu-ray Authoring", "Mastered By
+    [Blu-ray]"), "dvd" ("DVD Authoring", "[DVD-Video]"), "video" for a video
+    role naming no disc ("Film Director", "Video Editor", "Authoring",
+    "Cinematographer") - or "" for any other role. When in doubt the credit
+    stays album-wide: a role or qualifier that also names an audio carrier or
+    mix ("Mastered By [CD & DVD]", "Mixed By [Stereo & 5.1 DVD]", "[Vinyl &
+    DVD]") is none, nor is a bare "Film" or "Video" in a qualifier ("Music By
+    [Film]", "Mixed By [Video Mix]") - except after a direction, editing,
+    production or camera role ("Directed By [Video]", "Producer [Film]") -
+    nor "[BD]" beside a role that is not a
+    video role ("Vocals [BD]")."""
+    text = str(role or '')
+    if not text.strip() or _AUDIO_WORD.search(text):
+        return ''
+    base = re.sub(r'\[[^\]]*\]', '', text).strip().casefold()
+    base = re.sub(r'\s+', ' ', base)
+    quals = re.findall(r'\[([^\]]*)\]', text)
+    kinds = set()
+    m = _CARRIER_PREFIX.match(base)
+    if m:
+        kinds.add('bd' if m.group('bd') else 'dvd')
+        base = m.group('rest').strip()
+    video_role = base in VIDEO_ROLES or (
+        base in _VIDEO_QUALIFIED_ROLES and any(q.strip().casefold() in ('video', 'film') for q in quals))
+    for q in quals:
+        c = _VIDEO_CARRIER.match(q)
+        if not c:
+            continue
+        if c.group('bd') and c.group('bd').strip().casefold() == 'bd' and not video_role:
+            continue                       # ("Vocals [BD]": no sure carrier)
+        kinds.add('bd' if c.group('bd') else 'dvd')
+    if kinds == {'bd'}:
+        return 'blu-ray'
+    if kinds == {'dvd'}:
+        return 'dvd'
+    if kinds or video_role:
+        return 'video'
+    return ''
 
 
 def normalize_position(position) -> str:
@@ -268,6 +365,8 @@ def release_positions(tracklist) -> list[str]:
 _RANGE_WORD = re.compile(r'\s+to\s+|\s*[\u2013\u2014]\s*', re.I)
 _POSITION_TAIL = re.compile(r'\d+[a-z]?$')
 _MOVEMENT_TAIL = re.compile(r'^(?:[.\-][ivxlc]+|\.?[a-z])$')
+# a movement's position: its work's position, then a letter or roman number ("cd6-3a", "a1.ii")
+_MOVEMENT_START = re.compile(r'^(.*\d)(?:[.\-][ivxlc]+|\.?[a-z])$')
 
 
 def _span(pos: str, index: dict, positions: list[str]) -> tuple[int, int] | None:
@@ -294,16 +393,61 @@ def _range_end(left: str, right: str, index: dict, positions: list[str]) -> tupl
     return _span(right, index, positions)
 
 
+def _medium_run_end(first: int, prefix: str, positions: list[str]) -> int:
+    """CRD-1a: the index of the last position of a run of PREFIX's medium
+    ("bd2-", "a", "" for plain numbers) from FIRST onward."""
+    last = first
+    for j in range(first + 1, len(positions)):
+        p = positions[j]
+        if not (p.startswith(prefix) and p[len(prefix):][:1].isdigit()):
+            break
+        last = j
+    return last
+
+
+def _open_range_end(left: str, right: str, first: tuple[int, int], positions: list[str]) -> tuple[int, int] | None:
+    """CRD-1a: a range whose end is no position of the release ("BD2-5 to
+    BD2-24" on a disc of 19 tracks) runs from its start to the last position
+    of the end's medium (the start's, when the end gives a track number
+    only or its medium has no position after the start); one starting on a
+    movement ("CD6-3a to CD6-3k") to the last movement of that work."""
+    work = _MOVEMENT_START.match(left)
+    if work:
+        # (a range starting on a movement - "CD6-3a to CD6-3k" - ends at its work's last one)
+        stem, last = work.group(1), first[1]
+        for j in range(first[1] + 1, len(positions)):
+            if not (positions[j].startswith(stem) and _MOVEMENT_TAIL.match(positions[j][len(stem):])):
+                break
+            last = j
+        return last, last
+    tail = _POSITION_TAIL.search(left)
+    if not tail:
+        return None
+    start_medium = left[:tail.start()]
+    end_tail = _POSITION_TAIL.search(right)
+    end_medium = start_medium if (not end_tail or not end_tail.start()) else right[:end_tail.start()]
+    if end_medium != start_medium:
+        later = [j for j in range(first[0], len(positions))
+                 if positions[j].startswith(end_medium) and positions[j][len(end_medium):][:1].isdigit()]
+        if later:
+            return later[-1], later[-1]
+    last = _medium_run_end(first[1], start_medium, positions)
+    return last, last
+
+
 def credit_track_positions(spec, positions: list[str]) -> list[str] | None:
     """CRD-1: the release positions a credit's `tracks` text names, or None
-    when any part of it names no position of the release (the credit is
-    then left off). POSITIONS: release_positions() of the release.
+    when no part of it names a position of the release (the credit is then
+    left off). POSITIONS: release_positions() of the release.
 
     Parts are separated by commas (or ";" / "&"). A part is one position
     ("CD1-5", "A3", "5") or a range, in release order, between two of them:
     "A1 to A3", "CD1-1 to CD9-15", "A1\u2013A3", "1-3" (a hyphen is a range only
     where the part is no position itself: "CD1-5" is disc 1's track 5). A
-    position naming a work the release lists by its movements names them."""
+    position naming a work the release lists by its movements names them.
+    CRD-1a: a part naming no position of the release is passed over, the
+    others still name theirs; a range whose end is missing runs from its
+    start to the end of that medium (_open_range_end)."""
     positions = list(positions or [])
     index: dict[str, int] = {}
     for i, pos in enumerate(positions):
@@ -323,16 +467,28 @@ def credit_track_positions(spec, positions: list[str]) -> list[str] | None:
         if len(pieces) == 2:
             left, right = normalize_position(pieces[0]), normalize_position(pieces[1])
             first, last = _span(left, index, positions), _range_end(left, right, index, positions)
+            if first and not last:
+                last = _open_range_end(left, right, first, positions)
         else:
             for m in re.finditer('-', whole):
                 left, right = whole[:m.start()], whole[m.end():]
                 first, last = _span(left, index, positions), _range_end(left, right, index, positions)
                 if first and last:
                     break
+            else:
+                # (no hyphen made a range of two positions: the first that starts at one, its
+                # end missing - "5-24" on a disc of 19)
+                for m in re.finditer('-', whole):
+                    left, right = whole[:m.start()], whole[m.end():]
+                    first = _span(left, index, positions)
+                    if first and right[:1].isalnum():
+                        last = _open_range_end(left, right, first, positions)
+                        break
+                    first = None
         if not first or not last or last[1] < first[0]:
-            return None
+            continue                                   # (CRD-1a: this part names nothing)
         out.extend(positions[first[0]:last[1] + 1])
-    return list(dict.fromkeys(out))
+    return list(dict.fromkeys(out)) or None
 
 
 def extract_company_credits(companies: list[dict]) -> dict[str, list[str]]:

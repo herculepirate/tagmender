@@ -39,9 +39,16 @@ ROLES = (
 ROLE_NAMES = tuple(r for r, _ in ROLES) + ("other",)
 
 
+# a folder that holds all of an album's artwork ("covers", "Artwork", "Scans": TagMender's own
+# companion folders among them) says nothing of which side each scan is (IDM-1: "box_002.jpg"
+# moved into "covers/" by a job is no front cover, nor read later for being one)
+_ART_FOLDER = re.compile(r"^\s*(?:covers?|art(?:work)?s?|scans?|images?|pictures?|pics|photos?|artwork scans?)\s*$",
+                         re.I)
+
+
 def role_of(path) -> str:
     p = Path(path)
-    for where in (p.stem, p.parent.name):
+    for where in (p.stem, "" if _ART_FOLDER.match(p.parent.name) else p.parent.name):
         for role, pat in ROLES:
             if pat.search(where):
                 return role

@@ -3467,6 +3467,22 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
             n_cand = n_file
             notes.append("the vinyl single in the box is not in your files")
+    if n_file and n_file != n_cand and cand.get("works_view") and not box_note and not cand.get("version_media") \
+            and not cand.get("pregap_used") and not any(t.get("box_vinyl") for t in cand["tracks"]):
+        # TRK-5: works the release lists without lengths, their parts lettered as one track's
+        # (Soft Machine - Slightly All The Time, CD4 "Esther's Nose Job" over 3a-3e): one file
+        # per work, only where every disc of yours holds exactly that many files
+        view = cand["works_view"]
+
+        def per_disc(ts):
+            counts = {}
+            for t in ts:
+                counts[t.get("disc") or 1] = counts.get(t.get("disc") or 1, 0) + 1
+            return [counts[d] for d in sorted(counts)]
+        if len(view) == n_file and per_disc(view) == per_disc(album["tracks"]):
+            cand = dict(cand, tracks=view, whole_works=True)
+            n_cand = n_file
+            notes.append("each work's lettered parts are one of your files (the release lists no lengths)")
     tracks_ok = n_file > 0 and n_file == n_cand
     avail += cfg["w_tracks"]
     if tracks_ok:

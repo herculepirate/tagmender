@@ -358,12 +358,22 @@ class BlindTrackTotals(unittest.TestCase):
                      + [{"position": f"DVD1-{i}", "title": f"V{i}", "duration": "4:00"} for i in range(1, 5)])
         for rel in (index, video):
             c = ma.discogs_candidate(rel, dm)
-            self.assertEqual((len(c["tracks"]), ma._audio_rows(c)), (12, 8))
+            # (MED-16: a box's DVD chapters are no tracks at all now; its rows still count them)
+            self.assertEqual((c["rows"], ma._audio_rows(c)), (12, 8))
+            if rel is index:
+                self.assertEqual(len(c["tracks"]), 12)
             a, final, (mb, _) = self.results(12)
             dg = run(a, c)
             self.assertEqual(ma._copy_disagrees(final, a, "", (mb, dg)), [], rel["formats"])
+            if rel is video:
+                # without its rows the chapters are gone from the count: the total stands
+                bare = {k: v for k, v in c.items() if k != "rows"}
+                self.assertEqual(len(ma._copy_disagrees(final, a, "", (mb, run(a, bare)))), 1)
+                continue
             # without the marks the rows count as tracks, and the total stands
-            bare = dict(c, tracks=[{k: v for k, v in t.items() if k not in ("index", "video")} for t in c["tracks"]])
+            # (TRK-5's one-track-per-work view is such a mark too)
+            bare = dict({k: v for k, v in c.items() if k != "works_view"},
+                        tracks=[{k: v for k, v in t.items() if k not in ("index", "video")} for t in c["tracks"]])
             self.assertEqual(len(ma._copy_disagrees(final, a, "", (mb, run(a, bare)))), 1)
 
     def test_the_total_still_counts_otherwise(self):

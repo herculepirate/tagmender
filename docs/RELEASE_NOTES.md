@@ -1,5 +1,25 @@
 # Release notes
 
+## 0.8.57
+
+**A box of CDs and Blu-rays, ripped as its CDs, is matched (MED-16, TRK-5)**
+- In a box set that also holds video Blu-rays or DVDs (TV footage, a film), the video discs'
+  chapters, listed as "BD1-3" or "DVD2-1", no longer count as tracks of your CD rip, and no longer
+  take the CDs' disc numbers 1, 2, 3. A Blu-ray Audio or DVD-Audio keeps its tracks.
+- A work listed in parts ("Esther's Nose Job": "3a" to "3e") with no lengths anywhere is one track
+  when your files hold one file per work on every disc. It is then matched and tagged as that one
+  track, with the work's title. When your files are the parts, they stay tracks.
+- Choosing such a release by hand (`--release`) now works too.
+
+**Planning again after a job plans nothing new (IDM-1)**
+- Scans that a job moved into the "covers" folder are no longer taken for front covers. They are
+  read in the same order as before, so a barcode found the first time is found again.
+- A release listed on MusicBrainz with more discs than you ripped (a CD and its DVD-Audio) is
+  tagged the same way whichever database's pick leads. Before, the second plan could switch to
+  other titles and another folder name.
+- An album tagged where it is, with a file renamed, takes its disc folders' rip logs and scans in
+  the same plan, rather than leaving them for the next one.
+
 ## 0.8.56
 
 **A crash while tidying up after a move is recovered (DIR-2)**

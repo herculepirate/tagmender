@@ -4580,7 +4580,7 @@ def _movement_of(position, parent) -> bool:
     return bool(p) and p[-1].isdigit() and s.startswith(p) and bool(_MOVEMENT_REST.match(s[len(p):]))
 
 
-def one_track_movements(tracklist) -> list:
+def one_track_movements(tracklist, whole_works=False) -> list:
     """TRK-1: a work Discogs lists with its movements under it - an index entry with its own
     length whose sub-tracks list none (Blood, Sweat & Tears - Mirror Image & New City: "Mirror
     Image" 11:09, movements 7a-7d), or a track with its own length followed by rows of its
@@ -4601,8 +4601,10 @@ def one_track_movements(tracklist) -> list:
         kind = _row_kind(e)
         if kind == "index":
             subs = [s for s in e.get("sub_tracks") or [] if isinstance(s, dict) and _row_kind(s) == "track"]
-            if str(e.get("duration") or "").strip() and subs and not any(str(s.get("duration") or "").strip()
-                                                                           for s in subs):
+            # (TRK-5, WHOLE_WORKS: a work listing no length either, its parts lettered as one
+            # track's - read so only where your files' discs hold one file per work)
+            if (str(e.get("duration") or "").strip() or whole_works) and subs and \
+                    not any(str(s.get("duration") or "").strip() for s in subs):
                 pos = str(e.get("position") or "").strip()
                 if not pos:                          # ("" over 7a-7d: the work is track 7)
                     m = re.match(r"^(.*\d)(?:[.\-]\s*[ivxlc]+|\.?\s*[a-z])\s*$", str(subs[0].get("position") or ""), re.I)
@@ -4636,12 +4638,12 @@ def one_track_movements(tracklist) -> list:
     return out
 
 
-def discogs_one_track_movements(rel):
+def discogs_one_track_movements(rel, whole_works=False):
     """REL with its tracklist read as TRK-1 has it (one_track_movements); REL itself when that
-    changes nothing."""
+    changes nothing. WHOLE_WORKS: TRK-5's reading too (a work without lengths, one track)."""
     if not isinstance(rel, dict) or not rel.get("tracklist"):
         return rel
-    flat = one_track_movements(rel["tracklist"])
+    flat = one_track_movements(rel["tracklist"], whole_works)
     return rel if len(flat) == len(rel["tracklist"]) and all(a is b for a, b in zip(flat, rel["tracklist"])) \
         else dict(rel, tracklist=flat)
 
@@ -4691,7 +4693,7 @@ _VIDEO_TITLE = re.compile(r"\((?:video|videoclip|video clip|music video|live vid
                           r"\b(?:screensaver|wallpapers?|bonus multimedia|enhanced (?:part|section))\b", re.I)
 
 
-def drop_video_tracks(tracks, rel):
+def drop_video_tracks(tracks, rel, boxed=True):
     """An enhanced CD's videos and data are listed as tracks on Discogs (Kreator -
     Endorama, Art Music AMG 099: 13 songs + 2 videos), but are never audio files. Only
     entries marked as such are dropped: a position like "Video" or "CD-ROM", or a title
@@ -4705,7 +4707,18 @@ def drop_video_tracks(tracks, rel):
     while out and (_VIDEO_POS.match(str(out[-1].get("position") or "")) or _VIDEO_TITLE.search(out[-1]["title"])):
         out.pop()
     # videos marked anywhere by their position ("Video 1") are never audio
-    return [t for t in out if not _VIDEO_POS.match(str(t.get("position") or ""))]
+    out = [t for t in out if not _VIDEO_POS.match(str(t.get("position") or ""))]
+    # MED-16: a box's video discs numbered by their position ("BD1-3", "DVD2-1") beside its CDs
+    # (Soft Machine - Slightly All The Time: 14 CDs and 3 Blu-rays of TV footage) - chapters,
+    # never files of the CD rip, nor discs 1-3 of it. Kept where a video format says it holds
+    # audio (a Blu-ray Audio, a DVD-Audio) and where nothing else would remain (MED-12)
+    audio_video = any(re.search(r"\b(?:dvd|bd|blu-?ray|hd-?dvd)\b", str(f.get("name") or ""), re.I)
+                      and re.search(r"audio", " ".join([str(f.get("name") or "")] +
+                                                         [str(d) for d in f.get("descriptions") or []]), re.I)
+                      for f in rel.get("formats") or [] if isinstance(f, dict))
+    # (BOXED false: the rows another tagger counted for its track total, chapters among them)
+    rest = [t for t in out if not _VIDEO_MEDIUM.match(str(t.get("position") or ""))]
+    return rest if boxed and rest and not audio_video else out
 
 
 # a position on a video disc of a box ("DVD1-3", "BD2-1"): a chapter, never an audio file
@@ -4824,14 +4837,15 @@ def discogs_discs(rel, dm):
     return out, media
 
 
-def discogs_candidate(rel, dm):
+def discogs_candidate(rel, dm, whole_works=False):
     # The credit exactly as the plugin writes it (format_artist_credit honours
     # Discogs' "credited as" names and join words), plus the canonical names,
     # since files may carry either form.
     # (the rows as Discogs lists them, a work's movements each counted: what a tagger that wrote
     # the files' track total counted - _total_miscounted)
-    raw_rows = len(drop_video_tracks(flatten_tracklist(rel.get("tracklist"), dm, movements=False), rel))
-    rel = discogs_one_track_movements(rel)                  # TRK-1 (the plugin's disc split too)
+    raw_rows = len(drop_video_tracks(flatten_tracklist(rel.get("tracklist"), dm, movements=False), rel, boxed=False))
+    listed = rel
+    rel = discogs_one_track_movements(rel, whole_works)     # TRK-1 (the plugin's disc split too)
     artists = dm.format_artist_credit(rel.get("artists"))
     canonical = " & ".join(dm.clean_artist_name(a.get("name")) for a in rel.get("artists", [])
                            if isinstance(a, dict))
@@ -4887,7 +4901,18 @@ def discogs_candidate(rel, dm):
     year = rel.get("year") or 0
     if not year and str(rel.get("released") or "")[:4].isdigit():
         year = int(rel["released"][:4])
+    # TRK-5: works listing no length, their parts lettered as one track's ("CD4-3a".."CD4-3e"
+    # under "Esther's Nose Job"): the tracks read as one per work, compared only where your
+    # files' discs hold exactly that (match_core.score_candidate) - never decided here
+    works_view = None
+    if not whole_works:
+        whole = discogs_one_track_movements(listed, True)
+        if whole is not listed:
+            alt = discogs_candidate(listed, dm, whole_works=True)["tracks"]
+            works_view = alt if len(alt) < len(tracks) else None
     return {
+        **({"works_view": works_view} if works_view else {}),
+        **({"whole_works": True} if whole_works else {}),
         "source": "discogs", "id": str(rel["id"]),
         "url": rel.get("uri") or f"https://www.discogs.com/release/{rel['id']}",
         "artist": artists or canonical, "artist_alt": canonical,
@@ -7256,6 +7281,8 @@ def summarize(res):
             # (what lets a sure album be filed below the organize threshold: plan._files_on_evidence)
             # (BOX-2: one disc of a set, its folder alone: that disc's tracks tag it)
             **({"box_disc": int(c["box_disc"])} if c.get("box_disc") else {}),
+            # (TRK-5: the release read one track per work, as your files are: tagged so)
+            **({"whole_works": True} if c.get("whole_works") else {}),
             "all_lengths": bool(b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
                                 and not b.get("conflict") and not b.get("missing")),
             "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),

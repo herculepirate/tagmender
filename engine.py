@@ -457,6 +457,13 @@ def _has_htoa(album):
     return any(ma.htoa_file(tracks) is not None for tracks in discs.values())
 
 
+def _first_text(v):
+    """A tag's first value as text ("" for none): ["Title"] or "Title"."""
+    if isinstance(v, (list, tuple)):
+        return str(v[0]) if v else ""
+    return str(v or "")
+
+
 def _missing_of(best):
     """The tracks of the release missing from the folder, as TAGMENDER_MISSING has them
     ("2, 4, 5, 7-10, 14"; "1:3, 2:5" on several discs), or "" when none are."""
@@ -1650,7 +1657,10 @@ class Engine:
                                     reason=f"the release you chose was not found: {ref}")
         sc = mc.score_candidate(album, cand, self.cfg)
         best = dict(cand, confidence=100.0, notes=list(sc.get("notes") or []))
-        best.update(_slots_of(album, cand, sc))
+        if (sc.get("cand") or {}).get("whole_works"):
+            best["whole_works"] = True               # TRK-5: tagged one track per work, as scored
+        else:                                        # (one per work: no file missing, no slots)
+            best.update(_slots_of(album, cand, sc))
         if kind == "mb":
             best["mb_id"] = cand["id"]
         else:
@@ -1677,6 +1687,25 @@ class Engine:
     def _release(self, best):
         return ma.release_fields(best)
 
+    @staticmethod
+    def _twin_slots(album, rel, tags_mb, best, n):
+        """IDM-1: the MusicBrainz entry of a Discogs pick's pressing (its "mb_twin") listing
+        more tracks than your files (King Crimson - Islands, 40th Anniversary: the CD and its
+        DVD-Audio, 49 tracks, of which your 12 files are the CD): each file tagged as its own
+        track of it, as when MusicBrainz's pick leads (match_core.slot_view). Otherwise TAGS_MB
+        unchanged: the twin's tags were dropped and the album re-tagged from Discogs alone, so
+        planning the same files again after their first job gave other tags."""
+        if not tags_mb or len(tags_mb) == n or best.get("source") != "discogs" or best.get("slots") \
+                or best.get("version_tracks") or best.get("box_disc"):
+            return tags_mb
+        cand = ma.mb_candidate(rel)
+        if len(cand.get("tracks") or ()) != len(tags_mb):
+            return tags_mb
+        view = mc.slot_view(album, cand)
+        if not view or not view.get("missing") or len(view.get("slots") or ()) != n:
+            return tags_mb
+        return [tags_mb[k] for k in view["slots"]]
+
     def _identified(self, out, album, files, base, versions=True):
         """versions: the release's version kept visible (keep_version); never for an album
         whose pressings tie (album only: which version is not known)."""
@@ -1702,6 +1731,7 @@ class Engine:
                 self._note_mb_down(exc)
             if rel:
                 tags_mb = mb_tags.release_tags(rel, ps)
+                tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files))
         if not (mbid and self.use_mb):
             ps = self.profile.picard_tags()
         es = self.profile.enrichment()
@@ -1714,7 +1744,7 @@ class Engine:
                     raise
                 raise mb_down from None         # (Discogs refused too: tried again later)
             if det:
-                dparts = discogs_parts(det, self.dm, self.http, es)
+                dparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")))
         n = len(files)
         slots, missing = best.get("slots"), _missing_of(best)
         vtracks = best.get("version_tracks")
@@ -1762,7 +1792,17 @@ class Engine:
             full = best.get("release_tracks") or 0
             tags_mb = [tags_mb[k] for k in slots] if tags_mb and len(tags_mb) == full else None
             if dparts and dparts[1] is not None:
-                dparts = (dparts[0], [dparts[1][k] for k in slots] if len(dparts[1]) == full else None, dparts[2])
+                # IDM-1: Discogs listing just your files' tracks where they are the release's first
+                # ones (King Crimson - Islands: its 12 CD tracks, MusicBrainz's CD + DVD-Audio 49) -
+                # its tracks are yours as they are, as when Discogs's pick leads (Engine._twin_slots):
+                # never one merge after the first job and another after the next
+                # (and every title agrees: Discogs leaving out one track of the middle is no fit)
+                # (tags_mb: already your files' own tracks, in their order)
+                lead = list(slots) == list(range(n)) and len(dparts[1]) == n and bool(tags_mb) and \
+                    len(tags_mb) == n and all(mc.title_sim(_first_text(mt.get("title")), str(dt.get("title") or "")) >= 0.6
+                                              for mt, dt in zip(tags_mb, dparts[1]))
+                dparts = (dparts[0], [dparts[1][k] for k in slots] if len(dparts[1]) == full else
+                          (dparts[1] if lead else None), dparts[2])
         if (tags_mb and not slots and len(tags_mb) != n and rel and _has_htoa(album)
                 and any(m.get("pregap") for m in rel.get("media") or ())):
             # a rip with the hidden track before track 1 as a file numbered 0: the release's
@@ -5116,16 +5156,18 @@ def barcode_digits(values):
     return (out[0] if out else "") if one and len(out) <= 1 else out
 
 
-def discogs_parts(det, dm, http=None, s=None):
+def discogs_parts(det, dm, http=None, s=None, whole_works=False):
     """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
     builds them: extract_discogs_fields shaped by the settings, then the master's original
     year (and date = original date when prefer_original_date is on). Per-track fields are in
     the matcher's track order, each with its disc fields; None when the tracklist does not
-    line up with the matcher's."""
+    line up with the matcher's. WHOLE_WORKS: the matcher read each work listed without lengths
+    as one track (TRK-5: your files are one per work), so it is tagged so."""
     import tagger_settings
     s = s or tagger_settings.enrichment()
     det = discogs_without_repeats(det, dm)
-    det = ma.discogs_one_track_movements(det)                # TRK-1: the plugin writes one track too
+    det = ma.discogs_one_track_movements(det, True) if whole_works else \
+        ma.discogs_one_track_movements(det)                  # TRK-1: the plugin writes one track too
     album = shape_fields(dm.extract_discogs_fields(det), s, dm)
     if album.get("barcode"):
         album["barcode"] = barcode_digits(album["barcode"])

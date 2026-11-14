@@ -674,8 +674,11 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         return own, SHARED_FOLDER_NOTE
     tree, seen, foreign = [], 0, []
     # (an album tidied where it is - into its covers and misc folders - moves into no folder)
+    # IDM-1: nor is a folder the album's music is already in ("Disc 01" of an album tagged where
+    # it is, one file renamed) one it moves into: its logs and scans are the album's, planned now -
+    # else the next plan, with nothing renamed, tidies them (another plan for the same files)
     targets = set() if all(s_ == d_ for s_, d_ in moved.items()) else \
-        {os.path.realpath(str(x)) for x in dmap.values()}
+        {os.path.realpath(str(x)) for x in dmap.values()} - {os.path.realpath(str(s_.parent)) for s_ in moved}
 
     def overlaps(d):                       # a folder the album is moving into, or one holding it
         r = os.path.realpath(str(d))

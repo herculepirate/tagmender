@@ -212,7 +212,8 @@ class Versions(VersionsBase):
         by_file = {Path(f).parent.name + "/" + Path(f).name: t for f, t in zip(p.files, p.targets)}
         for name, t in by_file.items():
             want = "2" if name.startswith("2.0/") else "3"
-            self.assertEqual((t["discnumber"], t["totaldiscs"]), ([want], ["5"]), name)
+            # (MED-17: the set's DVD-Video, its last disc, is no disc of these audio rips: of 4)
+            self.assertEqual((t["discnumber"], t["totaldiscs"]), ([want], ["4"]), name)
             self.assertEqual(t["media"], [SET_MEDIA[int(want) - 1]], name)
         self.assertNotIn("tagmender_missing", p.targets[0])
         plan = eng.plan(top)

@@ -679,6 +679,27 @@ def _audio_ids(rel, media=None) -> set:
     return out
 
 
+def disc_total(rel, media=None) -> int:
+    """MED-17 (decided 2026-11-14): the disc total of a rip of the release's audio discs. A box
+    of CDs with video discs (DVD-Video, Blu-ray, VHS: VIDEO_FORMATS), ripped as its CDs, counts
+    only its audio discs: 3 CDs + a DVD-Video is "1 of 3", not the medium count 4. Each CD keeps
+    its own number (its medium position, as Picard numbers it), so only the video discs after
+    the last audio one drop out of the count: a DVD before or between the CDs stays counted
+    (CD, DVD, CD: discs 1 and 3 of 3), and no disc number is ever more than the total. All
+    media count where the rip holds a video disc's audio (MEDIA names one: a version folder of
+    its mix), where no medium is video, and where no medium is audio."""
+    all_media = rel.get("media") or []
+    total = len(all_media) or 1
+    audio = _audio_ids(rel, media)
+    if len(audio) == len(all_media) or not audio:
+        return total
+    if media:
+        want, plain = {int(x) for x in media}, {id(a) for a in audio_media(rel)}
+        if any(id(m) not in plain and int(m.get("position") or disc) in want for disc, m in enumerate(all_media, 1)):
+            return total                      # (a video disc's audio is yours: every disc counts)
+    return max(int(m.get("position") or disc) for disc, m in enumerate(all_media, 1) if id(m) in audio)
+
+
 def track_keys(rel, pregap=False, media=None) -> list:
     """(medium position, track index on it) of each entry release_tags(rel, pregap=pregap,
     media=media) gives, in its order (a pregap track's index is -1)."""
@@ -710,9 +731,10 @@ def release_tags(rel, settings=None, pregap=False, media=None) -> list[dict]:
     # numbered as Picard numbers them: the medium's own position among all media (a CD + DVD +
     # CD release's second CD is disc 3 of 3), its own track count, every track counted in
     # %_absolutetracknumber% - only the audio tracks are written (the n-th entry is the
-    # album's n-th audio file)
+    # album's n-th audio file). MED-17: the total counts the audio discs, the video discs after
+    # the last of them left out (3 CDs + a DVD-Video: of 3, not of 4; disc_total)
     all_media = rel.get("media") or []
-    total_discs = len(all_media) or 1
+    total_discs = disc_total(rel, media)
     audio = _audio_ids(rel, media)
     absolute, out, artists = 0, [], set()
     for disc, m in enumerate(all_media, 1):

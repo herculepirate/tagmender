@@ -40,9 +40,9 @@ class DiscogsArtistMakesMbReleaseMultiartist(Base):
         a = e.plan(d)["albums"][0]
         self.assertEqual(a["identification"]["provider"], "musicbrainz+discogs", a["identification"])
         names = sorted(Path(fe["dst"]).stem for fe in a["files"])
-        # (MusicBrainz: every track by "Band M" - Picard sets no %_multiartist%; its DVD makes
-        # the release two discs, so the disc number leads)
-        self.assertEqual(names, ["1-01 T0", "1-02 T1", "1-03 T2"])
+        # (MusicBrainz: every track by "Band M" - Picard sets no %_multiartist%; MED-17: its
+        # DVD-Video after the CD is no disc of the CD rip, so one disc and no disc number leads)
+        self.assertEqual(names, ["01 T0", "02 T1", "03 T2"])
 
 
 if __name__ == "__main__":

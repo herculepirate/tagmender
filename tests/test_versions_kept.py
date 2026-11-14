@@ -141,7 +141,8 @@ class KeepVersion(Base):
         a = engine.Engine(prof, http=GroupHttp(mb=[rel], groups=group)).plan(d)["albums"][0]
         f = a["files"][0]
         self.assertNotIn("albumversion", f["changes"])
-        self.assertIn(f"{title} (Remaster 2024)", Path(f["dst"]).parent.parent.name)
+        # (MED-17: the release's DVD-Video is no disc of the CD rip - one disc, no "Disc 01" folder)
+        self.assertIn(f"{title} (Remaster 2024)", Path(f["dst"]).parent.name)
 
     def test_a_group_that_cannot_be_read_keeps_the_files_version(self):
         import match_albums as ma

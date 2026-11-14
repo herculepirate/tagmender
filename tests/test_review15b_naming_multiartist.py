@@ -49,8 +49,9 @@ class MultiArtistNaming(Base):
         self.assertEqual(a["identification"]["status"], "identified", a["identification"])
         names = [Path(fe["dst"]).stem for fe in a["files"]]
         # Picard 3.0.2 (Preset 3): $if(%_multiartist%,%artist% - ,) on every track of this release
-        # (disc 1 of 2: the release's DVD counts, in Picard too)
-        self.assertEqual(names, ["1-01 Band - T0", "1-02 Band feat. Guest - T1", "1-03 Band - T2"], names)
+        # (MED-17: the release's DVD-Video after its CD is no disc of the CD rip - disc 1 of 1,
+        # so no disc number leads, where Picard counts the DVD: "1-01")
+        self.assertEqual(names, ["01 Band - T0", "02 Band feat. Guest - T1", "03 Band - T2"], names)
 
     def test_naming_reads_a_variable_a_tagger_script_set(self):
         d = self.album("Band", "Album")

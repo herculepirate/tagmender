@@ -1,5 +1,17 @@
 # Release notes
 
+## 0.8.63
+
+**A box ripped as its CDs counts its CDs (MED-17)**
+- A box of CDs with video DVDs or Blu-rays, ripped as its CDs, now gets a disc total of its
+  audio discs: 3 CDs and a DVD are discs 1 to 3 of 3, not of 4. A Blu-ray Audio or DVD-Audio
+  still counts, and so does a video disc whose audio you ripped.
+- Each CD keeps its own disc number. A video disc that comes before or between the CDs in the
+  box stays in the count, so no disc number is ever higher than the total.
+- Albums tagged before with the larger total are given the new one the next time they are
+  planned. A single CD that came with a DVD is now one disc, so its "Disc 01" folder is no
+  longer used.
+
 ## 0.8.62
 
 **Credits, more precisely (CRD-1)**

@@ -848,7 +848,7 @@ def _own_job_files(job):
             wrote = {r["field"]: (tuple(str(x) for x in r.get("before") or ()),
                                   tuple(str(x) for x in r.get("after") or ()))
                      for r in rows if r["field"] in REPLAN_FIELDS or pressing_field(r["field"])
-                     or r["field"] in ("tagmender", "tagmender_reason")}
+                     or credit_field(r["field"]) or r["field"] in ("tagmender", "tagmender_reason")}
             # REP-1: the file named a release before this job: an ID row whose value before is not
             # empty (whose, _own_index decides). Never inferred from a missing row: a job writes
             # none for an ID it left alone, held or not (a preserved empty field, a source left out)
@@ -1029,6 +1029,39 @@ def pressing_field(field) -> bool:
     """TAG-3: a field of one pressing (RESTORE_FIELDS, or a Discogs field of one release)."""
     f = str(field or "")
     return f in RESTORE_FIELDS or (f.startswith("discogs_") and f not in DG_ALBUM_FIELDS)
+
+
+# REP-2: the credit and performer roles of a track (Picard's names, the Discogs plugin's
+# discogs_credit_*): what a later identification of the same album may no longer give a file
+# (CRD-1 scoped Discogs credits to their tracks), taken back where TagMender's own job wrote it
+CREDIT_FIELDS = ("composer", "lyricist", "writer", "arranger", "conductor", "producer", "engineer", "mixer",
+                 "remixer", "djmixer", "orchestra", "chorusmaster")
+
+
+def credit_field(field) -> bool:
+    """REP-2: a credit or performer role (performer:*, producer, engineer, discogs_credit_* ...)."""
+    f = str(field or "").lower()
+    return f in CREDIT_FIELDS or f.startswith(("performer:", "discogs_credit_"))
+
+
+def tagmender_credit_writes(paths) -> dict:
+    """REP-2: {path: {field: (value before TagMender, value it left)}} of the credit fields
+    (credit_field) TagMender's own jobs wrote in each of these files, read from the job history
+    as tagmender_originals reads it; files TagMender's jobs never tagged are left out."""
+    if not paths:
+        return {}
+    _own_index()
+    with _OWN_LOCK:
+        wrote = _OWN_INDEX[2] if len(_OWN_INDEX) > 2 else {}
+    out = {}
+    for p in paths:
+        hit = wrote.get(str(p)) or wrote.get(os.path.realpath(str(p)))
+        if hit is None:
+            continue
+        own = {f: v for f, v in hit[2].items() if credit_field(f)}
+        if own:
+            out[str(p)] = own
+    return out
 
 
 def tagmender_pressing_writes(paths, title=False) -> dict:

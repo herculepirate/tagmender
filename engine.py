@@ -1960,6 +1960,11 @@ class Engine:
             most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")),
             own_number=bool(best.get("own_number")), guessed_pick=bool(best.get("guessed_pick")),
             number_proven=bool(best.get("number_proven")))
+        # REP-2: whose credits were read whole and placed track by track - MusicBrainz's with the
+        # release's and the tracks' relationships both asked for (Credits "Both"), Discogs's with
+        # its tracks lined up with yours (CRD-1) and the release listing its credits; what the
+        # profile drops (Discogs performers off, protected tags) is named so a plan leaves it
+        prop.credits_read = credits_read(tags_mb, ps, dparts, det if dparts else None, es)
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
@@ -5247,6 +5252,18 @@ def _track_credits(entry, scope, s, dm) -> dict:
     combined = dm.extract_credits(list(scope[0]) + mine)
     own = {k: combined[k] for k in dm.extract_credits(mine) if k in combined}
     return shape_fields(own, s, dm)
+
+
+def credits_read(tags_mb, ps, dparts, det, es) -> dict:
+    """REP-2: {"musicbrainz": bool, "discogs": bool, "discogs_performers": bool, "protected": [..]}:
+    whether each database's credits were read whole and placed per track for these targets
+    (a plan takes back only credits a database read so no longer gives a file)."""
+    ps, es = ps or {}, es or {}
+    mb = bool(tags_mb) and bool(ps.get("release_ars")) and bool(ps.get("track_ars"))
+    dg = bool(dparts) and dparts[1] is not None and isinstance(det, dict) and bool(det.get("extraartists"))
+    protected = sorted(p.lower() for p in re.split(r"[,\s]+", str(es.get("protected_tags") or "")) if p)
+    return {"musicbrainz": mb, "discogs": dg, "discogs_performers": bool(es.get("performers", True)),
+            "protected": protected}
 
 
 def with_track_credits(album: dict, track) -> dict:

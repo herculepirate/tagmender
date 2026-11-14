@@ -1,5 +1,17 @@
 # Release notes
 
+## 0.8.61
+
+**Credits that no longer belong are taken off (REP-2)**
+- When an earlier TagMender job wrote a credit on tracks it does not belong to (before credits
+  were limited to their own tracks in 0.8.60), planning the album again now takes it off, or
+  puts back what the file held before.
+- Only a value TagMender itself wrote, still exactly as written, is taken off. Your own edits,
+  another tagger's values and fields you preserve or lock stay. Nothing is taken off when the
+  credits were not read in full this time (credits switched off, or a release whose tracks did
+  not line up), or when the album is now matched to another release.
+- The plan lists what is taken off, and undo puts it back.
+
 ## 0.8.60
 
 **Credits go on the tracks they are for (CRD-1)**

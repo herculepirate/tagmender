@@ -139,6 +139,9 @@ class Proposal:
     # TAG-3 / REP-1: {file: {field: value before TagMender's job}} an album found album only
     # takes back (engine._restore_own): the pressing fields TagMender's earlier job wrote
     restore: dict = field(default_factory=dict)
+    # REP-2 (engine.credits_read): whose credits were read whole and placed per track; empty -
+    # an older proposal, another path - takes back none
+    credits_read: dict = field(default_factory=dict)
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
@@ -1427,6 +1430,23 @@ class Planner:
             if not claims[k]:
                 del claims[k]
 
+    def _own_credits(self, prop, files, conf) -> dict:
+        """REP-2: {file: {field: (value before TagMender, value it left)}} of the credit fields
+        TagMender's own earlier jobs wrote in these files, when this album may take back the ones
+        its identification no longer gives: proven exactly, at the replace threshold (below it a
+        file's values stay), and every database answering (a database out gives no credits, which
+        says nothing about them). {} otherwise."""
+        if tier_of(prop) != "exact" or getattr(prop, "held", "") or \
+                float(conf or 0) < _threshold(self.profile, "replace_min_confidence"):
+            return {}
+        if any(k in ("musicbrainz", "discogs") for k in (getattr(prop, "provider_errors", None) or {})):
+            return {}
+        try:
+            import match_albums
+            return match_albums.tagmender_credit_writes([str(f) for f in files])
+        except Exception:
+            return {}
+
     def _album(self, prop: Proposal) -> dict:
         self._win_album = f"{prop.source_dir}#{sorted(map(str, prop.files))}"   # (one of several albums of a folder)
         p = self.profile
@@ -1714,6 +1734,12 @@ class Planner:
             entry["notes"].append("versions of one disc (" + ", ".join(apart) + ") would be named alike: each "
                                   "goes into a folder of its own, named after it, inside the album's (or its disc's) folder")
         naming_with = plugins.working()                   # (a $function of a plugin failing while naming)
+        # REP-2: the credits TagMender's own earlier jobs wrote that this identification gives the
+        # file no more (CRD-1 scoped a Discogs credit to its tracks): taken back - only on an
+        # album proven again (exact, at the replace threshold, not held, every database answering)
+        own_credits = self._own_credits(prop, kept, tag_conf) \
+            if identified and not (partial or album_only or unproven or held) else {}
+        stale_credits = {}
         for f in kept:
             try:
                 before = tagio.read(f)
@@ -1879,6 +1905,15 @@ class Planner:
                 rows.append({"field": k_, "before": _vals(before.get(k_)), "after": v_,
                              "action": "restored (as before TagMender's job)" if v_ else "removed"})
             import levels as _lv
+            for k_, v_ in _stale_credits(f, before, whole, (own_credits or {}).get(str(f)), p,
+                                         changes, removals, getattr(prop, "credits_read", None)).items():
+                changes[k_] = v_ or None
+                rows = [r for r in rows if r.get("field") != k_]
+                rows.append({"field": k_, "before": _vals(before.get(k_)), "after": v_,
+                             "action": "restored (as before TagMender's job)" if v_ else "removed",
+                             "note": "written by TagMender's earlier job; this release no longer credits it "
+                                     "on this track"})
+                stale_credits[k_] = stale_credits.get(k_, 0) + 1
             if identified and tag_conf >= _threshold(p, "replace_min_confidence") \
                     and _lv.level(p) != "basic":
                 join_ = tagio.v23_join(f, fmt) if cust_set else None
@@ -2178,6 +2213,13 @@ class Planner:
                         if op == "copy" and not changes and not fe.get("fix_pictures"):
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
+        if stale_credits:
+            # REP-2: in words, once for the album
+            entry["notes"].append(
+                "credits TagMender's earlier job wrote that this release no longer gives these tracks "
+                "(its credits name the tracks they apply to) are taken back, restored where the file had "
+                "a value before: " + ", ".join(f"{k} ({n} file{'s' if n != 1 else ''})"
+                                                for k, n in sorted(stale_credits.items())))
         entry["conflicts"] += _linked_tracks(entry, self.roots() + sorted(self._split_roots))
         if identified and getattr(prop, "suspect_lossy", "") and (p.get("quality_action") == "hold" or
                                                                   p.get("quality_action") == "move" and op == "copy"):
@@ -3072,6 +3114,51 @@ def _album_only_reason(prop) -> str:
     tied = next((w for w in prop.why or [] if str(w).startswith("pressing unknown")), "")
     words = "album known, pressing not established" + (f": {tied.split(':', 1)[0]}" if tied else "")
     return reasons.encode(words, ["ambiguous_release"])
+
+
+def _stale_credits(f, before, target, own, profile, changes, removals, read=None) -> dict:
+    """REP-2: {field: value to write back ([] removes it)} for the credit fields TagMender's own
+    earlier job wrote in this file (`own`: {field: (before, after)}) that the identification now
+    gives it no value for: back to what the file held before that job, removed where it held
+    nothing. Only where the file still holds exactly what TagMender wrote (a value you or another
+    tagger changed since stays), the field policy lets the plan change it (never preserve, lock,
+    fill_missing), the level writes it, the target is the same release TagMender wrote (its
+    release IDs, written by TagMender's job, as the file holds them), and each database whose ID
+    the file holds read its credits whole (`read`, engine.credits_read: Credits "Both" for
+    MusicBrainz; Discogs's tracks lined up and its credits listed, its performers and the field
+    not switched off)."""
+    read = read or {}
+    if not own or not target or not any(_vals(target.get(k)) for k in ("title", "tracknumber")):
+        return {}
+    import levels as _lv
+    import match_albums as _ma
+    mb = (_vals(before.get("musicbrainz_albumid")) or [""])[0].strip().lower()
+    dg = (_vals(before.get("discogs_release_id")) or [""])[0].strip()
+    if not (mb or dg):
+        return {}
+    if mb and ((_vals(target.get("musicbrainz_albumid")) or [""])[0].strip().lower() != mb
+               or not read.get("musicbrainz")):
+        return {}
+    if dg and ((_vals(target.get("discogs_release_id")) or [""])[0].strip() != dg or not read.get("discogs")):
+        return {}
+    if not _ma.tagmender_wrote([(str(f), mb, dg)]):
+        return {}                       # (the release IDs are not TagMender's own write)
+    protected = set(read.get("protected") or ())
+    out = {}
+    for k, (was, left) in sorted(own.items()):
+        was, left = list(was or ()), list(left or ())
+        if not _vals(left) or _vals(target.get(k)) or k in changes or k in removals:
+            continue
+        if k.lower() in protected or (dg and k.startswith("performer:") and not read.get("discogs_performers")):
+            continue                    # (a field the profile keeps Discogs from writing)
+        if not _vals(before.get(k)) or not _ma._same_values(before.get(k), left) or _ma._same_values(was, left):
+            continue
+        if profile.policy(k) in ("preserve", "lock", "fill_missing"):
+            continue
+        if not _lv.restrict({k: left}, profile).get(k) or not tagio.holds(f, k):
+            continue
+        out[k] = _vals(was)
+    return out
 
 
 def tier_of(prop) -> str:

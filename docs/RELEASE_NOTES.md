@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.8.58
+
+**A set whose discs are different releases is stable after it is tagged (IDM-1)**
+- A folder holding several releases as disc folders ("Disc 1", "Disc 2", "Disc 3", each its own
+  volume) is tagged disc by disc, in place. Planning it again now reads each disc from its own
+  folder, as the first plan did. Before, the second plan read every disc with the scans of the
+  whole set, so a barcode from one volume's scans could match the other discs to that volume
+  (and hold them), or move a disc to a new folder.
+- Choosing a release by hand for one disc of such a set now works.
+
 ## 0.8.57
 
 **A box of CDs and Blu-rays, ripped as its CDs, is matched (MED-16, TRK-5)**

@@ -124,5 +124,105 @@ class IDM1Companions(unittest.TestCase):
         self.assertEqual([str(c.relative_to(t)) for c, _w in comps], ["a.log"])
 
 
+class IDM1TaggedDiscs(Base):
+    """A set whose discs are different releases (Funk Drops 1, 2 and 3 in "Disc 1".."Disc 3"),
+    tagged disc by disc by the first job: the next plan groups it by those tags, and each disc
+    is identified from its own folder as the first plan did - not from the set's folder, where
+    the shared scans in "Disc 1" (all three volumes' barcodes) prove disc 1's release for all."""
+
+    def disc_set(self):
+        import subprocess
+        top = self.lib / "Various Artists" / "Drops (2001-2004)"
+        for n in (1, 2):
+            d = top / f"Disc {n}"
+            d.mkdir(parents=True)
+            for i in range(2):
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=duration={i + 1}",
+                                "-ar", "8000", "-metadata", f"album=Drops {n}", "-metadata", "albumartist=Various",
+                                "-metadata", f"title=T{n}{i}", "-metadata", f"track={i + 1}",
+                                str(d / f"{n}0{i + 1}.flac"), "-y"], check=True)
+        return top
+
+    def owned(self, top, ids=("r1", "r2")):
+        """REP-1's ownership index as a job of TagMender's left it: each disc its own release."""
+        idx = {str(f): ({ids[n - 1]}, set()) for n in (1, 2) for f in (top / f"Disc {n}").glob("*.flac")}
+        saved = engine.ma._own_index
+        engine.ma._own_index = lambda: idx
+        self.addCleanup(setattr, engine.ma, "_own_index", saved)
+        return idx
+
+    def spied(self, e):
+        seen = []
+
+        def spy(g, names=None):
+            seen.append((g.folder.name, names, getattr(e, "_disc_alone", False)))
+            return engine.planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
+                                           status="unresolved", tier="unresolved")
+
+        def forced(g, ref):
+            seen.append((g.folder.name, ref, "forced"))
+            return engine.planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
+                                           status="unresolved", tier="unresolved")
+        e._identify, e._forced = spy, forced
+        return seen
+
+    def groups(self, e, top):
+        groups = sorted(e.albums_in(top), key=lambda g: str(g.files[0]))
+        self.assertEqual([(g.folder.name, len(g.files), len(g.others)) for g in groups],
+                         [(top.name, 2, 2), (top.name, 2, 2)])
+        return groups
+
+    def test_IDM1_a_disc_tagmender_tagged_as_its_own_release_is_identified_from_its_folder(self):
+        top = self.disc_set()
+        self.owned(top)
+        e = self.engine(FakeHttp())
+        seen = self.spied(e)
+        props = [e.identify(g) for g in self.groups(e, top)]
+        self.assertEqual([s[0] for s in seen], ["Disc 1", "Disc 2"])
+        self.assertTrue(all(s[1] == ("Various Artists", top.name) and s[2] is True for s in seen), seen)
+        self.assertEqual([p.disc_folder.name for p in props], ["Disc 1", "Disc 2"])
+        self.assertFalse(getattr(e, "_disc_alone", False))
+
+    def test_IDM1_a_box_another_tagger_titled_disc_by_disc_is_read_as_before(self):
+        top = self.disc_set()
+        e = self.engine(FakeHttp())
+        seen = self.spied(e)
+        for case in ({}, "one release twice", "one disc unowned"):
+            del seen[:]
+            if case == "one release twice":
+                self.owned(top, ids=("r1", "r1"))
+            elif case == "one disc unowned":
+                idx = self.owned(top)
+                del idx[str(top / "Disc 2" / "201.flac")]
+            props = [e.identify(g) for g in self.groups(e, top)]
+            self.assertEqual([s[0] for s in seen], [top.name, top.name], case)
+            self.assertFalse([p for p in props if getattr(p, "disc_folder", None)], case)
+
+    def test_IDM1_a_release_chosen_for_one_disc_is_used(self):
+        top = self.disc_set()
+        self.owned(top)
+        e = self.engine(FakeHttp())
+        seen = self.spied(e)
+        g1, g2 = self.groups(e, top)
+        e.force = {_os.path.realpath(str(top / "Disc 2")): "https://musicbrainz.org/release/x"}
+        props = [e.identify(g1), e.identify(g2)]
+        self.assertEqual(seen[0][0], "Disc 1")
+        self.assertEqual(seen[1], ("Disc 2", "https://musicbrainz.org/release/x", "forced"))
+        self.assertEqual(props[1].disc_folder.name, "Disc 2")
+
+    def test_IDM1_other_groups_keep_their_folder(self):
+        top = self.disc_set()
+        self.owned(top)
+        e = self.engine(FakeHttp())
+        g = self.groups(e, top)[0]
+        loose = top / "bonus.flac"
+        loose.write_bytes(b"x")
+        cases = [engine.Group(top, list(g.files), []),                       # (the set's only album)
+                 engine.Group(top, list(g.files), list(g.others) + [loose]),  # (another album beside the discs)
+                 engine.Group(top, list(g.files) + list(g.others), [loose])]  # (spanning both discs)
+        self.assertEqual([e._tagged_disc(c) for c in cases], [None, None, None])
+        self.assertEqual(e._tagged_disc(g), top / "Disc 1")
+
+
 if __name__ == "__main__":
     unittest.main()

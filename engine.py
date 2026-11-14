@@ -997,10 +997,30 @@ class Engine:
         return Group(g.folder, fs) if fs else g
 
     def identify(self, g: Group) -> planmod.Proposal:
-        choice = self._choice_for(g, getattr(self, "_alone", True))
+        disc = self._tagged_disc(g)
+        # (a release chosen for one disc of it: its row is the disc folder's - IDM-1, _per_disc)
+        own = Group(disc, list(g.files)) if disc is not None and self._choice_for(
+            Group(disc, list(g.files)), getattr(self, "_alone", True)) else g
+        choice = self._choice_for(own, getattr(self, "_alone", True))
         ref = choice.get("ref") if isinstance(choice, dict) else choice
         self._last_out = None
-        prop = self._forced(self._chosen_files(g, choice), ref) if ref else self._identify(g)
+        if ref:
+            prop = self._forced(self._chosen_files(own, choice), ref)
+            if own is not g:
+                prop.disc_folder = disc
+        elif disc is not None:
+            # IDM-1: one disc of a set TagMender tagged disc by disc (_per_disc), each its own
+            # release: identified alone, from its own folder, as that job did - the set's other
+            # discs' scans are not its proof
+            was, self._disc_alone = getattr(self, "_disc_alone", False), True
+            try:
+                prop = self._identify(Group(disc, list(g.files)),
+                                      names=(g.folder.parent.name, one_disc_name(g.folder.name)))
+            finally:
+                self._disc_alone = was
+            prop.disc_folder = disc
+        else:
+            prop = self._identify(g)
         # the releases the matcher scored best, for the run report (one album as one folder only:
         # a set of discs or a split was matched disc by disc, version by version)
         whole = not ref and not getattr(prop, "parts", None) and not getattr(prop, "split", None) \
@@ -1015,6 +1035,40 @@ class Engine:
         for p in [prop] + list(getattr(prop, "parts", None) or []):
             self._finish(p, g)
         return prop
+
+    def _tagged_disc(self, g: Group):
+        """IDM-1: the disc folder of a set (its folder's subfolder) holding all of this album's
+        files, when every disc of the set was tagged by a job of TagMender's as a release of its
+        own (_per_disc: each disc's files one release's IDs, the discs' different - REP-1's
+        ownership index) and albums_in grouped the set by those tags: None for any other album
+        (a box whose discs another tagger titled as albums of their own is split as before)."""
+        if not g.others or g.discs:
+            return None
+        parents = {Path(f).parent for f in g.files}
+        if len(parents) != 1:
+            return None
+        d = next(iter(parents))
+        skips = self._skipper()
+        if d.parent != g.folder or not set_dir(d, skips):
+            return None
+        if any(Path(f).parent == d or Path(f).parent.parent != g.folder or not set_dir(Path(f).parent, skips)
+               for f in g.others):
+            return None
+        try:
+            owned = ma._own_index()
+        except Exception:
+            return None
+        ids = {}
+        for f in list(g.files) + list(g.others):
+            own = owned.get(str(f)) or owned.get(os.path.realpath(str(f)))
+            key = frozenset(str(x).lower() for part in (own or ()) for x in part)
+            if not key:
+                return None                              # (not TagMender's own write)
+            ids.setdefault(Path(f).parent, set()).add(key)
+        if any(len(v) != 1 for v in ids.values()):
+            return None                                  # (a disc of two releases)
+        keys = [next(iter(v)) for v in ids.values()]
+        return d if len(set(keys)) == len(keys) else None
 
     def identify_all(self, g: Group) -> list:
         """identify, as a list of albums: one, or each disc of a set whose discs are

@@ -113,7 +113,10 @@ class Scans(Base):
         prop, _ = self.run_album()
         self.assertEqual((prop.status, prop.release_id), ("identified", "mb-s"), prop.why)
         ident = self.ident(prop)
-        self.assertEqual(ident["scans"], {"state": "unread", "found": [], "against": []})
+        scans = dict(ident["scans"])
+        cov = scans.pop("coverage")                    # (SCN-1: the counts of what was read, told too)
+        self.assertEqual(scans, {"state": "unread", "found": [], "against": []})
+        self.assertEqual((cov["found"], cov["read"], cov["complete"]), (1, 1, True))
 
     def test_a_folder_without_scans_reports_none(self):
         prop, _ = self.run_album(scans=False)

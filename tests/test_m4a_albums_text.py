@@ -753,7 +753,7 @@ class ProcessWiring(TempAlbum):
         a = self.read()
         final = {"status": "review", "why": [], "best": None}
         deep = "Terrestrials (2014, SUNN200, side A).wv - iZotope RX 7 Audio Editor\nSouthern Lord Recordings\n"
-        with mock.patch.object(ma, "list_images", lambda base, n: (["shot.png"], "k")), \
+        with mock.patch.object(ma, "list_images", lambda base, n, inventory=None: (["shot.png"], "k")), \
                 mock.patch.object(ma, "ocr_deep", lambda imgs: deep), \
                 mock.patch.object(ma, "ocr_disc_rings", lambda imgs: ""), \
                 mock.patch.object(ma, "pdf_deep", lambda base, db: "(Terrestrials (2014, SUNN200).cue)\n"), \

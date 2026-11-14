@@ -1856,10 +1856,12 @@ class Executor:
                         trees.append(tree)
                     if keep_p:
                         break
+                    # DIR-2: journaled before it goes (a crash in between loses no folder; making
+                    # one again that is still there is nothing)
                     for tree in trees:
                         for sub in tree:
-                            sub.rmdir()
                             self.journal.write(ev="dir_removed", album=i, path=str(sub))
+                            sub.rmdir()
                     inside = list(p.iterdir())
                     if any(x.name not in JUNK or not x.is_file() or x.is_symlink() for x in inside):
                         break
@@ -1869,8 +1871,8 @@ class Executor:
                         keep.parent.mkdir(parents=True, exist_ok=True)
                         self.journal.write(ev="junk_removed", album=i, path=str(x), saved=str(keep))
                         shutil.move(str(x), str(keep))
-                    p.rmdir()
                     self.journal.write(ev="dir_removed", album=i, path=str(p))
+                    p.rmdir()
                 except OSError:
                     break
                 p = p.parent
@@ -2386,6 +2388,13 @@ def _recover(job, jd, journal, events):
                 if p.exists() and (os.stat(p).st_size, os.stat(p).st_mtime_ns) == (c["size"], c["mtime_ns"]):
                     p.unlink()
                 journal.write(ev="rollback_step", key=["created", c["path"]])
+        # DIR-2: the folders its clean-up removed - its own folder, empty folder trees in it -
+        # made again, as undo does (only missing ones; each like its parent)
+        for x in reversed([x for x in events if x.get("ev") == "dir_removed" and x.get("album") == a]):
+            try:
+                mkdirs_like_parent(Path(x["path"]))
+            except OSError as exc:
+                problems.append(f"{x['path']}: the folder could not be made again ({exc.strerror})")
         for x in events:                 # .DS_Store / Thumbs.db of a folder its clean-up removed
             if x.get("ev") == "junk_removed" and x["album"] == a:
                 saved, path = Path(x["saved"]), Path(x["path"])
@@ -2749,7 +2758,9 @@ def _undo(job, jd, journal, events, force):
             did("companion", a, j)
         except Exception as exc:
             problems.append(f"{c['src']}: {exc}")
-    removed = [e for e in events if e.get("ev") == "dir_removed" and e.get("album") not in staying]
+    # (an album put back by a rollback or recover had its folders made again then - DIR-2)
+    removed = [e for e in events if e.get("ev") == "dir_removed" and e.get("album") not in staying
+               and e.get("album") not in rolled]
     for e in removed:
         try:
             mkdirs_like_parent(Path(e["path"]))

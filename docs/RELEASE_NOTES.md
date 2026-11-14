@@ -1,5 +1,24 @@
 # Release notes
 
+## 0.8.56
+
+**A crash while tidying up after a move is recovered (DIR-2)**
+- When a move empties a folder, TagMender removes it, and the empty folder trees inside it,
+  afterwards. Each folder is now noted in the job's journal before it goes. If the program or
+  the computer stops part-way through, recovery puts the album back with every folder it had
+  removed (undo already did). Folders you have since put files in are left as they are, and a
+  box set's other disc folders and the box folder stay untouched.
+- Not tested: a crash on a network share, and a crash during undo.
+
+**Scans are only "all read" when they were (SCN-1)**
+- The scan limit (8 images at "quick" OCR) is counted on your folder's distinct images. An exact
+  copy of a scan ("scan 1 (copy).jpg") is no scan left unread, and a scan past the limit is no
+  longer taken as read. The plan now shows how many images were found, how many were copies, how
+  many were distinct, and how many were read.
+- A scan whose reading failed is no longer stored as a blank page. Blank pages stored that way
+  by earlier versions are read again once.
+- "Investigated" says how many scans it read again and why it stopped, instead of "every scan".
+
 ## 0.8.55
 
 **A folder's year is the album's year (YR-1)**

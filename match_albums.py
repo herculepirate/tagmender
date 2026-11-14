@@ -5204,13 +5204,17 @@ def packaging_evidence(album_dir):
     return out or ({"jewel"} if jewel_parts else set())
 
 
-def list_images(base, max_n):
+def list_images(base, max_n, inventory=None):
     """Every image under the album folder (subfolders included), most likely
     to carry a barcode or catalogue number first (ocr_order: the roles whose scans paid
     off most, learned). Exact duplicate files (e.g. 'scan 1 (copy).jpg') are scanned once.
 
     Returns (paths, key): the key identifies exactly these image contents, so
-    OCR results can be cached and reused while the images are unchanged."""
+    OCR results can be cached and reused while the images are unchanged.
+    inventory (a dict, SCN-1): filled with what was found - found (image files), duplicates
+    (exact copies of another found), unique (found less duplicates and unreadable), listed,
+    cap, left_out (unique images after the cap, not listed: not read) and unreadable (files
+    that could not be read). A copy of a listed image is no image left out."""
     import hashlib
     found = []
     for dirpath, _d, names in os.walk(base):
@@ -5220,19 +5224,75 @@ def list_images(base, max_n):
                 found.append(p)
     found = ocr_order.rank(found, tie=_scan_shape)
     seen, out, digests = set(), [], []
-    for p in found:
+    unreadable = duplicates = left_out = 0
+    rest = []
+    for k, p in enumerate(found):
         try:
             digest = hashlib.md5(p.read_bytes()).hexdigest()
         except OSError:
+            unreadable += 1
             continue
         if digest in seen:
+            duplicates += 1
             continue
         seen.add(digest)
         out.append(str(p))
         digests.append(digest)
         _DIGESTS[str(p)] = digest
         if max_n and len(out) >= max_n:
+            rest = found[k + 1:]
             break
+    if rest:
+        # SCN-1: the images after the cap are not read; each is a copy of one already seen or
+        # a unique image left out. Only one of a size already seen can be a copy, so only those
+        # are read for their contents (a box's 80 further scans are not all read over the network)
+        # (of one size, the first 64 KiB told apart before the whole: same-size scans of a box,
+        # uncompressed at one resolution, differ there)
+        def head(q):
+            with open(q, "rb") as fh:
+                return hashlib.md5(fh.read(65536)).hexdigest()
+        by_size = {}                                   # size -> {path: [head, digest]} (None: not read yet)
+        for p in [Path(x) for x in out]:
+            try:
+                by_size.setdefault(p.stat().st_size, {})[str(p)] = [None, _DIGESTS.get(str(p))]
+            except OSError:
+                by_size.setdefault(None, {})[str(p)] = [None, _DIGESTS.get(str(p))]
+        for p in rest:
+            try:
+                size = p.stat().st_size
+                same = by_size.setdefault(size, {})
+                mine = [None, None]
+                if same:
+                    mine[0] = head(p)
+                    for q, hd in list(same.items()):
+                        try:                           # another's failing read is no fault of this one
+                            if hd[0] is None:
+                                hd[0] = head(q)
+                            if hd[0] == mine[0]:
+                                if hd[1] is None:
+                                    hd[1] = hashlib.md5(Path(q).read_bytes()).hexdigest()
+                                if mine[1] is None:
+                                    mine[1] = hashlib.md5(p.read_bytes()).hexdigest()
+                        except OSError:
+                            same.pop(q, None)          # (counted already, as listed or left out)
+                    # (a listed image whose size could not be told: compared by its whole contents)
+                    if None in by_size and mine[1] is None:
+                        mine[1] = hashlib.md5(p.read_bytes()).hexdigest()
+                elif None in by_size:
+                    mine[1] = hashlib.md5(p.read_bytes()).hexdigest()
+            except OSError:
+                unreadable += 1
+                continue
+            if mine[1] is not None and any(hd[1] == mine[1] for g in (same, by_size.get(None) or {})
+                                           for hd in g.values()):
+                duplicates += 1
+                continue
+            same[str(p)] = mine
+            left_out += 1
+    if inventory is not None:
+        inventory.update(found=len(found), duplicates=duplicates,
+                         unique=len(found) - duplicates - unreadable, listed=len(out), cap=max_n,
+                         left_out=left_out, unreadable=unreadable)
     key = hashlib.md5((OCR_VERSION + "|" + "|".join(digests)).encode()).hexdigest()
     return out, key
 
@@ -5350,6 +5410,32 @@ def new_scan_log():
     return {"read": set(), "text": {}, "barcodes": {}, "no_bars": set()}
 
 
+# SCN-1: a scan read with no text on it is cached as this, not "": before 0.8.56 a reading that
+# failed in the read-ahead (_ScanReads) was cached as "" too, so a "" in the cache may be a
+# failure - it is read again (once: what it gives is cached the new way). Readings with text
+# keep their cached value. (A string, one space: an older TagMender sharing the cache joins it
+# as a blank line, where a marker of another type would stop it.)
+BLANK_READING = " "
+
+
+def _read_ahead_kinds():
+    """The kinds _ScanReads reads ahead: only their "" can be a failure kept as a blank page."""
+    return {page_kind("text"), page_kind("spines"), "barcode-digits", "disc-rings-2"}
+
+
+def _cached_reading(raw, kind):
+    """A per-scan cache value as a reading; None: read it again (a "" of before 0.8.56 of a
+    kind read ahead - a deep reading's "" was never a failure)."""
+    v = json.loads(raw)
+    if v == "" and kind in _read_ahead_kinds():
+        return None
+    return "" if isinstance(v, str) and not v.strip() else v
+
+
+def _cache_value(v):
+    return json.dumps(BLANK_READING if v == "" else v)
+
+
 def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
     """read(path) for each scan, cached per scan (its contents and the OCR version, so a
     scan read once is not read again wherever it is in the list), several at once.
@@ -5365,7 +5451,7 @@ def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
         for i, k in enumerate(keys):
             row = db.execute("SELECT value FROM ocr_cache WHERE key=?", (k,)).fetchone()
             if row:
-                vals[i] = json.loads(row[0])
+                vals[i] = _cached_reading(row[0], kind)
     todo = [i for i, v in enumerate(vals) if v is None]
     started = time.time()
 
@@ -5389,7 +5475,7 @@ def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
             continue
         vals[i] = v
         if db is not None:
-            db.execute("INSERT OR REPLACE INTO ocr_cache VALUES (?,?)", (keys[i], json.dumps(v)))
+            db.execute("INSERT OR REPLACE INTO ocr_cache VALUES (?,?)", (keys[i], _cache_value(v)))
         if log is not None:
             log["read"].add(images[i])
     if db is not None and todo:
@@ -5465,7 +5551,9 @@ class _ScanReads:
                 except sqlite3.Error:
                     row = None
                 if row:
-                    return json.loads(row[0])
+                    v = _cached_reading(row[0], kind)
+                    if v is not None:          # (a "" of before 0.8.56: read again - SCN-1)
+                        return v
         budget = self.BUDGETS.get(kind)
         if budget is not None and time.time() - began > budget:
             return None
@@ -5473,7 +5561,7 @@ class _ScanReads:
         try:
             return read(path) or ""
         except Exception:
-            return ""
+            return False                               # SCN-1: failed - not read, not cached (each_scan)
         finally:
             _POOL.inside = False
 
@@ -7637,8 +7725,10 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
     """Read everything again, harder, and search every code found everywhere. In stages:
     the first INVESTIGATE_FIRST scans (those most likely to carry a code), their codes
     searched; the rest only when that leaves the album unsure. One time budget for all."""
-    images, _key = list_images(base, 80)
+    inventory = {}
+    images, _key = list_images(base, 80, inventory)
     log = album.setdefault("scan_log", new_scan_log())
+    reread, stopped, deep_failed = [], [], set()       # SCN-1: what this reading covered
     stages = [images[:INVESTIGATE_FIRST], images[INVESTIGATE_FIRST:]] if images else [[]]
     started = time.time()
     state = {"deep": "", "tried": ({mc.barcode_key(b) for b in album["barcodes"]}
@@ -7650,9 +7740,18 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
         if n and not stage:
             break
         left = INVESTIGATE_BUDGET_S - (time.time() - started)
-        deep = _joined(each_scan(db, "deep", stage, lambda p: ocr_deep([p]), log, budget_s=left))
+        dlog = new_scan_log()                          # (this reading's own: which of these failed)
+        deep = _joined(each_scan(db, "deep", stage, lambda p: ocr_deep([p]), dlog, budget_s=left))
+        reread += [p for p in stage if str(p) not in (dlog.get("unread") or ())]
+        log["read"] |= dlog["read"]
+        for p, v in dlog["text"].items():
+            log["text"].setdefault(p, []).extend(v)
+        if dlog.get("unread"):
+            log.setdefault("unread", set()).update(dlog["unread"])
+            deep_failed.update(str(x) for x in dlog["unread"])
         if stage and time.time() - started > INVESTIGATE_BUDGET_S:
             deep += "\n(investigation stopped: time budget used)"
+            stopped.append("its time budget used")
         if stage and state["rings"]:
             # the disc rings on their own as well: a matrix that clearly differs is told from them only
             rings = _joined(each_scan(db, "disc-rings-2", stage[:40], lambda p: ocr_disc_rings([p]), log,
@@ -7676,6 +7775,7 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
         mb_res, dg_res, new_final = _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final,
                                                        text, state, notes, use_mb, use_discogs)
         if n + 1 < len(stages) and stages[n + 1] and not _needs_investigation(new_final, album, text, base):
+            stopped.append("the rest not needed")
             break                                      # sure now: the other scans are not read
     engine = web_engine(cfg)[0]
     web_codes = state["codes"]
@@ -7684,9 +7784,28 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
                            "found": state["found"]}
     where = "MusicBrainz, Discogs" + (f" and the web ({engine})" if engine != "none" else
                                       " (other spellings too)")
+    if inventory.get("left_out"):
+        stopped.append(f"only the first {len(images)} images looked at, "
+                       f"{inventory['left_out']} others not read")
+    failed = len(deep_failed)                          # (this investigation's own readings only)
+    if failed:
+        stopped.append(f"{failed} could not be read")
+    elif len(reread) < len(images) and not stopped:
+        stopped.append("the others could not be read")
+    if inventory.get("unreadable"):
+        stopped.append(f"{inventory['unreadable']} image file(s) unreadable")
+    # counted among the folder's unique images: a copy of a scan read is no scan unread
+    unique = inventory.get("unique", len(images))
+    read_again = (f"{len(reread)} of {unique}"
+                  f" scans read again in full" + (f" ({'; '.join(stopped)})" if stopped else ""))
+    out["investigated"]["scans"] = {"read_again": len(reread), "listed": len(images), "unique": unique,
+                                    "found": inventory.get("found", len(images)),
+                                    "duplicates": inventory.get("duplicates", 0),
+                                    "left_out": inventory.get("left_out", 0),
+                                    "unreadable": inventory.get("unreadable", 0), "stopped": stopped}
     if new_final.get("best"):
         new_final["best"]["notes"] = new_final["best"]["notes"] + [
-            "investigated: every scan read again in full; codes "
+            f"investigated: {read_again}; codes "
             + (", ".join(web_codes[:6]) or "none") + f" searched on {where}"]
     if new_final.get("status") != "auto":
         new_final["why"] = list(new_final.get("why") or []) + [
@@ -7956,7 +8075,8 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # --ocr / the profile's "ocr": on, off, or auto (only folders with scans or a PDF)
     use_ocr = ocr_wanted(getattr(args, "ocr", False), base)
     if use_ocr:
-        images, img_key = list_images(base, getattr(args, "max_images", 15))
+        album["scan_inventory"] = inventory = {}           # SCN-1: what the cap left out
+        images, img_key = list_images(base, getattr(args, "max_images", 15), inventory)
         if images:
             found = decoded_barcodes(db, images, scan_log)
             album["ocr_barcodes"] = found               # decoded off the scans, whatever the tags say
@@ -8087,8 +8207,15 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         text = _joined(each_scan(db, kind, page_scans, lambda p: ocr_text([p]), scan_log, ahead=scans_ahead))
         # TAG-1: every image of the folder read as an image now (none left out, none failing): only
         # then is a clue an earlier reading found and this one does not disproved, not missing
+        # (SCN-1: none left out by the scan cap or unreadable either - "quick" reads 8 of a folder's)
+        inv = album.get("scan_inventory") or {}
         album["scans_complete"] = bool(use_ocr and images and len(page_scans) == len(images)
-                                       and not (scan_log or {}).get("unread"))
+                                       and not (scan_log or {}).get("unread")
+                                       and not inv.get("left_out") and not inv.get("unreadable"))
+        if use_ocr and inv:
+            # SCN-1: found, copies, unique and read told apart: completeness is of the unique ones
+            unread = {str(x) for x in (scan_log or {}).get("unread") or ()}
+            inv["read"] = sum(1 for p in page_scans if str(p) not in unread)
         # a file's name (a document's heading, a screenshot's title bar) is not print on the
         # copy: "SUNN200" in an RX window's title is no "catalogue number (OCR)" (R12)
         # which barcodes were only typed (notes, .nfo, saved pages) and which printed on the
@@ -8399,6 +8526,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                               bool(use_ocr and (images or _has_pdf(base))))
         if report:
             out["scans"] = report
+            cov = scan_coverage(album, out) if use_ocr else None
+            if cov:
+                report["coverage"] = cov
         out["via"] = found_via(final["best"], album)
     if status == "auto" and getattr(args, "learn_scan_order", True):
         learn_scan_order(scan_log, final)
@@ -8471,6 +8601,20 @@ _SCAN_CLUE_KINDS = {"barcode": "barcode", "catalogue number": "catalogue_number"
 _SCAN_AGAINST_KINDS = (("scans say made in ", "country"), ("disc ring reads ", "matrix"),
                        ("your scans show a ", "format"))
 SCAN_STATES = ("proven", "agrees", "differs", "unread")
+
+
+def scan_coverage(album, out):
+    """SCN-1, for the plan: what was read of the folder's images - found, copies, unique, read,
+    left out by the cap, unreadable, the cap - whether that is all of them, and what an
+    investigation read again. None when no inventory was taken."""
+    inv = album.get("scan_inventory")
+    if not inv:
+        return None
+    cov = {k: inv.get(k, 0) for k in ("found", "duplicates", "unique", "read", "left_out", "unreadable", "cap")}
+    cov["complete"] = bool(album.get("scans_complete"))
+    if ((out or {}).get("investigated") or {}).get("scans"):
+        cov["investigation"] = dict(out["investigated"]["scans"])
+    return cov
 
 
 def scans_report(best, album, ocr_txt, results, had_scans):

@@ -758,7 +758,7 @@ class OcrCodes(unittest.TestCase):
                                 "-metadata", f"title=T{i}", "-metadata", f"track={i + 1}",
                                 str(d / f"{i + 1:02d}.flac"), "-y"], check=True)
             (d / "back.jpg").write_bytes(b"x")
-            ma.list_images = lambda base, n: ([d / "back.jpg"], "k1")
+            ma.list_images = lambda base, n, inventory=None: ([d / "back.jpg"], "k1")
             ma.ocr_barcodes = lambda imgs: set()
             ma.ocr_text = lambda imgs: "Scan Artist  Cat. No. ZZQ-4471  Made in EU"
             row = {"AlbumArtistFolder": "Scan Artist", "AlbumFolder": d.name, "FullPath": str(d),
@@ -815,7 +815,7 @@ class PressingFromScans(unittest.TestCase):
                                 "-metadata", f"title=T{i}", "-metadata", f"track={i + 1}",
                                 str(d / f"{i + 1:02d}.flac"), "-y"], check=True)
             (d / "10.jpg").write_bytes(b"x")
-            ma.list_images = lambda base, n: ([d / "10.jpg"], "k-pref")
+            ma.list_images = lambda base, n, inventory=None: ([d / "10.jpg"], "k-pref")
             ma.ocr_barcodes = lambda imgs: set()
             ma.ocr_text = lambda imgs: "Scan Artist  Scan Album"
             ma.ocr_spines = lambda imgs: "SCAN ARTIST  FO532CD"

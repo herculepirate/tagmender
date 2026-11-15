@@ -1239,8 +1239,9 @@ def work_parsers(sub):
         a.add_argument("--json", action="store_true")
         a.add_argument("--file-below-score", action="store_true",
                        help="move or copy identified albums into the profile's layout even when their score is "
-                            "below organize_min_confidence (they are otherwise tagged in place); partial "
-                            "identifications and the other rules still keep theirs in place")
+                            "below organize_min_confidence (they are otherwise tagged in place), also below the "
+                            "floor Extra-careful matching raises; partial identifications and the other rules "
+                            "still keep theirs in place")
         prof(a)
         level(a)
         a.add_argument("--source", choices=pf.SOURCES,

@@ -27,6 +27,7 @@ What decides what:
 """
 from __future__ import annotations
 
+import copy
 import glob
 import hashlib
 import json
@@ -802,6 +803,12 @@ def _disc_nos(values) -> set:
     return {n for n in map(_disc_no, values or ()) if n is not None}
 
 
+def _moves_a_file(entry) -> bool:
+    """MOV-5: the album's plan moves or copies a file to another place."""
+    return any(fe.get("op") in ("copy", "move") and os.path.realpath(fe.get("src") or "") !=
+               os.path.realpath(fe.get("dst") or "") for fe in entry.get("files") or [])
+
+
 def _prop_discs(prop) -> set:
     """MOV-4: the disc numbers an album brings, as integers (its targets' disc numbers; 1 when
     none is a number)."""
@@ -1269,14 +1276,18 @@ def _cue_rewrites(path: Path, renames: dict):
 
 class Planner:
     def __init__(self, profile, job_id=None, rules=None, overrides=None, extra_roots=(), edits=None,
-                 file_anyway=None):
+                 file_anyway=None, seed_claims=None):
         self.profile = profile
         self.edits = edits or {}   # your edits from the app: {album folder: [edit]} (apply_edits)
-        # MOV-5: the album folders you asked to have filed though their score is below
-        # organize_min_confidence (realpaths; True: every album of this run - the CLI's
-        # --file-below-score). Never set by the watcher or an unattended run.
+        # MOV-5: the albums you asked to have filed though their score is below
+        # organize_min_confidence, by their audio files (realpaths: two albums of loose tracks in
+        # one folder are two asks); True: every album of this run - the CLI's --file-below-score.
+        # Never set by the watcher or an unattended run.
         self.file_anyway = file_anyway if file_anyway is True else {
             os.path.realpath(os.path.expanduser(str(f))) for f in file_anyway or ()}
+        # MOV-4: the album folders the other rows of the list being looked up again already claim
+        # (their plan entries' "claims"): an album planned alone sees them as one planned with them
+        self._seed_claims = list(seed_claims or ())
         self.extra_roots = [os.path.realpath(os.path.expanduser(str(r))) for r in extra_roots]
         self.extra_roots = [os.path.dirname(r) if os.path.isfile(r) else r for r in self.extra_roots]
         self.job = job_id or time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
@@ -1289,6 +1300,12 @@ class Planner:
         self._album_dirs = {}
         self._planned = set()
         self._album_claims = {}           # MOV-4: album folder -> [(release IDs, source folder, discs)]
+        for c in self._seed_claims:
+            try:
+                self._album_claims.setdefault(c["dir"], []).append(
+                    (frozenset(c["ids"]), str(c["src"]), {int(d) for d in c["discs"]}))
+            except (KeyError, TypeError, ValueError):
+                continue
         self._resident = []
         self._split_roots = set()  # folders a split's versions are made in, beside their folder
 
@@ -1411,27 +1428,69 @@ class Planner:
     def album(self, prop: Proposal) -> dict:
         """The plan for one album. Its files are opened once for all the reads below (tagio.reading)."""
         with tagio.reading(), ex.meta_memo():
-            try:
-                entry = self._album(prop)
-            except _DuplicateCopy as dup:
-                # MOV-4: another copy of this release is already filed there: tagged where it is
-                self._in_place_note = str(dup)
-                try:
-                    entry = self._album(prop)
-                finally:
-                    self._in_place_note = None
+            entry = self._album_placed(prop)
+            # MOV-5: offered only when filing it would put a file somewhere else; asked, it says
+            # so only when it does
+            if entry.get("below_floor") and not self._would_file(prop):
+                entry.pop("below_floor")
+            if entry.get("filed_on_request") and not _moves_a_file(entry):
+                entry.pop("filed_on_request")
+                entry["notes"] = [n for n in entry["notes"] if not n.endswith("because you asked")]
             # MOV-4: an album folder is claimed for this album's discs only once its placement
             # is decided - an album blocked, skipped or not moved claims none
             if not (entry.get("status") in ("ready", "unchanged") and
                     any(fe.get("op") in ("copy", "move") for fe in entry.get("files") or [])):
                 self._unclaim_album_dirs(prop)
+            else:
+                src, me = str(prop.source_dir), _release_ids(prop)
+                mine = [{"dir": k, "ids": sorted(c[0]), "src": c[1], "discs": sorted(c[2])}
+                        for k, cs in (self.__dict__.get("_album_claims") or {}).items()
+                        for c in cs if c[1] == src and c[0] == me]
+                if mine:
+                    entry["claims"] = mine                 # (MOV-4: for a row planned again alone)
             return entry
 
+    def _album_placed(self, prop) -> dict:
+        try:
+            return self._album(prop)
+        except _DuplicateCopy as dup:
+            # MOV-4: another copy of this release is already filed there: tagged where it is
+            self._in_place_note = str(dup)
+            try:
+                return self._album(prop)
+            finally:
+                self._in_place_note = None
+
+    # (what planning an album changes in the planner: put back after a trial, _would_file)
+    _TRIAL_STATE = ("claimed", "created_dirs", "_dirs", "_inodes", "_album_dirs", "_planned", "_album_claims",
+                    "_resident", "_split_roots", "_res_discs", "_win_dirs", "_win_tries", "_loose",
+                    "artist_dirs", "_unset", "_in_place_note", "_album_dir", "_win_album", "_album_tier")
+
+    def _would_file(self, prop) -> bool:
+        """MOV-5: planned as you asked, this album would move or copy a file (not every album kept
+        in place for its score would: one already where the naming puts it). A trial: the
+        planner is put back as it was."""
+        saved = {k: copy.deepcopy(self.__dict__[k]) for k in self._TRIAL_STATE if k in self.__dict__}
+        was = self.file_anyway
+        self.file_anyway = True
+        try:
+            return _moves_a_file(self._album_placed(prop))
+        except Exception:
+            return True                                    # (cannot tell: offered, as before)
+        finally:
+            self.file_anyway = was
+            for k in self._TRIAL_STATE:
+                if k in saved:
+                    self.__dict__[k] = saved[k]
+                else:
+                    self.__dict__.pop(k, None)
+
     def asked_to_file(self, prop) -> bool:
-        """MOV-5: you asked for this album's folder to be filed whatever its score."""
+        """MOV-5: you asked for this album to be filed whatever its score: one of its audio files
+        is one you asked for (never another album of the same folder)."""
         if self.file_anyway is True:
             return True
-        return bool(self.file_anyway) and os.path.realpath(str(prop.source_dir)) in self.file_anyway
+        return bool(self.file_anyway) and any(os.path.realpath(str(f)) in self.file_anyway for f in prop.files or ())
 
     def _unclaim_album_dirs(self, prop):
         """MOV-4: this album's claims on album folders, given up (it is not filed there)."""

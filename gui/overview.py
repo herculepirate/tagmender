@@ -324,7 +324,9 @@ class Overview(QWidget):
         self.path = None
         self.worker = None
         self.forced = {}
-        self.file_anyway = set()    # MOV-5: album folders you asked to have filed whatever the score
+        # MOV-5: the albums you asked to have filed whatever the score: {audio file: profile name}
+        # (an ask is the album's, under the profile it was made with: another profile, no ask)
+        self.file_anyway = {}
         self.library = ""           # the library folder chosen for this preview ("": the profile's)
         self.looked = {}            # album key -> how it was looked up (profile, sources): not again
         self.removed = set()        # folders of albums taken out of the list (Remove from List)
@@ -482,6 +484,7 @@ class Overview(QWidget):
         self.profile.currentTextChanged.connect(self.remember_profile)
         self.profile.currentTextChanged.connect(lambda _t: self.reset_sources())
         self.profile.currentTextChanged.connect(lambda _t: self.reset_library())
+        self.profile.currentTextChanged.connect(lambda _t: self.drop_asks_of_other_profiles())
         self.profile.currentTextChanged.connect(lambda _t: self.model.refresh_rows() if hasattr(self, "model") else None)
         self.sources.currentIndexChanged.connect(lambda _i: self.show_sources_state())
         # what the preview did without, because a key, login or program is missing (Open Setup: its row)
@@ -1088,7 +1091,7 @@ class Overview(QWidget):
         if not self.may_drop_edits(path):
             return False
         if not (self.path and os.path.realpath(str(path)) == os.path.realpath(str(self.path))):
-            self.file_anyway = set()                         # (MOV-5: asked for that folder's albums only)
+            self.file_anyway = {}                            # (MOV-5: asked for that folder's albums only)
         self.path = path
         self.forced = dict(forced or {})
         self.within = list(within or [])                     # (several folders dropped: only these)
@@ -1273,6 +1276,10 @@ class Overview(QWidget):
         ofs = {(a.get("split") or {}).get("of") for a in albums} - {None, ""}
         albums = list(albums) + [x for x in self.model.albums if (x.get("split") or {}).get("of") in ofs
                                  and not any(x is y for y in albums)]
+        import engine
+        for a in albums:                                   # (MOV-5: an ask was made under the profile it had)
+            for f in engine.plan_entry_files(a):
+                self.file_anyway.pop(os.path.realpath(f), None)
         again, done = [], []
         for a in albums:
             if a.get("status") == "done":                  # (applied already: filed again, from where it is)
@@ -1604,7 +1611,12 @@ class Overview(QWidget):
         skipped = len(done)
         path, ocr, edits = self.path, self.ocr.isChecked(), self.win.inspector.edits_for_preview()
         forced = dict(self.forced)                           # (the releases you chose: kept, as Preview)
-        file_anyway = set(self.file_anyway)                  # (MOV-5: the albums you asked to have filed)
+        file_anyway = dict(self.file_anyway)                 # (MOV-5: the albums you asked to have filed)
+        # MOV-4: the album folders the rows not looked up now claim, so an album planned alone
+        # is not filed where another row of the list is
+        looked_now = {k for ks in groups.values() for k in ks}
+        seed = [c for a in self.model.albums if self.album_key(a) not in looked_now
+                and a.get("status") in ("ready", "unchanged") for c in a.get("claims") or []]
         total = sum(len(ks) for ks in groups.values())
 
         roots = dict(getattr(self, "roots", {}))
@@ -1624,7 +1636,8 @@ class Overview(QWidget):
                 e = engine.engine_for_thread(profs[name], ocr=True if ocr else None)
                 e.edits = edits
                 e.force = forced
-                e.file_anyway = file_anyway
+                e.file_anyway = {f for f, n in file_anyway.items() if n == name}
+                e.seed_claims = seed
                 e.lookup_workers = workers
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
                 return plan_each(e, where, kr, lambda k, plan: report("partial", (name, k, plan)),
@@ -2000,7 +2013,7 @@ class Overview(QWidget):
             return
         self.looked_with = self.sources_words(mode)
         path, ocr, forced = self.path, self.ocr.isChecked(), dict(self.forced)
-        file_anyway = set(self.file_anyway)
+        file_anyway = {f for f, n in self.file_anyway.items() if n == self.profile.currentText()}
         edits = self.win.inspector.edits_for_preview()     # (your edits from the inspector: kept)
 
         def work(w):
@@ -2585,6 +2598,13 @@ class Overview(QWidget):
         return bool(a and a.get("below_floor") and a.get("status") not in ("done",)
                     and not (getattr(self, "running", False) and not getattr(self, "looking", None)))
 
+    def drop_asks_of_other_profiles(self):
+        """MOV-5: the profile chosen above changed: an ask made under another profile is dropped
+        (a move asked for is no copy asked for). An album with a profile of its own keeps its."""
+        own = set(self.album_profiles.values())
+        self.file_anyway = {f: n for f, n in self.file_anyway.items()
+                            if n == self.profile.currentText() or n in own}
+
     def file_anyway_selected(self):
         """Album > Move into the Library Layout Anyway: the selected albums kept in place for their
         score alone are looked up again with the floor lifted for their folders only (the rest of
@@ -2592,11 +2612,14 @@ class Overview(QWidget):
         chosen = [a for a in self.selected_albums() if self.may_file_anyway(a)]
         if not chosen:
             return
-        self.file_anyway |= {os.path.realpath(a["source_dir"]) for a in chosen}
+        import engine
+        for a in chosen:                                     # (the album's own files: not its folder's others)
+            for f in engine.plan_entry_files(a):
+                self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
         self.look_up(self.sources.currentData() or "profile", self.with_versions(chosen), again=True)
         self.win.statusBar().showMessage(
-            tr("Previewing {0} filed into the library as you asked; nothing is written until you apply.").format(
-                plural(len(chosen), tr("album"), tr("albums"))), 10000)
+            tr("Looking up {0} again, to be filed into the library as you asked; nothing is written until you "
+               "apply.").format(plural(len(chosen), tr("album"), tr("albums"))), 10000)
 
     def process_anyway(self):
         a = self.selected()

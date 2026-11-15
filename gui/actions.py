@@ -88,7 +88,8 @@ COMMANDS = {
     # MOV-5: its text is the operation's ("Move into…" / "Copy into…", file_anyway_words)
     "file_anyway": (N_("Move into the Library La&yout Anyway"), None, None,
                     N_("File this album into the profile's layout though its score is below the floor for "
-                       "moving or copying; it is previewed again, nothing is written until you apply")),
+                       "moving or copying (Extra-careful matching's raised floor too); it is looked up again, "
+                       "nothing is written until you apply")),
     "exclude_again": (N_("&Exclude Again"), None, None,
                       N_("The rules exclude this album again (undoes Process Anyway)")),
     "retry": (N_("&Retry in Overview"), "Ctrl+Shift+T", "refresh-cw", N_("Preview this album again in Overview")),

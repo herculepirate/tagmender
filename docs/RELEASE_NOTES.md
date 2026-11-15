@@ -24,6 +24,9 @@
   your exact disc ID is (TOC-2). A barcode another tagger wrote no longer outweighs your
   exact disc ID or your folder's catalogue number (BAR-5).
 - Folder catalogue numbers such as "RHEADCDX 1" are read (CAT-3).
+- Your exact disc ID on MusicBrainz's entry no longer overrules Discogs's pick of another
+  pressing when your folder name or scans speak against MusicBrainz's entry: a disc ID that
+  several pressings share proves the disc, not the pressing (TOC-3).
 
 **Boxes**
 - A Discogs box whose CDs are numbered "1-01" to "4-14" beside a headed DVD counts its discs

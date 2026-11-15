@@ -860,6 +860,9 @@ class Watcher:
             props = e.identify_all(g) if hasattr(e, "identify_all") else [e.identify(g)]
             prop = props[0]
             wait = "" if recheck else missing_discs(g, props)
+            if not wait and not recheck:
+                # DSC-5: one folder of a box set still being copied in (discs 1 .. k of N there)
+                wait = eng_mod.box_still_arriving(g.folder, e._skipper() if hasattr(e, "_skipper") else None)
             if wait:
                 # DSC-1: a set with a disc folder still missing is not filed: it waits (as an
                 # Unresolved album, on its schedule) and is looked at again when the disc arrives

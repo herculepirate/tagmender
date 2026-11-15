@@ -366,33 +366,86 @@ def numbered_box(box: Path, found: dict, metas: dict) -> bool:
     and no file's disc total says fewer than N discs (a "1 of 1" standalone album). An artist's
     folder or a "Compilations" folder of albums each tagged disc 1, a box whose discs' tags
     leave a gap or count otherwise, two artists' albums - stay apart as before."""
+    got = _box_discs(box, found, metas)
+    return bool(got) and got[1] == list(range(1, got[0] + 1))
+
+
+# DSC-5: the number a box's folder begins with, the order its discs are in: "01. (1980) - ...",
+# "CD3. 1992. ...", "CD02-03 1973 ..." (2), "CD-1 (KZ 2)", "Part 1"
+_LEAD_NUMBER = re.compile(r"^(?:(?:cd|disc|disk|part|pt\.?)\s*[-_.]?\s*)?(\d{1,3})(?!\d)", re.I)
+
+
+def _lead_key(name):
+    """DSC-5: a folder's place among its siblings - by the number its name begins with (any word
+    of a disc or part before it: "01. Alpha" and "CD02-03 Beta" are 1 and 2), else by its name."""
+    m = _LEAD_NUMBER.match(name)
+    return (0, int(m[1]), []) if m else (1, 0, ma._natural_key(name))
+
+
+def _box_discs(box: Path, found: dict, metas: dict):
+    """DSC-5: (N, the disc numbers of box's audio folders in their order, whether every file
+    gives a disc total) for numbered_box and box_still_arriving, when every other sign of a box
+    agrees; else None."""
     n = box_cd_count(box.name)
     if n < 2 or box in found:
-        return False
+        return None
     dirs = [d for d in found if box in d.parents]
     if not dirs:
-        return False
+        return None
     for d in dirs:
         depth = len(d.relative_to(box).parts)
-        if depth > 2 or (depth == 2 and (not is_disc_dir(d) or d.parent in found)):
-            return False
-    dirs.sort(key=lambda d: ma._natural_key(d.relative_to(box).as_posix()))
+        if depth > 2 or (depth == 2 and (not (is_disc_dir(d) or box_part_disc(d) is not None) or d.parent in found)):
+            return None                                   # (DSC-3's "Part 1" of a range folder is a disc folder too)
+    dirs.sort(key=lambda d: [_lead_key(x) for x in d.relative_to(box).parts])
     files = [f for d in dirs for f in found[d]]
     keys = album_keys(files, box, metas)
     if any(k[0] != "tags" or not k[1] for k in keys.values()) or len({k[1] for k in keys.values()}) != 1:
-        return False                                       # (untagged, or two artists' albums)
+        return None                                       # (untagged, or two artists' albums)
     numbers = []
     for d in dirs:
         if len({keys[f] for f in found[d]}) != 1:
-            return False                                   # (a folder of two albums)
+            return None                                   # (a folder of two albums)
         tags = {_disc_tag(metas.get(f) or {}) for f in found[d]}
         nums = {t[0] for t in tags}
         if len(nums) != 1 or not next(iter(nums)).isdigit():
-            return False                                   # (no disc number, or two of them)
+            return None                                   # (no disc number, or two of them)
         if any(t[1].isdigit() and int(t[1]) < n for t in tags):
-            return False                                   # (its own tags count fewer discs)
+            return None                                   # (its own tags count fewer discs)
         numbers.append(int(next(iter(nums))))
-    return numbers == list(range(1, n + 1))
+    return n, numbers, all(t[1].isdigit() for f in files for t in [_disc_tag(metas.get(f) or {})])
+
+
+def box_still_arriving(folder, skips=None) -> str:
+    """DSC-5 / DSC-1: why one folder of a box set being copied in waits (the watcher): the
+    folder above it (or the one above that) names its CD count N, its audio folders are its
+    discs as numbered_box has them, numbered 1 .. k rising in the folders' order with k below N,
+    and every file's disc total is N or more - "discs 3, 4 of 4 are not here yet". "" for any
+    other folder (an artist's or a "Compilations" folder of albums: their totals count fewer
+    discs, or none)."""
+    folder = Path(folder)
+    skips = skips or _skips_folder
+    for box in (folder.parent, folder.parent.parent):
+        if not box_cd_count(box.name):
+            continue
+        found = {}
+        try:
+            for dirpath, dirs, names in os.walk(box):
+                dirs[:] = sorted(x for x in dirs if not skips(x))
+                fs = sorted(Path(dirpath) / x for x in names
+                            if Path(x).suffix.lower() in ex.AUDIO_EXT and not x.startswith("."))
+                if fs:
+                    found[Path(dirpath)] = fs
+        except OSError:
+            return ""
+        got = _box_discs(box, found, {f: ex.read_meta(f) for fs in found.values() for f in fs})
+        if not got:
+            continue
+        n, numbers, totals = got
+        if totals and numbers and numbers == list(range(1, len(numbers) + 1)) and len(numbers) < n:
+            gone = list(range(len(numbers) + 1, n + 1))
+            words = ", ".join(map(str, gone))
+            return f"disc{'s' if len(gone) > 1 else ''} {words} of {n} {'are' if len(gone) > 1 else 'is'} not here yet"
+    return ""
 
 
 def version_dirs(parent: Path, metas=None, skips=None) -> list:
@@ -959,6 +1012,8 @@ class Engine:
         for box in sorted(near, key=lambda a: len(a.parts)):
             if any(b in box.parents for b in whole_boxes) or not numbered_box(box, found, metas):
                 continue
+            if self._box_part_left_out(box, [d for d in found if box in d.parents], path):
+                continue                                 # (a disc you excluded or ignored: no box)
             whole_boxes.add(box)
             for d in found:
                 if box in d.parents:
@@ -1008,6 +1063,23 @@ class Engine:
         if hasattr(self.profile, "joins_deluxe") and not self.profile.joins_deluxe():
             return groups
         return _with_deluxe(self.profile, groups, path, skip)
+
+    def _box_part_left_out(self, box: Path, dirs, path) -> bool:
+        """DSC-5: a folder of the box (one of its sub-folders, or a disc folder in one) that the
+        profile's exclude_paths leave out, or that the rules' Ignore remembered (the watcher's
+        ignored folders): the box is not one album - its other folders stay as they were, and
+        what you left out is never tagged or filed with them."""
+        parts = set(dirs) | {box / d.relative_to(box).parts[0] for d in dirs}
+        if any(self.profile.excluded_path(d, named=[path]) for d in parts):
+            return True
+        try:
+            st = ex.State()
+            try:
+                return any(st.ignored_item(d) for d in parts)
+            finally:
+                st.db.close()
+        except Exception:
+            return True                                  # (the ignores cannot be read: no box)
 
     def _skipper(self):
         """The profile's Skip These Folders (its folder_skipper), as albums_in reads folders."""

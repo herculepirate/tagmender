@@ -164,8 +164,17 @@ class DSC5_BoxOfAlbumFolders(te.Base):
         self.assertEqual(len(self.groups()), 2)
 
     def test_DSC5_an_artist_folder_of_albums_is_not_one_box(self):
-        # an artist's folder (no CD count in its name) of albums each tagged as its own disc 1:
-        # every album apart, as before - even when their disc numbers happen to count 1, 2, 3
+        # an artist's folder whose name gives a count ("Band N (3CD)") of albums each tagged as
+        # its own disc 1: the disc numbers keep every album apart, as before
+        artist = self.lib / "Band N (3CD)"
+        self.assertEqual(engine.box_cd_count(artist.name), 3)
+        for name in ("1980 - Alpha", "1982 - Beta", "1985 - Gamma"):
+            disc(artist, name, 1, name[7:], "Band N")
+        got = sorted((g.folder.name, len(g.files)) for g in self.groups())
+        self.assertEqual(got, [("1980 - Alpha", 3), ("1982 - Beta", 3), ("1985 - Gamma", 3)])
+
+    def test_DSC5_an_artist_folder_without_a_count_is_never_a_box(self):
+        # (no CD count in its name: apart even when its albums' disc numbers happen to run 1, 2, 3)
         artist = self.lib / "Band N"
         for n, name in enumerate(("1980 - Alpha", "1982 - Beta", "1985 - Gamma"), 1):
             disc(artist, name, n, name[7:], "Band N")
@@ -187,6 +196,131 @@ class DSC5_BoxOfAlbumFolders(te.Base):
         flac(top, "00.flac", 10, title="Intro", album="Bonus", albumartist="Band K", artist="Band K",
              track="1", disc="1")
         self.assertGreater(len(self.groups()), 1)
+
+    # ---- what you left out keeps the box apart -------------------------------------------------
+    def test_DSC5_an_excluded_sub_folder_keeps_the_box_apart(self):
+        top = numbered_box(self.lib)
+        sub = top / "02. (1986) - Beta 2CD"
+        eng = self.engine(te.FakeHttp(), exclude_paths=[str(sub) + "*"])
+        got = [(g.folder, len(g.files)) for g in eng.albums_in(self.lib)]
+        self.assertEqual(got, [(top / "01. (1980) - Alpha (2012) - KZ 1", 3)])     # (never the excluded discs)
+
+    def test_DSC5_an_ignored_sub_folder_keeps_the_box_apart(self):
+        import exclusions as ex
+        top = numbered_box(self.lib)
+        sub = top / "02. (1986) - Beta 2CD"
+        st = ex.State()
+        st.db.execute("INSERT INTO ignored VALUES (?,?,?,?,?,?)", (str(sub), "r1", "Skip Beta", "", "", 0.0))
+        st.db.commit()
+        got = sorted((g.folder.name, len(g.files)) for g in self.groups())
+        self.assertEqual(got, [("01. (1980) - Alpha (2012) - KZ 1", 3), ("02. (1986) - Beta 2CD", 6)])
+
+    # ---- beside DSC-3 ---------------------------------------------------------------------------
+    def test_DSC5_a_box_beside_a_disc_range_folder_of_parts(self):
+        top = self.lib / "Band R" / "2019 - Sets (4CD)"
+        disc(top, "01. 1974 Alpha", 1, "Alpha [Sets]")
+        disc(top / "CD02-03 1973 Beta", "Part 1", 2, "Beta [Sets]")
+        disc(top / "CD02-03 1973 Beta", "Part 2", 3, "Beta [Sets]")
+        disc(top, "04. 1975 Gamma", 4, "Gamma [Sets]")
+        self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 12)])
+        album = ma.read_album(top, "Band R", top.name)
+        self.assertEqual([t["disc"] for t in album["tracks"]][::3], [1, 2, 3, 4])
+
+    # ---- filed: the discs' folders take what is beside them --------------------------------------
+    def plan_moved(self, top, http=None, **prof):
+        dest = self.tmp / "library"
+        dest.mkdir(exist_ok=True)
+        eng = self.engine(http or SetHttp(mb=[box_release("mb-box", "Band K", "COMPLETE BOX", 3)]), operation="move",
+                          destination=str(dest), naming={"preset": "tagmender", "template": ""}, **prof)
+        return eng.plan(top), dest
+
+    def test_DSC5_a_two_disc_folders_own_files_go_with_its_first_disc(self):
+        top = numbered_box(self.lib)
+        beta = top / "02. (1986) - Beta 2CD"
+        (beta / "folder.jpg").write_bytes(b"\xff\xd8\xff\xe0" + bytes(200))
+        (beta / "rip.log").write_text("Exact Audio Copy V1.0\n")
+        (beta / "Scans").mkdir()
+        (beta / "Scans" / "back.jpg").write_bytes(b"\xff\xd8\xff\xe0" + bytes(100))
+        (beta / "CD-1 (KZ 2)" / "rip.log").write_text("Exact Audio Copy V1.0 disc\n")   # (the disc's own)
+        plan, dest = self.plan_moved(top)
+        [a] = plan["albums"]
+        album = Path(a["files"][0]["dst"]).parent.parent
+        got = {str(Path(c["src"]).relative_to(top)): str(Path(c["dst"]).relative_to(album)) for c in a["companions"]}
+        self.assertEqual(got["02. (1986) - Beta 2CD/folder.jpg"], "Disc 02/folder.jpg")
+        self.assertEqual(got["02. (1986) - Beta 2CD/Scans/back.jpg"], "Disc 02/Scans/back.jpg")
+        self.assertEqual(got["02. (1986) - Beta 2CD/CD-1 (KZ 2)/rip.log"], "Disc 02/rip.log")
+        # (two logs of one name: the disc's keeps its place, the folder's goes beside it, inside it)
+        self.assertEqual(got["02. (1986) - Beta 2CD/rip.log"], "Disc 02/02. (1986) - Beta 2CD/rip.log")
+        self.assertFalse(any(Path(c["dst"]).parent.parent == album.parent or Path(c["dst"]).parent == album / beta.name
+                             for c in a["companions"]), got)       # (no folder of its name without music)
+
+    # ---- a box no release fits: unresolved as a whole --------------------------------------------
+    def test_DSC5_a_box_no_release_fits_is_one_unresolved_album_held_as_it_is(self):
+        top = numbered_box(self.lib)
+        hold = self.tmp / "hold"
+        hold.mkdir()
+        plan, _dest = self.plan_moved(top, http=SetHttp(mb=[]), unresolved={"action": "move", "move_to": str(hold)})
+        [a] = plan["albums"]
+        self.assertEqual((a["status"], len(a["files"])), ("unresolved", 9))
+        # (held as the box: its artist's folder, the box's, each sub-folder below it)
+        dirs = sorted({str(Path(fe["dst"]).parent.relative_to(hold)) for fe in a["files"]})
+        self.assertEqual(dirs, [f"Band K/{top.name}/01. (1980) - Alpha (2012) - KZ 1",
+                                f"Band K/{top.name}/02. (1986) - Beta 2CD/CD-1 (KZ 2)",
+                                f"Band K/{top.name}/02. (1986) - Beta 2CD/CD-2 (KZ 3)"])
+
+    # ---- watched: a box still being copied in waits ----------------------------------------------
+    def test_DSC5_a_box_still_arriving_waits_for_its_other_discs(self):
+        top = self.lib / "Band K" / "2012 - Band K Complete Box 3CD+DVD"
+        first = disc(top, "01. (1980) - Alpha (2012) - KZ 1", 1, "COMPLETE BOX", "Band K", total=4)
+        self.assertEqual(engine.box_still_arriving(first), "discs 2, 3 of 3 are not here yet")
+        beta = top / "02. (1986) - Beta 2CD"
+        disc(beta, "CD-1 (KZ 2)", 2, "COMPLETE BOX", "Band K", total=4)
+        self.assertEqual(engine.box_still_arriving(beta), "disc 3 of 3 is not here yet")
+        disc(beta, "CD-2 (KZ 3)", 3, "COMPLETE BOX", "Band K", total=4)
+        self.assertEqual(engine.box_still_arriving(beta), "")                 # (all here: the box)
+        self.assertEqual([g.folder for g in self.groups()], [top])
+
+    def test_DSC5_an_album_beside_others_never_waits(self):
+        # (a "Compilations (3CD sets)" folder, its album tagged disc 1 of 1; one without totals)
+        comp = self.lib / "Band N" / "Boxsets & Compilations (3CD sets)"
+        one = disc(comp, "2004 - More Hits", 1, "More Hits", "Band N", total=1)
+        self.assertEqual(engine.box_still_arriving(one), "")
+        other = self.lib / "Band M" / "Live Box (3CD)"
+        no_total = disc(other, "01. Night One", 1, "Live Box", "Band M")
+        self.assertEqual(engine.box_still_arriving(no_total), "")
+
+
+class DSC5_WatchedBoxArriving(unittest.TestCase):
+    """DSC-5 / DSC-1: the watcher never files one folder of a box still being copied in."""
+
+    def setUp(self):
+        import shutil
+        import test_executor as tx
+        self.base = tx.Base("setUp")
+        self.base.setUp()
+        shutil.rmtree(self.base.album)
+
+    def tearDown(self):
+        self.base.tearDown()
+
+    def test_DSC5_the_watcher_waits_for_the_boxs_other_discs(self):
+        from unittest import mock
+        import test_executor as tx
+        import watcher
+        from test_fileops_review11 import FakeEngine
+        from test_fileops_review15 import age, watched
+        b = self.base
+        box = b.lib / "Band K" / "2012 - Band K Complete Box 3CD"
+        for name in ("01 a.flac", "02 b.flac"):
+            tx.audio(box / "01. (1980) - Alpha" / name, 440 if name[1] == "1" else 550, album="COMPLETE BOX",
+                     albumartist="Band K", artist="Band K", title=name[3], discnumber="1/3")
+        age(b.lib)
+        FakeEngine.test = b
+        w = watcher.Watcher(profiles=[watched(b, operation="move", destination=str(b.dest))], once=True)
+        with mock.patch.object(watcher.eng_mod, "Engine", FakeEngine):
+            got = w.tick()
+        self.assertEqual(list(got.values()), ["unresolved"], got)
+        self.assertEqual([p for p in b.dest.rglob("*") if p.is_file()], [])      # (nothing filed yet)
 
 
 if __name__ == "__main__":

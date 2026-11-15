@@ -4864,6 +4864,20 @@ def discogs_discs(rel, dm):
     discs = dm.parse_discs(rel)
     count = dm.release_disc_count(rel)
     media = _disc_media_total(rel)
+    # MED-18: discs numbered by position prefixes ("1-01" .. "4-14") under no heading of their
+    # own count one each, beside a disc listed without them (Judas Priest - Metalogy: 4 CDs as
+    # one run of "1-01" .. "4-14", then a "Judas Priest Live" heading over "DVD-1" ..: the
+    # headings alone made it 2 discs)
+    prefixed = {int(m.group(1)) for d in discs for t in d["tracks"]
+                for m in [_POS_DISC.match(str(t.get("position") or ""))] if m}
+    if len(prefixed) > 1:
+        unprefixed = sum(1 for d in discs if d["tracks"] and not any(
+            _POS_DISC.match(str(t.get("position") or "")) for t in d["tracks"]))
+        by_position = len(prefixed) + unprefixed
+        # (only where the formats declare that many discs: a work's sub-tracks "1.1", "2.1" on
+        # one CD are no discs)
+        if count < by_position <= media:
+            count = by_position
     kinds = {mc.media_kind(f.get("name")) for f in rel.get("formats") or [] if isinstance(f, dict)}
     if media < 2 or len(discs) <= media or kinds & {"vinyl", "cassette"}:
         return discs, count
@@ -6528,7 +6542,12 @@ def _hub_strips(g, cx, cy, r):
     out = []
     # (a band a little further out too: a printed hub line on a wide clamping ring sits there,
     # and the inner bands cut through it - Pallas - wearewhoweare: "398478 @1 MTS5503")
-    for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True), (0.33, 0.42, False)):
+    # OCR-6: and a band well out from the hub, for a close-up of the hub that fills the scan:
+    # the disc found is then the frame, and the matrix runs at about 0.7-0.86 of it, between
+    # the hub bands and the rim (Opeth - Blackwater Park, Legacy Edition: "A0102309767-0102
+    # 13 A00", Sony DADC, read nowhere else)
+    for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True), (0.33, 0.42, False),
+                         (0.70, 0.86, False)):
         if flip:                                   # text running the other way round
             strip = unwrap_ring(g.transpose(Image.FLIP_LEFT_RIGHT), g.width - cx, cy, r * f0, r * f1)
             strip = strip.rotate(180) if strip is not None else None

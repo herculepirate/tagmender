@@ -3033,10 +3033,35 @@ def packaging_variant(cand):
     return m.group(0) if m else ""
 
 
+def _matrices_disjoint(tied):
+    """EVI-8: True when every entry lists a matrix and no two share one: the numbered parts of
+    their matrices (5 digits or more; the catalogue number and barcode, which every pressing
+    of the product carries, left out) are all different. Same label, number and barcode, but
+    pressed elsewhere: two pressings (Opeth - Blackwater Park, Legacy Edition: Discogs 2261489,
+    Arvato "54044125/88697655822-1", and 10001697, Sony DADC "A0102309767-0102")."""
+    if len(tied) < 2:
+        return False
+    sets = []
+    for s in tied:
+        c = s["cand"]
+        own = {t for x in list(c.get("catnos") or ()) + list(c.get("barcodes") or ()) for t in matrix_tokens(str(x))}
+        own |= {matrix_tokens(norm_code(str(x)))[0] for x in list(c.get("catnos") or ()) + list(c.get("barcodes") or ())
+                if matrix_tokens(norm_code(str(x)))}
+        keys = {t for kind, v in cand_matrices(c) if kind == "matrix" for t in matrix_tokens(v)
+                if sum(ch.isdigit() for ch in t) >= 5} - own
+        if not keys:
+            return False
+        sets.append(keys)
+    return all(not (a & b) for i, a in enumerate(sets) for b in sets[i + 1:])
+
+
 def same_pressing_listed_twice(tied):
     """Two database entries for ONE pressing (same label, catalogue number,
     barcode, country and format; often one entered with only a year): either is
     right, so take the one with the fuller data."""
+    if _matrices_disjoint(tied):
+        return None                 # EVI-8: pressed at other plants: two pressings, not one listed twice
+
     def key(s):
         c = s["cand"]
         return (tuple(sorted(c.get("catnos") or ())), country_code(c.get("country")),

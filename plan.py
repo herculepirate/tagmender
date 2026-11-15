@@ -127,6 +127,7 @@ class Proposal:
     # no_lengths_tie: artist, title and tracks match, only entries of this album tie, and they
     # list no lengths to score (album_only tier)
     all_lengths: bool = False
+    twin_lengths: bool = False          # FIL-3: a Discogs pick's MusicBrainz twin agrees on every length
     lengths_missing: bool = False       # exact tier, and the release lists no track lengths to compare
     most_lengths: bool = False          # BAR-1b: the files are the release's tracks, half their lengths agree at least
     toc_proven: bool = False            # TOC-1: your disc's TOC is this release's (exact disc ID), its title agreeing
@@ -228,12 +229,14 @@ def _files_on_evidence(prop, profile, conf) -> str:
         # database lists wrong (Food - Food, filed as Iain Bellamy). Not when pressings sharing
         # the disc ID tied and the country order chose (no margin)
         return "your disc's table of contents is this release's (exact disc ID) and its title agrees"
-    if tier == "exact" and getattr(prop, "own_number", False) and lengths and not guessed:
+    if tier == "exact" and getattr(prop, "own_number", False) and not guessed and \
+            (lengths or getattr(prop, "twin_lengths", False)):
         # FIL-1: your copy's own catalogue number or barcode (its tags, the folder name) is on
         # the release and every track length agrees: the score is low only for a folder title
         # that says more than the database's (ABBA - GOLD. 40th Anniversary Edition (2014,
         # Remastered, Deluxe Edition, 3CD, Polar, 060253740130): 87.4)
-        return "your copy's own catalogue number or barcode is on it and every track length agrees"
+        return ("your copy's own catalogue number or barcode is on it and every track length agrees"
+                + ("" if lengths else " (on MusicBrainz's entry of this pressing; Discogs lists some otherwise)"))
     if tier == "exact" and getattr(prop, "number_proven", False) and not guessed:
         # FIL-2: your copy's own number proves it and the release lists no track lengths: nothing
         # disagrees, and the score is low only for the lengths it cannot compare (Mark Nauseef -

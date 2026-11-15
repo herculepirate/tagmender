@@ -1957,6 +1957,7 @@ class Engine:
             why=list(out.get("why") or []), evidence=evidence_of(out, best),
             provenance=prov, release=self._release(best), tier="exact",
             all_lengths=bool(best.get("all_lengths")), lengths_missing=bool(best.get("lengths_missing")),
+            twin_lengths=bool(best.get("twin_lengths")),
             most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")),
             own_number=bool(best.get("own_number")), guessed_pick=bool(best.get("guessed_pick")),
             number_proven=bool(best.get("number_proven")))

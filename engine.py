@@ -1897,7 +1897,7 @@ class Engine:
         return ma.release_fields(best)
 
     @staticmethod
-    def _twin_slots(album, rel, tags_mb, best, n):
+    def _twin_slots(album, rel, tags_mb, best, n, ps=None):
         """IDM-1: the MusicBrainz entry of a Discogs pick's pressing (its "mb_twin") listing
         more tracks than your files (King Crimson - Islands, 40th Anniversary: the CD and its
         DVD-Audio, 49 tracks, of which your 12 files are the CD): each file tagged as its own
@@ -1913,6 +1913,10 @@ class Engine:
         view = mc.slot_view(album, cand)
         if not view or not view.get("missing") or len(view.get("slots") or ()) != n:
             return tags_mb
+        digital = _unheld_digital_media(rel, view["slots"])     # (MED-20, as when MusicBrainz leads)
+        if digital:
+            again = mb_tags.release_tags(rel, ps, uncounted=digital)
+            tags_mb = again if len(again) == len(tags_mb) else tags_mb
         return [tags_mb[k] for k in view["slots"]]
 
     def _identified(self, out, album, files, base, versions=True):
@@ -1940,7 +1944,7 @@ class Engine:
                 self._note_mb_down(exc)
             if rel:
                 tags_mb = mb_tags.release_tags(rel, ps)
-                tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files))
+                tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files), ps)
         if not (mbid and self.use_mb):
             ps = self.profile.picard_tags()
         es = self.profile.enrichment()
@@ -5508,7 +5512,10 @@ def _unheld_digital_media(rel, slots):
     tracks in SLOTS (the release's entries your files are) is on them; else an empty set."""
     media = rel.get("media") or []
     kinds = {int(m.get("position") or d): mc.media_kind(m.get("format")) for d, m in enumerate(media, 1)}
-    physical = [p for p, k in kinds.items() if k != "digital"]
+    video = {int(m.get("position") or d) for d, m in enumerate(media, 1)
+             if str(m.get("format") or "").casefold() in mb_tags.VIDEO_FORMATS}
+    # (the physical audio discs: a video disc after them is MED-17's, left out of the count too)
+    physical = [p for p, k in kinds.items() if k != "digital" and p not in video]
     digital = {p for p, k in kinds.items() if k == "digital"}
     if not physical or not digital or any(p < max(physical) for p in digital):
         return set()

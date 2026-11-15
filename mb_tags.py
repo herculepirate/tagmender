@@ -691,23 +691,18 @@ def disc_total(rel, media=None, uncounted=None) -> int:
     (CD, DVD, CD: discs 1 and 3 of 3), and no disc number is ever more than the total. All
     media count where the rip holds a video disc's audio (MEDIA names one: a version folder of
     its mix), where no medium is video, and where no medium is audio."""
-    total = _disc_total(rel, media)
-    if uncounted:
-        # MED-20: a download of the release (its "Digital Media": a bonus track's code) is no
-        # disc of it; at the end of the release and none of its tracks your files, it is not
-        # counted (Helge Lien Trio - Guzuguzu: CD + Digital Media, a CD rip is "1 of 1")
-        drop = {int(x) for x in uncounted}
-        kept = [int(m.get("position") or disc) for disc, m in enumerate(rel.get("media") or [], 1)
-                if int(m.get("position") or disc) not in drop]
-        if kept and all(p > max(kept) for p in drop):
-            total = min(total, max(kept))
-    return total
+    # MED-20: a download of the release (its "Digital Media": a bonus track's code) is no disc
+    # of it; at the end of the release's audio discs and none of its tracks your files
+    # (UNCOUNTED, engine._unheld_digital_media), it is left out of the count as a video disc
+    # after the last audio one is (Helge Lien Trio - Guzuguzu: CD + Digital Media, a CD rip is
+    # "1 of 1", not "1 of 2")
+    return _disc_total(rel, media, uncounted)
 
 
-def _disc_total(rel, media=None) -> int:
+def _disc_total(rel, media=None, uncounted=None) -> int:
     all_media = rel.get("media") or []
     total = len(all_media) or 1
-    audio = _audio_ids(rel, media)
+    audio = _audio_ids(rel, media, uncounted)
     if len(audio) == len(all_media) or not audio:
         return total
     if media:

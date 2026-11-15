@@ -48,6 +48,27 @@ class MED20_DigitalMedia(unittest.TestCase):
         tags = mb_tags.release_tags(rel, {}, uncounted={3})
         self.assertEqual(numbers(tags[:4]), [("1", "2")] * 2 + [("2", "2")] * 2)
 
+    def test_MED20_a_video_disc_beside_the_download_counts_out_too(self):
+        # (review: MED-17's trailing video disc and the download, either order: "1 of 1")
+        for formats in (["CD", "DVD-Video", "Digital Media"], ["CD", "Digital Media", "DVD-Video"]):
+            rel = mb_box(formats)
+            digital = engine._unheld_digital_media(rel, [0, 1])
+            self.assertEqual(digital, {formats.index("Digital Media") + 1}, formats)
+            tags = mb_tags.release_tags(rel, {}, uncounted=digital)
+            self.assertEqual(numbers(tags[:2]), [("1", "1")] * 2, formats)
+
+    def test_MED20_discogs_leading_its_musicbrainz_twin_counts_one(self):
+        # (review: Discogs's pick leads, MusicBrainz's CD + Digital Media entry its twin, your
+        # files the CD's tracks: the twin's tags "1 of 1" as Discogs's own count)
+        rel = mb_box(["CD", "Digital Media"])
+        rel.update(date="2017", status="Official")
+        tracks = [{"disc": 1, "num": i + 1, "title": f"M1 {i}", "secs": s}
+                  for i, s in enumerate((10.0, 20.0))]
+        album = {"artist": "Band V", "title": "Box V", "year": 2017, "discs": 1, "tracks": tracks}
+        full = mb_tags.release_tags(rel, {})
+        out = engine.Engine._twin_slots(album, rel, full, {"source": "discogs"}, 2, {})
+        self.assertEqual(numbers(out), [("1", "1")] * 2)
+
 
 if __name__ == "__main__":
     unittest.main()

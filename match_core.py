@@ -4927,6 +4927,17 @@ def _guessed(res, other):
                 why=[f"runner-up {rival['cand']['id']} within {margin:.1f} points (likely another pressing)"])
 
 
+def _against_only(best, other) -> list:
+    """TOC-3: what your folder name or scans say against BEST that they do not say against OTHER
+    ("folder name says US/MX, this pressing is from GB"; "scans say made in ..."), as listed."""
+    def kinds(s):
+        return {x.split(",")[0] for x in (s or {}).get("clues_against") or ()
+                if x.startswith(("folder name says", "scans say"))}
+    theirs = kinds(other)
+    return [x for x in (best or {}).get("clues_against") or ()
+            if x.startswith(("folder name says", "scans say")) and x.split(",")[0] not in theirs]
+
+
 def _carries_barcode(s) -> bool:
     """A barcode read off your copy is on this pick, and no other barcode of yours argues."""
     return bool(s) and barcode_proves(s) and not s.get("conflict")
@@ -5157,6 +5168,16 @@ def mb_overrules(mb_result, dg_result, twins):
     # a disc ID a sector-aligned download could give says nothing about the format
     toc_unsure = _toc_maybe_download(mb_best, dg_best, mb_result, dg_result)
     if _exact_toc(mb_best) and not toc_unsure and not any(_exact_toc(s) for s in twins):
+        # TOC-3: what your copy says against MusicBrainz's pick and not against Discogs's - your
+        # folder's country or format, the country your scans print - is Discogs's evidence too:
+        # a disc ID that several pressings share does not outweigh it (Pink Floyd - The Dark
+        # Side Of The Moon, Immersion box, "USA, Mexico": the disc ID is on the GB entry, which
+        # the box's own print contradicts)
+        against = _against_only(mb_best, dg_best)
+        if against:
+            return _disputed(mb_result, dg_result,
+                             f"your disc ID is attached to MusicBrainz's {mb_best['cand']['id']}, but your copy "
+                             f"says otherwise of it ({against[0]})")
         if has_evidence(dg_best, mb_best):
             return _disputed(mb_result, dg_result,
                              f"your disc ID is attached to MusicBrainz's {mb_best['cand']['id']}, but Discogs's "

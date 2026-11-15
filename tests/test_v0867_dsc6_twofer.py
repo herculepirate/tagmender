@@ -72,6 +72,12 @@ class DSC6Twofer(te.Base):
                 self.assertEqual([g.folder for g in self.groups()], [top])
                 shutil.rmtree(top)
 
+    def test_DSC6_an_edition_in_brackets_on_a_title_aside(self):
+        top = self.lib / "Band T" / "1988 - Alpha + Beta"
+        album(top, "1974 - Alpha [1986 Reissue]", "Alpha [1986 Reissue]")
+        album(top, "1978 - Beta [1984 Reissue]", "Beta (1984 Reissue)", freq=600)
+        self.assertEqual([g.folder for g in self.groups()], [top])
+
     def test_DSC6_a_folder_named_otherwise_stays_apart(self):
         for name in ("Band T - Collection", "1992 - Alpha & Gamma", "1992 - Alpha", "Alpha & Beta & Gamma"):
             with self.subTest(name=name):
@@ -109,6 +115,59 @@ class DSC6Twofer(te.Base):
         # (the tags say which disc each folder is, whatever the folders' order)
         self.assertEqual([t["disc"] for t in a["tracks"]], [1, 1, 1, 2, 2, 2])
         self.assertEqual({t["title"] for t in a["tracks"] if t["disc"] == 1}, {"Epsilon 0", "Epsilon 1", "Epsilon 2"})
+
+
+def classics_box(lib, names=("Disc 1 1974 - Alpha [1997 Reissue]", "Disc 02", "Disc 3 - Gamma (Classics #2)"),
+                 artists=("Band W", "Band W", "Band W"), name="2014 - Classics #2"):
+    """DSC-7: an "Original Album Classics" box - its discs in folders named "Disc N ...", each
+    tagged as its own album (one as the box's disc 2 already)."""
+    top = lib / "Band W" / name
+    titles = ("Alpha [1997 Reissue]", "Classics #2", "Gamma (Classics #2)")
+    discs = ("1/1", "2/3", "01/01")
+    for k, (n, t, d, a) in enumerate(zip(names, titles, discs, artists)):
+        album(top, n, t, a, disc=d, freq=300 + 200 * k)
+    return top
+
+
+class DSC7NumberedDiscFolders(te.Base):
+    def groups(self, where=None):
+        return engine.Engine.albums_in(self.engine(te.FakeHttp()), where or self.lib)
+
+    def test_DSC7_disc_folders_numbered_one_to_n_are_one_set(self):
+        top = classics_box(self.lib)
+        gs = self.groups()
+        self.assertEqual([(g.folder, len(g.files)) for g in gs], [(top, 9)])
+        a = ma.read_album(top, "Band W", top.name)
+        self.assertEqual([t["disc"] for t in a["tracks"]], [1] * 3 + [2] * 3 + [3] * 3)
+
+    def test_DSC7_the_set_is_identified_as_the_box(self):
+        top = classics_box(self.lib)
+        box = set_release("mb-box", "Band W", "Classics #2", discs=("Alpha", "Classics #2", "Gamma"))
+        alone = set_release("mb-alpha", "Band W", "Alpha", discs=("Alpha",))
+        eng = self.engine(SetHttp(mb=[box, alone]))
+        gs = eng.albums_in(self.lib)
+        self.assertEqual([g.folder for g in gs], [top])
+        p = eng.identify(gs[0])
+        self.assertEqual((p.status, p.release_id), ("identified", "mb-box"), p.why)
+        self.assertEqual([t["discnumber"][0] for t in p.targets], ["1"] * 3 + ["2"] * 3 + ["3"] * 3)
+        self.assertEqual({t["totaldiscs"][0] for t in p.targets}, {"3"})
+
+    def test_DSC7_a_gap_in_the_numbers_keeps_them_apart(self):
+        classics_box(self.lib, names=("Disc 1 - Alpha", "Disc 02", "Disc 4 - Gamma"))
+        self.assertEqual(len(self.groups()), 3)
+
+    def test_DSC7_two_artists_keep_them_apart(self):
+        classics_box(self.lib, artists=("Band W", "Band W", "Band X"))
+        self.assertGreater(len(self.groups()), 1)
+
+    def test_DSC7_folders_not_named_as_discs_stay_apart(self):
+        classics_box(self.lib, names=("1974 - Alpha", "Disc 02", "Disc 3 - Gamma"))
+        self.assertGreater(len(self.groups()), 1)
+
+    def test_DSC7_a_box_folder_with_tracks_of_its_own_stays_as_before(self):
+        top = classics_box(self.lib)
+        album(top.parent, top.name, "Delta", "Band W", freq=1400)
+        self.assertNotIn(9, [len(g.files) for g in self.groups()])
 
 
 if __name__ == "__main__":

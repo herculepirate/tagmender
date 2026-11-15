@@ -403,6 +403,17 @@ def numbered_disc_set(folder: Path, files, keys) -> bool:
     return all(k[0] == "tags" for k in keys.values()) and len(artists) == 1 and all(artists)
 
 
+def _bare_name(name) -> str:
+    """A folder name or title without its year in front and its brackets ("1992 - Title (2CD)
+    [Label]" -> "Title")."""
+    name = str(name or "")
+    while True:
+        cut = _NAME_EXTRAS.sub("", name, count=1)
+        if cut == name:
+            return name
+        name = cut
+
+
 def titled_box(box: Path, found: dict, metas: dict) -> bool:
     """DSC-6: a folder holding two or more albums' folders that it is named after, joined ("1992 -
     The Stranger & An Innocent Man" holding "1977 - The Stranger" and "1983 - An Innocent Man"),
@@ -427,16 +438,11 @@ def titled_box(box: Path, found: dict, metas: dict) -> bool:
         own = {keys[f] for f in found[d]}
         if len(own) != 1:
             return False                                # (a folder of two albums)
-        titles.append(_title_fold(next(iter(own))[2]))
+        # (an edition in brackets aside: "Streetlife Serenade [1986 Reissue]", as a tagger named it)
+        titles.append(_title_fold(_bare_name(next(iter(own))[2])))
     if len(set(titles)) != len(titles) or not all(titles):
         return False
-    name = box.name
-    while True:                                         # ("1992 - Title (2CD) [Label]")
-        cut = _NAME_EXTRAS.sub("", name, count=1)
-        if cut == name:
-            break
-        name = cut
-    parts = [_title_fold(p) for p in _TITLE_JOIN.split(name) if _title_fold(p)]
+    parts = [_title_fold(p) for p in _TITLE_JOIN.split(_bare_name(box.name)) if _title_fold(p)]
     return sorted(parts) == sorted(titles)
 
 

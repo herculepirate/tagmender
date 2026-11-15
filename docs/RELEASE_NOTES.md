@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.65
+
+**The right pressing, more often**
+- Your exact disc ID now picks the MusicBrainz entry that carries it when that entry lists no
+  barcode but links only Discogs releases carrying yours, over another entry with your
+  barcode (BAR-12).
+
 ## 0.8.64
 
 **Move an album into your library when you ask (MOV-5)**

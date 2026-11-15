@@ -5491,6 +5491,45 @@ def _yields_to_linked_barcode(mb_result, dg_result):
         f"another product (BAR-1)"])
 
 
+def _disc_id_twin_of_barcode(mb_result, dg_result):
+    """BAR-12: MusicBrainz's sure pick carries your copy's barcode but not your exact disc ID,
+    while another MusicBrainz release lists no barcode, carries your exact disc ID (TOC-1), fits
+    as well, and every Discogs release it links to (all of them scored) carries your barcode:
+    that release is an entry of the same product (its barcode not typed in), and your disc ID
+    picks it among the entries carrying your barcode (Univers Zero - Heatwave, Cuneiform RUNE 9:
+    MusicBrainz a74c2f10, no barcode, your disc ID, linking Discogs 580070 with barcode
+    045775000923, against 958886df carrying that barcode). The barcode still names the
+    product: one release listing another barcode, or linking a Discogs release that does,
+    is never taken so (BAR-9)."""
+    best = (mb_result or {}).get("best")
+    if not (mb_result and dg_result and mb_result["status"] == "auto" and best and _carries_barcode(best)):
+        return mb_result
+    if (best.get("clues") or {}).get("disc TOC") == EXACT_TOC_CLUE:
+        return mb_result
+    dg_scored = [s for s in (dg_result.get("scored") or [dg_result.get("best")]) if s]
+    by_id = {str(s["cand"].get("id")): s for s in dg_scored}
+    twins = []
+    for s in mb_result.get("scored") or ():
+        c = s["cand"]
+        if s is best or c.get("barcodes") or s.get("conflict") or not s.get("tracks_ok"):
+            continue
+        if (s.get("clues") or {}).get("disc TOC") != EXACT_TOC_CLUE or s.get("clues_against"):
+            continue
+        if s.get("confidence", 0) < best.get("confidence", 0):
+            continue
+        links = linked_discogs(c)
+        # (every Discogs release it links to was scored, and each carries your barcode)
+        if links and all(i in by_id and _carries_barcode(by_id[i]) for i in links):
+            twins.append(s)
+    if len(twins) != 1:
+        return mb_result
+    twin = twins[0]
+    twin = dict(twin, notes=list(twin.get("notes") or []) + [
+        f"your barcode is on {best['cand']['id']} and on the Discogs releases this entry links to "
+        f"({', '.join(sorted(linked_discogs(twin['cand'])))}); your exact disc ID is on this one (BAR-12)"])
+    return dict(mb_result, best=twin, runner_up=best)
+
+
 def lengths_all_agree(b) -> bool:
     """Every track of the files is on the release and every length agrees (the exact tier's
     "all lengths", plan._files_on_evidence)."""
@@ -5518,6 +5557,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     mb_result, dg_result = _yields_to_audio(mb_result, dg_result), _yields_to_audio(dg_result, mb_result)
     mb_result, dg_result = _yields_to_cd(mb_result, dg_result, prefs), _yields_to_cd(dg_result, mb_result, prefs)
     mb_result = _yields_to_linked_barcode(mb_result, dg_result)
+    mb_result = _disc_id_twin_of_barcode(mb_result, dg_result)
     # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
     disputed = _proof_left_unsure(mb_result, dg_result, prefer)
     if disputed:

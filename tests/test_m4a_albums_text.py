@@ -230,6 +230,9 @@ class NotesAndLogCodes(TempAlbum):
         lens = [t["secs"] for t in a["tracks"]]
         r = run(a, cand(lens, id="268c5d5d", catnos={"19658890782"}, formats={"cd"}))
         self.assertEqual(r["status"], "auto", r["why"])
+        # (DAT-3: the log of 2007 and the only release found, of 2010: never held for the date alone)
+        self.assertEqual(a["rip_log_year"], 2007)
+        self.assertTrue(any("DAT-3" in n for n in r["best"]["notes"]), r["best"]["notes"])
 
     def test_a_foreign_logs_path_is_not_read(self):
         self.tracks()

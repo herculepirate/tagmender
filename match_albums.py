@@ -2012,6 +2012,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     typed_search = [c for c in note_catnos + log_codes if c not in folder_hints]
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
     headers = [log["header"] for log in ripped if log.get("header")]
+    # DAT-3: the year your files were ripped, from a dated EAC/XLD log that is of these files
+    log_year, log_year_from = rip_log_year(album_dir, logs)
     cdtocs = tag_tocs(infos)
     cue_toc = cue_tocs(album_dir, infos)
     tocs = merge_tocs(infos, log_toc, cue_toc, cdtocs)
@@ -2121,6 +2123,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tocs_read": tocs_read(tocs, tocs_fit, log_toc, cue_toc, disc_tocs(infos)),
         "tocs_fit": tocs_fit,
         "rip_log_toc": bool(log_toc),
+        # DAT-3: a rip log of these files dated this year: no pressing first out later is your copy
+        "rip_log_year": log_year, "rip_log_year_from": log_year_from,
         # discs whose hidden track before track 1 (a file numbered 0) a rip log's or CDTOC tag's
         # TOC shows in its first pregap: the disc itself has it (match_core.with_pregap)
         "htoa_toc_discs": htoa_toc_discs(infos, list(log_toc.values()) + list(cdtocs.values())),
@@ -2711,8 +2715,59 @@ def rip_logs(album_dir):
         toc, data = _log_toc(text)
         out.append({"path": str(p), "toc": toc, "data_track": data, "header": _log_header(text),
                     "codes": _path_codes(text, p.stem), "crcs": set(re.findall(r"\bCRC\s+([0-9A-F]{8})\b", text)),
-                    "out_parts": _output_parts(text)})
+                    "out_parts": _output_parts(text),
+                    # DAT-3: the year the ripper made it (EAC, XLD)
+                    "year": log_date_year(text)})
     return out
+
+
+# DAT-3: the date a ripping program wrote at the top of its log. EAC, in any of its languages:
+# "EAC extraction logfile from 27. August 2005, 15:28 for CD", "EAC Auslese-Logdatei vom 27.
+# August 2005", "Отчёт EAC об извлечении, выполненном 27. августа 2005" (day, month, year; also
+# CUERipper's logs, written in EAC's form). Never EAC 1.x's first line "Exact Audio Copy V1.0
+# beta 3 from 29. August 2011": that is the program's own build date. XLD: "XLD extraction
+# logfile from 2008-09-24 22:07:47 +0900". A checker's log (auCDtect, audiochecker) has neither.
+_EAC_DATE = re.compile(r"(?<!\d)\d{1,2}\.\s*\S{1,15}?\s+((?:19|20)\d{2})(?!\d)")
+_XLD_DATE = re.compile(r"^\s*XLD extraction logfile from\s+((?:19|20)\d{2})-\d{2}-\d{2}\b", re.M)
+_EAC_WORD = re.compile(r"(?<![A-Za-z])EAC(?![A-Za-z])")
+
+
+def log_date_year(text):
+    """DAT-3: the year an EAC or XLD rip log says it was made, from its first lines, or None
+    (another program's log, no date, or a year no ripper could have written: before EAC
+    existed, or in the future)."""
+    head = [l for l in str(text or "").splitlines()[:12] if l.strip()][:6]
+    year = None
+    m = _XLD_DATE.search("\n".join(head))
+    if m:
+        year = int(m.group(1))
+    else:
+        for line in head:
+            if _EAC_WORD.search(line) and not re.search(r"(?i)exact\s+audio\s+copy", line):
+                m = _EAC_DATE.search(line)
+                if m:
+                    year = int(m.group(1))
+                    break
+    if year is None or not 1998 <= year <= time.localtime().tm_year:
+        return None
+    return year
+
+
+def rip_log_year(album_dir, logs):
+    """DAT-3: (the earliest year a rip log of these files was made, its file name), or (None, "").
+    A log counts only when it is an EAC or XLD log with a date and it is proven to be of these
+    files: its TOC fits them (LOGS are fitting_logs' kept ones, so a TOC there fits), or, with
+    no TOC (older EAC), a CUETools report in the folder confirms its CRCs (accurip_confirms).
+    A log merely naming files like yours may be another rip's of the same album, and a
+    checker's log (auCDtect, audiochecker) has no ripper's date: neither counts."""
+    best = (None, "")
+    for log in logs:
+        y = log.get("year")
+        if not y:
+            continue
+        if (log["toc"] or accurip_confirms(album_dir, log)) and (best[0] is None or y < best[0]):
+            best = (y, Path(log["path"]).name)
+    return best
 
 
 def _output_parts(text):

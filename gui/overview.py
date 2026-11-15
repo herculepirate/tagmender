@@ -1615,8 +1615,10 @@ class Overview(QWidget):
         # MOV-4: the album folders the rows not looked up now claim, so an album planned alone
         # is not filed where another row of the list is
         looked_now = {k for ks in groups.values() for k in ks}
+        # (never a row left out of Apply: it files nothing)
         seed = [c for a in self.model.albums if self.album_key(a) not in looked_now
-                and a.get("status") in ("ready", "unchanged") for c in a.get("claims") or []]
+                and a.get("status") in ("ready", "unchanged") and not PlanModel.left_out(a)
+                for c in a.get("claims") or []]
         total = sum(len(ks) for ks in groups.values())
 
         roots = dict(getattr(self, "roots", {}))
@@ -1638,6 +1640,7 @@ class Overview(QWidget):
                 e.force = forced
                 e.file_anyway = {f for f, n in file_anyway.items() if n == name}
                 e.seed_claims = seed
+                e.offer_file_anyway = True                  # (MOV-5: here you can ask)
                 e.lookup_workers = workers
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
                 return plan_each(e, where, kr, lambda k, plan: report("partial", (name, k, plan)),
@@ -2022,6 +2025,7 @@ class Overview(QWidget):
             e.force = forced
             e.edits = edits
             e.file_anyway = file_anyway
+            e.offer_file_anyway = True                      # (MOV-5: here you can ask)
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, meta=META_STORE)
         self.busy(True)
         self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))

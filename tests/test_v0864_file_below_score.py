@@ -58,7 +58,7 @@ class Base(tx.Base):
 class MOV5_Planner(Base):
     def test_MOV5_unasked_below_the_floor_is_tagged_in_place_as_before(self):
         prof = self.profile(operation="move", destination=str(self.dest))
-        a = pl.build([self.proposal(conf=91)], prof)["albums"][0]
+        a = pl.build([self.proposal(conf=91)], prof, offer_file_anyway=True)["albums"][0]
         self.assertEqual(self.ops(a), {"tag"})
         self.assertIn("tagged in place, not moved", " ".join(a["notes"]))
         self.assertEqual(a["below_floor"], {"confidence": 91.0, "floor": 95.0, "op": "move"})
@@ -66,7 +66,7 @@ class MOV5_Planner(Base):
 
     def test_MOV5_asked_for_one_folder_files_that_album_only(self):
         prof = self.profile(operation="move", destination=str(self.dest))
-        p = pl.build([self.proposal(conf=91), self.proposal2(conf=91)], prof, file_anyway=self.mine())
+        p = pl.build([self.proposal(conf=91), self.proposal2(conf=91)], prof, offer_file_anyway=True, file_anyway=self.mine())
         mine, other = p["albums"]
         self.assertEqual(self.ops(mine), {"move"})
         self.assertIn("confidence 91.0 is below organize_min_confidence 95; moved because you asked",
@@ -86,7 +86,7 @@ class MOV5_Planner(Base):
         prof = self.profile(operation="move", destination=str(self.dest))
         link = self.tmp / "link"
         os.symlink(self.album, link)
-        a = pl.build([self.proposal(conf=91)], prof, file_anyway={str(link / self.f1.name)})["albums"][0]
+        a = pl.build([self.proposal(conf=91)], prof, file_anyway={str(link / self.f1.name), str(link / self.f2.name)})["albums"][0]
         self.assertEqual(self.ops(a), {"move"})
 
     def test_MOV5_two_albums_of_one_folder_are_two_asks(self):
@@ -96,7 +96,7 @@ class MOV5_Planner(Base):
         b = self.proposal2(conf=91)
         b.source_dir, b.files = str(self.album), [str(c), str(d)]
         prof = self.profile(operation="move", destination=str(self.dest))
-        mine, other = pl.build([self.proposal(conf=91), b], prof, file_anyway=self.mine())["albums"]
+        mine, other = pl.build([self.proposal(conf=91), b], prof, offer_file_anyway=True, file_anyway=self.mine())["albums"]
         self.assertEqual(self.ops(mine), {"move"})
         self.assertIn("filed_on_request", mine)
         self.assertEqual(self.ops(other), {"tag"})
@@ -124,6 +124,72 @@ class MOV5_Planner(Base):
         res = executor.Executor(dict(first, albums=[alone, b_row])).run()
         self.assertEqual(sorted(a["status"] for a in res["albums"]), ["done", "done"], res["albums"])
 
+    def test_MOV5_an_album_grouped_with_files_you_did_not_ask_for_is_not_asked(self):
+        # D: the files you asked for, grouped since with another album's: no ask for the whole
+        c = tx.audio(self.album / "05 c.flac", 660, album="Other", title="c", artist="X")
+        prop = self.proposal(conf=91, files=[str(self.f1), str(self.f2), str(c)],
+                             targets=[tx.target(1, "First"), tx.target(2, "Second"), tx.target(3, "Third")])
+        prof = self.profile(operation="move", destination=str(self.dest))
+        a = pl.build([prop], prof, file_anyway=self.mine())["albums"][0]
+        self.assertEqual(self.ops(a), {"tag"})
+        self.assertNotIn("filed_on_request", a)
+        a = pl.build([self.proposal(conf=91)], prof, file_anyway=self.mine())["albums"][0]
+        self.assertEqual(self.ops(a), {"move"})                          # (control: all of its files)
+
+    def test_MOV5_no_trial_where_nobody_can_ask(self):
+        # B: the watcher, unattended and command-line runs plan no trial and offer nothing
+        prof = self.profile(operation="move", destination=str(self.dest))
+        with mock.patch.object(pl.Planner, "_would_file", side_effect=AssertionError("trial")):
+            a = pl.build([self.proposal(conf=91)], prof)["albums"][0]
+        self.assertEqual(self.ops(a), {"tag"})
+        self.assertIn("tagged in place, not moved", " ".join(a["notes"]))
+        self.assertNotIn("below_floor", a)
+
+    def test_MOV5_the_trial_touches_nothing_of_the_plan(self):
+        # A: the artist-photo bookkeeping (entries, sidecars) keeps its very objects
+        planner = pl.Planner(self.profile(operation="move", destination=str(self.dest)), offer_file_anyway=True)
+        ea, sc = {"artist_photo": {"image": "x"}, "sidecars": []}, {"from": "dl"}
+        planner.artist_dirs = {"k": {"image": "i", "source": "s", "data": b"", "own": False, "entries": [ea],
+                                     "sidecar": sc}}
+        claims = planner._album_claims
+        self.assertTrue(planner._would_file(self.proposal(conf=91)))
+        self.assertIs(planner.artist_dirs["k"]["entries"][0], ea)
+        self.assertIs(planner.artist_dirs["k"]["sidecar"], sc)
+        self.assertIs(planner._album_claims, claims)
+        self.assertFalse(any(claims.values()))
+
+    def test_MOV5_own_artist_photo_still_takes_over_past_a_trial(self):
+        # A: two albums of one artist folder (the first with a downloaded photo, the last with
+        # your own artist.jpg) and an album below the floor planned between them: your photo
+        # still goes to the first album's tracks and artist.jpg, trial or not
+        import artwork
+        from test_cover_replace import give, jpeg
+        stage = self.tmp / "st"
+        stage.mkdir()
+        dl = artwork._stage(jpeg(900, 900, (10, 120, 200)), stage)[0]
+        own = artwork._stage(jpeg(700, 700, (200, 20, 20)), stage)[0]
+        props = []
+        for i, (conf, img, mine) in enumerate(((97, dl, False), (91, dl, False), (97, own, True))):
+            d = self.lib / f"A{i}" / f"200{i} - X{i}"
+            fs = [tx.audio(d / f"0{n} t.flac", 440 + 50 * n + i) for n in (1, 2)]
+            for f in fs:
+                give(f, jpeg(600, 600))
+            tg = [tx.target(n, f"T{n}", album=f"Album {i}", discogs_release_id=[str(900 + i)]) for n in (1, 2)]
+            props.append(pl.Proposal(source_dir=str(d), files=[str(f) for f in fs], targets=tg, provider="discogs",
+                                     release_id=str(900 + i), confidence=conf, margin=20.0,
+                                     release={"album": [f"Album {i}"], "albumartist": ["Real Artist"]},
+                                     artist_photo={"image": str(img), "own": mine, "artist": "Real Artist",
+                                                   "source": "test"}))
+        art = {"enabled": True, "embed_front": True, "files": True, "sources": ["caa"],
+               "artist": {"enabled": True, "file": "artist.jpg", "embed": True}}
+        prof = self.profile(operation="move", destination=str(self.dest), artwork=art, tag_level="enthusiast")
+        for offer in (False, True):
+            first, middle, last = pl.build(props, prof, offer_file_anyway=offer)["albums"]
+            self.assertEqual(bool(middle.get("below_floor")), offer)
+            self.assertEqual(first["artist_photo"]["image"], last["artist_photo"]["image"], offer)
+            photo = [x for x in first.get("sidecars") or [] if x.get("kind") == "artist"]
+            self.assertEqual([x["from"] for x in photo], [last["artist_photo"]["image"]], offer)
+
     def test_MOV5_nothing_offered_when_filing_would_move_nothing(self):
         # an album below the floor already where the naming puts it: no "Move … Anyway", and
         # asked, no "moved because you asked"
@@ -131,7 +197,7 @@ class MOV5_Planner(Base):
         executor.Executor(pl.build([self.proposal(conf=97)], prof)).run()
         filed = sorted(self.dest.rglob("*.flac"))
         prop = lambda: self.proposal(conf=91, source_dir=str(filed[0].parent), files=[str(f) for f in filed])  # noqa: E731
-        a = pl.build([prop()], prof)["albums"][0]
+        a = pl.build([prop()], prof, offer_file_anyway=True)["albums"][0]
         self.assertNotIn("below_floor", a)
         b = pl.build([prop()], prof, file_anyway={str(f) for f in filed})["albums"][0]
         self.assertNotIn("filed_on_request", b)
@@ -139,7 +205,7 @@ class MOV5_Planner(Base):
 
     def test_MOV5_copy_profile_copies_when_asked(self):
         prof = self.profile(operation="copy", destination=str(self.dest))
-        a = pl.build([self.proposal(conf=91)], prof)["albums"][0]
+        a = pl.build([self.proposal(conf=91)], prof, offer_file_anyway=True)["albums"][0]
         self.assertEqual(a["status"], "skipped")
         self.assertEqual(a["below_floor"]["op"], "copy")
         a = pl.build([self.proposal(conf=91)], prof, file_anyway=True)["albums"][0]
@@ -272,7 +338,7 @@ class MOV5_App(Base):
         from gui.models import PlanModel
         prof = self.profile(operation="move", destination=str(self.dest))
         executor.Executor(pl.build([self.proposal(conf=91)], prof)).run()      # (tagged in place)
-        plan = pl.build([self.proposal(conf=91)], prof)
+        plan = pl.build([self.proposal(conf=91)], prof, offer_file_anyway=True)
         a = plan["albums"][0]
         self.assertEqual(a["status"], "unchanged")                  # (would read "Up to date" alone)
         ov = self.show(plan)
@@ -289,14 +355,15 @@ class MOV5_App(Base):
         import engine
         from gui import overview as govw
         prof = self.profile(operation="move", destination=str(self.dest))
-        plan = pl.build([self.proposal(conf=91), self.proposal2(conf=91)], prof)
+        plan = pl.build([self.proposal(conf=91), self.proposal2(conf=91)], prof, offer_file_anyway=True)
         ov = self.show(plan)
         seen = []
 
         def fake_plan_each(e, path, keys, emit, **kw):
             seen.append((set(e.file_anyway), list(e.seed_claims), list(keys)))
             props = [self.proposal(conf=91)]
-            out = pl.build(props, prof, file_anyway=e.file_anyway, seed_claims=e.seed_claims)
+            out = pl.build(props, prof, file_anyway=e.file_anyway, seed_claims=e.seed_claims,
+                           offer_file_anyway=e.offer_file_anyway)
             out["albums"][0]["key"] = keys[0]
             emit(keys[0], out)
             return len(keys)
@@ -317,6 +384,44 @@ class MOV5_App(Base):
         executor.Executor(dict(plan, albums=rows)).run()
         self.assertEqual(len(list(self.dest.rglob("*.flac"))), 2)
 
+    def test_MOV5_rows_left_out_seed_no_claims(self):
+        # C: a row unticked (left out of Apply) files nothing: its folder is not claimed
+        import engine
+        from gui import overview as govw
+        from gui.models import PlanModel
+        other = self.lib / "Some Artist" / "copy"
+        g1 = tx.audio(other / "01 a.flac", 440, album="Some Album", title="a", artist="Some Artist")
+        g2 = tx.audio(other / "02 b.flac", 550, album="Some Album", title="b", artist="Some Artist")
+        prof = self.profile(operation="move", destination=str(self.dest))
+        plan = pl.build([self.proposal(conf=91), self.proposal(conf=97, source_dir=str(other),
+                                                               files=[str(g1), str(g2)])], prof, offer_file_anyway=True)
+        self.assertTrue(plan["albums"][1].get("claims"))
+        ov = self.show(plan)
+        seen = []
+
+        def fake_plan_each(e, path, keys, emit, **kw):
+            seen.append(list(e.seed_claims))
+            return 0
+        for leave_out in (False, True):
+            if leave_out:
+                filed = next(a for a in ov.model.albums if a.get("claims"))
+                ov.model.set_left_out([filed], True)
+                self.assertTrue(PlanModel.left_out(filed))
+            with mock.patch.object(engine, "engine_for_thread", lambda *a, **k: type("E", (), {})()), \
+                    mock.patch.object(govw, "plan_each", fake_plan_each), \
+                    mock.patch.object(ov, "planning_profile", lambda *a, **k: prof):
+                asked = next(i for i, a in enumerate(ov.model.albums) if a.get("below_floor"))
+                ov.table.selectRow(ov.proxy.mapFromSource(ov.model.index(asked, 0)).row())
+                self.win.update_album_actions()
+                self.assertTrue(self.win.commands["file_anyway"].isEnabled())
+                self.win.commands["file_anyway"].trigger()
+                end = time.time() + 30
+                while time.time() < end and (ov.running or len(seen) < (2 if leave_out else 1)):
+                    self.app.processEvents()
+                    time.sleep(0.02)
+        self.assertTrue(seen[0])                                     # (ticked: its claim seeded)
+        self.assertEqual(seen[1], [])                                # (left out: none)
+
     def test_MOV5_a_profile_change_drops_the_ask(self):
         ov = self.win.pages["Overview"]
         ov.file_anyway = {os.path.realpath(str(self.f1)): "a move profile"}
@@ -325,9 +430,9 @@ class MOV5_App(Base):
 
     def test_MOV5_copy_profile_words_and_no_offer_above_the_floor(self):
         prof = self.profile(operation="copy", destination=str(self.dest))
-        self.show(pl.build([self.proposal(conf=91)], prof))
+        self.show(pl.build([self.proposal(conf=91)], prof, offer_file_anyway=True))
         self.assertEqual(self.win.commands["file_anyway"].text().replace("&", ""), "Copy into the Library Anyway")
-        self.show(pl.build([self.proposal(conf=97)], self.profile(operation="move", destination=str(self.dest))))
+        self.show(pl.build([self.proposal(conf=97)], self.profile(operation="move", destination=str(self.dest)), offer_file_anyway=True))
         self.assertFalse(self.win.commands["file_anyway"].isEnabled())
 
     def test_MOV5_a_new_folder_forgets_the_ask(self):

@@ -1276,7 +1276,7 @@ def _cue_rewrites(path: Path, renames: dict):
 
 class Planner:
     def __init__(self, profile, job_id=None, rules=None, overrides=None, extra_roots=(), edits=None,
-                 file_anyway=None, seed_claims=None):
+                 file_anyway=None, seed_claims=None, offer_file_anyway=False):
         self.profile = profile
         self.edits = edits or {}   # your edits from the app: {album folder: [edit]} (apply_edits)
         # MOV-5: the albums you asked to have filed though their score is below
@@ -1288,6 +1288,10 @@ class Planner:
         # MOV-4: the album folders the other rows of the list being looked up again already claim
         # (their plan entries' "claims"): an album planned alone sees them as one planned with them
         self._seed_claims = list(seed_claims or ())
+        # MOV-5: the app's preview and look-up, where you can ask: an album kept in place for its
+        # score is marked "below_floor" (offered) when filing it would move a file. Elsewhere (the
+        # watcher, unattended and command-line runs) nobody can ask there, so no trial is made.
+        self.offer_file_anyway = bool(offer_file_anyway)
         self.extra_roots = [os.path.realpath(os.path.expanduser(str(r))) for r in extra_roots]
         self.extra_roots = [os.path.dirname(r) if os.path.isfile(r) else r for r in self.extra_roots]
         self.job = job_id or time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
@@ -1431,7 +1435,7 @@ class Planner:
             entry = self._album_placed(prop)
             # MOV-5: offered only when filing it would put a file somewhere else; asked, it says
             # so only when it does
-            if entry.get("below_floor") and not self._would_file(prop):
+            if entry.get("below_floor") and not (self.offer_file_anyway and self._would_file(prop)):
                 entry.pop("below_floor")
             if entry.get("filed_on_request") and not _moves_a_file(entry):
                 entry.pop("filed_on_request")
@@ -1461,36 +1465,39 @@ class Planner:
             finally:
                 self._in_place_note = None
 
-    # (what planning an album changes in the planner: put back after a trial, _would_file)
+    # (the placement state a trial planner starts from, copied: _would_file)
     _TRIAL_STATE = ("claimed", "created_dirs", "_dirs", "_inodes", "_album_dirs", "_planned", "_album_claims",
-                    "_resident", "_split_roots", "_res_discs", "_win_dirs", "_win_tries", "_loose",
-                    "artist_dirs", "_unset", "_in_place_note", "_album_dir", "_win_album", "_album_tier")
+                    "_resident", "_split_roots", "_res_discs", "_win_dirs", "_win_tries", "_loose")
+    # (read-only caches it may share)
+    _TRIAL_SHARED = ("_picard_set", "_file_set", "_digest_cache")
 
     def _would_file(self, prop) -> bool:
         """MOV-5: planned as you asked, this album would move or copy a file (not every album kept
-        in place for its score would: one already where the naming puts it). A trial: the
-        planner is put back as it was."""
-        saved = {k: copy.deepcopy(self.__dict__[k]) for k in self._TRIAL_STATE if k in self.__dict__}
-        was = self.file_anyway
-        self.file_anyway = True
+        in place for its score would: one already where the naming puts it). A trial on a planner
+        of its own, made from copies of this one's placement state: nothing of this plan - its
+        entries, their artist photos and sidecars (artist_dirs), its claims - is touched."""
+        trial = Planner(self.profile, self.job, rules=self.rules, overrides=self.overrides, edits=self.edits,
+                        file_anyway=True)
+        trial.extra_roots = list(self.extra_roots)
+        for k in self._TRIAL_STATE:
+            if k in self.__dict__:
+                trial.__dict__[k] = copy.deepcopy(self.__dict__[k])
+        for k in self._TRIAL_SHARED:
+            if k in self.__dict__:
+                trial.__dict__[k] = self.__dict__[k]
         try:
-            return _moves_a_file(self._album_placed(prop))
+            return _moves_a_file(trial._album_placed(prop))
         except Exception:
             return True                                    # (cannot tell: offered, as before)
-        finally:
-            self.file_anyway = was
-            for k in self._TRIAL_STATE:
-                if k in saved:
-                    self.__dict__[k] = saved[k]
-                else:
-                    self.__dict__.pop(k, None)
 
     def asked_to_file(self, prop) -> bool:
-        """MOV-5: you asked for this album to be filed whatever its score: one of its audio files
-        is one you asked for (never another album of the same folder)."""
+        """MOV-5: you asked for this album to be filed whatever its score: every one of its audio
+        files is one you asked for (never another album of the same folder, nor an album the
+        files you asked for were grouped with since)."""
         if self.file_anyway is True:
             return True
-        return bool(self.file_anyway) and any(os.path.realpath(str(f)) in self.file_anyway for f in prop.files or ())
+        return bool(self.file_anyway and prop.files) and all(
+            os.path.realpath(str(f)) in self.file_anyway for f in prop.files)
 
     def _unclaim_album_dirs(self, prop):
         """MOV-4: this album's claims on album folders, given up (it is not filed there)."""

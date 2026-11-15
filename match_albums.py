@@ -2076,6 +2076,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "catnos": ({mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}
                    | {mc.norm_code(h) for h in folder_match} | typed),
         "catnos_from_folder": {mc.norm_code(h) for h in folder_match} | typed,
+        # CAT-3: of which one-digit label codes ("RHEADCDX 1"), not in the tags or notes too
+        "catnos_cat3": ({mc.norm_code(h) for h in folder_match if mc.cat3_hint(h)} - typed
+                        - {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}),
         # ... and those from the tags (mc.tagger_catno: another tagger's word only)
         "tag_catnos": {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])},
         # ... of which the ripper typed in notes or a log (told apart from the folder's in the notes)
@@ -3123,7 +3126,9 @@ def toc_releases(http, album):
                 elif attrs.get("source") == "discogs" and attrs.get("id", "").isdigit():
                     discogs.add(attrs["id"])
                     # TOC-2: an entry with a "relevance" is CTDB's fuzzy match ("a CD of about
-                    # these lengths", any score: even 100); one without it is the disc's own
+                    # these lengths", any score: even 100). CTDB sends every Discogs entry with
+                    # one, so a Discogs release is proven only through MusicBrainz
+                    # (disc_id_discogs); an entry without one (older fixtures only) stays exact
                     # (exact on any disc: None, kept)
                     rel, did_ = attrs.get("relevance"), attrs["id"]
                     if rel is None:
@@ -3144,31 +3149,36 @@ def disc_id_discogs(album, mb_res):
     to (Radiohead - Pablo Honey box: MusicBrainz 8bc2ad8e carries both disc IDs and links
     Discogs 1705354). They inherit that proof: added to album["toc_discogs"] and taken out of
     album["toc_discogs_fuzzy"], so file_clues gives them the disc ID clue. Never a release
-    linked only by a fuzzy or CTDB match. Returns their ids."""
+    linked only by a fuzzy or CTDB match. Returns their ids, in the order they are fetched:
+    by CTDB's relevance for them (best first; none known last), then by id."""
     links = set()
     for s in (mb_res or {}).get("scored") or ():
         if mc.exact_disc_id(album, s["cand"]):
             links |= mc.linked_discogs(s["cand"])
     links = {x for x in links if x.isdigit()}
+    fuzzy = album.get("toc_discogs_fuzzy") or {}
+    order = sorted(links, key=lambda x: (-fuzzy.get(x, -1), int(x)))
     if links:
         album["toc_discogs"] = set(album.get("toc_discogs") or ()) | links
-        album["toc_discogs_fuzzy"] = {k: v for k, v in (album.get("toc_discogs_fuzzy") or {}).items()
-                                      if k not in links}
-    return links
+        album["toc_discogs_fuzzy"] = {k: v for k, v in fuzzy.items() if k not in links}
+    return order
 
 
 def with_discogs_ids(http, dm, cands, ids, limit=4):
-    """cands with the Discogs releases of ids (TOC-2: disc_id_discogs) that are not among them
-    fetched and added (at most limit). A fetch that fails leaves that one out."""
+    """cands with the Discogs releases of ids (TOC-2: disc_id_discogs, in its order) that are not
+    among them fetched and added (the first limit of them). A fetch or a release that fails
+    leaves that one out, never the search's own candidates (a credentials failure is raised)."""
     have = {str(c.get("id")) for c in cands}
     out = list(cands)
-    for rid in sorted((x for x in ids if x not in have), key=int)[:limit]:
+    for rid in [x for x in ids if x not in have][:limit]:
         try:
             det = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
-        except _CLUE_ERRORS:
+            if det:
+                out.append(discogs_candidate(det, dm))
+        except AuthError:
+            raise
+        except Exception:                # (one bad release: the others, and the search, stand)
             continue
-        if det:
-            out.append(discogs_candidate(det, dm))
     return out
 
 

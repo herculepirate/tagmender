@@ -7,10 +7,16 @@ lookup lists both Discogs entries with a "relevance" (a CD of about these length
 tags, another tagger's, carry the US barcode (weak: BAR-5, TAG-3). Before, every CTDB Discogs
 link counted as the disc ID, the two Discogs entries tied and the country order chose the US one.
 
-Controls: a CTDB entry without "relevance" (the disc's own, as every older fixture writes it)
-still counts as the disc ID; a Discogs release linked only by a fuzzy MusicBrainz match inherits
-nothing; "CD 1", "Vol 1", "Disc 1" stay no catalogue numbers. Synthetic releases: no network,
-no library files.
+In real CTDB answers every Discogs entry carries a relevance (386 of 2881 cached at relevance
+100), so a Discogs release gets the disc ID clue only through a MusicBrainz release carrying your
+exact disc ID that links it. A Discogs entry WITHOUT relevance never occurs; it is kept meaning
+exact only so that older fixtures, which write none, keep their meaning (a compatibility test).
+
+Controls: a Discogs release linked only by a fuzzy MusicBrainz match inherits nothing; "CD 1",
+"Vol 1", "Disc 1" and format words ("HDCD 1") stay no catalogue numbers. The review's repro
+cases (a Japanese pressing against a sure MusicBrainz pick, a disc ID on two pressings, format
+words in brackets, a tags' release with the same proof) behave as before. Synthetic releases:
+no network, no library files.
 """
 import os as _os, tempfile as _tempfile  # noqa: E401
 _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
@@ -101,7 +107,8 @@ class FakeHttp:
 
 
 class TOC2_CtdbRelevance(unittest.TestCase):
-    def test_TOC2_entries_with_a_relevance_are_fuzzy_without_one_exact(self):
+    def test_TOC2_entries_with_a_relevance_are_fuzzy_a_bare_one_kept_for_old_fixtures(self):
+        # (2000004, with no relevance, is an input real CTDB never sends: older fixtures only)
         xml = ('<metadata source="discogs" id="2000001" relevance="32"/>'
                '<metadata source="discogs" id="2000002" relevance="79"/>'
                '<metadata source="discogs" id="2000003" relevance="100"/>'
@@ -112,7 +119,7 @@ class TOC2_CtdbRelevance(unittest.TestCase):
         # (relevance 100 is still CTDB's fuzzy score, never the disc's own)
         self.assertEqual(a["toc_discogs_fuzzy"], {"2000001": 32, "2000002": 79, "2000003": 100})
 
-    def test_TOC2_exact_on_one_disc_is_exact(self):
+    def test_TOC2_compat_a_bare_entry_on_one_disc_keeps_old_fixtures_exact(self):
         class H(FakeHttp):
             n = 0
 
@@ -139,8 +146,9 @@ class TOC2_FuzzyLinkIsNoProof(unittest.TestCase):
         self.assertNotIn("disc TOC", s["clues"])
         self.assertIn("disc TOC (fuzzy)", s["clues"])
 
-    def test_TOC2_an_exact_ctdb_link_still_counts(self):
-        # control: no "relevance" (every older fixture) keeps the full clue
+    def test_TOC2_compat_old_fixtures_without_relevance_keep_the_clue(self):
+        # compatibility only: older fixtures write no relevance (and no toc_discogs_fuzzy); real
+        # CTDB always sends one for Discogs, so this input never comes from a lookup
         s = mc.score_candidate(album(toc_discogs_fuzzy={}), us_dg(), CFG)
         self.assertEqual(s["clues"]["disc TOC"], mc.TOC_CLUE)
         s = mc.score_candidate(album(toc_discogs_fuzzy=None), us_dg(), CFG)
@@ -156,7 +164,7 @@ class TOC2_InheritedFromTheDiscIdRelease(unittest.TestCase):
     def test_TOC2_the_discogs_entry_the_disc_id_release_links_inherits_the_proof(self):
         a = album()
         mb = run(a, mb_uk(), mb_us())
-        self.assertEqual(ma.disc_id_discogs(a, mb), {"2000001"})
+        self.assertEqual(ma.disc_id_discogs(a, mb), ["2000001"])
         self.assertNotIn("2000001", a["toc_discogs_fuzzy"])
         self.assertIn("2000002", a["toc_discogs_fuzzy"])
         uk = mc.score_candidate(a, uk_dg(), CFG)
@@ -168,13 +176,13 @@ class TOC2_InheritedFromTheDiscIdRelease(unittest.TestCase):
         # control: the US MusicBrainz entry is only a fuzzy match of your disc
         a = album()
         mb = run(a, mb_us())
-        self.assertEqual(ma.disc_id_discogs(a, mb), set())
+        self.assertEqual(ma.disc_id_discogs(a, mb), [])
         self.assertIn("2000002", a["toc_discogs_fuzzy"])
         self.assertNotIn("disc TOC", mc.score_candidate(a, us_dg(), CFG)["clues"])
 
     def test_TOC2_no_disc_id_known_exactly_passes_nothing_on(self):
         a = album(exact_toc_releases=set())
-        self.assertEqual(ma.disc_id_discogs(a, run(a, mb_uk(), mb_us())), set())
+        self.assertEqual(ma.disc_id_discogs(a, run(a, mb_uk(), mb_us())), [])
 
     def test_TOC2_a_linked_release_the_search_missed_is_fetched(self):
         det = {"id": 2000001, "title": "Copper Fields", "artists": [{"name": "Northern Lanterns"}],
@@ -184,7 +192,7 @@ class TOC2_InheritedFromTheDiscIdRelease(unittest.TestCase):
                               "type_": "track"} for i, s in enumerate(LENS)]}
         http = FakeHttp(releases={"2000001": det})
         have = [us_dg()]
-        out = ma.with_discogs_ids(http, DM, have, {"2000001", "2000002"})
+        out = ma.with_discogs_ids(http, DM, have, ["2000002", "2000001"])
         self.assertEqual([str(c["id"]) for c in out], ["2000002", "2000001"])
         self.assertEqual(http.asked, ["https://api.discogs.com/releases/2000001"])
 
@@ -192,7 +200,7 @@ class TOC2_InheritedFromTheDiscIdRelease(unittest.TestCase):
         class Down(FakeHttp):
             def get_json(self, url, host):
                 raise OSError("down")
-        self.assertEqual(ma.with_discogs_ids(Down(), DM, [], {"2000001"}), [])
+        self.assertEqual(ma.with_discogs_ids(Down(), DM, [], ["2000001"]), [])
 
     def test_TOC2_combined_the_uk_box_and_its_musicbrainz_twin(self):
         # the folder's number and the disc IDs: the UK box on both databases, sure
@@ -258,6 +266,172 @@ class CAT3_OneDigitLabelCode(unittest.TestCase):
         r = run(a, mb_us(), mb_uk())
         self.assertNotEqual(r["status"], "auto")
         self.assertTrue(any("written by another tagger" in w for w in r["why"]), r["why"])
+
+
+
+# ---- the review's repro cases, as synthetic tests: each behaves as on 0.8.63 --------------------
+def rv_album(**kw):
+    a = album(barcodes=set(), tag_barcodes=set(), tags_by_tagger=False,
+              folder="Northern Lanterns - 2009 - Copper Fields", toc_discogs=set(), toc_discogs_fuzzy={})
+    a.update(kw)
+    return a
+
+
+JP_BARCODE = ean("498800000301")
+
+
+class Review_SharedDiscIdAndTaggersBarcode(unittest.TestCase):
+    """A2: your disc ID on the US and the EU entries alike, another tagger's US barcode, the
+    country order putting EU first: the disc ID tells neither apart, so the barcode still
+    argues against EU (no BAR-5 lift) and the US entry stays the pick."""
+
+    def picks(self, countries):
+        cfg = dict(CFG, preferred_countries=countries)
+        a = rv_album(barcodes={US_BARCODE}, tag_barcodes={US_BARCODE}, tags_by_tagger=True,
+                     toc_releases={"mb-us", "mb-eu"}, exact_toc_releases={"mb-us", "mb-eu"})
+        cands = (cand(id="mb-us", country="US", barcodes={US_BARCODE}),
+                 cand(id="mb-eu", country="XE", barcodes={UK_BARCODE}))
+        scored = [mc.score_candidate(a, c, cfg) for c in cands]
+        r = mc.classify(scored, cfg)
+        r["scored"] = scored
+        return r
+
+    def test_BAR5_no_lift_when_the_taggers_release_has_your_disc_id_too(self):
+        for countries in (["XE", "US"], ["US", "GB", "XE"]):
+            r = self.picks(countries)
+            self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-us"), (countries, r["why"]))
+            eu = next(s for s in r["scored"] if s["cand"]["id"] == "mb-eu")
+            self.assertTrue(eu["conflict"])
+
+
+class Review_JapanesePressingAgainstASureMusicBrainzPick(unittest.TestCase):
+    """B2i: the folder says [Japan]; MusicBrainz has your exact disc ID on its EU entry (linking
+    Discogs 3002); CTDB links the Japanese Discogs 3001 (relevance 100), three of its five lengths
+    6 s off. MusicBrainz's sure pick is against the folder name, Discogs's held one fits it: a
+    review, never a sure EU pick."""
+
+    def test_TOC2_a_held_discogs_pick_fitting_the_folder_disputes_musicbrainz(self):
+        a = rv_album(toc_releases={"mb-eu"}, exact_toc_releases={"mb-eu"}, toc_discogs={"3001", "3002"},
+                     toc_discogs_fuzzy={"3001": 100, "3002": 90},
+                     folder="Northern Lanterns - 2009 - Copper Fields [Japan]")
+        mb = run(a, cand(id="mb-eu", country="XE", barcodes={UK_BARCODE}, catnos={"lnt1001"}, discogs_ids=["3002"]))
+        self.assertEqual(mb["status"], "auto")
+        self.assertEqual(ma.disc_id_discogs(a, mb), ["3002"])
+        jp = cand(source="discogs", id="3001", country="Japan", barcodes={JP_BARCODE}, catnos={"lntj1001"},
+                  tracks=[{"disc": 1, "title": f"T{i}", "secs": s + (6 if i < 3 else 0)} for i, s in enumerate(LENS)])
+        eu = cand(source="discogs", id="3002", country="Europe", barcodes={UK_BARCODE}, catnos={"lnt1001"})
+        dg = run(a, jp, eu)
+        self.assertNotEqual(dg["status"], "auto")
+        self.assertEqual(str(dg["best"]["cand"]["id"]), "3001")
+        out = mc.combine(mb, dg)
+        self.assertEqual(out["status"], "review", out.get("why"))
+        self.assertTrue(any("against your folder name" in w for w in out["why"]), out["why"])
+
+    def test_TOC2_no_dispute_when_the_folder_says_nothing_against_musicbrainz(self):
+        # control: no country in the folder name - MusicBrainz's sure pick stands
+        a = rv_album(toc_releases={"mb-eu"}, exact_toc_releases={"mb-eu"}, toc_discogs={"3001", "3002"},
+                     toc_discogs_fuzzy={"3001": 100, "3002": 90})
+        mb = run(a, cand(id="mb-eu", country="XE", barcodes={UK_BARCODE}, catnos={"lnt1001"}, discogs_ids=["3002"]))
+        ma.disc_id_discogs(a, mb)
+        jp = cand(source="discogs", id="3001", country="Japan", barcodes={JP_BARCODE},
+                  tracks=[{"disc": 1, "title": f"T{i}", "secs": s + (6 if i < 3 else 0)} for i, s in enumerate(LENS)])
+        out = mc.combine(mb, run(a, jp))
+        self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", "mb-eu"), out.get("why"))
+
+
+class Review_FormatWordsInBrackets(unittest.TestCase):
+    """C, rv_scen3: format and edition words with a digit are no catalogue numbers, and a sure
+    pick is not held for one."""
+
+    WORDS = ("[HDCD 1]", "[XRCD 2]", "[UHQCD 2]", "[HQCD 1]", "[SHMCD 1]", "[MFSL 2]", "[MSFL 1]", "[RMST 1]",
+             "[RMSTRD 1]", "[ANTHOLOGY 2]", "[SINGLES 1]", "[SYMPHONY 5]", "[UNPLUGGED 1]", "[ARCHIVES 1]",
+             "[CHRONICLES 2]", "[SPECTRUM 3]", "[INSTRUMENTALS 2]", "[ENGLAND 1]", "[NWOBHM 1]", "[SCHERZO 1]",
+             "[DCC 1]", "[MQA 1]", "[DSD 1]", "[LPCM 2]", "[BLURAY 1]", "[STEREO 2]", "[VINYL 1]", "[DEMOS 2]",
+             "[MAXICD 1]", "[CDLP 1]")
+
+    def test_CAT3_format_and_edition_words_are_no_numbers(self):
+        for text in self.WORDS:
+            self.assertEqual(mc.catno_hints(text), [], text)
+        self.assertEqual(mc.catno_hints("[2009, RHEADCDX 1]"), ["RHEADCDX 1"])
+
+    def test_CAT3_a_sure_pick_is_not_held_for_a_bracket_word(self):
+        for folder in ("Northern Lanterns - 2009 - Copper Fields [ANTHOLOGY 2]",
+                       "Northern Lanterns - 2009 - Copper Fields [HDCD 1]"):
+            cn = {mc.norm_code(h) for h in mc.catno_hints(folder)}
+            a = rv_album(folder=folder, catnos=cn, catnos_from_folder=cn)
+            r = run(a, cand(id="mb-us", country="US", catnos={"lnt100"}), cand(id="mb-gb", country="GB", catnos={"lnt200"}),
+                    cand(id="mb-lp", country="US", catnos={"lnt300"}, formats={"vinyl"}))
+            self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-us"), (folder, r["why"]))
+
+    def test_CAT3_a_number_no_release_carries_never_holds_the_pick(self):
+        # a CAT-3 number read but carried by no release: not "your number is on none of these"
+        a = rv_album(folder="Copper Fields [LANTCDX 1]", catnos={"lantcdx1"}, catnos_from_folder={"lantcdx1"},
+                     catnos_cat3={"lantcdx1"})
+        r = run(a, cand(id="mb-us", country="US", catnos={"lnt100"}), cand(id="mb-gb", country="GB", catnos={"lnt200"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-us"), r["why"])
+        self.assertFalse(any(s["own_catno_absent"] for s in r["scored"]))
+
+    def test_CAT3_a_number_a_release_carries_is_your_own(self):
+        a = rv_album(folder="Copper Fields [LANTCDX 1]", catnos={"lantcdx1"}, catnos_from_folder={"lantcdx1"},
+                     catnos_cat3={"lantcdx1"})
+        r = run(a, cand(id="mb-us", country="US", catnos={"lnt100"}), cand(id="mb-gb", country="GB", catnos={"lantcdx1"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-gb"), r["why"])
+        us = next(s for s in r["scored"] if s["cand"]["id"] == "mb-us")
+        self.assertTrue(us["own_catno_absent"])
+
+
+class Review_TagsReleaseWithTheSameProof(unittest.TestCase):
+    """rv_scen4: the tags' release ID names the US entry, which the folder's number rules out. The
+    hold is skipped only when your exact disc ID is on the pick and NOT on the tags' release."""
+    F = "Northern Lanterns - 2009 - Copper Fields [LNTX 2001]"
+
+    def a(self, exact):
+        return rv_album(folder=self.F, catnos={"lntx2001"}, catnos_from_folder={"lntx2001"}, tags_by_tagger=True,
+                        tag_release_mb={"mb-us"}, toc_releases=set(exact), exact_toc_releases=set(exact))
+
+    def test_TAG3_disc_id_on_both_keeps_the_hold(self):
+        r = run(self.a({"mb-us", "mb-uk"}), cand(id="mb-us", country="US", catnos={"lnt1"}),
+                cand(id="mb-uk", country="GB", catnos={"lntx2001"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "mb-uk"))
+        self.assertTrue(any("written by another tagger" in w for w in r["why"]), r["why"])
+
+    def test_TAG3_disc_id_on_the_tags_release_only_keeps_the_hold(self):
+        r = run(self.a({"mb-us"}), cand(id="mb-us", country="US", catnos={"lnt1"}),
+                cand(id="mb-uk", country="GB", catnos={"lntx2001"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "mb-uk"))
+
+    def test_TAG3_folder_number_on_a_third_entry_keeps_the_hold(self):
+        r = run(self.a({"mb-us", "mb-uk"}), cand(id="mb-us", country="US", catnos={"lnt1"}),
+                cand(id="mb-uk", country="GB", catnos={"lnt2"}), cand(id="mb-de", country="DE", catnos={"lntx2001"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("review", "mb-de"))
+
+    def test_TAG3_disc_id_on_the_pick_alone_lifts_the_hold(self):
+        r = run(self.a({"mb-uk"}), cand(id="mb-us", country="US", catnos={"lnt1"}),
+                cand(id="mb-uk", country="GB", catnos={"lntx2001"}))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-uk"), r["why"])
+
+
+class Review_WithDiscogsIds(unittest.TestCase):
+    def test_TOC2_one_bad_release_leaves_the_others(self):
+        class Bad(FakeHttp):
+            def get_json(self, url, host):
+                if url.endswith("/2000001"):
+                    return {"id": 2000001, "tracklist": "not a list"}     # breaks discogs_candidate
+                return super().get_json(url, host)
+        det = {"id": 2000003, "title": "Copper Fields", "artists": [{"name": "Northern Lanterns"}], "year": 2009,
+               "country": "UK", "formats": [{"name": "CD", "qty": "1"}], "labels": [], "identifiers": [],
+               "tracklist": [{"position": "1", "title": "T0", "duration": "3:20", "type_": "track"}]}
+        out = ma.with_discogs_ids(Bad(releases={"2000003": det}), DM, [us_dg()], ["2000001", "2000003"])
+        self.assertEqual([str(c["id"]) for c in out], ["2000002", "2000003"])
+
+    def test_TOC2_the_cap_takes_the_most_relevant_first(self):
+        a = album(toc_discogs={"5", "6", "7", "8", "9"},
+                  toc_discogs_fuzzy={"5": 30, "6": 90, "7": 60, "8": 100, "9": 45})
+        mb = run(a, cand(id="mb-uk", discogs_ids=["5", "6", "7", "8", "9"]))
+        self.assertEqual(ma.disc_id_discogs(a, mb), ["8", "6", "7", "9", "5"])
+        http = FakeHttp()
+        ma.with_discogs_ids(http, DM, [], ["8", "6", "7", "9", "5"])
+        self.assertEqual([u.rsplit("/", 1)[-1] for u in http.asked], ["8", "6", "7", "9"])
 
 
 if __name__ == "__main__":

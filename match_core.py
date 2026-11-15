@@ -220,6 +220,26 @@ _CATNO_NUMBER = re.compile(r"^\d{2,7}(?:[-/]\d{1,3})?$")                        
 _YEAR = re.compile(r"^(19|20)\d\d$")
 
 
+# CAT-3: disc formats and audio editions spelled like a label code ("[HDCD 1]", "[UHQCD 2]")
+_CAT3_NOT_CODE = {"hdcd", "xrcd", "xrcd2", "xrcd24", "uhqcd", "hqcd", "hqcd2", "shmcd", "bscd", "bscd2",
+                  "blucd", "bluspeccd", "mqacd", "sacd", "cdr", "cdrw", "vcd", "svcd", "minicd", "maxicd",
+                  "enhancedcd", "cdda", "cdg", "dualdisccd", "goldcd", "glasscd", "dvdcd", "cdlp",
+                  "maxilp", "minilp", "dlp", "lp", "dblp", "twolp", "doublelp"}
+
+
+def cat3_hint(text):
+    """CAT-3: "RHEADCDX 1" - a label code in capitals (4-12 letters) ending in CD or LP and up to
+    two letters, then one digit 1-9; never a disc format or audio edition (_CAT3_NOT_CODE) nor a
+    disc, volume or part number (_NUMBER_WORDS). Such a number is weaker than any other folder
+    number: it counts against a release only when some release carries it (classify)."""
+    m = re.fullmatch(r"([A-Z]{4,12}) ([1-9])", str(text or "").strip())
+    if not m:
+        return False
+    code = m.group(1).casefold()
+    return (bool(re.search(r"(?:cd|lp)[a-z]{0,2}$", code)) and code not in _CAT3_NOT_CODE
+            and code not in _NUMBER_WORDS)
+
+
 def catno_hints(text, variants=False):
     """Catalogue numbers written in square or round brackets of a folder name
     or album title. Returns them as written ("DOMO 71063-2"). Conservative:
@@ -266,12 +286,10 @@ def catno_hints(text, variants=False):
                       and prev.strip(".").casefold() not in _NUMBER_WORDS
                       and not re.fullmatch(r"\d{3,5}", nxt)):
                     found.append(f"{prev} {w}")
-                # CAT-3: a label code in capitals (4-12 letters, three consonants in a row, as
-                # a code rather than a word) and one digit, the whole of its bracket part
-                # ("[2009.03.23, RHEADCDX 1]"); never "CD 1", "Vol 1", "Disc 1", "Part 2"
-                elif (i == 1 and len(words) == 2 and len(segment.split()) == 2
-                      and re.fullmatch(r"[1-9]", w) and re.fullmatch(r"[A-Z]{4,12}", prev)
-                      and re.search(r"[^AEIOUY]{3}", prev) and prev.casefold() not in _NUMBER_WORDS):
+                # CAT-3: a CD or LP label code in capitals and one digit, the whole of its bracket
+                # part ("[2009.03.23, RHEADCDX 1]"); never a word or a disc format ("CD 1",
+                # "Vol 1", "ANTHOLOGY 2", "HDCD 1", "UHQCD 2")
+                elif i == 1 and len(words) == 2 and len(segment.split()) == 2 and cat3_hint(f"{prev} {w}"):
                     found.append(f"{prev} {w}")
     out = []
     for f in found + (extra if variants else []):
@@ -2183,9 +2201,10 @@ def file_clues(album, cand, clues, against, cfg=None):
         # can never get it, so it is told (weight 1) but never proof, and never tells
         # pressings apart. A CTDB link to a Discogs release keeps the full clue only when
         # MusicBrainz has your exact disc ID on some release (the disc is known for sure),
-        # and CTDB's link is exact itself (TOC-2: one with a "relevance", toc_discogs_fuzzy,
-        # is a fuzzy match - Radiohead's US box beside the UK one carrying the disc IDs -
-        # unless a release carrying your exact disc ID links it: match_albums.disc_id_discogs).
+        # and the link is not CTDB's fuzzy one (TOC-2: CTDB sends every Discogs entry with a
+        # "relevance", toc_discogs_fuzzy - Radiohead's US box beside the UK one carrying the disc
+        # IDs), so in practice only a Discogs release a MusicBrainz release carrying your exact
+        # disc ID links (match_albums.disc_id_discogs) gets it.
         if exact or (cand.get("source") == "discogs" and album.get("exact_toc_releases")
                      and str(cand.get("id")) not in (album.get("toc_discogs_fuzzy") or ())):
             clues["disc TOC"] = EXACT_TOC_CLUE if exact else TOC_CLUE
@@ -3565,15 +3584,19 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                 code = "barcode (OCR)"
                 break
     # BAR-5, TAG-3: a barcode only another tagger wrote is its guess at the release. On a release
-    # carrying your folder's catalogue number, or your exact disc ID, it differs without making
-    # it another product (Radiohead - Pablo Honey box: the US box's barcode in the tags, the
-    # folder's RHEADCDX 1 and both disc IDs on the UK one)
-    if conflict and tagger_barcode(album, a_codes) and (
-            code == "catalogue number (folder name)" or exact_disc_id(album, cand)):
+    # carrying your folder's catalogue number it differs without making it another product
+    # (Radiohead - Pablo Honey box: the US box's barcode in the tags, the folder's RHEADCDX 1 on
+    # the UK one). On one carrying your exact disc ID, likewise - unless a release carrying the
+    # tags' barcode has that disc ID too (then the disc ID tells neither apart): classify decides
+    # that across the releases (tagger_lift)
+    tagger_conflict = conflict and tagger_barcode(album, a_codes)
+    lift_by_disc_id = False
+    if tagger_conflict and code == "catalogue number (folder name)":
         conflict = False
         avail -= cfg["w_code"]
-        notes[notes.index("barcode differs")] = ("barcode in the tags another tagger wrote differs "
-                                                 "(not proof of the pressing)")
+        notes[notes.index("barcode differs")] = TAGGER_BARCODE_DIFFERS
+    elif tagger_conflict and exact_disc_id(album, cand):
+        lift_by_disc_id = True
     if code:
         pts += cfg["w_code"]
         avail += cfg["w_code"]
@@ -3711,9 +3734,13 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         notes.append(clues["matrix"].replace(" on the scans", " agrees (read on the scans)"))
     # A catalogue number the folder or tags name that this pressing does not carry:
     # if NO pressing carries it, the copy is probably one the databases do not list.
-    own = sorted(c for c in (album.get("catnos") or ())
-                 if (re.search(r"[a-z]", c) and re.search(r"\d", c) and len(c) >= 4)
-                 or len(re.sub(r"\D", "", c)) >= 6)
+    own_all = sorted(c for c in (album.get("catnos") or ())
+                     if (re.search(r"[a-z]", c) and re.search(r"\d", c) and len(c) >= 4)
+                     or len(re.sub(r"\D", "", c)) >= 6)
+    # CAT-3: a one-digit label code ("RHEADCDX 1") is left out here; classify takes it in when
+    # some release carries it (cat3_own)
+    weak = set(album.get("catnos_cat3") or ())
+    own = [c for c in own_all if c not in weak]
     # written either way ("RR 7157-2" in the folder, "RR 7157" on the release): catno_same
     own_absent = bool(own) and not catnos_agree(own, cand.get("catnos") or ())
     len_err = titles_agree = titles_loose = len_diffs = None
@@ -3729,6 +3756,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             titles_loose = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
                                if t.get("title") and _title_or_its_start(t["title"], c.get("title")))
     conf = round(100.0 * pts / avail, 1) if avail else 0.0
+    # (the confidence without the tags' barcode against it: tagger_lift)
+    lifted_conf = (round(100.0 * pts / (avail - cfg["w_code"]), 1) if avail > cfg["w_code"] else 0.0) \
+        if lift_by_disc_id else None
     outer = bool(code.startswith("barcode")) and barcode_on_outer(album, cand.get("barcodes"))     # BAR-3
     res = {"barcode_outer": outer,
         "confidence": conf, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
@@ -3744,6 +3774,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "len_err": len_err, "titles_agree": titles_agree, "titles_loose": titles_loose, "len_diffs": len_diffs,
         "ms_lengths": any(c["secs"] % 1 for c in cand["tracks"] if c.get("secs")),
         "own_catnos": own, "own_catno_absent": own_absent, "scans_name_artist": scans_name_artist,
+        "own_catnos_cat3": own_all if weak & set(own_all) else None,
+        "tagger_lift_conf": lifted_conf,
         "files_name_artist": files_name_artist,
         "other_version": other_version(album, cand),
         "has_folder_catno": bool(album.get("catnos_from_folder")),
@@ -4105,6 +4137,40 @@ def _missing_lengths_free(scored, cfg):
             s["lengths_free"] = True
 
 
+TAGGER_BARCODE_DIFFERS = "barcode in the tags another tagger wrote differs (not proof of the pressing)"
+
+
+def tagger_lift(scored):
+    """BAR-5, TAG-3: a release carrying your exact disc ID, against which only another tagger's
+    barcode argues ("tagger_lift_conf", score_candidate), is no other product - unless a release
+    carrying that barcode has your exact disc ID too: then the disc ID tells the two apart no
+    more than the tags do, and the barcode still argues. In place."""
+    if any(s.get("code") == TAGS_BARCODE and (s.get("clues") or {}).get("disc TOC") == EXACT_TOC_CLUE
+           for s in scored):
+        return
+    for s in scored:
+        if s.get("tagger_lift_conf") is not None and s.get("conflict"):
+            s["conflict"] = False
+            s["confidence"] = s["tagger_lift_conf"]
+            s["notes"] = [TAGGER_BARCODE_DIFFERS if n == "barcode differs" else n for n in s.get("notes") or ()]
+            s["tagger_lift_conf"] = None
+
+
+def cat3_own(scored):
+    """CAT-3: a one-digit label code from the folder ("RHEADCDX 1") is one of your copy's own
+    numbers (own_catnos, own_catno_absent) only when some scored release carries it: else it
+    may be no catalogue number at all, and must not hold back a pick on "your number is on
+    none of these". In place."""
+    if not any(s.get("own_catnos_cat3") and catnos_agree(s["own_catnos_cat3"], s["cand"].get("catnos") or ())
+               for s in scored):
+        return
+    for s in scored:
+        own = s.get("own_catnos_cat3")
+        if own:
+            s["own_catnos"] = own
+            s["own_catno_absent"] = not catnos_agree(own, s["cand"].get("catnos") or ())
+
+
 def classify(scored, cfg):
     """Decide auto / review / nomatch for ONE source's scored candidates.
 
@@ -4114,6 +4180,8 @@ def classify(scored, cfg):
     if not scored:
         return {"status": "nomatch", "best": None, "runner_up": None,
                 "margin": None, "why": ["no candidates found"]}
+    cat3_own(scored)
+    tagger_lift(scored)
     _missing_lengths_free(scored, cfg)
     scored = _full_fit_first(scored, cfg)
 
@@ -4167,8 +4235,8 @@ def classify(scored, cfg):
     # The release another tagger's tags name, which the folder name rules out: one of the two
     # is wrong, and nothing of your copy beyond those tags says which. Neither is taken
     # automatically (a person decides; the folder's pressing still leads the list).
-    tags_against = sorted({f"{s['cand']['id']} ({'; '.join(folder_says(s))})" for s in scored
-                           if s.get("tagger_tagged") and folder_says(s)})
+    tags_named = [s for s in scored if s.get("tagger_tagged") and folder_says(s)]
+    tags_against = sorted({f"{s['cand']['id']} ({'; '.join(folder_says(s))})" for s in tags_named})
     if any(folder_says(s) for s in scored):
         fitting = [s for s in scored if not folder_says(s)]
         # the same album: its names agree, or its own numbers prove it ("The Mediator" in the
@@ -4381,8 +4449,9 @@ def classify(scored, cfg):
                 {k for x in unproven for k in x["cand"].get("formats") or ()})) + ", so it is taken for a CD"]
 
     why = [best["media_why"]] if best.get("media_why") else []
-    # (not when your copy itself proves the pick: its exact disc ID says which is right)
-    if tags_against and not proven_by_your_copy(best):
+    # (not when your copy itself proves the pick and not the tags' release: your exact disc ID on
+    # the pick alone says which is right; on both, it says nothing)
+    if tags_against and not (proven_by_your_copy(best) and not any(proven_by_your_copy(s) for s in tags_named)):
         why.append(f"your files' tags (written by another tagger) name {', '.join(tags_against[:2])}; "
                    "the folder name rules that out and nothing else of your copy says which is right")
     # The album is PROVEN when its disc ID, barcode, or a catalogue number from
@@ -5223,6 +5292,31 @@ def _proof_left_unsure(mb_result, dg_result, prefer=None):
     return None
 
 
+def _folder_fit_disputes(mb_result, dg_result):
+    """TOC-2: MusicBrainz is sure of a pick your folder name contradicts ("folder name says JP")
+    and Discogs's pick, held back, fits the folder (its country or catalogue number) with nothing
+    of the folder against it: the two contradict each other, and _disputed decides - Discogs's
+    pressing may be one MusicBrainz lacks, sharing the disc of the one that has your disc ID
+    (the disc ID proves the album, not the pressing). Never when the two are one pressing.
+    Returns the review, or None."""
+    mb_best, dg_best = (mb_result or {}).get("best"), (dg_result or {}).get("best")
+    if not (mb_best and dg_best) or dg_result.get("status") == "auto":
+        return None
+    said = [x for x in mb_best.get("clues_against") or () if x.startswith("folder name says")]
+    if not said or dg_best.get("media_why") or not dg_best.get("tracks_ok") or dg_best.get("conflict") \
+            or any(x.startswith("folder name says") for x in dg_best.get("clues_against") or ()):
+        return None
+    country = str((dg_best.get("clues") or {}).get("country") or "")
+    if not ("folder name" in country or dg_best.get("folder_catno_agrees")):
+        return None
+    if same_pressing(mb_best["cand"], dg_best["cand"]) or any(s is mb_best for s in mb_twins(mb_result, dg_result)):
+        return None
+    return _disputed(mb_result, dg_result,
+                     f"MusicBrainz's sure pick {mb_best['cand']['id']} is against your folder name "
+                     f"({said[0]}); Discogs's {dg_best['cand']['id']} fits it but is not sure "
+                     f"({'; '.join(dg_result.get('why') or []) or dg_result.get('status')})")
+
+
 def _barcode_taken(res, best):
     """BAR-2: the unsure pick carrying your barcode, taken as the release: its tracks fit,
     no barcode of yours argues, and its doubt is not a tie with another entry carrying the
@@ -5428,6 +5522,9 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                 f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; Discogs decides"]
         return out
     if mb_result and mb_result["status"] == "auto":
+        folder = _folder_fit_disputes(mb_result, dg_result)
+        if folder:
+            return folder
         if _discogs_pressings_tied(dg_result, mb_result.get("best")):
             _noted(dg_result, f"MusicBrainz lists one pressing ({mb_result['best']['cand']['id']}), "
                               "but nothing about your copy shows it is that one")

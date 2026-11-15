@@ -30,7 +30,7 @@ from .common import (APP, HERE, _gui_prefs, _set_gui_pref, music_paths, open_fol
 from .work import _alive
 from .widgets import SourceList
 from .inspector import TABS, Inspector
-from .overview import Overview
+from .overview import Overview, file_anyway_words
 from .jobs import Jobs
 from .watched import Watched
 from .profiles import Profiles
@@ -257,6 +257,7 @@ class Main(QMainWindow):
             "suggested_cover": lambda: self.inspector.art.clear(),
             "tags_from_filenames": self.tags_from_filenames,
             "process_anyway": lambda: ov().process_anyway(),
+            "file_anyway": lambda: ov().file_anyway_selected(),
             "exclude_again": lambda: ov().exclude_again(),
             "retry": lambda: self.pages["Needs attention"].retry(),
             "search_web": lambda: self.album_do("web"),
@@ -621,6 +622,10 @@ class Main(QMainWindow):
         self.commands["job_details"].setEnabled(j is not None and page is j and bool(j.job()))
         self.commands["show_report"].setEnabled(report_mod.can_report(self))
         self.commands["process_anyway"].setEnabled(kind == "overview" and idle and x.get("status") == "excluded")
+        # MOV-5: kept in place for its score alone - you may ask for it to be filed
+        fa = self.commands["file_anyway"]
+        fa.setEnabled(kind == "overview" and idle and bool(ov is not None and ov.may_file_anyway(x)))
+        fa.setText(file_anyway_words(x if kind == "overview" else None))
         self.commands["retry"].setEnabled(kind == "attention" and idle)
         self.inspector.buttons["release"].setEnabled(kind == "overview" and idle)
         for k in ("open", "web"):

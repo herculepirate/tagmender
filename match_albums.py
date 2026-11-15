@@ -2053,15 +2053,26 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         different = False
     # (nor a box's own code on the discs titled as the box: "Original Album Classics" on discs 1-2,
     # "Songs in the Attic (Original Album Classics)" on the rest - a title is the set's name when
-    # it is the whole of another disc's brackets, a number after it aside ("... (Original Album
-    # Classics #2)"), or the set's folder, its year aside; the code is kept only when every disc
-    # carrying it is titled so - "Live" beside "Beta (Live)" with Beta's barcode stays Beta's)
+    # it is the whole of the brackets of two or more other discs, a set number after it aside
+    # ("... (Original Album Classics #2)" - "#2", "No. 2", "Vol. 2", never a year), or the title of
+    # two or more discs and in another disc's brackets or the set's folder (its year aside): never
+    # one disc's word alone, so a twofer of two discs names no set; the code is kept only when every
+    # disc carrying it is titled so - "Live" beside "Beta (Live)" with either's barcode stays theirs)
     def _fold(t):
         return re.sub(r"[\W_]+", " ", str(t or "").casefold()).strip()
-    in_brackets = {re.sub(r"\s+\d+$", "", _fold(b)) for _p, i in infos
-                   for b in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(i.get("album") or ""))} - {""}
+    bracket_discs = {}
+    for _p, i in infos:
+        for b in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(i.get("album") or "")):
+            b = _fold(re.sub(r"\s*(?:#|no\.?|vol\.?|volume)\s*\d+\s*$", "", b, flags=re.I))
+            if b:
+                bracket_discs.setdefault(b, set()).add(i["disc_eff"])
+    title_discs = {}
+    for _p, i in infos:
+        title_discs.setdefault(bare_title(i.get("album")), set()).add(i["disc_eff"])
     folder_name = _fold(re.sub(r"^\s*\d{4}\s*-\s*", "", str(album_folder or "")))
-    set_names = {t for t in bare if t == folder_name or t in in_brackets}
+    set_names = {t for t in bare
+                 if len(bracket_discs.get(t, set()) - title_discs[t]) >= 2
+                 or (len(title_discs[t]) >= 2 and (t == folder_name or bracket_discs.get(t, set()) - title_discs[t]))}
     set_discs = {i["disc_eff"] for _p, i in infos if bare_title(i.get("album")) in set_names}
     if len(discs_all) > 1 and different:
         for field in ("barcode", "catno"):

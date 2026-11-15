@@ -249,19 +249,33 @@ class DSC8BoxNamedByItsDiscs(te.Base):
 
     def test_DSC8_a_twofers_barcode_stays_one_discs_whatever_the_brackets_or_folder_say(self):
         cases = (("1992 - Live & Beta", "Live", "Beta (Live at Budokan)"),
+                 ("1992 - Live & Beta", "Live", "Beta (Live)"),
+                 ("1992 - Live & Beta", "Live", "Beta (Live 1975)"),
                  ("1992 - Demos & Beta", "Demos", "Beta (Demos)"),
                  ("1992 - Gold & Beta", "Gold", "Beta (Gold Edition)"),
                  ("1992 - Alpha & Beta", "Alpha", "Beta (Alpha Sessions)"),
-                 ("1992 - Alpha", "Alpha", "Beta"))
+                 ("1992 - Alpha", "Alpha", "Beta"),
+                 ("1992 - The Stranger", "The Stranger", "An Innocent Man"))
         for name, t1, t2 in cases:
-            with self.subTest(name=name, titles=(t1, t2)):
-                top = self.lib / "Band T" / name
-                album(top, "A", t1)
-                album(top, "B", t2, freq=600, barcode="074643883726")
-                a = ma.read_album(top, "Band T", top.name)
-                self.assertEqual(a["barcodes"], set())
-                self.assertIn("74643883726", a["disc_only_codes"])
-                shutil.rmtree(top)
+            for on in ("A", "B"):
+                with self.subTest(name=name, titles=(t1, t2), barcode_on=on):
+                    top = self.lib / "Band T" / name
+                    code = dict(barcode="074643883726")
+                    album(top, "A", t1, **(code if on == "A" else {}))
+                    album(top, "B", t2, freq=600, **(code if on == "B" else {}))
+                    a = ma.read_album(top, "Band T", top.name)
+                    self.assertEqual(a["barcodes"], set())
+                    self.assertIn("74643883726", a["disc_only_codes"])
+                    shutil.rmtree(top)
+
+    def test_DSC8_a_three_album_set_named_in_one_bracket_names_no_box(self):
+        # (a bracket on one disc only, its title on one disc: one disc's word, not the set's)
+        top = self.lib / "Band T" / "1995 - Live & Beta & Gamma"
+        album(top, "A", "Live", barcode="074643883726")
+        album(top, "B", "Beta (Live)", freq=600)
+        album(top, "C", "Gamma", freq=900)
+        a = ma.read_album(top, "Band T", top.name)
+        self.assertEqual(a["barcodes"], set())
 
 
 class DSC67Arriving(te.Base):

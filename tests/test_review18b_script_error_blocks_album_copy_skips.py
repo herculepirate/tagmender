@@ -20,7 +20,7 @@ from test_executor import Base, target  # noqa: E402  (the repo's own test helpe
 
 class ScriptErrorBlocksSkippedCopy(Base):
     def test_low_confidence_copy_is_skipped_not_blocked(self):
-        prof = self.profile(operation="copy", destination=str(self.dest),
+        prof = self.profile(operation="copy", destination=str(self.dest), unattended=True,   # (MOV-5: never offered)
                             picard={"enable_tagger_scripts": True,
                                     "list_of_scripts": ["$if($eq(%title%,Second),$set(x,$delprefix()))"]})
         p = pl.build([self.proposal(conf=80.0, targets=[target(1, "First"), target(2, "Second")])], prof)

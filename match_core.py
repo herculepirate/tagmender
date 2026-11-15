@@ -4307,7 +4307,11 @@ def classify(scored, cfg):
             if unlisted:
                 hard = ("disc TOC", "source link")      # (a fingerprint finds recordings: hard_proof)
                 own = next((x for s in scored for x in s.get("own_catnos") or ()), "")
-                scored = [s if (any(k in (s.get("clues") or {}) for k in hard) or barcode_proves(s))
+                # (CAT-5: so does a catalogue number printed on your copy's scans or booklet,
+                # BAR-8 - Judas Priest - Metalogy: the logs type the discs' CK 87127-87130, the
+                # box prints C4K 87126)
+                scored = [s if (any(k in (s.get("clues") or {}) for k in hard) or barcode_proves(s)
+                                or (s.get("code") == "catalogue number (OCR)" and s.get("catno_on_copy")))
                           else dict(s, media_why=f"catalogue number {own.upper()} from your folder/tags is on "
                                                  "none of these pressings") for s in scored]
         else:

@@ -27,6 +27,8 @@
 - A catalogue number with another label's letters in front ("TFCK 87128") is no longer
   taken for yours ("CK 87128", named by your rip logs), which had left a US box set with no
   release that fit (CAT-4).
+- When the catalogue number your folder or rip logs name is on no release, a catalogue
+  number printed on your scans now picks the pressing, as your barcode does (CAT-5).
 - Your exact disc ID on MusicBrainz's entry no longer overrules Discogs's pick of another
   pressing when your folder name or scans speak against MusicBrainz's entry: a disc ID that
   several pressings share proves the disc, not the pressing (TOC-3).

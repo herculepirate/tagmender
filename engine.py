@@ -332,6 +332,69 @@ def _one_box(folder, files, keys, metas) -> bool:
     return len(artists) == 1 and len(numbers) == len(set(numbers))
 
 
+# DSC-5: the CD count a box set's folder names ("Complete Box 13CD+DVD", "(2011, 7CD+DVD, Sony,
+# ...)", "[16 CD]", "4xSACD"): a number written right before "CD" - never a catalogue number's
+# digits ("88697763332-4"), never the disc word of a disc folder ("CD4-5")
+_BOX_CD_COUNT = re.compile(r"(?<![\w.\-])(\d{1,3})\s*[x×]?\s*(?:shm-?|blu-?spec\s*|hq|uhq|sa)?cds?(?![a-z0-9])",
+                           re.I)
+
+
+def box_cd_count(name) -> int:
+    """DSC-5: the number of CDs a folder's name says it holds ("13CD+DVD" -> 13), when it names
+    one count only and at least two CDs; else 0."""
+    counts = {int(m[1]) for m in _BOX_CD_COUNT.finditer(str(name or ""))}
+    return counts.pop() if len(counts) == 1 and min(counts) >= 2 else 0
+
+
+def _disc_tag(meta) -> tuple:
+    """(disc number, disc total) a file's tags give, as text without leading zeros ("" for none):
+    "4/7" and "04" with a total tag of "7" are both ("4", "7")."""
+    num, _s, total = _first(meta, "discnumber").partition("/")
+    total = total.strip() or _first(meta, "totaldiscs") or _first(meta, "disctotal")
+    return num.strip().lstrip("0"), total.strip().lstrip("0")
+
+
+def numbered_box(box: Path, found: dict, metas: dict) -> bool:
+    """DSC-5 (BOX-1): a box set's folder whose discs sit in folders of its own named as albums
+    ("01. (1980) - Kenso (2012) - KIZC 168"; "CD3. 1992. Amused to Death (88697763332-3)"),
+    some holding two discs in disc folders ("CD4-5. 2005. Ca Ira (2CD, ...)/CD1" and "/CD2"), is
+    one album - the box - when every sign of it agrees: the folder's name gives its CD count N
+    (box_cd_count) and it has no tracks of its own; each of its audio folders is a sub-folder
+    of it, or a disc folder of one (a sub-folder holding disc folders has no tracks beside
+    them); each such folder's files are tagged as one album with one disc number, by one album
+    artist all through; the disc numbers are 1 .. N, each once, rising in the folders' order;
+    and no file's disc total says fewer than N discs (a "1 of 1" standalone album). An artist's
+    folder or a "Compilations" folder of albums each tagged disc 1, a box whose discs' tags
+    leave a gap or count otherwise, two artists' albums - stay apart as before."""
+    n = box_cd_count(box.name)
+    if n < 2 or box in found:
+        return False
+    dirs = [d for d in found if box in d.parents]
+    if not dirs:
+        return False
+    for d in dirs:
+        depth = len(d.relative_to(box).parts)
+        if depth > 2 or (depth == 2 and (not is_disc_dir(d) or d.parent in found)):
+            return False
+    dirs.sort(key=lambda d: ma._natural_key(d.relative_to(box).as_posix()))
+    files = [f for d in dirs for f in found[d]]
+    keys = album_keys(files, box, metas)
+    if any(k[0] != "tags" or not k[1] for k in keys.values()) or len({k[1] for k in keys.values()}) != 1:
+        return False                                       # (untagged, or two artists' albums)
+    numbers = []
+    for d in dirs:
+        if len({keys[f] for f in found[d]}) != 1:
+            return False                                   # (a folder of two albums)
+        tags = {_disc_tag(metas.get(f) or {}) for f in found[d]}
+        nums = {t[0] for t in tags}
+        if len(nums) != 1 or not next(iter(nums)).isdigit():
+            return False                                   # (no disc number, or two of them)
+        if any(t[1].isdigit() and int(t[1]) < n for t in tags):
+            return False                                   # (its own tags count fewer discs)
+        numbers.append(int(next(iter(nums))))
+    return numbers == list(range(1, n + 1))
+
+
 def version_dirs(parent: Path, metas=None, skips=None) -> list:
     """The folders of parent that hold versions of one disc of one album, each named after
     its channel layout ("2.0/" and "5.0/", "Stereo/" and "Multichannel/": an SACD's two areas,
@@ -885,6 +948,21 @@ class Engine:
             if _one_box(box, fs, album_keys(fs, box, metas), metas):
                 for d in parts:
                     owner_of[d] = box
+        # DSC-5 (BOX-1): a box set's folder naming its CD count, its discs in folders named as
+        # albums ("01. (1980) - Kenso ...", "CD4-5. 2005. Ca Ira (2CD, ...)/CD1"), each tagged as
+        # its disc of the box: the box is one album (numbered_box), never each folder an album of
+        # its own matched to the standalone release of that disc - only when the box folder
+        # itself is planned (or a folder above it)
+        whole_boxes = set()
+        near = {a for d in found for a in (d.parent, d.parent.parent)
+                if (a == path or path in a.parents) and box_cd_count(a.name)}
+        for box in sorted(near, key=lambda a: len(a.parts)):
+            if any(b in box.parents for b in whole_boxes) or not numbered_box(box, found, metas):
+                continue
+            whole_boxes.add(box)
+            for d in found:
+                if box in d.parents:
+                    owner_of[d] = box
         own_key = {}
         for d in found:
             own_key.setdefault(owner_of[d], []).extend(found[d])
@@ -914,8 +992,8 @@ class Engine:
                 by_album = {(tagged or [("folder", str(folder))])[0]: files}   # one disc set, partly tagged
             elif len(by_album) > 1 and sets.get(folder) and _one_album_titled(by_album):
                 by_album = {tagged[0]: files}            # versions of one disc tagged apart ("[HD]")
-            elif len(by_album) > 1 and _one_box(folder, files, keys, metas):
-                by_album = {tagged[0]: files}                                  # DSC-2
+            elif len(by_album) > 1 and (folder in whole_boxes or _one_box(folder, files, keys, metas)):
+                by_album = {tagged[0]: files}                                  # DSC-2, DSC-5
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1))
                 continue

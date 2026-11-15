@@ -1591,15 +1591,6 @@ class Planner:
                 entry["label"] = "Skipped"
                 return entry
             op = "in_place"
-        elif op in ("copy", "move") and not organize_ok and not p.get("unattended") and not entry.get("held"):
-            # MOV-5 (decided 2026-11-14): the score gates what is done unasked, not what you ask
-            # for. An identified album below organize_min_confidence keeps its move (or copy),
-            # held: shown unticked, done only when you tick it (Soft Machine - Fifth at 92.2 had
-            # been tagged in place, then shown "Up to date" with no way to file it). An unattended
-            # profile, which applies without asking, still tags it in place.
-            entry["held"] = (f"confidence {conf:.1f} is below organize_min_confidence {_organize_floor_words(p)}: "
-                             + ("copied" if op == "copy" else "moved") + " only when you tick it")
-            entry["notes"].insert(0, entry["held"])
         elif op in ("copy", "move") and not organize_ok:
             entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
                                   f"{_organize_floor_words(p)}: "

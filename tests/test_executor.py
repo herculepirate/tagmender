@@ -257,35 +257,12 @@ class Organise(Base):
         self.assertEqual(tagio.read(f1)["album"], ["Real Album"])
         self.assertTrue((final / "02.S.flac").exists())
 
-    def test_low_confidence_move_unattended_tags_in_place_and_says_why(self):
-        # MOV-5: a profile that applies without asking still files nothing below the threshold
-        prof = self.profile(operation="move", destination=str(self.dest), unattended=True)
+    def test_low_confidence_move_tags_in_place_and_says_why(self):
+        prof = self.profile(operation="move", destination=str(self.dest))
         p, _ = self.run_plan(prof, self.proposal(conf=91))
         self.assertTrue(self.f1.exists())
         self.assertIn("tagged in place, not moved", " ".join(p["albums"][0]["notes"]))
         self.assertEqual(tagio.read(self.f1)["album"], ["Real Album"])
-
-    def test_MOV5_low_confidence_move_is_held_until_ticked(self):
-        prof = self.profile(operation="move", destination=str(self.dest))
-        p = pl.build([self.proposal(conf=91)], prof)
-        a = p["albums"][0]
-        self.assertIn("moved only when you tick it", a.get("held") or "")
-        self.assertTrue(pl.held(a))
-        self.assertTrue(all(fe["op"] == "move" for fe in a["files"]))
-        self.assertTrue(pl.has_work(a))                          # (never "Up to date")
-        executor.Executor(p).run()                               # not ticked: nothing done
-        self.assertTrue(self.f1.exists())
-        self.assertEqual(tagio.read(self.f1)["album"], ["Some Album"])
-
-    def test_MOV5_ticked_low_confidence_album_is_moved(self):
-        prof = self.profile(operation="move", destination=str(self.dest))
-        p = pl.build([self.proposal(conf=91)], prof)
-        p["albums"][0]["held_ok"] = True                         # (ticked in the preview)
-        executor.Executor(p).run()
-        self.assertFalse(self.f1.exists())
-        moved = [f for f in self.dest.rglob("*.flac")]
-        self.assertEqual(len(moved), 2)
-        self.assertEqual(tagio.read(moved[0])["album"], ["Real Album"])
 
     def test_lossy_profile_copies_lossy_only_and_leaves_sources_alone(self):
         mp3 = audio(self.album / "03 c.mp3", 700, album="Some Album", title="c")

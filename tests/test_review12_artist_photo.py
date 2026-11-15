@@ -77,7 +77,7 @@ class LookupEveryRunNoMbid(R8):
     the network on every run - nothing is kept (key = the name, lasting False)."""
     def test_one_lookup(self):
         prof = self.profile(artwork=self.prof()["artwork"], tag_level="enthusiast", operation="move",
-                            destination=str(self.dest), unattended=True)   # (MOV-5: tagged in place unasked)
+                            destination=str(self.dest))
         def prop():
             tg = [target(n + 1, t, artist="Some Artist") for n, t in enumerate("ab")]
             return self.proposal(targets=tg, conf=90.0)

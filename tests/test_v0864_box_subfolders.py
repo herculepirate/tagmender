@@ -280,6 +280,17 @@ class DSC5_BoxOfAlbumFolders(te.Base):
         self.assertEqual(engine.box_still_arriving(beta), "")                 # (all here: the box)
         self.assertEqual([g.folder for g in self.groups()], [top])
 
+    def test_DSC5_a_box_with_a_folder_left_out_never_waits(self):
+        # (one disc folder in the profile's excluded paths: the box is never one album - nothing
+        # of it waits for discs, there or not)
+        top = self.lib / "Band K" / "2012 - Band K Complete Box 3CD+DVD"
+        first = disc(top, "01. (1980) - Alpha (2012) - KZ 1", 1, "COMPLETE BOX", "Band K", total=4)
+        beta = disc(top, "02. (1982) - Beta (2012) - KZ 2", 2, "COMPLETE BOX", "Band K", total=4)
+        self.assertEqual(engine.box_still_arriving(first), "disc 3 of 3 is not here yet")
+        eng = self.engine(te.FakeHttp(), exclude_paths=[str(beta) + "*"])
+        self.assertEqual(engine.box_still_arriving(first, left_out=lambda b, ds: eng._box_part_left_out(b, ds, None)),
+                         "")
+
     def test_DSC5_an_album_beside_others_never_waits(self):
         # (a "Compilations (3CD sets)" folder, its album tagged disc 1 of 1; one without totals)
         comp = self.lib / "Band N" / "Boxsets & Compilations (3CD sets)"
@@ -321,6 +332,37 @@ class DSC5_WatchedBoxArriving(unittest.TestCase):
             got = w.tick()
         self.assertEqual(list(got.values()), ["unresolved"], got)
         self.assertEqual([p for p in b.dest.rglob("*") if p.is_file()], [])      # (nothing filed yet)
+
+    def test_DSC5_a_box_done_forgets_what_its_folders_waited_for(self):
+        # (in place: the box's key is not its folders' - the folder that waited must not stay
+        # Unresolved, to be retried and tagged alone, once the box is done)
+        from unittest import mock
+        import test_executor as tx
+        import watcher
+        from test_fileops_review11 import FakeEngine
+        from test_fileops_review15 import age, watched
+        b = self.base
+        box = b.lib / "Band K" / "2012 - Band K Complete Box 3CD"
+
+        def disc_(sub, n):
+            for name in ("01 a.flac", "02 b.flac"):
+                tx.audio(box / sub / name, 440 if name[1] == "1" else 550, album="COMPLETE BOX",
+                         albumartist="Band K", artist="Band K", title=name[3], discnumber=f"{n}/3")
+        disc_("01. (1980) - Alpha", 1)
+        age(b.lib)
+        FakeEngine.test = b
+        w = watcher.Watcher(profiles=[watched(b, operation="in_place")], once=True)
+        left_out = engine.Engine._box_part_left_out
+        with mock.patch.object(FakeEngine, "_box_part_left_out", left_out, create=True), \
+                mock.patch.object(watcher.eng_mod, "Engine", FakeEngine):
+            self.assertEqual(list(w.tick().values()), ["unresolved"])
+            rows = [(Path(r["folder"]).name, r["reason"]) for r in watcher.unresolved_records()]
+            self.assertEqual(rows, [("01. (1980) - Alpha", "discs 2, 3 of 3 are not here yet")])
+            disc_("02. (1982) - Beta", 2)
+            disc_("03. (1985) - Gamma", 3)
+            age(b.lib)
+            self.assertEqual(w.tick(), {str(box): "done"})
+        self.assertEqual(watcher.unresolved_records(), [])
 
 
 if __name__ == "__main__":

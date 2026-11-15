@@ -615,6 +615,26 @@ class Watcher:
         db.commit()
 
     @staticmethod
+    def _supersede_box_parts(db, box):
+        """DSC-5: a box set whose discs are all here is looked at as one album: what was recorded
+        of its folders while it was being copied in (each "discs 2, 3 of 3 are not here yet",
+        Unresolved) is no album any more - forgotten, so it is never retried, listed or planned
+        on its own (a disc of the box tagged alone)."""
+        pre = planmod.db_text(box).rstrip(os.sep) + os.sep
+        try:
+            _since_table(db)
+            for table in ("processed", "processed_match", "unresolved_since"):
+                if table == "processed":
+                    db.execute("DELETE FROM processed WHERE status = 'unresolved' AND substr(folder, 1, ?) = ?",
+                               (len(pre), pre))
+                else:
+                    db.execute(f"DELETE FROM {table} WHERE substr(folder, 1, ?) = ? AND folder NOT IN "
+                               "(SELECT folder FROM processed)", (len(pre), pre))
+            db.commit()
+        except sqlite3.Error:
+            pass
+
+    @staticmethod
     def _unresolved_since(db, key, sig, now) -> float:
         """HF-3: since when the album (these files) has been Unresolved - recorded the first time.
         A record kept from before HF-3 (Unresolved, no clock) counts from its last look."""
@@ -862,7 +882,11 @@ class Watcher:
             wait = "" if recheck else missing_discs(g, props)
             if not wait and not recheck:
                 # DSC-5: one folder of a box set still being copied in (discs 1 .. k of N there)
-                wait = eng_mod.box_still_arriving(g.folder, e._skipper() if hasattr(e, "_skipper") else None)
+                wait = eng_mod.box_still_arriving(
+                    g.folder, e._skipper() if hasattr(e, "_skipper") else None,
+                    (lambda b, ds: e._box_part_left_out(b, ds, None)) if hasattr(e, "_box_part_left_out") else None)
+            if not wait and getattr(g, "box", False):
+                self._supersede_box_parts(db, g.folder)
             if wait:
                 # DSC-1: a set with a disc folder still missing is not filed: it waits (as an
                 # Unresolved album, on its schedule) and is looked at again when the disc arrives

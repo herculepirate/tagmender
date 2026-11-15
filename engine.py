@@ -415,13 +415,14 @@ def _box_discs(box: Path, found: dict, metas: dict):
     return n, numbers, all(t[1].isdigit() for f in files for t in [_disc_tag(metas.get(f) or {})])
 
 
-def box_still_arriving(folder, skips=None) -> str:
+def box_still_arriving(folder, skips=None, left_out=None) -> str:
     """DSC-5 / DSC-1: why one folder of a box set being copied in waits (the watcher): the
     folder above it (or the one above that) names its CD count N, its audio folders are its
     discs as numbered_box has them, numbered 1 .. k rising in the folders' order with k below N,
     and every file's disc total is N or more - "discs 3, 4 of 4 are not here yet". "" for any
     other folder (an artist's or a "Compilations" folder of albums: their totals count fewer
-    discs, or none)."""
+    discs, or none). left_out(box, folders): a folder of it you excluded or ignored
+    (Engine._box_part_left_out) - such a box is never one album, so nothing of it waits."""
     folder = Path(folder)
     skips = skips or _skips_folder
     for box in (folder.parent, folder.parent.parent):
@@ -440,6 +441,8 @@ def box_still_arriving(folder, skips=None) -> str:
         got = _box_discs(box, found, {f: ex.read_meta(f) for fs in found.values() for f in fs})
         if not got:
             continue
+        if left_out is not None and left_out(box, list(found)):
+            return ""
         n, numbers, totals = got
         if totals and numbers and numbers == list(range(1, len(numbers) + 1)) and len(numbers) < n:
             gone = list(range(len(numbers) + 1, n + 1))
@@ -548,6 +551,8 @@ class Group:
     # DSC-1: the disc folders of a set filed side by side ("Album CD1", "Album CD2"), in disc
     # order - folder is the first; one such folder alone names a set too. [] for any other album.
     discs: list = field(default_factory=list)
+    # DSC-5: a box set's folder whose discs sit in folders of its own named as albums (numbered_box)
+    box: bool = False
 
 
 def _slots_of(album, cand, sc):
@@ -1050,7 +1055,7 @@ class Engine:
             elif len(by_album) > 1 and (folder in whole_boxes or _one_box(folder, files, keys, metas)):
                 by_album = {tagged[0]: files}                                  # DSC-2, DSC-5
             if len(by_album) == 1:
-                groups.append(Group(folder, files, [], single=len(files) == 1))
+                groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
                 continue
             for key, members in by_album.items():            # a mixed folder: one group per album
                 others = [f for f in files if f not in members]
@@ -1070,7 +1075,7 @@ class Engine:
         ignored folders): the box is not one album - its other folders stay as they were, and
         what you left out is never tagged or filed with them."""
         parts = set(dirs) | {box / d.relative_to(box).parts[0] for d in dirs}
-        if any(self.profile.excluded_path(d, named=[path]) for d in parts):
+        if any(self.profile.excluded_path(d, named=[path] if path else ()) for d in parts):
             return True
         try:
             st = ex.State()

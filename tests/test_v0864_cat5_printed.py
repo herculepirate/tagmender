@@ -32,9 +32,14 @@ class CAT5PrintedNumber(unittest.TestCase):
 
     def test_CAT5_a_number_printed_on_your_scans_picks_the_pressing(self):
         r = self.classify(box(), *self.cands())
-        self.assertEqual(r["best"]["cand"]["id"], "us-box", r["why"])
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "us-box"), r["why"])
         self.assertFalse(any("is on none of these pressings" in w and "probably" not in w for w in r["why"]),
                          r["why"])
+
+    def test_CAT5_a_printed_number_two_releases_carry_names_no_pressing(self):
+        # (it proves the album; the runner-up check still holds back a pick between the two)
+        r = self.classify(box(), *self.cands(), cand(id="us-box-2006", year=2006, country="US", catnos={"c4k87126"}))
+        self.assertNotEqual(r["status"], "auto", r["why"])
 
     def test_CAT5_a_number_only_typed_in_notes_proves_nothing(self):
         # the same text in typed notes, not on a scan: not your copy's print

@@ -4,6 +4,7 @@ Discogs's (a disc ID that several pressings share). The two are then disputed, a
 pick has evidence of its own. Synthetic results only."""
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -55,6 +56,22 @@ class TOC3(unittest.TestCase):
         out = mc.mb_overrules(self.mb(against=("scans say made in USA, this pressing is from GB",)), self.dg(), [])
         self.assertNotIn("MusicBrainz chosen: your disc ID is attached to its release, not to Discogs's pick",
                          out["best"].get("notes") or [])
+
+    def test_TOC3_discogs_preferred_takes_discogs_pick(self):
+        # (HF-2: the E10 shape with Sources preferring Discogs - the pressing your copy names)
+        mb, dg = self.mb(), self.dg()
+        mb["cfg"] = dg["cfg"] = {"prefer_source": "discogs"}
+        out = mc.mb_overrules(mb, dg, [])
+        self.assertEqual(out["status"], "auto")
+        self.assertEqual(out["best"]["cand"]["id"], "3137117")
+        self.assertTrue(any("as Sources prefers (HF-2)" in n for n in out["best"]["notes"]))
+
+    def test_TOC3_your_barcode_on_mb_still_wins(self):
+        mb = self.mb()
+        mb["best"]["code"], mb["best"]["cand"]["barcodes"] = "barcode", ["5099902943121"]
+        with unittest.mock.patch.object(mc, "_carries_barcode", side_effect=lambda s: s is mb["best"]):
+            out = mc.mb_overrules(mb, self.dg(), [])
+        self.assertIn("MusicBrainz chosen: your barcode is on its release, not on Discogs's pick", out["best"]["notes"])
 
     def test_TOC3_against_only(self):
         self.assertEqual(mc._against_only({"clues_against": [GB_AGAINST, "credit lacks X"]}, {}), [GB_AGAINST])

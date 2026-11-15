@@ -7339,8 +7339,12 @@ def summarize(res):
             **({"box_disc": int(c["box_disc"])} if c.get("box_disc") else {}),
             # (TRK-5: the release read one track per work, as your files are: tagged so)
             **({"whole_works": True} if c.get("whole_works") else {}),
-            "all_lengths": bool(b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
-                                and not b.get("conflict") and not b.get("missing")),
+            # (FIL-3: or the pick is Discogs's, its lengths typed off the sleeve, and MusicBrainz's
+            # entry of the same pressing written beside it agrees on every track: Soft Machine -
+            # Fifth, Sony BMG 82876872902, 5 of 8 on Discogs, 8 of 8 on MusicBrainz)
+            "all_lengths": mc.lengths_all_agree(b) or bool(
+                c["source"] == "discogs" and res.get("mb_twin") and res.get("mb_twin_lengths")
+                and b.get("tracks_ok") and not b.get("conflict") and not b.get("missing") and not b.get("lacks")),
             "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),
             # (BAR-1b: the release's tracks are the files', and at least half the lengths agree)
             # (TOC-1: your disc's TOC is this release's, its title agreeing: proof of the album)

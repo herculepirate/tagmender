@@ -2052,6 +2052,7 @@ def unofficial_settled(final, results, album, cfg, ocr_text=""):
         f"the release is an unofficial one (a bootleg); your copy proves it: {proof} (R9)"])
     out = dict(final, status="auto", best=best, why=[w for w in final.get("why") or [] if w not in (R9_HELD, R9_PENDING)])
     out.pop("mb_twin", None)
+    out.pop("mb_twin_lengths", None)
     out.pop("dg_twin", None)
     # its twin on the other database: only another entry of the bootleg (mb_twins never pairs
     # an official release with an unofficial one)
@@ -2059,7 +2060,8 @@ def unofficial_settled(final, results, album, cfg, ocr_text=""):
     if best["cand"].get("source") == "discogs" and (mb_res or {}).get("scored"):
         twins = mb_twins(mb_res, out)
         if twins:
-            out["mb_twin"] = best_twin(twins, best["cand"])["cand"]["id"]
+            chosen = best_twin(twins, best["cand"])
+            out["mb_twin"], out["mb_twin_lengths"] = chosen["cand"]["id"], lengths_all_agree(chosen)
     return out
 
 
@@ -5286,6 +5288,13 @@ def _yields_to_linked_barcode(mb_result, dg_result):
         f"another product (BAR-1)"])
 
 
+def lengths_all_agree(b) -> bool:
+    """Every track of the files is on the release and every length agrees (the exact tier's
+    "all lengths", plan._files_on_evidence)."""
+    return bool(b and b.get("tracks_ok") and b.get("dur_frac") == 1.0 and (b.get("dur_cov") or 0) >= 1.0
+                and not b.get("conflict") and not b.get("missing"))
+
+
 def combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
@@ -5331,7 +5340,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                 rest = [s for s in twins if s is not mb_best]
                 if rest:
                     chosen = best_twin(rest, dg_result["best"]["cand"])
-                    overrule = dict(overrule, mb_twin=chosen["cand"]["id"])
+                    overrule = dict(overrule, mb_twin=chosen["cand"]["id"], mb_twin_lengths=lengths_all_agree(chosen))
                     note = twin_note(rest, chosen)
                     if note and overrule.get("best"):
                         overrule["best"] = dict(overrule["best"],
@@ -5341,7 +5350,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             # the release carrying your disc ID first (Stygian Bough: the CD with the
             # rip's disc ID, not the download that shares its barcode), then the surest
             chosen = best_twin(twins, dg_result["best"]["cand"])
-            out["mb_twin"] = chosen["cand"]["id"]
+            out["mb_twin"], out["mb_twin_lengths"] = chosen["cand"]["id"], lengths_all_agree(chosen)
             note = twin_note(twins, chosen)
             if note:
                 out["best"] = dict(out["best"], notes=list(out["best"].get("notes") or []) + [note])

@@ -5200,8 +5200,20 @@ def best_twin(twins, dg):
     The Dark Side Of The Moon Immersion: your disc ID is on the GB 12fb801c, which links the
     European 3142241; the CA 96a7097a links the pick, USA & Canada 3137117 - CPT-1); then the
     release carrying your disc ID (Stygian Bough: the CD with the rip's disc ID, not the download
-    that shares its barcode), then the surest."""
-    return max(twins, key=lambda s: (not links_other_discogs(s["cand"], dg), _exact_toc(s), s["confidence"]))
+    that shares its barcode); then (CPT-2) one nothing of your copy speaks against before one it
+    does (a pressing later than your rip log, DAT-3), and one linking the pick itself before one
+    linking none (Pekka Pohjola - Flight Of The Angel: Discogs 3625724, the 2002 CD, linked by
+    MusicBrainz 1ec067b6, not the 2012 192d6570 sharing its barcode and linking none); then the
+    surest."""
+    def key(s):
+        against = s.get("clues_against") or ()
+        # (a pressing your rip log rules out, DAT-3, left out of MusicBrainz's own pick even with
+        # your disc ID on it - a disc ID is every pressing's of the master - is never written
+        # beside the Discogs pick either)
+        dated = any(str(x).startswith(RIP_DATE_AGAINST) for x in against)
+        return (not links_other_discogs(s["cand"], dg), not dated, _exact_toc(s), not against,
+                str(dg.get("id")) in linked_discogs(s["cand"]), s["confidence"])
+    return max(twins, key=key)
 
 
 def twin_note(twins, chosen):

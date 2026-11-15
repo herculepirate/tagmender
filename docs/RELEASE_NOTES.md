@@ -14,6 +14,8 @@
   ID or catalogue number): an EAC log from 2005 is never the 2012 reissue sharing the 2002
   CD's barcode. It only chooses: no album is held for the date alone, and a log dated
   before the album existed is ignored (DAT-3).
+- Beside a Discogs pick, the MusicBrainz entry that links it now comes along before one of the
+  same barcode that links none, and one your rip log rules out comes last (CPT-2).
 
 **Box sets in album-named folders**
 - A box set's folder that names its CD count and holds each disc in a folder named as its own

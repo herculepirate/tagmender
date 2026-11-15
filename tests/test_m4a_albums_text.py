@@ -65,8 +65,9 @@ def run(a, *cands, ocr=""):
     return r
 
 
+# (dated after the candidates' 2010: an earlier rip date rules them out, DAT-3)
 EAC = ("Exact Audio Copy V1.0 beta 3 from 29. August 2011\r\n\r\n"
-       "EAC extraction logfile from 2. February 2007, 19:37 for CD\r\n{header}\r\n\r\n"
+       "EAC extraction logfile from 2. February 2012, 19:37 for CD\r\n{header}\r\n\r\n"
        "Used drive  : PLEXTOR PX-716A   Adapter: 1  ID: 0\r\n\r\n"
        "TOC of the extracted CD\r\n\r\n"
        "     Track |   Start  |  Length  | Start sector | End sector \r\n"

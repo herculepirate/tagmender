@@ -104,7 +104,7 @@ class MED19BoxVinyl(Base):
         album["tocs"], album["media_hint"] = {}, ""
         files = [t["path"] for t in album["tracks"]]
         best = {"source": "mb", "id": MBID, "mb_id": MBID, "discogs_id": "1190", "confidence": 100.0}
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(RuntimeError, "tracks could not be read"):
             e._identified({"status": "auto", "best": best, "why": [], "margin": None}, album, files,
                           dict(source_dir=str(d), files=files, provider_errors={}))
 

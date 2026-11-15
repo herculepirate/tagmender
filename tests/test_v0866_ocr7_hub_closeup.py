@@ -2,6 +2,7 @@
 OCR slip in its letters (OCR-8). Synthetic data only."""
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -64,16 +65,37 @@ def read_rings(im):
         shutil.rmtree(d)
 
 
+def _can_read():
+    """A real tesseract with English, and the font the close-ups are drawn in."""
+    if not shutil.which("tesseract"):
+        return False
+    try:
+        from PIL import ImageFont
+        ImageFont.truetype("DejaVuSans.ttf", 20)
+        langs = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True,
+                               timeout=30).stdout.split()
+    except Exception:
+        return False
+    return "eng" in langs
+
+
+CAN_READ = _can_read()
+needs_tesseract = unittest.skipUnless(CAN_READ, "tesseract with eng, or the DejaVu Sans font, missing")
+
+
 class OCR7HubCloseUp(unittest.TestCase):
+    @needs_tesseract
     def test_OCR7_mirrored_maker_line_round_an_off_centre_hub_is_read(self):
         text = read_rings(hub_closeup("MASTERED BY TESTLAB", mirrored=True))
         self.assertIn("MASTERED", text.upper(), text)
         self.assertIn("TESTLAB", text.upper().replace(" ", ""), text)
 
+    @needs_tesseract
     def test_OCR7_light_print_on_a_dark_ring_beside_bright_blocks(self):
         text = read_rings(hub_closeup("U.S. OPTICAL DISC", light=True, boxes=True))
         self.assertIn("OPTICAL", text.upper(), text)
 
+    @needs_tesseract
     def test_OCR7_a_small_close_up_is_read_too(self):
         # (under the 800 px the whole-ring strips need: Heatwave's matrix photo is 555 px)
         im = hub_closeup("RUNE 9 CD 02", size=700).resize((520, 520))
@@ -105,6 +127,7 @@ class OCR7HubCloseUp(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertEqual(calls, [])
 
+    @needs_tesseract
     def test_OCR7_each_run_is_kept_the_way_it_reads_surest(self):
         from PIL import Image, ImageDraw
         im = Image.new("L", (520, 70), 255)

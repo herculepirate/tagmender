@@ -1,5 +1,36 @@
 # Release notes
 
+## 0.8.64
+
+**Move an album into your library when you ask (MOV-5)**
+- An album TagMender is sure of, but whose score is below the profile's floor for moving
+  files, is still tagged where it is. It no longer reads "Up to date": its Changes column says
+  "not moved (score 92 < 95)".
+- Album > Move into the Library Layout Anyway (also on the row's menu) looks that album up
+  again and plans its move, so you can apply it. On the command line, plan and run take
+  --file-below-score. Watched folders and unattended profiles never move such an album.
+
+**Filed on your own catalogue number (FIL-3)**
+- A Discogs pick whose track lengths were typed off the sleeve is filed on your folder's
+  catalogue number when MusicBrainz's entry of the same pressing agrees on every length
+  (Soft Machine - Fifth, Sony BMG 82876872902).
+
+**The right pressing, more often**
+- Matrix codes printed round the hub of a close-up disc photo are read, and two Discogs
+  entries pressed at different plants are no longer taken for one entry listed twice
+  (EVI-8, OCR-6).
+- A disc ID found only by a near match in the CUETools database is no longer counted as
+  proof of a Discogs release; a Discogs release linked by the MusicBrainz release carrying
+  your exact disc ID is (TOC-2). A barcode another tagger wrote no longer outweighs your
+  exact disc ID or your folder's catalogue number (BAR-5).
+- Folder catalogue numbers such as "RHEADCDX 1" are read (CAT-3).
+
+**Boxes**
+- A Discogs box whose CDs are numbered "1-01" to "4-14" beside a headed DVD counts its discs
+  right (MED-18).
+- A CD box with its own LP, ripped as its CDs, is tagged from its CDs instead of being left
+  unresolved (MED-19).
+
 ## 0.8.63
 
 **A box ripped as its CDs counts its CDs (MED-17)**

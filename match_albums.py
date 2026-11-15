@@ -4931,6 +4931,26 @@ def discogs_discs(rel, dm):
     discs = dm.parse_discs(rel)
     count = dm.release_disc_count(rel)
     media = _disc_media_total(rel)
+    # MED-18: discs numbered by position prefixes ("1-01" .. "4-14") under no heading of their
+    # own count one each, beside a disc listed without them (Judas Priest - Metalogy: 4 CDs as
+    # one run of "1-01" .. "4-14", then a "Judas Priest Live" heading over "DVD-1" ..: the
+    # headings alone made it 2 discs)
+    # Only a video disc is counted so (its tracks are no disc's of a CD rip, MED-16); an audio
+    # disc under a heading would be counted but its tracks left on disc 1. Vinyl and tape keep
+    # the plugin's rule.
+    sides = {mc.media_kind(f.get("name")) for f in rel.get("formats") or [] if isinstance(f, dict)}
+    prefixed = {int(m.group(1)) for d in discs for t in d["tracks"]
+                for m in [_POS_DISC.match(str(t.get("position") or ""))] if m}
+    if len(prefixed) > 1 and not sides & {"vinyl", "cassette"}:
+        bare = [d for d in discs if d["tracks"] and not any(
+            _POS_DISC.match(str(t.get("position") or "")) for t in d["tracks"])]
+        video = [d for d in bare if all(_video_medium(t.get("position"), rel) for t in d["tracks"])]
+        unprefixed = len(video) if len(video) == len(bare) else None
+        by_position = len(prefixed) + (unprefixed or 0)
+        # (only where the formats declare that many discs: a work's sub-tracks "1.1", "2.1" on
+        # one CD are no discs; and not at all beside an audio disc listed without prefixes)
+        if unprefixed is not None and count < by_position <= media:
+            count = by_position
     kinds = {mc.media_kind(f.get("name")) for f in rel.get("formats") or [] if isinstance(f, dict)}
     if media < 2 or len(discs) <= media or kinds & {"vinyl", "cassette"}:
         return discs, count
@@ -5053,6 +5073,10 @@ def discogs_candidate(rel, dm, whole_works=False):
         # matrix / runout, SID and label codes: compared with what the disc scans read
         "matrix": [(str(i.get("type")), str(i["value"])) for i in rel.get("identifiers", [])
                    if str(i.get("type") or "").casefold() in mc.MATRIX_KINDS and i.get("value")],
+        # (EVI-8: the matrices Discogs says are on a video disc: "DVD Layer 1", "Blu-ray")
+        "matrix_video": [str(i["value"]) for i in rel.get("identifiers", [])
+                         if str(i.get("type") or "").casefold() in mc.MATRIX_KINDS and i.get("value")
+                         and re.search(r"\b(?:dvd|blu-?ray|bd|vhs|video)\b", str(i.get("description") or ""), re.I)],
         # CLB-1: a club edition's own mark printed on its sleeve ("CRC" on the back cover: Columbia
         # House), from its identifiers - its absence from a legibly read back is evidence
         "club_marks": discogs_club_marks(rel),
@@ -5568,7 +5592,7 @@ BLANK_READING = " "
 
 def _read_ahead_kinds():
     """The kinds _ScanReads reads ahead: only their "" can be a failure kept as a blank page."""
-    return {page_kind("text"), page_kind("spines"), "barcode-digits", "disc-rings-2"}
+    return {page_kind("text"), page_kind("spines"), "barcode-digits", "disc-rings-3"}
 
 
 def _cached_reading(raw, kind):
@@ -5648,7 +5672,7 @@ class _ScanReads:
 
     Its own read-only connection to the cache (so a scan read before is not read again)."""
 
-    BUDGETS = {"barcode-digits": 120.0, "disc-rings-2": 60.0}
+    BUDGETS = {"barcode-digits": 120.0, "disc-rings-3": 60.0}
 
     @classmethod
     def start(cls, db, images, want_digits):
@@ -5675,11 +5699,11 @@ class _ScanReads:
         text, spines = page_kind("text"), page_kind("spines")
         reads = {text: lambda p: ocr_text([p]), spines: lambda p: ocr_spines([p]),
                  "barcode-digits": lambda p: ocr_barcode_digits([p]),
-                 "disc-rings-2": lambda p: ocr_disc_rings([p])}
+                 "disc-rings-3": lambda p: ocr_disc_rings([p])}
         # what _process reads for sure first (the first three scans' page text, which is all
         # it reads when the decoded barcode settles the album, every disc), the rest after
         order = [(text, p) for p in images[:3]] + [(spines, p) for p in images[:3]]
-        order += [("disc-rings-2", p) for p in images[:40]]
+        order += [("disc-rings-3", p) for p in images[:40]]
         if want_digits:
             order += [("barcode-digits", p) for p in images[:15]]
         order += [(text, p) for p in images[3:]] + [(spines, p) for p in images[3:]]
@@ -6595,7 +6619,12 @@ def _hub_strips(g, cx, cy, r):
     out = []
     # (a band a little further out too: a printed hub line on a wide clamping ring sits there,
     # and the inner bands cut through it - Pallas - wearewhoweare: "398478 @1 MTS5503")
-    for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True), (0.33, 0.42, False)):
+    # OCR-6: and a band well out from the hub, for a close-up of the hub that fills the scan:
+    # the disc found is then the frame, and the matrix runs at about 0.7-0.86 of it, between
+    # the hub bands and the rim (Opeth - Blackwater Park, Legacy Edition: "A0102309767-0102
+    # 13 A00", Sony DADC, read nowhere else)
+    for f0, f1, flip in ((0.28, 0.40, False), (0.30, 0.38, False), (0.28, 0.40, True), (0.33, 0.42, False),
+                         (0.70, 0.86, False)):
         if flip:                                   # text running the other way round
             strip = unwrap_ring(g.transpose(Image.FLIP_LEFT_RIGHT), g.width - cx, cy, r * f0, r * f1)
             strip = strip.rotate(180) if strip is not None else None
@@ -7904,7 +7933,7 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
             stopped.append("its time budget used")
         if stage and state["rings"]:
             # the disc rings on their own as well: a matrix that clearly differs is told from them only
-            rings = _joined(each_scan(db, "disc-rings-2", stage[:40], lambda p: ocr_disc_rings([p]), log,
+            rings = _joined(each_scan(db, "disc-rings-3", stage[:40], lambda p: ocr_disc_rings([p]), log,
                                       budget_s=60.0))
             if rings:
                 album["ring_text"] = _joined([album.get("ring_text") or "", rings])
@@ -8392,7 +8421,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 text = text + "\n" + digits
                 album["printed_text"] += "\n" + digits
         # every disc read, also when the barcode settled it: a matrix that differs is told only here
-        rings = _joined(each_scan(db, "disc-rings-2", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
+        rings = _joined(each_scan(db, "disc-rings-3", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
                                   budget_s=60.0, ahead=scans_ahead))
         if scans_ahead is not None:
             scans_ahead.close()                        # what was read ahead and not needed: dropped

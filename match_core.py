@@ -3063,10 +3063,52 @@ def packaging_variant(cand):
     return m.group(0) if m else ""
 
 
+def _matrix_runs(values, own):
+    """The runs of 5 digits or more in matrix VALUES, read with spaces, dashes and slashes
+    dropped ("A 0102309767-0102" and "A0102309767-0102" alike), after the catalogue numbers and
+    barcodes OWN (digits only) are taken out of them."""
+    out = set()
+    for v in values:
+        flat = re.sub(r"[^0-9a-z]", "", fold(str(v)))
+        for o in own:
+            flat = flat.replace(o, " ")
+        out |= {r for r in re.findall(r"\d{5,}", flat)}
+    return out
+
+
+def _matrices_disjoint(tied):
+    """EVI-8: True when every entry lists a matrix for its audio discs and none of them shares
+    a numbered part with another's: their runs of 5 digits or more (spacing and dashes ignored;
+    the catalogue number and barcode, which every pressing of the product carries, left out;
+    a video disc's matrices not compared, an entry may list only those) neither equal nor hold
+    one another. Same label, number and barcode, but pressed elsewhere: two pressings (Opeth -
+    Blackwater Park, Legacy Edition: Discogs 2261489, Arvato "54044125/88697655822-1", and
+    10001697, Sony DADC "A0102309767-0102")."""
+    if len(tied) < 2:
+        return False
+    sets = []
+    for s in tied:
+        c = s["cand"]
+        own = {re.sub(r"\D", "", str(x)) for x in list(c.get("catnos") or ()) + list(c.get("barcodes") or ())}
+        own = sorted((o for o in own if len(o) >= 5), key=len, reverse=True)
+        video = set(c.get("matrix_video") or ())
+        runs = _matrix_runs([v for kind, v in cand_matrices(c) if kind == "matrix" and v not in video], own)
+        if not runs:
+            return False
+        sets.append(runs)
+
+    def share(a, b):
+        return any(x in y or y in x for x in a for y in b)
+    return all(not share(a, b) for i, a in enumerate(sets) for b in sets[i + 1:])
+
+
 def same_pressing_listed_twice(tied):
     """Two database entries for ONE pressing (same label, catalogue number,
     barcode, country and format; often one entered with only a year): either is
     right, so take the one with the fuller data."""
+    if _matrices_disjoint(tied):
+        return None                 # EVI-8: pressed at other plants: two pressings, not one listed twice
+
     def key(s):
         c = s["cand"]
         return (tuple(sorted(c.get("catnos") or ())), country_code(c.get("country")),

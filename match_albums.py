@@ -3086,12 +3086,14 @@ def toc_releases(http, album):
     - the CUETools database (CTDB), which links rips to MusicBrainz AND Discogs
       releases, including pressings MusicBrainz has no disc ID for.
 
-    Sets album["toc_discogs"] (Discogs ids from CTDB), album["discids"]
+    Sets album["toc_discogs"] (Discogs ids from CTDB), album["toc_discogs_fuzzy"] ({id:
+    relevance} of those CTDB matched only fuzzily, TOC-2: never proof), album["discids"]
     ([(disc ID, toc, attached in MusicBrainz? None when the lookup failed)]) and album["exact_toc_releases"] (the
     MusicBrainz releases a disc ID of these files is attached to), album["exact_toc_media"]
     ({release: {medium positions carrying that disc ID}}) and, for a lookup that failed,
     album["clue_failures"] ({what: error}); returns MusicBrainz ids."""
     found, discogs, discids, exact_found, media, on = set(), set(), [], set(), {}, {}
+    fuzzy = {}            # TOC-2: {Discogs id: best relevance} of CTDB's fuzzy entries
     for toc in (album.get("tocs") or {}).values():
         did = mb_discid(toc)
         failed = False
@@ -3120,12 +3122,67 @@ def toc_releases(http, album):
                     found.add(attrs["id"])
                 elif attrs.get("source") == "discogs" and attrs.get("id", "").isdigit():
                     discogs.add(attrs["id"])
+                    # TOC-2: an entry with a "relevance" is CTDB's fuzzy match ("a CD of about
+                    # these lengths", any score: even 100); one without it is the disc's own
+                    # (exact on any disc: None, kept)
+                    rel, did_ = attrs.get("relevance"), attrs["id"]
+                    if rel is None:
+                        fuzzy[did_] = None
+                    elif fuzzy.get(did_, -1) is not None:
+                        fuzzy[did_] = max(fuzzy.get(did_, -1), int(rel) if rel.isdigit() else 0)
     album["toc_discogs"] = discogs
+    album["toc_discogs_fuzzy"] = {k: v for k, v in fuzzy.items() if v is not None}
     album["discids"] = discids
     album["exact_toc_releases"] = exact_found
     album["exact_toc_media"] = media
     album["exact_toc_on"] = on
     return found
+
+
+def disc_id_discogs(album, mb_res):
+    """TOC-2: the Discogs releases linked by a MusicBrainz release your exact disc ID is attached
+    to (Radiohead - Pablo Honey box: MusicBrainz 8bc2ad8e carries both disc IDs and links
+    Discogs 1705354). They inherit that proof: added to album["toc_discogs"] and taken out of
+    album["toc_discogs_fuzzy"], so file_clues gives them the disc ID clue. Never a release
+    linked only by a fuzzy or CTDB match. Returns their ids."""
+    links = set()
+    for s in (mb_res or {}).get("scored") or ():
+        if mc.exact_disc_id(album, s["cand"]):
+            links |= mc.linked_discogs(s["cand"])
+    links = {x for x in links if x.isdigit()}
+    if links:
+        album["toc_discogs"] = set(album.get("toc_discogs") or ()) | links
+        album["toc_discogs_fuzzy"] = {k: v for k, v in (album.get("toc_discogs_fuzzy") or {}).items()
+                                      if k not in links}
+    return links
+
+
+def with_discogs_ids(http, dm, cands, ids, limit=4):
+    """cands with the Discogs releases of ids (TOC-2: disc_id_discogs) that are not among them
+    fetched and added (at most limit). A fetch that fails leaves that one out."""
+    have = {str(c.get("id")) for c in cands}
+    out = list(cands)
+    for rid in sorted((x for x in ids if x not in have), key=int)[:limit]:
+        try:
+            det = http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
+        except _CLUE_ERRORS:
+            continue
+        if det:
+            out.append(discogs_candidate(det, dm))
+    return out
+
+
+def toc_discogs_order(album):
+    """The Discogs releases the CUETools database links to your disc, and your tags link to,
+    in the order they are fetched (TOC-2): CTDB's exact entries, then the tags' links, then
+    CTDB's fuzzy ones by relevance, best first (each group by id: the same every run)."""
+    fuzzy = album.get("toc_discogs_fuzzy") or {}
+    toc = set(album.get("toc_discogs") or ())
+    exact = {x for x in toc if x not in fuzzy}
+    tags = set(album.get("tag_discogs_links") or ()) - exact
+    num = lambda x: (int(x) if str(x).isdigit() else 0, str(x))  # noqa: E731
+    return (sorted(exact, key=num) + sorted(tags, key=num)
+            + sorted(toc - exact - tags, key=lambda x: (-fuzzy[x], num(x))))
 
 
 def _discid_url(did, toc):
@@ -5127,7 +5184,7 @@ def discogs_search(http, album, cfg, dm):
     # Discogs releases the CUETools database links to your disc, or your tags link to; then
     # the release the files were tagged with before (scored like the others, not evidence)
     have = {str(c["id"]) for c in out}
-    linked = sorted(set(album.get("toc_discogs") or ()) | set(album.get("tag_discogs_links") or ()))[:4]
+    linked = toc_discogs_order(album)[:4]
     tagged = sorted(set(album.get("tag_release_discogs") or ()) - set(linked))[:4]
     for rid in linked + tagged:
         if rid not in have:
@@ -8255,9 +8312,13 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # only there (Kreator Endorama, Art Music AMG 099), and its catalogue number then
     # outranks a MusicBrainz release that contradicts the folder name.
     if use_discogs:
+        # TOC-2: the Discogs releases a MusicBrainz release carrying your exact disc ID links
+        # are that disc's own (scored with it, fetched when the search did not find them; marked
+        # once the search is done: its worker reads album["toc_discogs"])
+        finder = dg_ahead.result if dg_ahead is not None else lambda: discogs_search(http, album, cfg, dm)
         try:
-            dg_res = run_source("discogs", dg_ahead.result if dg_ahead is not None
-                                else lambda: discogs_search(http, album, cfg, dm), album, cfg)
+            dg_res = run_source("discogs", lambda: with_discogs_ids(
+                http, dm, finder(), disc_id_discogs(album, mb_res)), album, cfg)
         except AuthError:
             raise
         except Exception as exc:     # keep what MusicBrainz found

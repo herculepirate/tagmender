@@ -266,6 +266,13 @@ def catno_hints(text, variants=False):
                       and prev.strip(".").casefold() not in _NUMBER_WORDS
                       and not re.fullmatch(r"\d{3,5}", nxt)):
                     found.append(f"{prev} {w}")
+                # CAT-3: a label code in capitals (4-12 letters, three consonants in a row, as
+                # a code rather than a word) and one digit, the whole of its bracket part
+                # ("[2009.03.23, RHEADCDX 1]"); never "CD 1", "Vol 1", "Disc 1", "Part 2"
+                elif (i == 1 and len(words) == 2 and len(segment.split()) == 2
+                      and re.fullmatch(r"[1-9]", w) and re.fullmatch(r"[A-Z]{4,12}", prev)
+                      and re.search(r"[^AEIOUY]{3}", prev) and prev.casefold() not in _NUMBER_WORDS):
+                    found.append(f"{prev} {w}")
     out = []
     for f in found + (extra if variants else []):
         if f not in out:
@@ -2175,8 +2182,12 @@ def file_clues(album, cand, clues, against, cfg=None):
         # releases nobody attached a disc ID to (often Japanese and other regional pressings)
         # can never get it, so it is told (weight 1) but never proof, and never tells
         # pressings apart. A CTDB link to a Discogs release keeps the full clue only when
-        # MusicBrainz has your exact disc ID on some release (the disc is known for sure).
-        if exact or (cand.get("source") == "discogs" and album.get("exact_toc_releases")):
+        # MusicBrainz has your exact disc ID on some release (the disc is known for sure),
+        # and CTDB's link is exact itself (TOC-2: one with a "relevance", toc_discogs_fuzzy,
+        # is a fuzzy match - Radiohead's US box beside the UK one carrying the disc IDs -
+        # unless a release carrying your exact disc ID links it: match_albums.disc_id_discogs).
+        if exact or (cand.get("source") == "discogs" and album.get("exact_toc_releases")
+                     and str(cand.get("id")) not in (album.get("toc_discogs_fuzzy") or ())):
             clues["disc TOC"] = EXACT_TOC_CLUE if exact else TOC_CLUE
         else:
             clues["disc TOC (fuzzy)"] = FUZZY_TOC_CLUE
@@ -3553,6 +3564,16 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                     continue
                 code = "barcode (OCR)"
                 break
+    # BAR-5, TAG-3: a barcode only another tagger wrote is its guess at the release. On a release
+    # carrying your folder's catalogue number, or your exact disc ID, it differs without making
+    # it another product (Radiohead - Pablo Honey box: the US box's barcode in the tags, the
+    # folder's RHEADCDX 1 and both disc IDs on the UK one)
+    if conflict and tagger_barcode(album, a_codes) and (
+            code == "catalogue number (folder name)" or exact_disc_id(album, cand)):
+        conflict = False
+        avail -= cfg["w_code"]
+        notes[notes.index("barcode differs")] = ("barcode in the tags another tagger wrote differs "
+                                                 "(not proof of the pressing)")
     if code:
         pts += cfg["w_code"]
         avail += cfg["w_code"]
@@ -4360,7 +4381,8 @@ def classify(scored, cfg):
                 {k for x in unproven for k in x["cand"].get("formats") or ()})) + ", so it is taken for a CD"]
 
     why = [best["media_why"]] if best.get("media_why") else []
-    if tags_against:
+    # (not when your copy itself proves the pick: its exact disc ID says which is right)
+    if tags_against and not proven_by_your_copy(best):
         why.append(f"your files' tags (written by another tagger) name {', '.join(tags_against[:2])}; "
                    "the folder name rules that out and nothing else of your copy says which is right")
     # The album is PROVEN when its disc ID, barcode, or a catalogue number from

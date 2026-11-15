@@ -370,6 +370,76 @@ def numbered_box(box: Path, found: dict, metas: dict) -> bool:
     return bool(got) and got[1] == list(range(1, got[0] + 1))
 
 
+# DSC-6: the words a twofer's folder joins its albums' titles with ("The Stranger & An Innocent
+# Man", "Album One / Album Two", "One + Two", "One and Two")
+_TITLE_JOIN = re.compile(r"\s+(?:&|\+|/|and|und|et|y)\s+|\s*/\s*", re.I)
+# a year or bracketed part around the title in a folder's name: "1992 - ", " (2CD)", " [Columbia]"
+_NAME_EXTRAS = re.compile(r"^\s*(?:19|20)\d\d\s*[-.–]\s*|\s*[\(\[\{][^\)\]\}]*[\)\]\}]")
+
+
+def _title_fold(text) -> str:
+    return re.sub(r"[\W_]+", " ", str(text or "").casefold()).strip()
+
+
+def numbered_disc_set(folder: Path, files, keys) -> bool:
+    """DSC-7: a folder whose tracks all lie in disc folders of its own numbered 1 to N ("Disc 1
+    1974 - Streetlife Serenade", "Disc 02", "Disc 3 - 52nd Street (Original Album Classics #2)"),
+    each number once, N two or more, by one artist, is one set - its discs - whatever album each
+    disc is tagged as (an "Original Album Classics" box: each disc its own album's title). A
+    folder with tracks of its own, a gap or a repeat in the numbers, two artists, or a folder
+    not named as a disc stays as before."""
+    dirs = {f.parent for f in files}
+    if len(dirs) < 2 or any(d.parent != folder or not is_disc_dir(d) for d in dirs):
+        return False
+    numbers = []
+    for d in dirs:
+        m = _LEAD_NUMBER.match(d.name)
+        if not m:
+            return False
+        numbers.append(int(m[1]))
+    if sorted(numbers) != list(range(1, len(dirs) + 1)):
+        return False
+    artists = {k[1] for k in keys.values() if k[0] == "tags"}
+    return all(k[0] == "tags" for k in keys.values()) and len(artists) == 1 and all(artists)
+
+
+def titled_box(box: Path, found: dict, metas: dict) -> bool:
+    """DSC-6: a folder holding two or more albums' folders that it is named after, joined ("1992 -
+    The Stranger & An Innocent Man" holding "1977 - The Stranger" and "1983 - An Innocent Man"),
+    is one album - the set they were issued in (a twofer, a "2 albums on 2 CDs" box) - when every
+    sign agrees: the folder has no tracks of its own; each of its audio folders is a sub-folder
+    of it; each holds one album by its tags, all by one album artist, each a different title;
+    and its name, its year and brackets aside, is exactly those titles joined by "&", "+", "/" or
+    "and" (each once, in any order). Its discs are numbered as the release found lists them (the
+    folders' order is no disc order: the discs of a twofer may be packed the other way round).
+    An artist's folder ("Billy Joel") or a folder named otherwise stays apart, as before."""
+    if box in found:
+        return False
+    dirs = [d for d in found if box in d.parents]
+    if len(dirs) < 2 or any(d.parent != box for d in dirs):
+        return False
+    files = [f for d in dirs for f in found[d]]
+    keys = album_keys(files, box, metas)
+    if any(k[0] != "tags" or not k[1] for k in keys.values()) or len({k[1] for k in keys.values()}) != 1:
+        return False                                    # (untagged, or two artists' albums)
+    titles = []
+    for d in dirs:
+        own = {keys[f] for f in found[d]}
+        if len(own) != 1:
+            return False                                # (a folder of two albums)
+        titles.append(_title_fold(next(iter(own))[2]))
+    if len(set(titles)) != len(titles) or not all(titles):
+        return False
+    name = box.name
+    while True:                                         # ("1992 - Title (2CD) [Label]")
+        cut = _NAME_EXTRAS.sub("", name, count=1)
+        if cut == name:
+            break
+        name = cut
+    parts = [_title_fold(p) for p in _TITLE_JOIN.split(name) if _title_fold(p)]
+    return sorted(parts) == sorted(titles)
+
+
 # DSC-5: the number a box's folder begins with, the order its discs are in: "01. (1980) - ...",
 # "CD3. 1992. ...", "CD02-03 1973 ..." (2), "CD-1 (KZ 2)", "Part 1"
 _LEAD_NUMBER = re.compile(r"^(?:(?:cd|disc|disk|part|pt\.?)\s*[-_.]?\s*)?(\d{1,3})(?!\d)", re.I)
@@ -1014,8 +1084,13 @@ class Engine:
         whole_boxes = set()
         near = {a for d in found for a in (d.parent, d.parent.parent)
                 if (a == path or path in a.parents) and box_cd_count(a.name)}
-        for box in sorted(near, key=lambda a: len(a.parts)):
-            if any(b in box.parents for b in whole_boxes) or not numbered_box(box, found, metas):
+        # DSC-6: a twofer's folder named after the albums it holds, joined ("The Stranger & An
+        # Innocent Man"): the set they were issued in, numbered as the release found lists it
+        named = {d.parent for d in found if (d.parent == path or path in d.parent.parents)
+                 and d.parent != d and titled_box(d.parent, found, metas)}
+        for box in sorted(near | named, key=lambda a: len(a.parts)):
+            if any(b in box.parents for b in whole_boxes) or not (
+                    numbered_box(box, found, metas) or box in named):
                 continue
             if self._box_part_left_out(box, [d for d in found if box in d.parents], path):
                 continue                                 # (a disc you excluded or ignored: no box)
@@ -1054,6 +1129,8 @@ class Engine:
                 by_album = {tagged[0]: files}            # versions of one disc tagged apart ("[HD]")
             elif len(by_album) > 1 and (folder in whole_boxes or _one_box(folder, files, keys, metas)):
                 by_album = {tagged[0]: files}                                  # DSC-2, DSC-5
+            elif len(by_album) > 1 and spans_discs and numbered_disc_set(folder, files, keys):
+                by_album = {tagged[0]: files}                                  # DSC-7
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
                 continue

@@ -2002,6 +2002,13 @@ class Engine:
             # tracks missing from the folder: each file takes its own track of the release
             # (its number, the release's totals), the others are left out
             full = best.get("release_tracks") or 0
+            if tags_mb and rel and len(tags_mb) == full:
+                # MED-20: the release's download at its end, none of whose tracks are yours, is no
+                # disc of your copy: not counted
+                digital = _unheld_digital_media(rel, slots)
+                if digital:
+                    again = mb_tags.release_tags(rel, ps, uncounted=digital)
+                    tags_mb = again if len(again) == full else tags_mb
             tags_mb = [tags_mb[k] for k in slots] if tags_mb and len(tags_mb) == full else None
             if dparts and dparts[1] is not None:
                 # IDM-1: Discogs listing just your files' tracks where they are the release's first
@@ -5493,6 +5500,21 @@ def with_track_credits(album: dict, track) -> dict:
     discogs_parts) in them - the fields that track is tagged with."""
     extra = (track or {}).get("~credits") if isinstance(track, dict) else None
     return {**album, **extra} if extra else album
+
+
+def _unheld_digital_media(rel, slots):
+    """MED-20: positions of a MusicBrainz release's download media ("Digital Media") that come
+    after its last physical medium, when the release has physical media and none of the
+    tracks in SLOTS (the release's entries your files are) is on them; else an empty set."""
+    media = rel.get("media") or []
+    kinds = {int(m.get("position") or d): mc.media_kind(m.get("format")) for d, m in enumerate(media, 1)}
+    physical = [p for p, k in kinds.items() if k != "digital"]
+    digital = {p for p, k in kinds.items() if k == "digital"}
+    if not physical or not digital or any(p < max(physical) for p in digital):
+        return set()
+    keys = mb_tags.track_keys(rel)
+    held = {keys[k][0] for k in slots if k < len(keys)}
+    return set() if held & digital else digital
 
 
 def _without_box_vinyl(rel, ps):

@@ -764,7 +764,35 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         Drives Away the Wolves: its .auCDtect report was left behind)."""
         return everything and not tracks_only and not foreign and not (artist_folder and d == src_dir) and \
             shared_ok(d) and (d in ours or d != src_dir)
-    out = []
+    # DSC-5 / DSC-3: a folder holding discs of the album in disc folders and no music of its own
+    # ("Box/02. (1986) - Beta 2CD/" with "CD-1/", "CD-2/"; "Box/CD02-03 .../" with "Part 1/", ...)
+    # whose discs land in folders of their own ("Disc 02/", "Disc 03/"): its own files (its cover,
+    # its log, its Scans/) go with its first disc, never into a folder of its name with no music
+    lands = {Path(v).parent for v in moved.values()}
+
+    def _nat(x):
+        return [int(t) if t.isdigit() else t.casefold() for t in re.split(r"(\d+)", str(x))]
+
+    def disc_holder(d):
+        """(the disc-holding folder d lies in, its first disc's destination), or None."""
+        h = d
+        while h != src_dir and src_dir in h.parents:
+            if h in dmap:
+                return None                                 # (inside a disc's own folder: with it)
+            if h in music_below:
+                below = sorted((q for q in dmap if h in q.parents), key=lambda q: _nat(q.relative_to(h).as_posix()))
+                if not below or any(f_ == h or h in f_.parents for f_ in foreign):
+                    return None
+                anchor_ = h
+                while anchor_ not in dmap:
+                    anchor_ = anchor_.parent
+                plain = dmap[anchor_].joinpath(*[fnm.safe_component(x, compat_) for x in h.relative_to(anchor_).parts])
+                if any(q == plain or plain in q.parents for q in lands):
+                    return None                             # (its discs land inside it: as it is)
+                return h, dmap[below[0]]
+            h = h.parent
+        return None
+    out, moved_up = [], {}
     for d, here in tree:
         if artist_folder and d != src_dir and d.relative_to(src_dir).parts[0].lower() in _artwork.ARTIST_ART_DIRS:
             continue                                        # the artist's extrafanart/ ...
@@ -773,6 +801,9 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             anchor = anchor.parent
         compat = (profile.get("filenames") or {}).get("compat", "windows")
         dest_dir = dmap[anchor].joinpath(*[fnm.safe_component(x, compat) for x in d.relative_to(anchor).parts])
+        holder = disc_holder(d) if d not in dmap else None
+        if holder:
+            dest_dir = holder[1].joinpath(*[fnm.safe_component(x, compat) for x in d.relative_to(holder[0]).parts])
         for p in sorted(here):
             if p.is_symlink() or not p.is_file() or p.suffix.lower() in AUDIO_EXT:
                 continue
@@ -788,6 +819,18 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             if d == src_dir and p in keep:
                 continue                                    # the artist folder's own photo and art
             out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
+            if holder and not track:
+                moved_up[len(out) - 1] = holder
+    if moved_up:
+        # (a disc's own file of the same name - its folder.jpg, its rip.log - keeps its place: the
+        # holder's goes into a folder of the holder's name inside that disc's folder)
+        taken = {dst for i, (_p, dst) in enumerate(out) if i not in moved_up}
+        for i, (h, first) in sorted(moved_up.items()):
+            p_, dst = out[i]
+            if dst in taken:
+                out[i] = (p_, first.joinpath(*[fnm.safe_component(x, compat_)
+                                               for x in p_.parent.relative_to(h.parent).parts]) / p_.name)
+            taken.add(out[i][1])
     return out, ""
 
 

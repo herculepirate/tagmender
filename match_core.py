@@ -5295,7 +5295,9 @@ def _proof_left_unsure(mb_result, dg_result, prefer=None):
 def _folder_fit_disputes(mb_result, dg_result):
     """TOC-2: MusicBrainz is sure of a pick your folder name contradicts ("folder name says JP")
     and Discogs's pick, held back, fits the folder (its country or catalogue number) with nothing
-    of the folder against it: the two contradict each other, and _disputed decides - Discogs's
+    of the folder against it, and a CTDB link to it that TOC-2 made fuzzy ("disc TOC (fuzzy)"),
+    while MusicBrainz's pick has neither your barcode nor your own number that Discogs's lacks:
+    the two contradict each other, and _disputed decides - Discogs's
     pressing may be one MusicBrainz lacks, sharing the disc of the one that has your disc ID
     (the disc ID proves the album, not the pressing). Never when the two are one pressing.
     Returns the review, or None."""
@@ -5306,8 +5308,22 @@ def _folder_fit_disputes(mb_result, dg_result):
     if not said or dg_best.get("media_why") or not dg_best.get("tracks_ok") or dg_best.get("conflict") \
             or any(x.startswith("folder name says") for x in dg_best.get("clues_against") or ()):
         return None
+    # only where TOC-2 changed things: Discogs's pick has a CTDB link 0.8.63 took for your disc ID
+    # ("disc TOC (fuzzy)" now); a held pick without one leaves a sure MusicBrainz pick as it was
+    if "disc TOC (fuzzy)" not in (dg_best.get("clues") or {}):
+        return None
     country = str((dg_best.get("clues") or {}).get("country") or "")
     if not ("folder name" in country or dg_best.get("folder_catno_agrees")):
+        return None
+    # nor when MusicBrainz's pick carries your copy's barcode or your own catalogue number and
+    # Discogs's does not: that is proof of MusicBrainz's pressing, the folder's country is not
+    def number(x):
+        return bool(x.get("folder_catno_agrees") or x.get("own_number") or x.get("catno_on_copy")
+                    or x.get("code") in ("catalogue number", "catalogue number (folder name)")
+                    or (x.get("own_catnos") and catnos_agree(x["own_catnos"], x["cand"].get("catnos") or ())))
+    if (_carries_barcode(mb_best) or barcode_proves(mb_best)) and not barcode_proves(dg_best):
+        return None
+    if number(mb_best) and not number(dg_best):
         return None
     if same_pressing(mb_best["cand"], dg_best["cand"]) or any(s is mb_best for s in mb_twins(mb_result, dg_result)):
         return None

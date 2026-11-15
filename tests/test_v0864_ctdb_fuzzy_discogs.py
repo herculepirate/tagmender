@@ -339,6 +339,46 @@ class Review_JapanesePressingAgainstASureMusicBrainzPick(unittest.TestCase):
         self.assertEqual((out["status"], out["best"]["cand"]["id"]), ("auto", "mb-eu"), out.get("why"))
 
 
+class Review_FolderFitDisputeIsNarrow(unittest.TestCase):
+    """rv_scen5 / rv_scen6: the folder-fit dispute (TOC-2) fires only for a Discogs pick with a
+    CTDB near-match link, and never against a MusicBrainz pick your barcode or your own number
+    proves. Each case is sure on MusicBrainz's EU entry, as on 0.8.63."""
+    F = "Northern Lanterns - 2009 - Copper Fields [Japan]"
+    JP_OFF = [{"disc": 1, "title": f"T{i}", "secs": s + (6 if i < 3 else 0)} for i, s in enumerate(LENS)]
+
+    def combined(self, ctdb, dg_kinds=("lengths off", "JP tie"), folder=None, **extra):
+        out = []
+        kw = dict(toc_discogs={"3001", "3003"}, toc_discogs_fuzzy={"3001": 100, "3003": 100}) if ctdb else {}
+        kw.update(extra)
+        a = rv_album(folder=folder or self.F, **kw)
+        mb = run(a, cand(id="mb-eu", country="XE", barcodes={UK_BARCODE}, catnos={"lnt1001"}))
+        for kind in dg_kinds:
+            if kind == "lengths off":
+                dg = run(a, cand(source="discogs", id="3001", country="Japan", barcodes={JP_BARCODE}, tracks=self.JP_OFF))
+            else:
+                dg = run(a, cand(source="discogs", id="3001", country="Japan", barcodes={JP_BARCODE}),
+                         cand(source="discogs", id="3003", country="Japan", barcodes={ean("498800000400")}))
+            self.assertNotEqual(dg["status"], "auto")
+            out.append(mc.combine(mb, dg))
+        return out
+
+    def test_TOC2_your_scans_barcode_on_musicbrainz_is_not_disputed(self):
+        for ctdb in (False, True):
+            for r in self.combined(ctdb, ocr_barcodes={UK_BARCODE}):
+                self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-eu"), (ctdb, r.get("why")))
+
+    def test_TOC2_your_folder_number_on_musicbrainz_is_not_disputed(self):
+        for ctdb in (False, True):
+            for r in self.combined(ctdb, folder=self.F + " [LNT 1001]", catnos={"lnt1001"},
+                                   catnos_from_folder={"lnt1001"}):
+                self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-eu"), (ctdb, r.get("why")))
+
+    def test_TOC2_tied_japanese_entries_without_a_ctdb_link_leave_the_disc_id_pick(self):
+        # E2: MusicBrainz sure by your exact disc ID; Discogs's two JP entries tie, no CTDB link
+        for r in self.combined(False, dg_kinds=("JP tie",), toc_releases={"mb-eu"}, exact_toc_releases={"mb-eu"}):
+            self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "mb-eu"), r.get("why"))
+
+
 class Review_FormatWordsInBrackets(unittest.TestCase):
     """C, rv_scen3: format and edition words with a digit are no catalogue numbers, and a sure
     pick is not held for one."""

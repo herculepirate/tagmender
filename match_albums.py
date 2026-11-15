@@ -1956,6 +1956,23 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # "Title CD 2", as EAC writes each disc of a set): that disc. Without it, the two discs'
     # tracks 1, 1, 2, 2 ... interleave and are lined up with the wrong tracks of the release.
     tag_disc, tag_title = ({}, "") if versions else album_tag_discs(infos)
+    # DSC-6: folders each tagged as a disc of their own album ("1977 - The Stranger" and "1983 -
+    # An Innocent Man" of a twofer, each "disc 1 of 1"): their disc tags repeat across folders and
+    # say nothing of the set - the folders number its discs
+    # (the album's own folders only: a deluxe sibling's tracks continue the album's disc)
+    # (and their track numbers overlap - each its own 1, 2, 3...: a "Bonus/" folder numbered on from
+    # the album's tracks, both "disc 1", is the album's one disc still)
+    per_folder, nums = {}, {}
+    for p, i in infos:
+        if p.parent in folder_disc:
+            per_folder.setdefault(p.parent, set()).add(i["disc"] or 0)
+            nums.setdefault(p.parent, set()).add(i["num"])
+    overlap = len(nums) > 1 and all(len(a & b) for a in nums.values() for b in nums.values() if a is not b)
+    if not versions and overlap and all(len(v) == 1 and 0 not in v for v in per_folder.values()) \
+            and len({next(iter(v)) for v in per_folder.values()}) < len(per_folder):
+        for p, i in infos:
+            if p.parent in folder_disc:
+                i["disc"] = 0
     for p, i in infos:
         i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else \
             i["disc"] or folder_disc.get(p.parent) or tag_disc.get(p, 1)

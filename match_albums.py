@@ -7324,6 +7324,9 @@ def release_fields(c):
             "artist": [c.get("artist") or ""], **({"genre": genre} if genre else {})}
 
 
+TWIN_LENGTHS_MIN_FRAC = 0.55     # (FIL-3: as auto_min_duration_frac_with_code)
+
+
 def summarize(res):
     b = res["best"]
     if not b:
@@ -7339,12 +7342,15 @@ def summarize(res):
             **({"box_disc": int(c["box_disc"])} if c.get("box_disc") else {}),
             # (TRK-5: the release read one track per work, as your files are: tagged so)
             **({"whole_works": True} if c.get("whole_works") else {}),
-            # (FIL-3: or the pick is Discogs's, its lengths typed off the sleeve, and MusicBrainz's
-            # entry of the same pressing written beside it agrees on every track: Soft Machine -
-            # Fifth, Sony BMG 82876872902, 5 of 8 on Discogs, 8 of 8 on MusicBrainz)
-            "all_lengths": mc.lengths_all_agree(b) or bool(
+            "all_lengths": mc.lengths_all_agree(b),
+            # (FIL-3: the pick is Discogs's, its lengths typed off the sleeve - most of them agreeing
+            # still -, and MusicBrainz's entry of the same pressing written beside it agrees on every
+            # track: Soft Machine - Fifth, Sony BMG 82876872902, 5 of 8 on Discogs, 8 of 8 on
+            # MusicBrainz. Read only beside your copy's own number, plan._files_on_evidence)
+            "twin_lengths": bool(
                 c["source"] == "discogs" and res.get("mb_twin") and res.get("mb_twin_lengths")
-                and b.get("tracks_ok") and not b.get("conflict") and not b.get("missing") and not b.get("lacks")),
+                and b.get("tracks_ok") and (b.get("dur_frac") or 0) >= TWIN_LENGTHS_MIN_FRAC
+                and not b.get("conflict") and not b.get("missing") and not b.get("lacks")),
             "lengths_missing": bool(b.get("lengths_free") and not b.get("conflict") and not b.get("missing")),
             # (BAR-1b: the release's tracks are the files', and at least half the lengths agree)
             # (TOC-1: your disc's TOC is this release's, its title agreeing: proof of the album)

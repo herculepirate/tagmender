@@ -1860,7 +1860,9 @@ class Engine:
                                               for mt, dt in zip(tags_mb, dparts[1]))
                 dparts = (dparts[0], [dparts[1][k] for k in slots] if len(dparts[1]) == full else
                           (dparts[1] if lead else None), dparts[2])
-        if not slots and not vtracks and not box:
+        cd_copy = ma.copy_source(album) in ("cd", "digital") or \
+            (ma.copy_source(album) == "" and not (album.get("audio") or {}).get("hires"))
+        if not slots and not vtracks and not box and cd_copy:
             # MED-19: a CD box with a vinyl record of its own (Biffy Clyro - Only Revolutions, the
             # Limited Collectors Edition: CD, sampler CD, 12" LP, DVD; Kreator - Dying Alive: 3 CDs
             # and a 7"): your CDs were ripped, the record was not. The matcher compared the CDs
@@ -1874,6 +1876,15 @@ class Engine:
                     and len(dg_vinyl) == len(dparts[1]):
                 kept = [t for t, v in zip(dparts[1], dg_vinyl) if not v]
                 if len(kept) == n:
+                    # (each CD numbered on its own, the record's sides no longer before it)
+                    count = {}
+                    for t in kept:
+                        count[t.get("discnumber")] = count.get(t.get("discnumber"), 0) + 1
+                    seen = {}
+                    for t in kept:
+                        d = t.get("discnumber")
+                        seen[d] = seen.get(d, 0) + 1
+                        t["tracknumber"], t["totaltracks"] = str(seen[d]), str(count[d])
                     dparts = (dparts[0], kept, dparts[2])
         if (tags_mb and not slots and len(tags_mb) != n and rel and _has_htoa(album)
                 and any(m.get("pregap") for m in rel.get("media") or ())):
@@ -5364,12 +5375,11 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
     total_discs = cand["disc_count"] or max(discs or [1])
     if len(discs) != len(raw):
         return album, None, total_discs
-    # (MED-19: a CD box's vinyl record, listed as the CD's disc, numbered apart from the CD)
-    keys = [(d, bool(c.get("box_vinyl"))) for d, c in zip(discs, cand["tracks"])] \
-        if len(cand["tracks"]) == len(discs) else [(d, False) for d in discs]
     per_disc = {}
-    for k in keys:
-        per_disc[k] = per_disc.get(k, 0) + 1
+    for d in discs:
+        per_disc[d] = per_disc.get(d, 0) + 1
+    vinyl = [bool(c.get("box_vinyl")) for c in cand["tracks"]] if len(cand["tracks"]) == len(discs) \
+        else [False] * len(discs)
     # MED-15: each track's media is its own disc's format, never every format of the release
     # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
     media = discogs_track_media(det, raw, discs)
@@ -5378,15 +5388,14 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
                 if isinstance(f, dict) and str(f.get("name") or "").strip().casefold() not in _NO_CARRIER]
     seen, tracks = {}, []
     for i, (entry, disc) in enumerate(zip(raw, discs)):
-        key = keys[i]
-        seen[key] = seen.get(key, 0) + 1
+        seen[disc] = seen.get(disc, 0) + 1
         t = dict(dm.extract_disc_fields({"number": disc}, total_discs))
         # numbered within each disc: the plugin's automatic path numbers through the whole
         # release, which would give disc 2's first track number 11
-        t.update(dm.extract_track_fields(entry, seen[key], per_disc[key]))
+        t.update(dm.extract_track_fields(entry, seen[disc], per_disc[disc]))
         t["discnumber"], t["totaldiscs"] = str(disc), str(total_discs)
         medium = media[i] if media is not None else (carriers[0] if len(set(carriers)) == 1 else "")
-        if key[1]:
+        if vinyl[i]:
             t["~box_vinyl"] = True          # MED-19: an LP or 7" of a CD box (engine._identified)
         credits = _track_credits(entry, scope, s, dm, medium, det)
         if credits:

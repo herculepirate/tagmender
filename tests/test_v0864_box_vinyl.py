@@ -82,6 +82,32 @@ class MED19BoxVinyl(Base):
                           album, files, dict(source_dir=str(d), files=files, provider_errors={}))
         self.assertEqual([t.get("tracknumber") for t in p.targets], [["1"], ["2"], ["3"]])
 
+    def test_MED19_full_cd_and_lp_rip_numbered_as_before(self):
+        # (review: the record's tracks are numbered apart only once they are left out)
+        import engine as eng
+        import tagger_settings
+        sys.path.insert(0, str(HERE.parent / "plugins_builtin" / "discogs"))
+        import discogs_mapping as dm
+
+        class H:
+            def get_json(self, *a, **k):
+                return None
+        tracks = eng.discogs_parts(dg_box(), dm, H(), tagger_settings.enrichment())[1]
+        self.assertEqual([t["tracknumber"] for t in tracks], ["1", "2", "3", "4", "5", "6"])
+        self.assertEqual({t["totaltracks"] for t in tracks}, {"6"})
+
+    def test_MED19_a_vinyl_rip_is_not_tagged_as_the_cd(self):
+        d = self.album("Band V", "Album V")
+        e = self.engine(FakeHttp(mb=[mb_box()], dg=[dg_box()]))
+        album = __import__("match_albums").read_album(d, d.parent.name, d.name)
+        album["audio"] = dict(album.get("audio") or {}, hires=True, cd_frames=False)
+        album["tocs"], album["media_hint"] = {}, ""
+        files = [t["path"] for t in album["tracks"]]
+        best = {"source": "mb", "id": MBID, "mb_id": MBID, "discogs_id": "1190", "confidence": 100.0}
+        with self.assertRaises(Exception):
+            e._identified({"status": "auto", "best": best, "why": [], "margin": None}, album, files,
+                          dict(source_dir=str(d), files=files, provider_errors={}))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,9 +8,12 @@
   barcode (BAR-12).
 - A CD whose MusicBrainz release also lists a download bonus track ("Digital Media") is
   disc 1 of 1, not 1 of 2, when your files do not hold that track (MED-20).
-- A rip log of your files dated in one year now rules out pressings first released in a later
-  year: an EAC log from 2005 is never the 2012 reissue sharing the 2002 CD's barcode. When
-  every release found came out later, the album waits for you instead (DAT-3).
+- A rip log proven to be of your files (its disc's table of contents, or a CUETools report
+  confirming it) and dated in one year now rules out pressings first released in a later
+  year, when one not later fits as well and carries what your copy proves (its barcode, disc
+  ID or catalogue number): an EAC log from 2005 is never the 2012 reissue sharing the 2002
+  CD's barcode. It only chooses: no album is held for the date alone, and a log dated
+  before the album existed is ignored (DAT-3).
 
 **Box sets in album-named folders**
 - A box set's folder that names its CD count and holds each disc in a folder named as its own

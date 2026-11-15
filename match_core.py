@@ -2216,8 +2216,79 @@ def rip_date_against(album, cand) -> str:
 
 
 def rip_dated_out(s) -> str:
-    """DAT-3: the scored candidate's rip-log date clue against it, or ""."""
+    """DAT-3: the rip-log date clue against a candidate classify left out for it, or ""."""
     return next((str(x) for x in (s or {}).get("clues_against") or () if str(x).startswith(RIP_DATE_AGAINST)), "")
+
+
+def _own_catno_on(s) -> bool:
+    """Your own catalogue number (tags, folder name, printed on your copy) is on this pick."""
+    return s.get("code") in ("catalogue number", "catalogue number (folder name)") or (
+        s.get("code") == "catalogue number (OCR)" and bool(s.get("catno_on_copy")))
+
+
+def rip_date_drop(scored, cfg):
+    """DAT-3: the scored candidates without the pressings your rip log's date leaves out, and
+    those left out. A pressing out in a later year than a rip log of your files (rip_date_later)
+    is left out only for one not later (or undated) that fits the same album with nothing of
+    your copy against it (no other clue against it, no format your audio rules out, no
+    conflicting barcode); and what your copy proves of the later one must be on that one too:
+    your barcode (BAR-1) - only for one carrying it too; your exact disc ID (TOC-1) or your own
+    catalogue number - only for one carrying either of those or your barcode. The date only
+    chooses among candidates: when it leaves none out, nothing is held for it, and the pick is
+    told why in its notes (rip_date_kept). A log dated before the album's first release (the
+    candidates' release group or master year, else your folder's or tags' year) is misdated and
+    rules nothing out. Those left out get the clue against them (rip_dated_out)."""
+    for s in scored:
+        s.pop("rip_date_kept", None)
+        if rip_dated_out(s):                   # (a clue an earlier classify of them added)
+            s["clues_against"] = [x for x in s["clues_against"] if not str(x).startswith(RIP_DATE_AGAINST)]
+    dated = [s for s in scored if s.get("rip_date_later")]
+    if not dated:
+        return scored, []
+    log_year = int(next(s["rip_log_year"] for s in dated if s.get("rip_log_year")))
+    firsts = [int(s["cand"]["original_year"]) for s in scored
+              if str(s["cand"].get("original_year") or "").isdigit()]
+    first = min(firsts) if firsts else next((int(s["album_year"]) for s in scored
+                                             if str(s.get("album_year") or "").isdigit()), None)
+    if first and log_year < first:
+        for s in dated:
+            s["rip_date_kept"] = (f"{RIP_DATE_AGAINST}{log_year}, before the album's first release ({first}): "
+                                  "its date is wrong, so it rules out nothing (DAT-3)")
+        return scored, []
+    not_later = [s for s in scored if not s.get("rip_date_later")]
+    fits = [s for s in not_later if s["tracks_ok"] and not s.get("media_why") and not s.get("conflict")
+            and not s.get("clues_against") and not format_contradictions(s)
+            and ((s["artist_sim"] >= cfg["auto_min_artist"] and s["title_sim"] >= cfg["auto_min_title"])
+                 or _numbers_prove_album(s, cfg))]
+    dropped = []
+    for s in dated:
+        if not not_later:
+            why = (f"{RIP_DATE_AGAINST}{log_year}; every release found came out later: the log's date or "
+                   "the database may be wrong (DAT-3)")
+        elif not fits:
+            why = (f"{s['rip_date_later']}; not left out: no release not later fits as well with nothing of "
+                   "your copy against it (DAT-3)")
+        elif barcode_proves(s) and not any(barcode_proves(f) for f in fits):
+            why = f"{s['rip_date_later']}; not left out: your barcode is on it and on no release not later (BAR-1, DAT-3)"
+        elif _exact_toc(s) and not any(_exact_toc(f) or barcode_proves(f) or _own_catno_on(f) for f in fits):
+            why = (f"{s['rip_date_later']}; not left out: your disc ID is on it, and no release not later carries "
+                   "it or your number (DAT-3)")
+        elif _own_catno_on(s) and not any(_own_catno_on(f) or barcode_proves(f) or _exact_toc(f) for f in fits):
+            why = (f"{s['rip_date_later']}; not left out: your catalogue number is on it, and no release not later "
+                   "carries it or your barcode (DAT-3)")
+        else:
+            dropped.append(s)
+            continue
+        s["rip_date_kept"] = why
+    if not dropped:
+        return scored, []
+    ids = ", ".join(str(s["cand"]["id"]) for s in dropped[:3])
+    for s in dropped:
+        s["clues_against"] = list(s.get("clues_against") or ()) + [s["rip_date_later"]]
+    for s in fits:
+        s["notes"] = s["notes"] + [f"{len(dropped)} release(s) left out ({ids}): {RIP_DATE_AGAINST}{log_year}, "
+                                   f"and {'they' if len(dropped) > 1 else 'it'} came out later (DAT-3)"]
+    return [s for s in scored if not any(s is d for d in dropped)], dropped
 
 
 def file_clues(album, cand, clues, against, cfg=None):
@@ -2306,11 +2377,6 @@ def file_clues(album, cand, clues, against, cfg=None):
                            f"{cand.get('country')}")
     if cand.get("script") == "Latn" and not re.search(r"[^\x00-\u024f\s\W\d]", str(album.get("title") or "")):
         clues.setdefault("script", "listed in Latin script, like your tags")
-    # DAT-3: a rip log of your files dated in one year: a pressing first out in a later year
-    # cannot be the disc that was ripped
-    later = rip_date_against(album, cand)
-    if later:
-        against.append(later)
     td, cd = "" if by_tagger else str(album.get("tag_date") or ""), str(cand.get("date") or "")
     if len(td) >= 7 and len(cd) >= 7 and td[:len(cd)] == cd[:len(td)]:
         clues.setdefault("date", f"release date {cd} in the tags")
@@ -3859,6 +3925,11 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
         "pressing_year": album.get("pressing_year"),
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
+        # DAT-3: "your rip log is dated 2005; this pressing came out in 2012" (or ""), and the
+        # years classify checks the log's date against (the album's own year: clock sanity).
+        # A clue against the pressing only once classify leaves it out (rip_date_drop).
+        "rip_date_later": rip_date_against(album, cand),
+        "rip_log_year": album.get("rip_log_year"), "album_year": album.get("year"),
         "len_err": len_err, "titles_agree": titles_agree, "titles_loose": titles_loose, "len_diffs": len_diffs,
         "ms_lengths": any(c["secs"] % 1 for c in cand["tracks"] if c.get("secs")),
         "own_catnos": own, "own_catno_absent": own_absent, "scans_name_artist": scans_name_artist,
@@ -4366,24 +4437,10 @@ def classify(scored, cfg):
                       for s in scored]
 
     # DAT-3: a rip log of your files dated before a pressing came out rules that pressing out,
-    # as the folder name's word does above: when the same album is listed in a pressing not
-    # later than the log (or undated: unknown, not later), the later ones drop out. Your barcode
-    # still names the release (BAR-1): a later pressing carrying it drops out only for one not
-    # later that carries it too (pressings sharing your barcode, which the log tells apart).
-    # When nothing is left, nothing drops (the log's date may be wrong): a person decides, below.
-    dated = [s for s in scored if rip_dated_out(s)]
-    if dated:
-        not_later = [s for s in scored if not rip_dated_out(s)]
-        fits = [s for s in not_later if s["tracks_ok"] and not s.get("media_why") and (
-            (s["artist_sim"] >= cfg["auto_min_artist"] and s["title_sim"] >= cfg["auto_min_title"])
-            or _numbers_prove_album(s, cfg))]
-        if fits and (not any(barcode_agrees(s) for s in dated) or any(barcode_agrees(s) for s in not_later)):
-            ids = ", ".join(str(s["cand"]["id"]) for s in dated[:3])
-            for s in fits:
-                s["notes"] = s["notes"] + [f"{len(dated)} release(s) left out ({ids}): "
-                                           f"{rip_dated_out(dated[0]).split(';')[0]}, and "
-                                           f"{'they' if len(dated) > 1 else 'it'} came out later (DAT-3)"]
-            scored = not_later
+    # as the folder name's word does above, when the same album is listed in a pressing not later
+    # (with the guards of rip_date_drop: your barcode, disc ID or number on the later one). It only
+    # chooses among candidates: nothing is held for the date alone.
+    scored, _rip_dropped = rip_date_drop(scored, cfg)
 
     drop_unproven_sectors(scored)
 
@@ -4726,18 +4783,11 @@ def classify(scored, cfg):
                    "release is not")
     if best.get("conflict"):
         why.append("barcode differs from the candidate's")
-    # DAT-3: the pick came out after your rip log's date and nothing not later was left to take
-    # instead (above): the date may be wrong, so nothing was dropped and a person decides. Not
-    # when your barcode names it and no other release carries that barcode: a barcode match
-    # with no rival is the release (BAR-1), the log's date only told in the notes.
-    later = rip_dated_out(best)
-    if later:
-        if _carries_barcode(best) and not any(barcode_agrees(s) for s in scored if s is not best):
-            best["notes"] = best["notes"] + [f"{later}; your barcode is this release's and no other's, so "
-                                             "it stands (BAR-1, DAT-3)"]
-        else:
-            why.append(f"{later}; no release found that fits as well came out by then, so none was left "
-                       "out (the log's date may be wrong) (DAT-3)")
+    # DAT-3: a pick out after your rip log's date that rip_date_drop did not leave out (none not
+    # later fits as well, your barcode / disc ID / number on it alone, or the log misdated): kept,
+    # never held for the date alone - told in the notes
+    if best.get("rip_date_kept"):
+        best["notes"] = best["notes"] + [best["rip_date_kept"]]
     # Your copy cannot be this format (hi-res audio and a CD; a rip log and a download):
     # however well the rest fits, a person decides (Ahab - The Coral Tombs: 24/48 audio
     # matched to the only CD listed). Not when your barcode is on it: the barcode names the

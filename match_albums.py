@@ -2013,7 +2013,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
     headers = [log["header"] for log in ripped if log.get("header")]
     # DAT-3: the year your files were ripped, from a dated EAC/XLD log that is of these files
-    log_year, log_year_from = rip_log_year(album_dir, logs, infos)
+    log_year, log_year_from = rip_log_year(album_dir, logs)
     cdtocs = tag_tocs(infos)
     cue_toc = cue_tocs(album_dir, infos)
     tocs = merge_tocs(infos, log_toc, cue_toc, cdtocs)
@@ -2716,8 +2716,8 @@ def rip_logs(album_dir):
         out.append({"path": str(p), "toc": toc, "data_track": data, "header": _log_header(text),
                     "codes": _path_codes(text, p.stem), "crcs": set(re.findall(r"\bCRC\s+([0-9A-F]{8})\b", text)),
                     "out_parts": _output_parts(text),
-                    # DAT-3: the year the ripper made it (EAC, XLD), and the files it names per track
-                    "year": log_date_year(text), "track_names": log_track_names(text)})
+                    # DAT-3: the year the ripper made it (EAC, XLD)
+                    "year": log_date_year(text)})
     return out
 
 
@@ -2753,79 +2753,19 @@ def log_date_year(text):
     return year
 
 
-# a track's own section of a log: "Track  1" (EAC), "Track 01" (XLD), "Трек  1", "Titel  1"
-_LOG_TRACK = re.compile(r"^\s*[^\W\d_]{3,10}\s+(\d{1,2})\s*$")
-_LOG_FILENAME = re.compile(r"(?i)^\s*(?:file\s*name|dateiname|nom\s+de\s+fichier|nombre\s+de\s+archivo|"
-                           r"имя\s+файла)\s*:?\s+(\S.*?)\s*$")
-
-
-def log_track_names(text):
-    """DAT-3: {track number: the name (without folder and extension) of the file the log says
-    it wrote for that track}, from each track's section ("Track  1" / "Filename I:\\...\\01 -
-    How about today .wav"); {} for a log without such sections."""
-    out, current = {}, None
-    for line in str(text or "").splitlines():
-        m = _LOG_TRACK.match(line)
-        if m:
-            current = int(m.group(1))
-            continue
-        m = _LOG_FILENAME.match(line)
-        if m and current is not None and current not in out:
-            name = re.split(r"[\\/]", m.group(1))[-1]
-            out[current] = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", name)
-    return out
-
-
-def _named_alike(log_name, title, stem):
-    """A log's file name for a track names this file: its title (or the file's own name), the
-    track number and separators in front left aside ("01 - How about today " and "How About
-    Today")."""
-    def bare(x):
-        return mc.fold(re.sub(r"^\s*\d{1,3}\s*[-._)\]]*\s*", "", str(x or "")))
-    a = bare(log_name)
-    if not a:
-        return False
-    for b in (bare(title), bare(stem)):
-        if b and (a == b or (len(b) >= 4 and (a.endswith(b) or b in a)) or mc._ratio(a, b) >= 0.9):
-            return True
-    return False
-
-
-def log_tracks_fit(log, infos):
-    """DAT-3: a log without a TOC is of these files when it names, track by track, the files of
-    one disc: as many tracks as the disc has files (three or more), and each track's file named
-    as the file of that number on the disc (its title or its own name). A log of another rip of
-    the same album names the same titles, so this is weaker than a TOC or a CUETools report;
-    it is used only for the log's date."""
-    names = log.get("track_names") or {}
-    if len(names) < 3:
-        return False
-    discs = {}
-    for p, i in infos:
-        discs.setdefault(i.get("disc_eff", 1), []).append((p, i))
-    for files in discs.values():
-        by_num = {i.get("num"): (p, i) for p, i in files}
-        if len(files) != len(names) or len(by_num) != len(files) or set(by_num) != set(names):
-            continue
-        if all(_named_alike(names[n], by_num[n][1].get("title"), Path(by_num[n][0]).stem) for n in names):
-            return True
-    return False
-
-
-def rip_log_year(album_dir, logs, infos):
+def rip_log_year(album_dir, logs):
     """DAT-3: (the earliest year a rip log of these files was made, its file name), or (None, "").
-    A log counts only when it is an EAC or XLD log with a date and it is of these files: its
-    TOC fits them (LOGS are fitting_logs' kept ones, so a TOC there fits), or, with no TOC, a
-    CUETools report in the folder confirms its CRCs (accurip_confirms) or it names the files
-    track by track (log_tracks_fit). A checker's log (auCDtect, audiochecker) has no ripper's
-    date and never counts."""
+    A log counts only when it is an EAC or XLD log with a date and it is proven to be of these
+    files: its TOC fits them (LOGS are fitting_logs' kept ones, so a TOC there fits), or, with
+    no TOC (older EAC), a CUETools report in the folder confirms its CRCs (accurip_confirms).
+    A log merely naming files like yours may be another rip's of the same album, and a
+    checker's log (auCDtect, audiochecker) has no ripper's date: neither counts."""
     best = (None, "")
     for log in logs:
         y = log.get("year")
         if not y:
             continue
-        mine = bool(log["toc"]) or accurip_confirms(album_dir, log) or log_tracks_fit(log, infos)
-        if mine and (best[0] is None or y < best[0]):
+        if (log["toc"] or accurip_confirms(album_dir, log)) and (best[0] is None or y < best[0]):
             best = (y, Path(log["path"]).name)
     return best
 

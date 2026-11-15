@@ -65,9 +65,8 @@ def run(a, *cands, ocr=""):
     return r
 
 
-# (dated after the candidates' 2010: an earlier rip date rules them out, DAT-3)
 EAC = ("Exact Audio Copy V1.0 beta 3 from 29. August 2011\r\n\r\n"
-       "EAC extraction logfile from 2. February 2012, 19:37 for CD\r\n{header}\r\n\r\n"
+       "EAC extraction logfile from 2. February 2007, 19:37 for CD\r\n{header}\r\n\r\n"
        "Used drive  : PLEXTOR PX-716A   Adapter: 1  ID: 0\r\n\r\n"
        "TOC of the extracted CD\r\n\r\n"
        "     Track |   Start  |  Length  | Start sector | End sector \r\n"
@@ -231,6 +230,9 @@ class NotesAndLogCodes(TempAlbum):
         lens = [t["secs"] for t in a["tracks"]]
         r = run(a, cand(lens, id="268c5d5d", catnos={"19658890782"}, formats={"cd"}))
         self.assertEqual(r["status"], "auto", r["why"])
+        # (DAT-3: the log of 2007 and the only release found, of 2010: never held for the date alone)
+        self.assertEqual(a["rip_log_year"], 2007)
+        self.assertTrue(any("DAT-3" in n for n in r["best"]["notes"]), r["best"]["notes"])
 
     def test_a_foreign_logs_path_is_not_read(self):
         self.tracks()

@@ -95,7 +95,8 @@ class Filing(unittest.TestCase):
         return pl.build([p], prof, "job")["albums"][0]
 
     def moved(self, a):
-        return a["files"][0]["dst"] != str(self.f)
+        # (filed unasked: MOV-5 keeps a held move for you to tick, which is not filing it)
+        return a["files"][0]["dst"] != str(self.f) and not a.get("held")
 
     def test_exact_below_the_score_with_every_length_is_filed(self):
         a = self.entry(tier="exact", confidence=91.5, margin=25.8, all_lengths=True)

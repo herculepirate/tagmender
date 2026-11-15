@@ -148,8 +148,11 @@ class Matrix(unittest.TestCase):
         self.assertEqual(scored[0]["confidence"], scored[1]["confidence"])    # no points, a clue
         r = mc.classify(scored, CFG)
         self.assertEqual(r["best"]["cand"]["id"], "11")
-        self.assertTrue(any("pressing chosen by matrix" in n for n in r["best"]["notes"]), r["best"]["notes"])
-        self.assertTrue(any("agrees (read on the scans)" in n for n in r["best"]["notes"]))
+        # (EVI-9: the other, with the same number and a matrix of its own, leaves the comparison)
+        self.assertTrue(any("pressing chosen by matrix" in n or "(EVI-9)" in n for n in r["best"]["notes"]),
+                        r["best"]["notes"])
+        # (read on the disc ring itself: told so, EVI-9)
+        self.assertTrue(any("agrees (read on the disc ring)" in n for n in r["best"]["notes"]))
 
     def test_a_matrix_never_makes_a_poor_match_auto(self):
         bad = cand(matrix=[("Matrix / Runout", "ABCD-77123-A1")], catnos=set(),

@@ -1,5 +1,27 @@
 # Release notes
 
+## 0.8.66
+
+**Disc photos read**
+- A close-up photo of a disc's hub is now read ring by ring: the text etched or printed round
+  it is found and read whichever way it runs, mirrored too (a disc photographed from the
+  label side), light on dark or dark on light, on photos as small as 400 px. Covers and
+  printed disc faces are recognised and skipped. Every disc photo is read again once (OCR-7).
+- A matrix read off the disc ring with a misread letter or two still counts; its digits must
+  be read exactly (OCR-8).
+- A plant's or country's line alone ("MADE IN GERMANY BY PDO", a side number beside it) no
+  longer counts as your disc's matrix, read exactly or not: every disc from that plant
+  carries it (OCR-8).
+
+**The right pressing, more often**
+- When your disc shows the matrix of one release, the other releases with the same catalogue
+  number or barcode that list a different matrix are left out, however well their track
+  lengths fit. Your barcode or disc ID on one of them still wins (EVI-9).
+- A catalogue number printed on your scans that a release found by title carries is now
+  searched, so every pressing sharing it is compared (CAT-6).
+- "Made in West Germany" on your booklet no longer counts against a release whose notes say
+  its booklet was made there (CTY-2).
+
 ## 0.8.65
 
 **The right pressing, more often**

@@ -487,6 +487,48 @@ def _rescored(res, extra, name, album, cfg, text=""):
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
 
+def printed_catnos(res, album, text):
+    """CAT-6: the catalogue numbers the found Discogs releases list, as Discogs writes them, that
+    your scans print (BAR-8's catno_printed: whole, on a scan or booklet), letters and digits and
+    5+ characters. Searched like the numbers the scan reading picks out itself, which leaves a
+    label's letters and ONE digit alone ("CDCCR 3": "TRACK 1" looks the same): the other
+    pressings sharing it are then compared too (Creedence Clearwater Revival - Chronicle,
+    Volume Two: four Discogs releases are CDCCR 3, the title found one)."""
+    out = []
+    # (every release fetched - a dozen or so - in the order found, not ranked yet)
+    for s in (res or {}).get("scored") or ():
+        for raw in str(s["cand"].get("catno_shown") or "").split(", "):
+            if _distinctive(raw) and raw not in out and mc.catno_printed(album, raw, text):
+                out.append(raw)
+    return out[:3]
+
+
+def printed_catno_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, use_discogs, source_notes):
+    """CAT-6, once all the steps that find releases are done (Creedence's CDCCR 3 release came
+    in by gnudb's title): the numbers printed_catnos finds that no search asked for yet."""
+    if not use_discogs or not ocr_txt or not (dg_res or {}).get("scored") or _barcode_settles(final, album):
+        return mb_res, dg_res, final        # (a decoded barcode on the release sure of: that is it)
+    asked = {mc.norm_code(c) for c in album.get("catno_search") or ()} | \
+            {mc.norm_code(c) for c in album.get("scan_catnos_searched") or ()}
+    more = [c for c in printed_catnos(dg_res, album, ocr_txt) if mc.norm_code(c) not in asked]
+    if not more:
+        return mb_res, dg_res, final
+    album["scan_catnos_searched"] = list(album.get("scan_catnos_searched") or ()) + more
+    probe = dict(album, barcodes=set(), catno_search=more, asins=[], search_labels=[],
+                 label_catnos=[], narrow_codes_first=True)
+    try:
+        found = discogs_search(http, probe, cfg, dm)
+    except AuthError:
+        raise
+    except Exception as exc:
+        source_notes.append(f"Discogs lookup of the catalogue number your scans print failed ({exc})")
+        return mb_res, dg_res, final
+    seen_ids = _cand_ids(mb_res, dg_res)
+    dg_res = _scored_again(dg_res, found, "discogs", album, cfg, ocr_txt)
+    _note_found(album, seen_ids, (mb_res, dg_res), "printed_catno")
+    return mb_res, dg_res, _combine(mb_res, dg_res)
+
+
 def _scored_again(res, extra, name, album, cfg, text=""):
     """`res` scored again against the files with the candidates in `extra` added, even when
     none is new (something the files show changed: fingerprints, a barcode). Each match is
@@ -5117,6 +5159,8 @@ def discogs_candidate(rel, dm, whole_works=False):
         "title": rel.get("title", ""), "year": year or None,
         "date": str(rel.get("released") or ""),
         "country": rel.get("country", ""),
+        # CTY-2: the "Made in ..." its notes give its parts ("Made in West Germany (Booklet)")
+        "notes_made_in": sorted(mc.countries_made_in(rel.get("notes") or "")),
         "label": "; ".join(sorted({dm.clean_artist_name(l.get("name")) for l in labels})),
         "catnos": {mc.norm_code(l["catno"]) for l in labels
                    if l.get("catno") and str(l["catno"]).casefold() != "none"},
@@ -5647,7 +5691,7 @@ BLANK_READING = " "
 
 def _read_ahead_kinds():
     """The kinds _ScanReads reads ahead: only their "" can be a failure kept as a blank page."""
-    return {page_kind("text"), page_kind("spines"), "barcode-digits", "disc-rings-3"}
+    return {page_kind("text"), page_kind("spines"), "barcode-digits", "disc-rings-4"}
 
 
 def _cached_reading(raw, kind):
@@ -5727,7 +5771,7 @@ class _ScanReads:
 
     Its own read-only connection to the cache (so a scan read before is not read again)."""
 
-    BUDGETS = {"barcode-digits": 120.0, "disc-rings-3": 60.0}
+    BUDGETS = {"barcode-digits": 120.0, "disc-rings-4": 60.0}
 
     @classmethod
     def start(cls, db, images, want_digits):
@@ -5754,11 +5798,11 @@ class _ScanReads:
         text, spines = page_kind("text"), page_kind("spines")
         reads = {text: lambda p: ocr_text([p]), spines: lambda p: ocr_spines([p]),
                  "barcode-digits": lambda p: ocr_barcode_digits([p]),
-                 "disc-rings-3": lambda p: ocr_disc_rings([p])}
+                 "disc-rings-4": lambda p: ocr_disc_rings([p])}
         # what _process reads for sure first (the first three scans' page text, which is all
         # it reads when the decoded barcode settles the album, every disc), the rest after
         order = [(text, p) for p in images[:3]] + [(spines, p) for p in images[:3]]
-        order += [("disc-rings-3", p) for p in images[:40]]
+        order += [("disc-rings-4", p) for p in images[:40]]
         if want_digits:
             order += [("barcode-digits", p) for p in images[:15]]
         order += [(text, p) for p in images[3:]] + [(spines, p) for p in images[3:]]
@@ -6651,21 +6695,25 @@ def ocr_disc_rings(paths, max_images=8, budget_s=60.0):
             g = Image.open(p).convert("L")
         except Exception:
             continue
-        if not 0.8 <= g.width / max(g.height, 1) <= 1.25 or min(g.size) < 800:
+        # (a hub close-up may be small: OCR-7 reads one of 555 px; the whole-ring strips need 800)
+        if not 0.8 <= g.width / max(g.height, 1) <= 1.25 or min(g.size) < 400:
             continue
         found = find_disc(g)
         if not found:
             continue
         discs += 1
         cx, cy, r = found
-        for strip in _hub_strips(g, cx, cy, r) + _rim_strips(g, cx, cy, r):
-            if time.time() - started > budget_s:
-                break
-            try:
-                chunks.append(_tess(strip, 11))
-            except Exception:
-                continue
-    return "\n".join(chunks)
+        if min(g.size) >= 800:
+            for strip in _hub_strips(g, cx, cy, r) + _rim_strips(g, cx, cy, r):
+                if time.time() - started > budget_s:
+                    break
+                try:
+                    chunks.append(_tess(strip, 11))
+                except Exception:
+                    continue
+        if time.time() - started <= budget_s:
+            chunks.append(ocr_hub_closeup(g, found, started + budget_s))
+    return "\n".join(c for c in chunks if c)
 
 
 def _hub_strips(g, cx, cy, r):
@@ -6705,6 +6753,241 @@ def _rim_strips(g, cx, cy, r):
     if r < 900:
         strip = strip.resize((strip.width * 2, strip.height * 2), Image.LANCZOS)
     return [strip, strip.rotate(180)]
+
+
+# OCR-7: a close-up of the hub, read band by band. The ring is laid flat round a centre
+# fitted to the disc's own rings (a close-up cut off at the scan's edge puts find_disc's centre
+# off, and the text then wanders up and down the strip); the strip is cut where a ring's edge
+# runs all the way round, each band into the runs of marks along it, and each run is read
+# tight, its letters brought to one height, as light print on dark and dark on light, in the
+# four ways it can run (as it comes, upside down, mirrored - a matrix photographed through the
+# disc - and both). Thin stencil letters on a hub read nowhere else (Creedence Clearwater
+# Revival - Chronicle, Volume Two: "MASTERED BY MAYKING"; Univers Zero - Heatwave, a 555 px
+# photo: "U.S. OPTICAL DISC").
+HUB_R = 700.0                       # the disc brought to this radius before its rings are found
+HUB_BAND = (0.25, 0.97)             # the part of the radius laid flat
+HUB_LETTERS = (13.0, 16.0)          # letter heights each run is read at (px)
+HUB_FIT = 0.04                      # a close-up: the rings fit a circle within 4% of the radius
+
+
+def hub_centre(g, cx, cy, r):
+    """The centre of the rings round a disc's hub, and how far (a share of r) the strongest
+    ring edge at each angle lies from a circle round it: (cx, cy, misfit). A close-up of a
+    hub fits within a percent or two; a cover or a printed disc face does not."""
+    import numpy as np
+    a = np.asarray(g, dtype=np.float32)
+    h, w = a.shape
+    th = np.linspace(0, 2 * np.pi, 360, endpoint=False)
+    M = np.c_[np.ones(len(th)), np.cos(th), np.sin(th)]
+    misfit = 1.0
+    for _ in range(3):
+        R = np.linspace(r * 0.45, r, max(20, int(r * 0.55)))
+        T, RR = np.meshgrid(th, R)
+        X = np.clip(cx + RR * np.cos(T), 0, w - 1).astype(int)
+        Y = np.clip(cy + RR * np.sin(T), 0, h - 1).astype(int)
+        edge = R[np.abs(np.diff(a[Y, X], axis=0)).argmax(axis=0)]
+        keep = np.ones(len(th), bool)
+        for _k in range(3):
+            sol = np.linalg.lstsq(M[keep], edge[keep], rcond=None)[0]
+            res = np.abs(M @ sol - edge)
+            keep = res < max(3.0, float(np.median(res[keep])) * 2.5)
+        misfit = float(np.median(res)) / r
+        if misfit > HUB_FIT:
+            break
+        cx, cy = cx + sol[1], cy + sol[2]
+    return cx, cy, misfit
+
+
+def _hub_bands(strip):
+    """The rows of a flat ring between two ring edges (rows whose median change down the
+    strip is strong all the way round), 12-150 rows tall."""
+    import numpy as np
+    a = np.asarray(strip, dtype=np.float32)
+    dy = np.convolve(np.median(np.abs(np.diff(a, axis=0)), axis=1), np.ones(3) / 3, "same")
+    edge = dy > max(6.0, 0.15 * float(dy.max()))
+    cuts = [0] + [i for i in range(1, len(edge)) if edge[i] != edge[i - 1]] + [len(edge)]
+    return [(y0, y1) for y0, y1 in zip(cuts, cuts[1:]) if not edge[y0] and 12 <= y1 - y0 <= 150]
+
+
+def _otsu(a):
+    import numpy as np
+    hist, edges = np.histogram(a, bins=64)
+    w = np.cumsum(hist).astype(float)
+    mu = np.cumsum(hist * edges[:-1])
+    w2 = w[-1] - w
+    ok = (w > 0) & (w2 > 0)
+    between = np.zeros_like(w)
+    between[ok] = (mu[-1] * w[ok] / w[-1] - mu[ok]) ** 2 / (w[ok] * w2[ok])
+    return float(edges[int(between.argmax()) + 1])
+
+
+def _mark_runs(mask, h):
+    """Column spans of a band holding marks, joined across gaps under 2.5 band heights."""
+    import numpy as np
+    on = np.convolve(mask.mean(axis=0), np.ones(5) / 5, "same") > 0.07
+    out, x0, last = [], None, 0
+    for x in np.flatnonzero(on):
+        if x0 is None:
+            x0 = x
+        elif x - last > 2.5 * h:
+            out.append((x0, last + 1))
+            x0 = x
+        last = x
+    if x0 is not None:
+        out.append((x0, last + 1))
+    return [(a, b) for a, b in out if 1.5 * h <= b - a <= 40 * h]
+
+
+def _letters_at(piece, light, height):
+    """A run's grey pixels brought to letters `height` px tall (the median line of marks)."""
+    import numpy as np
+    from PIL import Image
+    t = _otsu(piece)
+    marks = piece > t if light else piece < t
+    marks[marks.mean(axis=1) > 0.6] = False
+    lines, cur = [], 0
+    for on in list(marks.mean(axis=1) > 0.04) + [False]:
+        if on:
+            cur += 1
+        elif cur:
+            lines.append(cur)
+            cur = 0
+    lines = [n for n in lines if n >= 5]
+    if not lines:
+        return None
+    f = height / float(np.median(lines))
+    im = Image.fromarray(piece.astype("uint8")).resize(
+        (max(1, int(piece.shape[1] * f)), max(8, int(piece.shape[0] * f))), Image.LANCZOS)
+    return np.asarray(im, dtype=np.float32)
+
+
+def _hub_pieces(g, cx, cy, r):
+    """The runs of marks round a hub close-up, each as black-on-white images ready to read:
+    at each letter height, cut at Otsu's level and at one between it and the background
+    (faint letters beside bright blocks: Heatwave's "OPTICAL" between grey bars)."""
+    import numpy as np
+    from PIL import Image, ImageFilter, ImageOps
+    k = HUB_R / r
+    g = g.resize((max(1, int(g.width * k)), max(1, int(g.height * k))), Image.LANCZOS)
+    cx, cy, r = cx * k, cy * k, HUB_R
+    cx, cy, misfit = hub_centre(g, cx, cy, r)
+    if misfit > HUB_FIT:
+        return []
+    f0, f1 = HUB_BAND
+    strip = unwrap_ring(g, cx, cy, r * f0, r * f1)
+    if strip is None:
+        return []
+    out = []
+    for y0, y1 in _hub_bands(strip):
+        pad = max(3, (y1 - y0) // 6)
+        band = strip.crop((0, max(0, y0 - pad), strip.width, min(strip.height, y1 + pad)))
+        # the strip is as long as the outer edge: a band further in is drawn out, put right
+        at = f1 - (f1 - f0) * ((y0 + y1) / 2) / strip.height
+        band = band.resize((max(1, int(band.width * at / f1)), band.height), Image.LANCZOS)
+        a = np.asarray(band, dtype=np.float32)
+        mean = np.asarray(band.filter(ImageFilter.BoxBlur(max(4, int(band.height * 0.4)))), dtype=np.float32)
+        d = max(12.0, float(np.percentile(np.abs(a - mean), 90)) * 0.6)
+        h = y1 - y0
+        for light, mask in ((True, a > mean + d), (False, a < mean - d)):
+            mask[mask.mean(axis=1) > 0.25] = False          # a ring's edge, not letters
+            for x0, x1 in _mark_runs(mask, h)[:8]:
+                piece = a[:, max(0, x0 - h):min(a.shape[1], x1 + h)]
+                for height in HUB_LETTERS:
+                    p = _letters_at(piece, light, height)
+                    if p is None:
+                        continue
+                    t = _otsu(p)
+                    marks = p > t if light else p < t
+                    bg = float(np.median(p[~marks])) if (~marks).any() else t
+                    for cut in (t, (bg + t) / 2):
+                        ink = p > cut if light else p < cut
+                        ink[ink.mean(axis=1) > 0.6] = False
+                        im = Image.fromarray(np.where(ink, 0, 255).astype("uint8")).filter(ImageFilter.MinFilter(3))
+                        out.append(ImageOps.expand(im, 20, fill=255))
+    return out
+
+
+HUB_SURE = 55.0                     # tesseract's mean confidence a run's reading needs
+
+
+def _read_stacked(images, deadline=None):
+    """Each small image read the way it runs: all four ways of each (as it comes, upside
+    down, mirrored, both) stacked on pages (12000 px tall at most: a taller page reads
+    nothing), one tesseract run a page, not one an image; of each image's four readings the
+    one tesseract is surest of, kept when its words average HUB_SURE or more. Returns
+    [(text, confidence)] in the images' order."""
+    from PIL import Image
+    rows = []                                   # (image index, picture)
+    for i, im in enumerate(images):
+        rows += [(i, v) for v in (im, im.rotate(180), im.transpose(Image.FLIP_LEFT_RIGHT),
+                                  im.transpose(Image.FLIP_TOP_BOTTOM))]
+    pages, cur, tall = [], [], 0
+    for row in rows:
+        if cur and tall + row[1].height + 10 > 12000:
+            pages.append(cur)
+            cur, tall = [], 0
+        cur.append(row)
+        tall += row[1].height + 10
+    if cur:
+        pages.append(cur)
+
+    def read(page_rows):
+        canvas = Image.new("L", (max(v.width for _i, v in page_rows) + 40,
+                                 sum(v.height + 10 for _i, v in page_rows) + 40), 255)
+        spans, y = [], 20
+        for k, (_i, v) in enumerate(page_rows):
+            canvas.paste(v, (20, y))
+            spans.append((y, y + v.height, k))
+            y += v.height + 10
+        tsv = _tess_or_tsv(canvas, deadline)
+        words = {}                              # row on the page -> [(line key, left, word, conf)]
+        for line in tsv.splitlines()[1:]:
+            f = line.split("\t")
+            if len(f) < 12 or not f[11].strip():
+                continue
+            try:
+                top, height, conf = int(f[7]), int(f[9]), float(f[10])
+            except ValueError:
+                continue
+            mid = top + height / 2
+            row = next((k for y0, y1, k in spans if y0 - 5 <= mid <= y1 + 5), None)
+            if row is not None:
+                words.setdefault(row, []).append(((f[2], f[3], f[4]), int(f[6]), f[11], conf))
+        out = []
+        for k, (i, _v) in enumerate(page_rows):
+            ws = words.get(k) or []
+            text, lines = "", {}
+            for key, left, w, _c in ws:
+                lines.setdefault(key, []).append((left, w))
+            text = "\n".join(" ".join(w for _l, w in sorted(v)) for _key, v in sorted(lines.items()))
+            chars = sum(len(w) for _k, _l, w, _c in ws)
+            conf = sum(c * len(w) for _k, _l, w, c in ws) / chars if chars else 0.0
+            out.append((i, text, conf))
+        return out
+    best = {}
+    for page_out in _pmap(read, pages):
+        for i, text, conf in page_out:
+            if sum(ch.isalnum() for ch in text) >= 4 and conf > best.get(i, ("", -1.0))[1]:
+                best[i] = (text, conf)
+    return [best[i] for i in sorted(best) if best[i][1] >= HUB_SURE]
+
+
+def _tess_or_tsv(img, deadline=None):
+    if deadline is not None and time.time() >= deadline:
+        return ""
+    try:
+        return _tess(img, 4, tsv=True, deadline=deadline)
+    except Exception:
+        return ""
+
+
+def ocr_hub_closeup(g, found, deadline=None):
+    """The text round a hub close-up (OCR-7), or "" when the scan is not one."""
+    try:
+        pieces = _hub_pieces(g, *found)
+        return "\n".join(text for text, _conf in _read_stacked(pieces, deadline)) if pieces else ""
+    except Exception:
+        return ""                           # (the scan's other readings are kept)
 
 
 _CODE_LIKE = re.compile(r"(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9-]{5,}|\d[\d ]{9,}\d")
@@ -7998,7 +8281,7 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
             stopped.append("its time budget used")
         if stage and state["rings"]:
             # the disc rings on their own as well: a matrix that clearly differs is told from them only
-            rings = _joined(each_scan(db, "disc-rings-3", stage[:40], lambda p: ocr_disc_rings([p]), log,
+            rings = _joined(each_scan(db, "disc-rings-4", stage[:40], lambda p: ocr_disc_rings([p]), log,
                                       budget_s=60.0))
             if rings:
                 album["ring_text"] = _joined([album.get("ring_text") or "", rings])
@@ -8486,7 +8769,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 text = text + "\n" + digits
                 album["printed_text"] += "\n" + digits
         # every disc read, also when the barcode settled it: a matrix that differs is told only here
-        rings = _joined(each_scan(db, "disc-rings-3", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
+        rings = _joined(each_scan(db, "disc-rings-4", scans[:40], lambda p: ocr_disc_rings([p]), scan_log,
                                   budget_s=60.0, ahead=scans_ahead))
         if scans_ahead is not None:
             scans_ahead.close()                        # what was read ahead and not needed: dropped
@@ -8505,6 +8788,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             new_b = [b for b in codes["barcodes"] if mc.barcode_key(b) not in known_b]
             # a misreading ("ZB 44") is not searched; the documents' numbers are, as typed
             new_c = [c for c in scan_catnos(codes["catnos"], docs_txt) if mc.norm_code(c) not in known_c]
+            album["scan_catnos_searched"] = list(new_c)        # (CAT-6 asks for the rest)
             extra = {"mb": [], "discogs": []}
             # a label the documents name ("Label: X") is searched with the catalogue numbers
             labels = album.get("search_labels") or []
@@ -8593,6 +8877,11 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # Disc)"): that album searched too, so one disc of a set can be matched as that disc
     mb_res, dg_res, final = log_title_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, use_mb,
                                            use_discogs, out, source_notes, provider_errors)
+
+    # CAT-6: a catalogue number a found Discogs release lists and your scans print, not searched
+    # yet: searched with the artist, so the other pressings sharing it are compared too
+    mb_res, dg_res, final = printed_catno_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt,
+                                               use_discogs, source_notes)
 
     # Still unsure: fingerprint a few tracks (AcoustID) and add the releases that
     # hold those recordings; they also prove the album when its title differs.

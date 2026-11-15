@@ -1376,8 +1376,13 @@ def countries_from_addresses(ocr_text):
 def countries_on_scans(ocr_text):
     """Release countries printed on the scans ("Made in Germany" -> {"DE"}), and the
     countries of the postal addresses printed there (the label's own office)."""
-    out = countries_from_addresses(ocr_text)
-    for m in _MADE_IN.finditer(str(ocr_text or "")):
+    return countries_from_addresses(ocr_text) | countries_made_in(ocr_text)
+
+
+def countries_made_in(text):
+    """The countries a text says something was made in ("Made in West Germany" -> {"DE"})."""
+    out = set()
+    for m in _MADE_IN.finditer(str(text or "")):
         words = re.sub(r"[^a-z ]", " ", m.group(1).casefold()).split()
         for n in range(min(3, len(words)), 0, -1):       # longest known name first
             code = _COUNTRY_NAMES.get(" ".join(words[:n]))
@@ -1562,7 +1567,9 @@ def _misread_variants(text):
 # Identifier type (casefolded) -> the clue it gives.
 MATRIX_KINDS = {"matrix / runout": "matrix", "mastering sid code": "sid code",
                 "mould sid code": "sid code", "label code": "label code"}
-_MATRIX_SPLIT = re.compile(r"[\s\-‐‑–—_.,:;/\\|()\[\]{}'\"`*=+~#°]+")
+# OCR-8: every mark but letters and digits parts words - Discogs writes "‧MASTERED BY
+# MAYKING‧" and "<02>", OCR reads "MASTERED.”" and "«02>"
+_MATRIX_SPLIT = re.compile(r"[\W_]+")
 # only the look-alikes OCR confuses most on a hub: O for 0, I and l for 1 (both sides alike)
 _MATRIX_FOLD = str.maketrans({"o": "0", "i": "1", "l": "1"})
 
@@ -1607,17 +1614,76 @@ def cand_matrices(cand):
             if MATRIX_KINDS.get(str(k).casefold()) and str(v or "").strip()]
 
 
-def matrix_read(text, value, own=()):
+def _matrix_near(joined, key, letters):
+    """OCR-8: KEY read in JOINED (a disc ring's words run together) with a slip or two: at
+    most one for every 7 of its letters, each slip on a place that is a letter in the value
+    (a letter misread, missed, or a mark read in beside one); its digits are read exactly.
+    "MASTERED BY MAYKING" read "MASTERED. BY MAYVEING" counts; "RUNE9CD 01" read "RUNE 9 CD
+    <02>" never does, nor "SONOPRESS B-8172" read "B-8173"."""
+    allowed = sum(letters) // 7
+    if allowed < 1 or len(key) != len(letters):
+        return False
+    n, big = len(key), 10 ** 6
+    # where to look: an exact four-letter piece of the key, read somewhere
+    starts = set()
+    for i in range(n - 3):
+        if all(letters[i:i + 4]):
+            j = joined.find(key[i:i + 4])
+            while j >= 0:
+                starts.add(max(0, j - i - allowed))
+                j = joined.find(key[i:i + 4], j + 1)
+    for s in sorted(starts):
+        window = joined[s:s + n + 2 * allowed]
+        prev = [0] * (len(window) + 1)      # (Sellers: the key against any part of the window)
+        for i in range(1, n + 1):
+            slip = 1 if letters[i - 1] else big
+            cur = [prev[0] + slip] + [0] * len(window)
+            for j in range(1, len(window) + 1):
+                cur[j] = min(prev[j - 1] + (0 if key[i - 1] == window[j - 1] else slip),
+                             prev[j] + slip, cur[j - 1] + slip)
+            prev = cur
+        if min(prev) <= allowed:
+            return True
+    return False
+
+
+# OCR-8: words a disc ring or sleeve prints on every pressing of a plant or country: a run of
+# a matrix made of these alone names none ("MADE IN GERMANY BY" is every German disc's;
+# folding I to 1 once made "made1ngermany" look like a code)
+_MATRIX_GENERIC = {"made", "in", "by", "manufactured", "mastered", "pressed", "printed", "the", "of",
+                   "and", "for", "disc", "disk", "compact", "digital", "audio", "west", "east", "under",
+                   "licence", "license", "from", "inc", "ltd", "gmbh", "side", "stereo"}
+
+
+def _names_a_pressing(raw_words):
+    """A run of a matrix's words (unfolded) that can name a pressing: a digit as printed, or a
+    word of 5+ letters that is no generic word or country ("MAYKING", "OPTICAL", "SONOPRESS")."""
+    # (a digit as printed in a word of 3+ characters - "1A1", "01A", "8172" - or in two words of
+    # the run; never a lone side or disc number: "MADE IN GERMANY 1" is any German disc's side 1)
+    digit_words = [w for w in raw_words if any(ch.isdigit() for ch in w)]
+    if any(len(w) >= 3 for w in digit_words) or len(digit_words) >= 2:
+        return True
+    countries = {x for name in _COUNTRY_NAMES for x in name.split()}
+    return any(len(w) >= 5 and w.isalpha() and w not in _MATRIX_GENERIC and w not in countries
+               for w in raw_words)
+
+
+def matrix_read(text, value, own=(), near=False):
     """The part of a matrix value read in the text (folded as matrix_tokens), or "".
     The whole value, or a run of its words that is distinctive on its own and holds its
     longest word; a run that is
     only the catalogue number or barcode again (`own`, folded) says nothing new: a letter
     or three digits (zeros aside) must be left beyond it ("QDISS0201CDD-1" on a back cover's
-    "QDISS0201CDD 1999" does not count, its words end elsewhere)."""
+    "QDISS0201CDD 1999" does not count, its words end elsewhere). NEAR (the disc ring's own
+    text only): a run read with an OCR slip in its letters counts too (OCR-8)."""
     words = matrix_tokens(value)
     if not words or not text:
         return ""
     hay = _matrix_hay(str(text))
+    # which places of the folded words were letters before O/I/l were folded to digits
+    raw = [t for t in _MATRIX_SPLIT.split(str(value or "").casefold()) if t]
+    if [len(t) for t in raw] != [len(t) for t in words]:
+        raw = words
     best = ""
     # a run always holds the value's longest word: "-1 15 A00" alone is on many discs
     stem = max(range(len(words)), key=lambda k: len(words[k]))
@@ -1634,7 +1700,12 @@ def matrix_read(text, value, own=()):
                 c = c.replace("0", "")
                 if c and c in rest:
                     rest = rest.replace(c, "", 1)
-            if (len(rest) < 3 and not re.search(r"[a-z]", rest)) or not _matrix_in(hay, key):
+            if len(rest) < 3 and not re.search(r"[a-z]", rest):
+                continue
+            if not _names_a_pressing(raw[i:j]):
+                continue
+            if not _matrix_in(hay, key) and not (
+                    near and _matrix_near(hay[0], key, [c.isalpha() for c in "".join(raw[i:j])])):
                 continue
             best = key
     return best
@@ -1662,6 +1733,43 @@ def _matrix_conflict(ring_text, values):
     return ""
 
 
+ON_THE_SCANS = " on the scans"
+ON_THE_RING = " on the disc ring"
+
+
+def matrix_words_seen(ring_text, cand):
+    """EVI-9: the words of this release's own matrices that the disc ring reads - a plant's name
+    of 3+ letters ("PMDC", "EMI", "PDO"; never a generic word or a country), or a code word of 4+
+    characters, beyond its catalogue numbers and barcodes: this pressing's mark, whichever
+    release the rest of the ring was read as."""
+    if not ring_text:
+        return set()
+    own = {"".join(matrix_tokens(c)) for c in (cand.get("catnos") or ())} | \
+          {barcode_key(b) for b in (cand.get("barcodes") or ())}
+    countries = {x for name in _COUNTRY_NAMES for x in name.split()}
+    ring = set(matrix_tokens(ring_text))
+    seen = set()
+    for c, v in cand_matrices(cand):
+        if c != "matrix":
+            continue
+        raw = [t for t in _MATRIX_SPLIT.split(str(v).casefold()) if t]
+        for w_raw, w in zip(raw, matrix_tokens(v)):
+            if w in own or w not in ring:
+                continue
+            if (w_raw.isalpha() and len(w_raw) >= 3 and w_raw not in _MATRIX_GENERIC and w_raw not in countries) \
+                    or (not w_raw.isalpha() and len(w) >= 4):
+                seen.add(w)
+    return seen
+
+
+def lists_own_matrix(cand):
+    """A release's matrix says something of its pressing only beyond its catalogue number and
+    barcode: a matrix listed as "CDXYZ 3" is the number again (EVI-9 counts it as none)."""
+    own = {"".join(matrix_tokens(c)) for c in (cand.get("catnos") or ())} | \
+          {barcode_key(b) for b in (cand.get("barcodes") or ())}
+    return any(c == "matrix" and matrix_read(v, v, own) for c, v in cand_matrices(cand))
+
+
 def matrix_clues(ocr_text, cand, ring_text="", agree=None, disagree=None):
     """Discogs' matrix / runout, SID and label codes of this pressing read on the scans
     (the disc rings OCR'd flat, a disc scan's page OCR). A clue, never proof: added to
@@ -1677,8 +1785,14 @@ def matrix_clues(ocr_text, cand, ring_text="", agree=None, disagree=None):
     text = "\n".join(t for t in (ocr_text, ring_text) if t)
     names = {"matrix": "matrix", "sid code": "SID code", "label code": "label code"}
     for clue, value in found:
-        if clue not in agree and matrix_read(text, value, own):
-            agree[clue] = f"{names[clue]} {value.strip()} on the scans"
+        if clue in agree and not agree[clue].endswith(ON_THE_SCANS):
+            continue
+        # (read on the disc ring itself - the only reading EVI-9 lets name the pressing - or on
+        # the page text, which may be a sleeve's "Made in Germany by PDO", every PDO pressing's)
+        if ring_text and matrix_read(ring_text, value, own, near=True):
+            agree[clue] = f"{names[clue]} {value.strip()}{ON_THE_RING}"
+        elif clue not in agree and matrix_read(text, value, own):
+            agree[clue] = f"{names[clue]} {value.strip()}{ON_THE_SCANS}"
     if "matrix" not in agree and ring_text:
         values = [v for c, v in found if c == "matrix"]
         other = _matrix_conflict(ring_text, values)
@@ -1795,6 +1909,12 @@ def pressing_clues(ocr_text, cand, ring_text=""):
                 name = next((n for n, c in _COUNTRY_NAMES.items() if c == name and len(n) > 3), name)
                 name = name.upper() if name in ("us", "uk", "eu") else name.title()
             agree["country"] = f"made in {name} on the scans"
+        elif printed <= set(cand.get("notes_made_in") or ()):
+            # CTY-2: the release's own notes say its parts were made there too ("Made in West
+            # Germany (Booklet)", "Made in United Kingdom (CD Face)": Creedence Clearwater Revival -
+            # Chronicle, Volume Two, Discogs 25736467, filed under UK): nothing against it, and
+            # no clue for it either (a German booklet came with other pressings as well)
+            pass
         else:
             disagree.append(f"scans say made in {'/'.join(sorted(printed))}, "
                             f"this pressing is from {cand.get('country')}")
@@ -2288,6 +2408,68 @@ def rip_date_drop(scored, cfg):
     for s in fits:
         s["notes"] = s["notes"] + [f"{len(dropped)} release(s) left out ({ids}): {RIP_DATE_AGAINST}{log_year}, "
                                    f"and {'they' if len(dropped) > 1 else 'it'} came out later (DAT-3)"]
+    return [s for s in scored if not any(s is d for d in dropped)], dropped
+
+
+MATRIX_AGAINST = "your disc's matrix is another pressing's: "
+
+
+def matrix_drop(scored, cfg):
+    """EVI-9: the matrix your disc shows names the pressing among those sharing its catalogue
+    number or barcode (EVI-8: one number, several pressings). A release carrying the number of
+    one whose matrix your scans read, that lists a matrix of its own your scans do not show,
+    is left out - however well its listed lengths or country fit (Creedence Clearwater Revival
+    - Chronicle, Volume Two: four Discogs releases are CDCCR 3; your disc reads "MASTERED BY
+    MAYKING", 25736467's; the Sonopress one listed the rip's own lengths, Mayking's the
+    sleeve's). Only for a matrix match that fits the album with nothing of your copy against
+    it, and never against your copy's own proof: one carrying your barcode or exact disc ID
+    stays unless the matrix match carries it too (a barcode match is the release, BAR-1). One
+    listing no matrix stays (it may be the same pressing, undocumented); so do all when your
+    scans read two of the pressings' matrices. Those left out get the clue against them."""
+    for s in scored:
+        if any(str(x).startswith(MATRIX_AGAINST) for x in s.get("clues_against") or ()):
+            s["clues_against"] = [x for x in s["clues_against"] if not str(x).startswith(MATRIX_AGAINST)]
+    # (the disc ring's own reading only: a sleeve's "Made in Germany by PDO" is every PDO pressing's)
+    if any(str((s.get("clues") or {}).get("matrix") or "").endswith(ON_THE_SCANS) for s in scored):
+        return scored, []
+    read = [s for s in scored if str((s.get("clues") or {}).get("matrix") or "").endswith(ON_THE_RING)]
+    if len({str(s["cand"]["id"]) for s in read}) != 1:
+        return scored, []
+    match = read[0]
+    if not match["tracks_ok"] or match.get("media_why") or match.get("conflict") or \
+            match.get("clues_against") or format_contradictions(match) or not (
+            (match["artist_sim"] >= cfg["auto_min_artist"] and match["title_sim"] >= cfg["auto_min_title"])
+            or _numbers_prove_album(match, cfg)):
+        return scored, []
+    numbers = set(match["cand"].get("catnos") or ())
+    codes = {barcode_key(b) for b in match["cand"].get("barcodes") or ()}
+    dropped = []
+    for s in scored:
+        if s is match or str(s["cand"]["id"]) == str(match["cand"]["id"]):
+            continue
+        # (a matrix that is only its number again says nothing of the pressing: as none)
+        if not lists_own_matrix(s["cand"]):
+            continue
+        # (a word of its own matrix the ring reads - its plant's name - keeps it, one the match
+        # lists too as well: two PDO pressings are not told apart by "PDO")
+        if s.get("matrix_words_seen"):
+            continue
+        if not (numbers & set(s["cand"].get("catnos") or ())
+                or codes & {barcode_key(b) for b in s["cand"].get("barcodes") or ()}):
+            continue
+        if barcode_proves(s) and not barcode_proves(match):
+            continue
+        if _exact_toc(s) and not (_exact_toc(match) or barcode_proves(match)):
+            continue
+        dropped.append(s)
+    if not dropped:
+        return scored, []
+    for s in dropped:
+        s["clues_against"] = list(s.get("clues_against") or ()) + [
+            f"{MATRIX_AGAINST}{match['clues']['matrix']} names {match['cand']['id']} (EVI-9)"]
+    ids = ", ".join(str(s["cand"]["id"]) for s in dropped[:3])
+    match["notes"] = match["notes"] + [f"{len(dropped)} release(s) with its number left out ({ids}): "
+                                       f"your disc's matrix is this one's (EVI-9)"]
     return [s for s in scored if not any(s is d for d in dropped)], dropped
 
 
@@ -3076,7 +3258,7 @@ def choose_pressing(tied, preferred_countries=None, prefs=None):
     for s in tied:
         against = [a for a in s.get("clues_against") or () if _against_key(a) not in shared and a not in media_shared]
         if id(s) in burned:
-            against.append(f"your disc shows a pressed {matrix.split(' on the scans')[0]}; this pressing is a CD-R")
+            against.append(f"your disc shows a pressed {matrix.split(ON_THE_SCANS)[0].split(ON_THE_RING)[0]}; this pressing is a CD-R")
         view.append(dict(s, clues_against=against))
     back = {id(v): s for v, s in zip(view, tied)}
     got = _choose_pressing(view, preferred_countries, prefs)
@@ -3885,7 +4067,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     if club_against:
         clues_against.append(club_against)
     if "matrix" in clues:                    # a clue for telling pressings apart; no points
-        notes.append(clues["matrix"].replace(" on the scans", " agrees (read on the scans)"))
+        notes.append(clues["matrix"].replace(ON_THE_SCANS, " agrees (read on the scans)")
+                     .replace(ON_THE_RING, " agrees (read on the disc ring)"))
     # A catalogue number the folder or tags name that this pressing does not carry:
     # if NO pressing carries it, the copy is probably one the databases do not list.
     own_all = sorted(c for c in (album.get("catnos") or ())
@@ -3925,6 +4108,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
         "pressing_year": album.get("pressing_year"),
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
+        "matrix_words_seen": matrix_words_seen(album.get("ring_text") or "", cand),     # (EVI-9)
         # DAT-3: "your rip log is dated 2005; this pressing came out in 2012" (or ""), and the
         # years classify checks the log's date against (the album's own year: clock sanity).
         # A clue against the pressing only once classify leaves it out (rip_date_drop).
@@ -4441,6 +4625,8 @@ def classify(scored, cfg):
     # (with the guards of rip_date_drop: your barcode, disc ID or number on the later one). It only
     # chooses among candidates: nothing is held for the date alone.
     scored, _rip_dropped = rip_date_drop(scored, cfg)
+    # EVI-9: the matrix your disc shows names the pressing among those sharing its number
+    scored, _matrix_dropped = matrix_drop(scored, cfg)
 
     drop_unproven_sectors(scored)
 

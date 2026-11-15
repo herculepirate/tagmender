@@ -2045,6 +2045,12 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         return re.sub(r"[\W_]+", " ", t.casefold()).strip()
     bare = {bare_title(i.get("album")) for _p, i in infos} - {""}
     different = len(bare) > 1 and not any(a != b and (a in b or b in a) for a in bare for b in bare)
+    # (nor one set's discs with subtitles of their own: "Gamma: Dawn to Dusk" and "Gamma: Twilight to
+    # Starlight" begin alike - an article aside, "The Stranger" and "The Nylon Curtain" do not)
+    firsts = {next((w for w in t.split() if w not in ("the", "a", "an", "le", "la", "les", "der", "die", "das",
+                                                         "el", "il")), "") for t in bare}
+    if len(firsts) == 1 and "" not in firsts:
+        different = False
     if len(discs_all) > 1 and different:
         for field in ("barcode", "catno"):
             on = {}

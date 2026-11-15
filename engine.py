@@ -518,9 +518,6 @@ def box_still_arriving(folder, skips=None, left_out=None) -> str:
     (Engine._box_part_left_out) - such a box is never one album, so nothing of it waits."""
     folder = Path(folder)
     skips = skips or _skips_folder
-    waits = _named_set_arriving(folder, skips, left_out)          # DSC-6, DSC-7
-    if waits:
-        return waits
     for box in (folder.parent, folder.parent.parent):
         if not box_cd_count(box.name):
             continue
@@ -544,7 +541,7 @@ def box_still_arriving(folder, skips=None, left_out=None) -> str:
             gone = list(range(len(numbers) + 1, n + 1))
             words = ", ".join(map(str, gone))
             return f"disc{'s' if len(gone) > 1 else ''} {words} of {n} {'are' if len(gone) > 1 else 'is'} not here yet"
-    return ""
+    return _named_set_arriving(folder, skips, left_out)                 # DSC-6, DSC-7
 
 
 def _named_set_arriving(folder: Path, skips, left_out=None) -> str:
@@ -554,9 +551,24 @@ def _named_set_arriving(folder: Path, skips, left_out=None) -> str:
     name joins - "An Innocent Man is not here yet". DSC-7: it is "Disc k" of a folder of disc
     folders numbered 1, 2 ... with no gap, and its files' disc totals count more discs than are
     here - "discs 4, 5 of 5 are not here yet". "" otherwise (nothing says how many are coming)."""
-    box = folder.parent
+    # (the watcher asks about the set's folder, a DSC-7 group's: its highest-numbered disc folder)
     try:
-        subs = sorted(x for x in box.iterdir() if x.is_dir() and not skips(x.name))
+        inner = [(int(m[1]), x) for x in folder.iterdir() if x.is_dir() and is_disc_dir(x)
+                 for m in [_LEAD_NUMBER.match(x.name)] if m]
+    except OSError:
+        inner = []
+    if inner:
+        return _named_set_arriving(max(inner)[1], skips, left_out)
+    box = folder.parent
+
+    def has_audio(d):
+        try:
+            return any(f.suffix.lower() in ex.AUDIO_EXT for f in d.iterdir() if f.is_file())
+        except OSError:
+            return False
+    try:
+        # (folders holding audio only: "Scans/" or "Artwork/" beside the albums is none of them)
+        subs = sorted(x for x in box.iterdir() if x.is_dir() and not skips(x.name) and has_audio(x))
         if any(x.is_file() and x.suffix.lower() in ex.AUDIO_EXT for x in box.iterdir()):
             return ""
     except OSError:
@@ -576,12 +588,16 @@ def _named_set_arriving(folder: Path, skips, left_out=None) -> str:
     numbers = sorted(int(x[1]) for x in (_LEAD_NUMBER.match(s.name) for s in subs if is_disc_dir(s)) if x)
     if numbers != list(range(1, len(numbers) + 1)):
         return ""
-    totals = set()
+    # (its files tagged as its own disc k: a range folder's "CD1" holding disc 3 of 4 is no set)
+    totals, own = set(), set()
     for f in folder.iterdir():
         if f.suffix.lower() in ex.AUDIO_EXT:
-            t = _disc_tag(ex.read_meta(f))[1]
+            num, t = _disc_tag(ex.read_meta(f))
+            own.add(num)
             if t.isdigit():
                 totals.add(int(t))
+    if own != {str(int(m[1]))}:
+        return ""
     if len(totals) == 1 and next(iter(totals)) > len(numbers):
         n = next(iter(totals))
         gone = list(range(len(numbers) + 1, n + 1))

@@ -207,6 +207,15 @@ class DSC8Titles(te.Base):
                 shutil.rmtree(top)
 
 
+class DSC8Subtitles(te.Base):
+    def test_DSC8_discs_with_subtitles_of_one_set_keep_its_barcode(self):
+        top = self.lib / "Band T" / "Gamma"
+        album(top, "CD1", "Gamma: Dawn to Dusk", disc="1/2", barcode="5013929020160")
+        album(top, "CD2", "Gamma: Twilight to Starlight", disc="2/2", freq=600, titles="Delta")
+        a = ma.read_album(top, "Band T", "Gamma")
+        self.assertEqual(a["barcodes"], {"5013929020160"})
+
+
 class DSC67Arriving(te.Base):
     def test_DSC6_one_album_of_a_twofer_waits_for_the_other(self):
         top = self.lib / "Band T" / "1992 - Alpha & Beta"
@@ -220,6 +229,21 @@ class DSC67Arriving(te.Base):
         album(top, "Disc 1 - Alpha (Classics)", "Alpha (Classics)", disc="1/3")
         album(top, "Disc 2 - Beta (Classics)", "Beta (Classics)", disc="2/3", freq=600)
         self.assertEqual(engine.box_still_arriving(top / "Disc 2 - Beta (Classics)"), "disc 3 of 3 is not here yet")
+
+    def test_DSC7_asked_about_the_sets_folder_as_the_watcher_does(self):
+        top = self.lib / "Band W" / "Classics"
+        album(top, "Disc 1 - Alpha (Classics)", "Alpha (Classics)", disc="1/5")
+        album(top, "Disc 2 - Beta (Classics)", "Beta (Classics)", disc="2/5", freq=600)
+        gs = engine.Engine.albums_in(self.engine(te.FakeHttp()), self.lib)
+        self.assertEqual([g.folder for g in gs], [top])
+        self.assertEqual(engine.box_still_arriving(gs[0].folder), "discs 3, 4, 5 of 5 are not here yet")
+
+    def test_DSC6_scans_beside_the_albums_do_not_stop_the_wait(self):
+        top = self.lib / "Band T" / "1992 - Alpha & Beta"
+        album(top, "1977 - Alpha", "Alpha")
+        (top / "Scans").mkdir()
+        (top / "Scans" / "back.jpg").write_bytes(b"x")
+        self.assertEqual(engine.box_still_arriving(top / "1977 - Alpha"), "Beta is not here yet")
 
     def test_DSC7_nothing_says_how_many_nothing_waits(self):
         top = self.lib / "Band W" / "Classics"

@@ -247,6 +247,22 @@ class DSC8BoxNamedByItsDiscs(te.Base):
         a = ma.read_album(top, "Band T", top.name)
         self.assertEqual(a["barcodes"], set())
 
+    def test_DSC8_a_twofers_barcode_stays_one_discs_whatever_the_brackets_or_folder_say(self):
+        cases = (("1992 - Live & Beta", "Live", "Beta (Live at Budokan)"),
+                 ("1992 - Demos & Beta", "Demos", "Beta (Demos)"),
+                 ("1992 - Gold & Beta", "Gold", "Beta (Gold Edition)"),
+                 ("1992 - Alpha & Beta", "Alpha", "Beta (Alpha Sessions)"),
+                 ("1992 - Alpha", "Alpha", "Beta"))
+        for name, t1, t2 in cases:
+            with self.subTest(name=name, titles=(t1, t2)):
+                top = self.lib / "Band T" / name
+                album(top, "A", t1)
+                album(top, "B", t2, freq=600, barcode="074643883726")
+                a = ma.read_album(top, "Band T", top.name)
+                self.assertEqual(a["barcodes"], set())
+                self.assertIn("74643883726", a["disc_only_codes"])
+                shutil.rmtree(top)
+
 
 class DSC67Arriving(te.Base):
     def test_DSC6_one_album_of_a_twofer_waits_for_the_other(self):

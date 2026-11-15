@@ -2051,24 +2051,25 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                                          "el", "il")), "") for t in bare}
     if len(firsts) == 1 and "" not in firsts:
         different = False
-    # (nor a box whose discs name it: "Original Album Classics" on two discs, "Songs in the Attic
-    # (Original Album Classics)" on the rest - one disc's title is the set's name, in another disc's
-    # brackets ("... (Original Album Classics #2)" too) or as the set's folder, its year aside; a
-    # twofer's folder joining its albums' titles names neither)
+    # (nor a box's own code on the discs titled as the box: "Original Album Classics" on discs 1-2,
+    # "Songs in the Attic (Original Album Classics)" on the rest - a title is the set's name when
+    # it is the whole of another disc's brackets, a number after it aside ("... (Original Album
+    # Classics #2)"), or the set's folder, its year aside; the code is kept only when every disc
+    # carrying it is titled so - "Live" beside "Beta (Live)" with Beta's barcode stays Beta's)
     def _fold(t):
         return re.sub(r"[\W_]+", " ", str(t or "").casefold()).strip()
-    in_brackets = {_fold(b) for _p, i in infos
+    in_brackets = {re.sub(r"\s+\d+$", "", _fold(b)) for _p, i in infos
                    for b in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(i.get("album") or ""))} - {""}
     folder_name = _fold(re.sub(r"^\s*\d{4}\s*-\s*", "", str(album_folder or "")))
-    if any(t == folder_name or any(b == t or b.startswith(t + " ") for b in in_brackets) for t in bare):
-        different = False
+    set_names = {t for t in bare if t == folder_name or t in in_brackets}
+    set_discs = {i["disc_eff"] for _p, i in infos if bare_title(i.get("album")) in set_names}
     if len(discs_all) > 1 and different:
         for field in ("barcode", "catno"):
             on = {}
             for _p, i in infos:
                 if i.get(field):
                     on.setdefault(mc.norm_code(i[field]), set()).add(i["disc_eff"])
-            partial = {code for code, ds in on.items() if ds != discs_all}
+            partial = {code for code, ds in on.items() if ds != discs_all and not (ds <= set_discs)}
             for _p, i in infos:
                 if i.get(field) and mc.norm_code(i[field]) in partial:
                     i[field] = ""

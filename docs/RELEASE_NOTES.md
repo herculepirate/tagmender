@@ -3,9 +3,9 @@
 ## 0.8.65
 
 **The right pressing, more often**
-- Your exact disc ID now picks the MusicBrainz entry that carries it when that entry lists no
-  barcode but links only Discogs releases carrying yours, over another entry with your
-  barcode (BAR-12).
+- Your disc ID now picks the MusicBrainz entry that carries it when that entry lists no
+  barcode, links only Discogs releases carrying yours, and Discogs's own pick is one of them,
+  over another entry with your barcode (BAR-12).
 - A CD whose MusicBrainz release also lists a download bonus track ("Digital Media") is
   disc 1 of 1, not 1 of 2, when your files do not hold that track (MED-20).
 

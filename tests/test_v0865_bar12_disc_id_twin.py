@@ -42,9 +42,12 @@ def res(a, cands):
     return dict(mc.classify(scored, CFG), scored=scored)
 
 
-def held(r, best_id):
-    """Discogs held on a tie, its pick BEST_ID (as Heatwave's: the pressings sharing your barcode)."""
+def held(r, best_id, matrix=True):
+    """Discogs held on a tie, its pick BEST_ID (as Heatwave's: the pressings sharing your barcode),
+    its matrix on your scans when MATRIX."""
     best = next(s for s in r["scored"] if s["cand"]["id"] == best_id)
+    if matrix:
+        best["clues"] = dict(best.get("clues") or {}, matrix="matrix RUNE 9 CD <02> agrees (read on the scans)")
     return dict(r, status="review", best=best, why=["runner-up within 0.0 points (likely another pressing)"])
 
 
@@ -119,6 +122,26 @@ class BAR12DiscIdTwin(unittest.TestCase):
     def test_BAR12_your_barcode_release_with_your_disc_id_stands(self):
         mb, dg = self.heatwave(album=_album(on=("disc-mb", "barcode-mb")))
         self.assertIs(mc._disc_id_twin_of_barcode(mb, dg), mb)
+
+    def test_BAR12_a_tie_with_nothing_of_your_copy_between_keeps_your_barcode_release(self):
+        # (review A: Discogs's pick only first in its tie - the order says nothing of your copy)
+        mb, dg = self.heatwave()
+        dg = held(dg, "dg-a", matrix=False)
+        dg["best"]["clues"].pop("matrix", None)
+        self.assertIs(mc._disc_id_twin_of_barcode(mb, dg), mb)
+
+    def test_BAR12_musicbrainz_preferred_pairs_the_entry_with_discogs(self):
+        # (review B: the pick is the scored list's own object; MusicBrainz preferred, Discogs
+        # sure of the entry's link: MusicBrainz's entry with Discogs's pair, never Discogs alone)
+        a = _album()
+        mb = res(a, [_cand(**BARCODE_MB, discogs_ids=["dg-b"]), _cand(source="mb", id="disc-mb", discogs_ids=["dg-a"])])
+        dg = res(a, [_cand(id="dg-a", barcodes={UPC}, catnos={mc.norm_code("RUNE 9 CD"), "x1"})])
+        self.assertEqual(dg["status"], "auto")
+        out = mc._disc_id_twin_of_barcode(mb, dg)
+        self.assertTrue(any(out["best"] is s for s in mb["scored"]))
+        combined = mc.combine(dict(mb, cfg=dict(CFG, prefer_source="musicbrainz")), dg, ["US"],)
+        self.assertEqual((combined["best"]["cand"]["id"], combined.get("dg_twin")), ("disc-mb", "dg-a"),
+                         combined.get("why"))
 
     # The independent review's cases (each with and without BAR-12)
 

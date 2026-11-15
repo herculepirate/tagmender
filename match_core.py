@@ -5534,12 +5534,23 @@ def _disc_id_twin_of_barcode(mb_result, dg_result):
     if len(twins) != 1:
         return mb_result
     twin = twins[0]
-    twin = dict(twin, notes=list(twin.get("notes") or []) + [
-        f"your barcode is on {best['cand']['id']} and on the Discogs releases this entry links to "
-        f"({', '.join(sorted(linked_discogs(twin['cand'])))}); your disc IDs are on this one, and "
-        f"Discogs's pick {dg_pick} is its (BAR-12)"])
-    return dict(mb_result, best=twin, runner_up=best,
-                why=[w for w in mb_result.get("why") or () if not w.startswith("runner-up ")])
+    if dg_result.get("status") != "auto":
+        # Discogs held: its pick must rest on something of your copy (a matrix, a catalogue
+        # number, the scans) that each other entry carrying your barcode lacks - never its place
+        # in a tie, nor the disc ID it inherits from this very entry (_evidence)
+        links = linked_discogs(twin["cand"])
+        rivals = [s for s in dg_scored if str(s["cand"].get("id")) not in links and _carries_barcode(s)]
+        def ev(s):
+            return set(_evidence(s)) | ({"matrix"} if (s.get("clues") or {}).get("matrix") else set())
+        if not all(ev(dg_best) - ev(s) for s in rivals):
+            return mb_result
+    # (the very object of the scored list: later checks look for it by identity, mb_twins)
+    out = _noted(dict(mb_result, best=twin, runner_up=best,
+                      why=[w for w in mb_result.get("why") or () if not w.startswith("runner-up ")]),
+                 f"your barcode is on {best['cand']['id']} and on the Discogs releases this entry links to "
+                 f"({', '.join(sorted(linked_discogs(twin['cand'])))}); your disc IDs are on this one, and "
+                 f"Discogs's pick {dg_pick} is its (BAR-12)")
+    return out
 
 
 def lengths_all_agree(b) -> bool:

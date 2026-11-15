@@ -684,7 +684,11 @@ def catno_same(a, b):
         return True
     short, long_ = sorted((a, b), key=len)
     digits = len(re.sub(r"\D", "", short))
-    if digits >= 2 and long_.endswith(short) and re.fullmatch(r"[a-z]{1,5}" + fmt + "?", long_[:-len(short)]):
+    # CAT-4: only in front of a number that has no label letters of its own ("079", "CD0540"):
+    # "CK 87128" (a US Columbia disc) is not "TFCK 87128" (a Japanese one) with "TF" in front
+    lead = re.match(r"[a-z]*", short).group(0)
+    if digits >= 2 and long_.endswith(short) and re.fullmatch(r"[a-z]{1,5}" + fmt + "?", long_[:-len(short)]) \
+            and (not lead or re.fullmatch(fmt, lead)):
         return True                                  # the label's letters in front
     if (len(short) >= 3 and re.search(r"[a-z]", short) and digits
             and long_.startswith(short) and re.fullmatch(fmt + r"(?:\+" + fmt + r")*|[1-9]", long_[len(short):])):

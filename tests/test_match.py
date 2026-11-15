@@ -1847,6 +1847,18 @@ class PressingEvidence(unittest.TestCase):
             self.assertTrue(same(x, y), (x, y))
         self.assertFalse(same("SPV 99807", "SPV 98807 DVD+CD"))           # a different number
 
+    def test_CAT4_label_letters_in_front_only_of_a_number_without_its_own(self):
+        """Judas Priest - Metalogy: the rip logs name the US discs CK 87127-87130; a Japanese
+        TFCK 87128 is another label's number, not CK 87128 with "TF" in front."""
+        same = mc.catno_same
+        for x, y in (("CK 87128", "TFCK 87128"), ("CK87128", "TFCK-87128"), ("SPV 1234", "XSPV 1234")):
+            self.assertFalse(same(x, y), (x, y))
+            self.assertFalse(same(y, x), (y, x))
+            self.assertFalse(mc.catnos_agree({mc.norm_code(x)}, [y]), (x, y))
+        for x, y in (("079", "GUN 079"), ("CD0540", "MAS CD0540"), ("LP 123", "ABC LP 123"),
+                     ("CG-0004", "DIGICD CG-0004"), ("CK 87128", "CK 87128")):
+            self.assertTrue(same(x, y), (x, y))
+
     def test_clearly_closest_track_lengths(self):
         r = self.pick(album(), cand(id="far", tracks=[{"disc": 1, "title": f"T{i}", "secs": s}
                                                        for i, s in enumerate((203, 308, 413))]),

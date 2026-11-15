@@ -24,6 +24,9 @@
   your exact disc ID is (TOC-2). A barcode another tagger wrote no longer outweighs your
   exact disc ID or your folder's catalogue number (BAR-5).
 - Folder catalogue numbers such as "RHEADCDX 1" are read (CAT-3).
+- A catalogue number with another label's letters in front ("TFCK 87128") is no longer
+  taken for yours ("CK 87128", named by your rip logs), which had left a US box set with no
+  release that fit (CAT-4).
 - Your exact disc ID on MusicBrainz's entry no longer overrules Discogs's pick of another
   pressing when your folder name or scans speak against MusicBrainz's entry: a disc ID that
   several pressings share proves the disc, not the pressing (TOC-3).

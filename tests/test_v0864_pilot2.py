@@ -14,8 +14,9 @@ import match_albums as ma  # noqa: E402
 import match_core as mc  # noqa: E402
 
 
-def _entry(rid, matrix, catno="88697655822", barcode="886976558222", conf=100.0, date=""):
+def _entry(rid, matrix, catno="88697655822", barcode="886976558222", conf=100.0, date="", video=()):
     return {"cand": {"source": "discogs", "id": rid, "catnos": [catno], "barcodes": [barcode],
+                     "matrix_video": list(video),
                      "country": "Europe", "formats": ["cd", "dvd"], "label": "Roadrunner",
                      "matrix": [("Matrix / Runout", m) for m in matrix], "date": date, "tracks": []},
             "confidence": conf, "clues": {}}
@@ -67,6 +68,32 @@ def _metalogy_like():
                         {"name": "Box Set", "qty": "1", "descriptions": []}]}
 
 
+class EVI8TrueDuplicatesStayOne(unittest.TestCase):
+    """One pressing entered twice, its matrix typed otherwise: still one pressing (review)."""
+
+    def test_EVI8_spacing_variant_is_one_pressing(self):
+        a = _entry("1", ["A0102309767-0102 13 A00"], date="2010")
+        b = _entry("2", ["A 0102309767-0102 13 A00"])
+        self.assertFalse(mc._matrices_disjoint([a, b]))
+
+    def test_EVI8_dash_variant_is_one_pressing(self):
+        self.assertFalse(mc._matrices_disjoint([_entry("1", ["DIDX-123456 1"]), _entry("2", ["DIDX123456 1"])]))
+
+    def test_EVI8_video_disc_matrix_alone_is_not_compared(self):
+        dvd = "54044126/88697655822-2 DVD"
+        a = _entry("1", ["54044125/88697655822-1 21"])
+        b = _entry("2", [dvd], video=[dvd])
+        self.assertFalse(mc._matrices_disjoint([a, b]))
+        self.assertIsNotNone(mc.same_pressing_listed_twice([a, b]))
+
+    def test_EVI8_discogs_candidate_marks_video_matrices(self):
+        rel = _metalogy_like()
+        rel["identifiers"] = [
+            {"type": "Matrix / Runout", "value": "11111111/1-1", "description": "CD 1"},
+            {"type": "Matrix / Runout", "value": "22222222/2-1", "description": "DVD Layer 1 (Inner)"}]
+        self.assertEqual(ma.discogs_candidate(rel, dm)["matrix_video"], ["22222222/2-1"])
+
+
 class MED18DiscsByPositionPrefix(unittest.TestCase):
     def test_MED18_prefixed_run_and_dvd_heading_count_five(self):
         self.assertEqual(ma.discogs_discs(_metalogy_like(), dm)[1], 5)
@@ -80,6 +107,22 @@ class MED18DiscsByPositionPrefix(unittest.TestCase):
         rel = _metalogy_like()
         rel["formats"] = [{"name": "CD", "qty": "2"}, {"name": "DVD", "qty": "1"}]
         self.assertLessEqual(ma.discogs_discs(rel, dm)[1], 3)
+
+    def test_MED18_audio_disc_under_heading_not_counted(self):
+        # its tracks would stay on disc 1: the count is left as the headings give it (review)
+        rel = _metalogy_like()
+        rel["tracklist"] = [t for t in rel["tracklist"] if not str(t.get("position")).startswith("DVD")]
+        rel["tracklist"] += [{"type_": "track", "position": str(i), "title": f"Bonus {i}", "duration": "3:00"}
+                             for i in (1, 2)]
+        rel["formats"] = [{"name": "CD", "qty": "5"}]
+        self.assertEqual(ma.discogs_discs(rel, dm)[1], 2)
+
+    def test_MED18_vinyl_keeps_plugin_rule(self):
+        rel = _metalogy_like()
+        rel["tracklist"] = [t for t in rel["tracklist"] if not str(t.get("position")).startswith("DVD")]
+        rel["tracklist"] += [{"type_": "track", "position": p, "title": p, "duration": "3:00"} for p in ("A1", "B1")]
+        rel["formats"] = [{"name": "CD", "qty": "4"}, {"name": "Vinyl", "qty": "1"}]
+        self.assertEqual(ma.discogs_discs(rel, dm)[1], dm.release_disc_count(rel))
 
     def test_MED18_heading_split_release_unchanged(self):
         rel = {"tracklist": [{"type_": "heading", "title": "CD 1"},

@@ -2051,6 +2051,17 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                                          "el", "il")), "") for t in bare}
     if len(firsts) == 1 and "" not in firsts:
         different = False
+    # (nor a box whose discs name it: "Original Album Classics" on two discs, "Songs in the Attic
+    # (Original Album Classics)" on the rest - one disc's title is the set's name, in another disc's
+    # brackets ("... (Original Album Classics #2)" too) or as the set's folder, its year aside; a
+    # twofer's folder joining its albums' titles names neither)
+    def _fold(t):
+        return re.sub(r"[\W_]+", " ", str(t or "").casefold()).strip()
+    in_brackets = {_fold(b) for _p, i in infos
+                   for b in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(i.get("album") or ""))} - {""}
+    folder_name = _fold(re.sub(r"^\s*\d{4}\s*-\s*", "", str(album_folder or "")))
+    if any(t == folder_name or any(b == t or b.startswith(t + " ") for b in in_brackets) for t in bare):
+        different = False
     if len(discs_all) > 1 and different:
         for field in ("barcode", "catno"):
             on = {}

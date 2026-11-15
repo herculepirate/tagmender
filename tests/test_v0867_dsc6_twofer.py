@@ -216,6 +216,38 @@ class DSC8Subtitles(te.Base):
         self.assertEqual(a["barcodes"], {"5013929020160"})
 
 
+class DSC8BoxNamedByItsDiscs(te.Base):
+    def box(self, name, set_title, bracket):
+        top = self.lib / "Band W" / name
+        album(top, "Disc 01", set_title, "Band W", disc="1/3", barcode="886919685428", catalognumber="88691968542")
+        album(top, "Disc 02", set_title, "Band W", disc="2/3", freq=600, titles="Beta",
+              barcode="886919685428", catalognumber="88691968542")
+        album(top, "Disc 3 - Gamma", f"Gamma ({bracket})", "Band W", disc="01/01", freq=900)
+        return top
+
+    def test_DSC8_a_boxs_own_barcode_on_the_discs_titled_as_the_box_is_kept(self):
+        # (the rest titled "Gamma (Classics)": the box's name in their brackets)
+        top = self.box("Band W Box", "Classics", "Classics")
+        a = ma.read_album(top, "Band W", top.name)
+        self.assertEqual(a["barcodes"], {"886919685428"})
+        self.assertEqual(a["disc_only_codes"], [])
+
+    def test_DSC8_a_numbered_box_named_in_brackets_or_by_its_folder(self):
+        for name, bracket in (("Band W Box", "Classics #2"), ("2012 - Classics", "Remastered")):
+            with self.subTest(name=name, bracket=bracket):
+                top = self.box(name, "Classics", bracket)
+                a = ma.read_album(top, "Band W", top.name)
+                self.assertEqual(a["barcodes"], {"886919685428"})
+                shutil.rmtree(top)
+
+    def test_DSC8_a_twofers_folder_joining_its_titles_names_neither(self):
+        top = self.lib / "Band T" / "1992 - Alpha & Beta"
+        album(top, "1977 - Alpha", "Alpha")
+        album(top, "1983 - Beta", "Beta (Remastered)", freq=600, barcode="074643883726")
+        a = ma.read_album(top, "Band T", top.name)
+        self.assertEqual(a["barcodes"], set())
+
+
 class DSC67Arriving(te.Base):
     def test_DSC6_one_album_of_a_twofer_waits_for_the_other(self):
         top = self.lib / "Band T" / "1992 - Alpha & Beta"

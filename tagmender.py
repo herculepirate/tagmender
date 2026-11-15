@@ -693,6 +693,8 @@ def _make_plan(args):
         if engine.parse_release_ref(ref)[0] is None:
             raise SystemExit(f"tagmender: --release: not a MusicBrainz or Discogs release link or ID: {ref}")
         e.force = {os.path.realpath(os.path.expanduser(args.path)): ref}
+    if getattr(args, "file_below_score", False):
+        e.file_anyway = True          # MOV-5: you asked, for every album of this run
     p = e.plan(args.path, progress=_progress)
     if sys.stderr.isatty():
         print(file=sys.stderr)
@@ -1235,6 +1237,10 @@ def work_parsers(sub):
         a.add_argument("--release", metavar="LINK", help="use this release for the album at PATH: a MusicBrainz or "
                                                           "Discogs release link or ID (no search)")
         a.add_argument("--json", action="store_true")
+        a.add_argument("--file-below-score", action="store_true",
+                       help="move or copy identified albums into the profile's layout even when their score is "
+                            "below organize_min_confidence (they are otherwise tagged in place); partial "
+                            "identifications and the other rules still keep theirs in place")
         prof(a)
         level(a)
         a.add_argument("--source", choices=pf.SOURCES,

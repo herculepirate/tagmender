@@ -1268,9 +1268,15 @@ def _cue_rewrites(path: Path, renames: dict):
 
 
 class Planner:
-    def __init__(self, profile, job_id=None, rules=None, overrides=None, extra_roots=(), edits=None):
+    def __init__(self, profile, job_id=None, rules=None, overrides=None, extra_roots=(), edits=None,
+                 file_anyway=None):
         self.profile = profile
         self.edits = edits or {}   # your edits from the app: {album folder: [edit]} (apply_edits)
+        # MOV-5: the album folders you asked to have filed though their score is below
+        # organize_min_confidence (realpaths; True: every album of this run - the CLI's
+        # --file-below-score). Never set by the watcher or an unattended run.
+        self.file_anyway = file_anyway if file_anyway is True else {
+            os.path.realpath(os.path.expanduser(str(f))) for f in file_anyway or ()}
         self.extra_roots = [os.path.realpath(os.path.expanduser(str(r))) for r in extra_roots]
         self.extra_roots = [os.path.dirname(r) if os.path.isfile(r) else r for r in self.extra_roots]
         self.job = job_id or time.strftime("%Y%m%d-%H%M%S-") + os.urandom(2).hex()
@@ -1420,6 +1426,12 @@ class Planner:
                     any(fe.get("op") in ("copy", "move") for fe in entry.get("files") or [])):
                 self._unclaim_album_dirs(prop)
             return entry
+
+    def asked_to_file(self, prop) -> bool:
+        """MOV-5: you asked for this album's folder to be filed whatever its score."""
+        if self.file_anyway is True:
+            return True
+        return bool(self.file_anyway) and os.path.realpath(str(prop.source_dir)) in self.file_anyway
 
     def _unclaim_album_dirs(self, prop):
         """MOV-4: this album's claims on album folders, given up (it is not filed there)."""
@@ -1591,10 +1603,21 @@ class Planner:
                 entry["label"] = "Skipped"
                 return entry
             op = "in_place"
+        elif op in ("copy", "move") and not organize_ok and self.asked_to_file(prop):
+            # MOV-5: you asked for this album to be filed (the app's "… anyway", the CLI's
+            # --file-below-score): the score gates what is done unasked, never what you ask for
+            entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
+                                  f"{_organize_floor_words(p)}; "
+                                  + ("copied" if op == "copy" else "moved") + " because you asked")
+            entry["filed_on_request"] = {"confidence": round(conf, 1),
+                                         "floor": _threshold(p, "organize_min_confidence"), "op": op}
         elif op in ("copy", "move") and not organize_ok:
             entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
                                   f"{_organize_floor_words(p)}: "
                                   + ("not copied" if op == "copy" else "tagged in place, not moved"))
+            # MOV-5: kept where it is for the score alone - you may ask for it to be filed
+            entry["below_floor"] = {"confidence": round(conf, 1),
+                                    "floor": _threshold(p, "organize_min_confidence"), "op": op}
             if op == "copy":
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"

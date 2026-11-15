@@ -85,6 +85,10 @@ COMMANDS = {
                         N_("Forget your cover: use the one the preview found")),
     "process_anyway": (N_("&Process Anyway"), "Ctrl+Shift+A", None,
                        N_("Rules will not exclude this album; preview again to include it")),
+    # MOV-5: its text is the operation's ("Move into…" / "Copy into…", file_anyway_words)
+    "file_anyway": (N_("Move into the Library La&yout Anyway"), None, None,
+                    N_("File this album into the profile's layout though its score is below the floor for "
+                       "moving or copying; it is previewed again, nothing is written until you apply")),
     "exclude_again": (N_("&Exclude Again"), None, None,
                       N_("The rules exclude this album again (undoes Process Anyway)")),
     "retry": (N_("&Retry in Overview"), "Ctrl+Shift+T", "refresh-cw", N_("Preview this album again in Overview")),
@@ -188,7 +192,7 @@ MENUS = (
     (N_("&View"), ("@pages", None, "show_sidebar", "show_inspector", None, "tab_tags", "tab_artwork", "tab_evidence",
                None, "refresh")),
     (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), "match_files", None, (N_("&Tag"), TAG_MENU),
-                (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "exclude_again", "retry", None,
+                (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "exclude_again", "retry", None,
                 "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
                 "open_folder", "copy_path")),
     (N_("&Controls"), ("play_pause", "next_track", "previous_track", "stop_playing", None, "skip_forward",

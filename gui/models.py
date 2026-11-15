@@ -81,6 +81,23 @@ def changes_text(files) -> str:
     return tr("{0}, {1}").format(head, ", ".join(parts))
 
 
+def below_floor_text(a) -> str:
+    """MOV-5: an album tagged where it is (or not copied) only because its score is below the
+    profile's floor for filing: "not moved (score 92 < 95)". "" for any other album."""
+    bf = (a or {}).get("below_floor") or {}
+    if not bf or (a or {}).get("status") == "done":
+        return ""
+    words = tr("not copied (score {0:.0f} < {1:g})") if bf.get("op") == "copy" else \
+        tr("not moved (score {0:.0f} < {1:g})")
+    return words.format(float(bf.get("confidence") or 0), float(bf.get("floor") or 0))
+
+
+def album_changes_text(a) -> str:
+    """The Changes column: changes_text, and what MOV-5 kept from happening (below_floor_text)."""
+    parts = [t for t in (changes_text(a.get("files") or []), below_floor_text(a)) if t]
+    return "; ".join(parts)
+
+
 # --------------------------------------------------------------------------
 # the plan as a table
 # --------------------------------------------------------------------------
@@ -243,7 +260,7 @@ class PlanModel(QAbstractTableModel):
             if c == 3:
                 return f"{ident['confidence']:.0f}" if ident.get("confidence") else ""
             if c == 4:
-                return changes_text(a["files"])
+                return album_changes_text(a)
             if c == self.PROFILE:
                 return self.profile_of(a)[0] if self.profile_of else ""
             if c == 5:

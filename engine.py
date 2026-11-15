@@ -3799,7 +3799,7 @@ class Engine:
             props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))],
-                          edits=getattr(self, "edits", None))
+                          edits=getattr(self, "edits", None), file_anyway=getattr(self, "file_anyway", None))
         with_keys(p["albums"], props)
         # (not kept in self.notes: those become every later album's provider errors)
         p["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
@@ -3834,7 +3834,8 @@ class Engine:
             return {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
 
         def planner():
-            return planmod.Planner(self.profile, self.job, extra_roots=[root], edits=getattr(self, "edits", None))
+            return planmod.Planner(self.profile, self.job, extra_roots=[root], edits=getattr(self, "edits", None),
+                                   file_anyway=getattr(self, "file_anyway", None))
         done = []                                        # (key, its proposals)
         try:
             for i, k in enumerate(keys):
@@ -3898,7 +3899,8 @@ class Engine:
         failed = threading.Event()
 
         def planner(e):
-            return planmod.Planner(e.profile, e.job, extra_roots=[root], edits=getattr(e, "edits", None))
+            return planmod.Planner(e.profile, e.job, extra_roots=[root], edits=getattr(e, "edits", None),
+                                   file_anyway=getattr(e, "file_anyway", None))
 
         def notes(e):
             return {**getattr(e, "run_notes", {}), **e.notes}     # (outages: the clones' shared state, below)
@@ -3906,7 +3908,7 @@ class Engine:
         def worker(clone):
             try:
                 e = engine_for_thread(self.profile, http=clone, log=self.log, job=self.job, **self._made_with)
-                for name in ("edits", "force"):
+                for name in ("edits", "force", "file_anyway"):
                     if name in self.__dict__:
                         setattr(e, name, self.__dict__[name])
                 scan = e.albums_in

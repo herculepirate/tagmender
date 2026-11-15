@@ -303,6 +303,14 @@ class ProfileDelegate(QStyledItemDelegate):
         editor.setGeometry(option.rect)
 
 
+def file_anyway_words(a) -> str:
+    """The Album menu's MOV-5 command, worded as the album's operation: a copy profile's album is
+    copied into the library, a move profile's moved into its layout."""
+    if ((a or {}).get("below_floor") or {}).get("op") == "copy":
+        return tr("Cop&y into the Library Anyway")
+    return tr("Move into the Library La&yout Anyway")
+
+
 class Overview(QWidget):
     """The profile picker, search field, progress bar and Preview / Apply / Cancel live in the
     window's toolbar (the window makes them); the album actions (Change Release: a link, Search for
@@ -316,6 +324,7 @@ class Overview(QWidget):
         self.path = None
         self.worker = None
         self.forced = {}
+        self.file_anyway = set()    # MOV-5: album folders you asked to have filed whatever the score
         self.library = ""           # the library folder chosen for this preview ("": the profile's)
         self.looked = {}            # album key -> how it was looked up (profile, sources): not again
         self.removed = set()        # folders of albums taken out of the list (Remove from List)
@@ -699,7 +708,7 @@ class Overview(QWidget):
 
     def context_menu(self, pos):
         keys = ("@release", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
-                "exclude_again", None, "play_pause", None, "search_web", "open_folder", "copy_path")
+                "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder", "copy_path")
         # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
         release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
             self.win, "menus", {}) else None
@@ -1078,6 +1087,8 @@ class Overview(QWidget):
             return False
         if not self.may_drop_edits(path):
             return False
+        if not (self.path and os.path.realpath(str(path)) == os.path.realpath(str(self.path))):
+            self.file_anyway = set()                         # (MOV-5: asked for that folder's albums only)
         self.path = path
         self.forced = dict(forced or {})
         self.within = list(within or [])                     # (several folders dropped: only these)
@@ -1593,6 +1604,7 @@ class Overview(QWidget):
         skipped = len(done)
         path, ocr, edits = self.path, self.ocr.isChecked(), self.win.inspector.edits_for_preview()
         forced = dict(self.forced)                           # (the releases you chose: kept, as Preview)
+        file_anyway = set(self.file_anyway)                  # (MOV-5: the albums you asked to have filed)
         total = sum(len(ks) for ks in groups.values())
 
         roots = dict(getattr(self, "roots", {}))
@@ -1612,6 +1624,7 @@ class Overview(QWidget):
                 e = engine.engine_for_thread(profs[name], ocr=True if ocr else None)
                 e.edits = edits
                 e.force = forced
+                e.file_anyway = file_anyway
                 e.lookup_workers = workers
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
                 return plan_each(e, where, kr, lambda k, plan: report("partial", (name, k, plan)),
@@ -1987,6 +2000,7 @@ class Overview(QWidget):
             return
         self.looked_with = self.sources_words(mode)
         path, ocr, forced = self.path, self.ocr.isChecked(), dict(self.forced)
+        file_anyway = set(self.file_anyway)
         edits = self.win.inspector.edits_for_preview()     # (your edits from the inspector: kept)
 
         def work(w):
@@ -1994,6 +2008,7 @@ class Overview(QWidget):
             e = engine.Engine(prof, ocr=True if ocr else None)    # unticked: the profile's "ocr"
             e.force = forced
             e.edits = edits
+            e.file_anyway = file_anyway
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, meta=META_STORE)
         self.busy(True)
         self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))
@@ -2562,6 +2577,26 @@ class Overview(QWidget):
             self.forced.pop(key, None)
         # (this album only - not every album listed - looked up again with the release chosen)
         self.look_up(self.sources.currentData() or "profile", self.with_versions([a]), again=True)
+
+    # ---- MOV-5: filed though the score is below the floor, because you ask -----------------
+    def may_file_anyway(self, a) -> bool:
+        """The album was tagged where it is (or not copied) only because its score is below the
+        profile's floor for filing (plan entry "below_floor"), and is not being worked on."""
+        return bool(a and a.get("below_floor") and a.get("status") not in ("done",)
+                    and not (getattr(self, "running", False) and not getattr(self, "looking", None)))
+
+    def file_anyway_selected(self):
+        """Album > Move into the Library Layout Anyway: the selected albums kept in place for their
+        score alone are looked up again with the floor lifted for their folders only (the rest of
+        the list stays as it is). Nothing is written until Apply."""
+        chosen = [a for a in self.selected_albums() if self.may_file_anyway(a)]
+        if not chosen:
+            return
+        self.file_anyway |= {os.path.realpath(a["source_dir"]) for a in chosen}
+        self.look_up(self.sources.currentData() or "profile", self.with_versions(chosen), again=True)
+        self.win.statusBar().showMessage(
+            tr("Previewing {0} filed into the library as you asked; nothing is written until you apply.").format(
+                plural(len(chosen), tr("album"), tr("albums"))), 10000)
 
     def process_anyway(self):
         a = self.selected()

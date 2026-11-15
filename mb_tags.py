@@ -668,7 +668,7 @@ _TRACK_SETS = {"title", "artist", "artistsort", "artists", "musicbrainz_artistid
 DATA_TRACK_TITLE, SILENCE_TRACK_TITLE = "[data track]", "[silence]"
 
 
-def _audio_ids(rel, media=None) -> set:
+def _audio_ids(rel, media=None, without=None) -> set:
     """id() of the media whose tracks are the album's audio files: every one but a video
     format's, and those at the positions in media (a DVD's or Blu-ray's audio, ripped as one
     version of the album: engine version folders)."""
@@ -676,6 +676,9 @@ def _audio_ids(rel, media=None) -> set:
     if media:
         want = {int(x) for x in media}
         out |= {id(m) for disc, m in enumerate(rel.get("media") or [], 1) if int(m.get("position") or disc) in want}
+    if without:                 # MED-19: media not in your files (a vinyl record of a CD box)
+        drop = {int(x) for x in without}
+        out -= {id(m) for disc, m in enumerate(rel.get("media") or [], 1) if int(m.get("position") or disc) in drop}
     return out
 
 
@@ -716,7 +719,7 @@ def track_keys(rel, pregap=False, media=None) -> list:
     return out
 
 
-def release_tags(rel, settings=None, pregap=False, media=None) -> list[dict]:
+def release_tags(rel, settings=None, pregap=False, media=None, without=None) -> list[dict]:
     """pregap=True: a medium's hidden track before track 1 (its "pregap", numbered 0) is one
     of the album's audio files too (a rip that has it as a file numbered 0), first on its
     disc, as Picard lists it. media: positions of video-format media whose tracks are audio
@@ -735,7 +738,7 @@ def release_tags(rel, settings=None, pregap=False, media=None) -> list[dict]:
     # the last of them left out (3 CDs + a DVD-Video: of 3, not of 4; disc_total)
     all_media = rel.get("media") or []
     total_discs = disc_total(rel, media)
-    audio = _audio_ids(rel, media)
+    audio = _audio_ids(rel, media, without)
     absolute, out, artists = 0, [], set()
     for disc, m in enumerate(all_media, 1):
         loaded = ([("pregap", m["pregap"])] if m.get("pregap") else []) + \

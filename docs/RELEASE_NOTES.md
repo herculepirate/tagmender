@@ -7,6 +7,12 @@
   barcode but links only Discogs releases carrying yours, over another entry with your
   barcode (BAR-12).
 
+**Box sets in album-named folders**
+- A box set's folder that names its CD count and holds each disc in a folder named as its own
+  album (Kenso - Complete Box, Roger Waters - The Collection) is now planned as one album, the
+  box, with each disc numbered in the set (DSC-5). Discs of a box still being copied in wait
+  until the box is complete.
+
 ## 0.8.64
 
 **Move an album into your library when you ask (MOV-5)**

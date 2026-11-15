@@ -35,8 +35,7 @@ class ChooseReleaseForStoppedAlbum(Base):
         return a, e.forced_for(g, alone=True)
 
     def test_copy_below_organize_confidence(self):
-        prof = self.profile(operation="copy", destination=str(self.dest),      # organize_min_confidence 95
-                            unattended=True)                                  # (MOV-5: else held, not skipped)
+        prof = self.profile(operation="copy", destination=str(self.dest))      # organize_min_confidence 95
         a, ref = self.chosen(prof, self.proposal(conf=90.0))
         self.assertEqual(a["status"], "skipped", a)            # "confidence 90.0 is below ...: not copied"
         self.assertEqual(ref, REF, "the release chosen for the skipped album is dropped")

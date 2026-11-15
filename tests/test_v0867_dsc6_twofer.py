@@ -160,6 +160,12 @@ class DSC7NumberedDiscFolders(te.Base):
         classics_box(self.lib, artists=("Band W", "Band W", "Band X"))
         self.assertGreater(len(self.groups()), 1)
 
+    def test_DSC7_a_series_whose_discs_do_not_name_the_set_stays_apart(self):
+        top = self.lib / "Various" / "Drops (2001-2004)"
+        album(top, "Disc 1", "Drops 1", "Various")
+        album(top, "Disc 2", "Drops 2", "Various", freq=600)
+        self.assertEqual(len(self.groups()), 2)
+
     def test_DSC7_folders_not_named_as_discs_stay_apart(self):
         classics_box(self.lib, names=("1974 - Alpha", "Disc 02", "Disc 3 - Gamma"))
         self.assertGreater(len(self.groups()), 1)
@@ -188,6 +194,39 @@ class DSC8OneDiscsCodes(te.Base):
         self.assertEqual(a["barcodes"], {"5013929020160"})
 
 
+class DSC8Titles(te.Base):
+    def test_DSC8_a_sets_barcode_with_disc_words_in_its_titles_is_kept(self):
+        for t1, t2 in (("Gamma (Disc 1)", "Gamma (Disc 2)"), ("Gamma", "Gamma (Bonus Disc)")):
+            with self.subTest(titles=(t1, t2)):
+                top = self.lib / "Band T" / "Gamma"
+                album(top, "CD1", t1, disc="1/2", barcode="5013929020160")
+                album(top, "CD2", t2, disc="2/2", freq=600, titles="Delta")
+                a = ma.read_album(top, "Band T", "Gamma")
+                self.assertEqual(a["barcodes"], {"5013929020160"})
+                self.assertEqual(a["disc_only_codes"], [])
+                shutil.rmtree(top)
+
+
+class DSC67Arriving(te.Base):
+    def test_DSC6_one_album_of_a_twofer_waits_for_the_other(self):
+        top = self.lib / "Band T" / "1992 - Alpha & Beta"
+        album(top, "1977 - Alpha", "Alpha")
+        self.assertEqual(engine.box_still_arriving(top / "1977 - Alpha"), "Beta is not here yet")
+        album(top, "1983 - Beta", "Beta", freq=600)
+        self.assertEqual(engine.box_still_arriving(top / "1977 - Alpha"), "")
+
+    def test_DSC7_discs_whose_totals_count_more_wait(self):
+        top = self.lib / "Band W" / "Classics"
+        album(top, "Disc 1 - Alpha (Classics)", "Alpha (Classics)", disc="1/3")
+        album(top, "Disc 2 - Beta (Classics)", "Beta (Classics)", disc="2/3", freq=600)
+        self.assertEqual(engine.box_still_arriving(top / "Disc 2 - Beta (Classics)"), "disc 3 of 3 is not here yet")
+
+    def test_DSC7_nothing_says_how_many_nothing_waits(self):
+        top = self.lib / "Band W" / "Classics"
+        album(top, "Disc 1 - Alpha (Classics)", "Alpha (Classics)", disc="01/01")
+        self.assertEqual(engine.box_still_arriving(top / "Disc 1 - Alpha (Classics)"), "")
+
+
 class LEN1DiscByDisc(unittest.TestCase):
     def setUp(self):
         import match_core as mc
@@ -196,7 +235,8 @@ class LEN1DiscByDisc(unittest.TestCase):
 
     def score(self, short):
         mc = self.mc
-        lens = [(1, 211), (1, 311), (1, 291), (1, 458), (2, 246), (2, 318), (2, 218), (2, 258), (2, 231)]
+        lens = [(1, 211), (1, 311), (1, 291), (1, 458), (2, 246), (2, 318), (2, 218), (2, 258), (2, 231), (2, 197)]
+        lens = lens[:self.cut] if getattr(self, "cut", None) else lens
         alb = {"artist": "Band T", "title": "Alpha & Beta", "year": 1992, "discs": 2, "barcodes": set(),
                "catnos": set(), "tracks": [{"disc": d, "num": k + 1, "title": f"T{k}", "secs": float(s)}
                                            for k, (d, s) in enumerate(lens)]}
@@ -217,6 +257,11 @@ class LEN1DiscByDisc(unittest.TestCase):
         self.assertTrue(st(base + [(236.4, 228.0)]))           # 8.4 s on 228 s: a sleeve's rounding
         self.assertFalse(st(base + [(46.0, 40.0)]))            # 6 s on a 40 s interlude: another edit
         self.assertFalse(st(base + [(311.0, 300.0)]))          # 11 s: more than 10 s
+
+    def test_LEN1_a_short_disc_of_four_tracks_is_not_excused(self):
+        self.cut = 8                                            # (disc 2: four tracks)
+        s = self.score(lambda k, secs: 6)
+        self.assertFalse(any(n.startswith("disc 2: every length listed") for n in s["notes"]), s["notes"])
 
     def test_LEN1_a_disc_of_another_edit_still_differs(self):
         s = self.score(lambda k, secs: 40 if k == 6 else 5)        # (one track 40 s short: another edit)

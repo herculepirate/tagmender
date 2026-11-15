@@ -2033,12 +2033,19 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # "The Stranger" untagged, in the 1992 twofer): the set's it is not, so neither agrees nor differs
     # (only when its discs are tagged as different albums: a set ripped with its barcode on disc
     # 1's files alone keeps it)
+    # (the discs different albums: their titles, brackets and disc words aside - "Gamma (Disc 1)"
+    # and "Gamma (Bonus Disc)" are one - two or more, neither holding the other)
     disc_only_codes = []
     discs_all = {i["disc_eff"] for _p, i in infos}
-    titles_of = {}
-    for _p, i in infos:
-        titles_of.setdefault(i["disc_eff"], set()).add(re.sub(r"[\W_]+", " ", str(i.get("album") or "").casefold()).strip())
-    if len(discs_all) > 1 and len({frozenset(v) for v in titles_of.values()}) > 1:
+
+    def bare_title(t):
+        t = re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", str(t or ""))
+        m = _ALBUM_DISC.match(t)
+        t = m.group(1) if m else t
+        return re.sub(r"[\W_]+", " ", t.casefold()).strip()
+    bare = {bare_title(i.get("album")) for _p, i in infos} - {""}
+    different = len(bare) > 1 and not any(a != b and (a in b or b in a) for a in bare for b in bare)
+    if len(discs_all) > 1 and different:
         for field in ("barcode", "catno"):
             on = {}
             for _p, i in infos:
@@ -8675,6 +8682,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                     out["cover_read"] = True
 
     source_notes = []
+    if album.get("disc_only_codes"):
+        # DSC-8: told, never silently dropped
+        source_notes.append("tagged on some discs of this set only, so that disc's own album's and not the "
+                            f"set's: {', '.join(album['disc_only_codes'][:3]).upper()} (DSC-8)")
     # A clue host's failure (CTDB): a note in `why`, never what turns a no match into an
     # error (engine.CLUE_HOSTS); a MusicBrainz disc ID failure counts as MusicBrainz's.
     clue_notes = []

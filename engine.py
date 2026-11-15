@@ -381,7 +381,7 @@ def _title_fold(text) -> str:
     return re.sub(r"[\W_]+", " ", str(text or "").casefold()).strip()
 
 
-def numbered_disc_set(folder: Path, files, keys) -> bool:
+def numbered_disc_set(folder: Path, files, keys, metas=None) -> bool:
     """DSC-7: a folder whose tracks all lie in disc folders of its own numbered 1 to N ("Disc 1
     1974 - Streetlife Serenade", "Disc 02", "Disc 3 - 52nd Street (Original Album Classics #2)"),
     each number once, N two or more, by one artist, is one set - its discs - whatever album each
@@ -400,7 +400,24 @@ def numbered_disc_set(folder: Path, files, keys) -> bool:
     if sorted(numbers) != list(range(1, len(dirs) + 1)):
         return False
     artists = {k[1] for k in keys.values() if k[0] == "tags"}
-    return all(k[0] == "tags" for k in keys.values()) and len(artists) == 1 and all(artists)
+    if not (all(k[0] == "tags" for k in keys.values()) and len(artists) == 1 and all(artists)):
+        return False
+    # (and its discs name the set: half of them at least carry the set folder's title in brackets
+    # in their folder's name or album tag - "52nd Street (Original Album Classics #2)" - or as
+    # their album tag itself; "Drops 1" and "Drops 2" in "Drops (2001-2004)/Disc 1", "/Disc 2"
+    # are a series' volumes, each its own release, and "CD1", "CD2" of an artist's folder two albums)
+    name = _title_fold(_bare_name(folder.name))
+    if not name:
+        return False
+    metas = metas or {}
+
+    def names_set(d):
+        tags = {_first(metas.get(f) or ex.read_meta(f), "album") for f in files if f.parent == d}
+        for text in [d.name, *tags]:
+            if any(_title_fold(b) == name for b in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", text)):
+                return True
+        return any(_title_fold(t) == name for t in tags)
+    return 2 * sum(1 for d in dirs if names_set(d)) >= len(dirs)
 
 
 def _bare_name(name) -> str:
@@ -501,6 +518,9 @@ def box_still_arriving(folder, skips=None, left_out=None) -> str:
     (Engine._box_part_left_out) - such a box is never one album, so nothing of it waits."""
     folder = Path(folder)
     skips = skips or _skips_folder
+    waits = _named_set_arriving(folder, skips, left_out)          # DSC-6, DSC-7
+    if waits:
+        return waits
     for box in (folder.parent, folder.parent.parent):
         if not box_cd_count(box.name):
             continue
@@ -524,6 +544,49 @@ def box_still_arriving(folder, skips=None, left_out=None) -> str:
             gone = list(range(len(numbers) + 1, n + 1))
             words = ", ".join(map(str, gone))
             return f"disc{'s' if len(gone) > 1 else ''} {words} of {n} {'are' if len(gone) > 1 else 'is'} not here yet"
+    return ""
+
+
+def _named_set_arriving(folder: Path, skips, left_out=None) -> str:
+    """DSC-6 / DSC-7: why a folder of a set still being copied in waits. DSC-6: its folder is one
+    of the albums its parent is named after ("1977 - The Stranger" in "1992 - The Stranger & An
+    Innocent Man"), the parent has no tracks of its own and holds fewer albums' folders than its
+    name joins - "An Innocent Man is not here yet". DSC-7: it is "Disc k" of a folder of disc
+    folders numbered 1, 2 ... with no gap, and its files' disc totals count more discs than are
+    here - "discs 4, 5 of 5 are not here yet". "" otherwise (nothing says how many are coming)."""
+    box = folder.parent
+    try:
+        subs = sorted(x for x in box.iterdir() if x.is_dir() and not skips(x.name))
+        if any(x.is_file() and x.suffix.lower() in ex.AUDIO_EXT for x in box.iterdir()):
+            return ""
+    except OSError:
+        return ""
+    if left_out is not None and left_out(box, subs):
+        return ""
+    parts = [_title_fold(p) for p in _TITLE_JOIN.split(_bare_name(box.name)) if _title_fold(p)]
+    mine = _title_fold(_bare_name(folder.name))
+    if len(parts) > 1 and mine in parts:
+        have = {_title_fold(_bare_name(x.name)) for x in subs}
+        if have <= set(parts) and len(have) < len(parts):
+            gone = [p for p in _TITLE_JOIN.split(_bare_name(box.name)) if _title_fold(p) and _title_fold(p) not in have]
+            return f"{' and '.join(x.strip() for x in gone)} {'are' if len(gone) > 1 else 'is'} not here yet"
+    m = _LEAD_NUMBER.match(folder.name)
+    if not (m and is_disc_dir(folder)):
+        return ""
+    numbers = sorted(int(x[1]) for x in (_LEAD_NUMBER.match(s.name) for s in subs if is_disc_dir(s)) if x)
+    if numbers != list(range(1, len(numbers) + 1)):
+        return ""
+    totals = set()
+    for f in folder.iterdir():
+        if f.suffix.lower() in ex.AUDIO_EXT:
+            t = _disc_tag(ex.read_meta(f))[1]
+            if t.isdigit():
+                totals.add(int(t))
+    if len(totals) == 1 and next(iter(totals)) > len(numbers):
+        n = next(iter(totals))
+        gone = list(range(len(numbers) + 1, n + 1))
+        return f"disc{'s' if len(gone) > 1 else ''} {', '.join(map(str, gone))} of {n} " \
+               f"{'are' if len(gone) > 1 else 'is'} not here yet"
     return ""
 
 
@@ -1135,7 +1198,8 @@ class Engine:
                 by_album = {tagged[0]: files}            # versions of one disc tagged apart ("[HD]")
             elif len(by_album) > 1 and (folder in whole_boxes or _one_box(folder, files, keys, metas)):
                 by_album = {tagged[0]: files}                                  # DSC-2, DSC-5
-            elif len(by_album) > 1 and spans_discs and numbered_disc_set(folder, files, keys):
+            elif len(by_album) > 1 and spans_discs and numbered_disc_set(folder, files, keys, metas) \
+                    and not self._box_part_left_out(folder, sorted({f.parent for f in files}), path):
                 by_album = {tagged[0]: files}                                  # DSC-7
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))

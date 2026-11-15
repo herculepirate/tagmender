@@ -3973,8 +3973,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                     if c["secs"] > 0:
                         by_disc.setdefault(t.get("disc") or 1, []).append((t["secs"], c["secs"]))
                 if len(by_disc) > 1:
+                    # (six tracks a disc at least: four short tracks may be another master's fades)
                     fixed = [d for d, ks in sorted(by_disc.items())
-                             if not all(duration_ok(f, c, cfg) for f, c in ks) and sleeve_times(ks)]
+                             if len(ks) >= 6 and not all(duration_ok(f, c, cfg) for f, c in ks) and sleeve_times(ks)]
                     if fixed:
                         gained = sum(sum(1 for f, c in by_disc[d] if not duration_ok(f, c, cfg)) for d in fixed)
                         notes.append(f"disc {', '.join(map(str, fixed))}: every length listed a few seconds short "

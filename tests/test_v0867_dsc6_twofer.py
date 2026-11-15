@@ -15,11 +15,11 @@ import engine  # noqa: E402
 import match_albums as ma  # noqa: E402
 
 
-def album(parent, name, album_title, artist="Band T", disc="1/1", first=1, n=3, freq=300, titles=None):
+def album(parent, name, album_title, artist="Band T", disc="1/1", first=1, n=3, freq=300, titles=None, **extra):
     """An album's folder: N tracks (10, 20, 30 s ...) numbered from FIRST, tagged as ALBUM_TITLE."""
     for i in range(n):
         meta = dict(title=f"{titles or album_title} {i}", album=album_title, albumartist=artist, artist=artist,
-                    track=str(first + i), disc=disc)
+                    track=str(first + i), disc=disc, **extra)
         flac(parent / name, f"{first + i:02d}.flac", 10 * (i % 3 + 1), freq=freq + 10 * i, **meta)
     return parent / name
 
@@ -168,6 +168,59 @@ class DSC7NumberedDiscFolders(te.Base):
         top = classics_box(self.lib)
         album(top.parent, top.name, "Delta", "Band W", freq=1400)
         self.assertNotIn(9, [len(g.files) for g in self.groups()])
+
+
+class DSC8OneDiscsCodes(te.Base):
+    def test_DSC8_a_barcode_on_one_disc_of_a_twofer_is_not_the_sets(self):
+        top = self.lib / "Band T" / "1992 - Alpha & Beta"
+        album(top, "1977 - Alpha", "Alpha")
+        album(top, "1983 - Beta", "Beta", freq=600, barcode="074643883726", catalognumber="CK 38837")
+        a = ma.read_album(top, "Band T", top.name)
+        self.assertEqual(a["barcodes"], set())
+        self.assertNotIn("ck38837", a["catnos"])
+        self.assertIn("74643883726", a["disc_only_codes"])
+
+    def test_DSC8_a_sets_barcode_tagged_on_its_first_disc_only_is_kept(self):
+        top = self.lib / "Band T" / "Gamma"
+        album(top, "CD1", "Gamma", disc="1/2", barcode="5013929020160")
+        album(top, "CD2", "Gamma", disc="2/2", freq=600, titles="Delta")
+        a = ma.read_album(top, "Band T", "Gamma")
+        self.assertEqual(a["barcodes"], {"5013929020160"})
+
+
+class LEN1DiscByDisc(unittest.TestCase):
+    def setUp(self):
+        import match_core as mc
+        self.mc = mc
+        self.cfg = dict(mc.DEFAULT_CFG, preferred_countries=[])
+
+    def score(self, short):
+        mc = self.mc
+        lens = [(1, 211), (1, 311), (1, 291), (1, 458), (2, 246), (2, 318), (2, 218), (2, 258), (2, 231)]
+        alb = {"artist": "Band T", "title": "Alpha & Beta", "year": 1992, "discs": 2, "barcodes": set(),
+               "catnos": set(), "tracks": [{"disc": d, "num": k + 1, "title": f"T{k}", "secs": float(s)}
+                                           for k, (d, s) in enumerate(lens)]}
+        cand = {"source": "mb", "id": "x", "url": "u", "artist": "Band T", "title": "Alpha & Beta", "year": 1992,
+                "country": "XE", "label": "L", "catnos": set(), "barcodes": set(), "disc_count": 2, "matrix": [],
+                "tracks": [{"disc": d, "title": f"T{k}", "secs": s - (short(k, s) if d == 2 else 0)}
+                           for k, (d, s) in enumerate(lens)]}
+        return mc.score_candidate(alb, cand, self.cfg)
+
+    def test_LEN1_one_disc_of_sleeve_times_agrees(self):
+        s = self.score(lambda k, secs: 5 + k % 3)
+        self.assertTrue(any(n.startswith("disc 2: every length listed") for n in s["notes"]), s["notes"])
+        self.assertEqual(s["confidence"], self.score(lambda k, secs: 0)["confidence"])
+
+    def test_LEN1_four_percent_ten_seconds_at_most(self):
+        st = self.mc.sleeve_times
+        base = [(245.7, 240.0), (217.8, 212.0), (258.1, 252.0), (231.1, 225.0)]
+        self.assertTrue(st(base + [(236.4, 228.0)]))           # 8.4 s on 228 s: a sleeve's rounding
+        self.assertFalse(st(base + [(46.0, 40.0)]))            # 6 s on a 40 s interlude: another edit
+        self.assertFalse(st(base + [(311.0, 300.0)]))          # 11 s: more than 10 s
+
+    def test_LEN1_a_disc_of_another_edit_still_differs(self):
+        s = self.score(lambda k, secs: 40 if k == 6 else 5)        # (one track 40 s short: another edit)
+        self.assertFalse(any(n.startswith("disc 2: every length listed") for n in s["notes"]), s["notes"])
 
 
 if __name__ == "__main__":

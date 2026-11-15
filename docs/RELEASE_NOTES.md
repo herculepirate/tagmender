@@ -13,6 +13,17 @@
   longer counts as your disc's matrix, read exactly or not: every disc from that plant
   carries it (OCR-8).
 
+**Twofers and "Original Album Classics" boxes**
+- A folder named after the albums it holds ("1992 - The Stranger & An Innocent Man", "Streetlife
+  Serenade + 52nd Street") is now planned as one album, the set they were issued in, its discs
+  numbered as the release lists them - no longer each album matched to its standalone CD
+  (DSC-6).
+- A folder of disc folders numbered "Disc 1" to "Disc N" is one set whatever album each disc
+  is tagged as, as the discs of an "Original Album Classics" box are (DSC-7).
+- A barcode or catalogue number tagged on one disc of such a set only (an earlier run's
+  standalone CD) no longer counts against the set (DSC-8), and a set whose one disc lists its
+  track times off the sleeve is matched disc by disc (LEN-1).
+
 **The right pressing, more often**
 - When your disc shows the matrix of one release, the other releases with the same catalogue
   number or barcode that list a different matrix are left out, however well their track

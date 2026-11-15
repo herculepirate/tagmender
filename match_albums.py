@@ -2028,6 +2028,27 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     version_discs = {d: v[0] for d, v in found.items()}
     version_labels = {d: v[1] for d, v in found.items()}
     version_kinds = {d: k[0] for d, k in kinds.items()}
+    # DSC-8: in a set of several discs, a barcode or catalogue number tagged on some of its discs
+    # only is that disc's own album's ("An Innocent Man" tagged with the 1983 CD's CK 38837 beside
+    # "The Stranger" untagged, in the 1992 twofer): the set's it is not, so neither agrees nor differs
+    # (only when its discs are tagged as different albums: a set ripped with its barcode on disc
+    # 1's files alone keeps it)
+    disc_only_codes = []
+    discs_all = {i["disc_eff"] for _p, i in infos}
+    titles_of = {}
+    for _p, i in infos:
+        titles_of.setdefault(i["disc_eff"], set()).add(re.sub(r"[\W_]+", " ", str(i.get("album") or "").casefold()).strip())
+    if len(discs_all) > 1 and len({frozenset(v) for v in titles_of.values()}) > 1:
+        for field in ("barcode", "catno"):
+            on = {}
+            for _p, i in infos:
+                if i.get(field):
+                    on.setdefault(mc.norm_code(i[field]), set()).add(i["disc_eff"])
+            partial = {code for code, ds in on.items() if ds != discs_all}
+            for _p, i in infos:
+                if i.get(field) and mc.norm_code(i[field]) in partial:
+                    i[field] = ""
+            disc_only_codes += sorted(partial)
     # (a file numbered 0, "00 - Hidden.flac": the hidden track before track 1, first on its disc)
     infos.sort(key=lambda x: (x[1]["disc_eff"], x[1]["num"] or (0 if x[1].get("num0") else 9999),
                               _natural_key(rel(x[0]))))
@@ -2126,6 +2147,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # the tags' barcode, else one the ripper's notes name ("Barcode: 5013929020160")
         "barcodes": tags_barcodes,
         "tag_barcodes": set(tags_barcodes),
+        "disc_only_codes": disc_only_codes,                     # (DSC-8: one disc's album's, not the set's)
         # a barcode the ripper's notes name ("Barcode: 5013929020160"): typed, perhaps from another
         # edition's page, so never the tags' barcode; the documents step searches it as read print
         "note_barcodes": sorted({mc.norm_code(b) for b in note_barcodes} - tags_barcodes),

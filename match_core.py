@@ -1171,14 +1171,15 @@ def barcode_variants(value):
 
 def sleeve_times(known) -> bool:
     """LEN-1: [(file secs, listed secs)] where the release lists EVERY track a few seconds short
-    of your file - none more than a second longer, none more than 8 s shorter, most of them
+    of your file - none more than a second longer, none more than 4% (10 s at most) shorter, most of them
     short at all - as times copied off a sleeve are (Popol Vuh - Kailash, Soul Jazz: each track
     0-6 s longer than Discogs lists). Another edit or version is not short on every track. Four
     tracks at least."""
     if len(known) < 4:
         return False
-    # (8 s at most, and 4% of the track: on a 40 s interlude 8 s is another edit, not a misprint)
-    return all(-1.0 <= f - c <= min(8.0, max(3.0, 0.04 * c)) for f, c in known) and \
+    # (4% of the track, 10 s at most: on a 40 s interlude 8 s is another edit, not a misprint; on
+    # a 228 s song 8.4 s is a sleeve's rounding - An Innocent Man's "Leave A Tender Moment Alone")
+    return all(-1.0 <= f - c <= min(10.0, max(3.0, 0.04 * c)) for f, c in known) and \
         sum(1 for f, c in known if f - c >= 0.5) >= 0.75 * len(known)
 
 
@@ -3963,6 +3964,22 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                 notes.append(f"durations {good}/{len(known)} agree as listed, and every one is listed a few "
                              f"seconds short of your file (times printed on the sleeve): taken as agreeing")
                 good = len(known)
+            elif good < len(known):
+                # LEN-1 disc by disc: a set whose one disc's lengths were copied off its sleeve (the
+                # 1992 twofer The Stranger & An Innocent Man on MusicBrainz: its second disc every
+                # track 2-8 s short, its first as the audio)
+                by_disc = {}
+                for t, c in zip(album["tracks"], cand["tracks"]):
+                    if c["secs"] > 0:
+                        by_disc.setdefault(t.get("disc") or 1, []).append((t["secs"], c["secs"]))
+                if len(by_disc) > 1:
+                    fixed = [d for d, ks in sorted(by_disc.items())
+                             if not all(duration_ok(f, c, cfg) for f, c in ks) and sleeve_times(ks)]
+                    if fixed:
+                        gained = sum(sum(1 for f, c in by_disc[d] if not duration_ok(f, c, cfg)) for d in fixed)
+                        notes.append(f"disc {', '.join(map(str, fixed))}: every length listed a few seconds short "
+                                     f"of your file (times printed on the sleeve): taken as agreeing")
+                        good += gained
             dur_frac = good / len(known)
             pts += cfg["w_durations"] * dur_frac
             avail += cfg["w_durations"]

@@ -634,8 +634,8 @@ def volume_set(box: Path, found: dict, metas: dict) -> bool:
 
     def apart(codes):                                   # (every volume carries one, and no two share)
         return all(codes) and not set.intersection(*codes)
-    # (barcodes first: a catalogue number only where no volume has one - "none" is no number)
-    codes = barcodes if any(barcodes) else catnos
+    # (barcodes first, when every volume has one; else catalogue numbers - "none" is no number)
+    codes = barcodes if all(barcodes) else catnos      # (a barcode on some volumes only tells nothing apart)
     if apart(codes):
         return False                                    # (each volume its own release)
     shared = all(codes) and set.intersection(*codes)

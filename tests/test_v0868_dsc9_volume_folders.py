@@ -162,6 +162,7 @@ class DSC9VolumeFolders(te.Base):
                       ({"date": "1999", "barcode": "111111111111", "catalognumber": "none"},
                        {"date": "2003", "barcode": "222222222222", "catalognumber": "none"}),
                       ({"catalognumber": "none", "date": "1999"}, {"catalognumber": "none", "date": "2003"}),
+                      ({"barcode": "111111111111", "catalognumber": "AAA1"}, {"catalognumber": "BBB2"}),
                       ({"catalognumber": "NOW 1"}, {"catalognumber": "NOW 2"})):
             with self.subTest(extra=extra):
                 top = volume_set(self.lib, name="Now Music Vol. 1-2", extra=extra)

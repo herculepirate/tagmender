@@ -437,23 +437,45 @@ NEW_STRIP_WORDS = "\\(?:CD|WEB|Vinyl|Tape|SACD|DVD-A|Blu-ray\\)"
 _STRIP_LINE = "$set(_tm_album,$rreplace(%album%,"
 
 
-def _old_edition_lines(template) -> bool:
-    """ED-8: the template holds one of the old edition lines (OLD_EDKIND, or OLD_STRIP_WORDS in
-    the line that takes the album tag's edition off)."""
+OLD_STRIP_LINE = _STRIP_LINE + "\\\\s\\\\[\\(?:\\\\d{4} \\)?" + OLD_STRIP_WORDS + "\\\\]\\$,))"
+NEW_STRIP_LINE = OLD_STRIP_LINE.replace(OLD_STRIP_WORDS, NEW_STRIP_WORDS)
+
+
+def _edition_plan(template):
+    """ED-8: {old line: new line} to apply to the template, or {} - whole lines only, word for word.
+    The edition line is upgraded alone when the script takes no edition off the album tag; with the
+    old strip line beside it the two are upgraded together (an SACD named so with the strip line
+    unchanged would show "[2024 SACD] [2024 SACD]"); a strip line of any other words leaves both."""
     if not isinstance(template, str):
-        return False
-    return OLD_EDKIND in template or any(
-        line.lstrip().startswith(_STRIP_LINE) and OLD_STRIP_WORDS in line for line in template.split("\n"))
+        return {}
+    lines = [line.rstrip("\r").strip() for line in template.split("\n")]
+    if OLD_EDKIND not in lines:
+        return {}
+    strips = [line for line in lines if line.startswith(_STRIP_LINE)]
+    if not strips:
+        return {OLD_EDKIND: NEW_EDKIND}
+    if all(line == OLD_STRIP_LINE for line in strips):
+        return {OLD_EDKIND: NEW_EDKIND, OLD_STRIP_LINE: NEW_STRIP_LINE}
+    return {}
+
+
+def _old_edition_lines(template) -> bool:
+    """ED-8: the template holds the old edition lines word for word (_edition_plan)."""
+    return bool(_edition_plan(template))
 
 
 def _new_edition_lines(template: str) -> str:
-    """ED-8: the template with the old edition lines in today's words, everything else as it was."""
-    lines = []
-    for line in template.replace(OLD_EDKIND, NEW_EDKIND).split("\n"):
-        if line.lstrip().startswith(_STRIP_LINE):
-            line = line.replace(OLD_STRIP_WORDS, NEW_STRIP_WORDS)
-        lines.append(line)
-    return "\n".join(lines)
+    """ED-8: the template with those whole lines in today's words, everything else as it was."""
+    plan = _edition_plan(template)
+    out = []
+    for line in template.split("\n"):
+        cr = "\r" if line.endswith("\r") else ""
+        body = line.rstrip("\r")
+        key = body.strip()
+        if key in plan:
+            body = body[:len(body) - len(body.lstrip())] + plan[key]
+        out.append(body + cr)
+    return "\n".join(out)
 
 
 def _web_search_of(data: dict):

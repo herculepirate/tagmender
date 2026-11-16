@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import naming  # noqa: E402
 import profiles as pf  # noqa: E402
 
-OLD_STRIP = "$set(_tm_album,$rreplace(%album%,\\\\s\\\\[\\(?:\\\\d{4} \\)?" + pf.OLD_STRIP_WORDS + "\\\\]\\$,))"
+OLD_STRIP = pf.OLD_STRIP_LINE
 TEMPLATE = "\n".join([
     OLD_STRIP,
     "$set(usedate,$if(%originaldate%,%originaldate%,%date%))",
@@ -38,7 +38,7 @@ class ED8OldEditionLines(unittest.TestCase):
         new = pf.rename_legacy(data)["naming"]["template"]
         self.assertIn(pf.NEW_EDKIND, new)
         self.assertNotIn(pf.OLD_EDKIND, new)
-        self.assertIn(pf.NEW_STRIP_WORDS, new)
+        self.assertIn(pf.NEW_STRIP_LINE, new.split("\n"))
         self.assertFalse(pf.has_legacy(self.profile(new)))
         self.assertEqual(pf.rename_legacy(self.profile(new))["naming"]["template"], new)
 
@@ -79,6 +79,66 @@ class ED8OldEditionLines(unittest.TestCase):
         self.assertIn(naming._RULE_SUFFIX_WORDS, both[0])
         self.assertIn(naming._RULE_SUFFIX_WORDS, both[1])
         self.assertNotIn(pf.NEW_STRIP_WORDS, both[1])
+
+
+class ED8OnlyWhatItShould(unittest.TestCase):
+    def up(self, template):
+        return pf.rename_legacy({"name": "x", "version": 3, "naming": {"preset": "tagmender",
+                                                                        "template": template}})["naming"]["template"]
+
+    def test_ED8_a_line_merely_holding_the_old_text_stays(self):
+        for line in (f"$noop(was {pf.OLD_EDKIND})", f"$if(%x%,{pf.OLD_EDKIND})"):
+            with self.subTest(line=line):
+                t = TEMPLATE.replace(pf.OLD_EDKIND, line)
+                self.assertEqual(self.up(t), t)
+
+    def test_ED8_a_strip_line_of_other_words_leaves_both(self):
+        t = TEMPLATE.replace("|Tape\\)", "|Tape|Mini\\)")
+        self.assertNotEqual(t, TEMPLATE)
+        self.assertEqual(self.up(t), t)
+
+    def test_ED8_the_edition_line_alone_is_upgraded_alone(self):
+        t = "\n".join(line for line in TEMPLATE.split("\n") if line != OLD_STRIP)
+        new = self.up(t)
+        self.assertIn(pf.NEW_EDKIND, new)
+        self.assertEqual(len(new.split("\n")), len(t.split("\n")))
+
+    def test_ED8_windows_line_ends_and_indents_kept(self):
+        t = TEMPLATE.replace(pf.OLD_EDKIND, "  " + pf.OLD_EDKIND).replace("\n", "\r\n")
+        new = self.up(t)
+        self.assertIn("  " + pf.NEW_EDKIND + "\r", new.split("\n"))
+        self.assertEqual(new.count("\r\n"), t.count("\r\n"))
+
+    def test_ED8_media_named_as_the_presets_name_them(self):
+        new = self.up(TEMPLATE)
+        rows = (("DVD-Audio", "Piano Song", "1973 - Piano Song [2015 DVD-A]"),
+                ("Blu-ray", "Piano Song", "1973 - Piano Song [2015 Blu-ray]"),
+                ("Hybrid SACD (CD layer)", "Piano Song", "1973 - Piano Song [2015 CD]"),
+                ("DualDisc (CD side)", "Piano Song", "1973 - Piano Song [2015 CD]"),
+                ("Blu-spec CD", "Piano Song", "1973 - Piano Song [2015 CD]"))
+        for media, album, want in rows:
+            with self.subTest(media=media):
+                self.assertEqual(folder(new, albumartist="Band P", album=album, date="2015", originaldate="1973",
+                                        tracknumber="1", media=media), want)
+
+    def test_ED8_migrate_writes_it_back_once_with_a_backup(self):
+        name = "ed8-migrate"
+        path = pf.path_of(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        path.write_text(json.dumps({"name": name, "version": pf.SCHEMA_VERSION,
+                                    "naming": {"preset": "tagmender", "template": TEMPLATE}}), encoding="utf-8")
+        try:
+            changed, backup = pf.migrate(name)
+            self.assertTrue(changed)
+            self.assertTrue(backup and backup.exists())
+            self.assertIn(pf.OLD_EDKIND, backup.read_text(encoding="utf-8").replace("\\\\", "\\"))
+            written = json.loads(path.read_text(encoding="utf-8"))["naming"]["template"]
+            self.assertIn(pf.NEW_EDKIND, written)
+            self.assertEqual(pf.migrate(name), (False, None))
+        finally:
+            for f in path.parent.glob(path.name + "*"):
+                f.unlink()
 
 
 if __name__ == "__main__":

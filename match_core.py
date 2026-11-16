@@ -4239,6 +4239,101 @@ def _full_fit_first(scored, cfg):
     return [s["whole_view"] if s.get("missing") and s.get("whole_view") else s for s in scored]
 
 
+# BAR-13: the codes your copy itself names a pressing by - your barcode (files as ripped, scans),
+# the catalogue number of your tags, folder name or rip notes; never one another tagger wrote,
+# one typed in notes only, nor a number OCR merely found
+OWN_CODES = ("barcode", "catalogue number", "catalogue number (folder name)")
+
+
+def _code_twin_of(s, f, cfg) -> bool:
+    """BAR-13: F, a full entry, is the same album as S, the sparse one carrying your code: one
+    database's, the same master (Discogs) or release group (MusicBrainz) - or, where neither
+    entry names it, the same title and artist -, the same number of discs, and S's track titles
+    (those it lists) F's."""
+    a, b = s["cand"], f["cand"]
+    if a.get("source") != b.get("source") or str(a.get("id")) == str(b.get("id")):
+        return False
+    key = "master_id" if a.get("source") == "discogs" else "release_group"
+    ka, kb = str(a.get(key) or ""), str(b.get(key) or "")
+    if ka and kb and ka != kb:
+        return False
+    if not (ka and kb) and not (title_sim(a.get("title") or "", b.get("title") or "") >= 0.85
+                                 and artist_sim(a.get("artist") or "", b.get("artist") or "") >= 0.85):
+        return False
+    if not a.get("disc_count") or a.get("disc_count") != b.get("disc_count"):
+        return False
+    mine = [str(t.get("title") or "") for t in a.get("tracks") or ()]
+    theirs = [str(t.get("title") or "") for t in b.get("tracks") or ()]
+    if not mine:
+        return False
+    found = sum(1 for x in mine if any(track_titles_agree(x, y) for y in theirs))
+    return found >= 0.8 * len(mine)
+
+
+def code_twins(album, scored, cfg, ocr_text=""):
+    """BAR-13: an entry carrying your copy's own code (OWN_CODES) whose track list is too sparse
+    to compare - no lengths at all, or fewer tracks than your files (a box's discs listed in
+    part, under headings) - while a full entry of the same album (_code_twin_of) fits every
+    track and its lengths but lacks your code: the album is proven by the full entry, the
+    pressing by your code. That entry is scored again as itself with the full entry's tracks
+    ("tracks_of": tagged from them too, engine._identified), in place of its sparse self
+    (Neil Young - Archives Vol. II, folder "(Reprise 093624899051)": Discogs 16262491, the
+    2020 limited box, 131 tracks without lengths; 17690677, the 2021 retail box, 139 agreeing).
+    Never for an entry anything of your copy argues against (a barcode of yours that differs, a
+    rip log dated before it came out, the folder name or scans against it, a format your files
+    cannot be), nor when the full entry carries your code too, nor when any entry carrying your
+    code fits your files on its own tracks: a view never outranks a pressing of your number
+    listing its own lengths (one number is often an original's and its reissues', and lengths
+    typed off a sleeve may be a few seconds off). A sparse list of fewer than 3 tracks names no
+    album. Returns SCORED, the views in place."""
+    n_file = len(album.get("tracks") or ())
+    if not n_file or not scored:
+        return scored
+    if any(o.get("code") in OWN_CODES and o.get("tracks_ok") and not o.get("missing")
+           and not (o.get("cand") or {}).get("tracks_of") for o in scored):
+        return scored
+    out = []
+    for s in scored:
+        c = s.get("cand") or {}
+        n_cand = len(c.get("tracks") or ())
+        sparse = n_cand >= 3 and (n_cand < n_file or (n_cand == n_file and not s.get("dur_cov")))
+        # (a Discogs entry: only its tracks can be tagged from another entry's, engine._identified;
+        # a MusicBrainz release's IDs name its own tracks)
+        if not (sparse and c.get("source") == "discogs" and s.get("code") in OWN_CODES
+                and not s.get("conflict") and not s.get("missing")
+                and not s.get("clues_against") and not s.get("rip_date_later") and not s.get("lacks")
+                and not format_contradictions(s) and not c.get("video_only") and not c.get("tracks_of")
+                and s.get("artist_sim", 0) >= cfg["auto_min_artist"]):
+            out.append(s)
+            continue
+        full = [f for f in scored if f is not s and f.get("tracks_ok") and not f.get("missing")
+                and not f.get("conflict") and f.get("code") not in OWN_CODES
+                and (f.get("dur_frac") or 0) >= cfg["auto_min_duration_frac"]
+                and not (f.get("cand") or {}).get("tracks_of") and not (f.get("cand") or {}).get("slots")
+                and not (f.get("cand") or {}).get("version_media") and _code_twin_of(s, f, cfg)]
+        if not full:
+            out.append(s)
+            continue
+        f = max(full, key=lambda x: (x["dur_frac"] or 0, x["confidence"]))
+        fc = f["cand"]
+        view = dict({k: v for k, v in c.items() if k not in ("works_view", "whole_works", "rows")},
+                    tracks=fc["tracks"], disc_titles=fc.get("disc_titles"), sparse_cand=c,
+                    tracks_of=str(fc["id"]), **({"rows": fc["rows"]} if fc.get("rows") else {}),
+                    # (TRK-5: the full entry read one track per work is tagged so too)
+                    **({"whole_works": True} if fc.get("whole_works") else {}))
+        v = score_candidate(album, view, cfg, ocr_text)
+        if not (v.get("tracks_ok") and v.get("code") == s.get("code") and not v.get("conflict")
+                and (v.get("dur_frac") or 0) >= cfg["auto_min_duration_frac"]):
+            out.append(s)
+            continue
+        v["notes"] = v["notes"] + [
+            f"it lists {n_cand} tracks{'' if s.get('dur_cov') else ' without lengths'}; the album's tracks and "
+            f"lengths are those of {fc['id']}, the same album, which lacks your copy's number "
+            f"({fc.get('catno_shown') or 'none listed'}): your {s['code']} names this pressing (BAR-13)"]
+        out.append(v)
+    return out
+
+
 def tagged_release(album, cand):
     """The files' own tags name this release (MUSICBRAINZ_ALBUMID, DISCOGS_RELEASE_ID or an
     id in their comments). Not evidence for the album, which those tags may have got wrong;
@@ -5847,6 +5942,35 @@ def _yields_to_linked_barcode(mb_result, dg_result):
         f"another product (BAR-1)"])
 
 
+def _yields_to_code_twin(res, other):
+    """BAR-13 across the databases: OTHER's sure pick is the pressing your copy's own code names,
+    its tracks those of a full entry of the same album (code_twins: "tracks_of"); RES's sure pick
+    is that album too (title, artist, track and disc count) but carries neither your code nor
+    any other barcode or catalogue number of yours, and has nothing of your copy behind it that
+    OTHER's lacks beyond what every pressing of the album shares - your disc ID (TOC-3: the
+    disc, not the pressing) and the format. Then RES's pick is another pressing of the album:
+    unsure, so the code's pressing decides (Neil Young - Archives Vol. II: MusicBrainz's
+    3796a182, the 2021 retail box with your disc ID, against Discogs's 16262491, the 2020 box
+    your folder's 093624899051 names, which MusicBrainz does not list)."""
+    best, ob = (res or {}).get("best"), (other or {}).get("best")
+    if not (best and ob and res.get("status") == "auto" and other.get("status") == "auto"
+            and ob["cand"].get("tracks_of") and ob.get("code") in OWN_CODES):
+        return res
+    if best.get("code") in OWN_CODES or _carries_barcode(best) or _own_catno_on(best) or best.get("tagged"):
+        return res
+    if set(_evidence(best)) - set(_evidence(ob)) - {"disc TOC", "format"}:
+        return res
+    a, b = best["cand"], ob["cand"]
+    if not (title_sim(a.get("title") or "", b.get("title") or "") >= 0.85
+            and artist_sim(a.get("artist") or "", b.get("artist") or "") >= 0.85
+            and len(a.get("tracks") or ()) == len(b.get("tracks") or ())
+            and a.get("disc_count") == b.get("disc_count")):
+        return res
+    return dict(res, status="review", why=list(res.get("why") or []) + [
+        f"{best['cand']['id']} is another pressing of the album: your copy's {ob['code']} names "
+        f"{ob['cand']['id']}, which it does not carry (BAR-13)"])
+
+
 def _disc_id_twin_of_barcode(mb_result, dg_result):
     """BAR-12: MusicBrainz's sure pick carries your copy's barcode but not your disc IDs, while
     another MusicBrainz release lists no barcode, carries every disc ID of your copy (TOC-1, each
@@ -5937,6 +6061,8 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     mb_result, dg_result = _yields_to_cd(mb_result, dg_result, prefs), _yields_to_cd(dg_result, mb_result, prefs)
     mb_result = _yields_to_linked_barcode(mb_result, dg_result)
     mb_result = _disc_id_twin_of_barcode(mb_result, dg_result)
+    # BAR-13: a sure pick of the album that lacks your code yields to the pressing it names
+    mb_result, dg_result = _yields_to_code_twin(mb_result, dg_result), _yields_to_code_twin(dg_result, mb_result)
     # (before either sure pick is taken: the unsure database's pick may carry your copy's proof)
     disputed = _proof_left_unsure(mb_result, dg_result, prefer)
     if disputed:

@@ -2028,6 +2028,12 @@ class Engine:
             return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
                                     reason=f"the release you chose was not found: {ref}")
         sc = mc.score_candidate(album, cand, self.cfg)
+        if kind != "mb":
+            # BAR-13: a pressing your code names, chosen by hand, listing too few tracks to tag -
+            # tagged from the full entry of its master, as when the matcher picks it
+            view = self._code_twin_view(album, cand, sc)
+            if view:
+                sc, cand = view, view["cand"]
         best = dict(cand, confidence=100.0, notes=list(sc.get("notes") or []))
         if (sc.get("cand") or {}).get("whole_works"):
             best["whole_works"] = True               # TRK-5: tagged one track per work, as scored
@@ -2055,6 +2061,31 @@ class Engine:
                                     reason=f"the release you chose does not fit the files: {exc}")
         prop.why = why + [w for w in prop.why if w not in why]
         return prop
+
+    CODE_TWIN_VERSIONS = 20         # (BAR-13, a hand-chosen release: its master's versions read at most)
+
+    def _code_twin_view(self, album, cand, sc):
+        """BAR-13 for a release you chose (Engine._forced): the Discogs entry carrying your copy's
+        own code whose track list is too sparse to tag, scored with the tracks of a full entry of
+        its master as match_core.code_twins scores it when the matcher finds it; None otherwise
+        (the chosen release then stands as it is)."""
+        n = len(album.get("tracks") or ())
+        tracks = cand.get("tracks") or ()
+        if sc.get("code") not in mc.OWN_CODES or not cand.get("master_id") or self.dm is None or \
+                not (len(tracks) < n or (len(tracks) == n and not sc.get("dur_cov"))):
+            return None
+        try:
+            ids = _discogs_versions(self.http, cand["master_id"]) or set()
+            others = []
+            for vid in sorted(ids - {str(cand["id"])})[:self.CODE_TWIN_VERSIONS]:
+                det = self.http.get_json(f"https://api.discogs.com/releases/{vid}", "discogs")
+                if det:
+                    others.append(mc.score_candidate(album, ma.discogs_candidate(det, self.dm), self.cfg))
+        except ma.ProviderUnavailable:
+            return None
+        view = next((s for s in mc.code_twins(album, [sc] + others, self.cfg)
+                     if str(s["cand"].get("id")) == str(cand["id"])), None)
+        return view if view is not None and view["cand"].get("tracks_of") else None
 
     def _release(self, best):
         return ma.release_fields(best)
@@ -2121,6 +2152,18 @@ class Engine:
                 raise mb_down from None         # (Discogs refused too: tried again later)
             if det:
                 dparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")))
+            if dparts and best.get("tracks_of") and best.get("source") == "discogs" and \
+                    (dparts[1] is None or len(dparts[1]) != len(files)):
+                # BAR-13: the pressing your code names lists too few of its tracks (Discogs 16262491,
+                # 131 of a box's 139, no lengths): each file is tagged as its track of the full entry
+                # of the same album the matcher compared (match_core.code_twins), the release's own
+                # fields (IDs, label, number, barcode, date, country, notes, its discs' format)
+                # staying its own
+                full = self.http.get_json(f"https://api.discogs.com/releases/{best['tracks_of']}", "discogs")
+                fparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")),
+                                       tracks_det=full) if full else None
+                if fparts and fparts[1] is not None and len(fparts[1]) == len(files) and fparts[2] == dparts[2]:
+                    dparts = fparts
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)
         dg_vinyl = [bool(t.pop("~box_vinyl", None)) for t in dparts[1]] \
             if dparts and dparts[1] is not None else []
@@ -5701,20 +5744,25 @@ def _without_box_vinyl(rel, ps):
     return mb_tags.release_tags(rel, ps, without=drop)
 
 
-def discogs_parts(det, dm, http=None, s=None, whole_works=False):
+def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None):
     """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
     builds them: extract_discogs_fields shaped by the settings, then the master's original
     year (and date = original date when prefer_original_date is on). Per-track fields are in
     the matcher's track order, each with its disc fields; None when the tracklist does not
     line up with the matcher's. WHOLE_WORKS: the matcher read each work listed without lengths
-    as one track (TRK-5: your files are one per work), so it is tagged so."""
+    as one track (TRK-5: your files are one per work), so it is tagged so. TRACKS_DET (BAR-13):
+    the tracks are that entry's - the full entry of the same album, DET listing too few of its
+    own -, the album's fields and each disc's format DET's."""
     import tagger_settings
     s = s or tagger_settings.enrichment()
     det = discogs_without_repeats(det, dm)
+    own = det
+    if tracks_det is not None:
+        det = discogs_without_repeats(tracks_det, dm)
     scope = _credit_scope(det, dm)              # (CRD-1: from the tracklist as listed, movements too)
     det = ma.discogs_one_track_movements(det, True) if whole_works else \
         ma.discogs_one_track_movements(det)                  # TRK-1: the plugin writes one track too
-    album = shape_fields(dm.extract_discogs_fields(det), s, dm)
+    album = shape_fields(dm.extract_discogs_fields(own if tracks_det is not None else det), s, dm)
     if album.get("barcode"):
         album["barcode"] = barcode_digits(album["barcode"])
     if det.get("master_id") and http is not None:
@@ -5741,9 +5789,9 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
         else [False] * len(discs)
     # MED-15: each track's media is its own disc's format, never every format of the release
     # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
-    media = discogs_track_media(det, raw, discs)
+    media = discogs_track_media(own, raw, discs)
     # (CRD-1b: a release of one format: every track is on it)
-    carriers = [str(f.get("name") or "") for f in det.get("formats") or []
+    carriers = [str(f.get("name") or "") for f in own.get("formats") or []
                 if isinstance(f, dict) and str(f.get("name") or "").strip().casefold() not in _NO_CARRIER]
     seen, tracks = {}, []
     for i, (entry, disc) in enumerate(zip(raw, discs)):

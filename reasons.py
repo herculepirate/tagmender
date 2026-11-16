@@ -50,7 +50,7 @@ _PATTERNS = [
     (r"artist similarity|same-?name artist|ambiguous artist", "ambiguous_artist"),
     (r"title similarity", "low_similarity"),
     (r"confidence \d", "low_confidence"),
-    (r"folder name says|barcode differs|catalogue number .* not|contradict|conflict", "conflicting_sources"),
+    (r"folder name says|your copy is |barcode differs|catalogue number .* not|contradict|conflict", "conflicting_sources"),
     (r"partially tagged", "partially_tagged"),
     (r"not on musicbrainz,? (or )?discogs|no candidates? found|^nomatch|not found", "no_candidate"),
     (r"near miss", "web_fallback_only"),

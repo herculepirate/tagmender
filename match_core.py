@@ -1922,6 +1922,9 @@ def pressing_clues(ocr_text, cand, ring_text=""):
     return matrix_clues(ocr_text, cand, ring_text, agree, disagree)
 
 
+# what the copy says of itself, against a pressing: its folder name, or (MED-21) your copy's media
+# said by its album tags or rip notes ("your copy is vinyl (the rip notes say vinyl rip), ...")
+COPY_SAYS = ("folder name says", "your copy is ")
 _VINYL_HINT = re.compile(r"vinyl|(?<![A-Za-z0-9])\d*\s*LPs?\b", re.I)
 _CD_HINT = re.compile(r"(?<![A-Za-z0-9])\d*\s*CDs?\b|\bSACD\b|\bHDCD\b", re.I)    # not "FO40CD"
 # A remaster ("[2016 RM 20th Annv Edn]") says nothing of the source: remasters come out on
@@ -2618,7 +2621,7 @@ def file_clues(album, cand, clues, against, cfg=None):
             src = album.get("media_hint_from") or "folder name"
             against.append(f"folder name says {hint}, this pressing is {'/'.join(sorted(formats))}"
                            if src == "folder name" else
-                           f"folder name says nothing, but {src}: this pressing is {'/'.join(sorted(formats))}")
+                           f"your copy is {hint} ({src}), this pressing is {'/'.join(sorted(formats))}")
         elif not hint and album.get("tags_media") == "cd" and "cd" in formats \
                 and not audio.get("hires") and not audio.get("not_cd"):
             # MED-14: the album tags' "[... 10CD Box]": a clue for a CD, never against the others
@@ -4576,7 +4579,7 @@ def classify(scored, cfg):
                      and s.get("has_folder_catno") for s in scored)
 
     def _says(s):
-        return [x for x in s.get("clues_against") or () if x.startswith("folder name says")]
+        return [x for x in s.get("clues_against") or () if x.startswith(COPY_SAYS)]
     # Several releases carry the folder's own number (an unofficial Russian CD copies the
     # European one's NB 3099-0): then the rest of the folder name decides between them -
     # unless your copy cannot be the one the rest fits (Mekong Delta - Toccata, "Germany,
@@ -4604,7 +4607,7 @@ def classify(scored, cfg):
             return []
         if s.get("folder_catno_agrees") and not numbered_fit:
             # the folder's own number is on it: that is the pressing
-            out = [x for x in out if re.match(r"folder name says (vinyl|cd),", x)]
+            out = [x for x in out if re.match(r"(?:folder name says|your copy is) (vinyl|cd)\b", x)]
         if catno_real and s.get("folder_catno_absent"):
             out.append("folder catalogue number is not on it")
         return out
@@ -5281,10 +5284,10 @@ def _against_only(best, other) -> list:
     ("folder name says US/MX, this pressing is from GB"; "scans say made in ..."), as listed."""
     def kinds(s):
         return {x.split(",")[0] for x in (s or {}).get("clues_against") or ()
-                if x.startswith(("folder name says", "scans say"))}
+                if x.startswith(COPY_SAYS + ("scans say",))}
     theirs = kinds(other)
     return [x for x in (best or {}).get("clues_against") or ()
-            if x.startswith(("folder name says", "scans say")) and x.split(",")[0] not in theirs]
+            if x.startswith(COPY_SAYS + ("scans say",)) and x.split(",")[0] not in theirs]
 
 
 def _carries_barcode(s) -> bool:
@@ -5730,9 +5733,9 @@ def _folder_fit_disputes(mb_result, dg_result):
     mb_best, dg_best = (mb_result or {}).get("best"), (dg_result or {}).get("best")
     if not (mb_best and dg_best) or dg_result.get("status") == "auto":
         return None
-    said = [x for x in mb_best.get("clues_against") or () if x.startswith("folder name says")]
+    said = [x for x in mb_best.get("clues_against") or () if x.startswith(COPY_SAYS)]
     if not said or dg_best.get("media_why") or not dg_best.get("tracks_ok") or dg_best.get("conflict") \
-            or any(x.startswith("folder name says") for x in dg_best.get("clues_against") or ()):
+            or any(x.startswith(COPY_SAYS) for x in dg_best.get("clues_against") or ()):
         return None
     # only where TOC-2 changed things: Discogs's pick has a CTDB link 0.8.63 took for your disc ID
     # ("disc TOC (fuzzy)" now); a held pick without one leaves a sure MusicBrainz pick as it was

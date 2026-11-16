@@ -64,13 +64,17 @@ class MED21Said(Base):
                      "Other versions: vinyl rip by X", "vinyl version, ripped with EAC from the CD",
                      "Also available: CD, vinyl, ripped mp3", "Vinyl sound, ripped from CD",
                      "Cover of the vinyl ripped from discogs", "Source: WEB",
-                     "The 2008 vinyl reissue got a rip on the forum; this one is the CD"):
+                     "The 2008 vinyl reissue got a rip on the forum; this one is the CD",
+                     "Source: CD\nOther source: vinyl rip", "I own the vinyl but this rip is from the CD"):
             with self.subTest(text=text):
                 self.assertFalse(ma._vinyl_rip_in(text))
 
     def test_MED21_a_trackers_fields_and_scene_words(self):
         for text in ("Source: Vinyl", "Lineage: Vinyl > Pro-Ject > Audacity", "VinylRip", "LP rip", "Rip from LP",
-                     "rip from original 1979 vinyl", "Ripped from my mint original vinyl"):
+                     "rip from original 1979 vinyl", "Ripped from my mint original vinyl",
+                     "Vinyl rip from original pressing", "LP rip from 1979 pressing", "Media: Vinyl",
+                     "No noise reduction, vinyl rip 24/96", "Ripped from vinyl (not remastered)",
+                     "Vinyl rip - not declicked"):
             with self.subTest(text=text):
                 self.assertTrue(ma._vinyl_rip_in(text))
 
@@ -153,6 +157,18 @@ class MED21Scored(Base):
                 s = mc.score_candidate(album, ma.discogs_candidate(rel, dm), dict(mc.DEFAULT_CFG))
                 # (the CD's lengths only where the record's tracks are the CD's, title by title)
                 self.assertEqual(s["dur_cov"] > 0, same_titles, s["notes"])
+
+
+class MED21CopySays(unittest.TestCase):
+    def test_MED21_the_copys_word_reads_as_the_folder_names(self):
+        import match_core as mc
+        import reasons
+        import validate
+        said = "your copy is vinyl (the rip notes say vinyl rip), this pressing is cd"
+        self.assertTrue(said.startswith(mc.COPY_SAYS))
+        self.assertEqual(reasons.classify(said), ["conflicting_sources"])
+        self.assertEqual(validate._picked_kind("4 release(s) left out: your copy is vinyl (the album tags say vinyl rip)"),
+                         "vinyl")
 
 
 class MED21NoCarrier(unittest.TestCase):

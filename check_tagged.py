@@ -81,8 +81,9 @@ def check(folder_name, rel):
     mc.file_clues(album, cand, clues, against)
     folder_cat = {mc.norm_code(c) for c in mc.catno_hints(folder_name)} - {""}
     cat_ok = bool(folder_cat and catnos and mc.catnos_agree(folder_cat, catnos))
-    issues += [a for a in against if a.startswith("folder name")
-               and not (cat_ok and not a.startswith(("folder name says vinyl", "folder name says cd")))]
+    issues += [a for a in against if a.startswith(("folder name", "your copy is "))
+               and not (cat_ok and not a.startswith(("folder name says vinyl", "folder name says cd",
+                                                     "your copy is vinyl", "your copy is cd")))]
     if folder_cat and catnos and not mc.catnos_agree(folder_cat, catnos):
         issues.append(f"folder catalogue number {', '.join(mc.catno_hints(folder_name))} is not this "
                       f"release's ({', '.join(li.get('catalog-number') or '' for li in rel.get('label-info') or [])})")

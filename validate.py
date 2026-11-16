@@ -588,14 +588,14 @@ _STRONG = re.compile(r"barcode (?:\(OCR\) )?agrees|pressing chosen by barcode|ca
 # format contradicts it (Jesu - Terminus: a CD rip tagged as the download).
 _FORMAT = re.compile(r"pressing chosen by (?:digital release \((?:hi-res|lossless|bought from)|"
                      r"CD \((?:tracks are whole|the folder's rip log)|"
-                     r"physical release)|left out: folder name says (?:cd|vinyl)")
+                     r"physical release)|left out: (?:folder name says|your copy is) (?:cd|vinyl)")
 
 
 def _picked_kind(notes):
     m = re.search(r"pressing chosen by (digital release|CD|physical release)", notes)
     if m:
         return {"digital release": "digital", "CD": "cd", "physical release": "physical"}[m.group(1)]
-    m = re.search(r"left out: folder name says (cd|vinyl)", notes)
+    m = re.search(r"left out: (?:folder name says|your copy is) (cd|vinyl)", notes)
     return m.group(1) if m else ""
 
 

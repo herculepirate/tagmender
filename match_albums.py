@@ -2419,14 +2419,15 @@ _VINYL_RIP = re.compile(rf"\b(?:vinyl|LP)(?:{_SEP}\w+){{0,2}}?{_SEP}rip(?:ped)?\
 # (a vinyl rip denied or of another copy: "the 7\" vinyl was not ripped", "not the vinyl rip",
 # "other versions: vinyl rip by X", "ripped from the CD")
 _NOT_THIS = re.compile(r"\b(?:not|no|never|other|another|also|alternative|unlike)\b(?:\W+\w+){0,3}?\W*$", re.I)
-_DENIED_AFTER = re.compile(r"^\W*(?:\w+\W+){0,2}?(?:not\b|from\b(?!\W+(?:\w+\W+){0,3}?(?:vinyl|LP)\b))", re.I)
+_DENIED_AFTER = re.compile(r"^\W*(?:\w+\W+){0,2}?(?:not\W+(?:ripped|used|included|this|mine)\b|from\W+(?:(?:the|an?|my)\W+)?"
+                           r"(?:CD|CDs|WEB|digital|download|stream|streaming|tape|cassette|files?|SACD|DVD|discogs)\b)", re.I)
 _DENIED_WITHIN = re.compile(r"\b(?:not|never|no)\b|n't\b", re.I)
 
 
 def _vinyl_rip_in(text) -> bool:
     for m in _VINYL_RIP.finditer(text or ""):
         line_start = text.rfind("\n", 0, m.start()) + 1
-        before = re.split(r"[.;!?(\[]", text[line_start:m.start()])[-1]
+        before = re.split(r"[.,;!?(\[]", text[line_start:m.start()])[-1]
         after = re.split(r"[.;!?)\]\n]", text[m.end():m.end() + 60])[0]
         if not _NOT_THIS.search(before) and not _DENIED_AFTER.search(after) \
                 and not _DENIED_WITHIN.search(m.group(0)):
@@ -9430,7 +9431,7 @@ def release_choices(results):
             year = f" ({c['year']})" if c.get("year") else ""
             out.append({"source": c["source"], "id": str(c["id"]), "score": s["confidence"],
                         "title": f"{c['artist']} - {c['title']}{year}", "details": mc.release_details(c),
-                        "against_folder": any(str(x).startswith("folder name says")
+                        "against_folder": any(str(x).startswith(mc.COPY_SAYS)
                                               for x in s.get("clues_against") or ())})
     return out
 

@@ -159,6 +159,35 @@ class BAR13CodeTwin(unittest.TestCase):
                 self.assertFalse(any(s["cand"].get("tracks_of") for s in sc))
                 self.assertEqual(_pick(_res(_album(), sparse, _full(id="remaster"), orig)), "orig")
 
+    def test_BAR13_another_entry_carrying_your_code_leaves_the_pressing_open(self):
+        # (of 2020, as your rip log: nothing of your copy rules them out)
+        code = dict(catnos={mc.norm_code(CODE)}, catno_shown=CODE, barcodes=set(), year=2020, date="2020")
+        shapes = {
+            # every track, lengths agreeing, but listed as two discs
+            "orig2d": _full(id="orig2d", disc_count=2, tracks=[{"disc": 1 if i < 3 else 2, "title": t, "secs": s}
+                                                               for i, (t, s) in enumerate(zip(TITLES, SECS))], **code),
+            # another master
+            "othermaster": _full(id="othermaster", master_id="901", **code),
+            # another sparse entry of your number, one length typed
+            "sparseL": _sparse(id="sparseL", tracks=[{"disc": 1, "title": t, "secs": (s if i == 0 else 0)}
+                                                     for i, (t, s) in enumerate(zip(TITLES[:4], SECS))]),
+        }
+        for name, other in shapes.items():
+            with self.subTest(other=name):
+                self.assertFalse(any(s["cand"].get("tracks_of") for s in _scored(_album(), _full(), _sparse(), other)))
+                res = _res(_album(), _full(), _sparse(), other)
+                self.assertFalse(res["status"] == "auto" and res["best"]["cand"].get("tracks_of"), _pick(res))
+
+    def test_BAR13_an_entry_of_your_number_ruled_out_by_your_rip_log_does_not_block(self):
+        # (Neil Young: Discogs 17747869 carries 093624899051 too, but came out in 2021, after your
+        # 2020 rip log - DAT-3)
+        later = _sparse(id="later", year=2021, date="2021", barcodes={mc.norm_code("093624884316")})
+        sc = _scored(_album(), _full(), _sparse(), later)
+        self.assertTrue(next(s for s in sc if s["cand"]["id"] == "later")["rip_date_later"])
+        res = _res(_album(), _full(), _sparse(), later)
+        self.assertEqual((res["status"], _pick(res)), ("auto", "sparse"), res.get("why"))
+        self.assertEqual(res["best"]["cand"].get("tracks_of"), "full")
+
     def test_BAR13_a_list_of_one_or_two_tracks_names_no_album(self):
         for titles in (TITLES[3:4], TITLES[3:5]):
             with self.subTest(n=len(titles)):

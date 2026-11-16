@@ -414,9 +414,46 @@ def rename_legacy(data: dict) -> dict:
     naming = data.get("naming")
     if isinstance(naming, dict) and naming.get("preset") in LEGACY_PRESETS:
         data["naming"] = dict(naming, preset=LEGACY_PRESETS[naming["preset"]])
+        naming = data["naming"]
+    if isinstance(naming, dict) and _old_edition_lines(naming.get("template")):
+        data["naming"] = dict(naming, template=_new_edition_lines(naming["template"]))
     if _lists_retired_engine(data):
         data = _without_retired_engines(data)
     return data
+
+
+# ED-8: the edition lines TagMender's naming scripts carried before 0.8.12, kept in profiles that
+# copied them: every SACD, DVD-Audio or Blu-ray was named "CD" ("1973 - Piano Man ... [2024 CD]"
+# for a rip of the SACD's layers), and an album tag's " [2024 SACD]" was not taken off before
+# the folder name was made. Only these exact lines are replaced; a line you changed is yours.
+OLD_EDKIND = ("$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($or($in(%media%,Digital),$in(%media%,File)),WEB,"
+              "$if($in(%media%,Cassette),Tape,$if(%media%,CD,)))))")
+NEW_EDKIND = ("$set(_edkind,$if($in(%media%,Vinyl),Vinyl,$if($or($in(%media%,Digital),$in(%media%,File)),WEB,"
+              "$if($in(%media%,Cassette),Tape,$if($in(%media%,SACD layer),SACD,$if($in(%media%,CD layer),CD,"
+              "$if($in(%media%,CD side),CD,$if($in(%media%,SACD),SACD,$if($in(%media%,DVD-Audio),DVD-A,"
+              "$if($in(%media%,Blu-ray),Blu-ray,$if(%media%,CD,)))))))))))")
+OLD_STRIP_WORDS = "\\(?:CD|WEB|Vinyl|Tape\\)"
+NEW_STRIP_WORDS = "\\(?:CD|WEB|Vinyl|Tape|SACD|DVD-A|Blu-ray\\)"
+_STRIP_LINE = "$set(_tm_album,$rreplace(%album%,"
+
+
+def _old_edition_lines(template) -> bool:
+    """ED-8: the template holds one of the old edition lines (OLD_EDKIND, or OLD_STRIP_WORDS in
+    the line that takes the album tag's edition off)."""
+    if not isinstance(template, str):
+        return False
+    return OLD_EDKIND in template or any(
+        line.lstrip().startswith(_STRIP_LINE) and OLD_STRIP_WORDS in line for line in template.split("\n"))
+
+
+def _new_edition_lines(template: str) -> str:
+    """ED-8: the template with the old edition lines in today's words, everything else as it was."""
+    lines = []
+    for line in template.replace(OLD_EDKIND, NEW_EDKIND).split("\n"):
+        if line.lstrip().startswith(_STRIP_LINE):
+            line = line.replace(OLD_STRIP_WORDS, NEW_STRIP_WORDS)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _web_search_of(data: dict):
@@ -482,7 +519,8 @@ def has_legacy(data: dict) -> bool:
     data = data or {}
     naming = data.get("naming")
     return any(k in data for k in LEGACY_KEYS) or "primary" in data or (
-        isinstance(naming, dict) and naming.get("preset") in LEGACY_PRESETS) or _lists_retired_engine(data)
+        isinstance(naming, dict) and naming.get("preset") in LEGACY_PRESETS) or _lists_retired_engine(data) or (
+        isinstance(naming, dict) and _old_edition_lines(naming.get("template")))
 
 
 def keep_v2_behaviour(data: dict) -> dict:

@@ -166,6 +166,7 @@ _ALBUM_EXPR = re.compile(r"\$words\(%album%,\s*\d+\)|%album%", re.I)
 
 # what a script's own edition lines strip off the album tag, and the words ED-1..4 add
 _OWN_SUFFIX_WORDS = "\\(?:CD|WEB|Vinyl|Tape\\)"
+_OWN_SUFFIX_WORDS_8 = "\\(?:CD|WEB|Vinyl|Tape|SACD|DVD-A|Blu-ray\\)"       # (ED-8: since 0.8.68)
 _RULE_SUFFIX_WORDS = "\\(?:CD|WEB|Vinyl Rip|Tape Rip|Vinyl|Tape|SACD|DVD-A|Blu-ray|Remaster HD|Reissue HD|Remaster|Reissue|HD\\)"
 
 
@@ -179,7 +180,7 @@ def with_editions(template: str, mode: str) -> str:
         # ED-1..4: the edition TagMender's rules give, in place of the script's own (an
         # original download is no "[WEB]"); and the album tag's suffix in those words is taken
         # off as the script takes off its own (" [2015 WEB]")
-        template = template.replace(_OWN_SUFFIX_WORDS, _RULE_SUFFIX_WORDS)
+        template = template.replace(_OWN_SUFFIX_WORDS_8, _RULE_SUFFIX_WORDS).replace(_OWN_SUFFIX_WORDS, _RULE_SUFFIX_WORDS)
         var = "_ed_rule_kind" if mode == "edition" else "_ed_rule"
         if _RULE_SUFFIX_WORDS not in template:
             var += "_add"                    # (the script names the album tag as it is: suffix once)

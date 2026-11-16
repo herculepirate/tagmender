@@ -4270,6 +4270,16 @@ def _code_twin_of(s, f, cfg) -> bool:
     return found >= 0.8 * len(mine)
 
 
+def _ruled_out_by_copy(s) -> bool:
+    """BAR-13: your copy's hard evidence already rules this entry out (score_candidate's flags,
+    set before classify): a barcode of yours that differs ("conflict"), a rip log dated before it
+    came out (DAT-3's "rip_date_later"), a format your files cannot be. Never a weaker clue
+    against it alone ("clues_against": a country the scans or folder name, the tags' media, a
+    packaging or matrix): a sparse entry escapes those by listing nothing, so they must not
+    leave it the one entry of your number."""
+    return bool(s.get("conflict") or s.get("rip_date_later") or format_contradictions(s))
+
+
 def code_twins(album, scored, cfg, ocr_text=""):
     """BAR-13: an entry carrying your copy's own code (OWN_CODES) whose track list is too sparse
     to compare - no lengths at all, or fewer tracks than your files (a box's discs listed in
@@ -4281,22 +4291,31 @@ def code_twins(album, scored, cfg, ocr_text=""):
     2020 limited box, 131 tracks without lengths; 17690677, the 2021 retail box, 139 agreeing).
     Never for an entry anything of your copy argues against (a barcode of yours that differs, a
     rip log dated before it came out, the folder name or scans against it, a format your files
-    cannot be), nor when the full entry carries your code too, nor when any entry carrying your
-    code fits your files on its own tracks: a view never outranks a pressing of your number
-    listing its own lengths (one number is often an original's and its reissues', and lengths
-    typed off a sleeve may be a few seconds off). A sparse list of fewer than 3 tracks names no
+    cannot be), nor when the full entry carries your code too, nor when any other entry carries
+    your code (of any track count, disc count or master, with lengths or without) that your
+    copy's hard evidence does not rule out (_ruled_out_by_copy: Neil Young's 17747869, the 2021 entry
+    of 093624899051, is dated after your rip log): a view never outranks a pressing of your
+    number listing its own lengths, nor settles a tie between two entries of it (one number is
+    often an original's and its reissues', and lengths typed off a sleeve may be a few seconds
+    off). A sparse list of fewer than 3 tracks names no
     album. Returns SCORED, the views in place."""
     n_file = len(album.get("tracks") or ())
     if not n_file or not scored:
         return scored
-    if any(o.get("code") in OWN_CODES and o.get("tracks_ok") and not o.get("missing")
-           and not (o.get("cand") or {}).get("tracks_of") for o in scored):
+    # (only the one entry carrying your code that nothing of your copy rules out: another, of any
+    # track count, disc count or master, with lengths or without, leaves the pressing open)
+    carriers = [o for o in scored if o.get("code") in OWN_CODES and not (o.get("cand") or {}).get("tracks_of")
+                and not _ruled_out_by_copy(o)]
+    if len(carriers) != 1:
         return scored
     out = []
     for s in scored:
         c = s.get("cand") or {}
         n_cand = len(c.get("tracks") or ())
         sparse = n_cand >= 3 and (n_cand < n_file or (n_cand == n_file and not s.get("dur_cov")))
+        if s is not carriers[0]:
+            out.append(s)
+            continue
         # (a Discogs entry: only its tracks can be tagged from another entry's, engine._identified;
         # a MusicBrainz release's IDs name its own tracks)
         if not (sparse and c.get("source") == "discogs" and s.get("code") in OWN_CODES

@@ -62,6 +62,16 @@ def _pick(res):
     return str(((res or {}).get("best") or {}).get("cand", {}).get("id"))
 
 
+def _mb_res(prefer=""):
+    cfg = dict(CFG, prefer_source=prefer)
+    # MusicBrainz's entry of the 2021 box, your exact disc ID attached (as disc IDs of one master are)
+    mb = _full(source="mb", id="mb-2021", year=None, date="", country="XE", master_id="",
+               release_group="rg-1")
+    res = _res(_album(), mb, cfg=cfg)
+    res["best"]["clues"] = dict(res["best"].get("clues") or {}, **{"disc TOC": mc.EXACT_TOC_CLUE})
+    return res, cfg
+
+
 class BAR13CodeTwin(unittest.TestCase):
     def test_BAR13_the_entry_carrying_your_code_is_the_pressing(self):
         res = _res(_album(), _full(), _sparse())
@@ -76,6 +86,29 @@ class BAR13CodeTwin(unittest.TestCase):
         sparse = _sparse(tracks=[{"disc": 1, "title": t, "secs": 0} for t in TITLES])
         res = _res(_album(), _full(), sparse)
         self.assertEqual((res["status"], _pick(res)), ("auto", "sparse"), res.get("why"))
+        self.assertEqual(res["best"]["cand"].get("tracks_of"), "full")
+        # (and the other database's disc-ID pick of the other pressing yields to it)
+        for prefer in ("", "musicbrainz"):
+            with self.subTest(prefer=prefer):
+                mb, cfg = _mb_res(prefer)
+                final = mc.combine(mb, _res(_album(), _full(), sparse, cfg=cfg))
+                self.assertEqual((final["status"], _pick(final)), ("auto", "sparse"), final.get("why"))
+
+    def test_BAR13_your_number_listed_with_lengths_and_another_track_count_blocks_it(self):
+        # (your code on an entry listing its own lengths: your tracks and a bonus one; or, for four
+        # files, all five of the album's - neither fits on its tracks, both can be compared)
+        code = dict(catnos={mc.norm_code(CODE)}, catno_shown=CODE, barcodes=set(), year=2020)
+        bonus = _full(id="orig6", tracks=[{"disc": 1, "title": t, "secs": s} for t, s in zip(TITLES, SECS)]
+                      + [{"disc": 1, "title": "Bonus", "secs": 100.0}], **code)
+        sc = _scored(_album(), _full(), _sparse(), bonus)
+        self.assertFalse(any(s["cand"].get("tracks_of") for s in sc))
+        self.assertNotEqual(_pick(_res(_album(), _full(), _sparse(), bonus)), "sparse")
+        four = _album(tracks=_album()["tracks"][:4])
+        part = _full(id="origpart", **code)
+        args = (four, _full(tracks=_full()["tracks"][:4]),
+                _sparse(tracks=[{"disc": 1, "title": t, "secs": 0} for t in TITLES[:3]]), part)
+        self.assertFalse(any(s["cand"].get("tracks_of") for s in _scored(*args)))
+        self.assertNotEqual(_pick(_res(*args)), "sparse")
 
     def test_BAR13_scored_again_from_its_own_entry(self):
         # (a result scored again - match_albums._whole - starts from the sparse entry itself)
@@ -126,6 +159,51 @@ class BAR13CodeTwin(unittest.TestCase):
                 self.assertFalse(any(s["cand"].get("tracks_of") for s in sc))
                 self.assertEqual(_pick(_res(_album(), sparse, _full(id="remaster"), orig)), "orig")
 
+    def test_BAR13_another_entry_carrying_your_code_leaves_the_pressing_open(self):
+        # (of 2020, as your rip log: nothing of your copy rules them out)
+        code = dict(catnos={mc.norm_code(CODE)}, catno_shown=CODE, barcodes=set(), year=2020, date="2020")
+        shapes = {
+            # every track, lengths agreeing, but listed as two discs
+            "orig2d": _full(id="orig2d", disc_count=2, tracks=[{"disc": 1 if i < 3 else 2, "title": t, "secs": s}
+                                                               for i, (t, s) in enumerate(zip(TITLES, SECS))], **code),
+            # another master
+            "othermaster": _full(id="othermaster", master_id="901", **code),
+            # another sparse entry of your number, one length typed
+            "sparseL": _sparse(id="sparseL", tracks=[{"disc": 1, "title": t, "secs": (s if i == 0 else 0)}
+                                                     for i, (t, s) in enumerate(zip(TITLES[:4], SECS))]),
+        }
+        for name, other in shapes.items():
+            with self.subTest(other=name):
+                self.assertFalse(any(s["cand"].get("tracks_of") for s in _scored(_album(), _full(), _sparse(), other)))
+                res = _res(_album(), _full(), _sparse(), other)
+                self.assertFalse(res["status"] == "auto" and res["best"]["cand"].get("tracks_of"), _pick(res))
+
+    def test_BAR13_a_weak_clue_against_an_entry_of_your_number_still_leaves_it_a_carrier(self):
+        # (your number on a US entry listing its lengths, one 9 s off; your scans print "Printed in
+        # the EU" - a clue against it the sparse entry, listing no country, escapes)
+        ocr = "Printed in the EU"
+        orig = _full(id="origUS", year=2020, date="2020-11-20", country="US", catnos={mc.norm_code(CODE)},
+                     catno_shown=CODE, barcodes=set(),
+                     tracks=[{"disc": 1, "title": t, "secs": s + (9 if i == 4 else 0)}
+                             for i, (t, s) in enumerate(zip(TITLES, SECS))])
+        album = _album()
+        sc = mc.code_twins(album, [mc.score_candidate(album, c, CFG, ocr)
+                                   for c in (_full(), _sparse(country=""), orig)], CFG, ocr)
+        self.assertTrue(next(s for s in sc if s["cand"]["id"] == "origUS")["clues_against"])
+        self.assertFalse(any(s["cand"].get("tracks_of") for s in sc))
+        res = mc.classify(sc, CFG)
+        self.assertNotEqual(_pick(res), "sparse")
+
+    def test_BAR13_an_entry_of_your_number_ruled_out_by_your_rip_log_does_not_block(self):
+        # (Neil Young: Discogs 17747869 carries 093624899051 too, but came out in 2021, after your
+        # 2020 rip log - DAT-3)
+        later = _sparse(id="later", year=2021, date="2021", barcodes={mc.norm_code("093624884316")})
+        sc = _scored(_album(), _full(), _sparse(), later)
+        self.assertTrue(next(s for s in sc if s["cand"]["id"] == "later")["rip_date_later"])
+        res = _res(_album(), _full(), _sparse(), later)
+        self.assertEqual((res["status"], _pick(res)), ("auto", "sparse"), res.get("why"))
+        self.assertEqual(res["best"]["cand"].get("tracks_of"), "full")
+
     def test_BAR13_a_list_of_one_or_two_tracks_names_no_album(self):
         for titles in (TITLES[3:4], TITLES[3:5]):
             with self.subTest(n=len(titles)):
@@ -147,13 +225,7 @@ class BAR13CodeTwin(unittest.TestCase):
 
 class BAR13AcrossTheDatabases(unittest.TestCase):
     def _mb(self, prefer=""):
-        cfg = dict(CFG, prefer_source=prefer)
-        # MusicBrainz's entry of the 2021 box, your exact disc ID attached (as disc IDs of one master are)
-        mb = _full(source="mb", id="mb-2021", year=None, date="", country="XE", master_id="",
-                   release_group="rg-1")
-        res = _res(_album(), mb, cfg=cfg)
-        res["best"]["clues"] = dict(res["best"].get("clues") or {}, **{"disc TOC": mc.EXACT_TOC_CLUE})
-        return res, cfg
+        return _mb_res(prefer)
 
     def test_BAR13_musicbrainz_entry_of_another_pressing_yields(self):
         for prefer in ("", "musicbrainz", "discogs"):

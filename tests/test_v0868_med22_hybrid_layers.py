@@ -169,6 +169,8 @@ class MED22_Families(unittest.TestCase):
         self.assertEqual(engine._layer_prefer({"tracks": [{"disc": 1, "audio": {"rate": 44100, "bits": 16}},
                                                           {"disc": 2, "audio": {"rate": 88200, "bits": 24}}]}, rel),
                          {2: "cd", 3: "stereo"})
+        self.assertEqual(engine._audio_position(mb_tags.one_layer(rel), 2), 3)
+        self.assertEqual(engine._audio_position(rel_of([medium(1, "CD", DISC1)]), 1), 1)
 
 
 class MED22_Candidate(unittest.TestCase):
@@ -258,16 +260,45 @@ class MED22_Tags(unittest.TestCase):
         self.assertEqual(engine._layer_prefer({"tracks": [tr(1, hi), tr(2, hi)]}, rel), {1: "stereo", 2: "stereo"})
         self.assertEqual(engine._layer_prefer({"tracks": [tr(1, cd), tr(2, mch)]}, rel), {1: "cd", 2: "multichannel"})
         # (a disc whose files mix the two: its CD layer)
-        self.assertEqual(engine._layer_prefer({"tracks": [tr(1, cd), tr(1, hi)]}, rel), {1: "cd"})
+        self.assertEqual(engine._layer_prefer({"tracks": [tr(1, cd), tr(1, hi), tr(2, hi)]}, rel), {1: "cd", 2: "stereo"})
         # (an SACD area named in the tags)
-        self.assertEqual(engine._layer_prefer({"tracks": [tr(1, dict(hi, sacd_area="Multichannel"))]}, rel),
-                         {1: "multichannel"})
-        # (one disc of the set alone: the disc it is)
-        self.assertEqual(engine._layer_prefer({"tracks": [tr(1, hi)]}, rel, box=2), {2: "stereo"})
+        self.assertEqual(engine._layer_prefer({"tracks": [tr(1, dict(hi, sacd_area="Multichannel")),
+                                                          tr(2, dict(hi, sacd_area="Multichannel"))]}, rel),
+                         {1: "multichannel", 2: "multichannel"})
+        # (one disc of the set alone: the copy's layer)
+        self.assertEqual(engine._layer_prefer({"tracks": [tr(1, hi)]}, rel, box=2), {1: "stereo", 2: "stereo"})
         # (no audio facts on the files: the copy's)
         self.assertEqual(engine._layer_prefer({"audio": {"hires": True}, "tracks": [{"disc": 1, "channels": 2}]}, rel),
-                         {1: "stereo"})
-        self.assertEqual(engine._layer_prefer({"audio": {"hires": False}, "tracks": [{"disc": 1}]}, rel), {1: "cd"})
+                         {1: "stereo", 2: "stereo"})
+        self.assertEqual(engine._layer_prefer({"audio": {"hires": False}, "tracks": [{"disc": 1}]}, rel), {1: "cd", 2: "cd"})
+
+    def test_MED22_one_folder_of_every_disc_takes_the_copys_layer(self):
+        # (26 files of the 2-disc set, no disc tags: all on "disc 1" - every disc the copy's layer,
+        # never disc 2 left to its CD layer)
+        hi = {"rate": 88200, "bits": 24, "channels": 2}
+        album = {"tracks": [{"disc": 1, "audio": hi}] * 5}
+        prefer = engine._layer_prefer(album, greatest_hits())
+        self.assertEqual(prefer, {1: "stereo", 2: "stereo"})
+        self.assertEqual([m["format"] for m in mb_tags.one_layer(greatest_hits(), prefer)["media"]], [SA2, SA2])
+        cd = {"rate": 44100, "bits": 16, "channels": 2}
+        self.assertEqual(engine._layer_prefer({"tracks": [{"disc": 1, "audio": cd}] * 5}, greatest_hits()),
+                         {1: "cd", 2: "cd"})
+
+    def test_MED22_group_pressings_take_the_picks_layer(self):
+        class Http:
+            def get_json(self, url, host):
+                rel = greatest_hits()
+                for m in rel["media"]:
+                    if m["format"] == SA2:
+                        for t in m["tracks"]:
+                            t["recording"] = dict(t["recording"], id="sa-" + t["recording"]["id"])
+                return {"releases": [rel], "release-count": 1}
+        self.assertEqual(engine._uniform_layer({1: "stereo", 2: "stereo"}), "stereo")
+        self.assertEqual(engine._uniform_layer({1: "cd", 2: "stereo"}), "cd")
+        rec = [x["recording"] for x in engine._mb_group(Http(), "rg-gh", "stereo")["pressings"][0]["tracks"]]
+        self.assertEqual(rec, ["sa-r-" + t for t in DISC1 + DISC2])
+        rec = [x["recording"] for x in engine._mb_group(Http(), "rg-gh")["pressings"][0]["tracks"]]
+        self.assertEqual(rec, ["r-" + t for t in DISC1 + DISC2])
 
     def test_MED22_one_layer_disc_by_disc(self):
         one = mb_tags.one_layer(greatest_hits(), {1: "cd", 2: "stereo"})
@@ -356,6 +387,56 @@ class MED22_Engine(te.Base):
                     flac(d, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 100 * n + 10 * i, **meta)
         return top
 
+    def lone_disc_two(self, rel):
+        top = self.make(discs=(2,))
+        eng = self.engine(te.FakeHttp(mb=[rel]))
+        p = eng.identify(eng.albums_in(top)[0])
+        return p, [(t["title"][0], t["discnumber"][0], t["totaldiscs"][0], t["musicbrainz_trackid"][0])
+                   for t in p.targets]
+
+    def dvd_first(self, media):
+        dvd = {"position": 1, "format": "DVD-Video", "track-count": 1, "tracks": [
+            {"id": "t-v", "position": 1, "number": "1", "title": "Clip", "length": 5000,
+             "recording": {"id": "r-v", "title": "Clip", "video": True}}]}
+        rel = greatest_hits(names=("Volume One", "Greatest Hits"))
+        rel["media"] = [dvd] + [m for m in rel["media"] if m["format"] in media]
+        for i, m in enumerate(rel["media"], 1):
+            for t in m["tracks"]:
+                t["id"] = t["id"].replace(f"t-{m['position']}-", f"t-{i}-")
+            m["position"] = i
+        return rel
+
+    def test_MED22_box2_lone_disc_two_after_a_dvd(self):
+        # (BOX-2: the candidate's disc 2 is the release's second audio disc, medium 3 after a
+        # DVD-Video - never medium 2, disc 1's tracks)
+        rel = self.dvd_first({"CD"} | {CDL})
+        for m in rel["media"][1:]:
+            m["format"] = "CD"
+        p, got = self.lone_disc_two(rel)
+        self.assertEqual(got, [("Song C", "3", "3", "t-3-0"), ("Song D", "3", "3", "t-3-1"),
+                               ("Song E", "3", "3", "t-3-2")], (p.status, p.reason, p.why))
+
+    def test_MED22_box2_lone_disc_two_after_a_dvd_layered(self):
+        rel = self.dvd_first({CDL, SA2})
+        p, got = self.lone_disc_two(rel)
+        # (media: DVD 1, disc 1's layers 2-3, disc 2's 4-5: disc 2 is the CD layer at 4, numbered 3 of 3)
+        self.assertEqual(got, [("Song C", "3", "3", "t-4-0"), ("Song D", "3", "3", "t-4-1"),
+                               ("Song E", "3", "3", "t-4-2")], (p.status, p.reason, p.why))
+
+    def test_MED22_one_folder_hires_copy_of_both_discs(self):
+        # (no disc subfolders, no disc tags: every file the SACD layer's)
+        top = self.lib / "Piano Player" / "2017 - Greatest Hits"
+        for k, t in enumerate(DISC1 + DISC2):
+            hires_flac(top, f"{k + 1:02d}.flac", (10, 20, 10, 20, 30)[k],
+                       freq=300 + 10 * k, title=t, album="Greatest Hits", albumartist="Piano Player",
+                       artist="Piano Player", track=str(k + 1))
+        eng = self.engine(te.FakeHttp(mb=[greatest_hits()]))
+        p = eng.identify(eng.albums_in(top)[0])
+        self.assertTrue(p.targets, (p.status, p.reason, p.why))
+        self.assertEqual({t.get("media", [""])[0] for t in p.targets}, {SA2}, (p.status, p.reason, p.why, p.targets[0]))
+        self.assertEqual(sorted(t["musicbrainz_trackid"][0] for t in p.targets),
+                         ["t-2-0", "t-2-1", "t-4-0", "t-4-1", "t-4-2"])
+
     def test_MED22_cd_layer_disc_one_sacd_layer_disc_two(self):
         top = self.make(hires=(2,))
         eng = self.engine(te.FakeHttp(mb=[greatest_hits()]))
@@ -398,6 +479,19 @@ class MED22_Engine(te.Base):
                          (p.status, p.reason, p.why))
         self.assertEqual({t["media"][0] for t in p.targets}, {CDL})
         self.assertEqual([t["musicbrainz_trackid"][0] for t in p.targets], ["t-3-0", "t-3-1", "t-3-2"])
+
+
+class MED22BoxMedium(unittest.TestCase):
+    def test_MED22_a_lone_disc_medium_by_its_database_numbering(self):
+        import engine
+        rel = {"media": [{"position": 1, "format": "DVD-Video"}, {"position": 2, "format": "CD"},
+                         {"position": 3, "format": "CD"}]}
+        # (MusicBrainz's disc 1 is its first audio disc: medium 2; Discogs's disc 2 counts the DVD: medium 2)
+        self.assertEqual(engine._box_medium(rel, 1, "mb"), 2)
+        self.assertEqual(engine._box_medium(rel, 2, "discogs"), 2)
+        self.assertEqual(engine._box_medium({"media": [{"position": 1, "format": "CD"}, {"position": 2, "format": "CD"}]},
+                                            2, "mb"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

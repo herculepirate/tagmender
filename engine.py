@@ -1698,7 +1698,7 @@ class Engine:
                 return None
             cand = ma.discogs_candidate(det, self.dm)
             # (its audio discs as its formats name them: a DVD-Video listed "2-1" ... is none, MED-11)
-            cand["audio_shape"], cand["video_medium"] = _discogs_shape(det, cand)
+            cand["audio_shape"], cand["shape_unsure"] = _discogs_shape(det, cand)
             return cand
         except Exception as exc:                           # (no claim then: each folder as planned)
             self.log.warning("release %s %s for a set's claim: %s", kind, rid, exc)
@@ -1819,15 +1819,16 @@ class Engine:
                 if str(v).lower() in ours:
                     why_of[v] = "TagMender's earlier job wrote it"
                 else:
-                    shape, video = [], False
+                    shape, unsure = [], False
                     try:
                         c = self._release_cand(kind, v) if asks else None     # (never a database left out)
                         shape = _disc_shape(c) if c else []
-                        video = bool(c and c.get("video_medium"))
+                        unsure = bool(c and c.get("shape_unsure"))
                     except Exception:
                         shape = []
-                    # (never by the count alone while its formats list a video disc: TAG-3's evidence then)
-                    if shape and mine and len(shape) != mine and not video:
+                    # (never by the count alone while it is unsure - a DVD or Blu-ray in its formats, or
+                    # formats counting other discs than its tracklist: TAG-3's evidence then)
+                    if shape and mine and len(shape) != mine and not unsure:
                         why_of[v] = f"another pressing: {len(shape)} disc(s), not {mine}"
                     else:
                         try:
@@ -5768,6 +5769,8 @@ def _discogs_media(det) -> list:
     "audio" - from its formats list and their quantities; [] when it gives none."""
     out = []
     for f in (det or {}).get("formats") or []:
+        if str(f.get("name") or "").strip().casefold() in ("box set", "all media"):
+            continue                                     # (a container, no disc of its own)
         try:
             qty = max(1, int(str(f.get("qty") or "1").strip() or 1))
         except ValueError:
@@ -5779,14 +5782,19 @@ def _discogs_media(det) -> list:
 
 
 def _discogs_shape(det, cand) -> tuple:
-    """TAG-4: (a Discogs release's audio discs as their track counts in order, whether its
-    formats list a video medium). A disc its formats name as video ("2-1" ... on the DVD of a
-    CD and DVD-Video) is no audio disc - counted by the formats only when they list as many
-    discs as the tracklist has."""
+    """TAG-4: (a Discogs release's audio discs as their track counts in order, whether that
+    count is unsure). A disc its formats name as video ("2-1" ... on the DVD of a CD and
+    DVD-Video) is no audio disc - counted by the formats only when they list as many discs as
+    the tracklist has. Unsure: the formats name a DVD, Blu-ray, VHS or the like (video or audio:
+    MusicBrainz may count it otherwise - its "Blu-ray" is video to it), or list another number
+    of discs than the tracklist; its disc count alone then shows no other pressing."""
     shape, media = _disc_shape(cand), _discogs_media(det)
+    unsure = len(media) != len(shape) or any(
+        _VIDEO_MEDIUM.search(" ".join([str(f.get("name") or "")] + [str(x) for x in f.get("descriptions") or []]))
+        for f in (det or {}).get("formats") or [])
     if len(media) == len(shape):
         shape = [n for n, m in zip(shape, media) if m == "audio"]
-    return shape, "video" in media
+    return shape, unsure
 
 
 def _disc_shape(cand) -> list:

@@ -696,7 +696,7 @@ class TAG4VideoDiscs(DSC10Base):
     """TAG-4: a CD and DVD-Video release Discogs numbers "1-n" (the CD) and "2-n" (the DVD): its
     audio discs are counted by its formats (MED-11) - the twin is kept, and so is your ID."""
 
-    def album(self, linked, dg):
+    def album(self, linked, dg, second="DVD-Video"):
         top = self.lib / "Band B" / "Album B"
         for i in range(3):
             flac(top, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 10 * i, title=f"S0-{i}", album="Album B",
@@ -706,7 +706,7 @@ class TAG4VideoDiscs(DSC10Base):
         rel["media"] = [{"format": "CD", "position": 1, "title": "", "tracks": [
             {"id": f"t{i}", "position": i + 1, "title": f"S0-{i}", "length": 10000 * (i + 1),
              "recording": {"id": f"r{i}", "title": f"S0-{i}"}} for i in range(3)]},
-            {"format": "DVD-Video", "position": 2, "title": "", "tracks": [
+            {"format": second, "position": 2, "title": "", "tracks": [
                 {"id": f"v{i}", "position": i + 1, "title": f"Video {i}", "length": 240000,
                  "recording": {"id": f"rv{i}", "title": f"Video {i}"}} for i in range(4)]}]
         if linked:
@@ -732,6 +732,33 @@ class TAG4VideoDiscs(DSC10Base):
     def test_TAG4_your_id_of_a_cd_and_dvd_video_stays(self):
         p = self.album(False, self.cd_and_dvd(778))
         self.assertFalse(any("discogs_release_id" in (t.get("~remove") or []) for t in p.targets), p.notes)
+
+    def kept(self, p):
+        return not any("discogs_release_id" in (t.get("~remove") or []) for t in p.targets)
+
+    def test_TAG4_your_id_stays_when_the_formats_leave_the_dvd_out(self):
+        d = self.cd_and_dvd(780)
+        d["formats"] = [{"name": "CD", "qty": "1"}]                  # (the tracklist's disc 2 named nowhere)
+        p = self.album(False, d)
+        self.assertTrue(self.kept(p), p.notes)
+
+    def test_TAG4_your_id_stays_beside_an_audio_blu_ray(self):
+        # (MusicBrainz's "Blu-ray" medium is video to it, Discogs's "Blu-ray Audio" an audio disc)
+        d = self.cd_and_dvd(781)
+        d["formats"] = [{"name": "CD", "qty": "1"}, {"name": "Blu-ray", "qty": "1", "descriptions": ["Blu-ray Audio"]}]
+        for linked in (True, False):
+            with self.subTest(linked=linked):
+                p = self.album(linked, d, second="Blu-ray")
+                self.assertTrue(self.kept(p), p.notes)
+                import shutil
+                shutil.rmtree(self.lib / "Band B")
+
+    def test_TAG4_a_box_set_entry_is_no_disc_of_the_twin(self):
+        # ("Box Set" in the formats is the box, no disc: the CD and its DVD-Video are still the twin)
+        d = self.cd_and_dvd(782)
+        d["formats"] = [{"name": "Box Set", "qty": "1", "descriptions": ["Limited Edition"]}] + d["formats"]
+        p = self.album(True, d)
+        self.assertEqual({(t.get("discogs_release_id") or [""])[0] for t in p.targets}, {"782"})
 
     def test_TAG4_a_cd_of_another_track_count_is_no_twin(self):
         # (9 tracks against the 10 of a bonus edition, no headings: two releases)

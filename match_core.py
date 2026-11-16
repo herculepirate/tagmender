@@ -4253,12 +4253,13 @@ def _code_twin_of(s, f, cfg) -> bool:
 
 
 def _ruled_out_by_copy(s) -> bool:
-    """BAR-13: your copy's own evidence already speaks against this entry (score_candidate's
-    flags, set before classify): a barcode of yours that differs ("conflict"), a rip log dated
-    before it came out (DAT-3's "rip_date_later"), the folder name, scans or audio against it
-    ("clues_against"), a format your files cannot be."""
-    return bool(s.get("conflict") or s.get("rip_date_later") or s.get("clues_against")
-                or format_contradictions(s))
+    """BAR-13: your copy's hard evidence already rules this entry out (score_candidate's flags,
+    set before classify): a barcode of yours that differs ("conflict"), a rip log dated before it
+    came out (DAT-3's "rip_date_later"), a format your files cannot be. Never a weaker clue
+    against it alone ("clues_against": a country the scans or folder name, the tags' media, a
+    packaging or matrix): a sparse entry escapes those by listing nothing, so they must not
+    leave it the one entry of your number."""
+    return bool(s.get("conflict") or s.get("rip_date_later") or format_contradictions(s))
 
 
 def code_twins(album, scored, cfg, ocr_text=""):
@@ -4274,7 +4275,7 @@ def code_twins(album, scored, cfg, ocr_text=""):
     rip log dated before it came out, the folder name or scans against it, a format your files
     cannot be), nor when the full entry carries your code too, nor when any other entry carries
     your code (of any track count, disc count or master, with lengths or without) that your
-    copy's evidence does not rule out (_ruled_out_by_copy: Neil Young's 17747869, the 2021 entry
+    copy's hard evidence does not rule out (_ruled_out_by_copy: Neil Young's 17747869, the 2021 entry
     of 093624899051, is dated after your rip log): a view never outranks a pressing of your
     number listing its own lengths, nor settles a tie between two entries of it (one number is
     often an original's and its reissues', and lengths typed off a sleeve may be a few seconds

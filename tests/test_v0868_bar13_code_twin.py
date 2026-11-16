@@ -178,6 +178,22 @@ class BAR13CodeTwin(unittest.TestCase):
                 res = _res(_album(), _full(), _sparse(), other)
                 self.assertFalse(res["status"] == "auto" and res["best"]["cand"].get("tracks_of"), _pick(res))
 
+    def test_BAR13_a_weak_clue_against_an_entry_of_your_number_still_leaves_it_a_carrier(self):
+        # (your number on a US entry listing its lengths, one 9 s off; your scans print "Printed in
+        # the EU" - a clue against it the sparse entry, listing no country, escapes)
+        ocr = "Printed in the EU"
+        orig = _full(id="origUS", year=2020, date="2020-11-20", country="US", catnos={mc.norm_code(CODE)},
+                     catno_shown=CODE, barcodes=set(),
+                     tracks=[{"disc": 1, "title": t, "secs": s + (9 if i == 4 else 0)}
+                             for i, (t, s) in enumerate(zip(TITLES, SECS))])
+        album = _album()
+        sc = mc.code_twins(album, [mc.score_candidate(album, c, CFG, ocr)
+                                   for c in (_full(), _sparse(country=""), orig)], CFG, ocr)
+        self.assertTrue(next(s for s in sc if s["cand"]["id"] == "origUS")["clues_against"])
+        self.assertFalse(any(s["cand"].get("tracks_of") for s in sc))
+        res = mc.classify(sc, CFG)
+        self.assertNotEqual(_pick(res), "sparse")
+
     def test_BAR13_an_entry_of_your_number_ruled_out_by_your_rip_log_does_not_block(self):
         # (Neil Young: Discogs 17747869 carries 093624899051 too, but came out in 2021, after your
         # 2020 rip log - DAT-3)

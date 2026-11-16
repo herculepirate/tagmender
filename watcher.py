@@ -505,6 +505,28 @@ class Watcher:
                 return False
         return True
 
+    def siblings_settled(self, g, prof, db, top) -> tuple:
+        """DSC-10: (whether album g is looked at now, whether alone). Its sibling folders (Group.
+        siblings), any of which a release may file with it as one album: one still being copied
+        in (a download in progress, files changing within the settle time) - the whole set waits;
+        one not due (done or planned already, undone by you, Unresolved and not yet due again) -
+        g is identified as itself only, as before DSC-10 (never filing a folder you undid, or
+        identifying its siblings again at each retry); all due - as one set."""
+        alone = False
+        for m in getattr(g, "siblings", None) or ():
+            if m is g:
+                continue
+            deep = Path(os.path.realpath(m.folder)) != top
+            try:
+                _sig, newest, partial = snapshot(Path(m.folder), m.files, deep)
+            except OSError:
+                return False, False
+            if partial or time.time() - newest < prof["watch"]["settle_minutes"] * 60:
+                return False, False
+            go, _why = self.due(m.folder, prof, db, self.key(m), m.files, m.files, deep)
+            alone = alone or not go
+        return True, alone
+
     @staticmethod
     def destination_ready(prof) -> bool:
         """The folders a copy or move profile files albums into are there (mounted)."""
@@ -834,6 +856,9 @@ class Watcher:
                     go, why = (True, "recheck") if recheck else self.due(g.folder, prof, db, k, scope, g.files, deep)
                     if go and not recheck:
                         go = self.discs_settled(g, prof)         # DSC-1: the set's other disc folders too
+                    alone = False
+                    if go and not recheck:
+                        go, alone = self.siblings_settled(g, prof, db, top)     # DSC-10
                 except Exception:                              # one album never stops the watcher
                     self.log.exception("watch: %s could not be looked at", g.folder)
                     continue
@@ -842,13 +867,13 @@ class Watcher:
                 if why in ("retry", "recheck"):            # HF-3: new albums always go first
                     row = db.execute("SELECT next_try FROM processed WHERE folder=?", (k,)).fetchone()
                     later.append(((recheck, (row and row[0]) or 0, len(later)),
-                                  (root, prof, e, g, k, deep, scope, why, recheck)))
+                                  (root, prof, e, g, k, deep, scope, why, recheck, alone)))
                     continue
                 if executor.job_running():                 # a plan being applied, an undo: it may be this album
                     self.log.info("watch: a job is changing files; the rest of this pass waits")
                     self.stop_pass = True
                     break
-                self._look(db, done, root, prof, e, g, k, deep, scope, why, recheck)
+                self._look(db, done, root, prof, e, g, k, deep, scope, why, recheck, alone)
         # HF-3: then the retries, the longest overdue first (re-checks of filed albums last), one
         # at a time (the providers' limits are shared); they stop after a watch interval, and what
         # is left is due at the next pass - after its new albums
@@ -871,15 +896,24 @@ class Watcher:
                 break
             self._look(db, done, *args)
 
-    def _look(self, db, done, root, prof, e, g, k, deep, scope, why, recheck):
-        """Identify one album that is due and plan, file or remember it."""
+    def _look(self, db, done, root, prof, e, g, k, deep, scope, why, recheck, alone=False):
+        """Identify one album that is due and plan, file or remember it. alone: DSC-10 - an album
+        of sibling folders identified as itself only (siblings_settled)."""
         prev = db.execute("SELECT attempts, status FROM processed WHERE folder=?", (k,)).fetchone()
         attempts = (prev[0] or 0) + 1 if prev and why == "retry" else 1
         try:
             # (a set whose discs are different releases: each disc an album of the plan)
-            props = e.identify_all(g) if hasattr(e, "identify_all") else [e.identify(g)]
+            was = getattr(e, "_set_alone", False)
+            e._set_alone = alone
+            try:
+                props = e.identify_all(g) if hasattr(e, "identify_all") else [e.identify(g)]
+            finally:
+                e._set_alone = was
             # DSC-10: sibling folders one release holds are one album, found by each of them: the
-            # first folder looked at plans it and remembers the others with it (_look_set_members)
+            # first folder looked at plans it and remembers the others with it (_look_set_members).
+            # (The engine of this pass holds the set's Proposals once - Engine._set_member's memo,
+            # one per scan - so a later member of this pass finds them marked; a later pass makes
+            # new ones, and its members are not due then: remembered with the set.)
             if any(getattr(p, "set_looked", False) for p in props):
                 return
             for p in props:

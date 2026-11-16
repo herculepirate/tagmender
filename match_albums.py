@@ -8056,7 +8056,8 @@ def summarize(res):
             # (your copy another version than the release: an instrumental album - engine holds it)
             "copy_version": str(b.get("copy_version") or ""),
             "vinyl_rip": str((b.get("clues") or {}).get("format", "")).startswith("vinyl"),
-            "notes": b["notes"], "discogs_id": c.get("discogs_id", ""), "genre": list(c.get("genre") or []),
+            "notes": b["notes"], "discogs_id": c.get("discogs_id", ""),
+            "discogs_ids": list(c.get("discogs_ids") or ()), "genre": list(c.get("genre") or []),   # (every Discogs release it links: engine._discogs_twin)
             # tracks missing from the folder: each file's track of the release (0-based, in
             # the release's order), the missing ones {disc: [numbers]}, the release's count
             # (TRK-2: or your files are its tracks in another order: each file's track, none missing)

@@ -150,6 +150,22 @@ class DSC10ClaimedByARelease(DSC10Base):
         self.assertIn("'Disc 3 - Bonus Disc' fits no disc of it: planned alone", joined.notes)
         self.assertEqual({p.source_dir for p in props}, {str(top)})
 
+    def test_DSC10_the_parents_own_files_go_with_the_joined_album_only(self):
+        top = self.stranger()
+        (top / "Scans").mkdir()
+        (top / "Scans" / "box.jpg").write_bytes(b"\xff\xd8\xffbox")
+        (top / "folder.jpg").write_bytes(b"\xff\xd8\xfftop")
+        legacy = release("mb-legacy", "Legacy", ("Dreams", "Live"), disc_titles=("Dreams", "Live Tour"))
+        bonus = release("mb-bonus", "Bonus", ("Bonus",), lens={0: [10000, 20000]}, barcode="0886973225129")
+        dest = self.tmp / "filed"
+        dest.mkdir()
+        eng = self.engine(DiscHttp(mb=[legacy, bonus, release("mb-dreams", "Dreams", ("Dreams",), barcode="")]),
+                          operation="move", destination=str(dest))
+        albums = eng.plan(self.lib)["albums"]
+        taken = {a["identification"].get("release_id"): sorted(Path(c["src"]).name for c in a["companions"])
+                 for a in albums}
+        self.assertEqual(taken, {"mb-legacy": ["box.jpg", "folder.jpg"], "mb-bonus": []})
+
     def test_DSC10_a_folder_whose_own_copy_proves_another_release_stays_apart(self):
         top = self.voyage()
         for f in (top / "Disc 1 - Dreams").iterdir():
@@ -492,15 +508,14 @@ def _age(root):
     import os
     import time
     old = time.time() - 3600
-    for p in Path(root).rglob("*"):
-        if p.is_file():
-            os.utime(p, (old, old))
+    for p in sorted(Path(root).rglob("*"), key=lambda x: -len(x.parts)):     # (files, then their folders)
+        os.utime(p, (old, old))
 
 
 class DSC10Watched(DSC10Base):
     """The watcher: each folder an album as before unless a release joins them."""
 
-    def watch(self, rels, hold=None, broken=""):
+    def watch(self, rels, hold=None, broken="", settle=0):
         import profiles as pf
         import watcher
         from unittest import mock
@@ -509,7 +524,7 @@ class DSC10Watched(DSC10Base):
         prof = pf.from_dict({"name": "default", "operation": "move", "destination": str(self.dest),
                              "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False},
                              "sources": [{"path": str(self.lib), "watch": True}], "unattended": True,
-                             "watch": {"settle_minutes": 0, "interval_seconds": 1, "workers": 1},
+                             "watch": {"settle_minutes": settle, "interval_seconds": 1, "workers": 1},
                              "unresolved": {"action": "move" if hold else "leave", "move_to": str(hold or ""),
                                             "allow_partial": False}})
         http = DiscHttp(mb=rels)
@@ -579,6 +594,104 @@ class DSC10Watched(DSC10Base):
         self.assertEqual(len(self.filed()), 9, self.filed())
         self.assertEqual(sorted({Path(f).parent.name for f in self.filed()}), ["Disc 01", "Disc 02", "Disc 03"])
         self.assertEqual(len({Path(f).parent.parent for f in self.filed()}), 1)
+
+
+class TAG4LinkedDiscogsTwin(DSC10Base):
+    """TAG-4: the Discogs release a MusicBrainz release links tags the files only when it is the
+    same pressing by its discs (The Stranger's 3-CD Best Buy edition links its 1-CD bonus EP)."""
+
+    def two_cds(self, dg):
+        from test_v0821_engine_rules import disc_folder, two_cd_release
+        box = self.lib / "Band B" / "Album B [2CD]"
+        disc_folder(box, "CD1", 1, "Album B", "Band B")
+        disc_folder(box, "CD2", 2, "Album B", "Band B")
+        rel = two_cd_release("mb-b", "Band B", "Album B")
+        rel["relations"] = [{"type": "discogs", "target-type": "url",
+                             "url": {"resource": f"https://www.discogs.com/release/{dg['id']}"}}]
+        eng = self.engine(DiscHttp(mb=[rel], dg=[dg]))
+        return eng.identify(eng.albums_in(self.lib)[0])
+
+    def test_TAG4_a_linked_one_disc_ep_gives_none_of_its_fields(self):
+        ep = te.dg_release(903, "Band B", "Album B - Bonus CD", catno="EP-1")
+        p = self.two_cds(ep)
+        self.assertEqual((p.status, p.release_id), ("identified", "mb-b"), p.why)
+        self.assertFalse(any(t.get("discogs_release_id") for t in p.targets))
+        self.assertNotIn("EP-1", {c for t in p.targets for c in t.get("catalognumber") or []})
+        self.assertEqual({t["album"][0] for t in p.targets}, {"Album B"})
+
+    def test_TAG4_a_linked_release_of_the_same_discs_is_still_used(self):
+        twin = te.dg_release(904, "Band B", "Album B")
+        twin["tracklist"] = [{"type_": "track", "position": f"{d}-{i + 1}", "title": f"{'TU'[d - 1]}{i}",
+                              "duration": f"0:{10 * (i + 1)}"} for d in (1, 2) for i in range(3)]
+        twin["formats"] = [{"name": "CD", "qty": "2", "descriptions": ["Album"]}]
+        p = self.two_cds(twin)
+        self.assertEqual({t["discogs_release_id"][0] for t in p.targets}, {"904"})
+
+
+class DSC10WatchedArriving(DSC10Base):
+    """The watcher never files a folder of a set while one of its siblings is still being copied
+    in, nor one you undid, through another folder's look."""
+
+    def numbered(self):
+        return self.voyage(names=("01 Dreams", "02 Live Tour", "03 Questions"))
+
+    def rels(self):
+        return [three_disc_set(), release("mb-dreams", "Dreams", ("Dreams",), barcode="")]
+
+    def test_DSC10_a_sibling_still_downloading_holds_the_set(self):
+        top = self.numbered()
+        (top / "03 Questions" / "04.flac.part").write_bytes(b"x" * 100)
+        _age(self.lib)
+        w, patched = DSC10Watched.watch(self, self.rels())
+        with patched:
+            w.tick()
+        self.assertEqual(list((self.tmp / "filed").rglob("*")), [])
+        self.assertTrue((top / "03 Questions" / "04.flac.part").exists())
+        self.assertEqual(len(list(top.rglob("*.flac"))), 9)
+
+    def test_DSC10_a_sibling_still_settling_holds_the_set(self):
+        import os
+        import time
+        top = self.numbered()
+        _age(self.lib)
+        for f in (top / "02 Live Tour").iterdir():
+            os.utime(f, (time.time(), time.time()))
+        w, patched = DSC10Watched.watch(self, self.rels(), settle=10)
+        with patched:
+            w.tick()
+        self.assertEqual(list((self.tmp / "filed").rglob("*.flac")), [])
+
+    def test_DSC10_an_undone_sibling_is_never_filed_by_anothers_look(self):
+        import executor
+        from mutagen.flac import FLAC
+        top = self.numbered()
+        _age(self.lib)
+        w, patched = DSC10Watched.watch(self, self.rels())
+        with patched:
+            w.tick()
+            self.assertEqual(len(list((self.tmp / "filed").rglob("*.flac"))), 9)
+            for j, *_r in executor.jobs(10):
+                executor.undo(j)
+            m = FLAC(str(top / "01 Dreams" / "01.flac"))          # (you change one folder since)
+            m["comment"] = "edited"
+            m.save()
+            _age(self.lib)
+            w.tick()
+        self.assertEqual(sorted(p.name for p in (top / "02 Live Tour").glob("*.flac")), ["01.flac", "02.flac", "03.flac"])
+        self.assertEqual(sorted(p.name for p in (top / "03 Questions").glob("*.flac")), ["01.flac", "02.flac", "03.flac"])
+
+    def test_DSC10_a_joined_rows_refresh_gives_every_folder_back(self):
+        self.numbered()
+        eng = self.engine(DiscHttp(mb=self.rels()))
+        keys = [a["key"] for a in eng.listing(self.lib)["albums"]]
+        got = []
+        eng.plan_each(self.lib, [keys[1]], lambda k, plan: got.append([a.get("key") for a in plan["albums"]]))
+        self.assertEqual(got, [[keys[0]]])                     # (the set's one row, its first folder's key)
+        # (the release no longer joins them: the row looked up again gives each folder's own row)
+        eng2 = self.engine(DiscHttp(mb=[release("mb-dreams", "Dreams", ("Dreams",), barcode="")]))
+        got = []
+        eng2.plan_each(self.lib, [keys[0]], lambda k, plan: got.append(sorted(a.get("key") for a in plan["albums"])))
+        self.assertEqual(got, [sorted(keys)])
 
 
 if __name__ == "__main__":

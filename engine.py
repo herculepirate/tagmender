@@ -1733,6 +1733,47 @@ class Engine:
             return False
         return linked and bool(twin) and _disc_shape(twin) == _disc_shape(cand)
 
+    def _discogs_twin(self, best, rel, dgid) -> str:
+        """TAG-4: of the Discogs releases a MusicBrainz release links (best's discogs_ids, dgid
+        first), the first that is the same pressing by its discs: as many audio discs with as
+        many tracks (in all within a tenth: Discogs lists headings and index tracks its own way)
+        - or its CDs only, the MusicBrainz release's leading discs track for track, when every
+        other disc of it is no CD (a DVD-Audio Discogs lists apart, IDM-1). "" when none is (a
+        3-CD edition linking its 1-CD bonus EP). The MusicBrainz release's discs are rel's
+        (fetched), else the match's own when it is the whole release (not one disc of it,
+        BOX-2). Unknown shapes keep dgid."""
+        mine, fmts = [], []
+        if rel:
+            try:
+                c = ma.mb_candidate(rel)
+                mine, fmts = _disc_shape(c), list(c.get("media_formats") or [])
+            except Exception:
+                mine = []
+        elif not best.get("box_disc") and not best.get("slots") and isinstance(best.get("tracks"), list):
+            mine, fmts = _disc_shape(best), list(best.get("media_formats") or [])
+        if not mine:
+            return dgid
+        ids = [str(dgid)] + [str(x) for x in best.get("discogs_ids") or () if str(x) != str(dgid)]
+        for x in ids:
+            try:
+                det = self.http.get_json(f"https://api.discogs.com/releases/{x}", "discogs")
+                theirs = _disc_shape(ma.discogs_candidate(det, self.dm)) if det else []
+            except ma.AuthError:
+                raise
+            except Exception:
+                return dgid                              # (cannot be read now: as before)
+            if not theirs:
+                return dgid
+            same = len(theirs) == len(mine) and abs(sum(theirs) - sum(mine)) <= max(1, sum(mine) // 10)
+            cds = len(theirs) < len(mine) and theirs == mine[:len(theirs)] and len(fmts) == len(mine) and \
+                all(mc.medium_type(f) != "cd" for f in fmts[len(theirs):])
+            if same or cds:
+                return x
+            self.log.info("Discogs %s linked by MusicBrainz %s is another release: %d disc(s) of %d track(s), "
+                          "not %d of %d", x, best.get("mb_id") or best.get("id"), len(theirs), sum(theirs),
+                          len(mine), sum(mine))
+        return ""
+
     @staticmethod
     def _foreign_ids(files) -> set:
         """DSC-10: the releases your files name by their own release IDs ("mb" | "discogs", ID)
@@ -2014,7 +2055,8 @@ class Engine:
         different releases (_per_disc), each its own album. DSC-10: an album of sibling
         folders (Group.siblings) is planned as _release_set has it - alone, as before, or as
         the one album of the release that holds it and its siblings."""
-        if len(getattr(g, "siblings", None) or ()) > 1 and not getattr(self, "_in_set", False):
+        if len(getattr(g, "siblings", None) or ()) > 1 and not getattr(self, "_in_set", False) and \
+                not getattr(self, "_set_alone", False):           # (the watcher: watcher.siblings_settled)
             return self._set_member(g)
         prop = self.identify(g)
         return [prop] + list(getattr(prop, "parts", None) or [])
@@ -2804,6 +2846,10 @@ class Engine:
                 tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files), ps)
         if not (mbid and self.use_mb):
             ps = self.profile.picard_tags()
+        if dgid and best.get("source") == "mb" and self.dm is not None and (self.use_discogs or self.token):
+            # (the Discogs release MusicBrainz links is the same pressing only with the same discs:
+            # a 3-CD edition linking its 1-CD bonus EP is no twin - none of the EP's fields)
+            dgid = self._discogs_twin(best, rel, dgid)
         es = self.profile.enrichment()
         dparts = None
         if dgid and self.dm is not None and (self.use_discogs or self.token):
@@ -4816,7 +4862,12 @@ class Engine:
             k = os.path.realpath(str(g.folder))
             per_folder[k] = per_folder.get(k, 0) + 1
         if only is not None:
-            groups = [g for g in groups if group_key(g.folder, g.files) in only]
+            # (DSC-10: an album of sibling folders is looked up with its siblings, each planned
+            # under its own key - a joined set's row looked up again when it no longer joins
+            # gives every folder's row back)
+            asked = {id(g) for g in groups if group_key(g.folder, g.files) in only}
+            asked |= {id(m) for g in groups if id(g) in asked for m in getattr(g, "siblings", None) or ()}
+            groups = [g for g in groups if id(g) in asked]
         out, told = [], set()
         self.reached = set()                      # the group_key()s looked up (a run cancelled: not all)
         for i, g in enumerate(groups):

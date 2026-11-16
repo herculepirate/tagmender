@@ -1344,6 +1344,9 @@ class Planner:
         self.rules = ex.load_rules(profile.name if profile.name != "default" else "") if rules is None else rules
         self.overrides = ex.State().overrides() if overrides is None else overrides
         self.claimed = {}          # folded destination path -> source (collisions inside the plan)
+        # companion files an earlier album of this plan moves (DSC-10: a parent folder's own
+        # "folder.jpg" or "Scans/" beside two albums of its sub-folders goes with the first only)
+        self._comp_moved = {}
         self.created_dirs = set()
         self._dirs = {}
         self._inodes = {}
@@ -1512,7 +1515,7 @@ class Planner:
                 self._in_place_note = None
 
     # (the placement state a trial planner starts from, copied: _would_file)
-    _TRIAL_STATE = ("claimed", "created_dirs", "_dirs", "_inodes", "_album_dirs", "_planned", "_album_claims",
+    _TRIAL_STATE = ("claimed", "_comp_moved", "created_dirs", "_dirs", "_inodes", "_album_dirs", "_planned", "_album_claims",
                     "_resident", "_split_roots", "_res_discs", "_win_dirs", "_win_tries", "_loose")
     # (read-only caches it may share)
     _TRIAL_SHARED = ("_picard_set", "_file_set", "_digest_cache")
@@ -2476,9 +2479,18 @@ class Planner:
                     want = want.with_name(_fit_name(want.name, p["filenames"]))
                 if want != c and want.exists() and not same_entry(want, c) and _same_bytes(want, c, pairs, p):
                     continue                                  # copied there by an earlier run
+                op_c = how.get(c, base_op) if want != c else "rewrite"
+                first = self._comp_moved.get(str(c))
+                if op_c == "move" and first is not None and first[0] != id(entry):
+                    # (a file of a folder two albums of this plan come from: the first one planned
+                    # - a set's joined album before a disc planned alone - takes it)
+                    entry["notes"].append(f"{c.name} goes with the album planned first ({first[1]})")
+                    continue
                 dst = c if want == c else self._unique(want, c, entry)
                 if dst is None:
                     continue
+                if op_c == "move":
+                    self._comp_moved.setdefault(str(c), (id(entry), Path(str(dst)).parent.name))
                 ce = {"src": str(c), "dst": str(dst), "op": how.get(c, base_op) if dst != c else "rewrite",
                       "fingerprint": _fp(c)}
                 if kind:

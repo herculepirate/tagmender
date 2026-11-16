@@ -2189,7 +2189,8 @@ class Engine:
             if rel and (src == "mb" or same):
                 whole = mb_tags.release_tags(rel, ps)
                 keys = mb_tags.track_keys(rel)
-                tags_mb = [whole[i] for i, (p, _k) in enumerate(keys) if int(p) == box] \
+                at = _audio_position(rel, box)        # (the candidate's disc number: audio discs only)
+                tags_mb = [whole[i] for i, (p, _k) in enumerate(keys) if int(p) == at] \
                     if len(keys) == len(whole) else None
             elif rel:
                 tags_mb = None
@@ -3487,13 +3488,15 @@ class Engine:
         facts, never the release's own. {"targets" (one per file, in file order), "score",
         "group_ids"}, or None."""
         ps = self.profile.picard_tags()
+        layer = "cd"
         if not sc["cand"].get("version_tracks"):
-            rel = mb_tags.one_layer(rel, _layer_prefer(album, rel, sc["cand"].get("box_disc")))   # (MED-22)
+            prefer = _layer_prefer(album, rel, sc["cand"].get("box_disc"))
+            rel, layer = mb_tags.one_layer(rel, prefer), _uniform_layer(prefer)       # (MED-22)
         rg_id = (rel.get("release-group") or {}).get("id")
         if not rg_id:
             notes.append("the MusicBrainz release has no release group")
             return None
-        group = _mb_group(self.http, rg_id)
+        group = _mb_group(self.http, rg_id, layer)
         pairs = list(sc.get("map") or [(i, i) for i in range(n)])
         n_cand = len(sc["cand"]["tracks"])
         # the release without what is its own: relationships (its mastering, its studio), label,
@@ -5377,17 +5380,18 @@ def _mb_audio_tracks(rel) -> list:
             if not (t.get("recording") or {}).get("video")]
 
 
-def _mb_group(http, rg_id):
+def _mb_group(http, rg_id, layer="cd"):
     """Every release of a MusicBrainz release group, with each one's tracks (recording, title,
     artist folded; name and length in seconds), disc layout, title and credit (folded): {"ids", "pressings", "whole"} - whole when the one page (100) read
-    holds them all; None when it could not be read."""
+    holds them all; None when it could not be read. layer: which layer of a hybrid SACD listed
+    as media of their own each pressing's disc is (MED-22, mb_tags.one_layer)."""
     data = http.get_json(f"https://musicbrainz.org/ws/2/release?release-group={rg_id}"
                          "&inc=recordings+artist-credits+media&limit=100&fmt=json", "mb")
     if not data or not isinstance(data.get("releases"), list):
         return None
     pressings = []
     for r in data["releases"]:
-        r = mb_tags.one_layer(r)        # (MED-22: a hybrid SACD's layers one disc, as the pick's)
+        r = mb_tags.one_layer(r, layer)  # (MED-22: a hybrid SACD's layers one disc, the pick's layer)
         tracks = [{"recording": (t.get("recording") or {}).get("id") or "",
                    "title": mc.fold(t.get("title") or ""), "artist": mc.fold(ma.mb_credit(t) or ma.mb_credit(r)),
                    "name": t.get("title") or "", "secs": (t.get("length") or 0) / 1000.0}
@@ -5768,23 +5772,37 @@ def _disc_layer(album, tracks) -> str:
 
 def _layer_prefer(album, rel, box=None) -> dict:
     """MED-22: {disc of the release, as mb_tags.one_layer numbers them: the layer your copy's
-    disc is (_disc_layer)}, disc by disc: a rip of disc 1's CD layer and disc 2's SACD layer
-    takes each from its own. Your disc n is the release's n-th audio disc; one disc of the set in
-    a folder of its own (box: its number among them) that disc."""
+    disc is (_disc_layer)}. Disc by disc where your files' discs are the release's audio discs
+    (your disc n its n-th): a rip of disc 1's CD layer and disc 2's SACD layer takes each from
+    its own. Otherwise (one folder of every disc, no disc tags) every disc takes your copy's
+    layer as a whole; one disc of the set in a folder of its own (box: its number among the
+    audio discs) likewise."""
     groups = mb_tags.layer_groups(rel)
     audio = [k for k, g in enumerate(groups, 1)
              if str(g[0].get("format") or "").casefold() not in mb_tags.VIDEO_FORMATS]
     tracks = album.get("tracks") or []
-    discs = sorted({t.get("disc") or 1 for t in tracks})
-    out = {}
-    if box:
-        if 0 < int(box) <= len(audio):
-            out[audio[int(box) - 1]] = _disc_layer(album, tracks)
-        return out
-    for d in discs:
-        if 0 < int(d) <= len(audio):
-            out[audio[int(d) - 1]] = _disc_layer(album, [t for t in tracks if (t.get("disc") or 1) == d])
+    discs = sorted({int(t.get("disc") or 1) for t in tracks})
+    whole = _disc_layer(album, tracks)
+    out = {k: whole for k in audio}
+    if not box and discs == list(range(1, len(audio) + 1)):
+        for d in discs:
+            out[audio[d - 1]] = _disc_layer(album, [t for t in tracks if int(t.get("disc") or 1) == d])
     return out
+
+
+def _uniform_layer(prefer) -> str:
+    """MED-22: the one layer a {disc: layer} map names for every disc ("cd" when they differ)."""
+    kinds = set((prefer or {}).values())
+    return kinds.pop() if len(kinds) == 1 else "cd"
+
+
+def _audio_position(rel, n) -> int:
+    """BOX-2: the medium position of the release's n-th audio disc (the candidate's disc n): a
+    video disc listed first is no disc of the candidate's (DVD-Video, CD, CD: disc 2 is medium
+    3). n itself when the release has no such disc."""
+    audio = [m.get("position") or k for k, m in enumerate(rel.get("media") or [], 1)
+             if str(m.get("format") or "").casefold() not in mb_tags.VIDEO_FORMATS]
+    return int(audio[n - 1]) if 0 < n <= len(audio) else n
 
 
 def _without_box_vinyl(rel, ps):

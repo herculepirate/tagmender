@@ -1,5 +1,32 @@
 # Release notes
 
+## 0.8.67
+
+**Vinyl rips the ripper names**
+- A rip whose album tags end in "[Vinyl Rip ...]", or whose notes beside the music say so ("Vinyl
+  24bit/96khz rip", "ripped from the original vinyl", "needle drop", "Source: Vinyl"), is now
+  matched as a vinyl rip even when the folder name says nothing. Before, its hi-res audio was
+  taken for a download. A mention of vinyl is not enough ("also released on vinyl", "the 7"
+  was not ripped"), and a rip log that fits the files, or tracks that are whole CD sectors,
+  still says CD (MED-21).
+- From a set of the album's records and its CD, a vinyl rip is tagged with the records' tracks,
+  as a CD rip of such a set is with the CD's. Where the records are listed without lengths, the
+  CD's lengths in the same set stand in for them, title by title (MED-21).
+- A Discogs "Box Set" or "All Media" entry is no longer counted as a disc: 2 LPs and a CD are
+  3 discs, not 4.
+
+**Your folder's number decides the pressing**
+- When your folder (or rip notes) names a number that only one release of the album carries,
+  and that release's Discogs track list is too sparse to compare (no lengths, or tracks left
+  out), it is now chosen, with its tracks taken from a fuller listing of the same album. Before,
+  the fuller listing of another pressing won on its lengths (BAR-13). Another release carrying
+  the same number, unless your copy rules it out (another barcode, a release date after your
+  rip log, a format your files cannot be), leaves the choice to you.
+
+**Steadier checks**
+- Two test files no longer run another file's tests a second time, and a timing test reads the
+  requests' own times, so the suite gives the same count and result on any machine.
+
 ## 0.8.66
 
 **Disc photos read**

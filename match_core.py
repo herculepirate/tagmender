@@ -4252,6 +4252,26 @@ def _code_twin_of(s, f, cfg) -> bool:
     return found >= 0.8 * len(mine)
 
 
+def _code_listed_with_lengths(s, scored, cfg) -> bool:
+    """BAR-13's guard: another entry of S's album (_code_twin_of; in the other database, its title
+    and artist) carries your code and lists track lengths of its own - whatever its track count
+    (your tracks and a bonus one, or some of them): your number is then on a pressing that can
+    be compared, and no entry's borrowed tracks may outrank it."""
+    for o in scored:
+        oc = o.get("cand") or {}
+        if o is s or o.get("code") not in OWN_CODES or oc.get("tracks_of") or \
+                not any(t.get("secs") for t in oc.get("tracks") or ()):
+            return_it = False
+        else:
+            c = s.get("cand") or {}
+            return_it = _code_twin_of(s, o, cfg) if oc.get("source") == c.get("source") else (
+                title_sim(c.get("title") or "", oc.get("title") or "") >= 0.85
+                and artist_sim(c.get("artist") or "", oc.get("artist") or "") >= 0.85)
+        if return_it:
+            return True
+    return False
+
+
 def code_twins(album, scored, cfg, ocr_text=""):
     """BAR-13: an entry carrying your copy's own code (OWN_CODES) whose track list is too sparse
     to compare - no lengths at all, or fewer tracks than your files (a box's discs listed in
@@ -4263,22 +4283,22 @@ def code_twins(album, scored, cfg, ocr_text=""):
     2020 limited box, 131 tracks without lengths; 17690677, the 2021 retail box, 139 agreeing).
     Never for an entry anything of your copy argues against (a barcode of yours that differs, a
     rip log dated before it came out, the folder name or scans against it, a format your files
-    cannot be), nor when the full entry carries your code too, nor when any entry carrying your
-    code fits your files on its own tracks: a view never outranks a pressing of your number
-    listing its own lengths (one number is often an original's and its reissues', and lengths
+    cannot be), nor when the full entry carries your code too, nor when another entry of the
+    album carrying your code lists lengths of its own (_code_listed_with_lengths, whatever its
+    track count): a view never outranks a pressing of your number listing its own lengths (one number is often an original's and its reissues', and lengths
     typed off a sleeve may be a few seconds off). A sparse list of fewer than 3 tracks names no
     album. Returns SCORED, the views in place."""
     n_file = len(album.get("tracks") or ())
     if not n_file or not scored:
-        return scored
-    if any(o.get("code") in OWN_CODES and o.get("tracks_ok") and not o.get("missing")
-           and not (o.get("cand") or {}).get("tracks_of") for o in scored):
         return scored
     out = []
     for s in scored:
         c = s.get("cand") or {}
         n_cand = len(c.get("tracks") or ())
         sparse = n_cand >= 3 and (n_cand < n_file or (n_cand == n_file and not s.get("dur_cov")))
+        if sparse and _code_listed_with_lengths(s, scored, cfg):
+            out.append(s)
+            continue
         # (a Discogs entry: only its tracks can be tagged from another entry's, engine._identified;
         # a MusicBrainz release's IDs name its own tracks)
         if not (sparse and c.get("source") == "discogs" and s.get("code") in OWN_CODES

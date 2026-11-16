@@ -2615,7 +2615,10 @@ def file_clues(album, cand, clues, against, cfg=None):
         elif not hint and "cassette" in formats and _CASSETTE_HINT.search(str(album.get("folder") or "")):
             clues.setdefault("format", "cassette release (folder name)")
         elif hint in ("vinyl", "cd") and hint not in formats:
-            against.append(f"folder name says {hint}, this pressing is {'/'.join(sorted(formats))}")
+            src = album.get("media_hint_from") or "folder name"
+            against.append(f"folder name says {hint}, this pressing is {'/'.join(sorted(formats))}"
+                           if src == "folder name" else
+                           f"folder name says nothing, but {src}: this pressing is {'/'.join(sorted(formats))}")
         elif not hint and album.get("tags_media") == "cd" and "cd" in formats \
                 and not audio.get("hires") and not audio.get("not_cd"):
             # MED-14: the album tags' "[... 10CD Box]": a clue for a CD, never against the others
@@ -3829,11 +3832,14 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     if n_file and n_file != n_cand and any(t.get("box_vinyl") for t in cand["tracks"]):
         # a CD set with a vinyl single in the box (Kreator - Dying Alive, NB 3053-5: 3 CDs
         # and a 7"): the CDs were ripped, the 7" was not
-        cds = [t for t in cand["tracks"] if not t.get("box_vinyl")]
+        # (MED-21: a vinyl rip of a set of records and the CD: the record's tracks are yours)
+        vinyl_copy = (album.get("media_hint") or "") == "vinyl"
+        cds = [t for t in cand["tracks"] if bool(t.get("box_vinyl")) == vinyl_copy]
         if len(cds) == n_file:
             cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
             n_cand = n_file
-            notes.append("the vinyl single in the box is not in your files")
+            notes.append("the CD in the set is not in your files" if vinyl_copy else
+                         "the vinyl single in the box is not in your files")
     if n_file and n_file != n_cand and cand.get("works_view") and not box_note and not cand.get("version_media") \
             and not cand.get("pregap_used") and not any(t.get("box_vinyl") for t in cand["tracks"]):
         # TRK-5: works the release lists without lengths, their parts lettered as one track's

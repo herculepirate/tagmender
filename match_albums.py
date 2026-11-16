@@ -2138,7 +2138,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     tocs_fit = sorted(d for d, t in tocs.items()
                       if toc_fits_audio(t, [i for _p, i in infos if i.get("disc_eff", 1) == d]))
     hint, hint_from = _media_hint(album_dir, album_folder, files, infos, top("artist") or artist_folder,
-                                  bool(log_toc), notes)
+                                  bool(log_toc), notes,
+                                  # (MED-21: a TOC that fits the files, or whole CD sectors, says CD)
+                                  bool(tocs_fit) or audio_evidence([i for _p, i in infos])["cd_frames"])
     box_tags = "" if hint else _tags_box_count(infos)
     # The files name a release in their ID tags, and TagMender did not write them: another
     # tagger did (Picard, an older tool, the shop). Their barcode, ISRCs, country, date and
@@ -2408,11 +2410,28 @@ def _log_year(album_dir, logs):
 
 
 # MED-21: a vinyl rip in the ripper's words: "Vinyl Rip", "vinyl 24/96 rip", "ripped from vinyl",
-# "needle drop" (vinyl and rip at most a few words apart; never "vinyl" alone)
-_SEP = r"[^\w.;:!?\n]+"                    # (between words, within one sentence)
-_VINYL_RIP = re.compile(rf"\bvinyl\b(?:{_SEP}\w+){{0,3}}?{_SEP}rip(?:ped)?\b"
-                        rf"|\brip(?:ped)?{_SEP}(?:from|of|off){_SEP}(?:(?:the|an?|my){_SEP})?(?:\w+{_SEP})?vinyl\b"
-                        r"|\bneedle[ _-]?drop", re.I)
+# "needle drop", "VinylRip", "LP rip", and a tracker's "Source: Vinyl" / "Lineage: Vinyl > ..." (vinyl
+# and rip at most a few words apart, within one sentence; never "vinyl" alone)
+_SEP = r"[^\w.,;:!?()\[\]\n]+"           # (between words, within one clause or bracket)
+_VINYL_RIP = re.compile(rf"\b(?:vinyl|LP)(?:{_SEP}\w+){{0,2}}?{_SEP}rip(?:ped)?\b|\bvinyl-?rip\b"
+                        rf"|\brip(?:ped)?{_SEP}(?:from|of|off){_SEP}(?:\w+{_SEP}){{0,4}}?(?:vinyl|LP)\b"
+                        r"|\bneedle[ _-]?drop|^[ \t]*(?:source|lineage|media|medium)[ \t]*[:=][ \t]*vinyl\b", re.I | re.M)
+# (a vinyl rip denied or of another copy: "the 7\" vinyl was not ripped", "not the vinyl rip",
+# "other versions: vinyl rip by X", "ripped from the CD")
+_NOT_THIS = re.compile(r"\b(?:not|no|never|other|another|also|alternative|unlike)\b(?:\W+\w+){0,3}?\W*$", re.I)
+_DENIED_AFTER = re.compile(r"^\W*(?:\w+\W+){0,2}?(?:not\b|from\b(?!\W+(?:\w+\W+){0,3}?(?:vinyl|LP)\b))", re.I)
+_DENIED_WITHIN = re.compile(r"\b(?:not|never|no)\b|n't\b", re.I)
+
+
+def _vinyl_rip_in(text) -> bool:
+    for m in _VINYL_RIP.finditer(text or ""):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        before = re.split(r"[.;!?(\[]", text[line_start:m.start()])[-1]
+        after = re.split(r"[.;!?)\]\n]", text[m.end():m.end() + 60])[0]
+        if not _NOT_THIS.search(before) and not _DENIED_AFTER.search(after) \
+                and not _DENIED_WITHIN.search(m.group(0)):
+            return True
+    return False
 
 
 def vinyl_rip_said(infos, notes) -> str:
@@ -2421,15 +2440,15 @@ def vinyl_rip_said(infos, notes) -> str:
     marks = []
     for _p, i in infos:
         m = re.search(r"[\(\[]([^\(\)\[\]]*)[\)\]]\s*$", str(i.get("album") or ""))
-        marks.append(bool(m and _VINYL_RIP.search(m.group(1))))
+        marks.append(bool(m and _vinyl_rip_in(m.group(1))))
     if infos and all(marks):
         return "the album tags say vinyl rip"
-    if _VINYL_RIP.search(notes or ""):
+    if _vinyl_rip_in(notes or ""):
         return "the rip notes say vinyl rip"
     return ""
 
 
-def _media_hint(album_dir, album_folder, files, infos, artist, rip_log, notes=""):
+def _media_hint(album_dir, album_folder, files, infos, artist, rip_log, notes="", cd_said=False):
     """What the copy was made from, and what says so: the folder name first ("[Vinyl Rip]",
     "[2CD]"), then signs the files carry whatever the folder is called (R4). Vinyl signs
     (sides, needle-drop pictures) outrank a "[WEB]" folder; a shop's comments in the tags or
@@ -2445,7 +2464,7 @@ def _media_hint(album_dir, album_folder, files, infos, artist, rip_log, notes=""
         # MED-21: the ripper's own word, when the folder name has none: a closing mark in every
         # file's album tag ("Saturdays = Youth [Vinyl Rip 24bit 96khz]") or the rip notes beside
         # them ("Vinyl 24bit/96khz rip") - a rip of vinyl, never a mention of it ("also on vinyl")
-        if not hint:
+        if not hint and not cd_said:
             said = vinyl_rip_said(infos, notes)
             if said:
                 return "vinyl", said

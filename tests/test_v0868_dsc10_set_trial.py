@@ -157,14 +157,16 @@ class DSC10ClaimedByARelease(DSC10Base):
         (top / "folder.jpg").write_bytes(b"\xff\xd8\xfftop")
         legacy = release("mb-legacy", "Legacy", ("Dreams", "Live"), disc_titles=("Dreams", "Live Tour"))
         bonus = release("mb-bonus", "Bonus", ("Bonus",), lens={0: [10000, 20000]}, barcode="0886973225129")
-        dest = self.tmp / "filed"
-        dest.mkdir()
-        eng = self.engine(DiscHttp(mb=[legacy, bonus, release("mb-dreams", "Dreams", ("Dreams",), barcode="")]),
-                          operation="move", destination=str(dest))
-        albums = eng.plan(self.lib)["albums"]
-        taken = {a["identification"].get("release_id"): sorted(Path(c["src"]).name for c in a["companions"])
-                 for a in albums}
-        self.assertEqual(taken, {"mb-legacy": ["box.jpg", "folder.jpg"], "mb-bonus": []})
+        for op in ("move", "copy"):
+            with self.subTest(operation=op):
+                dest = self.tmp / f"filed-{op}"
+                dest.mkdir()
+                eng = self.engine(DiscHttp(mb=[legacy, bonus, release("mb-dreams", "Dreams", ("Dreams",), barcode="")]),
+                                  operation=op, destination=str(dest))
+                albums = eng.plan(self.lib)["albums"]
+                taken = {a["identification"].get("release_id"): sorted(Path(c["src"]).name for c in a["companions"])
+                         for a in albums}
+                self.assertEqual(taken, {"mb-legacy": ["box.jpg", "folder.jpg"], "mb-bonus": []})
 
     def test_DSC10_a_folder_whose_own_copy_proves_another_release_stays_apart(self):
         top = self.voyage()
@@ -626,6 +628,59 @@ class TAG4LinkedDiscogsTwin(DSC10Base):
         twin["formats"] = [{"name": "CD", "qty": "2", "descriptions": ["Album"]}]
         p = self.two_cds(twin)
         self.assertEqual({t["discogs_release_id"][0] for t in p.targets}, {"904"})
+
+
+class TAG4StaleOtherID(DSC10Base):
+    """TAG-4: the other database's release ID your files carry, when the release written has no
+    twin there, is taken off only when TagMender wrote it or it is shown to be another pressing."""
+
+    def two_cds(self, dg_id, dgs=(), **extra):
+        from test_v0821_engine_rules import two_cd_release
+        box = self.lib / "Band B" / "Album B [2CD]"
+        for n in (1, 2):
+            for i in range(3):
+                flac(box / f"CD{n}", f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 100 * n + 10 * i,
+                     title=f"{'TU'[n - 1]}{i}", album="Album B", albumartist="Band B", artist="Band B",
+                     track=str(i + 1), disc=str(n), discogs_release_id=dg_id, **extra)
+        eng = self.engine(DiscHttp(mb=[two_cd_release("mb-b", "Band B", "Album B")], dg=list(dgs)))
+        p = eng.identify(eng.albums_in(self.lib)[0])
+        self.assertEqual((p.status, p.release_id), ("identified", "mb-b"), p.why)
+        return p
+
+    @staticmethod
+    def removed(p):
+        return {"discogs_release_id" in (t.get("~remove") or []) for t in p.targets}
+
+    def two_disc_dg(self, rid):
+        d = te.dg_release(rid, "Band B", "Album B")
+        d["tracklist"] = [{"type_": "track", "position": f"{n}-{i + 1}", "title": f"{'TU'[n - 1]}{i}",
+                           "duration": f"0:{10 * (i + 1)}"} for n in (1, 2) for i in range(3)]
+        d["formats"] = [{"name": "CD", "qty": "2", "descriptions": ["Album"]}]
+        d["labels"] = [{"name": "Label MB", "catno": "CAT-1"}]
+        d["country"] = "Germany"
+        return d
+
+    def test_TAG4_an_id_tagmenders_earlier_job_wrote_is_taken_off(self):
+        # (a release Discogs does not answer for: only TagMender's own earlier word, no proof, takes it off)
+        from unittest import mock
+        box = self.lib / "Band B" / "Album B [2CD]"
+        with mock.patch.object(engine.ma, "_own_index",
+                               lambda: {str(f): (frozenset(), frozenset({"555"})) for f in box.rglob("*.flac")}):
+            p = self.two_cds("555")
+        self.assertEqual(self.removed(p), {True}, p.notes)
+        self.assertTrue(any("555" in n and "TagMender" in n for n in p.notes), p.notes)
+
+    def test_TAG4_an_id_of_a_release_of_other_discs_is_taken_off(self):
+        ep = te.dg_release(556, "Band B", "Album B - Bonus CD")
+        p = self.two_cds("556", dgs=[ep])
+        self.assertEqual(self.removed(p), {True})
+        self.assertTrue(any("556" in n and "1 disc(s), not 2" in n for n in p.notes), p.notes)
+
+    def test_TAG4_another_taggers_id_nothing_shows_another_pressing_stays(self):
+        p = self.two_cds("557", dgs=[self.two_disc_dg(557)])
+        self.assertEqual(self.removed(p), {False})
+        p = self.two_cds("558")                                   # (nothing known of it at all)
+        self.assertEqual(self.removed(p), {False})
 
 
 class DSC10WatchedArriving(DSC10Base):

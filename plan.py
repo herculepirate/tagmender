@@ -2481,7 +2481,7 @@ class Planner:
                     continue                                  # copied there by an earlier run
                 op_c = how.get(c, base_op) if want != c else "rewrite"
                 first = self._comp_moved.get(str(c))
-                if op_c == "move" and first is not None and first[0] != id(entry):
+                if op_c in ("move", "copy") and first is not None and first[0] != id(entry) and not how.get(c):
                     # (a file of a folder two albums of this plan come from: the first one planned
                     # - a set's joined album before a disc planned alone - takes it)
                     entry["notes"].append(f"{c.name} goes with the album planned first ({first[1]})")
@@ -2489,7 +2489,7 @@ class Planner:
                 dst = c if want == c else self._unique(want, c, entry)
                 if dst is None:
                     continue
-                if op_c == "move":
+                if op_c in ("move", "copy") and not how.get(c):
                     self._comp_moved.setdefault(str(c), (id(entry), Path(str(dst)).parent.name))
                 ce = {"src": str(c), "dst": str(dst), "op": how.get(c, base_op) if dst != c else "rewrite",
                       "fingerprint": _fp(c)}

@@ -1774,6 +1774,74 @@ class Engine:
                           len(mine), sum(mine))
         return ""
 
+    def _stale_other_ids(self, prop):
+        """TAG-4: a release ID of the other database your files carry, where the release written
+        has no twin there (none of that database's IDs is written): taken off when TagMender's own
+        earlier job wrote it (REP-1: the value it left, still there), or when its release is shown
+        to be another pressing - another number of audio discs than the release written, or
+        TAG-3's evidence (_another_pressing). Another tagger's ID nothing shows to be another
+        pressing stays. The plan says what is taken off and why."""
+        import tagio
+        if prop.status != "identified" or planmod.tier_of(prop) != "exact" or not prop.targets:
+            return
+        has = {k for t in prop.targets for k in ("musicbrainz_albumid", "discogs_release_id") if t.get(k)}
+        if has == {"musicbrainz_albumid"}:
+            field, kind, name = "discogs_release_id", "discogs", "Discogs"
+        elif has == {"discogs_release_id"}:
+            field, kind, name = "musicbrainz_albumid", "mb", "MusicBrainz"
+        else:
+            return
+        if str(getattr(self, "source", "") or "").endswith("_only"):
+            return                                       # (follow_source takes them all off)
+        asks = bool(getattr(self, "use_discogs" if kind == "discogs" else "use_mb", False)) and \
+            not (prop.provider_errors or {}).get("discogs" if kind == "discogs" else "musicbrainz")
+        totals = {str((t.get("totaldiscs") or [""])[0]).strip() for t in prop.targets} - {""}
+        mine = int(next(iter(totals))) if len(totals) == 1 and next(iter(totals)).isdigit() else 0
+        try:
+            owned = ma._own_index()
+        except Exception:
+            owned = {}
+        why_of = {}
+
+        def why(v, f):
+            if v not in why_of:
+                own = owned.get(str(f)) or owned.get(os.path.realpath(str(f))) or (frozenset(), frozenset())
+                ours = {str(x).lower() for x in own[0 if kind == "mb" else 1]}
+                if str(v).lower() in ours:
+                    why_of[v] = "TagMender's earlier job wrote it"
+                else:
+                    shape = []
+                    try:
+                        c = self._release_cand(kind, v) if asks else None     # (never a database left out)
+                        shape = _disc_shape(c) if c else []
+                    except Exception:
+                        shape = []
+                    if shape and mine and len(shape) != mine:
+                        why_of[v] = f"another pressing: {len(shape)} disc(s), not {mine}"
+                    else:
+                        try:
+                            ev = self._another_pressing(prop, getattr(prop, "release_view", None), field, v)[0] \
+                                if asks else ""
+                        except Exception:
+                            ev = ""
+                        why_of[v] = f"another pressing: {ev}" if ev else ""
+            return why_of[v]
+        told = {}
+        for f, t in zip(prop.files, prop.targets):
+            if t.get(field):
+                continue
+            try:
+                had = [str(v) for v in tagio.read(f).get(field) or [] if str(v)]
+            except Exception:
+                continue
+            if had and all(why(v, f) for v in had):
+                t["~remove"] = list(dict.fromkeys(list(t.get("~remove") or []) + [field]))
+                for v in had:
+                    told.setdefault(v, why(v, f))
+        for v, w in told.items():
+            note = f"takes off your {name} release ID {v} ({w}): the release written has none there"
+            prop.notes = list(prop.notes or []) + [note]
+
     @staticmethod
     def _foreign_ids(files) -> set:
         """DSC-10: the releases your files name by their own release IDs ("mb" | "discogs", ID)
@@ -2075,6 +2143,7 @@ class Engine:
                           and not (prop.provider_errors or {}).get(other), sure=getattr(prop, "sure_picks", None),
                           differs=lambda f, v: bool(self._another_pressing(
                               prop, getattr(prop, "release_view", None), f, v)[0]))
+            self._stale_other_ids(prop)                  # TAG-4
         # every audio file of the album as found (its second copies too: "01 a.flac" and
         # "01 - a.mp3"), for telling its covers from another album's (not saved in plans)
         disc = getattr(prop, "disc_folder", None)          # (one disc of a set, as its own album)

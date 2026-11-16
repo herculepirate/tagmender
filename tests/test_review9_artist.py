@@ -13,16 +13,18 @@ sys.path.insert(0, str(REPO / "tests"))
 import artwork  # noqa: E402
 import executor  # noqa: E402
 import plan as pl  # noqa: E402
-from test_artist_photo import ArtistPhoto, FakeCoverUp, ARTIST_MBID, pictures  # noqa: E402
+# (ArtistPhoto through its module: imported by name, unittest would run its tests here again)
+import test_artist_photo as _tap  # noqa: E402
+from test_artist_photo import FakeCoverUp, ARTIST_MBID, pictures  # noqa: E402
 from test_cover_replace import MBID, jpeg, give  # noqa: E402
 from test_executor import audio, target  # noqa: E402
 
 
-class R9(ArtistPhoto):
+class R9(_tap.ArtistPhoto):
     pass
 
 
-for _n in dir(ArtistPhoto):
+for _n in dir(_tap.ArtistPhoto):
     if _n.startswith("test_"):
         setattr(R9, _n, None)
 

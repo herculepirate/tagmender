@@ -181,10 +181,18 @@ class Sources(te.Base):
             return te.FakeHttp(mb=[mb_release("mb-c", "Band C", "Album C", discogs=902)],
                                dg=[dg_release(902, "Band C", "Album C")])
         _s, _c, wire_s, wire_c, t_s, t_c = self.same_both_ways(fake)
-        dg_time = sum(t1 - t0 for h, t0, t1, n in wire_c.log if n == "discogs-search")
+        dg = [(t0, t1) for h, t0, t1, n in wire_c.log if n == "discogs-search"]
+        dg_time = sum(t1 - t0 for t0, t1 in dg)
         self.assertGreater(dg_time, 0)
-        # most of the Discogs search's time is hidden behind MusicBrainz's
-        self.assertLess(t_c, t_s - 0.5 * dg_time, (t_s, t_c, dg_time))
+        # most of the Discogs search's time is hidden behind MusicBrainz's: its requests run
+        # while MusicBrainz is being searched (read from the requests' own times, not the
+        # wall clock of two runs - a busy machine slows both runs alike, not the order)
+        mb = [(t0, t1) for h, t0, t1, n in wire_c.log if h == "mb"]
+        first, last = min(t0 for t0, _ in mb), max(t1 for _, t1 in mb)
+        hidden = sum(max(0.0, min(t1, last) - max(t0, first)) for t0, t1 in dg)
+        self.assertGreater(hidden, 0.5 * dg_time, (hidden, dg_time, first, last, dg))
+        # and in turn none is (the sequential run's Discogs search follows MusicBrainz's)
+        self.assertFalse(any(n == "discogs-search" for *_x, n in wire_s.log))
 
 
 class SourcesDirect(te.Base):

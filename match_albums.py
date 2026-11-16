@@ -473,7 +473,8 @@ def _whole(sc):
     """The release a scored candidate was made from: for a match with tracks missing, the
     whole release rather than the view of the tracks you have (scoring that view again would
     lose which tracks are missing)."""
-    return (sc.get("whole_view") or {}).get("cand") or sc["cand"]
+    c = (sc.get("whole_view") or {}).get("cand") or sc["cand"]
+    return c.get("sparse_cand") or c              # (BAR-13: a code twin's view, scored again as made)
 
 
 def _rescored(res, extra, name, album, cfg, text=""):
@@ -483,7 +484,7 @@ def _rescored(res, extra, name, album, cfg, text=""):
     new = [c for c in extra if str(c["id"]) not in ids]
     if not new:
         return res                                    # nothing new: the result stands as it is
-    scored = [mc.score_candidate(album, c, cfg, text) for c in cands + new]
+    scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, text) for c in cands + new], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
 
@@ -538,7 +539,7 @@ def _scored_again(res, extra, name, album, cfg, text=""):
     cands += [c for c in extra if str(c["id"]) not in ids]
     if not cands:
         return res
-    scored = [mc.score_candidate(album, c, cfg, text) for c in cands]
+    scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, text) for c in cands], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
 
@@ -546,7 +547,7 @@ def _rescored_all(res, album, cfg, text=""):
     """`res` with every candidate scored again against the files (something about them changed)."""
     if not res or not res.get("scored"):
         return res
-    scored = [mc.score_candidate(album, _whole(s), cfg, text) for s in res["scored"]]
+    scored = mc.code_twins(album, [mc.score_candidate(album, _whole(s), cfg, text) for s in res["scored"]], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=res.get("source"))
 
 
@@ -7880,6 +7881,9 @@ def summarize(res):
             **({"box_disc": int(c["box_disc"])} if c.get("box_disc") else {}),
             # (TRK-5: the release read one track per work, as your files are: tagged so)
             **({"whole_works": True} if c.get("whole_works") else {}),
+            # (BAR-13: the pressing your code names lists too few tracks to tag: those of its full
+            # entry of the same album, engine._identified)
+            **({"tracks_of": str(c["tracks_of"])} if c.get("tracks_of") else {}),
             "all_lengths": mc.lengths_all_agree(b),
             # (FIL-3: the pick is Discogs's, its lengths typed off the sleeve - most of them agreeing
             # still -, and MusicBrainz's entry of the same pressing written beside it agrees on every
@@ -8067,7 +8071,8 @@ def release_ids_view(final, results, album):
 
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
-    scored = [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands]
+    # (BAR-13: an entry carrying your code, too sparse to compare, scored with its full twin's tracks)
+    scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands], cfg, ocr_txt)
     res = mc.classify(scored, cfg)
     res["scored"] = scored
     res["source"] = name

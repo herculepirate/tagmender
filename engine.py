@@ -2121,6 +2121,17 @@ class Engine:
                 raise mb_down from None         # (Discogs refused too: tried again later)
             if det:
                 dparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")))
+            if dparts and best.get("tracks_of") and best.get("source") == "discogs" and \
+                    (dparts[1] is None or len(dparts[1]) != len(files)):
+                # BAR-13: the pressing your code names lists too few of its tracks (Discogs 16262491,
+                # 131 of a box's 139, no lengths): each file is tagged as its track of the full entry
+                # of the same album the matcher compared (match_core.code_twins), the release's own
+                # fields (IDs, label, number, barcode, date, country, notes, its discs' format)
+                # staying its own
+                full = self.http.get_json(f"https://api.discogs.com/releases/{best['tracks_of']}", "discogs")
+                fparts = discogs_parts(det, self.dm, self.http, es, tracks_det=full) if full else None
+                if fparts and fparts[1] is not None and len(fparts[1]) == len(files) and fparts[2] == dparts[2]:
+                    dparts = fparts
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)
         dg_vinyl = [bool(t.pop("~box_vinyl", None)) for t in dparts[1]] \
             if dparts and dparts[1] is not None else []
@@ -5701,20 +5712,25 @@ def _without_box_vinyl(rel, ps):
     return mb_tags.release_tags(rel, ps, without=drop)
 
 
-def discogs_parts(det, dm, http=None, s=None, whole_works=False):
+def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None):
     """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
     builds them: extract_discogs_fields shaped by the settings, then the master's original
     year (and date = original date when prefer_original_date is on). Per-track fields are in
     the matcher's track order, each with its disc fields; None when the tracklist does not
     line up with the matcher's. WHOLE_WORKS: the matcher read each work listed without lengths
-    as one track (TRK-5: your files are one per work), so it is tagged so."""
+    as one track (TRK-5: your files are one per work), so it is tagged so. TRACKS_DET (BAR-13):
+    the tracks are that entry's - the full entry of the same album, DET listing too few of its
+    own -, the album's fields and each disc's format DET's."""
     import tagger_settings
     s = s or tagger_settings.enrichment()
     det = discogs_without_repeats(det, dm)
+    own = det
+    if tracks_det is not None:
+        det = discogs_without_repeats(tracks_det, dm)
     scope = _credit_scope(det, dm)              # (CRD-1: from the tracklist as listed, movements too)
     det = ma.discogs_one_track_movements(det, True) if whole_works else \
         ma.discogs_one_track_movements(det)                  # TRK-1: the plugin writes one track too
-    album = shape_fields(dm.extract_discogs_fields(det), s, dm)
+    album = shape_fields(dm.extract_discogs_fields(own if tracks_det is not None else det), s, dm)
     if album.get("barcode"):
         album["barcode"] = barcode_digits(album["barcode"])
     if det.get("master_id") and http is not None:
@@ -5741,9 +5757,9 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False):
         else [False] * len(discs)
     # MED-15: each track's media is its own disc's format, never every format of the release
     # joined ("CD, ...; Blu-ray, ...; Box Set": a box's Blu-ray named every CD of it Blu-ray)
-    media = discogs_track_media(det, raw, discs)
+    media = discogs_track_media(own, raw, discs)
     # (CRD-1b: a release of one format: every track is on it)
-    carriers = [str(f.get("name") or "") for f in det.get("formats") or []
+    carriers = [str(f.get("name") or "") for f in own.get("formats") or []
                 if isinstance(f, dict) and str(f.get("name") or "").strip().casefold() not in _NO_CARRIER]
     seen, tracks = {}, []
     for i, (entry, disc) in enumerate(zip(raw, discs)):

@@ -3835,6 +3835,15 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         # (MED-21: a vinyl rip of a set of records and the CD: the record's tracks are yours)
         vinyl_copy = (album.get("media_hint") or "") == "vinyl"
         cds = [t for t in cand["tracks"] if bool(t.get("box_vinyl")) == vinyl_copy]
+        others = [t for t in cand["tracks"] if bool(t.get("box_vinyl")) != vinyl_copy]
+        if vinyl_copy and len(cds) == n_file and len(others) == len(cds) \
+                and not any(t.get("secs") for t in cds) \
+                and all(title_sim(str(a.get("title") or ""), str(b.get("title") or "")) >= 0.9
+                        for a, b in zip(cds, others)):
+            # (the record listed without lengths, the set's CD of the same tracks with them, in the
+            # same order and titles: the CD's lengths stand for the record's - M83 - Saturdays =
+            # Youth, Discogs 1572883)
+            cds = [dict(a, secs=b.get("secs") or 0) for a, b in zip(cds, others)]
         if len(cds) == n_file:
             cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
             n_cand = n_file

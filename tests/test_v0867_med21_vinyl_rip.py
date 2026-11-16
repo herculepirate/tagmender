@@ -138,6 +138,23 @@ class MED21Scored(Base):
         self.assertTrue(s["tracks_ok"], s["notes"])
 
 
+    def test_MED21_the_sets_cd_lengths_stand_for_a_lengthless_record(self):
+        import match_core as mc
+        import companions
+        d = self.album("Band V", "Album V [Vinyl Rip]", folder="2008 - Album V")
+        album = ma.read_album(d, d.parent.name, d.name)
+        dm = ma.load_plugin(str(companions.discogs_dir()))
+        for same_titles in (True, False):
+            with self.subTest(same_titles=same_titles):
+                rel = lp_and_cd()
+                if same_titles:
+                    for t in rel["tracklist"]:
+                        t["title"] = t["title"].replace("LP ", "")
+                s = mc.score_candidate(album, ma.discogs_candidate(rel, dm), dict(mc.DEFAULT_CFG))
+                # (the CD's lengths only where the record's tracks are the CD's, title by title)
+                self.assertEqual(s["dur_cov"] > 0, same_titles, s["notes"])
+
+
 class MED21NoCarrier(unittest.TestCase):
     def test_MED21_a_wrapper_is_no_disc(self):
         rel = {"formats": [{"name": "Vinyl", "qty": "2"}, {"name": "CD", "qty": "1"},

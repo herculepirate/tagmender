@@ -2191,21 +2191,25 @@ class Engine:
                           (dparts[1] if lead else None), dparts[2])
         cd_copy = ma.copy_source(album) in ("cd", "digital") or \
             (ma.copy_source(album) == "" and not (album.get("audio") or {}).get("hires"))
-        if not slots and not vtracks and not box and cd_copy:
+        # MED-21: the other way round, the record ripped and not the CD (M83 - Saturdays = Youth,
+        # Discogs 1572883: 2 LPs and the CD of the album, your files a rip of the LPs)
+        vinyl_copy = ma.copy_source(album) == "vinyl"
+        if not slots and not vtracks and not box and (cd_copy or vinyl_copy):
             # MED-19: a CD box with a vinyl record of its own (Biffy Clyro - Only Revolutions, the
             # Limited Collectors Edition: CD, sampler CD, 12" LP, DVD; Kreator - Dying Alive: 3 CDs
             # and a 7"): your CDs were ripped, the record was not. The matcher compared the CDs
             # alone (match_core.score_candidate); the tags are theirs too. The record still counts
             # among the discs (an audio disc, MED-17)
-            if tags_mb and rel and len(tags_mb) != n:
+            if tags_mb and rel and len(tags_mb) != n and cd_copy:
                 cut = _without_box_vinyl(rel, ps)
                 if cut is not None and len(cut) == n:
                     tags_mb = cut
             if dparts and dparts[1] is not None and len(dparts[1]) != n and any(dg_vinyl) \
                     and len(dg_vinyl) == len(dparts[1]):
-                kept = [t for t, v in zip(dparts[1], dg_vinyl) if not v]
+                kept = [t for t, v in zip(dparts[1], dg_vinyl) if v == vinyl_copy]
                 if len(kept) == n:
-                    # (each CD numbered on its own, the record's sides no longer before it)
+                    # (each CD numbered on its own, the record's sides no longer before it; a
+                    # record's tracks likewise, the CD no longer after them)
                     count = {}
                     for t in kept:
                         count[t.get("discnumber")] = count.get(t.get("discnumber"), 0) + 1

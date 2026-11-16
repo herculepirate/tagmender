@@ -2611,7 +2611,7 @@ def file_clues(album, cand, clues, against, cfg=None):
             # name)" (the hint reads "SACD" as cd): the SACD itself, not any CD of the album
             clues.setdefault("format", f"SACD (hi-res audio, and {album['sacd_hint']} says SACD)")
         if hint and hint in formats:
-            clues.setdefault("format", f"{hint} release (folder name)")
+            clues.setdefault("format", f"{hint} release ({album.get('media_hint_from') or 'folder name'})")
         elif not hint and "cassette" in formats and _CASSETTE_HINT.search(str(album.get("folder") or "")):
             clues.setdefault("format", "cassette release (folder name)")
         elif hint in ("vinyl", "cd") and hint not in formats:

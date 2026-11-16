@@ -1417,6 +1417,10 @@ def _declared_disc_total(release: dict[str, Any]) -> int | None:
         if str(fmt.get('name') or '').strip().casefold() in _NON_DISC_MEDIA:
             total += 1
             continue
+        # the box or the "All Media" wrapper around a set's media is no disc of
+        # its own (2 LPs and a CD under "All Media" are three discs, not four)
+        if str(fmt.get('name') or '').strip().casefold() in _NO_CARRIER:
+            continue
         try:
             total += int(str(fmt.get('qty') or '1').strip())
         except (TypeError, ValueError):
@@ -1698,6 +1702,7 @@ def discogs_release_id_from_mb(release_node: dict[str, Any] | None) -> str | Non
 # for digital releases, a quantity of cartridges/reels for tape. Treated as a
 # single logical disc so disc mapping never invents extra discs.
 _NON_DISC_MEDIA = frozenset({'file', 'memory stick', 'umd'})
+_NO_CARRIER = frozenset({'box set', 'all media'})   # (no medium of their own)
 
 
 def release_disc_count(release: dict[str, Any]) -> int:
@@ -1720,6 +1725,10 @@ def release_disc_count(release: dict[str, Any]) -> int:
         # single digital album into six phantom discs during disc mapping.
         if str(fmt.get('name') or '').strip().casefold() in _NON_DISC_MEDIA:
             total += 1
+            continue
+        # the box or the "All Media" wrapper around a set's media is no disc of
+        # its own (2 LPs and a CD under "All Media" are three discs, not four)
+        if str(fmt.get('name') or '').strip().casefold() in _NO_CARRIER:
             continue
         try:
             total += int(str(fmt.get('qty') or '1').strip())

@@ -480,5 +480,18 @@ class MED22_Engine(te.Base):
         self.assertEqual({t["media"][0] for t in p.targets}, {CDL})
         self.assertEqual([t["musicbrainz_trackid"][0] for t in p.targets], ["t-3-0", "t-3-1", "t-3-2"])
 
+
+class MED22BoxMedium(unittest.TestCase):
+    def test_MED22_a_lone_disc_medium_by_its_database_numbering(self):
+        import engine
+        rel = {"media": [{"position": 1, "format": "DVD-Video"}, {"position": 2, "format": "CD"},
+                         {"position": 3, "format": "CD"}]}
+        # (MusicBrainz's disc 1 is its first audio disc: medium 2; Discogs's disc 2 counts the DVD: medium 2)
+        self.assertEqual(engine._box_medium(rel, 1, "mb"), 2)
+        self.assertEqual(engine._box_medium(rel, 2, "discogs"), 2)
+        self.assertEqual(engine._box_medium({"media": [{"position": 1, "format": "CD"}, {"position": 2, "format": "CD"}]},
+                                            2, "mb"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

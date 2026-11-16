@@ -2189,7 +2189,7 @@ class Engine:
             if rel and (src == "mb" or same):
                 whole = mb_tags.release_tags(rel, ps)
                 keys = mb_tags.track_keys(rel)
-                at = _audio_position(rel, box)        # (the candidate's disc number: audio discs only)
+                at = _box_medium(rel, box, src)
                 tags_mb = [whole[i] for i, (p, _k) in enumerate(keys) if int(p) == at] \
                     if len(keys) == len(whole) else None
             elif rel:
@@ -5794,6 +5794,13 @@ def _uniform_layer(prefer) -> str:
     """MED-22: the one layer a {disc: layer} map names for every disc ("cd" when they differ)."""
     kinds = set((prefer or {}).values())
     return kinds.pop() if len(kinds) == 1 else "cd"
+
+
+def _box_medium(rel, box, src) -> int:
+    """BOX-2: the MusicBrainz medium position of a lone disc: a MusicBrainz pick numbers its discs
+    as audio discs only (_audio_position); a Discogs pick as its track positions do, a video disc
+    listed first counted - the same as the medium position (the media counts agree: "same")."""
+    return _audio_position(rel, box) if src == "mb" else box
 
 
 def _audio_position(rel, n) -> int:

@@ -3251,6 +3251,8 @@ def mb_recordings(http, release_id):
     """The recording ID of each audio track of a MusicBrainz release, in order ([] when unknown)."""
     det = http.get_json(f"https://musicbrainz.org/ws/2/release/{release_id}"
                         f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb") or {}
+    import mb_tags
+    det = mb_tags.one_layer(det)              # (MED-22: a hybrid SACD's layers are one disc)
     return [(t.get("recording") or {}).get("id") or ""
             for m in det.get("media") or [] if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS
             for t in m.get("tracks") or [] if not (t.get("recording") or {}).get("video")]
@@ -4571,6 +4573,19 @@ def _year_of(date) -> int:
 
 
 def mb_candidate(rel):
+    import mb_tags
+    full_media = [m for m in rel.get("media", [])
+                  if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
+    # MED-22: a hybrid SACD's layers, listed as media of their own, are one disc: its tracks,
+    # discs and formats are its CD layer's (a rip of the 2 discs is 26 files of 2 discs, not
+    # 52 of 4); every medium stays in media_info (an SACD's stereo and multichannel layers
+    # are version folders' own: match_core.version_view)
+    whole, rel = rel, mb_tags.one_layer(rel, "cd")
+    layer_positions = {}
+    if rel is not whole:
+        for disc, g in enumerate(mb_tags.layer_groups(whole), 1):
+            for m in g:
+                layer_positions[int(m.get("position") or 0)] = disc
     tracks = []
     audio_media = [m for m in rel.get("media", [])
                    if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
@@ -4614,7 +4629,9 @@ def mb_candidate(rel):
         # every medium (a DVD's and Blu-ray's too), its format and its audio tracks ("index": the
         # track's place on its medium): which tracks of it a version folder of yours is
         # (match_core.version_view; the tags are made for those, mb_tags.track_keys)
-        "media_info": mb_media_info(rel),
+        "media_info": mb_media_info(whole),
+        # MED-22: the hybrid SACD's layers taken as one disc each ({medium position: disc})
+        "layers": bool(layer_positions), "layer_positions": layer_positions,
         "artist": mb_credit(rel), "artist_alt": mb_canonical_artists(rel),
         "artist_sort": mb_sort_names(rel),
         "title": rel.get("title", ""),
@@ -4629,9 +4646,9 @@ def mb_candidate(rel):
         "disc_count": len([m for m in audio_media if m.get("tracks")]) or len(audio_media) or 1,
         "tracks": tracks, "pregap_tracks": pregaps, "disc_titles": disc_titles, "packaging": mc.packaging_kind(rel.get("packaging")),
         "formats": {k for k in (mc.media_kind(m.get("format")) for m in audio_media) if k},
-        "hires_media": mc.hires_media(m.get("format") for m in audio_media),
-        "sacd_media": mc.sacd_media(m.get("format") for m in audio_media),        # MED-3
-        "enhanced": any("enhanced" in str(m.get("format") or "").casefold() for m in rel.get("media") or []),
+        "hires_media": mc.hires_media(m.get("format") for m in full_media),
+        "sacd_media": mc.sacd_media(m.get("format") for m in full_media),        # MED-3
+        "enhanced": any("enhanced" in str(m.get("format") or "").casefold() for m in whole.get("media") or []),
         "unofficial": str(rel.get("status") or "").casefold() == "bootleg",       # R9
         # (the release's and its group's genres, when the lookup carried them: what an album
         # rule on the identified release's genre checks)
@@ -4661,8 +4678,21 @@ def _genre_names(genres):
 
 
 def _mb_track_total(rel):
-    return sum(int(m.get("track-count") or 0) for m in rel.get("media") or []
+    # (MED-22: a hybrid SACD's layers listed apart counted once: mb_tags.one_layer)
+    import mb_tags
+    return sum(int(m.get("track-count") or 0) for m in mb_tags.one_layer(rel).get("media") or []
                if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS)
+
+
+def _mb_hit_tracks(r):
+    """A search hit's track count: the release's own, a hybrid SACD's layers listed apart
+    counted once (MED-22), when its media name their track counts."""
+    import mb_tags
+    media = r.get("media") or []
+    if not (media and all(isinstance(m.get("track-count"), int) for m in media)):
+        return r.get("track-count")
+    one = mb_tags.one_layer(r)
+    return r.get("track-count") if one is r else sum(m["track-count"] for m in one["media"])
 
 
 def version_priority(album, catnos=(), country="", formats=()):
@@ -4771,9 +4801,9 @@ def mb_search(http, album, cfg):
             if r["id"] not in seen:
                 seen.add(r["id"])
                 hits.append(r)
-        if len(hits) >= 5 and any(r.get("track-count") == n_files for r in hits):
+        if len(hits) >= 5 and any(_mb_hit_tracks(r) == n_files for r in hits):
             break
-    same = [r for r in hits if r.get("track-count") == n_files]
+    same = [r for r in hits if _mb_hit_tracks(r) == n_files]
 
     def prio(r):
         return version_priority(album, catnos=[i.get("catalog-number") for i in r.get("label-info") or []],

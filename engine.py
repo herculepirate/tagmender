@@ -2136,6 +2136,12 @@ class Engine:
                     raise
                 mb_down, rel = exc, None
                 self._note_mb_down(exc)
+            if rel and not best.get("version_tracks"):
+                # MED-22: a hybrid SACD's layers listed as media of their own are one disc: your
+                # copy's layer of each, numbered as the discs are (2 hybrid SACDs listed as 4
+                # media: discs 1 and 2 of 2). A version view keeps every medium (its folders are
+                # the layers: match_core.version_view)
+                rel = mb_tags.one_layer(rel, _layer_prefer(album))
             if rel:
                 tags_mb = mb_tags.release_tags(rel, ps)
                 tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files), ps)
@@ -2700,6 +2706,9 @@ class Engine:
             offsets = [int(x) for x in offsets]
             return [b - a for a, b in zip(offsets, offsets[1:] + [int(leadout)])]
 
+        # MED-22: a hybrid SACD's CD layer is the disc of that number (its SACD layers, listed as
+        # media of their own, number no disc: the CD layers at positions 1 and 3 are discs 1 and 2)
+        rel = mb_tags.one_layer(rel, "cd") if rel else rel
         media = [(m, [lengths(d["offsets"], d["sectors"]) for d in m.get("discs") or ()
                       if d.get("offsets") and d.get("sectors")]) for m in (rel or {}).get("media") or ()]
         own = {str(k): lengths(t.split()[3:], t.split()[2]) for k, t in copy_tocs.items()}
@@ -3478,6 +3487,8 @@ class Engine:
         facts, never the release's own. {"targets" (one per file, in file order), "score",
         "group_ids"}, or None."""
         ps = self.profile.picard_tags()
+        if not sc["cand"].get("version_tracks"):
+            rel = mb_tags.one_layer(rel, _layer_prefer(album))      # (MED-22, as _identified)
         rg_id = (rel.get("release-group") or {}).get("id")
         if not rg_id:
             notes.append("the MusicBrainz release has no release group")
@@ -5732,6 +5743,18 @@ def _unheld_digital_media(rel, slots):
     keys = mb_tags.track_keys(rel)
     held = {keys[k][0] for k in slots if k < len(keys)}
     return set() if held & digital else digital
+
+
+def _layer_prefer(album) -> str:
+    """MED-22: which layer of a hybrid SACD your copy is (mb_tags.one_layer): "cd" for CD-quality
+    audio (16-bit/44.1 kHz: only the CD layer holds that), else the SACD layer of your files'
+    channel layout ("multichannel" when a file has more than two channels or names its
+    multichannel area, else "stereo")."""
+    audio = album.get("audio") or {}
+    if not (audio.get("hires") or audio.get("sacd")):
+        return "cd"
+    lays = {mc.layout_of_channels(t.get("channels"), t.get("sacd_area")) for t in album.get("tracks") or ()}
+    return "multichannel" if "multichannel" in lays else "stereo"
 
 
 def _without_box_vinyl(rel, ps):

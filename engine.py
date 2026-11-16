@@ -464,82 +464,65 @@ def titled_box(box: Path, found: dict, metas: dict) -> bool:
 
 
 
-# DSC-9: a set's volume folder ("Volume 1", "Vol. II", "Volume 2 - 1978-1985"); its number
-_VOLUME_DIR = re.compile(r"^vol(?:ume)?\.?\s*[-_.]?\s*(?P<n>\d{1,2}|[ivx]{1,4}|one|two|three|four|five|six|"
-                         r"seven|eight|nine|ten)(?![\w])(?:\s*[-–:.,]\s+.*|\s*[\(\[].*)?$", re.I)
-_NUMBER_WORDS = {w: i + 1 for i, w in enumerate(("one", "two", "three", "four", "five", "six", "seven",
-                                                 "eight", "nine", "ten"))}
-_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
-# its folder's name naming the volumes it holds: "Volume I & II", "Vol. 1-2", "1 + 2" ...
-_VOLUME_RANGE = re.compile(r"(?<![\w.])(?P<a>1|i|one)\s*(?:&|\+|-|–|/|and|to)\s*(?:vol(?:ume)?s?\.?\s*)?"
-                           r"(?P<b>\d{1,2}|[ivx]{1,4}|two|three|four|five|six|seven|eight|nine|ten)(?![\w])", re.I)
-# ... or their count: "(2 Hybrid SACD MFSL 2017)", "2CD", "2 Discs", "3xLP"
-_DISC_COUNT = re.compile(r"(?<![\w.\-])(?P<n>\d{1,2})\s*[x×]?\s*(?:[a-z][\w\-]*\s+){0,2}?"
-                         r"(?:cds?|discs?|disks?|sacds?|lps?)(?![a-z0-9])", re.I)
 
-
-def _volume_number(text) -> int:
-    t = str(text or "").casefold()
-    if t.isdigit():
-        return int(t)
-    return _NUMBER_WORDS.get(t) or _ROMAN.get(t) or 0
-
-
-def volume_number(d: Path) -> int:
-    """DSC-9: the number of a volume folder ("Volume 2" -> 2, "Vol. II" -> 2), else 0."""
-    m = _VOLUME_DIR.match(Path(d).name)
-    return _volume_number(m["n"]) if m else 0
-
-
-def _names_volumes(name, k) -> bool:
-    """DSC-9: a folder's name says it holds volumes 1 to k: "Greatest Hits Volume I & II", "Vol 1-3",
-    or k discs ("(2 Hybrid SACD MFSL 2017)", "2CD")."""
-    name = str(name or "")
-    if any(_volume_number(m["a"]) == 1 and _volume_number(m["b"]) == k for m in _VOLUME_RANGE.finditer(name)):
-        return True
-    return any(int(m["n"]) == k for m in _DISC_COUNT.finditer(name))
+volume_number = ma.volume_number          # DSC-9 (match_albums: read_album numbers the discs by it)
+_names_volumes = ma.names_volumes
 
 
 def volume_set(box: Path, found: dict, metas: dict) -> bool:
     """DSC-9: a folder holding a set's volumes in folders of their own ("Volume 1", "Volume 2"),
     each tagged as an album of its own ("Greatest Hits MFSL I", "... II"), is one album - the
-    set - when every sign agrees: the folder has no tracks of its own; each of its audio folders
-    is a sub-folder of it named as a volume, numbered 1 to k (k two or more), each once, in the
-    folders' own order; each holds one album by its tags, all by one album artist; no disc tag
-    contradicts its volume (each folder's files say one disc - its volume's, or the same one in
-    every folder); and the folder's name says it holds them - the volumes ("Volume I & II",
-    "Vol. 1-3") or their count ("2 Hybrid SACD", "2CD"). A series' volumes in a folder named
-    otherwise ("Now That's Music/Volume 1", "/Volume 2": separate releases) stay apart."""
-    if box in found:
-        return False
+    set - when every sign agrees: its name says it holds k volumes ("Volume I & II", "Vol. 1-2",
+    "2 Hybrid SACD", "2CD": every count or range in it saying k); it has no tracks of its own;
+    each of its audio folders is a sub-folder of it named as a volume, numbered 1 to k, each
+    once; each holds one album by its tags with one disc tag, all by one album artist; the
+    volumes are not shown to be separate releases (a series pack "Vol. 1-2" of two releases:
+    their barcodes or catalogue numbers differ, or their years do, with no code shared); and
+    their disc tags, where they are one numbering of a set (every volume tagged, one total),
+    number them as the volumes (that total k or none) - or say disc 1 on every volume, each
+    numbered from track 1. Disc tags that are no one numbering (half tagged, totals differing:
+    "1/2" beside "3/4") say nothing; the volume number is the disc (match_albums.read_album).
+    A series' volumes in a folder named otherwise stay apart."""
+    if box in found or not ma.named_volume_count(box.name):
+        return False                                    # (the name first: cheap, and most folders fail it)
     dirs = [d for d in found if box in d.parents]
-    if len(dirs) < 2 or any(d.parent != box for d in dirs):
-        return False
-    numbers = [volume_number(d) for d in dirs]
     k = len(dirs)
-    if sorted(numbers) != list(range(1, k + 1)):
+    if k < 2 or any(d.parent != box for d in dirs):
         return False
-    by_name = sorted(dirs, key=lambda d: ma._natural_key(d.name))
-    if [volume_number(d) for d in by_name] != list(range(1, k + 1)):
-        return False                                    # (read_album numbers the discs in this order)
-    if not _names_volumes(box.name, k):
+    if sorted(volume_number(d) for d in dirs) != list(range(1, k + 1)) or not _names_volumes(box.name, k):
         return False
     files = [f for d in dirs for f in found[d]]
     keys = album_keys(files, box, metas)
     if any(k_[0] != "tags" or not k_[1] for k_ in keys.values()) or len({k_[1] for k_ in keys.values()}) != 1:
         return False                                    # (untagged, or two artists' albums)
-    discs = {}
+    discs, totals, years, barcodes, catnos, restart = {}, set(), [], [], [], {}
     for d in dirs:
         if len({keys[f] for f in found[d]}) != 1:
             return False                                # (a folder of two albums)
-        nums = {_disc_tag(metas.get(f) or {})[0] for f in found[d]}
+        ms = [metas.get(f) or {} for f in found[d]]
+        nums = {_disc_tag(m)[0] for m in ms}
         if len(nums) != 1:
             return False                                # (a folder of two discs, or partly tagged)
         discs[d] = next(iter(nums))
-    if any(v for v in discs.values()):
-        same = len(set(discs.values())) == 1
-        if not same and any(v and v != str(volume_number(d)) for d, v in discs.items()):
-            return False                                # (its disc tags number it otherwise)
+        totals |= {_disc_tag(m)[1] for m in ms}
+        years.append({_first(m, "date")[:4] for m in ms} - {""})
+        barcodes.append({mc.norm_code(_first(m, "barcode")) for m in ms} - {""})
+        catnos.append({mc.norm_code(_first(m, "catalognumber")) for m in ms} - {""})
+        restart[d] = "1" in {_first(m, "tracknumber").partition("/")[0].strip().lstrip("0") or "0" for m in ms}
+
+    def apart(codes):                                   # (every volume carries one, and no two share)
+        return all(codes) and not set.intersection(*codes)
+    shared = (all(barcodes) and set.intersection(*barcodes)) or (all(catnos) and set.intersection(*catnos))
+    if not shared:
+        if apart(barcodes) or apart(catnos):
+            return False                                # (each volume its own release)
+        if all(len(y) == 1 for y in years) and len({next(iter(y)) for y in years}) > 1:
+            return False                                # (released years apart: a series' volumes)
+    if all(discs.values()) and len(totals) == 1:        # (one numbering of a set: it must be this one)
+        if len(set(discs.values())) == 1:
+            return discs[dirs[0]] == "1" and all(restart.values())
+        total = next(iter(totals))
+        return total in ("", str(k)) and all(v == str(volume_number(d)) for d, v in discs.items())
     return True
 
 
@@ -662,6 +645,14 @@ def _named_set_arriving(folder: Path, skips, left_out=None) -> str:
         if have <= set(parts) and len(have) < len(parts):
             gone = [p for p in _TITLE_JOIN.split(_bare_name(box.name)) if _title_fold(p) and _title_fold(p) not in have]
             return f"{' and '.join(x.strip() for x in gone)} {'are' if len(gone) > 1 else 'is'} not here yet"
+    # DSC-9: "Volume 1" of a folder naming k volumes, fewer of them here - "volume 2 of 2 is not here yet"
+    k, n = ma.named_volume_count(box.name), ma.volume_number(folder)
+    if k >= 2 and 1 <= n <= k:
+        have = sorted(ma.volume_number(x) for x in subs)
+        if 0 not in have and have == list(range(1, len(have) + 1)) and len(have) < k:
+            gone = list(range(len(have) + 1, k + 1))
+            return f"volume{'s' if len(gone) > 1 else ''} {', '.join(map(str, gone))} of {k} " \
+                   f"{'are' if len(gone) > 1 else 'is'} not here yet"
     m = _LEAD_NUMBER.match(folder.name)
     if not (m and is_disc_dir(folder)):
         return ""
@@ -1252,8 +1243,9 @@ class Engine:
         # DSC-6: a twofer's folder named after the albums it holds, joined ("The Stranger & An
         # Innocent Man"): the set they were issued in, numbered as the release found lists it
         # DSC-9: a folder of a set's volumes ("Volume 1", "Volume 2") that its name says it holds
-        named = {d.parent for d in found if (d.parent == path or path in d.parent.parents)
-                 and d.parent != d and (titled_box(d.parent, found, metas) or volume_set(d.parent, found, metas))}
+        # (each parent once: a library's every album folder asks of its artist's folder)
+        parents = {d.parent for d in found if (d.parent == path or path in d.parent.parents) and d.parent != d}
+        named = {b for b in parents if titled_box(b, found, metas) or volume_set(b, found, metas)}
         for box in sorted(near | named, key=lambda a: len(a.parts)):
             if any(b in box.parents for b in whole_boxes) or not (
                     numbered_box(box, found, metas) or box in named):

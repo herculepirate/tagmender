@@ -15,24 +15,25 @@ import engine  # noqa: E402
 import match_albums as ma  # noqa: E402
 
 
-def volume(parent, name, album_title, artist="Band V", disc=None, n=3, freq=300, titles=None):
+def volume(parent, name, album_title, artist="Band V", disc=None, n=3, freq=300, titles=None, first=1, **extra):
     """A volume's folder: N tracks (10, 20, 30 s) numbered from 1, tagged as ALBUM_TITLE, with no
     disc number unless DISC is given."""
     for i in range(n):
         meta = dict(title=f"{titles or album_title} {i}", album=album_title, albumartist=artist, artist=artist,
-                    track=str(i + 1))
+                    track=str(first + i), **extra)
         if disc:
             meta["disc"] = disc
-        flac(parent / name, f"{i + 1:02d}.flac", 10 * (i % 3 + 1), freq=freq + 10 * i, **meta)
+        flac(parent / name, f"{first + i:02d}.flac", 10 * (i % 3 + 1), freq=freq + 10 * i, **meta)
     return parent / name
 
 
 def volume_set(lib, name="Band V - 1985 - Hits Volume I & II (2 Hybrid SACD 2017)", dirs=("Volume 1", "Volume 2"),
-               artists=("Band V", "Band V"), discs=(None, None)):
+               artists=None, discs=None, extra=None, first=None):
     top = lib / "Band V" / name
     for k, d in enumerate(dirs):
-        volume(top, d, f"Hits {'I' * (k + 1)}", artists[k], disc=discs[k], freq=300 + 300 * k,
-               titles=("Alpha", "Beta", "Gamma")[k])
+        volume(top, d, f"Hits {'I' * (k + 1)}", (artists or ["Band V"] * 9)[k], disc=(discs or [None] * 9)[k],
+               freq=300 + 300 * k, titles=("Alpha", "Beta", "Gamma")[k], first=(first or [1] * 9)[k],
+               **(extra or [{}] * 9)[k])
     return top
 
 
@@ -89,7 +90,8 @@ class DSC9VolumeFolders(te.Base):
                 shutil.rmtree(top)
 
     def test_DSC9_a_series_folder_named_otherwise_stays_apart(self):
-        for name in ("Now Music", "Hits (3CD)", "Hits Vol. 1-3", "Hits 2001", "Hits I & III"):
+        for name in ("Now Music", "Hits (3CD)", "Hits Vol. 1-3", "Hits 2001", "Hits I & III", "Hits 1 & 2 (3CD)",
+                     "Live (2CD) (1 & 3)"):
             with self.subTest(name=name):
                 top = volume_set(self.lib, name=name)
                 self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
@@ -110,14 +112,15 @@ class DSC9VolumeFolders(te.Base):
     def test_DSC9_tracks_in_the_set_folder_itself_stay_apart(self):
         top = volume_set(self.lib)
         flac(top, "intro.flac", 10, title="Intro", album="Hits", albumartist="Band V", artist="Band V", track="1")
-        self.assertNotIn(top, [g.folder for g in self.groups() if len(g.files) == 6])
+        gs = self.groups()
+        self.assertFalse([g for g in gs if len({f.parent for f in g.files}) > 1], [(g.folder, g.files) for g in gs])
 
     def test_DSC9_disc_tags_numbering_it_otherwise_stay_apart(self):
         volume_set(self.lib, discs=("2", "1"))
         self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
 
     def test_DSC9_disc_tags_agreeing_or_repeating_join(self):
-        for discs in (("1", "2"), ("1/2", "2/2"), ("1/1", "1/1"), ("1", None)):
+        for discs in (("1", "2"), ("1/2", "2/2"), ("1/1", "1/1"), ("1", None), ("1/2", "3/4"), ("2/2", "1/1")):
             with self.subTest(discs=discs):
                 top = volume_set(self.lib, discs=discs)
                 self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 6)])
@@ -135,13 +138,90 @@ class DSC9VolumeFolders(te.Base):
         self.assertEqual([vn(Path(x)) for x in ("Volume 1", "Vol. II", "vol 3", "Volume Ten", "Volume 2 (1978-1985)",
                                                 "Volumes", "Volume 1 Extra", "Vol.ume 1", "Hits Volume 1")],
                          [1, 2, 3, 10, 2, 0, 0, 0, 0])
+        self.assertEqual([vn(Path(x)) for x in ("Volume One", "Volume Three", "Vol. IX", "Volume 01")], [1, 3, 9, 1])
         nv = engine._names_volumes
+        self.assertFalse(nv("Hits 1 & 2 (3CD)", 2))
+        self.assertFalse(nv("Live (2CD) (1 & 3)", 2))
+        self.assertTrue(nv("Hits (2-CD)", 2))
         self.assertTrue(nv("Greatest Hits Volume I & II (2 Hybrid SACD MFSL 2017)", 2))
         self.assertTrue(nv("Box (4CD)", 4))
         self.assertFalse(nv("Box (4CD)", 2))
         self.assertFalse(nv("1985 - Hits", 2))
         self.assertFalse(nv("2011 - 2 Live", 3))
         self.assertFalse(nv("Hits 2001-2", 2))
+
+    def test_DSC9_volumes_numbered_in_words_are_discs_by_number_not_name_order(self):
+        top = volume_set(self.lib, name="Hits (3CD)", dirs=("Volume One", "Volume Two", "Volume Three"))
+        self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 9)])
+        a = ma.read_album(top, "Band V", top.name)
+        self.assertEqual(sorted({(t["disc"], t["title"].split()[0]) for t in a["tracks"]}),
+                         [(1, "Alpha"), (2, "Beta"), (3, "Gamma")])
+
+    def test_DSC9_a_series_pack_of_separate_releases_stays_apart(self):
+        for extra in (({"date": "1999"}, {"date": "2003"}), ({"barcode": "5012345678900"}, {"barcode": "5012345678917"}),
+                      ({"catalognumber": "NOW 1"}, {"catalognumber": "NOW 2"})):
+            with self.subTest(extra=extra):
+                top = volume_set(self.lib, name="Now Music Vol. 1-2", extra=extra)
+                self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
+                shutil.rmtree(top)
+
+    def test_DSC9_one_barcode_on_both_volumes_is_the_set_whatever_their_dates(self):
+        # (an earlier job tagged one volume as the 2017 pressing, the other kept 1985)
+        top = volume_set(self.lib, extra=({"date": "1985", "barcode": "821797212168"},
+                                          {"date": "2017-07-31", "barcode": "821797212168"}))
+        self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 6)])
+
+    def test_DSC9_an_earlier_jobs_disc_tags_are_no_numbering_of_the_set(self):
+        # (Volume 1 tagged "1 of 2", Volume II tagged "3 of 4" by a release listing each disc's two layers)
+        top = volume_set(self.lib, dirs=("Volume 1", "Volume II"), discs=("1/2", "3/4"),
+                         extra=({"date": "1985", "barcode": "821797212168"},
+                                {"date": "2017-07-31", "barcode": "821797212168"}))
+        self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 6)])
+        a = ma.read_album(top, "Band V", top.name)
+        self.assertEqual([(t["disc"], t["num"]) for t in a["tracks"]],
+                         [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3)])
+
+    def test_DSC9_one_disc_tag_on_every_volume_but_tracks_numbered_on_stays_apart(self):
+        for discs, first in ((("1", "1"), (1, 4)), (("2", "2"), (1, 1))):
+            with self.subTest(discs=discs):
+                top = volume_set(self.lib, discs=discs, first=first)
+                self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
+                shutil.rmtree(top)
+
+    def test_DSC9_a_total_other_than_the_volumes_stays_apart(self):
+        volume_set(self.lib, discs=("1/3", "2/3"))
+        self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
+
+    def test_DSC9_a_volume_half_tagged_or_of_two_albums_or_untagged_stays_apart(self):
+        top = volume_set(self.lib)
+        flac(top / "Volume 2", "09.flac", 10, title="X", album="Hits II", albumartist="Band V", artist="Band V",
+             track="9", disc="2")
+        self.assertEqual(len(self.groups()), 2)
+        shutil.rmtree(top)
+        top = volume_set(self.lib)
+        flac(top / "Volume 2", "09.flac", 10, title="X", album="Other", albumartist="Band V", artist="Band V", track="9")
+        self.assertFalse([g for g in self.groups() if len({f.parent for f in g.files}) > 1])
+        shutil.rmtree(top)
+        top = self.lib / "Band V" / "Hits Volume I & II"
+        volume(top, "Volume 1", "Hits I")
+        flac(top / "Volume 2", "01.flac", 10)
+        self.assertFalse([g for g in self.groups() if len({f.parent for f in g.files}) > 1])
+
+    def test_DSC9_a_volume_with_disc_folders_inside_stays_apart(self):
+        top = self.lib / "Band V" / "Hits Volume I & II"
+        volume(top / "Volume 1", "CD1", "Hits I")
+        volume(top, "Volume 2", "Hits II", freq=600)
+        self.assertFalse([g for g in self.groups() if g.folder == top])
+
+    def test_DSC9_the_watcher_waits_for_the_volumes_not_here_yet(self):
+        top = self.lib / "Band V" / "Hits Volume I & II (2 Hybrid SACD 2017)"
+        volume(top, "Volume 1", "Hits I")
+        self.assertEqual(engine.box_still_arriving(top / "Volume 1"), "volume 2 of 2 is not here yet")
+        volume(top, "Volume 2", "Hits II", freq=600)
+        self.assertEqual(engine.box_still_arriving(top / "Volume 1"), "")
+        other = self.lib / "Band V" / "Now Music"
+        volume(other, "Volume 1", "Now 1")
+        self.assertEqual(engine.box_still_arriving(other / "Volume 1"), "")
 
 
 if __name__ == "__main__":

@@ -1722,6 +1722,60 @@ def documents_text(album_dir, ocr=True, db=None):
 DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*\d+\b|^\d{1,2}$", re.I)
 
 
+
+# DSC-9: a set's volume folder ("Volume 1", "Vol. II", "Volume Two", "Volume 2 - 1978-1985"); its number
+_VOLUME_DIR = re.compile(r"^vol(?:ume)?\.?\s*[-_.]?\s*(?P<n>\d{1,2}|[ivx]{1,4}|one|two|three|four|five|six|"
+                         r"seven|eight|nine|ten)(?![\w])(?:\s*[-–:.,]\s+.*|\s*[\(\[].*)?$", re.I)
+_NUMBER_WORDS = {w: i + 1 for i, w in enumerate(("one", "two", "three", "four", "five", "six", "seven",
+                                                 "eight", "nine", "ten"))}
+_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
+# a folder's name naming the volumes it holds: "Volume I & II", "Vol. 1-2", "1 + 2" ...
+_VOLUME_RANGE = re.compile(r"(?<![\w.])(?P<a>1|i|one)\s*(?:&|\+|-|–|/|and|to)\s*(?:vol(?:ume)?s?\.?\s*)?"
+                           r"(?P<b>\d{1,2}|[ivx]{1,4}|two|three|four|five|six|seven|eight|nine|ten)(?![\w])", re.I)
+# ... or their count: "(2 Hybrid SACD MFSL 2017)", "2CD", "2-CD", "2 Discs", "3xLP"
+_VOLUME_DISCS = re.compile(r"(?<![\w.\-])(?P<n>\d{1,2})\s*[x×-]?\s*(?:[a-z][\w\-]*\s+){0,2}?"
+                           r"(?:cds?|discs?|disks?|sacds?|lps?)(?![a-z0-9])", re.I)
+
+
+def _volume_word(text) -> int:
+    t = str(text or "").casefold()
+    if t.isdigit():
+        return int(t)
+    return _NUMBER_WORDS.get(t) or _ROMAN.get(t) or 0
+
+
+def volume_number(d) -> int:
+    """DSC-9: the number of a volume folder ("Volume 2" -> 2, "Vol. II" -> 2), else 0."""
+    m = _VOLUME_DIR.match(Path(d).name)
+    return _volume_word(m["n"]) if m else 0
+
+
+def named_volume_count(name) -> int:
+    """DSC-9: how many volumes a folder's name says it holds - every range ("Volume I & II", "Vol 1-3")
+    and disc count ("2 Hybrid SACD", "2CD") in it saying the same k, at least two; else 0 ("Hits 1 & 2
+    (3CD)" says two things)."""
+    name = str(name or "")
+    said = {_volume_word(m["b"]) for m in _VOLUME_RANGE.finditer(name) if _volume_word(m["a"]) == 1}
+    said |= {int(m["n"]) for m in _VOLUME_DISCS.finditer(name)}
+    return said.pop() if len(said) == 1 and min(said) >= 2 else 0
+
+
+def names_volumes(name, k) -> bool:
+    """DSC-9: a folder's name says it holds volumes 1 to k (named_volume_count)."""
+    return named_volume_count(name) == k >= 2
+
+
+def volume_discs(album_dir, folders) -> dict:
+    """DSC-9: {volume folder: its disc} when the album's folders are all volume folders of
+    album_dir numbered 1 to k and album_dir's name says it holds k volumes; else {}."""
+    album_dir = Path(album_dir)
+    nums = {d: volume_number(d) for d in folders}
+    if len(nums) < 2 or any(d.parent != album_dir for d in nums) or \
+            sorted(nums.values()) != list(range(1, len(nums) + 1)) or not names_volumes(album_dir.name, len(nums)):
+        return {}
+    return nums
+
+
 def album_dirs(top):
     """The album folders under an artist folder, however deep (Rotting Christ/Albums/
     1993 - Thy Mighty Contract): every folder holding audio, a disc folder ("Disc 02",
@@ -2015,6 +2069,15 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
             and len({next(iter(v)) for v in per_folder.values()}) < len(per_folder):
         for p, i in infos:
             if p.parent in folder_disc:
+                i["disc"] = 0
+    # DSC-9: a set's volume folders ("Volume 1", "Volume II" in "Hits Volume I & II (2CD)"): the
+    # volume is the disc, whatever disc tag its files carry (engine.volume_set joined them only where
+    # their disc tags agree, or are no one numbering of the set: "1/2" beside an earlier job's "3/4")
+    vols = {} if versions else volume_discs(album_dir, folders)
+    if vols:
+        folder_disc = vols
+        for p, i in infos:
+            if p.parent in vols:
                 i["disc"] = 0
     for p, i in infos:
         i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else \

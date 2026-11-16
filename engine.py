@@ -2028,6 +2028,12 @@ class Engine:
             return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
                                     reason=f"the release you chose was not found: {ref}")
         sc = mc.score_candidate(album, cand, self.cfg)
+        if kind != "mb":
+            # BAR-13: a pressing your code names, chosen by hand, listing too few tracks to tag -
+            # tagged from the full entry of its master, as when the matcher picks it
+            view = self._code_twin_view(album, cand, sc)
+            if view:
+                sc, cand = view, view["cand"]
         best = dict(cand, confidence=100.0, notes=list(sc.get("notes") or []))
         if (sc.get("cand") or {}).get("whole_works"):
             best["whole_works"] = True               # TRK-5: tagged one track per work, as scored
@@ -2055,6 +2061,31 @@ class Engine:
                                     reason=f"the release you chose does not fit the files: {exc}")
         prop.why = why + [w for w in prop.why if w not in why]
         return prop
+
+    CODE_TWIN_VERSIONS = 20         # (BAR-13, a hand-chosen release: its master's versions read at most)
+
+    def _code_twin_view(self, album, cand, sc):
+        """BAR-13 for a release you chose (Engine._forced): the Discogs entry carrying your copy's
+        own code whose track list is too sparse to tag, scored with the tracks of a full entry of
+        its master as match_core.code_twins scores it when the matcher finds it; None otherwise
+        (the chosen release then stands as it is)."""
+        n = len(album.get("tracks") or ())
+        tracks = cand.get("tracks") or ()
+        if sc.get("code") not in mc.OWN_CODES or not cand.get("master_id") or self.dm is None or \
+                not (len(tracks) < n or (len(tracks) == n and not sc.get("dur_cov"))):
+            return None
+        try:
+            ids = _discogs_versions(self.http, cand["master_id"]) or set()
+            others = []
+            for vid in sorted(ids - {str(cand["id"])})[:self.CODE_TWIN_VERSIONS]:
+                det = self.http.get_json(f"https://api.discogs.com/releases/{vid}", "discogs")
+                if det:
+                    others.append(mc.score_candidate(album, ma.discogs_candidate(det, self.dm), self.cfg))
+        except ma.ProviderUnavailable:
+            return None
+        view = next((s for s in mc.code_twins(album, [sc] + others, self.cfg)
+                     if str(s["cand"].get("id")) == str(cand["id"])), None)
+        return view if view is not None and view["cand"].get("tracks_of") else None
 
     def _release(self, best):
         return ma.release_fields(best)
@@ -2129,7 +2160,8 @@ class Engine:
                 # fields (IDs, label, number, barcode, date, country, notes, its discs' format)
                 # staying its own
                 full = self.http.get_json(f"https://api.discogs.com/releases/{best['tracks_of']}", "discogs")
-                fparts = discogs_parts(det, self.dm, self.http, es, tracks_det=full) if full else None
+                fparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")),
+                                       tracks_det=full) if full else None
                 if fparts and fparts[1] is not None and len(fparts[1]) == len(files) and fparts[2] == dparts[2]:
                     dparts = fparts
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)

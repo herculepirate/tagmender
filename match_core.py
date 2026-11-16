@@ -4263,16 +4263,22 @@ def code_twins(album, scored, cfg, ocr_text=""):
     2020 limited box, 131 tracks without lengths; 17690677, the 2021 retail box, 139 agreeing).
     Never for an entry anything of your copy argues against (a barcode of yours that differs, a
     rip log dated before it came out, the folder name or scans against it, a format your files
-    cannot be), nor when the full entry carries your code too. Returns SCORED, the views in
-    place."""
+    cannot be), nor when the full entry carries your code too, nor when any entry carrying your
+    code fits your files on its own tracks: a view never outranks a pressing of your number
+    listing its own lengths (one number is often an original's and its reissues', and lengths
+    typed off a sleeve may be a few seconds off). A sparse list of fewer than 3 tracks names no
+    album. Returns SCORED, the views in place."""
     n_file = len(album.get("tracks") or ())
     if not n_file or not scored:
+        return scored
+    if any(o.get("code") in OWN_CODES and o.get("tracks_ok") and not o.get("missing")
+           and not (o.get("cand") or {}).get("tracks_of") for o in scored):
         return scored
     out = []
     for s in scored:
         c = s.get("cand") or {}
         n_cand = len(c.get("tracks") or ())
-        sparse = n_cand and (n_cand < n_file or (n_cand == n_file and not s.get("dur_cov")))
+        sparse = n_cand >= 3 and (n_cand < n_file or (n_cand == n_file and not s.get("dur_cov")))
         # (a Discogs entry: only its tracks can be tagged from another entry's, engine._identified;
         # a MusicBrainz release's IDs name its own tracks)
         if not (sparse and c.get("source") == "discogs" and s.get("code") in OWN_CODES
@@ -4294,7 +4300,9 @@ def code_twins(album, scored, cfg, ocr_text=""):
         fc = f["cand"]
         view = dict({k: v for k, v in c.items() if k not in ("works_view", "whole_works", "rows")},
                     tracks=fc["tracks"], disc_titles=fc.get("disc_titles"), sparse_cand=c,
-                    tracks_of=str(fc["id"]), **({"rows": fc["rows"]} if fc.get("rows") else {}))
+                    tracks_of=str(fc["id"]), **({"rows": fc["rows"]} if fc.get("rows") else {}),
+                    # (TRK-5: the full entry read one track per work is tagged so too)
+                    **({"whole_works": True} if fc.get("whole_works") else {}))
         v = score_candidate(album, view, cfg, ocr_text)
         if not (v.get("tracks_ok") and v.get("code") == s.get("code") and not v.get("conflict")
                 and (v.get("dur_frac") or 0) >= cfg["auto_min_duration_frac"]):

@@ -4,6 +4,7 @@ entry of the same album (same master, same discs, its titles) fits every track b
 the album is proven by the full entry, the pressing by the code (Neil Young - Archives Vol. II,
 folder "(Reprise 093624899051)": Discogs 16262491, the 2020 box, 131 tracks without lengths, over
 17690677 and MusicBrainz 3796a182, the 2021 retail box, 139 agreeing). Synthetic data only."""
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -110,6 +111,27 @@ class BAR13CodeTwin(unittest.TestCase):
         other = _sparse(tracks=[{"disc": 1, "title": t, "secs": 0} for t in ("A", "B", "C", "D")])
         self.assertFalse(any(s["cand"].get("tracks_of") for s in _scored(_album(), _full(), other)))
 
+    def test_BAR13_an_entry_of_your_number_listing_its_own_lengths_is_never_outranked(self):
+        # (one number on the original and a reissue: the original lists its own lengths, sleeve-
+        # typed, one or two seconds off; a remaster of the master without your number fits to the
+        # second - its tracks never make the sparse reissue a view that beats the original)
+        for off in ((4,), (3, 4)):
+            with self.subTest(off=off):
+                orig = _full(id="orig", catnos={mc.norm_code(CODE)}, catno_shown=CODE, barcodes=set(),
+                             year=2020, date="2020-11-20",
+                             tracks=[{"disc": 1, "title": t, "secs": s + (9 if i in off else 0)}
+                                     for i, (t, s) in enumerate(zip(TITLES, SECS))])
+                sparse = _sparse(barcodes=set())
+                sc = _scored(_album(), sparse, _full(id="remaster"), orig)
+                self.assertFalse(any(s["cand"].get("tracks_of") for s in sc))
+                self.assertEqual(_pick(_res(_album(), sparse, _full(id="remaster"), orig)), "orig")
+
+    def test_BAR13_a_list_of_one_or_two_tracks_names_no_album(self):
+        for titles in (TITLES[3:4], TITLES[3:5]):
+            with self.subTest(n=len(titles)):
+                few = _sparse(tracks=[{"disc": 1, "title": t, "secs": 0} for t in titles])
+                self.assertFalse(any(s["cand"].get("tracks_of") for s in _scored(_album(), _full(), few)))
+
     def test_BAR13_a_musicbrainz_entry_is_not_tagged_from_another(self):
         mb = dict(source="mb", master_id="", release_group="rg-1")
         sc = _scored(_album(), _full(id="mb-full", **mb), _sparse(**mb))
@@ -156,29 +178,65 @@ class BAR13AcrossTheDatabases(unittest.TestCase):
         self.assertIs(mc._yields_to_code_twin(mb, dg), mb)
 
 
+class VersionsHttp(te.FakeHttp):
+    """FakeHttp that also lists a Discogs master's versions (one page)."""
+
+    def get_json(self, url, host):
+        if host == "discogs" and "/masters/" in url and "/versions" in url:
+            mid = int(url.split("/masters/")[1].split("/")[0])
+            vs = [{"id": r["id"]} for r in self.dg.values() if r.get("master_id") == mid]
+            return {"versions": vs, "pagination": {"pages": 1}}
+        return super().get_json(url, host)
+
+
+def _releases():
+    full = te.dg_release(501, "Neil Band", "Archives", durs=("0:10", "0:20", "0:30", "0:40"), catno=OTHER)
+    full.update(year=2021, released="2021-03-05", master_id=900, identifiers=[{"type": "Barcode", "value": OTHER}])
+    sparse = te.dg_release(502, "Neil Band", "Archives", durs=("", "", ""), catno=CODE, country="US")
+    sparse.update(year=2020, released="2020-11-20", master_id=900, identifiers=[{"type": "Barcode", "value": CODE}])
+    mb = te.mb_release("mb-2021", "Neil Band", "Archives", lens=[10000, 20000, 30000, 40000], catno=OTHER)
+    mb["barcode"] = OTHER
+    mb["media"] = mb["media"][:1]
+    return full, sparse, mb
+
+
 class BAR13Tagged(te.Base):
     """Through the engine: the pressing's own fields, the full entry's tracks, no MusicBrainz ID."""
 
-    def test_BAR13_tagged_from_the_full_entrys_tracks(self):
-        folder = f"2020 - Archives (Reprise {CODE})"
-        self.album("Neil Band", "Archives", n=4, folder=folder)
-        full = te.dg_release(501, "Neil Band", "Archives", durs=("0:10", "0:20", "0:30", "0:40"), catno=OTHER)
-        full.update(year=2021, released="2021-03-05", master_id=900,
-                    identifiers=[{"type": "Barcode", "value": OTHER}])
-        sparse = te.dg_release(502, "Neil Band", "Archives", durs=("", "", ""), catno=CODE, country="US")
-        sparse.update(year=2020, released="2020-11-20", master_id=900,
-                      identifiers=[{"type": "Barcode", "value": CODE}])
-        mb = te.mb_release("mb-2021", "Neil Band", "Archives", lens=[10000, 20000, 30000, 40000], catno=OTHER)
-        mb["barcode"] = OTHER
-        mb["media"] = mb["media"][:1]
-        eng = self.engine(te.FakeHttp(mb=[mb], dg=[full, sparse]))
-        g = eng.albums_in(self.lib)[0]
-        p = eng.identify(g)
+    def folder(self):
+        return self.album("Neil Band", "Archives", n=4, folder=f"2020 - Archives (Reprise {CODE})")
+
+    def http(self):
+        full, sparse, mb = _releases()
+        return VersionsHttp(mb=[mb], dg=[full, sparse])
+
+    def assert_bar13(self, p):
         self.assertEqual((p.status, p.release_id), ("identified", "502"), p.why)
         self.assertEqual([t["title"][0] for t in p.targets], ["T0", "T1", "T2", "T3"])
         self.assertEqual({t["discogs_release_id"][0] for t in p.targets}, {"502"})
         self.assertEqual({t["catalognumber"][0] for t in p.targets}, {CODE})
         self.assertFalse(any(t.get("musicbrainz_albumid") for t in p.targets))
+
+    def test_BAR13_tagged_from_the_full_entrys_tracks(self):
+        self.folder()
+        eng = self.engine(self.http())
+        self.assert_bar13(eng.identify(eng.albums_in(self.lib)[0]))
+
+    def test_BAR13_the_pressing_chosen_by_hand_is_tagged_as_the_matcher_tags_it(self):
+        d = self.folder()
+        eng = self.engine(self.http())
+        eng.force = {os.path.realpath(d): "https://www.discogs.com/release/502"}
+        self.assert_bar13(eng.identify(eng.albums_in(self.lib)[0]))
+
+    def test_BAR13_planned_again_after_its_job_nothing_changes(self):
+        d = self.folder()
+        p = self.engine(self.http()).plan(d)
+        self.assertEqual(p["albums"][0]["status"], "ready", te.pl.preview(p))
+        self.assertEqual(te.executor.Executor(p).run()["counts"], {"done": 1})
+        t = te.tagio.read(next(iter(sorted(self.lib.rglob("*.flac")))))
+        self.assertEqual((t["discogs_release_id"], t["catalognumber"]), (["502"], [CODE]))
+        again = self.engine(self.http()).plan(self.lib / "Neil Band")
+        self.assertEqual([a["status"] for a in again["albums"]], ["unchanged"], te.pl.preview(again))
 
     def test_BAR13_a_full_entry_carrying_your_code_is_tagged_as_before(self):
         folder = f"2020 - Archives (Reprise {CODE})"

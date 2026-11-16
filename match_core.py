@@ -2274,6 +2274,20 @@ def exact_disc_id(album, cand):
             and cand.get("id") in (album.get("exact_toc_releases") or ()))
 
 
+def layer_discs(cand, positions):
+    """MED-22: medium positions of a MusicBrainz release (where a disc ID is attached) as the
+    disc numbers the candidate's tracks carry, on a release whose hybrid SACD layers are listed
+    as media of their own (match_albums.mb_candidate "layer_positions": the audio discs in
+    order, a disc's layers one disc, a video disc none; Billy Joel - Greatest Hits Vol. I & II:
+    its CD layers at positions 1 and 3 are discs 1 and 2). The positions as they are on any
+    other release."""
+    lp = cand.get("layer_positions") or {}
+    if not lp:
+        return set(positions)
+    lp = {int(k): int(v) for k, v in lp.items()}
+    return {lp[int(p)] for p in positions if int(p) in lp}
+
+
 def toc_lengths(album, cand, tracks_ok) -> bool:
     """TOC-1: the release's lengths are your files' own, whatever lengths it lists: every disc
     of these files has a TOC that fits its files to the sector, and MusicBrainz has each of
@@ -2294,7 +2308,7 @@ def toc_lengths(album, cand, tracks_ok) -> bool:
     on = (album.get("exact_toc_on") or {}).get(cand.get("id")) or {}
     for d, toc in tocs.items():
         want = cand["box_disc"] if cand.get("box_disc") and len(discs) == 1 else d
-        if want not in (on.get(toc) or ()):
+        if want not in layer_discs(cand, on.get(toc) or ()):
             return False
     return True
 
@@ -3544,7 +3558,7 @@ def _box_disc(album, cand):
     # An untitled disc MusicBrainz attaches your exact disc ID to (Jesu - Sun Down / Sun
     # Rise: disc 2 of the Japanese Conqueror): the ID hashes the whole TOC, lead-out too,
     # so with the same track count (2 or more) and every length within 0.1 s it is this disc
-    on = (album.get("exact_toc_media") or {}).get(cand.get("id")) or ()
+    on = layer_discs(cand, (album.get("exact_toc_media") or {}).get(cand.get("id")) or ())
     if cand.get("source") == "mb" and len(files) >= 2:
         for d in sorted(on):
             tr = discs.get(d) or []

@@ -2182,7 +2182,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "year": year or None, "discs": n_discs,
         "dropped_formats": dropped_formats, "dropped_tracks": dropped_tracks,
         "tracks": [{"disc": i["disc_eff"], "disc_tag": i["disc"] or 0, "num": i["num"], "title": i["title"],
-                    "secs": i["secs"], "path": str(_p)} for _p, i in infos],
+                    "secs": i["secs"], "path": str(_p),
+                    # (MED-22: which layer of a hybrid SACD each disc is, engine._layer_prefer)
+                    "audio": {"rate": i.get("rate") or 0, "bits": i.get("bits") or 0,
+                              "channels": i.get("channels") or 0, "sacd_area": i.get("sacd_area") or ""}}
+                   for _p, i in infos],
         # the tags' barcode, else one the ripper's notes name ("Barcode: 5013929020160")
         "barcodes": tags_barcodes,
         "tag_barcodes": set(tags_barcodes),
@@ -4583,7 +4587,11 @@ def mb_candidate(rel):
     whole, rel = rel, mb_tags.one_layer(rel, "cd")
     layer_positions = {}
     if rel is not whole:
-        for disc, g in enumerate(mb_tags.layer_groups(whole), 1):
+        # (each medium's position as the candidate numbers its discs: the audio discs in order,
+        # a video disc none)
+        audio_groups = [g for g in mb_tags.layer_groups(whole)
+                        if str(g[0].get("format") or "").lower() not in _MB_VIDEO_FORMATS]
+        for disc, g in enumerate(audio_groups, 1):
             for m in g:
                 layer_positions[int(m.get("position") or 0)] = disc
     tracks = []

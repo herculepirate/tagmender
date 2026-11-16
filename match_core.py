@@ -2276,14 +2276,16 @@ def exact_disc_id(album, cand):
 
 def layer_discs(cand, positions):
     """MED-22: medium positions of a MusicBrainz release (where a disc ID is attached) as the
-    disc numbers the candidate counts: a hybrid SACD's layers listed as media of their own are
-    one disc (match_albums.mb_candidate "layer_positions"; Billy Joel - Greatest Hits Vol. I &
-    II: its CD layers at positions 1 and 3 are discs 1 and 2). Unchanged for any other release."""
+    disc numbers the candidate's tracks carry, on a release whose hybrid SACD layers are listed
+    as media of their own (match_albums.mb_candidate "layer_positions": the audio discs in
+    order, a disc's layers one disc, a video disc none; Billy Joel - Greatest Hits Vol. I & II:
+    its CD layers at positions 1 and 3 are discs 1 and 2). The positions as they are on any
+    other release."""
     lp = cand.get("layer_positions") or {}
     if not lp:
         return set(positions)
     lp = {int(k): int(v) for k, v in lp.items()}
-    return {lp.get(int(p), int(p)) for p in positions}
+    return {lp[int(p)] for p in positions if int(p) in lp}
 
 
 def toc_lengths(album, cand, tracks_ok) -> bool:

@@ -682,17 +682,23 @@ def _audio_ids(rel, media=None, without=None) -> set:
     return out
 
 
-def _layer_kind(fmt) -> str:
-    """MED-22: which layer of a hybrid SACD (or which area of an SACD) a medium's format names:
-    "cd" ("Hybrid SACD (CD layer)"), "stereo" / "multichannel" ("... (SACD layer, 2 channels)",
-    "SACD (multichannel)") or "" (any other medium: a plain CD, a DVD, an SACD naming no layer)."""
+def _layer_kind(fmt) -> tuple:
+    """MED-22: (family, layer) of a medium that is one layer of a hybrid SACD or one area of an
+    SACD: family the format's name before its parentheses ("hybrid sacd", "sacd", "shm-sacd"),
+    layer "cd" ("Hybrid SACD (CD layer)"), "stereo" / "multichannel" ("... (SACD layer, 2
+    channels)", "SACD (multichannel)") or "sacd" (an SACD layer naming no channels); ("", "")
+    for any other medium (a plain CD, a DVD, an SACD naming no layer or area)."""
     import match_core as mc
-    f = str(fmt or "").casefold()
-    if "sacd" not in f:
-        return ""
+    f = str(fmt or "").casefold().strip()
+    if "sacd" not in f or "(" not in f:
+        return "", ""
+    family = f.split("(")[0].strip()
     if mc.medium_type(fmt) == "cd":
-        return "cd" if re.search(r"(?<!sa)cd layer", f) else ""
-    return mc.medium_layout(fmt) if "layer" in f or "(" in f else ""
+        return (family, "cd") if re.search(r"(?<!sa)cd layer", f) else ("", "")
+    lay = mc.medium_layout(fmt)
+    if lay:
+        return family, lay
+    return (family, "sacd") if re.search(r"sacd layer", f) else ("", "")
 
 
 def _layer_count(m) -> int:
@@ -712,44 +718,68 @@ def layer_groups(rel) -> list:
     of one hybrid SACD that MusicBrainz lists as media of their own ("Hybrid SACD (CD layer)",
     then "Hybrid SACD (SACD layer, 2 channels)" and "... multichannel)", the same tracks on
     each) are one disc; so are an SACD's stereo and multichannel areas listed apart. A layer
-    joins the disc before it only when it lists as many tracks with the same titles (the track
-    counts alone where the lookup carried no tracks: inc=discids+media) and that disc holds no
-    layer of its kind yet; any other medium is a disc of its own."""
+    joins the disc listed right before it only when it is of the same kind of disc (a hybrid
+    SACD's layer a hybrid's, a plain SACD's area a plain SACD's), that disc holds no layer of
+    its kind yet, and it lists as many tracks with the same titles. Where the lookup carried no
+    tracks (inc=discids+media) only the counts can be compared: then only a CD layer followed
+    by its SACD layers joins, and only when every layer of the release is in such a disc
+    (CD layer, SACD layer, CD layer, SACD layer - never CD, CD, SACD, SACD). Any other medium
+    is a disc of its own."""
+    media = rel.get("media") or []
+    counted = not all(m.get("tracks") for m in media if _layer_kind(m.get("format"))[1])
     groups = []
-    for m in rel.get("media") or []:
-        kind = _layer_kind(m.get("format"))
+    for m in media:
+        family, kind = _layer_kind(m.get("format"))
         last = groups[-1] if groups else None
-        if kind and last and last[0][1] and kind not in {k for _m, k in last} and \
-                _layer_count(m) and _layer_count(m) == _layer_count(last[0][0]) and \
-                (not (m.get("tracks") and last[0][0].get("tracks")) or _layer_titles(m) == _layer_titles(last[0][0])):
-            last.append((m, kind))
+        head = last[0] if last else None
+        join = bool(kind and head and head[2] and head[1] == family and
+                    kind not in {k for _m, _f, k in last} and
+                    _layer_count(m) and _layer_count(m) == _layer_count(head[0]))
+        if join and counted:
+            join = head[2] == "cd" and kind != "cd"
+        elif join:
+            join = _layer_titles(m) == _layer_titles(head[0])
+        if join:
+            last.append((m, family, kind))
         else:
-            groups.append([(m, kind)])
-    return [[m for m, _k in g] for g in groups]
+            groups.append([(m, family, kind)])
+    with_cd = {f for g in groups for _m, f, k in g if k == "cd"}
+    if counted and any((g[0][2] == "cd" and len(g) < 2) or (g[0][2] and g[0][2] != "cd" and g[0][1] in with_cd)
+                       for g in groups) and any(len(g) > 1 for g in groups):
+        # (counts alone, and a layer left without its disc: the layers' order is not the
+        # discs' - nothing joined)
+        groups = [[x] for g in groups for x in g]
+    return [[m for m, _f, _k in g] for g in groups]
+
+
+def _pick_layer(g, prefer):
+    kinds = [_layer_kind(m.get("format"))[1] for m in g]
+    if prefer == "cd" and "cd" in kinds:
+        return g[kinds.index("cd")]
+    if prefer in kinds and prefer != "cd":
+        return g[kinds.index(prefer)]
+    sacd = [m for m, k in zip(g, kinds) if k in ("stereo", "multichannel", "sacd")]
+    return sacd[0] if sacd and prefer != "cd" else g[0]
 
 
 def one_layer(rel, prefer="cd"):
     """MED-22: the release with one medium per physical disc (layer_groups): of a hybrid SACD's
     layers, the CD layer (prefer "cd"), or the SACD layer of the channel layout preferred
-    ("stereo", "multichannel"; else its first SACD layer); every other medium as it is. The
-    media kept are numbered 1..n in order, as the discs are ("~layer_position": the medium's
-    own position on the release). REL itself (no copy) when no disc is listed as two layers or
-    more. Billy Joel - Greatest Hits Vol. I & II (MFSL, 2 hybrid SACDs listed as 4 media): a rip
-    of its CD layers is discs 1 and 2 of 2, not 1 and 3 of 4."""
+    ("stereo", "multichannel"; else its first SACD layer); every other medium as it is. PREFER
+    is one layer for every disc, or {disc: layer} (the discs as numbered here, 1..n; a disc it
+    does not name: "cd"). The media kept are numbered 1..n in order, as the discs are
+    ("~layer_position": the medium's own position on the release). REL itself (no copy) when
+    no disc is listed as two layers or more. Billy Joel - Greatest Hits Vol. I & II (MFSL, 2
+    hybrid SACDs listed as 4 media): a rip of its CD layers is discs 1 and 2 of 2, not 1 and 3
+    of 4."""
     groups = layer_groups(rel)
     if not any(len(g) > 1 for g in groups):
         return rel
     at = {id(m): m.get("position") or k for k, m in enumerate(rel.get("media") or [], 1)}
     media = []
     for disc, g in enumerate(groups, 1):
-        kinds = [_layer_kind(m.get("format")) for m in g]
-        if prefer == "cd" and "cd" in kinds:
-            pick = g[kinds.index("cd")]
-        elif prefer in kinds and prefer != "cd":
-            pick = g[kinds.index(prefer)]
-        else:
-            sacd = [m for m, k in zip(g, kinds) if k in ("stereo", "multichannel")]
-            pick = sacd[0] if sacd else g[0]
+        want = (prefer.get(disc) or "cd") if isinstance(prefer, dict) else prefer
+        pick = _pick_layer(g, want)
         media.append(dict(pick, position=disc, **{"~layer_position": at[id(pick)]}))
     return dict(rel, media=media)
 

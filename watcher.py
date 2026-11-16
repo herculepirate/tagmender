@@ -516,10 +516,7 @@ class Watcher:
         guard = prof.mount_guard() if hasattr(prof, "mount_guard") else "auto"
         return all(r and Path(r).expanduser().is_dir() and planmod.mounted(Path(r).expanduser(), guard) for r in roots)
 
-    def due(self, folder: Path, prof, db, key=None, files=None, members=None, deep=True,
-            parts=()) -> tuple[bool, str]:
-        """parts: the files of each album a DSC-10 group of sibling folders holds (Group.trial):
-        one of them undone by hand, unchanged since, keeps the whole set from being done again."""
+    def due(self, folder: Path, prof, db, key=None, files=None, members=None, deep=True) -> tuple[bool, str]:
         key = key or planmod.db_text(folder)
         sig, newest, partial = snapshot(folder, files, deep)
         if partial:
@@ -539,13 +536,11 @@ class Watcher:
             # one undone beside other music by the folder and its files: music dropped beside it
             # since, or taken away, changes which - the undo, if it is newer than this key's own
             # record, still holds)
-            alts = {planmod.db_text(folder): files} | ({_files_key(folder, files): files} if files else {})
-            for fs in parts or ():                       # (DSC-10: an album of the set undone alone)
-                alts.setdefault(_files_key(folder, fs), fs)
-            for alt in sorted(set(alts) - {key}):
+            alts = {planmod.db_text(folder)} | ({_files_key(folder, files)} if files else set())
+            for alt in sorted(alts - {key}):
                 other = db.execute("SELECT signature, status, ts FROM processed WHERE folder=?", (alt,)).fetchone()
                 if other and other[1] == "undone" and (not row or (other[2] or 0) >= (row[4] or 0)) and \
-                        shape_in(folder, alts[alt], other[0]):
+                        shape_in(folder, files, other[0]):
                     return False, "undone"
         if not row:
             return True, "new"
@@ -836,9 +831,7 @@ class Watcher:
                 deep = real != top
                 scope = g.files                            # the album's own files (see snapshot)
                 try:
-                    go, why = (True, "recheck") if recheck else self.due(
-                        g.folder, prof, db, k, scope, g.files, deep,
-                        parts=[q.files for q in getattr(g, "trial", None) or ()])
+                    go, why = (True, "recheck") if recheck else self.due(g.folder, prof, db, k, scope, g.files, deep)
                     if go and not recheck:
                         go = self.discs_settled(g, prof)         # DSC-1: the set's other disc folders too
                 except Exception:                              # one album never stops the watcher
@@ -885,8 +878,19 @@ class Watcher:
         try:
             # (a set whose discs are different releases: each disc an album of the plan)
             props = e.identify_all(g) if hasattr(e, "identify_all") else [e.identify(g)]
+            # DSC-10: sibling folders one release holds are one album, found by each of them: the
+            # first folder looked at plans it and remembers the others with it (_look_set_members)
+            if any(getattr(p, "set_looked", False) for p in props):
+                return
+            for p in props:
+                if getattr(p, "set_members", None):
+                    p.set_looked = True
             prop = props[0]
             wait = "" if recheck else missing_discs(g, props)
+            if not wait and not recheck:
+                # DSC-10: a folder whose release holds discs not here yet, its siblings all discs of
+                # it (a set still being copied in): it waits for them
+                wait = next((p.awaits for p in props if getattr(p, "awaits", "")), "")
             if not wait and not recheck:
                 # DSC-5: one folder of a box set still being copied in (discs 1 .. k of N there)
                 wait = eng_mod.box_still_arriving(
@@ -974,6 +978,7 @@ class Watcher:
                         ex.rules_hash(ex.load_rules(prof.name)) if status == "excluded" else a.get("label", ""),
                         key=k, files=scope, deep=deep,
                         match=None if status == "excluded" else match_of(worst))
+            self._look_set_members(db, g, props, prof, status, attempts, a, worst)
             if res is not None:
                 for x, out_i, _st in each:
                     self.filed(db, x, prof, out_i)
@@ -992,6 +997,17 @@ class Watcher:
                 attempts = 1                           # (HF-4: as above)
             self.record(db, g.folder, prof, status, attempts, str(exc)[:200], key=k, files=scope, deep=deep)
             done[str(g.folder)] = "error"
+
+    def _look_set_members(self, db, g, props, prof, status, attempts, a, worst):
+        """DSC-10: the other folders of a set planned as one album with g's (Proposal.set_members),
+        remembered as it was - each by its own key, as the watcher finds it - so none of them is
+        looked at again until it changes."""
+        for p in props:
+            for m in getattr(p, "set_members", None) or ():
+                if m is g or (m.folder == g.folder and sorted(map(str, m.files)) == sorted(map(str, g.files))):
+                    continue
+                self.record(db, m.folder, prof, status, attempts, a.get("label", ""), key=self.key(m),
+                            files=list(m.files), deep=True, match=match_of(worst))
 
     def run(self):
         """Watch until stopped. One watching process at a time (the app's background

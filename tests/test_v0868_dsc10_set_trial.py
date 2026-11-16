@@ -84,7 +84,8 @@ class DSC10ClaimedByARelease(DSC10Base):
         alone = release("mb-dreams", "Dreams", ("Dreams",), barcode="")
         eng = self.engine(DiscHttp(mb=[three_disc_set(), alone]))
         gs = eng.albums_in(self.lib)
-        self.assertEqual([(g.folder, len(g.files), len(g.trial)) for g in gs], [(top, 9, 3)])
+        # (listed as before: an album per disc folder, each knowing its siblings)
+        self.assertEqual([(g.folder, len(g.files), len(g.siblings), g.set_folder) for g in gs], [(top, 3, 3, top)] * 3)
         props = eng.proposals(self.lib)
         self.assertEqual(len(props), 1, [p.release_id for p in props])
         p = props[0]
@@ -110,7 +111,8 @@ class DSC10ClaimedByARelease(DSC10Base):
         self.assertEqual(len({d.parent.parent for d in dsts}), 1, dsts)     # (one album folder)
         self.assertEqual(sorted({d.parent.name for d in dsts}), ["Disc 01", "Disc 02", "Disc 03"])
         self.assertTrue(any("'Disc 2 - Live Tour' -> disc 2" in n for n in a["notes"]), a["notes"])
-        self.assertEqual({a.get("key")}, {engine.group_key(top, eng.albums_in(self.lib)[0].files)})
+        first = eng.albums_in(self.lib)[0]
+        self.assertEqual(a.get("key"), engine.group_key(first.folder, first.files))
 
     def test_DSC10_folders_named_in_another_order_take_the_releases_discs(self):
         top = self.voyage(names=("01 Questions", "02 Live Tour", "03 Dreams"),
@@ -122,14 +124,14 @@ class DSC10ClaimedByARelease(DSC10Base):
                 f.unlink()
             disc(top, n, t if t != "Live" else "Live Tour", t, freq=300 + 300 * k)
         eng = self.engine(DiscHttp(mb=[three_disc_set()]))
-        self.assertEqual([g.trial_shape for g in eng.albums_in(self.lib)], ["numbered"])
+        self.assertEqual({g.set_shape for g in eng.albums_in(self.lib)}, {"numbered"})
         props = eng.proposals(self.lib)
         self.assertEqual(len(props), 1, [(p.status, p.release_id, p.files) for p in props])
         disc_of = {Path(f).parent.name: t["discnumber"][0] for f, t in zip(props[0].files, props[0].targets)}
         self.assertEqual(disc_of, {"03 Dreams": "1", "02 Live Tour": "2", "01 Questions": "3"})
 
     def stranger(self):
-        top = self.lib / ARTIST / f"{ARTIST} - Voyage Legacy (with Bonus Disc) [FLAC]"
+        top = self.lib / ARTIST / f"{ARTIST} - Legacy (with Bonus Disc) [FLAC]"
         disc(top, "Disc 1", "Dreams", "Dreams")
         disc(top, "Disc 2 - Live Tour", "Live Tour", "Live", freq=600)
         disc(top, "Disc 3 - Bonus Disc", "Bonus", "Bonus", freq=900, n=2)
@@ -159,10 +161,10 @@ class DSC10ClaimedByARelease(DSC10Base):
         by = {Path(p.files[0]).parent.name: p for p in props}
         self.assertEqual(by["Disc 1 - Dreams"].release_id, "mb-dreams")
         self.assertTrue(by["Disc 1 - Dreams"].own_number)
-        joined = by["Disc 2 - Live Tour"]
-        self.assertEqual(joined.release_id, "mb-voyage")
-        self.assertEqual(sorted({Path(f).parent.name for f in joined.files}), ["Disc 2 - Live Tour", "Disc 3 - Questions"])
-        self.assertEqual(sorted({t["discnumber"][0] for t in joined.targets}), ["2", "3"])
+        # (without it the set's disc 1 is not here: no claim - each folder keeps its own plan)
+        self.assertEqual(sorted(len(p.files) for p in props), [3, 3, 3])
+        self.assertEqual(by["Disc 2 - Live Tour"].release_id, "mb-voyage")
+        self.assertEqual([t["discnumber"][0] for t in by["Disc 2 - Live Tour"].targets], ["2"] * 3)
 
     def test_DSC10_two_releases_claiming_as_many_folders_claim_none(self):
         self.voyage()
@@ -193,21 +195,22 @@ class DSC10ClaimedByARelease(DSC10Base):
 class DSC10Evidence(DSC10Base):
     """(A) how a sibling's own match weighs against a claim (Engine._claim, _same_release)."""
 
-    def picked(self, part, rid, disc_no, provider="musicbrainz", **flags):
+    def picked(self, part, rid, disc_no, provider="musicbrainz", total=1, **flags):
         import plan as pl
         return pl.Proposal(source_dir=str(part.folder), files=[str(f) for f in part.files], status="identified",
                            tier="exact", provider=provider, release_id=rid, confidence=100.0, margin=20.0,
-                           targets=[{"discnumber": [str(disc_no)]} for _f in part.files], **flags)
+                           targets=[{"discnumber": [str(disc_no)], "totaldiscs": [str(total)]} for _f in part.files],
+                           **flags)
 
     def claim(self, disc1_flags, lens=None):
         self.voyage()
         rel = three_disc_set(lens=lens)
         eng = self.engine(DiscHttp(mb=[rel]))
         g = eng.albums_in(self.lib)[0]
-        p1, p2, p3 = g.trial
-        per = [(p1, [self.picked(p1, "mb-dreams", 1, **disc1_flags)]), (p2, [self.picked(p2, "mb-voyage", 2)]),
-               (p3, [self.picked(p3, "mb-q", 1)])]
-        got = eng._claim(g, per)
+        p1, p2, p3 = g.siblings
+        per = [(0, p1, [self.picked(p1, "mb-dreams", 1, **disc1_flags)]), (1, p2, [self.picked(p2, "mb-voyage", 2, total=3)]),
+               (2, p3, [self.picked(p3, "mb-q", 1)])]
+        got = eng._claim(g.set_folder, g.siblings, per)
         return got and sorted(d.name[:6] for d in got[1])
 
     def test_DSC10_a_disc_id_elsewhere_yields_to_lengths_agreeing_to_the_second(self):
@@ -216,11 +219,11 @@ class DSC10Evidence(DSC10Base):
     def test_DSC10_a_disc_id_elsewhere_and_lengths_only_near_stay_apart(self):
         # (the release's disc 1 two seconds longer each: the matcher's tolerance, not the same master)
         lens = {0: [12000, 22000, 32000]}
-        self.assertEqual(self.claim({"toc_proven": True}, lens=lens), ["Disc 2", "Disc 3"])
+        self.assertIsNone(self.claim({"toc_proven": True}, lens=lens))           # (its disc 1 not claimed: none)
         self.assertEqual(self.claim({}, lens=lens), ["Disc 1", "Disc 2", "Disc 3"])
 
     def test_DSC10_a_barcode_of_its_own_on_another_release_stays_apart(self):
-        self.assertEqual(self.claim({"own_number": True}), ["Disc 2", "Disc 3"])
+        self.assertIsNone(self.claim({"own_number": True}))
 
     def test_DSC10_a_one_disc_release_linking_the_box_is_no_twin(self):
         eng = self.engine(DiscHttp(mb=[release("mb-q", "Questions", ("Questions",))]))
@@ -268,11 +271,25 @@ class DSC10SearchedAsASet(DSC10Base):
         top = self.lib / ARTIST / "Drops (2001-2004)"
         disc(top, "Disc 1", "Drops 1", "One")
         disc(top, "Disc 2", "Drops 2", "Two", freq=600)
+        # (a 2-CD pack of the two in the database too: each folder its own release still)
         eng = self.engine(DiscHttp(mb=[release("mb-d1", "Drops 1", ("One",), barcode="1111111111116"),
-                                       release("mb-d2", "Drops 2", ("Two",), barcode="2222222222222")]))
+                                       release("mb-d2", "Drops 2", ("Two",), barcode="2222222222222"),
+                                       release("mb-pack", "Drops", ("One", "Two"), barcode="3333333333333")]))
         props = eng.proposals(self.lib)
         self.assertEqual(self.summary(props), [("identified", "mb-d1", ("Disc 1",), ("1",) * 3),
                                                ("identified", "mb-d2", ("Disc 2",), ("1",) * 3)])
+
+    def test_DSC10_folders_their_own_codes_show_apart_are_never_searched_as_a_set(self):
+        top = self.lib / ARTIST / SET
+        disc(top, "Disc 1", "Dreams", "Dreams", barcode="1111111111116")
+        disc(top, "Disc 2", "Live Tour", "Live", freq=600, barcode="2222222222222")
+        eng = self.engine(DiscHttp(mb=[release("mb-voyage", "Voyage", ("Dreams", "Live"))]))
+        tried = []
+        trial = eng._set_trial_identify
+        eng._set_trial_identify = lambda g: tried.append(g) or trial(g)
+        props = eng.proposals(self.lib)
+        self.assertEqual(tried, [])
+        self.assertEqual(sorted(len(p.files) for p in props), [3, 3])
 
     def test_DSC10_a_set_whose_disc_holds_other_tracks_is_no_join(self):
         self.voyage()
@@ -302,7 +319,7 @@ class DSC10SearchedAsASet(DSC10Base):
         top = self.voyage()
         eng = self.engine(DiscHttp(mb=[three_disc_set()]))
         gs = eng.albums_in(top / "Disc 2 - Live Tour")
-        self.assertEqual([(g.folder, len(g.files), g.trial) for g in gs], [(top / "Disc 2 - Live Tour", 3, [])])
+        self.assertEqual([(g.folder, len(g.files), g.siblings) for g in gs], [(top / "Disc 2 - Live Tour", 3, [])])
         props = eng.proposals(top / "Disc 2 - Live Tour")
         self.assertEqual([len(p.files) for p in props], [3])
 
@@ -326,7 +343,7 @@ class DSC10SearchedAsASet(DSC10Base):
         top = self.lib / ARTIST / SET
         for k in range(engine.SET_TRIAL_MAX_DISCS + 1):
             disc(top, f"Disc {k + 1}", f"Part {k}", f"P{k}", freq=300 + 50 * k, n=1)
-        self.assertTrue(all(not g.trial for g in self.engine(DiscHttp()).albums_in(self.lib)))
+        self.assertTrue(all(not g.siblings for g in self.engine(DiscHttp()).albums_in(self.lib)))
 
     def test_DSC10_an_artists_folder_of_albums_is_no_set(self):
         for name in (ARTIST, f"{ARTIST} - Discography [FLAC]"):
@@ -334,9 +351,234 @@ class DSC10SearchedAsASet(DSC10Base):
                 top = self.lib / name
                 disc(top, "01 Dreams", "Dreams", "Dreams")
                 disc(top, "02 Questions", "Questions", "Questions", freq=600)
-                self.assertTrue(all(not g.trial for g in self.engine(DiscHttp()).albums_in(self.lib)))
+                self.assertTrue(all(not g.siblings for g in self.engine(DiscHttp()).albums_in(self.lib)))
                 import shutil
                 shutil.rmtree(top)
+
+
+class DSC10Review(DSC10Base):
+    """What a claim or a search must never do (the review of DSC-10)."""
+
+    def two_live_albums(self, beta_release=True):
+        top = self.lib / ARTIST / "Live Albums"
+        disc(top, "1 - Alpha", "Alpha", "Alpha")
+        disc(top, "2 - Beta", "Beta", "Beta", freq=600)
+        tri = release("mb-tri", "Alpha", ("Alpha", "Beta", "Gamma"), barcode="", disc_titles=("Alpha", "Beta", "Gamma"))
+        return top, [tri] + ([release("mb-beta", "Beta", ("Beta",), barcode="")] if beta_release else [])
+
+    def test_DSC10_a_release_not_all_here_claims_nothing(self):
+        # (Alpha found only as disc 1 of a trilogy; Beta its own CD: never the trilogy, Gamma missing)
+        _top, rels = self.two_live_albums()
+        eng = self.engine(DiscHttp(mb=rels))
+        props = eng.proposals(self.lib)
+        self.assertEqual(sorted(len({Path(f).parent for f in p.files}) for p in props), [1, 1], self.summary(props))
+        self.assertEqual({p.release_id for p in props if Path(p.files[0]).parent.name == "2 - Beta"}, {"mb-beta"})
+
+    def test_DSC10_a_release_of_more_discs_than_folders_is_not_even_fetched_for_a_claim(self):
+        _top, rels = self.two_live_albums()
+        eng = self.engine(DiscHttp(mb=rels))
+        asked = []
+        cand = eng._release_cand
+        eng._release_cand = lambda *a: asked.append(a) or cand(*a)
+        eng.proposals(self.lib)
+        self.assertEqual(asked, [])
+
+    def test_DSC10_another_taggers_release_id_keeps_a_folder_apart(self):
+        top = self.voyage()
+        for f in (top / "Disc 3 - Questions").iterdir():
+            f.unlink()
+        disc(top, "Disc 3 - Questions", "Questions", "Questions", freq=900, musicbrainz_albumid="mb-q-elsewhere")
+        eng = self.engine(DiscHttp(mb=[three_disc_set(), release("mb-dreams", "Dreams", ("Dreams",), barcode="")]))
+        props = eng.proposals(self.lib)
+        self.assertEqual(sorted(len(p.files) for p in props), [3, 3, 3], self.summary(props))
+
+    def test_DSC10_an_earlier_tagmender_jobs_release_id_is_no_proof(self):
+        top = self.voyage()
+        for f in (top / "Disc 3 - Questions").iterdir():
+            f.unlink()
+        disc(top, "Disc 3 - Questions", "Questions", "Questions", freq=900, musicbrainz_albumid="mb-q-elsewhere",
+             tagmender="Resolved")
+        eng = self.engine(DiscHttp(mb=[three_disc_set(), release("mb-dreams", "Dreams", ("Dreams",), barcode="")]))
+        props = eng.proposals(self.lib)
+        self.assertEqual([(p.release_id, len(p.files)) for p in props], [("mb-voyage", 9)], self.summary(props))
+
+    def test_DSC10_a_one_track_disc_is_no_fit_by_titles_alone(self):
+        top = self.lib / ARTIST / "Odds"
+        disc(top, "1 - Dreams", "Dreams", "Dreams")
+        flac(top / "2 - Talk", "01.flac", 11, freq=900, title="Interview", album="Talk", albumartist=ARTIST,
+             artist=ARTIST, track="1")
+        rel = release("mb-dx", "Dreams", ("Dreams", "Extras"), barcode="", disc_titles=("Dreams", "Extras"))
+        rel["media"][1]["tracks"] = [dict(rel["media"][1]["tracks"][0], title="Interview", length=13000)]
+        eng = self.engine(DiscHttp(mb=[rel]))
+        props = eng.proposals(self.lib)
+        self.assertEqual(sorted(len(p.files) for p in props), [1, 3], self.summary(props))
+
+    def test_DSC10_a_joined_album_short_of_the_auto_threshold_is_no_join(self):
+        # (its folder's title says "Voyage Legacy", the release's "Legacy", no disc tagged so: 89.8)
+        top = self.lib / ARTIST / f"{ARTIST} - Voyage Legacy (with Bonus Disc) [FLAC]"
+        disc(top, "Disc 1", "Dreams", "Dreams")
+        disc(top, "Disc 2 - Live Tour", "Live Tour", "Live", freq=600)
+        legacy = release("mb-legacy", "Legacy", ("Dreams", "Live"), disc_titles=("Dreams", "Live Tour"))
+        eng = self.engine(DiscHttp(mb=[legacy, release("mb-dreams", "Dreams", ("Dreams",), barcode="")]))
+        props = eng.proposals(self.lib)
+        self.assertEqual(sorted(len(p.files) for p in props), [3, 3], self.summary(props))
+
+    def test_DSC10_a_set_still_arriving_waits(self):
+        top = self.lib / ARTIST / SET
+        disc(top, "Disc 1 - Dreams", "Dreams", "Dreams")
+        disc(top, "Disc 2 - Live Tour", "Live Tour", "Live", freq=600)
+        eng = self.engine(DiscHttp(mb=[three_disc_set()]))
+        props = eng.proposals(self.lib)
+        self.assertEqual(sorted(len(p.files) for p in props), [3, 3], self.summary(props))
+        self.assertEqual({getattr(p, "awaits", "") for p in props}, {"disc 3 of 3 is not here yet"})
+
+    def test_DSC10_one_folders_failure_is_its_own(self):
+        top = self.voyage()
+        eng = self.engine(DiscHttp(mb=[three_disc_set(), release("mb-dreams", "Dreams", ("Dreams",), barcode="")]))
+        real = eng._identify
+
+        def broken(g, names=None):
+            if any("Questions" in str(f) for f in g.files):
+                raise RuntimeError("unreadable")
+            return real(g, names)
+        eng._identify = broken
+        props = eng.proposals(self.lib)
+        self.assertEqual(sorted((p.status, len(p.files)) for p in props),
+                         [("identified", 3), ("identified", 3), ("unresolved", 3)], self.summary(props))
+        self.assertTrue(any("unreadable" in p.reason for p in props))
+
+    def test_DSC10_nothing_claiming_each_folder_keeps_its_own_plan(self):
+        # (the shapes of DSC-7's gap, DSC-2's two folders saying one disc, DSC-3's "Part 1"/"Part 2")
+        for names in (("Disc 1 - Alpha", "Disc 02", "Disc 4 - Gamma"), ("CD1", "CD2"), ("Part 1", "Part 2")):
+            with self.subTest(names=names):
+                top = self.lib / ARTIST / "Odds"
+                for k, n in enumerate(names):
+                    disc(top, n, f"Album {k}", f"A{k}", freq=300 + 200 * k, disc="1")
+                eng = self.engine(DiscHttp())
+                gs = eng.albums_in(self.lib)
+                self.assertEqual(len(gs), len(names))
+                props = eng.proposals(self.lib)
+                self.assertEqual(sorted(tuple(sorted({Path(f).parent.name for f in p.files})) for p in props),
+                                 sorted((n,) for n in names))
+                import shutil
+                shutil.rmtree(top)
+
+    def test_DSC10_the_set_title_keeps_an_artists_numbered_title(self):
+        import match_albums as ma
+        P = Path
+
+        def inf(a):
+            return [(P("/x/CD1/1.flac"), {"album": "Alpha", "artist": a}), (P("/x/CD2/1.flac"), {"album": "Zeta", "artist": a})]
+        for artist, folder, want in (("Led Zeppelin", "Led Zeppelin IV (Deluxe)", "Led Zeppelin IV (Deluxe)"),
+                                     ("Queen", "Queen II", "Queen II"), ("Chicago", "Chicago 17", "Chicago 17"),
+                                     ("Band", "Band - 1999 - IV", "Band - 1999 - IV"),
+                                     ("Billy Joel", "Billy Joel - 1994 - A Voyage on the River of Dreams [FLAC]",
+                                      "A Voyage on the River of Dreams")):
+            with self.subTest(folder=folder):
+                self.assertEqual(ma._set_title(inf(artist), folder), want)
+
+    def test_DSC10_an_artists_folder_spelled_otherwise_is_no_set(self):
+        for name, artist in (("Beatles", "The Beatles"), ("Motorhead [FLAC]", "Motörhead")):
+            with self.subTest(name=name):
+                top = self.lib / name
+                disc(top, "01 Please", "Please", "P", artist=artist)
+                disc(top, "02 With", "With", "W", artist=artist, freq=600)
+                self.assertTrue(all(not g.siblings for g in self.engine(DiscHttp()).albums_in(self.lib)))
+                import shutil
+                shutil.rmtree(top)
+
+
+def _age(root):
+    import os
+    import time
+    old = time.time() - 3600
+    for p in Path(root).rglob("*"):
+        if p.is_file():
+            os.utime(p, (old, old))
+
+
+class DSC10Watched(DSC10Base):
+    """The watcher: each folder an album as before unless a release joins them."""
+
+    def watch(self, rels, hold=None, broken=""):
+        import profiles as pf
+        import watcher
+        from unittest import mock
+        self.dest = self.tmp / "filed"
+        self.dest.mkdir(exist_ok=True)
+        prof = pf.from_dict({"name": "default", "operation": "move", "destination": str(self.dest),
+                             "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False},
+                             "sources": [{"path": str(self.lib), "watch": True}], "unattended": True,
+                             "watch": {"settle_minutes": 0, "interval_seconds": 1, "workers": 1},
+                             "unresolved": {"action": "move" if hold else "leave", "move_to": str(hold or ""),
+                                            "allow_partial": False}})
+        http = DiscHttp(mb=rels)
+
+        class E(engine.Engine):
+            def __init__(s, p, **kw):
+                kw.pop("http", None)
+                super().__init__(p, http=http, **kw)
+
+            def _identify(s, g, names=None):
+                if broken and any(broken in str(f) for f in g.files):
+                    raise RuntimeError("unreadable")
+                return super()._identify(g, names)
+        w = watcher.Watcher(profiles=[prof], once=True)
+        return w, mock.patch.object(watcher.eng_mod, "Engine", E)
+
+    def filed(self):
+        return sorted(str(p.relative_to(self.dest)) for p in self.dest.rglob("*.flac"))
+
+    def here(self):
+        return sorted(str(p.relative_to(self.lib)) for p in self.lib.rglob("*.flac"))
+
+    def test_DSC10_a_sibling_that_fails_never_holds_the_others_filing(self):
+        top = self.lib / ARTIST / "Live Albums"
+        disc(top, "1 - Alpha", "Alpha", "Alpha")
+        disc(top, "2 - Beta", "Beta", "Beta", freq=600)                 # (it cannot be read)
+        _age(self.lib)
+        w, patched = self.watch([release("mb-alpha", "Alpha", ("Alpha",), barcode="")], broken="2 - Beta")
+        with patched:
+            done = w.tick()
+        self.assertEqual(len(self.filed()), 3, (self.filed(), done))
+        self.assertEqual(sorted(p.name for p in (top / "2 - Beta").glob("*.flac")), ["01.flac", "02.flac", "03.flac"])
+        self.assertEqual(done.get(str(top / "2 - Beta")), "error")
+
+    def undone_stays_undone(self, rels, files_filed):
+        import executor
+        before = self.here()
+        _age(self.lib)
+        w, patched = self.watch(rels)
+        with patched:
+            w.tick()
+            self.assertEqual(len(self.filed()), files_filed, self.filed())
+            for j, *_r in executor.jobs(10):
+                executor.undo(j)
+            self.assertEqual(self.here(), before)
+            _age(self.lib)
+            w.tick()
+        self.assertEqual(self.here(), before, "the undone job was done again by the watcher")
+
+    def test_DSC10_numbered_albums_undone_are_not_filed_again(self):
+        top = self.lib / ARTIST / "Live Albums"
+        disc(top, "1 - Alpha", "Alpha", "Alpha")
+        disc(top, "2 - Beta", "Beta", "Beta", freq=600)
+        self.undone_stays_undone([release("mb-alpha", "Alpha", ("Alpha",), barcode=""),
+                                  release("mb-beta", "Beta", ("Beta",), barcode="")], 6)
+
+    def test_DSC10_a_joined_set_undone_is_not_filed_again(self):
+        self.voyage()
+        self.undone_stays_undone([three_disc_set(), release("mb-dreams", "Dreams", ("Dreams",), barcode="")], 9)
+
+    def test_DSC10_a_joined_set_is_filed_once_as_one_album(self):
+        self.voyage()
+        _age(self.lib)
+        w, patched = self.watch([three_disc_set(), release("mb-dreams", "Dreams", ("Dreams",), barcode="")])
+        with patched:
+            w.tick()
+        self.assertEqual(len(self.filed()), 9, self.filed())
+        self.assertEqual(sorted({Path(f).parent.name for f in self.filed()}), ["Disc 01", "Disc 02", "Disc 03"])
+        self.assertEqual(len({Path(f).parent.parent for f in self.filed()}), 1)
 
 
 if __name__ == "__main__":

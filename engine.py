@@ -247,7 +247,7 @@ def _disc_sets(groups, metas) -> list:
     their own. A mixed folder, or two folders naming the same disc, is left as it is."""
     sets = {}
     for g in groups:
-        sd = None if g.others or g.trial else sibling_disc(g.folder)
+        sd = None if g.others else sibling_disc(g.folder)
         if sd is None:
             continue
         keys = set(album_keys(g.files, g.folder, metas).values())
@@ -433,8 +433,11 @@ _ARTIST_FOLDER_WORDS = {"discography", "albums", "album", "collection", "studio"
 def _artist_folder(folder: Path, artist: str) -> bool:
     """DSC-10: FOLDER is named as ARTIST's folder ("Billy Joel", "Billy Joel - Discography
     [FLAC]"): what it holds are the artist's albums, never one set's discs."""
-    name = _title_fold(re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", folder.name))
-    who = _title_fold(artist)
+    def fold(t):                                        # ("The Beatles" and "Beatles", "Motörhead" and "Motorhead")
+        t = _title_fold(unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode())
+        return t[4:] if t.startswith("the ") else t
+    name = fold(re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", folder.name))
+    who = fold(artist)
     if not who or not name.startswith(who):
         return False
     rest = [w for w in name[len(who):].split() if not re.fullmatch(r"(?:19|20)\d\d", w)]
@@ -502,20 +505,20 @@ def _left_out(profile, box: Path, dirs, path) -> bool:
 
 def _release_set_groups(eng, groups, found, metas, path) -> list:
     """DSC-10: the albums of sibling folders of one parent that may be one set by its release
-    (release_set_shape) become one group of the parent, holding them as they were (.trial):
-    Engine.identify_all plans them each alone and then joins those one release holds
-    (_release_set). Only below the folder planned (a plan of one disc's folder plans it
-    alone); a folder you excluded or ignored keeps the set apart."""
+    (release_set_shape) stay the albums they are - listed, watched and remembered each as
+    before - and each knows the others (Group.siblings): Engine.identify_all plans them each
+    alone and then joins those one release proves one (Engine._release_set). Only below the
+    folder planned (a plan of one disc's folder plans it alone); a folder you excluded or
+    ignored keeps the set apart."""
     by_parent = {}
     for g in groups:
         dirs = {Path(f).parent for f in g.files}
-        if len(dirs) != 1 or g.discs or g.box or g.trial:
+        if len(dirs) != 1 or g.discs or g.box:
             continue
         d = next(iter(dirs))
         if d.parent == d or not (d.parent == path or path in d.parent.parents):
             continue
         by_parent.setdefault(d.parent, []).append((d, g))
-    joined = {}
     for parent, members in by_parent.items():
         dirs = [d for d, _g in members]
         if len(set(dirs)) != len(dirs):
@@ -529,11 +532,9 @@ def _release_set_groups(eng, groups, found, metas, path) -> list:
             continue
         # (the parts in their folders' order: by the number each name begins with)
         parts = [g for _d, g in sorted(members, key=lambda m: _lead_key(m[0].name))]
-        joined[id(parts[0])] = Group(parent, [f for g in parts for f in g.files], [], single=False,
-                                     trial=parts, trial_shape=shape)
-        for g in parts[1:]:
-            joined[id(g)] = None
-    return [joined.get(id(g), g) for g in groups if joined.get(id(g), g) is not None]
+        for g in parts:
+            g.siblings, g.set_folder, g.set_shape = parts, parent, shape
+    return groups
 
 
 def _bare_name(name) -> str:
@@ -914,10 +915,12 @@ class Group:
     discs: list = field(default_factory=list)
     # DSC-5: a box set's folder whose discs sit in folders of its own named as albums (numbered_box)
     box: bool = False
-    # DSC-10: sibling folders that may be one set by its release: the albums as they would be
-    # planned each alone (Engine._release_set decides; folder is their parent). [] otherwise.
-    trial: list = field(default_factory=list)
-    trial_shape: str = ""
+    # DSC-10: the albums of sibling folders that may be one set by its release, this one among
+    # them (each planned alone first; Engine._release_set joins those a release proves one), the
+    # folder holding them and their shape (release_set_shape). [] / None / "" otherwise.
+    siblings: list = field(default_factory=list, compare=False, repr=False)
+    set_folder: Path | None = field(default=None, compare=False)
+    set_shape: str = ""
 
 
 def _slots_of(album, cand, sc):
@@ -995,7 +998,7 @@ def _with_deluxe(profile, groups, path, skip=()) -> list[Group]:
     the profile), is left as it is; one outside the path scanned (only the main folder
     named) is read from its folder. skip: real paths, as albums_in has them."""
     folders = {g.folder for g in groups}
-    whole = {g.folder: g for g in groups if not g.others and not g.trial}
+    whole = {g.folder: g for g in groups if not g.others}
     merged = set()
     for g in list(whole.values()):
         sib = ma.deluxe_sibling(g.folder)
@@ -1308,6 +1311,7 @@ class Engine:
         """The albums below path; skip: folders not looked into at all (a library inside a
         watched folder: its tracks are never even opened)."""
         path = Path(os.path.abspath(Path(path).expanduser()))  # plans and journals hold absolute paths
+        getattr(self, "__dict__", {}).pop("_set_memo", None)   # (DSC-10: the sets as this scan finds them)
         if path.is_file():
             return [Group(path.parent, [path], [], single=True)]
         found = {}
@@ -1518,12 +1522,6 @@ class Engine:
         return Group(g.folder, fs) if fs else g
 
     def identify(self, g: Group) -> planmod.Proposal:
-        if g.trial:
-            # DSC-10: sibling folders that may be one set by its release: the first album of
-            # what they are planned as, the others in its .parts (identify_all lists them all)
-            props = self._release_set(g)
-            props[0].parts = props[1:]
-            return props[0]
         disc = self._tagged_disc(g)
         # (a release chosen for one disc of it: its row is the disc folder's - IDM-1, _per_disc)
         own = Group(disc, list(g.files)) if disc is not None and self._choice_for(
@@ -1564,14 +1562,40 @@ class Engine:
         return prop
 
     # ---- DSC-10: sibling folders of one set, joined by its release ----------------------
-    def _release_set(self, g: Group) -> list:
-        """DSC-10: the albums of g's sibling folders (g.trial), each first planned alone as
-        before; then, (A) a release one folder is matched to for sure that holds more discs
-        claims the siblings that fit its other discs track by track (_claim), else (B) for
-        disc folders numbered 1 to k a search for the whole set, then for its leading discs
-        1 to j (_set_search) - the folders it proves one release are one album of it, the
-        others stay as they were planned. Every album planned is returned, first to last."""
-        parts, was_alone = list(g.trial), getattr(self, "_alone", True)
+    def _set_member(self, g: Group) -> list:
+        """DSC-10: what album g of sibling folders is planned as: the set's albums are worked
+        out once per scan (_release_set, for whichever of them is asked first) - g's own plan as
+        before, or the joined album of the release holding it (the same Proposal for each of
+        its folders: its group_key is its first folder's, Proposal.set_key). A failure in
+        identifying g alone is g's own, as before; its siblings are planned without it."""
+        memo = self.__dict__.setdefault("_set_memo", {})
+        sk = tuple(group_key(q.folder, q.files) for q in g.siblings)
+        if sk not in memo:
+            memo[sk] = self._release_set(g)
+        got = memo[sk]
+        i = sk.index(group_key(g.folder, g.files))
+        if i in got["members"]:
+            return list(got["joined"])
+        own = got["own"].get(i)
+        if isinstance(own, BaseException):
+            raise own
+        if own is None:                                  # (not reached: identified alone now)
+            was, self._in_set = getattr(self, "_in_set", False), True
+            try:
+                return self.identify_all(g)
+            finally:
+                self._in_set = was
+        return list(own)
+
+    def _release_set(self, g: Group) -> dict:
+        """DSC-10: the albums of g's sibling folders, each planned alone first, as before (a
+        failure is that album's own); then (A) a release one of them is matched to for sure
+        claims the siblings holding all its other discs (_claim), else (B) disc folders
+        numbered 1 to k are searched for as a set and as its leading discs (_set_search). The
+        folders proven one release are one album of it. {"own": {index: [Proposal] or the
+        exception}, "members": indexes joined, "joined": [the joined album's Proposal]}."""
+        parts, folder = list(g.siblings), g.set_folder
+        was_alone = getattr(self, "_alone", True)
         count = {}
         for part in parts:
             k = os.path.realpath(str(part.folder))
@@ -1579,62 +1603,74 @@ class Engine:
 
         def alone(part):
             return count[os.path.realpath(str(part.folder))] == 1
-        # a release you chose for the whole set (its row): the set as one album of it
-        choice = self._choice_for(g, was_alone)
-        every = {os.path.realpath(str(f)) for f in g.files}
-        if choice and (not isinstance(choice, dict) or
-                       every <= {os.path.realpath(str(f)) for f in choice.get("files") or []}):
-            return self.identify_all(Group(g.folder, list(g.files)))
-        chosen = self._chosen_join(g, parts)
-        per = []
+        out = {"own": {}, "members": set(), "joined": []}
+        chosen = self._chosen_join(folder, parts)
+        was_in, self._in_set = getattr(self, "_in_set", False), True
         try:
-            for part in parts:
-                if any(part is q for q in chosen):
+            for i, part in enumerate(parts):
+                if i in chosen:
                     continue
                 self._alone = alone(part)
-                ps = self.identify_all(part)
-                per.append((part, ps))
+                try:
+                    out["own"][i] = self.identify_all(part)
+                except Exception as exc:                 # (that album's own failure, as before)
+                    out["own"][i] = exc
+            if chosen:                                   # (you chose a release for some of them together)
+                files = [f for i in sorted(chosen) for f in parts[i].files]
+                joined = Group(folder, files, [f for q in parts for f in q.files if f not in files])
+                self._alone = True
+                try:
+                    props = self.identify_all(joined)
+                except Exception as exc:
+                    for i in chosen:
+                        out["own"][i] = exc
+                    return out
+                lead = parts[min(chosen)]
+                for p in props:
+                    p.set_key, p.set_members = group_key(lead.folder, lead.files), [parts[i] for i in sorted(chosen)]
+                out["members"], out["joined"] = set(chosen), props
+                return out
+            per = [(i, parts[i], ps) for i, ps in sorted(out["own"].items()) if isinstance(ps, list)]
+            if any(self._choice_for(part, alone(part)) for _i, part, _ps in per):
+                return out                               # (a release you chose for one of them)
+            got = self._claim(folder, parts, per)
+            if got is None and g.set_shape == "discs" and len(per) == len(parts):
+                got = self._set_search(folder, parts, per)
         finally:
-            self._alone = was_alone
-        if chosen:                                     # (you chose a release for some of them together)
-            joined = Group(g.folder, [f for q in chosen for f in q.files],
-                           [f for f in g.files if not any(f in q.files for q in chosen)])
-            return self.identify_all(joined) + [p for _part, ps in per for p in ps]
-        if any(self._choice_for(part, alone(part)) for part, _ps in per):
-            return [p for _part, ps in per for p in ps]     # (a release you chose for one of them)
-        got = self._claim(g, per)
-        if got is None and g.trial_shape == "discs":
-            got = self._set_search(g, per)
+            self._in_set, self._alone = was_in, was_alone
         if got is None:
-            return [p for _part, ps in per for p in ps]
+            return out
         prop, mapping, how = got
         names = ", ".join(f"'{d.name}' -> disc {n}" for d, n in sorted(mapping.items(), key=lambda x: x[1]))
         note = f"one release, {len(mapping)} discs: {names} ({_release_words(prop)}{how})"
-        out, left = [prop], []
-        for part, ps in per:
-            if {Path(f).parent for f in part.files} <= set(mapping):
+        members = {i for i, part, _ps in per if {Path(f).parent for f in part.files} <= set(mapping)}
+        left = []
+        for i, part, ps in per:
+            if i in members:
                 continue
             words = f"'{Path(part.files[0]).parent.name}' fits no disc of it: planned alone"
             left.append(words)
             for p in ps:
                 p.notes = list(p.notes or []) + [words]
-                out.append(p)
         prop.notes = list(prop.notes or []) + [note] + left
-        self.log.info("%s: %s", g.folder, "; ".join([note] + left))
+        lead = parts[min(members)]
+        prop.set_key, prop.set_members = group_key(lead.folder, lead.files), [parts[i] for i in sorted(members)]
+        out["members"], out["joined"] = members, [prop]
+        self.log.info("%s: %s", folder, "; ".join([note] + left))
         return out
 
-    def _chosen_join(self, g: Group, parts) -> list:
+    def _chosen_join(self, folder: Path, parts) -> set:
         """DSC-10: the parts a release you chose for several of them together names (the
-        joined row's Change Release): those parts, else []."""
-        v = (getattr(self, "force", None) or {}).get(os.path.realpath(str(g.folder)))
+        joined row's Change Release): their indexes, else none."""
+        v = (getattr(self, "force", None) or {}).get(os.path.realpath(str(folder)))
         for c in ([v] if isinstance(v, dict) else v if isinstance(v, list) else []):
             if not isinstance(c, dict) or not c.get("ref"):
                 continue
             named = {os.path.realpath(str(f)) for f in c.get("files") or []}
-            covered = [q for q in parts if {os.path.realpath(str(f)) for f in q.files} <= named]
+            covered = {i for i, q in enumerate(parts) if {os.path.realpath(str(f)) for f in q.files} <= named}
             if len(covered) >= 2:
                 return covered
-        return []
+        return set()
 
     def _release_cand(self, kind, rid):
         """A MusicBrainz ("mb") or Discogs release as the matcher's candidate (its tracks, disc
@@ -1676,15 +1712,16 @@ class Engine:
             float(p.confidence or 0) >= planmod._threshold(self.profile, "auto_min_confidence")
 
     def _same_release(self, key, q, cand) -> bool:
-        """DSC-10: Proposal q's release is the release key (cand): the same ID, or the same
-        pressing on the other database (MusicBrainz's entry linking that Discogs release)."""
+        """DSC-10: Proposal q's release is the release key (cand): _same_key."""
         other = self._release_of(q)
-        if other is None:
-            return False
+        return other is not None and self._same_key(key, other, cand)
+
+    def _same_key(self, key, other, cand) -> bool:
+        """DSC-10: release other ("mb" | "discogs", ID) is release key (cand): the same ID, or the
+        same pressing on the other database - linked to it, with as many audio discs and tracks
+        (a one-disc release that links the box it came in is no twin of the box)."""
         if other == key:
             return True
-        # (a twin is the same pressing: as many audio discs and tracks - a one-disc release that
-        # links the box it came in is no twin of the box)
         if key[0] == "mb" and other[0] == "discogs":
             twin = self._release_cand(*other)
             linked = other[1] in {str(x) for x in cand.get("discogs_ids") or ()} | {str(cand.get("discogs_id") or "")}
@@ -1695,6 +1732,23 @@ class Engine:
         else:
             return False
         return linked and bool(twin) and _disc_shape(twin) == _disc_shape(cand)
+
+    @staticmethod
+    def _foreign_ids(files) -> set:
+        """DSC-10: the releases your files name by their own release IDs ("mb" | "discogs", ID)
+        that another tagger wrote: a file TagMender tagged (its TAGMENDER mark) says only what an
+        earlier job of TagMender's chose, which is no proof (REP-1)."""
+        out = set()
+        for f in files:
+            m = ex.read_meta(f)
+            if _first(m, "tagmender"):
+                continue
+            for kind, tags in (("mb", ("musicbrainz_albumid",)), ("discogs", ("discogs_release_id", "discogs_releaseid"))):
+                for t in tags:
+                    v = _first(m, t).strip()
+                    if v:
+                        out.add((kind, v.lower() if kind == "mb" else v))
+        return out
 
     @staticmethod
     def _own_proof(p, against="mb") -> bool:
@@ -1733,6 +1787,8 @@ class Engine:
         tracks = [t for t in album.get("tracks") or [] if str(t.get("path")) in mine]
         if len(tracks) != len(mine):
             return []
+        if len(tracks) < self.FIT_MIN_TRACKS and sum(float(t.get("secs") or 0) for t in tracks) < self.FIT_MIN_SECONDS:
+            return []                                    # (a short disc of a track or two: any interview fits)
         tol_s, tol_pct = float(self.cfg.get("duration_tol_s", 3.0)), float(self.cfg.get("duration_tol_pct", 0.015))
         if tight:
             tol_s, tol_pct = self.TIGHT_S, 0.0
@@ -1751,100 +1807,162 @@ class Engine:
         return out
 
     TIGHT_S = 1.0          # (DSC-10: lengths as one disc's table of contents gives them, to the second)
+    FIT_MIN_TRACKS = 3     # (DSC-10: a disc fits by its titles and lengths with this many tracks,
+    FIT_MIN_SECONDS = 600  # or this long: never a one-track 11 s "Interview")
 
-    def _claim(self, g: Group, per):
-        """DSC-10 (A): a folder matched for sure (_sure) to a release of more discs than it holds
-        claims the sibling folders that fit its other discs (_fits_discs): each fitting one disc
-        exactly, no two folders the same disc, none whose own match is another release resting
-        on its own copy (_own_proof): its barcode or catalogue number - or its disc ID, unless
-        its every length is this disc's to the second (TIGHT_S: the same master; a disc ID is
-        often shared by the pressings of one CD). The release claiming the most folders wins; two claiming
-        as many, neither. Then (Proposal of the joined folders, {folder: disc}, "") - or None."""
+    @staticmethod
+    def _complete(p) -> bool:
+        """DSC-10: an album matched to a release it holds whole (no track of it missing)."""
+        return p.status == "identified" and "incomplete_album" not in (p.reason_codes or [])
+
+    def _claim(self, folder: Path, parts, per):
+        """DSC-10 (A): a folder matched for sure (_sure) to a release of more audio discs than it
+        holds claims its sibling folders when they hold every other disc of it, each fitting
+        one disc: its own match is that release (or its twin), or its files' track or recording
+        IDs are that disc's, or else its every title and length in order (_fits_discs; three
+        tracks or ten minutes at least). A sibling stays apart when its files name another
+        release by IDs another tagger wrote (_foreign_ids), or its own match is another release
+        resting on its own copy: its barcode or catalogue number - or its disc ID, unless its
+        every length is this disc's to the second (TIGHT_S). A folder fitting two discs, two
+        fitting one, a disc of the release no folder holds: no claim. The release claiming the
+        most folders wins; two claiming as many, neither. The joined album must itself be proven
+        at the auto threshold. Then (its Proposal, {folder: disc}, "") - or None. Folders that
+        are all discs of one release with discs not here yet wait for them (_set_arriving)."""
         claims, seen = [], set()
-        for i, (part, ps) in enumerate(per):
+        dir_of = {i: next(iter({Path(f).parent for f in part.files})) for i, part, _ps in per}
+        for i, part, ps in per:
             if len(ps) != 1 or not self._sure(ps[0]):
                 continue
             p = ps[0]
             key = self._release_of(p)
             own = {str((t.get("discnumber") or [""])[0]).partition("/")[0].strip() for t in p.targets or []}
-            dirs = {Path(f).parent for f in part.files}
-            if key is None or key in seen or len(own) != 1 or len(dirs) != 1 or not next(iter(own)).isdigit():
+            totals = {str((t.get("totaldiscs") or [""])[0]).strip() for t in p.targets or []}
+            if key is None or key in seen or len(own) != 1 or not next(iter(own)).isdigit():
                 continue
+            total = int(next(iter(totals))) if len(totals) == 1 and next(iter(totals)).isdigit() else 0
+            if not 2 <= total <= len(parts):
+                continue                                 # (no release of more discs, or more than are here)
             seen.add(key)
             cand = self._release_cand(*key)
-            if not cand or len({int(t.get("disc") or 1) for t in cand.get("tracks") or []}) < 2:
+            discs = set(range(1, len(_disc_shape(cand)) + 1)) if cand else set()
+            if len(discs) < 2:
                 continue
-            mapping = {next(iter(dirs)): int(next(iter(own)))}
-            fits = {}
-            for j, (other, ops) in enumerate(per):
-                odirs = {Path(f).parent for f in other.files}
-                if j == i or len(odirs) != 1:
+            mapping, fits = {dir_of[i]: int(next(iter(own)))}, {}
+            for j, other, ops in per:
+                if j == i:
                     continue
+                d = dir_of[j]
+                if any(not self._same_key(key, x, cand) for x in self._foreign_ids(other.files)):
+                    continue                             # (another tagger's IDs name another release)
                 proof = [q for q in ops if self._own_proof(q, key[0]) and not self._same_release(key, q, cand)]
                 if any(q.own_number or q.number_proven for q in proof):
                     continue                             # (its own barcode or catalogue number: another release)
-                if proof and len(self._fits_discs(next(iter(odirs)), other.files, cand, tight=True)) != 1:
+                if proof and len(self._fits_discs(d, other.files, cand, tight=True)) != 1:
                     continue                             # (its disc ID proves another release, and its
                                                          # lengths are not this one's to the second)
-                # (its own match is this release - or its twin on the other database: its disc)
+                    # (its own match is this release - or its twin on the other database: its disc)
                 same = [q for q in ops if self._sure(q) and self._same_release(key, q, cand)]
                 theirs = {str((t.get("discnumber") or [""])[0]).partition("/")[0].strip()
                           for q in same for t in q.targets or []}
                 if len(ops) == 1 and same and len(theirs) == 1 and next(iter(theirs)).isdigit():
                     found = [int(next(iter(theirs)))]
                 else:
-                    found = self._fits_discs(next(iter(odirs)), other.files, cand)
-                found = [d for d in found if d not in mapping.values()]
+                    found = self._fits_discs(d, other.files, cand)
+                found = [n for n in found if n not in mapping.values()]
                 if len(found) == 1:
-                    fits[next(iter(odirs))] = found[0]
+                    fits[d] = found[0]
             taken = list(fits.values())
             mapping.update({d: n for d, n in fits.items() if taken.count(n) == 1})
-            if len(mapping) >= 2:
+            if set(mapping.values()) == discs and len(mapping) == len(discs):
                 claims.append((len(mapping), key, p, mapping))
+        self._set_arriving(parts, per)
         if not claims:
             return None
         claims.sort(key=lambda c: -c[0])
         if len(claims) > 1 and claims[1][0] == claims[0][0]:
-            self.log.info("%s: %s and %s each claim %d folders: each planned alone", g.folder,
+            self.log.info("%s: %s and %s each claim %d folders: each planned alone", folder,
                           claims[0][1], claims[1][1], claims[0][0])
             return None
         _n, (kind, rid), claimer, mapping = claims[0]
-        files = [f for d, _n2 in sorted(mapping.items(), key=lambda x: x[1]) for f in g.files if Path(f).parent == d]
-        joined = Group(g.folder, files, [f for f in g.files if f not in files])
+        every = [f for q in parts for f in q.files]
+        files = [f for d, _n2 in sorted(mapping.items(), key=lambda x: x[1]) for f in every if Path(f).parent == d]
+        joined = Group(folder, files, [f for f in every if f not in files])
         ref = f"https://musicbrainz.org/release/{rid}" if kind == "mb" else f"https://www.discogs.com/release/{rid}"
         prop = self._forced(joined, ref, discs=mapping, claimed=claimer, release=(kind, rid))
-        if prop.status != "identified" or not _discs_as(prop, mapping):
-            self.log.info("%s: the claim of %s did not line up: %s", g.folder, ref, prop.reason)
+        # (proven as one album at the auto threshold, as any album: never on weaker evidence than
+        # its folders' own plans had)
+        if not self._sure(prop) or not _discs_as(prop, mapping) or not self._complete(prop):
+            self.log.info("%s: the claim of %s is not proven as one album: %s %s", folder, ref,
+                          prop.reason, f"{prop.confidence:.1f}")
             return None
         self._finish(prop, joined)
         return prop, mapping, ""
 
-    def _set_search(self, g: Group, per):
+    def _set_arriving(self, parts, per):
+        """DSC-10: every folder here matched for sure, each alone, to its own disc of one same
+        release of more discs than are here ("Disc 2", "Disc 3" each found as theirs of a 3-CD
+        set): a set still being copied in. Each album says which discs are not here yet
+        (.awaits): the watcher waits for them; a plan plans each folder alone meanwhile. Nothing
+        is fetched for it."""
+        if len(per) != len(parts) or any(len(ps) != 1 or not self._sure(ps[0]) for _i, _p, ps in per):
+            return
+        keys = {self._release_of(ps[0]) for _i, _p, ps in per}
+        discs, totals = [], set()
+        for _i, _p, ps in per:
+            t = ps[0].targets or [{}]
+            discs.append(str((t[0].get("discnumber") or [""])[0]).partition("/")[0].strip())
+            totals.add(str((t[0].get("totaldiscs") or [""])[0]).strip())
+        if len(keys) != 1 or None in keys or len(totals) != 1 or not all(d.isdigit() for d in discs) or \
+                len(set(discs)) != len(discs) or not next(iter(totals)).isdigit():
+            return
+        n = int(next(iter(totals)))
+        gone = [d for d in range(1, n + 1) if str(d) not in discs]
+        if not gone or len(gone) + len(discs) != n:
+            return
+        words = f"disc{'s' if len(gone) > 1 else ''} {', '.join(map(str, gone))} of {n} " \
+                f"{'are' if len(gone) > 1 else 'is'} not here yet"
+        for _i, _p, ps in per:
+            ps[0].awaits = words
+
+    def _set_search(self, folder: Path, parts, per):
         """DSC-10 (B): disc folders numbered 1 to k (release_set_shape "discs") searched for as
         one set, then as their leading discs 1 to j (j from k-1 down to 2), at most
         SET_TRIAL_MAX_SEARCHES searches: accepted only when a release is proven for them at the
         auto threshold, holding exactly those discs (its audio discs, MED-17), every file its
         own track of the disc its folder numbers, none missing - and no disc's own match
-        resting on its own copy is another release. Then (Proposal, {folder: disc}, how) - or None."""
-        order = sorted({Path(f).parent for f in g.files}, key=lambda d: _lead_key(d.name))
+        resting on its own copy is another release. Never for folders each matched for sure to
+        a release of its own held whole (a series' volumes), nor for folders their own codes or
+        years show to be separate releases (as DSC-9). Then (Proposal, {folder: disc}, how) - or None."""
+        if all(len(ps) == 1 and self._sure(ps[0]) and self._complete(ps[0]) for _i, _p, ps in per) and \
+                len({self._release_of(ps[0]) for _i, _p, ps in per}) == len(per):
+            return None                                  # (each a release of its own, held whole)
+        if _separate_releases(parts):
+            return None
+        every = [f for q in parts for f in q.files]
+        order = sorted({Path(f).parent for f in every}, key=lambda d: _lead_key(d.name))
         k = len(order)
         runs = ([k] + list(range(k - 1, 1, -1)))[:SET_TRIAL_MAX_SEARCHES]
         for j in runs:
             dirs = order[:j]
-            files = [f for d in dirs for f in g.files if Path(f).parent == d]
-            trial = Group(g.folder, files, [f for f in g.files if f not in files])
+            files = [f for d in dirs for f in every if Path(f).parent == d]
+            trial = Group(folder, files, [f for f in every if f not in files])
             prop = self._set_trial_identify(trial)
             mapping = {d: n for n, d in enumerate(dirs, 1)}
-            if not self._sure(prop) or getattr(prop, "parts", None) or "incomplete_album" in (prop.reason_codes or []):
+            if not self._sure(prop) or getattr(prop, "parts", None) or not self._complete(prop):
                 continue
             if len(prop.targets or []) != len(files) or not _discs_as(prop, mapping, total=j):
                 continue
             key = self._release_of(prop)
-            if not self._own_proof(prop, key[0]) and any(self._own_proof(q, key[0]) and self._release_of(q) != key
-                                                 for part, ps in per if {Path(f).parent for f in part.files} <= set(dirs)
-                                                 for q in ps):
+            foreign = {x for q in parts if {Path(f).parent for f in q.files} <= set(dirs)
+                       for x in self._foreign_ids(q.files)}
+            if foreign and any(not self._same_key(key, x, self._release_cand(*key) or {}) for x in foreign):
+                continue                                 # (another tagger's IDs name another release)
+            if not self._own_proof(prop, key[0]) and any(
+                    self._own_proof(q, key[0]) and self._release_of(q) != key
+                    for _i, part, ps in per if {Path(f).parent for f in part.files} <= set(dirs) for q in ps):
                 continue                                 # (a disc's own copy proves another release)
-            return prop, mapping, "; found searching for the set" if j == k else                 f"; found searching for discs 1-{j}"
+            return prop, mapping, ("; found searching for the set" if j == k else
+                                   f"; found searching for discs 1-{j}")
         return None
 
     def _set_trial_identify(self, g: Group):
@@ -1893,7 +2011,11 @@ class Engine:
 
     def identify_all(self, g: Group) -> list:
         """identify, as a list of albums: one, or each disc of a set whose discs are
-        different releases (_per_disc), each its own album."""
+        different releases (_per_disc), each its own album. DSC-10: an album of sibling
+        folders (Group.siblings) is planned as _release_set has it - alone, as before, or as
+        the one album of the release that holds it and its siblings."""
+        if len(getattr(g, "siblings", None) or ()) > 1 and not getattr(self, "_in_set", False):
+            return self._set_member(g)
         prop = self.identify(g)
         return [prop] + list(getattr(prop, "parts", None) or [])
 
@@ -2519,7 +2641,7 @@ class Engine:
         tags are written as for any match - when its tracks line up with the files.
         DSC-10: discs ({folder: the release's disc}) and claimed (the Proposal of the disc whose
         own match found the release): sibling folders the release claimed by their fit, each
-        read as its disc of the release; the score is the claiming disc's. release: ("mb" |
+        read as its disc of the release, the whole scored as one album (its margin the claiming disc's). release: ("mb" |
         "discogs", ID) when known already (ref is then only shown)."""
         kind, rid = release or parse_release_ref(ref)
         outside = self._outside(g)
@@ -2548,13 +2670,23 @@ class Engine:
             return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
                                     reason=f"the release you chose was not found: {ref}")
         sc = mc.score_candidate(album, cand, self.cfg)
+        if claimed is not None:
+            # (DSC-10: a set's title is its folder's, or the title one of its discs is tagged with -
+            # "The Stranger" on the disc of the album in "The Stranger Legacy Edition (with BestBuy
+            # Bonus Disc)": scored as the title that agrees best)
+            for t in sorted({_first(ex.read_meta(f), "album") for f in g.files} - {"", album.get("title")}):
+                alt = dict(album, title=t)
+                s2 = mc.score_candidate(alt, cand, self.cfg)
+                if float(s2.get("confidence") or 0) > float(sc.get("confidence") or 0):
+                    album, sc = alt, s2
         if kind != "mb":
             # BAR-13: a pressing your code names, chosen by hand, listing too few tracks to tag -
             # tagged from the full entry of its master, as when the matcher picks it
             view = self._code_twin_view(album, cand, sc)
             if view:
                 sc, cand = view, view["cand"]
-        best = dict(cand, confidence=float(claimed.confidence) if claimed is not None else 100.0,
+        # (DSC-10: a claimed set is scored as one album, as any match: never the claiming disc's score)
+        best = dict(cand, confidence=float(sc.get("confidence") or 0) if claimed is not None else 100.0,
                     notes=list(sc.get("notes") or []))
         if (sc.get("cand") or {}).get("whole_works"):
             best["whole_works"] = True               # TRK-5: tagged one track per work, as scored
@@ -2573,7 +2705,7 @@ class Engine:
         if not fits:
             why.append("its track list does not fit the files well: check the preview")
         if claimed is not None:
-            best["all_lengths"] = bool(getattr(claimed, "all_lengths", False))
+            best["all_lengths"] = bool(mc.lengths_all_agree(sc))
         out = {"status": "auto", "best": best, "why": why,
                "margin": getattr(claimed, "margin", None) if claimed is not None else None}
         try:
@@ -4685,7 +4817,7 @@ class Engine:
             per_folder[k] = per_folder.get(k, 0) + 1
         if only is not None:
             groups = [g for g in groups if group_key(g.folder, g.files) in only]
-        out = []
+        out, told = [], set()
         self.reached = set()                      # the group_key()s looked up (a run cancelled: not all)
         for i, g in enumerate(groups):
             if cancel and cancel():
@@ -4698,9 +4830,13 @@ class Engine:
             try:
                 self._alone = per_folder[os.path.realpath(str(g.folder))] == 1     # (a folder's only album?)
                 for p in self.identify_all(g):           # (each disc of _per_disc as an album)
+                    if id(p) in told:
+                        continue                         # (DSC-10: a set's one album, found by each of its folders)
+                    told.add(id(p))
                     self.add_artwork(p)
                     self.apply_level(p)
-                    p.group_key = key
+                    # (DSC-10: a set's album is its first folder's, whichever folder found it)
+                    p.group_key = getattr(p, "set_key", None) or key
                     out.append(p)
             except Exception as exc:                          # one bad album never stops the run
                 self.log.exception("identifying %s failed", g.folder)
@@ -4806,7 +4942,7 @@ class Engine:
             else:
                 self.__dict__.pop("albums_in", None)     # (the class's own again)
         if len(done) > 1:
-            whole, groups = _build_despite_gone(planner, [ps for _k, ps in done], getattr(self, "log", None))
+            whole, groups = _build_despite_gone(planner, _once_each([ps for _k, ps in done]), getattr(self, "log", None))
             allp = [q for g in groups for q in g]
             with_keys(whole["albums"], allp)
             whole["provider_notes"] = notes()
@@ -4917,7 +5053,7 @@ class Engine:
             raise error
         self.reached = {k for k, _p in done.values()}
         if len(done) > 1:
-            whole, groups = _build_despite_gone(lambda: planner(self), [done[i][1] for i in sorted(done)],
+            whole, groups = _build_despite_gone(lambda: planner(self), _once_each([done[i][1] for i in sorted(done)]),
                                                 getattr(self, "log", None))
             allp = [q for g in groups for q in g]
             with_keys(whole["albums"], allp)
@@ -4938,6 +5074,22 @@ def engine_for_thread(*args, **kw) -> "Engine":
     """An Engine made while other threads make theirs (loading its plugin is not thread-safe)."""
     with _MAKING:
         return Engine(*args, **kw)
+
+
+def _once_each(groups) -> list:
+    """Each album's proposals once (DSC-10: a set's one album is what each of its folders'
+    look-ups found - in a plan of them all, it is planned once)."""
+    seen, out = set(), []
+    for ps in groups:
+        mine = []
+        for q in ps:
+            k = (os.path.realpath(str(q.source_dir)), tuple(sorted(os.path.realpath(str(f)) for f in q.files)))
+            if q.files and k in seen:
+                continue
+            seen.add(k)
+            mine.append(q)
+        out.append(mine)
+    return out
 
 
 def group_key(folder, files) -> str:
@@ -5457,6 +5609,23 @@ def _renumbered(album: dict, discs: dict) -> dict:
         out["tocs"] = {moved.get(d, d): v for d, v in album["tocs"].items()}
     out["discs"] = len({t["disc"] for t in out["tracks"]}) or 1
     return out
+
+
+def _separate_releases(parts) -> bool:
+    """DSC-10 (as DSC-9): sibling folders shown to be separate releases by their own tags (an
+    earlier job of TagMender's aside): each carries a barcode (or, none carrying one, a
+    catalogue number) and no two share one - or, sharing no code, their years differ."""
+    barcodes, catnos, years = [], [], []
+    for q in parts:
+        ms = [m for m in (ex.read_meta(f) for f in q.files) if not _first(m, "tagmender")]
+        barcodes.append({mc.norm_code(_first(m, "barcode")) for m in ms} - {""})
+        catnos.append({mc.norm_code(_first(m, "catalognumber")) for m in ms} - _NO_CODE)
+        years.append({_first(m, "date")[:4] for m in ms} - {""})
+    codes = barcodes if any(barcodes) else catnos
+    if all(codes) and not any(a & b for x, a in enumerate(codes) for b in codes[x + 1:]):
+        return True
+    shared = any(a & b for x, a in enumerate(codes) for b in codes[x + 1:])
+    return not shared and all(len(y) == 1 for y in years) and len({next(iter(y)) for y in years}) > 1
 
 
 def _disc_shape(cand) -> list:

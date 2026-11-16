@@ -2589,6 +2589,16 @@ def _watcher_forgets(jd: Path):
             sigs = {watcher.shape(folder, files), watcher.shape(folder, group)}
             db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
                        (key, plan.get("profile") or "", "|".join(sorted(sigs)), "undone", 0, 0, time.time(), ""))
+            # DSC-10: an album of sibling folders joined by its release is watched as the albums its
+            # folders are (each its own group, engine.Engine.albums_in): each remembered undone too
+            dirs = {p.parent for p in group}
+            if len(dirs) > 1 and all(d.parent == folder for d in dirs):
+                for d in sorted(dirs):
+                    mine = [p for p in group if p.parent == d]
+                    for where in (folder, d):
+                        db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
+                                   (watcher.album_key(where, mine), plan.get("profile") or "",
+                                    watcher.shape(where, mine), "undone", 0, 0, time.time(), ""))
         db.commit()
     except Exception:                    # the watcher's memory is a convenience: never fail an undo
         pass

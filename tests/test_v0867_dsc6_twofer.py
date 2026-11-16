@@ -154,8 +154,7 @@ class DSC7NumberedDiscFolders(te.Base):
 
     def test_DSC7_a_gap_in_the_numbers_keeps_them_apart(self):
         classics_box(self.lib, names=("Disc 1 - Alpha", "Disc 02", "Disc 4 - Gamma"))
-        # (DSC-10 holds them as one group of three albums, each planned alone unless a release claims them)
-        self.assertEqual(sum(len(g.trial) or 1 for g in self.groups()), 3)
+        self.assertEqual(len(self.groups()), 3)
 
     def test_DSC7_two_artists_keep_them_apart(self):
         classics_box(self.lib, artists=("Band W", "Band W", "Band X"))

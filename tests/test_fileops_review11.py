@@ -205,10 +205,6 @@ class FakeEngine:
     def albums_in(self, root):
         return REAL_ALBUMS_IN(self, root)
 
-    def identify_all(self, g):
-        # (DSC-10: sibling folders held as one group are each planned alone - no release claims them here)
-        return [self.identify(part) for part in g.trial] if getattr(g, "trial", None) else [self.identify(g)]
-
     def identify(self, g):
         ts = [target(1, "First") if f.name.startswith("01") else target(2, "Second") for f in g.files]
         return FakeEngine.test.proposal(source_dir=str(g.folder), files=[str(f) for f in g.files], targets=ts)

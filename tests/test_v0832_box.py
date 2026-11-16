@@ -76,7 +76,8 @@ class DSC2_DiscsWithTitlesOfTheirOwn(te.Base):
         box = self.lib / "Band B" / "Two Albums"
         disc_folder(box, "CD1", 1, "Album B", "Band B")
         disc_folder(box, "CD2", 1, "Album D", "Band B")
-        self.assertEqual(len(self.groups()), 2)
+        # (DSC-10 holds them as one group of two albums, each planned alone unless a release claims them)
+        self.assertEqual(sum(len(g.trial) or 1 for g in self.groups()), 2)
 
     def test_DSC2_an_album_with_tracks_of_its_own_beside_a_disc_folder_stays_apart(self):
         top = self.lib / "Band B" / "Album B"

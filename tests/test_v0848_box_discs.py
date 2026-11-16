@@ -100,7 +100,10 @@ class DSC3_DiscRangeParts(te.Base):
         for n in (1, 2):
             flac(artist / "2007 - Live" / f"Part {n}", "01.flac", 10, title=f"L{n}", album=f"Live Part {n}",
                  albumartist="Band N", artist="Band N", track="1")
-        got = sorted((str(g.folder.relative_to(artist)), len(g.files)) for g in self.groups())
+        # (DSC-10 holds "Part 1" and "Part 2" as one group of two albums, each planned alone unless a
+        # release claims them: listed here as the albums they are planned as)
+        got = sorted((str(Path(a.files[0]).parent.relative_to(artist)) if g.trial else str(g.folder.relative_to(artist)),
+                      len(a.files)) for g in self.groups() for a in (g.trial or [g]))
         self.assertEqual(got, [("2001 - Album X", 2), ("2003 - Album Y", 2), ("2005 - Album Z", 6),
                                ("2007 - Live/Part 1", 1), ("2007 - Live/Part 2", 1)])
 

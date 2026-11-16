@@ -1970,7 +1970,23 @@ def _set_title(infos, folder_title) -> str:
             break
         common.append(ws[0])
     shared = " ".join(common)
-    return shared if len(shared) >= 4 else folder_title   # (never "The" alone)
+    if len(shared) >= 4:
+        return shared                                     # (never "The" alone)
+    # DSC-10: the folder's title without the artist and year before it and the brackets after it
+    # ("Band - 1994 - A Voyage [FLAC]" -> "A Voyage"), as the set's release is titled
+    t = str(folder_title or "")
+    for a in sorted({str(i.get("albumartist") or i.get("artist") or "") for _p, i in infos} - {""}, key=len,
+                    reverse=True):
+        if t.casefold().startswith(a.casefold() + " "):
+            t = re.sub(r"^\s*[-–_.:]\s*", "", t[len(a):])
+            break
+    t = re.sub(r"^\s*(?:19|20)\d\d\s*[-–.]\s*", "", t)
+    while True:
+        cut = re.sub(r"\s*[\[\(\{][^\]\)\}]*[\]\)\}]\s*$", "", t)
+        if cut == t:
+            break
+        t = cut
+    return t.strip() or folder_title
 
 
 def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):

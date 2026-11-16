@@ -516,7 +516,10 @@ class Watcher:
         guard = prof.mount_guard() if hasattr(prof, "mount_guard") else "auto"
         return all(r and Path(r).expanduser().is_dir() and planmod.mounted(Path(r).expanduser(), guard) for r in roots)
 
-    def due(self, folder: Path, prof, db, key=None, files=None, members=None, deep=True) -> tuple[bool, str]:
+    def due(self, folder: Path, prof, db, key=None, files=None, members=None, deep=True,
+            parts=()) -> tuple[bool, str]:
+        """parts: the files of each album a DSC-10 group of sibling folders holds (Group.trial):
+        one of them undone by hand, unchanged since, keeps the whole set from being done again."""
         key = key or planmod.db_text(folder)
         sig, newest, partial = snapshot(folder, files, deep)
         if partial:
@@ -536,11 +539,13 @@ class Watcher:
             # one undone beside other music by the folder and its files: music dropped beside it
             # since, or taken away, changes which - the undo, if it is newer than this key's own
             # record, still holds)
-            alts = {planmod.db_text(folder)} | ({_files_key(folder, files)} if files else set())
-            for alt in sorted(alts - {key}):
+            alts = {planmod.db_text(folder): files} | ({_files_key(folder, files): files} if files else {})
+            for fs in parts or ():                       # (DSC-10: an album of the set undone alone)
+                alts.setdefault(_files_key(folder, fs), fs)
+            for alt in sorted(set(alts) - {key}):
                 other = db.execute("SELECT signature, status, ts FROM processed WHERE folder=?", (alt,)).fetchone()
                 if other and other[1] == "undone" and (not row or (other[2] or 0) >= (row[4] or 0)) and \
-                        shape_in(folder, files, other[0]):
+                        shape_in(folder, alts[alt], other[0]):
                     return False, "undone"
         if not row:
             return True, "new"
@@ -831,7 +836,9 @@ class Watcher:
                 deep = real != top
                 scope = g.files                            # the album's own files (see snapshot)
                 try:
-                    go, why = (True, "recheck") if recheck else self.due(g.folder, prof, db, k, scope, g.files, deep)
+                    go, why = (True, "recheck") if recheck else self.due(
+                        g.folder, prof, db, k, scope, g.files, deep,
+                        parts=[q.files for q in getattr(g, "trial", None) or ()])
                     if go and not recheck:
                         go = self.discs_settled(g, prof)         # DSC-1: the set's other disc folders too
                 except Exception:                              # one album never stops the watcher

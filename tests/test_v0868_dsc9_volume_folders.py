@@ -120,7 +120,7 @@ class DSC9VolumeFolders(te.Base):
         self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
 
     def test_DSC9_disc_tags_agreeing_or_repeating_join(self):
-        for discs in (("1", "2"), ("1/2", "2/2"), ("1/1", "1/1"), ("1", None), ("1/2", "3/4"), ("2/2", "1/1")):
+        for discs in (("1", "2"), ("1/2", "2/2"), ("1/1", "1/1"), ("1", None), ("2/2", "1/1")):
             with self.subTest(discs=discs):
                 top = volume_set(self.lib, discs=discs)
                 self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 6)])
@@ -159,6 +159,9 @@ class DSC9VolumeFolders(te.Base):
 
     def test_DSC9_a_series_pack_of_separate_releases_stays_apart(self):
         for extra in (({"date": "1999"}, {"date": "2003"}), ({"barcode": "5012345678900"}, {"barcode": "5012345678917"}),
+                      ({"date": "1999", "barcode": "111111111111", "catalognumber": "none"},
+                       {"date": "2003", "barcode": "222222222222", "catalognumber": "none"}),
+                      ({"catalognumber": "none", "date": "1999"}, {"catalognumber": "none", "date": "2003"}),
                       ({"catalognumber": "NOW 1"}, {"catalognumber": "NOW 2"})):
             with self.subTest(extra=extra):
                 top = volume_set(self.lib, name="Now Music Vol. 1-2", extra=extra)
@@ -171,11 +174,15 @@ class DSC9VolumeFolders(te.Base):
                                           {"date": "2017-07-31", "barcode": "821797212168"}))
         self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 6)])
 
+    def test_DSC9_a_total_of_another_release_not_written_by_tagmender_stays_apart(self):
+        volume_set(self.lib, dirs=("Volume 1", "Volume II"), discs=("1/2", "3/4"))
+        self.assertEqual(self.apart(), ["Volume 1", "Volume II"])
+
     def test_DSC9_an_earlier_jobs_disc_tags_are_no_numbering_of_the_set(self):
         # (Volume 1 tagged "1 of 2", Volume II tagged "3 of 4" by a release listing each disc's two layers)
         top = volume_set(self.lib, dirs=("Volume 1", "Volume II"), discs=("1/2", "3/4"),
-                         extra=({"date": "1985", "barcode": "821797212168"},
-                                {"date": "2017-07-31", "barcode": "821797212168"}))
+                         extra=({"date": "1985", "barcode": "821797212168", "tagmender": "Resolved"},
+                                {"date": "2017-07-31", "barcode": "821797212168", "tagmender": "Resolved"}))
         self.assertEqual([(g.folder, len(g.files)) for g in self.groups()], [(top, 6)])
         a = ma.read_album(top, "Band V", top.name)
         self.assertEqual([(t["disc"], t["num"]) for t in a["tracks"]],
@@ -189,8 +196,11 @@ class DSC9VolumeFolders(te.Base):
                 shutil.rmtree(top)
 
     def test_DSC9_a_total_other_than_the_volumes_stays_apart(self):
-        volume_set(self.lib, discs=("1/3", "2/3"))
-        self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
+        for discs in (("1/3", "2/3"), ("1/1", "1/3")):
+            with self.subTest(discs=discs):
+                top = volume_set(self.lib, discs=discs)
+                self.assertEqual(self.apart(), ["Volume 1", "Volume 2"])
+                shutil.rmtree(top)
 
     def test_DSC9_a_volume_half_tagged_or_of_two_albums_or_untagged_stays_apart(self):
         top = volume_set(self.lib)
@@ -222,6 +232,9 @@ class DSC9VolumeFolders(te.Base):
         other = self.lib / "Band V" / "Now Music"
         volume(other, "Volume 1", "Now 1")
         self.assertEqual(engine.box_still_arriving(other / "Volume 1"), "")
+        pack = self.lib / "Band V" / "Now Music Vol. 1-2"
+        volume(pack, "Volume 1", "Now 1", barcode="5012345678900")
+        self.assertEqual(engine.box_still_arriving(pack / "Volume 1"), "")
 
 
 if __name__ == "__main__":

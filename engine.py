@@ -441,8 +441,8 @@ def titled_box(box: Path, found: dict, metas: dict) -> bool:
     "and" (each once, in any order). Its discs are numbered as the release found lists them (the
     folders' order is no disc order: the discs of a twofer may be packed the other way round).
     An artist's folder ("Billy Joel") or a folder named otherwise stays apart, as before."""
-    if box in found:
-        return False
+    if box in found or not _TITLE_JOIN.search(_bare_name(box.name)):
+        return False                                    # (the name first: no titles joined, no twofer)
     dirs = [d for d in found if box in d.parents]
     if len(dirs) < 2 or any(d.parent != box for d in dirs):
         return False
@@ -467,6 +467,10 @@ def titled_box(box: Path, found: dict, metas: dict) -> bool:
 
 volume_number = ma.volume_number          # DSC-9 (match_albums: read_album numbers the discs by it)
 _names_volumes = ma.names_volumes
+
+
+# DSC-9: a catalogue number that names none ("none", Discogs's for a release without one)
+_NO_CODE = {"", "none", "n/a", "na", "nocat", "-", "0", "unknown"}
 
 
 def volume_set(box: Path, found: dict, metas: dict) -> bool:
@@ -495,7 +499,7 @@ def volume_set(box: Path, found: dict, metas: dict) -> bool:
     keys = album_keys(files, box, metas)
     if any(k_[0] != "tags" or not k_[1] for k_ in keys.values()) or len({k_[1] for k_ in keys.values()}) != 1:
         return False                                    # (untagged, or two artists' albums)
-    discs, totals, years, barcodes, catnos, restart = {}, set(), [], [], [], {}
+    discs, totals, years, barcodes, catnos, restart, stale = {}, set(), [], [], [], {}, {}
     for d in dirs:
         if len({keys[f] for f in found[d]}) != 1:
             return False                                # (a folder of two albums)
@@ -507,17 +511,25 @@ def volume_set(box: Path, found: dict, metas: dict) -> bool:
         totals |= {_disc_tag(m)[1] for m in ms}
         years.append({_first(m, "date")[:4] for m in ms} - {""})
         barcodes.append({mc.norm_code(_first(m, "barcode")) for m in ms} - {""})
-        catnos.append({mc.norm_code(_first(m, "catalognumber")) for m in ms} - {""})
+        catnos.append({mc.norm_code(_first(m, "catalognumber")) for m in ms} - _NO_CODE)
+        stale[d] = all(_first(m, "tagmender") for m in ms)     # (an earlier job's tags: its disc numbers too)
         restart[d] = "1" in {_first(m, "tracknumber").partition("/")[0].strip().lstrip("0") or "0" for m in ms}
 
     def apart(codes):                                   # (every volume carries one, and no two share)
         return all(codes) and not set.intersection(*codes)
-    shared = (all(barcodes) and set.intersection(*barcodes)) or (all(catnos) and set.intersection(*catnos))
-    if not shared:
-        if apart(barcodes) or apart(catnos):
-            return False                                # (each volume its own release)
-        if all(len(y) == 1 for y in years) and len({next(iter(y)) for y in years}) > 1:
-            return False                                # (released years apart: a series' volumes)
+    # (barcodes first: a catalogue number only where no volume has one - "none" is no number)
+    codes = barcodes if any(barcodes) else catnos
+    if apart(codes):
+        return False                                    # (each volume its own release)
+    shared = all(codes) and set.intersection(*codes)
+    if not shared and all(len(y) == 1 for y in years) and len({next(iter(y)) for y in years}) > 1:
+        return False                                    # (released years apart: a series' volumes)
+    # (a total counting other than the set - "1 of 3" on a volume of two - is another release's,
+    # unless an earlier job of TagMender's wrote it: "3 of 4" from a release listing each disc twice)
+    for d in dirs:
+        ts = {_disc_tag(metas.get(f) or {})[1] for f in found[d]} - {"", "1", str(k)}
+        if ts and not stale[d]:
+            return False
     if all(discs.values()) and len(totals) == 1:        # (one numbering of a set: it must be this one)
         if len(set(discs.values())) == 1:
             return discs[dirs[0]] == "1" and all(restart.values())
@@ -649,7 +661,14 @@ def _named_set_arriving(folder: Path, skips, left_out=None) -> str:
     k, n = ma.named_volume_count(box.name), ma.volume_number(folder)
     if k >= 2 and 1 <= n <= k:
         have = sorted(ma.volume_number(x) for x in subs)
-        if 0 not in have and have == list(range(1, len(have) + 1)) and len(have) < k:
+        coded = False
+        try:
+            coded = any(_first(ex.read_meta(f), "barcode") for x in subs for f in x.iterdir()
+                        if f.suffix.lower() in ex.AUDIO_EXT)
+        except OSError:
+            pass
+        # (a volume carrying a barcode is a release of its own - a series pack's -: nothing to wait for)
+        if not coded and 0 not in have and have == list(range(1, len(have) + 1)) and len(have) < k:
             gone = list(range(len(have) + 1, k + 1))
             return f"volume{'s' if len(gone) > 1 else ''} {', '.join(map(str, gone))} of {k} " \
                    f"{'are' if len(gone) > 1 else 'is'} not here yet"

@@ -190,6 +190,50 @@ class DSC10ClaimedByARelease(DSC10Base):
         self.assertIn("Disc 3 - Questions", {Path(f).parent.name for f in joined[0].files})
 
 
+class DSC10Evidence(DSC10Base):
+    """(A) how a sibling's own match weighs against a claim (Engine._claim, _same_release)."""
+
+    def picked(self, part, rid, disc_no, provider="musicbrainz", **flags):
+        import plan as pl
+        return pl.Proposal(source_dir=str(part.folder), files=[str(f) for f in part.files], status="identified",
+                           tier="exact", provider=provider, release_id=rid, confidence=100.0, margin=20.0,
+                           targets=[{"discnumber": [str(disc_no)]} for _f in part.files], **flags)
+
+    def claim(self, disc1_flags, lens=None):
+        self.voyage()
+        rel = three_disc_set(lens=lens)
+        eng = self.engine(DiscHttp(mb=[rel]))
+        g = eng.albums_in(self.lib)[0]
+        p1, p2, p3 = g.trial
+        per = [(p1, [self.picked(p1, "mb-dreams", 1, **disc1_flags)]), (p2, [self.picked(p2, "mb-voyage", 2)]),
+               (p3, [self.picked(p3, "mb-q", 1)])]
+        got = eng._claim(g, per)
+        return got and sorted(d.name[:6] for d in got[1])
+
+    def test_DSC10_a_disc_id_elsewhere_yields_to_lengths_agreeing_to_the_second(self):
+        self.assertEqual(self.claim({"toc_proven": True}), ["Disc 1", "Disc 2", "Disc 3"])
+
+    def test_DSC10_a_disc_id_elsewhere_and_lengths_only_near_stay_apart(self):
+        # (the release's disc 1 two seconds longer each: the matcher's tolerance, not the same master)
+        lens = {0: [12000, 22000, 32000]}
+        self.assertEqual(self.claim({"toc_proven": True}, lens=lens), ["Disc 2", "Disc 3"])
+        self.assertEqual(self.claim({}, lens=lens), ["Disc 1", "Disc 2", "Disc 3"])
+
+    def test_DSC10_a_barcode_of_its_own_on_another_release_stays_apart(self):
+        self.assertEqual(self.claim({"own_number": True}), ["Disc 2", "Disc 3"])
+
+    def test_DSC10_a_one_disc_release_linking_the_box_is_no_twin(self):
+        eng = self.engine(DiscHttp(mb=[release("mb-q", "Questions", ("Questions",))]))
+        box = {"tracks": [{"disc": d} for d in (1, 1, 2, 3)]}
+        one = self.picked(type("P", (), {"folder": self.lib, "files": []})(), "mb-q", 1)
+        eng._release_cand = lambda kind, rid: dict({"tracks": [{"disc": 1}]},
+                                                    discogs_ids=["9235490"]) if kind == "mb" else box
+        self.assertFalse(eng._same_release(("discogs", "9235490"), one, box))
+        eng._release_cand = lambda kind, rid: {"tracks": [{"disc": d} for d in (1, 1, 2, 3)],
+                                               "discogs_ids": ["9235490"]}
+        self.assertTrue(eng._same_release(("discogs", "9235490"), one, box))
+
+
 class DSC10SearchedAsASet(DSC10Base):
     """(B) disc folders numbered 1 to k: the set searched for as a whole, then as its leading discs."""
 

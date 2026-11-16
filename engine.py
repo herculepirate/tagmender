@@ -1683,25 +1683,35 @@ class Engine:
             return False
         if other == key:
             return True
+        # (a twin is the same pressing: as many audio discs and tracks - a one-disc release that
+        # links the box it came in is no twin of the box)
         if key[0] == "mb" and other[0] == "discogs":
-            return other[1] in {str(x) for x in cand.get("discogs_ids") or ()} | {str(cand.get("discogs_id") or "")}
-        if key[0] == "discogs" and other[0] == "mb":
             twin = self._release_cand(*other)
-            return bool(twin) and key[1] in {str(x) for x in twin.get("discogs_ids") or ()} | \
+            linked = other[1] in {str(x) for x in cand.get("discogs_ids") or ()} | {str(cand.get("discogs_id") or "")}
+        elif key[0] == "discogs" and other[0] == "mb":
+            twin = self._release_cand(*other)
+            linked = bool(twin) and key[1] in {str(x) for x in twin.get("discogs_ids") or ()} | \
                 {str(twin.get("discogs_id") or "")}
-        return False
+        else:
+            return False
+        return linked and bool(twin) and _disc_shape(twin) == _disc_shape(cand)
 
     @staticmethod
-    def _own_proof(p) -> bool:
-        """DSC-10: an album's match rests on its own copy: its barcode or catalogue number, or
-        its disc's table of contents, is on the release it was matched to."""
-        return p.status == "identified" and bool(getattr(p, "own_number", False) or getattr(p, "toc_proven", False)
-                                                 or getattr(p, "number_proven", False))
+    def _own_proof(p, against="mb") -> bool:
+        """DSC-10: an album's match rests on its own copy: its barcode or catalogue number is on
+        the release it was matched to - or its disc's table of contents is, when the release
+        it is weighed against (against: "mb" | "discogs") is one that would list that disc ID
+        too (MusicBrainz's; Discogs lists none, so a disc of a box pressed as the standalone CD
+        is no proof against the box)."""
+        return p.status == "identified" and bool(
+            getattr(p, "own_number", False) or getattr(p, "number_proven", False)
+            or (against == "mb" and getattr(p, "toc_proven", False)))
 
-    def _fits_discs(self, folder: Path, files, cand) -> list:
+    def _fits_discs(self, folder: Path, files, cand, tight=False) -> list:
         """DSC-10: the discs of the release cand whose every track one file of folder is, in
         order: as many tracks as files, each title agreeing and each length within the
-        matcher's tolerance (a track listing no length fits none)."""
+        matcher's tolerance (a track listing no length fits none). tight: each length within
+        TIGHT_S - as a disc's table of contents measures it, the same master and pressing."""
         mine = {str(f) for f in files}
         ids = cand.get("track_ids") or {}
         if ids:
@@ -1724,6 +1734,8 @@ class Engine:
         if len(tracks) != len(mine):
             return []
         tol_s, tol_pct = float(self.cfg.get("duration_tol_s", 3.0)), float(self.cfg.get("duration_tol_pct", 0.015))
+        if tight:
+            tol_s, tol_pct = self.TIGHT_S, 0.0
         by_disc = {}
         for t in cand.get("tracks") or []:
             by_disc.setdefault(int(t.get("disc") or 1), []).append(t)
@@ -1738,11 +1750,15 @@ class Engine:
                 out.append(d)
         return out
 
+    TIGHT_S = 1.0          # (DSC-10: lengths as one disc's table of contents gives them, to the second)
+
     def _claim(self, g: Group, per):
         """DSC-10 (A): a folder matched for sure (_sure) to a release of more discs than it holds
         claims the sibling folders that fit its other discs (_fits_discs): each fitting one disc
         exactly, no two folders the same disc, none whose own match is another release resting
-        on its own copy (_own_proof). The release claiming the most folders wins; two claiming
+        on its own copy (_own_proof): its barcode or catalogue number - or its disc ID, unless
+        its every length is this disc's to the second (TIGHT_S: the same master; a disc ID is
+        often shared by the pressings of one CD). The release claiming the most folders wins; two claiming
         as many, neither. Then (Proposal of the joined folders, {folder: disc}, "") - or None."""
         claims, seen = [], set()
         for i, (part, ps) in enumerate(per):
@@ -1764,8 +1780,12 @@ class Engine:
                 odirs = {Path(f).parent for f in other.files}
                 if j == i or len(odirs) != 1:
                     continue
-                if any(self._own_proof(q) and not self._same_release(key, q, cand) for q in ops):
-                    continue                             # (its own copy proves another release)
+                proof = [q for q in ops if self._own_proof(q, key[0]) and not self._same_release(key, q, cand)]
+                if any(q.own_number or q.number_proven for q in proof):
+                    continue                             # (its own barcode or catalogue number: another release)
+                if proof and len(self._fits_discs(next(iter(odirs)), other.files, cand, tight=True)) != 1:
+                    continue                             # (its disc ID proves another release, and its
+                                                         # lengths are not this one's to the second)
                 # (its own match is this release - or its twin on the other database: its disc)
                 same = [q for q in ops if self._sure(q) and self._same_release(key, q, cand)]
                 theirs = {str((t.get("discnumber") or [""])[0]).partition("/")[0].strip()
@@ -1820,7 +1840,7 @@ class Engine:
             if len(prop.targets or []) != len(files) or not _discs_as(prop, mapping, total=j):
                 continue
             key = self._release_of(prop)
-            if not self._own_proof(prop) and any(self._own_proof(q) and self._release_of(q) != key
+            if not self._own_proof(prop, key[0]) and any(self._own_proof(q, key[0]) and self._release_of(q) != key
                                                  for part, ps in per if {Path(f).parent for f in part.files} <= set(dirs)
                                                  for q in ps):
                 continue                                 # (a disc's own copy proves another release)
@@ -5437,6 +5457,15 @@ def _renumbered(album: dict, discs: dict) -> dict:
         out["tocs"] = {moved.get(d, d): v for d, v in album["tocs"].items()}
     out["discs"] = len({t["disc"] for t in out["tracks"]}) or 1
     return out
+
+
+def _disc_shape(cand) -> list:
+    """DSC-10: a release candidate's audio discs, as their track counts in order."""
+    count = {}
+    for t in cand.get("tracks") or []:
+        d = int(t.get("disc") or 1)
+        count[d] = count.get(d, 0) + 1
+    return [count[d] for d in sorted(count)]
 
 
 def _discs_as(prop, discs: dict, total=None) -> bool:

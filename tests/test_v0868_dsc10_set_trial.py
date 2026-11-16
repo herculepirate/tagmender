@@ -676,11 +676,70 @@ class TAG4StaleOtherID(DSC10Base):
         self.assertEqual(self.removed(p), {True})
         self.assertTrue(any("556" in n and "1 disc(s), not 2" in n for n in p.notes), p.notes)
 
+    def test_TAG4_the_plan_says_it_once_with_its_reason(self):
+        from test_v0821_engine_rules import two_cd_release
+        self.two_cds("556", dgs=[te.dg_release(556, "Band B", "Album B - Bonus CD")])
+        eng = self.engine(DiscHttp(mb=[two_cd_release("mb-b", "Band B", "Album B")],
+                                   dg=[te.dg_release(556, "Band B", "Album B - Bonus CD")]))
+        notes = [n for a in eng.plan(self.lib)["albums"] for n in a["notes"] if "556" in n]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("another pressing", notes[0])
+
     def test_TAG4_another_taggers_id_nothing_shows_another_pressing_stays(self):
         p = self.two_cds("557", dgs=[self.two_disc_dg(557)])
         self.assertEqual(self.removed(p), {False})
         p = self.two_cds("558")                                   # (nothing known of it at all)
         self.assertEqual(self.removed(p), {False})
+
+
+class TAG4VideoDiscs(DSC10Base):
+    """TAG-4: a CD and DVD-Video release Discogs numbers "1-n" (the CD) and "2-n" (the DVD): its
+    audio discs are counted by its formats (MED-11) - the twin is kept, and so is your ID."""
+
+    def album(self, linked, dg):
+        top = self.lib / "Band B" / "Album B"
+        for i in range(3):
+            flac(top, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 10 * i, title=f"S0-{i}", album="Album B",
+                 albumartist="Band B", artist="Band B", track=str(i + 1), discogs_release_id=str(dg["id"]))
+        rel = te.mb_release("mb-x", "Band B", "Album B")
+        rel["barcode"] = ""
+        rel["media"] = [{"format": "CD", "position": 1, "title": "", "tracks": [
+            {"id": f"t{i}", "position": i + 1, "title": f"S0-{i}", "length": 10000 * (i + 1),
+             "recording": {"id": f"r{i}", "title": f"S0-{i}"}} for i in range(3)]},
+            {"format": "DVD-Video", "position": 2, "title": "", "tracks": [
+                {"id": f"v{i}", "position": i + 1, "title": f"Video {i}", "length": 240000,
+                 "recording": {"id": f"rv{i}", "title": f"Video {i}"}} for i in range(4)]}]
+        if linked:
+            rel["relations"] = [{"type": "discogs", "target-type": "url",
+                                 "url": {"resource": f"https://www.discogs.com/release/{dg['id']}"}}]
+        eng = self.engine(DiscHttp(mb=[rel], dg=[dg]))
+        return eng.identify(eng.albums_in(self.lib)[0])
+
+    @staticmethod
+    def cd_and_dvd(rid, tracks=3):
+        d = te.dg_release(rid, "Band B", "Album B")
+        d["tracklist"] = [{"type_": "track", "position": f"1-{i + 1}", "title": f"S0-{i}", "duration": f"0:{10 * (i + 1)}"}
+                          for i in range(tracks)] + \
+            [{"type_": "track", "position": f"2-{i + 1}", "title": f"Video {i}", "duration": "4:00"} for i in range(4)]
+        d["formats"] = [{"name": "CD", "qty": "1", "descriptions": ["Album"]},
+                        {"name": "DVD", "qty": "1", "descriptions": ["DVD-Video", "NTSC"]}]
+        return d
+
+    def test_TAG4_a_cd_and_dvd_video_twin_is_kept(self):
+        p = self.album(True, self.cd_and_dvd(777))
+        self.assertEqual({(t.get("discogs_release_id") or [""])[0] for t in p.targets}, {"777"})
+
+    def test_TAG4_your_id_of_a_cd_and_dvd_video_stays(self):
+        p = self.album(False, self.cd_and_dvd(778))
+        self.assertFalse(any("discogs_release_id" in (t.get("~remove") or []) for t in p.targets), p.notes)
+
+    def test_TAG4_a_cd_of_another_track_count_is_no_twin(self):
+        # (9 tracks against the 10 of a bonus edition, no headings: two releases)
+        d = te.dg_release(779, "Band B", "Album B")
+        d["tracklist"] = [{"type_": "track", "position": str(i + 1), "title": f"S0-{i}", "duration": f"0:{10 * (i + 1)}"}
+                          for i in range(4)]
+        p = self.album(True, d)
+        self.assertEqual({(t.get("discogs_release_id") or [""])[0] for t in p.targets}, {""})
 
 
 class DSC10WatchedArriving(DSC10Base):

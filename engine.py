@@ -1694,7 +1694,12 @@ class Engine:
                     cand["track_ids"] = {x: next(iter(v)) for x, v in ids.items() if len(v) == 1}
                 return cand
             det = self.http.get_json(f"https://api.discogs.com/releases/{rid}", "discogs")
-            return ma.discogs_candidate(det, self.dm) if det and self.dm is not None else None
+            if not det or self.dm is None:
+                return None
+            cand = ma.discogs_candidate(det, self.dm)
+            # (its audio discs as its formats name them: a DVD-Video listed "2-1" ... is none, MED-11)
+            cand["audio_shape"], cand["video_medium"] = _discogs_shape(det, cand)
+            return cand
         except Exception as exc:                           # (no claim then: each folder as planned)
             self.log.warning("release %s %s for a set's claim: %s", kind, rid, exc)
             return None
@@ -1757,14 +1762,18 @@ class Engine:
         for x in ids:
             try:
                 det = self.http.get_json(f"https://api.discogs.com/releases/{x}", "discogs")
-                theirs = _disc_shape(ma.discogs_candidate(det, self.dm)) if det else []
+                theirs, _video = _discogs_shape(det, ma.discogs_candidate(det, self.dm)) if det else ([], False)
             except ma.AuthError:
                 raise
             except Exception:
                 return dgid                              # (cannot be read now: as before)
             if not theirs:
                 return dgid
-            same = len(theirs) == len(mine) and abs(sum(theirs) - sum(mine)) <= max(1, sum(mine) // 10)
+            # (disc for disc the same tracks - a tenth's leeway only where Discogs lists headings or
+            # index tracks its own way: 9 tracks and the 10 of a bonus edition are two releases)
+            loose = any(str(t.get("type_") or "track") in ("heading", "index") for t in det.get("tracklist") or [])
+            same = theirs == mine or (loose and len(theirs) == len(mine)
+                                      and abs(sum(theirs) - sum(mine)) <= max(1, sum(mine) // 10))
             cds = len(theirs) < len(mine) and theirs == mine[:len(theirs)] and len(fmts) == len(mine) and \
                 all(mc.medium_type(f) != "cd" for f in fmts[len(theirs):])
             if same or cds:
@@ -1810,13 +1819,15 @@ class Engine:
                 if str(v).lower() in ours:
                     why_of[v] = "TagMender's earlier job wrote it"
                 else:
-                    shape = []
+                    shape, video = [], False
                     try:
                         c = self._release_cand(kind, v) if asks else None     # (never a database left out)
                         shape = _disc_shape(c) if c else []
+                        video = bool(c and c.get("video_medium"))
                     except Exception:
                         shape = []
-                    if shape and mine and len(shape) != mine:
+                    # (never by the count alone while its formats list a video disc: TAG-3's evidence then)
+                    if shape and mine and len(shape) != mine and not video:
                         why_of[v] = f"another pressing: {len(shape)} disc(s), not {mine}"
                     else:
                         try:
@@ -1828,8 +1839,8 @@ class Engine:
             return why_of[v]
         told = {}
         for f, t in zip(prop.files, prop.targets):
-            if t.get(field):
-                continue
+            if t.get(field) or field in (t.get("~remove") or ()):
+                continue                                 # (written, or taken off already: follow_source, TAG-3)
             try:
                 had = [str(v) for v in tagio.read(f).get(field) or [] if str(v)]
             except Exception:
@@ -5748,10 +5759,46 @@ def _separate_releases(parts) -> bool:
     return not shared and all(len(y) == 1 for y in years) and len({next(iter(y)) for y in years}) > 1
 
 
+_VIDEO_MEDIUM = re.compile(r"\b(?:dvd|blu-?ray|hd-?dvd|vhs|laserdisc|umd)\b", re.I)
+
+
+def _discogs_media(det) -> list:
+    """TAG-4 (as MED-11): each disc of a Discogs release in order, as its format names it -
+    "video" for a DVD-Video, Blu-ray or VHS (a DVD-Audio, an audio Blu-ray are audio), else
+    "audio" - from its formats list and their quantities; [] when it gives none."""
+    out = []
+    for f in (det or {}).get("formats") or []:
+        try:
+            qty = max(1, int(str(f.get("qty") or "1").strip() or 1))
+        except ValueError:
+            qty = 1
+        words = " ".join([str(f.get("name") or "")] + [str(x) for x in f.get("descriptions") or []])
+        video = bool(_VIDEO_MEDIUM.search(words)) and not re.search(r"dvd-?audio|blu-?ray audio|pure audio", words, re.I)
+        out += ["video" if video else "audio"] * qty
+    return out
+
+
+def _discogs_shape(det, cand) -> tuple:
+    """TAG-4: (a Discogs release's audio discs as their track counts in order, whether its
+    formats list a video medium). A disc its formats name as video ("2-1" ... on the DVD of a
+    CD and DVD-Video) is no audio disc - counted by the formats only when they list as many
+    discs as the tracklist has."""
+    shape, media = _disc_shape(cand), _discogs_media(det)
+    if len(media) == len(shape):
+        shape = [n for n, m in zip(shape, media) if m == "audio"]
+    return shape, "video" in media
+
+
 def _disc_shape(cand) -> list:
-    """DSC-10: a release candidate's audio discs, as their track counts in order."""
+    """DSC-10: a release candidate's audio discs, as their track counts in order (a track
+    marked video, on a DVD of the set, counts on none; a Discogs release's as its formats name
+    them, _discogs_shape, when _release_cand read it)."""
+    if cand.get("audio_shape") is not None:
+        return list(cand["audio_shape"])
     count = {}
     for t in cand.get("tracks") or []:
+        if t.get("video"):
+            continue
         d = int(t.get("disc") or 1)
         count[d] = count.get(d, 0) + 1
     return [count[d] for d in sorted(count)]

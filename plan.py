@@ -2122,7 +2122,10 @@ class Planner:
                 entry["notes"].append(f"{f.name}: a fragmented MP4 - never written to (its audio would no longer "
                                       "play); it goes with its album as it is")
             for note in _release_id_notes(rows):
-                if note not in entry["notes"]:
+                # (TAG-4 says it already, with its reason: "takes off your Discogs release ID ... (why)")
+                said = note.startswith("removes your ") and any(
+                    n.startswith("takes off your " + note[len("removes your "):] + " (") for n in entry["notes"])
+                if note not in entry["notes"] and not said:
                     entry["notes"].append(note)
             fe = {"src": str(f), "dst": str(f), "op": "tag" if changes else "none", "changes": changes,
                   "diff": rows, "fingerprint": _fp(f)}

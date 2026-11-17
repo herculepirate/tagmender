@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSize, QSortFilterProxyModel, Qt, QTimer, QUrl
+from PySide6.QtCore import QObject, QSize, QSortFilterProxyModel, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QSplitter, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
@@ -159,17 +159,78 @@ LOOK_UP = (("profile", N_("Profile's sources")), ("musicbrainz_only", N_("MusicB
 META_STORE: dict = {}
 
 
-def read_folders(prof, folders) -> list:
+def _takes_on_album(fn) -> bool:
+    """The engine's listing can send each album as soon as it is read (on_album)."""
+    import inspect
+    try:
+        ps = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "on_album" in ps or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in ps.values())
+
+
+def listing(e, path, within=None, meta=None, on_album=None) -> dict:
+    """Engine E's listing of PATH; ON_ALBUM(album) called (on this thread) with each album as soon
+    as its folder is read, when the engine can (one that cannot: the list whole, at the end)."""
+    kw = {"within": within} if within is not None else {}
+    if on_album is not None and _takes_on_album(e.listing):
+        try:
+            return e.listing(path, meta=meta, on_album=on_album, **kw)
+        except TypeError as exc:                          # (an engine whose listing takes no on_album)
+            if "on_album" not in str(exc):
+                raise
+    return e.listing(path, meta=meta, **kw)
+
+
+def read_folders(prof, folders, on_album=None) -> list:
     """[(folder, album)] of FOLDERS, each read on its own (no wider scan). What they remember goes
     into META_STORE beside the rest: a listing given META_STORE itself would forget every album
-    outside its folder, and the albums of the list would be opened again."""
+    outside its folder, and the albums of the list would be opened again. ON_ALBUM(folder, album):
+    each as soon as it is read (listing)."""
     import engine
     out = []
     for f in folders:
         seen = {}
-        out += [(f, x) for x in engine.Engine(prof).listing(f, meta=seen).get("albums") or []]
+        each = (lambda x, f=f: on_album(f, x)) if on_album is not None else None
+        out += [(f, x) for x in listing(engine.Engine(prof), f, meta=seen, on_album=each).get("albums") or []]
         META_STORE.update(seen)
     return out
+
+
+def dropped_folders(paths) -> list:
+    """The folders read for PATHS dropped (a file: its folder), once each, in order."""
+    return list(dict.fromkeys(os.path.abspath(p if os.path.isdir(p) else os.path.dirname(p)) for p in paths))
+
+
+class Batches:
+    """What a worker sends as it goes (its partial signal: in order, and before its result), put
+    to use on the UI thread every STREAM_MS ms at most, not item by item: USE(items). Closed: the
+    rest is dropped (the worker's result says it all)."""
+
+    def __init__(self, owner, use):
+        self.use, self.items, self.closed, self.shown = use, [], False, []
+        self.timer = QTimer(owner)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(STREAM_MS)
+        self.timer.timeout.connect(self.flush)
+
+    def add(self, item):
+        if self.closed:
+            return
+        self.items.append(item)
+        if not self.timer.isActive():
+            # (the first at once: a row as soon as there is one; the rest every STREAM_MS ms)
+            self.timer.start(0 if not self.shown else STREAM_MS)
+
+    def flush(self):
+        items, self.items = self.items, []
+        if items and not self.closed:
+            self.shown += list(self.use(items) or [])
+
+    def close(self):
+        self.closed = True
+        self.timer.stop()
+        self.items = []
 
 
 # what is being done with an album now, in its Status column (the page's, never the plan's)
@@ -325,6 +386,37 @@ class ProfileDelegate(QStyledItemDelegate):
         editor.setGeometry(option.rect)
 
 
+# the providers a look-up waits for after a refusal (HTTP 429 or 503, or no answer), as named on screen
+WAIT_TITLES = {"musicbrainz": "MusicBrainz", "mb": "MusicBrainz", "discogs": "Discogs", "web": N_("the web")}
+
+
+class BackOff(QObject):
+    """A look-up waiting before it asks a provider again (it said it is busy, or did not answer):
+    report(provider, seconds) from any thread; waiting(provider, seconds) on the UI thread."""
+    waiting = Signal(str, float)
+
+    def report(self, provider, seconds):
+        try:
+            self.waiting.emit(str(provider), float(seconds))
+        except (RuntimeError, TypeError, ValueError):        # (the page went: nobody to tell)
+            pass
+
+
+def listen_for_back_off(fn) -> bool:
+    """FN(provider, seconds) called (on the look-up's thread) before each wait of a provider's
+    back-off, where the matcher offers such a hook (stagetimes.on_back_off); False when it does
+    not (the wait is then only in the log's timing lines)."""
+    import stagetimes
+    hook = getattr(stagetimes, "on_back_off", None)
+    if not callable(hook):
+        return False
+    try:
+        hook(fn)
+    except Exception:
+        return False
+    return True
+
+
 def file_anyway_words(a) -> str:
     """The Album menu's MOV-5 command, worded as the album's operation: a copy profile's album is
     copied into the library, a move profile's moved into its layout."""
@@ -373,6 +465,22 @@ class Overview(QWidget):
         self._later_list_only = False
         # folders dropped while Apply runs, being read now (their albums join the list at once)
         self._reading = []
+        # folders dropped while a listing or a preview runs (its list replaces this one): read at
+        # once, folder -> [(folder, album)] (None: being read), their rows shown meanwhile
+        # (id(album) -> album) and put under the new list when the work ends, not read again
+        self._early, self._provisional = {}, {}
+        # the work running: "listing", "preview", "refile", "adding" (folders added to the list),
+        # "lookup" or "apply"; None when nothing runs
+        self._work_kind = None
+        self._listing_rows = None                   # (the albums of the listing running, as they come)
+        # a provider's back-off: the look-up waits before asking again; said in the status bar,
+        # counting down (provider, when the wait ends)
+        self.back_off, self._waiting = BackOff(self), None
+        self.back_off.waiting.connect(self.backing_off)
+        self._wait_timer = QTimer(self)
+        self._wait_timer.setInterval(1000)
+        self._wait_timer.timeout.connect(self.show_wait)
+        listen_for_back_off(self.back_off.report)
         # album key -> the folder its look-up reads, for albums outside the folder previewed (a
         # folder dropped meanwhile, an album already applied and given another profile)
         self.roots = {}
@@ -970,6 +1078,9 @@ class Overview(QWidget):
             self.win.update_album_actions()
             return
         self.running = on
+        ended = None
+        if not on:
+            ended, self._work_kind = self._work_kind, None
         self.show_ready()
         if hasattr(self, "model"):
             # (no profile chosen while work runs; during a look-up it is: that album is queued)
@@ -994,6 +1105,10 @@ class Overview(QWidget):
         if not on and getattr(self, "later", None):
             # (after whatever ended has finished: a look-up queued meanwhile goes first)
             QTimer.singleShot(0, self.add_waiting)
+        if not on and ended in ("refile", "adding") and self.queue:
+            # (albums dropped meanwhile, queued to be looked up: looked up now, unless what ended
+            # started a look-up of its own - they wait for that one, as before)
+            QTimer.singleShot(0, self.run_queue)
 
     # ---- folders dropped while work runs ---------------------------------------------------
     def add_later(self, paths) -> list:
@@ -1009,15 +1124,24 @@ class Overview(QWidget):
         new = [p for p in new if os.path.realpath(str(p)) not in held]
         applying = getattr(self, "_applying", False)
         side = getattr(self, "apply_worker", None) is not None      # (APL-1: an Apply beside the look-up)
+        kind = getattr(self, "_work_kind", None)
+        # (a look-up, an Apply not touching them, or work that keeps this list - albums applied
+        # being filed again, folders being added: read now, put under the list, queued)
         if new and ((self.looking and not (side and self.touches_apply(new))) or
-                    (applying and not self.touches_apply(new))) and self.read_now(new):
+                    (applying and not self.touches_apply(new)) or
+                    (kind in ("refile", "adding") and not applying and not self.looking)) and self.read_now(new):
             msg = (tr("{0}: added to the list; not looked up yet.") if self._later_list_only or _list_first()
                    else tr("{0}: added to the list; looked up when Apply ends.") if applying
                    else tr("{0}: added to the list; looked up next.")).format(manual_match._names(new))
             self.win.statusBar().showMessage(msg, 6000)
             return new
         self.later += new
-        if new:
+        if new and kind in ("listing", "preview") and not applying and not self.looking and self.read_early(new):
+            # (a listing or preview replaces the list when it ends: their rows shown now, under it;
+            # they join the new list then, without being read again)
+            msg = tr("{0}: shown in the list; added to it when the current work ends.").format(
+                manual_match._names(new))
+        elif new:
             msg = tr("{0}: added to the list when the current work ends.").format(manual_match._names(new))
         elif present:
             msg = tr("Already in the preview: {0}.").format(manual_match._names(present))
@@ -1045,11 +1169,15 @@ class Overview(QWidget):
         if self.running:
             if self.looking and self.plan and self.path:
                 paths, self.later = list(self.later), []
-                if not self.read_now(paths):
+                early = self.take_early(paths)
+                if early is not None:                        # (read while the listing ran: joined now)
+                    self.joined(early, paths)
+                elif not self.read_now(paths):
                     self.later = paths + self.later
             return
         from . import manual_match
         paths, self.later = list(self.later), []
+        early = self.take_early(paths)
         list_only, self._later_list_only = self._later_list_only or _list_first(), False
         new, _ = manual_match.new_paths(self, paths)
         if not new:
@@ -1057,17 +1185,111 @@ class Overview(QWidget):
         if not self.plan or not self.path:
             manual_match.add_dropped(self.win, new)
             return
+        folders = dropped_folders(new)
+        if early is not None:                                # (read while the work ran: not again)
+            mine = set(folders)
+            self.added([(f, a) for f, a in early if f in mine], folders, list_only)
+            return
         try:
             prof = load_profile(self.profile.currentText())
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
-        folders = list(dict.fromkeys(os.path.abspath(p if os.path.isdir(p) else os.path.dirname(p)) for p in new))
 
         self.busy(True)
+        self._work_kind = "adding"
         self.summary.setText(tr("Adding {0}…").format(manual_match._names(new)))
-        self.worker = start(self, lambda _w: read_folders(prof, folders),
-                            lambda got: self.added(got, folders, list_only), self.progress, self.oops)
+        rows = Batches(self, self.put_under_list)            # (each album's row as soon as it is read)
+
+        def work(w):
+            return read_folders(prof, folders, on_album=lambda f, x: w.partial.emit((f, x)))
+
+        def done(got):
+            rows.close()
+            self.added(got, folders, list_only, streamed=rows.shown)
+
+        def failed(msg):
+            rows.close()
+            self.oops(msg)
+        self.worker = start(self, work, done, self.progress, failed, partial=rows.add)
+
+    # ---- folders dropped while a listing or a preview runs ------------------------------------
+    def read_early(self, paths) -> bool:
+        """Folders dropped while a listing or a preview runs (its list replaces the one shown when
+        it ends): read now, on a thread of their own, their rows shown under the list as each
+        album is read; when the work ends they join its list (add_waiting) without being read
+        again, and are looked up as any folder dropped then. Nothing of them is in the work that
+        runs. False when they cannot be read now (the profile cannot be loaded)."""
+        try:
+            prof = load_profile(self.profile.currentText())
+        except pf.ProfileError:
+            return False
+        folders = [f for f in dropped_folders(paths) if f not in self._early]
+        if not folders:
+            return True
+        for f in folders:
+            self._early[f] = None                            # (being read)
+        rows = Batches(self, self.show_early)
+
+        def work(w):
+            return read_folders(prof, folders, on_album=lambda f, x: w.partial.emit((f, x)))
+
+        def done(got):
+            rows.close()
+            if all(f in self._early and self._early[f] is None for f in folders):
+                for f in folders:
+                    self._early[f] = [(r, a) for r, a in got if r == f]
+                self.show_early(got)
+            # (else taken meanwhile - the work ended, or Cancel: read again, or not added)
+
+        def failed(_msg):
+            rows.close()
+            for f in folders:                                # (read again when the work ends: said then)
+                if self._early.get(f, 0) is None:
+                    self._early.pop(f)
+        start(self, work, done, failed=failed, partial=rows.add)
+        return True
+
+    def show_early(self, got, _folders=None) -> list:
+        """Rows for albums GOT ((folder, album) pairs) read early: under the rows shown, until the
+        work ends (not in its plan). Returns the albums shown now."""
+        if not self.running:
+            return []
+        have = {self.album_key(a) for a in self.model.albums}
+        fresh = []
+        for f, a in got:
+            k = self.album_key(a)
+            if f in self._early and k not in have:          # (its folder not taken meanwhile)
+                have.add(k)
+                fresh.append(a)
+                self._provisional[id(a)] = (a, f)
+        if fresh:
+            if self.views.currentWidget() is not self.results:
+                self.views.setCurrentWidget(self.results)
+            self.model.replace_rows([], fresh)
+        return fresh
+
+    def take_early(self, paths):
+        """The albums read early for PATHS ([(folder, album)]), None unless every folder of them
+        was read whole; their rows meanwhile are taken out (put under the list again by whoever
+        adds them). What was read for them is forgotten either way."""
+        folders = dropped_folders(paths)
+        got = [self._early.pop(f, None) for f in folders]
+        self.drop_provisional(folders)
+        if not folders or any(g is None for g in got):
+            return None
+        return [x for g in got for x in g]
+
+    def drop_provisional(self, folders=None):
+        """Rows shown for albums read early (of FOLDERS; None: all) taken out of the list."""
+        if not self._provisional:
+            return
+        mine = {k: a for k, (a, f) in self._provisional.items() if folders is None or f in folders}
+        rows = [r for r, a in enumerate(self.model.albums) if mine.get(id(a)) is a]
+        for k in mine:
+            self._provisional.pop(k, None)
+        if rows:
+            self.model.replace_rows(rows, [])
 
     def touches_apply(self, paths) -> bool:
         """A folder dropped during Apply that is, holds or sits inside a folder Apply is working
@@ -1098,27 +1320,30 @@ class Overview(QWidget):
             prof = load_profile(self.profile.currentText())
         except pf.ProfileError:
             return False
-        folders = list(dict.fromkeys(os.path.abspath(p if os.path.isdir(p) else os.path.dirname(p)) for p in paths))
+        folders = dropped_folders(paths)
         self._reading += list(paths)
+        # (each album's row as soon as it is read; queued to be looked up once all are)
+        rows = Batches(self, lambda items: self.put_under_list(items) if self.plan and self.path else [])
 
-        def work(_w):
-            return read_folders(prof, folders)
+        def work(w):
+            return read_folders(prof, folders, on_album=lambda f, x: w.partial.emit((f, x)))
 
         def finish():
+            rows.close()
             self._reading = [p for p in self._reading if p not in paths]
 
         def done(got):
             finish()
-            self.joined(got, paths)
+            self.joined(got, paths, streamed=rows.shown)
 
         def failed(msg):
             finish()
             self.win.statusBar().showMessage(tr("{0} could not be read: {1}").format(
                 _dropped_names(paths), msg.split("\n\n")[0]), 8000)
-        start(self, work, done, failed=failed)
+        start(self, work, done, failed=failed, partial=rows.add)
         return True
 
-    def joined(self, got, paths):
+    def joined(self, got, paths, streamed=()):
         """The albums of folders dropped during Apply, read: under the list at once, and queued to
         be looked up when Apply ends (unless your setting lists added folders first, or Apply
         was cancelled). Apply ended meanwhile: as any folder dropped then."""
@@ -1129,7 +1354,7 @@ class Overview(QWidget):
                 from . import manual_match
                 manual_match.add_dropped(self.win, paths)
             return
-        fresh = self.put_under_list(got)
+        fresh = self.streamed_still_here(streamed) + self.put_under_list(got)
         if not fresh:
             self.win.statusBar().showMessage(tr("No music found in {0}.").format(_dropped_names(paths)), 6000)
             return
@@ -1146,6 +1371,13 @@ class Overview(QWidget):
             self.model.refresh_rows()                        # (their rows: Waiting…)
         else:
             self.look_up(mode, fresh, queued=True)
+
+    def streamed_still_here(self, albums) -> list:
+        """Of ALBUMS put under the list as they were read, those it still has (the plan's own)."""
+        if not albums or not self.plan:
+            return []
+        ids = {id(a) for a in self.plan.get("albums") or []}
+        return [a for a in albums if id(a) in ids]
 
     def put_under_list(self, got) -> list:
         """The albums GOT ((folder read, album) pairs) that the list does not have yet: put under
@@ -1169,12 +1401,13 @@ class Overview(QWidget):
             self.fit_status()
         return fresh
 
-    def added(self, got, folders, list_only):
-        """The dropped folders' albums, found: put under the albums already listed, then looked up."""
+    def added(self, got, folders, list_only, streamed=()):
+        """The dropped folders' albums, found: put under the albums already listed, then looked up
+        (STREAMED: those of them put under the list already, as they were read)."""
         self.busy(False)
         if not self.plan:                                    # (the list went meanwhile)
             return
-        fresh = self.put_under_list(got)
+        fresh = self.streamed_still_here(streamed) + self.put_under_list(got)
         if not fresh:
             self.summary.setText(tr("No music found in the folders dropped."))
             return
@@ -1204,6 +1437,7 @@ class Overview(QWidget):
         self.looked = {}                                     # (a new folder: nothing looked up yet)
         self.queue = {}                                      # (nor waiting to be)
         self.roots = {}
+        self._early, self._provisional = {}, {}
         self.album_profiles, self.planned_with, self.headers = {}, {}, {}
         self.removed = set()                                 # (albums taken out of this list: their folders)
         self.plan_library = ""
@@ -1235,21 +1469,64 @@ class Overview(QWidget):
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
         path, within = self.path, list(getattr(self, "within", []) or [])
+        # (each album's row as soon as its folder is read; the listing's own list at its end)
+        rows = self._listing_rows = Batches(self, self.listed_some)
 
-        def work(_w):
+        def work(w):
             import engine
-            return engine.Engine(prof).listing(path, within=within or None, meta=META_STORE)
+            return listing(engine.Engine(prof), path, within=within or None, meta=META_STORE, on_album=w.partial.emit)
+
+        def failed(msg):
+            self.end_listing_rows()
+            if self.plan is None:                            # (no list: the rows shown so far go)
+                self.model.set_plan(None)
+            self.oops(msg)
         self.busy(True)
+        self._work_kind = "listing"
         self.summary.setText(tr("Finding the albums… nothing is looked up yet."))
-        self.worker = start(self, work, lambda plan: self.listed(plan, look_up), self.progress, self.oops)
+        self.worker = start(self, work, lambda plan: self.listed(plan, look_up), self.progress, failed,
+                            partial=rows.add)
+
+    def listed_some(self, albums) -> list:
+        """Albums of the listing running, read: their rows now, under those shown (nothing is
+        looked up yet; the listing's own list takes their place when it ends)."""
+        if self.plan is not None or not self.running:
+            return []
+        have = {self.album_key(a) for a in self.model.albums}
+        fresh = []
+        for a in albums:
+            k = self.album_key(a)
+            if k not in have:
+                have.add(k)
+                fresh.append(a)
+        if fresh:
+            self.model.replace_rows([], fresh)
+        return fresh
+
+    def end_listing_rows(self):
+        if self._listing_rows is not None:
+            self._listing_rows.close()
+            self._listing_rows = None
+
+    def adopt_listing(self, plan):
+        """PLAN's albums in the list. When the rows shown are the listing's own, as it sent them
+        (the same albums in the same order, nothing else among them), its list takes their place
+        row for row - the selection and the scrolling stay; else the list is made again."""
+        new, old = plan["albums"], self.model.albums
+        if old and old is not new and len(old) == len(new) and \
+                all(self.album_key(a) == self.album_key(b) for a, b in zip(old, new)):
+            self.model.adopt(new)
+        else:
+            self.model.set_plan(plan)
 
     def listed(self, plan, look_up=False):
+        self.end_listing_rows()
         self.plan = plan
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
-        self.model.set_plan(plan)
+        self.adopt_listing(plan)
         self.show_profile_column()
-        self.fit_status()
+        self.request_fit()
         self.busy(False)
         n = len(plan["albums"])
         if look_up and n:
@@ -1442,6 +1719,7 @@ class Overview(QWidget):
                 out.append((a, folder, found))
             return out
         self.busy(True)
+        self._work_kind = "refile"
         self.summary.setText(tr("Reading {0} where Apply put them…").format(
             plural(len(items), tr("album"), tr("albums"))))
         self.worker = start(self, work, lambda got: self.refound(got, name), self.progress, self.oops)
@@ -1764,6 +2042,7 @@ class Overview(QWidget):
         self.states = dict.fromkeys(self._lookup_order, "waiting")
         self.model.refresh_rows()
         self.busy(True)
+        self._work_kind = "lookup"
         self.looked_with = self.sources_words(mode)
         self._lookup_n = total
         self._lookup_skipped = skipped
@@ -2012,6 +2291,38 @@ class Overview(QWidget):
             badge.setAccessibleDescription(" ".join(lines))
             badge.setVisible(bool(short))
 
+    def backing_off(self, provider, seconds):
+        """A look-up waits SECONDS before asking PROVIDER again: said in the status bar, counting
+        down, until it asks again or the work ends."""
+        if not getattr(self, "running", False) or seconds <= 0:
+            return
+        self._waiting = (provider, time.monotonic() + seconds)
+        self.show_wait()
+        self._wait_timer.start()
+
+    def wait_words(self) -> str:
+        """"Waiting for MusicBrainz (busy, retrying in 12 s)", or "" when no wait runs."""
+        if not self._waiting or not getattr(self, "running", False):
+            return ""
+        provider, until = self._waiting
+        left = until - time.monotonic()
+        if left <= 0:
+            return ""
+        name = WAIT_TITLES.get(provider.lower().replace(" back-off", ""), provider)
+        return tr("Waiting for {0} (busy, retrying in {1} s)").format(tr(name), max(1, round(left)))
+
+    def show_wait(self):
+        words = self.wait_words()
+        bar = self.win.statusBar()
+        if words:
+            bar.showMessage(words, 1500)                   # (said again each second while it lasts)
+            self._wait_said = words
+            return
+        if getattr(self, "_wait_said", "") and bar.currentMessage() == self._wait_said:
+            bar.clearMessage()                             # (over: not left saying it waits)
+        self._waiting, self._wait_said = None, ""
+        self._wait_timer.stop()
+
     def progress(self, i, n, what):
         if getattr(self, "_lookup_n", 0) and self.running and not self._applying:
             # (several albums at once: i says which row is being looked up, the bar how many have started)
@@ -2138,6 +2449,7 @@ class Overview(QWidget):
             e.offer_file_anyway = True                      # (MOV-5: here you can ask)
             return e.plan(path, progress=w.progress.emit, cancel=lambda: w.cancelled, meta=META_STORE)
         self.busy(True)
+        self._work_kind = "preview"
         self.summary.setText(tr("Identifying with {0}… nothing is changed while previewing.").format(self.looked_with))
         stamp = None if forced else self.lookup_stamp(prof, mode)    # (a release you chose: not the same)
 
@@ -2541,6 +2853,7 @@ class Overview(QWidget):
         self.states = {id(a): "waiting" for a in self._applied}
         self.model.refresh_rows()
         self.busy(True)
+        self._work_kind = "apply"
         self._applying, self._apply_at = True, (0, total, "")
         self.summary.setText(tr("Applying…"))
         self.worker = start(self, work, self.applied, self.progress, self.apply_failed,
@@ -2638,6 +2951,8 @@ class Overview(QWidget):
                 from .manual_match import _names
                 self.win.statusBar().showMessage(tr("Not added: {0}.").format(_names(self.later)), 6000)
                 self.later = []
+            self._early = {}                               # (nor what was read of them: their rows go)
+            self.drop_provisional()
             self.states = {k: v for k, v in self.states.items() if v != "waiting"}
             self.model.refresh_rows()
             self.summary.setText(tr("Cancelling after the current album…") + (tr(

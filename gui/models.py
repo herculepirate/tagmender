@@ -222,6 +222,12 @@ class PlanModel(QAbstractTableModel):
         self.albums = plan["albums"] if plan else []
         self.endResetModel()
 
+    def adopt(self, albums):
+        """ALBUMS (a list holding the same albums as the rows shown, in their order: another
+        list, or other entries of them) shown in their place, row for row, without a reset."""
+        self.albums = albums
+        self.refresh_rows()
+
     def replace_rows(self, rows, new) -> int:
         """The albums of ROWS (row numbers) replaced by NEW, put where the first of them was
         (none: at the end); rows not removed keep their places, selection and sorting. The

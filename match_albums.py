@@ -2409,6 +2409,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # VIN-2: the album tag's bracket numbers the folder's own number differs from, held aside
         "catnos_title_held": sorted(held_title),
         "catnos_folder_own": sorted(own_norm),
+        # VIN-5: a US record's number with its format suffix -> the bare number read with it
+        "catnos_suffix_bare": {mc.norm_code(h): mc.norm_code(h.rsplit(" ", 1)[0]) for h in own_hints
+                               if re.search(r"\s[A-Z]-\d$", h)},
         # CAT-3: of which one-digit label codes ("RHEADCDX 1"), not in the tags or notes too
         "catnos_cat3": ({mc.norm_code(h) for h in folder_match if mc.cat3_hint(h)} - typed
                         - {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}),

@@ -943,6 +943,27 @@ class VIN2_FolderNumberOverAnotherTaggersTitle(VinBase):
                      catno="9100 059", label="Mercury", barcode="")
         return [us, uk]
 
+    def test_VIN5_the_suffixed_number_first_the_bare_one_only_without_it(self):
+        import match_albums as ma
+        top = self.rip("1987 - Hold Your Fire [Vinyl Rip 832-464-1 Q-1]", 96000)
+        fresh = lambda: ma.read_album(top, "Billy Joel", top.name)          # noqa: E731
+        us, eu = {"catnos": ["832 464-1 Q-1"]}, {"catnos": ["832 464-1"]}
+
+        def agrees(album, cand):
+            return mc.catnos_agree(album["catnos_from_folder"], cand["catnos"])
+
+        def against(album, cand):
+            return not mc.catnos_agree(set(album["catnos_from_folder"]) | set(album.get("catnos_folder_soft") or ()),
+                                       cand["catnos"])
+        # (a US entry with Q-1 and an EU entry with the bare number: only the US agrees; the EU is not against)
+        a = fresh()
+        mc.settle_title_numbers(a, [us, eu])
+        self.assertEqual((agrees(a, us), agrees(a, eu), against(a, eu)), (True, False, False))
+        # (only bare entries: they agree)
+        a = fresh()
+        mc.settle_title_numbers(a, [eu])
+        self.assertTrue(agrees(a, eu))
+
     def test_VIN2_a_folder_number_no_candidate_carries_hides_nothing(self):
         # (a false folder hint - "[Unit 731 101-1]" - never hides a real number in the album tag)
         album = {"catnos_from_folder": {"731 1011"}, "catnos": {"731 1011"}, "catnos_title_held": ["srm11184"],

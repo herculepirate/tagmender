@@ -280,6 +280,7 @@ def settle_title_numbers(album, cands):
     its own (read_album "catnos_title_held") count again - as the folder's - when no candidate
     carries the folder's own number: a folder hint that names nothing of the album ("[Unit 731
     101-1]") never hides a real number in the tags. Once per album (it stays settled)."""
+    settle_suffixed_numbers(album, cands)
     held = set(album.get("catnos_title_held") or ())
     if not held or album.get("_title_numbers_settled"):
         return
@@ -292,6 +293,24 @@ def settle_title_numbers(album, cands):
     album["catnos_from_folder"] = set(album.get("catnos_from_folder") or ()) | held
     album["catnos"] = set(album.get("catnos") or ()) | held
     album["_title_numbers_settled"] = True
+
+
+def settle_suffixed_numbers(album, cands):
+    """VIN-5: the suffixed form first. A folder's "832-464-1 Q-1" is read with its bare "832-464-1"
+    (a database may list either); when some candidate lists the suffixed form, the bare number is
+    no longer the folder's: an entry carrying only "832 464-1" (the European pressing) gets no
+    "folder catalogue number agrees" - nor is it against the folder (catnos_folder_soft). Only
+    bare entries: they agree. Once per album."""
+    pairs = dict(album.get("catnos_suffix_bare") or {})
+    if not pairs or album.get("_suffix_settled"):
+        return
+    if not any(c.get("catnos") for c in cands or ()):
+        return                                       # (nothing to tell by yet)
+    album["_suffix_settled"] = True
+    if any(catnos_agree(set(pairs), c.get("catnos")) for c in cands or () if c.get("catnos")):
+        bare = set(pairs.values()) - set(pairs)
+        album["catnos_from_folder"] = set(album.get("catnos_from_folder") or ()) - bare
+        album["catnos_folder_soft"] = sorted(bare)
 
 
 def catno_hints(text, variants=False):
@@ -4285,7 +4304,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "has_folder_catno": bool(album.get("catnos_from_folder")),
         "folder_catno_agrees": catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
         "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos")
-                                    and not catnos_agree(album.get("catnos_from_folder"), cand.get("catnos"))),
+                                    and not catnos_agree(set(album.get("catnos_from_folder") or ())
+                                                         | set(album.get("catnos_folder_soft") or ()),
+                                                         cand.get("catnos"))),
         "tagged": tagged_release(album, cand),
         # (TAG-1: what decided it when TagMender's own job chose it; whether the scans were read
         # now - a clue of the scans not read now is missing, not disproved)

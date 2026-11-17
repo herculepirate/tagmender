@@ -789,14 +789,19 @@ def _make_plan(args):
     return prof, p
 
 
+MEASURE_LIMIT_S = 600                       # VIN-6: the CLI measures copies for this long at most
+
+
 def _measure_copies(p):
     """VIN-6: two or more copies of one release in the plan (or one filed before): each measured
     (dynamic range, clipping) after the plan, shown side by side in its preview."""
     try:
         import dynamics
         if dynamics.copies(p):
-            _err("Measuring the copies of one release (dynamic range, clipping)…")
-            dynamics.annotate(p, dynamics.measure(p))
+            import time
+            _err("Measuring the copies of one release (dynamic range, clipping; --no-measure skips it)…")
+            until = time.monotonic() + MEASURE_LIMIT_S
+            dynamics.annotate(p, dynamics.measure(p, cancel=lambda: time.monotonic() > until))
     except Exception as exc:                      # (a measure is only shown: never fails the plan)
         _err(f"The copies were not measured: {exc}")
 
@@ -804,10 +809,11 @@ def _measure_copies(p):
 def cmd_plan(args):
     import plan as planmod
     _prof, p = _make_plan(args)
-    _measure_copies(p)
     if args.output:
         planmod.save(p, args.output)
         _err(f"Plan saved to {args.output}  (apply with: tagmender apply {args.output})")
+    if not getattr(args, "no_measure", False):
+        _measure_copies(p)                     # (after the plan is saved: it never waits on this)
     if args.json:
         print(json.dumps(p, indent=1, ensure_ascii=False, default=str))
     else:
@@ -1346,6 +1352,8 @@ def work_parsers(sub):
         if name == "plan":
             a.add_argument("-o", "--output", metavar="PLAN")
             a.add_argument("-v", "--verbose", action="store_true")
+            a.add_argument("--no-measure", action="store_true",
+                           help="do not measure copies of one release (dynamic range, clipping) after the plan")
         else:
             a.add_argument("--yes", "-y", action="store_true", help="apply without asking")
     a = sub.add_parser("apply", help="carry out a saved plan")

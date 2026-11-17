@@ -265,7 +265,8 @@ class KeepV2Behaviour(Base):
     def test_names_of_a_version_2_profile_stay(self):
         p = pf.from_dict(pf.keep_v2_behaviour({"name": "x", "version": 2}))
         tpl = naming.effective_template(p["naming"], p["filenames"])
-        self.assertEqual(tpl, naming.PRESETS["tagmender"])
+        # (VIN-3: editions off adds only a vinyl rip's own bracket, which no other album sets)
+        self.assertEqual(tpl.replace("$if(%_vinylrip%, [%_vinylrip%])", ""), naming.PRESETS["tagmender"])
         tags = {"albumartist": ["Band"], "album": ["A Very Long Album Title With Many Words"],
                 "title": ["The Night"], "tracknumber": ["3"], "discnumber": ["2"], "totaldiscs": ["2"],
                 "originaldate": ["1991"]}

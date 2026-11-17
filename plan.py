@@ -1203,6 +1203,42 @@ def _split_companions(vsplit, pairs: dict, profile, op, extra=()):
     return out, "; ".join(notes), how
 
 
+_TAKEN = re.compile(r" ~[0-9a-f]{4}(?=\.[^.]+$)")
+
+
+def _rips_apart(of, group):
+    """VIN-7: the copies of a folder that held two rips of one record. The notes, pictures and
+    other files both rips share go with the first copy only - never copied (one file, one
+    place); the others get a note saying where they went. A copy whose folder name is another
+    copy's (no ripper or year ripped tells them apart) is tagged where it is (MOV-4): it stays in
+    the folder it was found in, its files named there as the naming names them."""
+    group.sort(key=lambda a: int(a["split"].get("index") or 0))
+    first = group[0]
+    took = {c["src"] for c in first.get("companions") or ()}
+    for c in first.get("companions") or ():
+        if c.get("shared") and c["op"] == "copy":
+            c["op"] = "move"
+    seen = {fnm.fold(first["split"].get("folder") or "")}
+    for a in group[1:]:
+        gone = [c for c in a.get("companions") or () if c.get("shared") or c["src"] in took]
+        if gone:
+            a["companions"] = [c for c in a["companions"] if c not in gone]
+            a["notes"].append("the files both rips shared (" + ", ".join(sorted(Path(c["src"]).name for c in gone))
+                              + ") go with the first copy, " + Path(first["split"].get("folder") or of).name)
+        folder = fnm.fold(a["split"].get("folder") or "")
+        if folder in seen and a["status"] in ("ready", "unchanged"):
+            for fe in a["files"]:
+                fe["dst"] = str(Path(of) / _TAKEN.sub("", Path(fe["dst"]).name))
+            for c in a.get("companions") or ():
+                if c["op"] in ("move", "copy"):
+                    c["op"], c["dst"] = "none", c["src"]
+            a["split"]["folder"] = str(of)
+            a["notes"] = [n for n in a["notes"] if " is taken; using " not in n]
+            a["notes"].append("another copy of this release takes the folder this one would be named into: "
+                              "this one is tagged where it is, in the folder it was found in (MOV-4)")
+        seen.add(fnm.fold(a["split"].get("folder") or ""))
+
+
 def _split_together(albums):
     """The versions of one split go together or not at all: when one cannot be planned (a
     conflict, skipped), or two would go to the same folder, none is split."""
@@ -1211,6 +1247,8 @@ def _split_together(albums):
         if a.get("split"):
             by.setdefault(a["split"]["of"], []).append(a)
     for of, group in by.items():
+        if all(a["split"].get("rips") for a in group):
+            _rips_apart(of, group)
         folders = [fnm.fold(a["split"].get("folder") or "") for a in group]
         why = ""
         if len(group) < max(int(a["split"].get("count") or 1) for a in group):
@@ -1229,7 +1267,7 @@ def _split_together(albums):
                 a["split_with"] = list(dict.fromkeys(list(a.get("split_with") or []) + [
                     fe["dst"] for b in group if b is not a for fe in b["files"] if fe.get("dst")]))
             stays = any(os.path.realpath(a["split"].get("folder") or "") == os.path.realpath(of) for a in group)
-            if stays:
+            if stays and not all(a["split"].get("rips") for a in group):
                 # (one version stays in the folder, named as it already is: what the versions
                 # share stays there too, copied to the others - never moved away from it)
                 for a in group:
@@ -1655,20 +1693,9 @@ class Planner:
             return entry
 
     def _album_placed(self, prop) -> dict:
-        self._rip_year_known = ""
         try:
             return self._album(prop)
         except _DuplicateCopy as dup:
-            if getattr(self, "_rip_year_known", "") and not self.__dict__.get("_rip_dated"):
-                # VIN-3: another rip of this record would take its folder - the year ripped, when
-                # known, names this one's apart ("[2022 Vinyl Rip SRM-1-4013]")
-                self._rip_dated = True
-                try:
-                    return self._album(prop)
-                except _DuplicateCopy as again:
-                    dup = again
-                finally:
-                    self._rip_dated = False
             # MOV-4: another copy of this release is already filed there: tagged where it is
             self._in_place_note = str(dup)
             try:
@@ -1843,6 +1870,8 @@ class Planner:
         flat = False
         if vsplit:
             entry["split"] = {k: vsplit[k] for k in ("of", "index", "count")}
+            if vsplit.get("rips"):
+                entry["split"]["rips"] = True              # VIN-7: two rips of one record
             entry["split_with"] = list(vsplit.get("others") or [])
         if not identified:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
@@ -2036,23 +2065,20 @@ class Planner:
         # VIN-3 / VIN-4: a vinyl rip's own details - its ripper and the pressing's catalogue number
         # for the folder name, the comment line (resolution, ripper, year ripped, equipment)
         rip_line = ""
-        self._rip_year_known = ""
         if identified and kept:
             rip = self._vinyl_rip(prop, kept, targets, rel, unproven)
             if rip:
                 import vinylrip
                 rip_line = vinylrip.comment_line(rip)
                 for k_, v_ in (("~ripper", rip.get("ripper")), ("~rip_catalog", rip.get("catno")),
-                               ("~rip_resolution", vinylrip.resolution_name(rip.get("resolution")))):
+                               ("~rip_resolution", vinylrip.resolution_name(rip.get("resolution"))),
+                               ("~rip_year", rip.get("year"))):
                     if v_:
+                        # (the year ripped whenever it is known: two rips of one pressing are named
+                        # apart by it whichever is planned first, and a folder TagMender named so
+                        # plans the same again)
                         rel_tags[k_] = [v_]
-                if unproven:
-                    rel_tags["~rip_vinyl"] = ["1"]
-                self._rip_year_known = rip.get("year") or ""
-                if rip.get("year") and (rip.get("year_named") or self.__dict__.get("_rip_dated")):
-                    # (the year ripped your folder name gives - "[2022 Vinyl Rip ...]" - or, from the rip
-                    # notes, where two copies of this release would share one folder: it tells them apart)
-                    rel_tags["~rip_year"] = [rip["year"]]
+                rel_tags["~rip_vinyl"] = ["1"]
         # a Partial album whose files already name a release (Picard's or TagMender's tags):
         # only what they lack is filled; their date, album, titles and mark stay as they are
         held = partial and _names_release(kept)
@@ -2215,7 +2241,7 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
-            if rip_line and not held:
+            if rip_line and not held and self._vinyl_file(targets.get(f) or {}, unproven):
                 self._rip_comment(f, before, changes, rows, p, rip_line,
                                   "album_only" if album_only or unproven else "partial" if partial else "")
             # (filled by the engine only for: an album only (TAG-3's pressing fields), an album held
@@ -3287,30 +3313,36 @@ class Planner:
         return fnm.fold(str(other[-2])) != fnm.fold(str(comps[-2]))
 
     @staticmethod
+    def _vinyl_file(target, unproven) -> bool:
+        """VIN-4: this file is of a record (its own medium, not the release's first: a CD and LP
+        set's CD files get no rip line); a file of an unproven pressing with no medium: yes."""
+        import match_core as mc
+        media = [str(m) for m in target.get("media") or ()]
+        return any(mc.media_kind(m) == "vinyl" for m in media) if media else bool(unproven)
+
+    @staticmethod
     def _rip_comment(f, before, changes, rows, p, line, tier=""):
         """VIN-4: TagMender's own line about a vinyl rip ("Vinyl rip: PBTHAL · 24-bit/96 kHz ...")
         in the comment: added after the text already there, or put in place of its own earlier
-        line (vinylrip.merged_comment); every other line kept. Never where the comment's policy
-        is preserve or lock, nor where your own fill_missing policy keeps a comment already
-        there, nor where the level writes no comment (Basic, a dropped field); a value Picard's
-        "Preserve these tags" keeps stays whole, the line beside it. Nothing when the comment
-        already says it (idempotent). Your edit of the comment wins over it (apply_edits)."""
+        line (vinylrip.merged_values: only a line wholly in its form is its own); every other line
+        and value kept. Never where the comment's policy is preserve, lock or remove, fill_missing
+        (yours, the profile's default, or Picard's "Preserve these tags") with a comment there,
+        cleanup.comments "remove", nor where the level writes no comment (Basic, a dropped
+        field). Nothing when the comment already says it (idempotent). Your edit wins (apply_edits)."""
         import levels
         import vinylrip
         pol = p.policy("comment")
         if pol in ("preserve", "lock", "remove") or not tagio.holds(f, "comment"):
             return
+        if ((p.get("cleanup") or {}).get("comments")) == "remove":
+            return
         if not levels.restrict({"comment": [line]}, p, tier=tier).get("comment"):
             return
         had = _vals(before.get("comment"))
-        if "comment" in changes:
-            base = _vals(changes["comment"])           # (what this plan writes: a script's, or none)
-        else:
-            base = had
-        if pol == "fill_missing" and had and "comment" in ((p["field_policy"].get("fields") or {})):
-            return                                     # (your own policy: only where there is none)
-        first = vinylrip.merged_comment(base[0] if base else "", line)
-        after = [first] + list(base[1:])
+        base = _vals(changes["comment"]) if "comment" in changes else had
+        if pol == "fill_missing" and had:
+            return                                     # (a comment there is kept as it is)
+        after = vinylrip.merged_values(base, line)
         if after == had:
             if "comment" in changes:                   # (the plan would write only what is there)
                 changes.pop("comment")
@@ -3344,6 +3376,8 @@ class Planner:
         first = targets.get(kept[0]) or {}
         catno = "" if unproven else str((first.get("catalognumber") or [""])[0]).strip()
         pressing = "" if unproven else str((rel.get("date") or first.get("date") or [""])[0])[:4]
+        original = str((first.get("originalyear") or first.get("originaldate") or [""])[0])[:4]
+        artist = str((first.get("albumartist") or [""])[0])
         comments = []
         for f in kept[:3]:
             try:
@@ -3351,7 +3385,8 @@ class Planner:
             except Exception:
                 pass
         try:
-            return vinylrip.describe(prop.source_dir, kept, catno, comments=comments, pressing_year=pressing)
+            return vinylrip.describe(prop.source_dir, kept, catno, comments=comments, pressing_year=pressing,
+                                     original_year=original, artist=artist)
         except Exception:
             return {}
 

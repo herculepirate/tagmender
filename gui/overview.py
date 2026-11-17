@@ -2143,13 +2143,20 @@ class Overview(QWidget):
         look-up (never in its way), then shown with each copy's row (its tooltip, Why This
         Release). Nothing is chosen or changed by it."""
         plan = self.plan
-        if not plan or getattr(self, "_copies_worker", None) is not None:
+        if not plan:
+            return
+        if getattr(self, "_copies_worker", None) is not None:
+            self._copies_again = True                      # (another plan meanwhile: measured after)
             return
         albums = list(plan.get("albums") or [])
         # (what the worker reads, copied here: the albums are the UI thread's)
         snap = {"albums": [{"identification": dict(a.get("identification") or {}), "status": a.get("status"),
                             "source_dir": a.get("source_dir"),
-                            "files": [{"src": fe.get("src"), "dst": fe.get("dst")} for fe in a.get("files") or ()]}
+                            "files": [{"src": fe.get("src"), "dst": fe.get("dst"),
+                                       "discnumber": (fe.get("changes") or {}).get("discnumber") or next(
+                                           (r.get("after") for r in fe.get("diff") or ()
+                                            if r.get("field") == "discnumber"), None)}
+                                      for fe in a.get("files") or ()]}
                            for a in albums]}
 
         def work(_w):
@@ -2160,7 +2167,11 @@ class Overview(QWidget):
 
         def done(found):
             self._copies_worker = None
-            if self.plan is not plan or not found:
+            if self.plan is not plan or getattr(self, "_copies_again", False):
+                self._copies_again = False
+                self.measure_copies()                      # (the plan shown now)
+                return
+            if not found:
                 return
             for i, rows in found.items():
                 if 0 <= i < len(albums):
@@ -2172,6 +2183,9 @@ class Overview(QWidget):
 
         def failed(_msg):
             self._copies_worker = None                     # (a measure is only shown: nothing to tell)
+            if getattr(self, "_copies_again", False):
+                self._copies_again = False
+                self.measure_copies()
         self._copies_worker = start(self, work, done, failed=failed)
 
     def lookup_failed(self, msg):

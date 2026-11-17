@@ -40,6 +40,8 @@ CLIP = 0.9999                       # (16-bit full scale is 32767/32768 = 0.9999
 MAX_COPIES = 8
 MAX_TRACKS = 60
 MAX_SECONDS = 3 * 3600
+FILE_TIMEOUT = 600.0                  # s: a file decoded longer is left unmeasured
+MAX_CACHED = 50000
 AUDIO = {".flac", ".wav", ".aif", ".aiff", ".ape", ".wv", ".m4a", ".alac", ".tak", ".mp3", ".ogg", ".opus", ".dsf",
          ".dff", ".wma", ".aac"}
 _LOCK = threading.Lock()
@@ -61,39 +63,47 @@ def dr_of_blocks(rms_blocks, peak_blocks):
     return 20 * math.log10(peak / top)
 
 
-def _clipped(x) -> int:
-    """Samples of one channel at full scale in runs of two or more."""
-    import numpy as np
-    m = np.abs(x) >= CLIP
-    if not m.any():
-        return 0
-    prev = np.concatenate(([False], m[:-1]))
-    nxt = np.concatenate((m[1:], [False]))
-    return int((m & (prev | nxt)).sum())
+def half_up(x: float) -> int:
+    """x rounded as a meter shows it: halves up (12.5 is 13), never to the even number."""
+    return int(math.floor(x + 0.5))
 
 
-def measure_file(path, cancel=None) -> dict | None:
+def _decode_args(info, path) -> tuple:
+    """(rate, channels, ffmpeg's args) to decode PATH to 32-bit float PCM at a rate the meter
+    reads: the file's own rate - a DSD file's (2.8 MHz and up) at 176.4 kHz, as its PCM is read."""
+    rate, ch = int(getattr(info, "sample_rate", 0) or 0), int(getattr(info, "channels", 0) or 0)
+    if rate > 384000 or Path(str(path)).suffix.lower() in (".dsf", ".dff"):
+        rate = 176400
+    return rate, ch, ["-ac", str(ch), "-ar", str(rate)]
+
+
+def measure_file(path, cancel=None, timeout=None) -> dict | None:
     """{"dr": the track's DR (float), "clipped": samples, "peak": max |x|} or None (unreadable,
-    silent, or cancelled)."""
+    silent, no ffmpeg, too slow, or cancelled)."""
+    import shutil
+    import time
     import numpy as np
+    if not shutil.which("ffmpeg"):
+        return None
     try:
         import mutagen
-        info = mutagen.File(str(path)).info
-        rate, ch = int(getattr(info, "sample_rate", 0) or 0), int(getattr(info, "channels", 0) or 0)
+        rate, ch, args = _decode_args(mutagen.File(str(path)).info, path)
     except Exception:
         return None
     if not rate or not ch:
         return None
+    deadline = time.monotonic() + (timeout or FILE_TIMEOUT)
     block = int(rate * BLOCK_S) * ch
     proc = subprocess.Popen(["ffmpeg", "-v", "error", "-nostdin", "-i", str(path), "-t", str(MAX_SECONDS),
-                             "-map", "0:a:0", "-f", "f32le", "-acodec", "pcm_f32le", "-"],
+                             "-map", "0:a:0", *args, "-f", "f32le", "-acodec", "pcm_f32le", "-"],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     rms = [[] for _ in range(ch)]
     peaks = [[] for _ in range(ch)]
+    tail = [(False, False)] * ch
     clipped, top = 0, 0.0
     try:
         while True:
-            if cancel is not None and cancel():
+            if (cancel is not None and cancel()) or time.monotonic() > deadline:
                 return None
             raw = proc.stdout.read(block * 4)
             if not raw:
@@ -107,7 +117,8 @@ def measure_file(path, cancel=None) -> dict | None:
                 p = float(np.max(np.abs(s)))
                 peaks[c].append(p)
                 top = max(top, p)
-                clipped += _clipped(s)
+                n, tail[c] = _run_count(s, tail[c])
+                clipped += n
     finally:
         proc.stdout.close()
         proc.kill()
@@ -118,65 +129,119 @@ def measure_file(path, cancel=None) -> dict | None:
     return {"dr": sum(drs) / len(drs), "clipped": clipped, "peak": top}
 
 
+def _run_count(x, state=(False, False)) -> tuple:
+    """(samples of one channel at full scale in runs of two or more, the state for the next
+    block). state: (the block before ended at full scale, that last sample was counted) - a run
+    across two blocks is one run: the sample left alone at the end of the block before is
+    counted once its partner shows here."""
+    import numpy as np
+    before, counted = state
+    m = np.abs(x) >= CLIP
+    if not len(m):
+        return 0, state
+    prev = np.concatenate(([before], m[:-1]))
+    nxt = np.concatenate((m[1:], [False]))
+    hit = m & (prev | nxt)
+    n = int(hit.sum())
+    if before and m[0] and not counted:
+        n += 1
+    return n, (bool(m[-1]), bool(hit[-1]))
+
+
 # ---------------------------------------------------------------------------- the cache
 def _cache_path() -> Path:
     import exclusions
     return Path(exclusions.STATE_DIR) / "dynamics.json"
 
 
-def _fp(path) -> str:
+def _stamp(path) -> str:
     st = os.stat(path)
-    return f"{st.st_size}:{st.st_mtime_ns}"
+    return f"{st.st_size}:{st.st_mtime_ns}:{st.st_ino}"
 
 
 def _load() -> dict:
     try:
-        return json.loads(_cache_path().read_text(encoding="utf-8"))
+        got = json.loads(_cache_path().read_text(encoding="utf-8"))
+        return got if isinstance(got, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
 def _save(cache: dict):
+    """The cache written - only when it changed (cache["~changed"]), files gone pruned, at most
+    MAX_CACHED files kept."""
+    if not cache.pop("~changed", False):
+        return
+    keep = {k: v for k, v in cache.items() if not k.startswith("~") and os.path.exists(k)}
+    if len(keep) > MAX_CACHED:
+        keep = dict(sorted(keep.items(), key=lambda kv: -float((kv[1] or {}).get("t") or 0))[:MAX_CACHED])
     p = _cache_path()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(f".{p.name}.tmp")
-        tmp.write_text(json.dumps(cache), encoding="utf-8")
+        tmp.write_text(json.dumps(keep), encoding="utf-8")
         os.replace(tmp, p)
     except OSError:
         pass
 
 
+def _analysis():
+    """levels.Cache - the measurements kept by the audio itself (its digest): the same audio
+    renamed, moved or retagged is not decoded again."""
+    try:
+        import exclusions
+        import levels
+        return levels.Cache(Path(exclusions.STATE_DIR) / "analysis.db")
+    except Exception:
+        return None
+
+
 def measure_copy(files, cancel=None, cache=None) -> dict | None:
-    """{"dr": int, "clipped": int, "tracks": n} of one copy (its audio files), each file measured
-    once (the cache, by path, size and modification time); None when nothing was measured."""
+    """{"dr": int, "clipped": int, "tracks": n} of one copy (its audio files), each file's audio
+    measured once: by its path, size, time (the cache) and, a file changed or moved, its audio
+    itself (levels.Cache, by digest: tags written since measure nothing again). None when nothing
+    was measured."""
+    import time
     own = cache is None
     cache = _load() if own else cache
-    drs, clipped, changed = [], 0, False
-    for f in [f for f in files if Path(str(f)).suffix.lower() in AUDIO][:MAX_TRACKS]:
-        if cancel is not None and cancel():
-            return None
-        key = os.path.realpath(str(f))
-        try:
-            fp = _fp(key)
-        except OSError:
-            continue
-        hit = cache.get(key)
-        if not (isinstance(hit, dict) and hit.get("fp") == fp):
-            got = measure_file(key, cancel)
-            if got is None:
+    db = None
+    drs, clipped = [], 0
+    try:
+        for f in [f for f in files if Path(str(f)).suffix.lower() in AUDIO][:MAX_TRACKS]:
+            if cancel is not None and cancel():
+                return None
+            key = os.path.realpath(str(f))
+            try:
+                stamp = _stamp(key)
+            except OSError:
                 continue
-            hit = dict(got, fp=fp)
-            with _LOCK:
-                cache[key] = hit
-            changed = True
-        drs.append(round(hit["dr"]))                # (each track's DR as the meter shows it: whole)
-        clipped += int(hit.get("clipped") or 0)
-    if own and changed:
-        _save(cache)
+            hit = cache.get(key)
+            if not (isinstance(hit, dict) and hit.get("fp") == stamp):
+                if db is None:
+                    db = _analysis() or False
+                import levels
+                akey = levels._audio_key(key)
+                got = db.cached("dr1", akey)[1] if db else None
+                if got is None:
+                    got = measure_file(key, cancel)
+                    if got is None:
+                        continue
+                    if db:
+                        db.put("dr1", akey, got)
+                hit = dict(got, fp=stamp, t=time.time())
+                with _LOCK:
+                    cache[key] = hit
+                    cache["~changed"] = True
+            drs.append(half_up(hit["dr"]))            # (each track's DR as the meter shows it: whole)
+            clipped += int(hit.get("clipped") or 0)
+    finally:
+        if db:
+            db.close()
+        if own:
+            _save(cache)
     if not drs:
         return None
-    return {"dr": int(round(sum(drs) / len(drs))), "clipped": clipped, "tracks": len(drs)}
+    return {"dr": half_up(sum(drs) / len(drs)), "clipped": clipped, "tracks": len(drs)}
 
 
 # ---------------------------------------------------------------------------- the copies
@@ -209,7 +274,8 @@ def copies(plan, filed=True) -> list:
             continue
         files = [fe["src"] for fe in a.get("files") or () if fe.get("src")]
         for rid in _ids_of(a):
-            by.setdefault(rid, []).append({"folder": a.get("source_dir") or "", "files": files, "album": i})
+            by.setdefault(rid, []).append({"folder": a.get("source_dir") or "", "files": files, "album": i,
+                                           "discs": _discs_of(a.get("files") or ())})
         # (paths as written, no file system asked: the plan's are absolute already)
         planned |= {os.path.normpath(f) for f in files} | {os.path.normpath(fe["dst"])
                                                            for fe in a.get("files") or () if fe.get("dst")}
@@ -232,8 +298,36 @@ def copies(plan, filed=True) -> list:
                 found.setdefault((rid, str(_album_folder(Path(path)))), []).append(path)
         for (rid, folder), files in sorted(found.items()):
             if folder not in {c["folder"] for c in by[rid]}:
-                by[rid].append({"folder": folder, "files": sorted(files), "album": None})
-    return [(rid, cs[:MAX_COPIES]) for rid, cs in by.items() if len(cs) >= 2]
+                by[rid].append({"folder": folder, "files": sorted(files), "album": None,
+                                "discs": _discs_of([{"src": f} for f in sorted(files)[:3]])})
+    out = []
+    for rid, cs in by.items():
+        # (copies hold the same disc: disc 1 in one folder and disc 2 in another are two parts of
+        # one set, never two copies)
+        cs = [c for c in cs if any(c is not o and c["discs"] & o["discs"] for o in cs)]
+        if len(cs) >= 2:
+            out.append((rid, cs[:MAX_COPIES]))
+    return out
+
+
+def _discs_of(entries) -> set:
+    """The disc numbers a planned album's files take (as written, or as the files have them)."""
+    out = set()
+    for fe in entries:
+        got = (fe.get("changes") or {}).get("discnumber") or fe.get("discnumber")
+        if not got:
+            for r in fe.get("diff") or ():
+                if r.get("field") == "discnumber" and r.get("after"):
+                    got = r["after"]
+        if not got and fe.get("src"):
+            try:
+                import tagio
+                got = tagio.read(fe["src"]).get("discnumber")
+            except Exception:
+                got = None
+        v = str((got if isinstance(got, list) else [got or "1"])[0] or "1").split("/")[0].strip()
+        out.add(v or "1")
+    return out or {"1"}
 
 
 def label(folder, files) -> str:

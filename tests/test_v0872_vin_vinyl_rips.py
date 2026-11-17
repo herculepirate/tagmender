@@ -140,8 +140,9 @@ class VIN3_FolderNames(VinBase):
         self.rip(OTHER, 192000, shift=1)
         plan = self.moving(self.http()).plan(self.lib / "Billy Joel")
         self.assertEqual(len(plan["albums"]), 2, pl.preview(plan))
-        self.assertEqual(self.folders(plan), ["1973 - Piano Man [Vinyl Rip PBTHAL SRM-1-1184]",
-                                              "1973 - Piano Man [Vinyl Rip SRM-1-1184]"])
+        # (ED-2's pressing year kept - decided 2026-11-17 - then the ripper and catalogue number)
+        self.assertEqual(self.folders(plan), ["1973 - Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]",
+                                              "1973 - Piano Man [1977 Vinyl Rip SRM-1-1184]"])
         # (the Album tag keeps ED-2's edition alone: no rip details in it)
         albums = {v for a in plan["albums"] for fe in a["files"] for v in (fe["changes"].get("album") or [])}
         self.assertEqual(albums, {"Piano Man [1977 Vinyl Rip]"})
@@ -152,15 +153,15 @@ class VIN3_FolderNames(VinBase):
     def test_VIN3_the_year_ripped_the_folder_name_gives_is_kept(self):
         self.rip("1973 - Piano Man [2022 Vinyl Rip 24bit 192khz Mercury SRM-1-1184]", 192000)
         plan = self.moving(self.http()).plan(self.lib / "Billy Joel")
-        self.assertEqual(self.folders(plan), ["1973 - Piano Man [2022 Vinyl Rip SRM-1-1184]"])
+        self.assertEqual(self.folders(plan), ["1973 - Piano Man [1977 Vinyl Rip SRM-1-1184 ripped 2022]"])
 
-    def test_VIN3_two_copies_one_name_the_year_ripped_from_the_notes_names_the_second_apart(self):
+    def test_VIN3_two_copies_one_name_the_year_ripped_from_the_notes_names_one_apart_in_any_order(self):
         self.rip("1973 - Piano Man [Vinyl Rip 24bit 192khz Mercury SRM-1-1184]", 192000)
         self.rip("1973 - Piano Man [Vinyl Rip 32bit 192khz Mercury SRM-1-1184]", 96000, shift=1,
                  notes="Rip details:\nVinyl rip recorded February 1, 2012\n")
         plan = self.moving(self.http()).plan(self.lib / "Billy Joel")
-        self.assertEqual(self.folders(plan), ["1973 - Piano Man [2012 Vinyl Rip SRM-1-1184]",
-                                              "1973 - Piano Man [Vinyl Rip SRM-1-1184]"])
+        self.assertEqual(self.folders(plan), ["1973 - Piano Man [1977 Vinyl Rip SRM-1-1184 ripped 2012]",
+                                              "1973 - Piano Man [1977 Vinyl Rip SRM-1-1184]"])
 
     def test_VIN3_naming_fields(self):
         t = {"album": ["Piano Man"], "albumartist": ["Billy Joel"], "title": ["t"], "tracknumber": ["1"],
@@ -168,7 +169,7 @@ class VIN3_FolderNames(VinBase):
              "~ripper": ["PBTHAL"], "~rip_catalog": [CAT], "~rip_resolution": ["24-96"]}
         tpl = "%_riptag%/%_ripper%/%_rip_catalog%/%_rip_resolution%/%_edition%/x"
         self.assertEqual(naming.render(tpl, t), ["PBTHAL SRM-1-1184", "PBTHAL", CAT, "24-96",
-                                                 "Vinyl Rip PBTHAL SRM-1-1184", "x"])
+                                                 "1977 Vinyl Rip PBTHAL SRM-1-1184", "x"])
         self.assertEqual(naming.folder_edition(t, "edition"), "Vinyl Rip PBTHAL SRM-1-1184")
         # (no ripper or catalogue number known: ED-2 as before)
         plain = {k: v for k, v in t.items() if not k.startswith("~")}
@@ -184,14 +185,31 @@ class VIN3_FolderNames(VinBase):
         t = {"album": ["Piano Man"], "albumartist": ["Billy Joel"], "title": ["t"],
              "tracknumber": ["1"], "originaldate": ["1973"], "date": ["1977"], "media": ['12" Vinyl'],
              "~ripper": ["PBTHAL"], "~rip_catalog": [CAT]}
-        self.assertEqual(naming.render(out, t)[1], "1973 - Piano Man [Vinyl Rip PBTHAL SRM-1-1184]")
+        self.assertEqual(naming.render(out, t)[1], "1973 - Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]")
+        # (the Album tag carrying ED-2's "[1977 Vinyl Rip]": one bracket, never two)
+        t["album"] = ["Piano Man [1977 Vinyl Rip]"]
+        self.assertEqual(naming.render(out, t)[1], "1973 - Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]")
+        self.assertEqual(naming.render(naming.with_editions(naming.PRESETS["tagmender"], "edition_year"), t)[1],
+                         "1973 - Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]")
+
+    def test_VIN3_editions_off_a_vinyl_rip_still_names_its_rip(self):
+        t = {"album": ["Piano Man"], "albumartist": ["Billy Joel"], "title": ["t"], "tracknumber": ["1"],
+             "originaldate": ["1973"], "date": ["1977"], "media": ['12" Vinyl'], "~rip_vinyl": ["1"],
+             "~ripper": ["PBTHAL"], "~rip_catalog": [CAT]}
+        for name in ("tagmender", "all-music"):
+            out = naming.with_editions(naming.PRESETS[name], "off")
+            self.assertEqual(naming.render(out, t)[1], "1973 - Piano Man [Vinyl Rip PBTHAL SRM-1-1184]", name)
+            cd = {k: v for k, v in t.items() if not k.startswith("~")}
+            self.assertEqual(naming.render(out, dict(cd, media=["CD"]))[1], "1973 - Piano Man", name)
 
 
 class VIN3_Ripper(unittest.TestCase):
     def test_VIN3_ripper_from_the_folder_name(self):
         self.assertEqual(vr.ripper_in_name(PB), "PBTHAL")
         self.assertEqual(vr.ripper_in_name("1975 - X [Vinyl Rip pbthal 24bit 96khz]"), "PBTHAL")
-        self.assertEqual(vr.ripper_in_name("X [Vinyl Rip KRONOS 24bit 96khz Mercury 6337 160]"), "KRONOS")
+        # (a word in capitals is only a candidate: a ripper where the notes name it too - describe)
+        self.assertEqual(vr.ripper_in_name("X [Vinyl Rip KRONOS 24bit 96khz Mercury 6337 160]"), "")
+        self.assertEqual(vr.caps_in_name("X [Vinyl Rip KRONOS 24bit 96khz Mercury 6337 160]"), "KRONOS")
         self.assertEqual(vr.ripper_in_name("X [Vinyl Rip, rip by Gorehound]"), "Gorehound")
 
     def test_VIN3_a_catalogue_number_label_or_country_is_no_ripper(self):
@@ -387,6 +405,242 @@ class VIN6_CopiesMeasured(VinBase):
         m.set_plan({"albums": [a]})
         self.assertIn("32-192 DR 12, 3 clipped samples", m.data(m.index(0, 1), R_TOOLTIP))
 
+
+class VIN_Review(VinBase):
+    """The independent review's findings (2026-11-17), each with its own test."""
+    def apply(self, plan):
+        import executor
+        return executor.Executor(plan).run()
+
+    def test_VIN3_VIN4_plan_apply_plan_again_changes_nothing(self):
+        # C1: TagMender's own folder name and comment line are read back: the ripper and year stay
+        for folder, notes in (("1973 - Piano Man [Vinyl Rip KRONOS 24bit 96khz Mercury SRM-1-1184]",
+                               "Vinyl rip by KRONOS\nripped 2012-02-01 on my deck\n"),
+                              ("1973 - Piano Man [Vinyl Rip, rip by Gorehound 24bit 96khz]", None)):
+            with self.subTest(folder=folder):
+                import shutil
+                shutil.rmtree(self.lib, ignore_errors=True)
+                shutil.rmtree(self.tmp / "library", ignore_errors=True)
+                top = self.rip(folder, 96000, notes)
+                plan = self.moving(self.http()).plan(top)
+                first = self.folders(plan)
+                self.apply(plan)
+                there = Path(plan["albums"][0]["files"][0]["dst"]).parent
+                again = self.moving(self.http()).plan(there)
+                self.assertEqual(self.folders(again), first)
+                [a] = again["albums"]
+                self.assertTrue(all(fe["src"] == fe["dst"] and "comment" not in fe["changes"] for fe in a["files"]),
+                                [(fe["src"], fe["dst"], fe["changes"]) for fe in a["files"]])
+
+    def test_VIN4_a_line_of_yours_starting_vinyl_rip_is_kept(self):
+        # C2: a line of the user's own that starts "Vinyl rip: " is never TagMender's
+        mine = "Vinyl rip: my own notes, Technics SL-1200, cleaned with VPI 16.5"
+        line = vr.comment_line({"ripper": "PBTHAL", "resolution": (24, 96000)})
+        self.assertIsNone(vr.parse_own(mine))
+        self.assertEqual(vr.merged_comment(mine, line), mine + "\n" + line)
+        self.assertEqual(vr.merged_comment(f"{mine}\n{line}\nVinyl rip: more of mine", line),
+                         f"{mine}\n{line}\nVinyl rip: more of mine")
+        old = vr.comment_line({"resolution": (24, 192000)})
+        self.assertEqual(vr.merged_comment(f"a\n{old}\nb", line), f"a\n{line}\nb")
+        # (a Vorbis comment of two values: the line goes once, into the value holding it)
+        self.assertEqual(vr.merged_values(["Final Master", line], line), ["Final Master", line])
+        self.assertEqual(vr.merged_values(["Final Master", old], line), ["Final Master", line])
+        self.assertEqual(vr.parse_own(line)["ripper"], "PBTHAL")
+
+    def test_VIN4_policies_cleanup_and_a_cd_of_a_cd_and_lp_set(self):
+        top = self.rip(PB, 96000, PB_NOTES, comment="Final Master")
+        self.dest = self.tmp / "library"
+        self.dest.mkdir(exist_ok=True)
+        for extra in ({"field_policy": {"default": "replace", "fields": {"comment": "fill_missing"}}},
+                      {"field_policy": {"default": "fill_missing", "fields": {}}},
+                      {"cleanup": {"comments": "remove"}}):
+            with self.subTest(extra=extra):
+                eng = self.engine(self.http(), operation="move", destination=str(self.dest),
+                                  naming={"preset": "tagmender", "template": "", "editions": "edition_year"}, **extra)
+                plan = eng.plan(top)
+                self.assertFalse(any("Vinyl rip" in str(fe["changes"].get("comment"))
+                                     for a in plan["albums"] for fe in a["files"]))
+        import plan as planmod
+        self.assertFalse(planmod.Planner._vinyl_file({"media": ["CD"]}, False))
+        self.assertTrue(planmod.Planner._vinyl_file({"media": ['12" Vinyl']}, False))
+
+    def test_VIN4_picard_preserved_comment_gets_no_line(self):
+        top = self.rip(PB, 96000, PB_NOTES, comment="Final Master")
+        self.picard_ini(preserved="comment")
+        plan = self.moving(self.http()).plan(top)
+        self.assertFalse(any("Vinyl rip" in str(fe["changes"].get("comment"))
+                             for a in plan["albums"] for fe in a["files"]))
+
+    def test_VIN1_a_cd_beside_an_lp_and_a_ripper_named_on_one_side_only_join(self):
+        # M2: only vinyl members compared; one ripper named and one not is no difference
+        self.assertFalse(engine.Engine._other_rips([("24-96", "Packgrog"), ("24-96", "")]))
+        self.assertTrue(engine.Engine._other_rips([("24-96", "Packgrog"), ("24-96", "PBTHAL")]))
+        self.assertTrue(engine.Engine._other_rips([("24-96", ""), ("24-192", "")]))
+        from types import SimpleNamespace as NS
+        a = self.rip("1973 - Piano Man CD", 44100)
+        b = self.rip("1973 - Piano Man LP", 96000)
+        mem = [(0, NS(folder=a), NS(files=sorted(a.glob("*.flac")), targets=[{"media": ["CD"]}])),
+               (1, NS(folder=b), NS(files=sorted(b.glob("*.flac")), targets=[{"media": ['12" Vinyl']}]))]
+        self.assertEqual(engine.Engine._vinyl_rips(mem), [("24-96", "")])
+
+    def test_VIN3_ripper_false_positives(self):
+        # M3
+        for name in ("X [Vinyl Rip ABBA 24-96]", "X [Vinyl Rip LONDON 24bit 96khz]", "X [Vinyl Rip ALAC 24-96]",
+                     "X [Vinyl Rip MINT 24-96]", "X [rip by john at 24-96]", "X [Rip by Foo using Audacity]",
+                     "X [ripped by EAC]", "X [Vinyl rip by me 24-96]"):
+            self.assertEqual(vr.ripper_in_name(name), "", name)
+        for text in ("Digitally transferred by Bob Ludwig at Gateway", "Remastered and transferred by Kevin Gray",
+                     "ripped by EAC", "Ripped by Audacity 2.0", "Posted by: admin", "Uploaded by Torrentbot",
+                     "Ripped by request", "ripped by Sunday", "Digitized by DBPOWERAMP", "Rip by the way",
+                     "Converted and ripped by foobar2000"):
+            self.assertEqual(vr.ripper_in_notes(text), "", text)
+        self.assertEqual(vr.ripper_in_notes("rip by gorehound, vm760slc"), "gorehound")
+        # (a word in capitals the notes name too is the ripper; never the album artist)
+        top = self.rip("1973 - Piano Man [Vinyl Rip KRONOS 24bit 96khz]", 96000, "Vinyl rip by KRONOS\n")
+        self.assertEqual(vr.describe(top, sorted(top.glob("*.flac")))["ripper"], "KRONOS")
+        self.assertEqual(vr.describe(top, sorted(top.glob("*.flac")), notes="")["ripper"], "")
+        self.assertEqual(vr.describe(top, sorted(top.glob("*.flac")), artist="Kronos")["ripper"], "")
+
+    def test_VIN5_no_catalogue_number_in_dates_spans_rates_or_formats(self):
+        # M4
+        for name in ("[12-02-74]", "[2019-2020-2021]", "[24-192-Vinyl]", "[44100-16-2]", "[96000-24-2]",
+                     "[H264-AAC-1080p]", "[mp3-v0-2008]", "[33-45-78]", "[Tracks 01-12-16]", "[DR 12-14-11]",
+                     "[555-123-4567]", "[SN 123-45-6789]", "[1080-2160-4320]", "[0-60-120]", "[S1 123456]",
+                     "[LP-33-12345]", "[2LP-SET-12345]", "[Remaster-2015-24-96]", "[1977-1978-1979]",
+                     "[CD1 12345]", "[HD1 192000]", "MC5-1969"):
+            self.assertEqual(mc.catno_hints(name), [], name)
+
+    def test_VIN3_year_ripped_never_a_pressing_year(self):
+        # M5
+        for text in ("Ripped from my 1985 UK first pressing", "Recorded live 1981, ripped from LP",
+                     "Ripped at 24/96 from the 1989 reissue", "Ripped by X\nRecorded at Le Studio 1981"):
+            self.assertEqual(vr.rip_year(text), "", text)
+        self.assertEqual(vr.rip_year("Transferred in 2008 from a 1982 copy"), "2008")
+        self.assertEqual(vr.rip_year("ripped 2012-02-01", not_years=("2012",)), "")
+        for name, pressing in (("X [1985 Vinyl Rip]", ""), ("X [1985 UK Vinyl Rip]", "1977"),
+                               ("X [1985 Vinyl Rip 24bit 96khz]", "1985"), ("X [1977 Vinyl Rip PBTHAL SRM-1-1184]", "")):
+            self.assertEqual(vr.year_in_name(name, pressing), "", name)
+        self.assertEqual(vr.year_in_name("X [1977 Vinyl Rip SRM-1-1184 ripped 2012]"), "2012")
+
+    def test_VIN4_equipment_never_a_sentence(self):
+        for text in ("Turntable\n\nThe album was cut by ...", "Track 3 has a click in the cartridge",
+                     "This record was played with my old cartridge", "Turntable setup\nI used a Technics"):
+            self.assertEqual(vr.equipment(text), "", text)
+        self.assertEqual(vr.equipment("Turntable Equipment Profile\n- VPI Scoutmaster with SDS"), "VPI Scoutmaster")
+
+    def test_VIN6_copies_hold_the_same_disc(self):
+        import dynamics
+        def album(i, disc):
+            return {"status": "ready", "source_dir": f"/x/{i}", "identification": {
+                "status": "identified", "release_id": RID, "tier": "exact"},
+                "files": [{"src": f"/x/{i}/01.flac", "dst": f"/y/{i}/01.flac", "changes": {"discnumber": [disc]}}]}
+        self.assertEqual(dynamics.copies({"albums": [album(1, "1"), album(2, "2")]}, filed=False), [])
+        self.assertEqual(len(dynamics.copies({"albums": [album(1, "1"), album(2, "1")]}, filed=False)), 1)
+        self.assertEqual(dynamics.half_up(12.5), 13)
+        # (a run of full-scale samples across two blocks is counted whole)
+        import numpy as np
+        x = np.array([0, 1, 1, 0, 1, 0, 1], float)
+        n1, st = dynamics._run_count(x[:2])
+        n2, _st = dynamics._run_count(x[2:], st)
+        self.assertEqual(n1 + n2, dynamics._run_count(x)[0])
+
+    def test_VIN6_no_ffmpeg_measures_nothing(self):
+        import dynamics
+        from unittest import mock
+        f = self.tmp / "a.flac"
+        self.rip("x", 44100)
+        f = next((self.lib / "Billy Joel" / "x").glob("*.flac"))
+        with mock.patch("shutil.which", return_value=None):
+            self.assertIsNone(dynamics.measure_file(f))
+
+
+class VIN7_TwoRipsInOneFolder(VinBase):
+    FOLDER = "1973 - Piano Man [Vinyl Rip 24bit 96khz Mercury SRM-1-1184]"
+
+    def two(self, b_comment, b_suffix=" (1)", b_titles=TITLES, b_lens=None):
+        top = self.lib / "Billy Joel" / self.FOLDER
+        top.mkdir(parents=True)
+        sets = (("", TITLES, [x / 1000 for x in LENS], "US Pressing - Fran Solo, Ediciones 24bit-96kHz"),
+                (b_suffix, b_titles, b_lens or [x / 1000 + 0.6 for x in LENS], b_comment))
+        for suffix, titles, lens, com in sets:
+            for i, (t, secs) in enumerate(zip(titles, lens)):
+                f = top / (f"{i + 1:02d}. {t}{suffix}.flac" if suffix else f"{i + 1:02d}. {t}.flac")
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                                f"sine=frequency={300 + 50 * i}:duration={secs}", "-ar", "96000", "-sample_fmt", "s32",
+                                "-ac", "2", "-metadata", f"title={t}", "-metadata", "album=Piano Man",
+                                "-metadata", "albumartist=Billy Joel", "-metadata", "artist=Billy Joel",
+                                "-metadata", f"track={i + 1}", "-metadata", f"ISRC=USSM1730050{i}", str(f), "-y"],
+                               check=True)
+                tagio.write(f, {"comment": [com]})
+        (top / "Info.txt").write_text("notes both rips share\n")
+        return top
+
+    def test_VIN7_two_rips_saved_as_copies_are_split_into_a_copy_each(self):
+        top = self.two("Vinyl rip by Packgrog, recorded February 1, 2012")
+        plan = self.moving(self.http()).plan(top)
+        self.assertEqual(len(plan["albums"]), 2, pl.preview(plan))
+        self.assertTrue(all(a["status"] == "ready" and a["split"].get("rips") for a in plan["albums"]))
+        self.assertEqual(self.folders(plan), ["1973 - Piano Man [1977 Vinyl Rip Packgrog SRM-1-1184 ripped 2012]",
+                                              "1973 - Piano Man [1977 Vinyl Rip SRM-1-1184]"])
+        # (the shared notes go with the first copy, moved - never copied; the other gets a note)
+        first, other = sorted(plan["albums"], key=lambda a: a["split"]["index"])
+        self.assertEqual([(Path(c["src"]).name, c["op"]) for c in first["companions"]], [("Info.txt", "move")])
+        self.assertEqual(other["companions"], [])
+        self.assertTrue(any("go with the first copy" in n for n in other["notes"]))
+        # (nothing moved before Apply; Apply files both, Undo puts the one folder back as it was)
+        before = sorted(p.name for p in top.iterdir())
+        res = TestUndo.apply_and_undo(self, plan, top)
+        self.assertEqual(res, before)
+
+    def test_VIN7_two_rips_one_name_the_second_stays_where_it_was(self):
+        top = self.two("other ripper's words")
+        plan = self.moving(self.http()).plan(top)
+        self.assertTrue(all(a["status"] == "ready" for a in plan["albums"]), pl.preview(plan))
+        first, other = sorted(plan["albums"], key=lambda a: a["split"]["index"])
+        self.assertEqual({str(Path(fe["dst"]).parent) for fe in other["files"]}, {str(top)})
+        self.assertNotEqual({str(Path(fe["dst"]).parent) for fe in first["files"]}, {str(top)})
+        self.assertTrue(any("MOV-4" in n for n in other["notes"]))
+
+    def test_VIN7_two_rips_told_by_their_tags_alone(self):
+        # (no copy names: two sets numbered 1..3 each, each rip's own comment and date)
+        top = self.two("Vinyl rip by Packgrog, recorded February 1, 2012", b_suffix=" b")
+        eng = self.moving(self.http())
+        g = eng.albums_in(top)[0]
+        sets = engine.rip_sets(g.files)
+        self.assertEqual(sorted(len(x) for x in sets), [3, 3])
+        plan = eng.plan(top)
+        self.assertEqual(len(plan["albums"]), 2, pl.preview(plan))
+
+    def test_VIN7_weak_evidence_holds_and_lists_two_rips(self):
+        # (an 8-track rip beside a 4-track one of the same record, its suite as one track - here a
+        # second set whose last track is no track of the release: it proves no release of its
+        # own: held, both sets named, for Needs Attention)
+        top = self.two("Vinyl rip by Packgrog", b_suffix=" b", b_titles=["Track 1", "Track 2", "Track 3 Suite"],
+                       b_lens=[10.6, 20.6, 75.0])
+        plan = self.moving(self.http()).plan(top)
+        [a] = plan["albums"]
+        self.assertEqual(a["identification"]["status"], "unresolved")
+        self.assertIn("two_rips", a["identification"].get("reason_codes") or [])
+        words = a["identification"]["why"][0]
+        self.assertIn("two rips of one record are mixed in this folder", words)
+        self.assertIn("01. Track 1.flac", words)
+        self.assertIn("03. Track 3 Suite b.flac", words)
+        self.assertTrue(all(fe["src"] == fe["dst"] for fe in a["files"]))
+        import reasons
+        from gui.attention import short_reason
+        self.assertEqual(short_reason("two_rips"), "Two rips in one folder")
+        self.assertIn("two_rips", reasons.CODES)
+
+
+class TestUndo:
+    @staticmethod
+    def apply_and_undo(case, plan, top):
+        """Apply PLAN (every file where it said), then undo it: TOP's entries after the undo."""
+        import executor
+        res = executor.Executor(plan).run()
+        case.assertTrue(all(Path(fe["dst"]).exists() for a in plan["albums"] for fe in a["files"]), res)
+        executor.undo(plan["job"])
+        return sorted(p.name for p in top.iterdir())
 
 if __name__ == "__main__":
     unittest.main()

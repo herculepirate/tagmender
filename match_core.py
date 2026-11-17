@@ -219,8 +219,40 @@ _CATNO_ONE_TOKEN = re.compile(r"^[A-Za-z]{1,10}-?\d{2,7}(?:[-/]\d{1,3})?(?:CD|LP
 _CATNO_NUMBER = re.compile(r"^\d{2,7}(?:[-/]\d{1,3})?$")                         # 71063-2, 058, 2357
 _YEAR = re.compile(r"^(19|20)\d\d$")
 # VIN-5: a code in three or four groups of letters and digits ("SRM-1-1184", "25-3P-378", "25·3P-269")
-_VIN_GROUPED = re.compile(r"^[A-Za-z0-9]{1,8}(?:[-·・][A-Za-z0-9]{1,8}){2,3}$")
-_VIN_DATE = re.compile(r"^(?:(?:19|20)\d\d[-.·]\d{1,2}[-.·]\d{1,2}|\d{1,2}[-.·]\d{1,2}[-.·](?:19|20)\d\d)$")
+_VIN_GROUPED = re.compile(r"^[A-Za-z0-9]{1,8}(?:[-\u00b7\u30fb][A-Za-z0-9]{1,8}){2,3}$")
+_VIN_DATE = re.compile(r"^(?:(?:19|20)\d\d[-.\u00b7]\d{1,2}[-.\u00b7]\d{1,2}|\d{1,2}[-.\u00b7]\d{1,2}[-.\u00b7](?:19|20)?\d\d)$")
+# (groups that are an audio or video format, a rate or a resolution, never a catalogue number's)
+_VIN_NOT_GROUP = {"lp", "cd", "ep", "web", "flac", "mp3", "aac", "alac", "wav", "dvd", "rpm", "set", "box", "dr", "hd",
+                  "sd", "bd", "fps", "bpm", "kbps", "vinyl", "rip", "live", "disc", "side", "vol", "pt", "of", "tracks",
+                  "h264", "h265", "x264", "x265", "hevc", "v0", "v2", "320", "4k", "8k"}
+_VIN_RATES = {"44100", "48000", "88200", "96000", "176400", "192000", "352800", "384000", "2822400", "5644800",
+              "480", "576", "720", "1080", "1440", "2160", "4320"}
+
+
+def _vin_code(w: str) -> bool:
+    """VIN-5: W is a record's catalogue number in groups ("SRM-1-1184", "25-3P-378", "832-464-1",
+    "7567-82293-1"): five digits or more; a letter group in capitals or a letter-and-digit chunk
+    ("3P", "B0022371") or a group of three digits or more that is no year; never only groups of
+    one or two digits ("12-02-74", "33-45-78", "01-12-16"), only years ("2019-2020-2021"), a date,
+    a phone or social-security shape, a rate or video resolution ("44100-16-2", "1080-2160-4320"),
+    nor a format word ("24-192-Vinyl", "H264-AAC-1080p", "mp3-v0-2008", "LP-33-12345")."""
+    if not _VIN_GROUPED.match(w) or _VIN_DATE.match(w) or sum(c.isdigit() for c in w) < 5:
+        return False
+    groups = re.split(r"[-\u00b7\u30fb]", w)
+    if re.fullmatch(r"\d{3}-\d{3}-\d{4}|\d{3}-\d{2}-\d{4}", w):
+        return False
+    lettered = False
+    for g in groups:
+        if g.casefold() in _VIN_NOT_GROUP or g in _VIN_RATES or re.fullmatch(r"\d*(?:lp|cd|ep|bit|khz|hz)", g, re.I) or \
+                re.fullmatch(r"\d+[kp]", g):
+            return False
+        if re.search(r"[A-Za-z]", g):
+            if re.search(r"[a-z]", g):                # (a word in lower case: never a number's part)
+                return False
+            lettered = True
+    big = any(g.isdigit() and len(g) >= 3 and not _YEAR.match(g) for g in groups) and \
+        (len(groups[0]) >= 3 or any(g.isdigit() and len(g) >= 4 and not _YEAR.match(g) for g in groups))
+    return lettered or big
 
 
 # CAT-3: disc formats and audio editions spelled like a label code ("[HDCD 1]", "[UHQCD 2]")
@@ -278,17 +310,18 @@ def catno_hints(text, variants=False):
                 # "B0022371-01-9"), a prefix with a digit ("R1-83736", "RD1 83736"), a long second
                 # group ("RR 1686-176561"), or numbers in groups with a dashed last one ("818 476-1",
                 # "422 826 098-1"); never a date ("1974-12-02", "02-12-1974")
-                elif _VIN_GROUPED.match(w) and sum(c.isdigit() for c in w) >= 5 and not _VIN_DATE.match(w):
+                elif _vin_code(w):
                     found.append(w)
-                elif re.fullmatch(r"[A-Za-z]{1,4}\d{1,2}-\d{4,7}", w):
+                elif re.fullmatch(r"[A-Z]{1,3}\d-\d{4,7}", w) and w.split("-")[1] not in _VIN_RATES \
+                        and not _YEAR.match(w.split("-")[1]):
                     found.append(w)
-                elif re.fullmatch(r"\d{5,6}", w) and re.fullmatch(r"[A-Za-z]{1,4}\d", prev) and \
-                        not re.fullmatch(r"(?:cd|lp|dvd|bd|disc|disk|vol|pt|part|side|ep)\d", prev, re.I):
+                elif re.fullmatch(r"\d{5,6}", w) and w not in _VIN_RATES and re.fullmatch(r"[A-Z]{2,3}\d", prev) and \
+                        not re.fullmatch(r"(?:CD|LP|DVD|BD|DL|HD|TR|MK|EP|PT|SD|MIX|VOL|DSC)\d", prev):
                     found.append(f"{prev} {w}")
-                elif re.fullmatch(r"\d{3,5}-\d{4,7}", w) and not all(_YEAR.match(x) for x in w.split("-")):
+                elif re.fullmatch(r"\d{3,5}-\d{5,7}", w) and not _YEAR.match(w.split("-")[0]):
                     found.append(f"{prev} {w}" if re.fullmatch(r"[A-Z]{1,4}", prev) else w)
                 elif re.fullmatch(r"\d{3}", w) and re.fullmatch(r"\d{3}", nxt) and \
-                        re.fullmatch(r"\d{3}(?:-\d{1,2})?", nxt2):
+                        re.fullmatch(r"\d{3}-\d{1,2}", nxt2):
                     found.append(f"{w} {nxt} {nxt2}")
                     skip.update((i + 1, i + 2))
                 elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt):

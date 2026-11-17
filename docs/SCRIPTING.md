@@ -121,9 +121,10 @@ The naming script also sees these:
 | `%_albumartists_sorted%` | The album artists (the `albumartists` tag) A to Z; else the album artist as written. Use with `$join` |
 | `%_edition%` | The edition: the reissue year and the kind, "2019 Vinyl", "2015 WEB", "2014 CD"; just "Vinyl" for an original vinyl; empty for an original CD and when the media is unknown |
 | `%_edition_kind%` | The kind alone: "Vinyl", "WEB", "Tape"; empty for a CD |
-| `%_riptag%` | A vinyl rip's ripper and catalogue number, "PBTHAL SRM-1-1184" (VIN-3); empty for anything else. `%_edition%` already ends with it ("Vinyl Rip PBTHAL SRM-1-1184") |
+| `%_riptag%` | A vinyl rip's ripper and catalogue number, "PBTHAL SRM-1-1184" (VIN-3); empty for anything else. `%_edition%` already holds it ("1977 Vinyl Rip PBTHAL SRM-1-1184") |
 | `%_ripper%`, `%_rip_catalog%` | Its parts: "PBTHAL", "SRM-1-1184" |
-| `%_rip_year%` | The year ripped, set where your folder name gives it or two copies of one release would share a folder (VIN-3) |
+| `%_rip_year%` | The year ripped, when known (VIN-3) |
+| `%_vinylrip%` | A vinyl rip's bracket with editions off: "Vinyl Rip PBTHAL SRM-1-1184" |
 | `%_rip_resolution%` | The rip's audio, bits and kHz: "24-96" (in no preset's folder name) |
 | `%_multiartist%` | `1` when the release's tracks are by more than one artist |
 

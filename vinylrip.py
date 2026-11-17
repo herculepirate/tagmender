@@ -34,31 +34,44 @@ LOSSLESS = {".flac", ".wav", ".aif", ".aiff", ".ape", ".wv", ".m4a", ".alac", ".
 KNOWN_RIPPERS = {"pbthal": "PBTHAL"}
 
 # capitals after "Vinyl Rip" that name no ripper: labels, cutting and pressing words, formats
+# (VIN-3: such a word is a ripper only when it is a known one or the rip notes name it too)
 _NOT_RIPPER = {
     "DMM", "RM", "LP", "EP", "MFSL", "MOFI", "UHQR", "QRP", "RTI", "HQ", "HQ180", "OBI", "MONO", "STEREO",
     "PROMO", "TEST", "PRESS", "PRESSING", "ORIGINAL", "FIRST", "REISSUE", "REMASTER", "REMASTERED", "VINYL",
-    "RIP", "FLAC", "WAV", "DSD", "PCM", "HDTRACKS", "WEB", "CD", "SACD", "BOX", "SET", "DELUXE", "LIMITED",
-    "EDITION", "JAPAN", "GERMANY", "HOLLAND", "CANADA", "FRANCE", "ITALY", "SPAIN", "EMI", "RCA", "CBS", "MCA",
-    "ABC", "UA", "EMI", "ATCO", "EPIC", "ANTHEM", "MERCURY", "ATLANTIC", "COLUMBIA", "CAPITOL", "VERTIGO",
-    "HARVEST", "ISLAND", "VIRGIN", "POLYDOR", "PHILIPS", "DECCA", "ASYLUM", "ELEKTRA", "REPRISE", "WARNER",
-    "SIRE", "GEFFEN", "ARISTA", "CHRYSALIS", "MOTOWN", "STAX", "BLUE", "NOTE", "IMPULSE", "VERVE", "ECM",
-    "PITMAN", "TERRE", "HAUTE", "SANTA", "MARIA", "JACKSONVILLE", "SPECIALTY", "ALLIED", "MASTERDISK",
-    "STERLING", "JAMF", "RL", "HALF", "SPEED", "AAA", "ADD", "NEW", "USED", "NM", "VG", "EX",
+    "RIP", "FLAC", "WAV", "DSD", "PCM", "LPCM", "ALAC", "AIFF", "APE", "WAVPACK", "HDTRACKS", "WEB", "CD", "SACD",
+    "BOX", "SET", "DELUXE", "LIMITED", "EDITION", "ALBUM", "SINGLE", "DOUBLE", "MAXI", "SPLIT", "LIVE", "DEMO",
+    "BOOTLEG", "REMIX", "MONOMIX", "STUDIO", "MASTER", "SPECIAL", "RAW", "CLEAN", "MINT", "RARE", "AUDIOPHILE",
+    "CLEAR", "WHITE", "BLACK", "COLOURED", "COLORED", "QUIEX", "ORIG",
 }
-_COUNTRY = {"US", "USA", "UK", "GB", "JP", "DE", "EU", "FR", "IT", "NL", "CA", "AU", "SK", "ES", "SE", "BR"}
+_COUNTRY = {"US", "USA", "UK", "GB", "JP", "DE", "EU", "FR", "IT", "NL", "CA", "AU", "SK", "ES", "SE", "BR", "USSR"}
+# words that sign no ripper: software, forum roles, the ripper's own words for himself, days
+_NOT_A_NAME = {
+    "the", "a", "an", "me", "myself", "us", "my", "using", "with", "hand", "ear", "way", "request", "requests",
+    "eac", "exact", "audacity", "foobar", "foobar2000", "dbpoweramp", "xld", "audition", "adobe", "izotope", "rx",
+    "clickrepair", "vinylstudio", "sox", "ffmpeg", "flac", "wavelab", "soundforge", "sound", "dvd", "usb",
+    "admin", "administrator", "moderator", "mod", "staff", "torrentbot", "bot", "anonymous", "unknown", "dr",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "someone", "somebody", "friend",
+}
 
 _VINYL_RIP_WORDS = re.compile(r"\bvinyl\s*-?\s*rip\b|\bvinylrip\b|\bLP\s*rip\b|\bneedle\s*-?\s*drop\b", re.I)
 _RES_IN_NAME = re.compile(r"\b(?:\d{2}\s*-?\s*bits?|\d{2,3}(?:[.,]\d)?\s*k?hz|\d{2}\s*[-/]\s*\d{2,3}(?:[.,]\d)?)\b", re.I)
-# "rip by X", "vinyl rip by X", "ripped by X", "transfer by X", "needle drop by X" (one or two words)
-_BY = re.compile(r"\b(?:vinyl\s+)?(?:rip(?:ped)?|transfer(?:red)?|needle\s*drop|digiti[sz]ed)\s+by\s*[:\-]?\s*"
-                 r"([A-Za-z][\w.\-]{1,23}(?: [A-Z][\w.\-]{1,23})?)", re.I)
-_POSTED = re.compile(r"^\W*(?:posted|uploaded)\s+by\s*:?\s*([A-Za-z][\w.\-]{1,23})\b", re.I | re.M)
+# "rip by X", "vinyl rip by X", "ripped by X", "needle drop by X": one name, or two words both
+# capitalised ("Fran Solo"; never "john at", "Foo using")
+_BY = re.compile(r"\b(?i:(?:vinyl\s+)?(?:rip(?:ped)?|needle\s*-?\s*drop|digiti[sz]ed)\s+by)\s*[:\-]?\s*"
+                 r"([A-Za-z][\w.\-]{1,23}(?: [A-Z][\w.\-]{1,23})?)")
+_POSTED = re.compile(r"^\W*(?i:posted\s+by)\s*:?\s*([A-Za-z][\w.\-]{1,23})\b", re.M)
 _POSSESSIVE = re.compile(r"\b([A-Za-z][\w\-]{2,23})['’]s\s+(?:\d{2}\s*-?\s*bit|vinyl|rip|needle)", re.I)
-_WORD_AFTER_BY = {"the", "a", "an", "me", "myself", "us", "my", "using", "with", "hand", "ear"}
 
 _RIP_LINE = re.compile(r"\brip(?:s|ped|ping)?\b|\bneedle\s*-?\s*drop|\btransfer(?:red)?\b|\bdigiti[sz]ed\b", re.I)
-_RIPPED_WHEN = re.compile(r"\b(?:ripped|recorded|digiti[sz]ed|transferred|rip\s+date|date\s+ripped)\b[^\n]{0,60}?"
-                          r"\b((?:19[89]|20[0-9])\d)\b", re.I)
+_MONTH = (r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?")
+# VIN-3: a year ripped follows the rip verb (or a date label) at once, a date between at most:
+# "recorded February 1, 2012", "ripped 2012-02-01", "Rip date: 2019-03-02", "transferred in 2008";
+# never "Ripped from my 1985 UK first pressing", "Recorded live 1981", "from the 1989 reissue"
+_RIPPED_WHEN = re.compile(
+    r"\b(?:ripped|recorded|digiti[sz]ed|transferred|rip\s+date|date\s+ripped|ripping\s+date)\s*[:=]?\s*"
+    r"(?:(?:on|in)\s+)?(?:" + _MONTH + r"\s+\d{1,2}(?:st|nd|rd|th)?,?\s+|\d{1,2}(?:st|nd|rd|th)?\s+" + _MONTH +
+    r",?\s+|\d{1,2}[./]\d{1,2}[./])?((?:19[89]|20[0-9])\d)\b(?!\s*(?:uk|us|german|japan\w*|first|original|"
+    r"pressings?|reissues?|copy|copies|lp|records?|vinyl|edition|issue|release)\b)", re.I)
 
 
 def _first_text(v) -> str:
@@ -106,49 +119,99 @@ def resolution_words(res) -> str:
 
 # ---------------------------------------------------------------------------- ripper
 def _canon(name: str) -> str:
-    name = name.strip(" .-_")
+    name = name.strip(" .-_:")
     return KNOWN_RIPPERS.get(name.casefold(), name)
 
 
+def _a_name(name: str) -> bool:
+    words = str(name or "").strip(" .-_:").split()
+    return bool(words) and all(w.strip(".").casefold() not in _NOT_A_NAME for w in words)
+
+
+def _signed(m) -> bool:
+    """A "rip by X" match that names someone: not software or a forum word, and - unless a known
+    ripper - not a word in lower case running on into the sentence ("rip by john at ...",
+    "rip by Foo using Audacity"): a name ends at punctuation or the line's end."""
+    name = m.group(1)
+    if not _a_name(name):
+        return False
+    if name.split()[0].casefold() in KNOWN_RIPPERS:
+        return True
+    after = m.string[m.end():m.end() + 30]
+    return not re.match(r" +[a-z]", after)
+
+
+def _brackets(text):
+    return re.findall(r"[\(\[\{]([^\)\]\}]+)[\)\]\}]", str(text or ""))
+
+
 def ripper_in_name(folder_name: str) -> str:
-    """VIN-3: the ripper the folder name names: a known ripper's name anywhere in its brackets
-    ("[Vinyl Rip PBTHAL 24bit 96khz ...]"), "rip by X", or a word in capitals of 4 to 12
-    letters right after "Vinyl Rip" and before the resolution that is no label, country,
-    format or pressing word. Never a catalogue number ("[Vinyl Rip 24bit 192khz Mercury
-    Price19]": PRICE 19 is the pressing's), never a word after the resolution."""
-    text = str(folder_name or "")
-    for content in re.findall(r"[\(\[\{]([^\)\]\}]+)[\)\]\}]", text):
+    """VIN-3: the ripper a folder name names for sure: a known ripper's name anywhere in its
+    brackets ("[Vinyl Rip PBTHAL 24bit 96khz ...]"), or "rip by X". A word in capitals after
+    "Vinyl Rip" is only a candidate (caps_in_name): never a catalogue number ("[Vinyl Rip 24bit
+    192khz Mercury Price19]": PRICE 19 is the pressing's), a label, a country or a format."""
+    for content in _brackets(folder_name):
         for w in re.findall(r"[\w\-]+", content):
             if w.casefold() in KNOWN_RIPPERS:
                 return KNOWN_RIPPERS[w.casefold()]
         m = _BY.search(content)
-        if m and m.group(1).split()[0].casefold() not in _WORD_AFTER_BY:
+        if m and _signed(m):
             return _canon(m.group(1))
+    return ""
+
+
+def caps_in_name(folder_name: str) -> str:
+    """VIN-3: a word in capitals of 4 to 12 letters right after "Vinyl Rip" and before the
+    resolution, that is no label, country, format or pressing word ("[Vinyl Rip KRONOS 24bit
+    96khz ...]"): a ripper only where the rip notes name it too (describe)."""
+    for content in _brackets(folder_name):
         m = _VINYL_RIP_WORDS.search(content)
         if not m:
             continue
         after = content[m.end():].split()
-        if after and not _RES_IN_NAME.match(after[0]):
+        if len(after) > 1 and not _RES_IN_NAME.match(after[0]) and _RES_IN_NAME.match(after[1]):
             w = after[0].strip(",;:")
-            if re.fullmatch(r"[A-Z]{4,12}", w) and w not in _NOT_RIPPER and w not in _COUNTRY and \
-                    len(after) > 1 and _RES_IN_NAME.match(after[1]):
+            if re.fullmatch(r"[A-Z]{4,12}", w) and w not in _NOT_RIPPER and w not in _COUNTRY:
                 return w
     return ""
+
+
+# TagMender's own folder edition (VIN-3): "[1977 Vinyl Rip PBTHAL SRM-1-1184 ripped 2012]",
+# "[Vinyl Rip SRM-1-1184]" - no resolution, no other words
+_OWN_FOLDER = re.compile(r"^(?:(?:19|20)\d\d )?Vinyl Rip(?: (?P<rest>.+?))?(?: ripped (?P<year>(?:19|20)\d\d))?$")
+
+
+def own_folder(folder_name: str, catno: str = "") -> dict:
+    """VIN-3: what TagMender's own folder edition says ({"ripper", "year"}), read back so a
+    folder it named plans the same again (idempotent); {} for any other name. The ripper is what
+    stands before the catalogue number (catno, the release's)."""
+    for content in _brackets(folder_name):
+        m = _OWN_FOLDER.match(content.strip())
+        if not m or _RES_IN_NAME.search(content):
+            continue
+        rest = (m.group("rest") or "").strip()
+        catno = str(catno or "").strip()
+        if catno and rest.endswith(catno):
+            rest = rest[:-len(catno)].strip()
+        elif catno and rest:
+            continue                                  # (another pressing's number: not ours to read)
+        who = rest if rest and len(rest.split()) <= 3 and _a_name(rest) and not re.search(r"\d{3}", rest) else ""
+        return {"ripper": _canon(who) if who else "", "year": m.group("year") or ""}
+    return {}
 
 
 def ripper_in_notes(text: str) -> str:
     """VIN-3: the ripper the rip notes (or a comment tag holding them) sign: "Vinyl rip by
     Packgrog", "ripped by X"; else "Posted by pbthal" at a line's start; else a known
-    ripper's "PBTHAL's 24bit 192khz raw audio". "" when none is clearly named."""
+    ripper's "PBTHAL's 24bit 192khz raw audio". Never software ("ripped by EAC"), a forum's
+    "admin", "request", a day, "me"; never "transferred by" (a mastering engineer: "transferred
+    by Bob Ludwig"), nor "uploaded by". "" when none is clearly named."""
     text = str(text or "")
     for m in _BY.finditer(text):
-        first = m.group(1).split()[0]
-        if first.casefold() in _WORD_AFTER_BY:
-            continue
-        return _canon(m.group(1) if len(m.group(1).split()) == 1 or m.group(1).split()[1][:1].isupper()
-                      else first)
+        if _signed(m):
+            return _canon(m.group(1))
     m = _POSTED.search(text)
-    if m and m.group(1).casefold() not in _WORD_AFTER_BY:
+    if m and _a_name(m.group(1)):
         return _canon(m.group(1))
     for m in _POSSESSIVE.finditer(text):
         if m.group(1).casefold() in KNOWN_RIPPERS:
@@ -157,16 +220,19 @@ def ripper_in_notes(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------- year, equipment
-def rip_year(text: str) -> str:
-    """The year the rip was made, when a line about the rip dates it ("Vinyl rip by X, recorded
-    February 1, 2012"; "Ripped: 2019-03-02"): only on a line that speaks of ripping, so an
-    album's own "Recorded at Le Studio, 1981" is never taken."""
+def rip_year(text: str, not_years=()) -> str:
+    """The year the rip was made, when a line about the rip dates it right after its verb
+    ("Vinyl rip by X, recorded February 1, 2012"; "Rip date: 2019-03-02"; "transferred in
+    2008"): only on a line that speaks of ripping, never a year before a pressing, reissue,
+    copy or record word ("ripped from my 1985 UK first pressing"), nor one of not_years (the
+    pressing's, the album's original)."""
+    skip = {str(y)[:4] for y in not_years or () if y}
     for line in str(text or "").splitlines():
         if not _RIP_LINE.search(line):
             continue
-        m = _RIPPED_WHEN.search(line)
-        if m:
-            return m.group(1)
+        for m in _RIPPED_WHEN.finditer(line):
+            if m.group(1) not in skip:
+                return m.group(1)
     return ""
 
 
@@ -179,11 +245,18 @@ def _short(item: str, limit: int = 32) -> str:
     return item if 2 <= len(item) <= limit else ""
 
 
+def _gear(words: str) -> bool:
+    """A make and model, not a sentence: every word capitalised or holding a digit."""
+    ws = [w for w in re.split(r"\s+", words.strip()) if w]
+    return bool(ws) and len(ws) <= 6 and all(w[:1].isupper() or any(c.isdigit() for c in w) for w in ws)
+
+
 def equipment(text: str) -> str:
     """The turntable and cartridge the notes name, short ("VPI Scoutmaster, Zyx Airy 3X-SB"):
-    "Turntable: X" / "Cartridge: X" lines, a turntable heading's first item, a line ending in
-    "cartridge" ("Zyx Airy 3X-SB cartridge"; "Pioneer PL-200 with Denon DL-110 cartridge" names
-    both). "" when the notes label neither."""
+    "Turntable: X" / "Deck: X" / "Cartridge: X" lines, the first listed item ("- X") under a
+    turntable heading, a line naming a make and model and ending in "cartridge" ("Zyx Airy
+    3X-SB cartridge"; "Pioneer PL-200 with Denon DL-110 cartridge" names both). Never a
+    sentence ("Track 3 has a click in the cartridge"). "" when the notes label neither."""
     lines = [x.strip() for x in str(text or "").splitlines()]
     table = cart = ""
     for i, line in enumerate(lines):
@@ -196,15 +269,18 @@ def equipment(text: str) -> str:
             elif what in ("cartridge", "cart") and not cart:
                 cart = _short(val)
             continue
-        if not table and re.match(r"^turntable\b[^:]*$", low) and len(line) < 40:
+        if not table and re.match(r"^turntable(?:\s+(?:equipment|profile|setup|used))*\s*:?\s*$", low):
             nxt = next((x for x in lines[i + 1:i + 3] if x), "")
-            if nxt.startswith(("-", "*", "•")) or nxt[:1].isupper():
-                table = _short(nxt)
+            if nxt.startswith(("-", "*", "•")):
+                got = _short(nxt)
+                table = got if _gear(got) else ""
             continue
         if not cart and re.search(r"\bcartridge\s*$", low) and len(line) < 80:
             body = re.sub(r"\s*cartridge\s*$", "", line, flags=re.I)
-            body = re.sub(r"^[\s\-*•]+", "", body)
+            body = re.sub("^[\\s\\-*•]+", "", body)
             parts = re.split(r"\s+with\s+", body, maxsplit=1, flags=re.I)
+            if not all(_gear(x) for x in parts):
+                continue
             if len(parts) == 2:
                 if not table:
                     table = _short(parts[0])
@@ -224,38 +300,114 @@ def notes_of(folder) -> str:
         return ""
 
 
+def notes_here(folder, limit=20000) -> str:
+    """The notes in FOLDER itself only (not its sub-folders): a set's parent folder's."""
+    out = []
+    try:
+        for p in sorted(Path(str(folder)).iterdir()):
+            if p.suffix.lower() in (".info", ".txt", ".nfo", ".md") and p.is_file() and p.stat().st_size < limit:
+                out.append(p.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        pass
+    return " ".join(out)[:limit]
+
+
+_RES_PART = re.compile(r"^\d{1,2}-bit/\d{2,3}(?:\.\d)? kHz$")
+_YEAR_PART = re.compile(r"^ripped ((?:19|20)\d\d)$")
+
+
+def parse_own(line: str) -> dict | None:
+    """VIN-4: TagMender's own comment line read back ({"ripper", "resolution", "year",
+    "equipment"} as written), or None: only a line that is wholly in the form TagMender writes -
+    "Vinyl rip: " then, in order and joined by " · ", a ripper, the resolution ("24-bit/96
+    kHz"), "ripped 2012", the equipment, with the resolution or the year there. A line of your
+    own ("Vinyl rip: my own notes, Technics SL-1200") is never taken for it."""
+    line = str(line or "")
+    if not line.startswith(PREFIX):
+        return None
+    parts = line[len(PREFIX):].split(SEP)
+    if not parts or any(not p.strip() or p != p.strip() for p in parts):
+        return None
+    out = {"ripper": "", "resolution": "", "year": "", "equipment": ""}
+    i = 0
+    if i < len(parts) and not _RES_PART.match(parts[i]) and not _YEAR_PART.match(parts[i]):
+        if i + 1 >= len(parts) or not (_RES_PART.match(parts[i + 1]) or _YEAR_PART.match(parts[i + 1])):
+            return None                               # (a ripper is followed by the resolution or year)
+        out["ripper"] = parts[i]
+        i += 1
+    if i < len(parts) and _RES_PART.match(parts[i]):
+        out["resolution"] = parts[i]
+        i += 1
+    if i < len(parts) and _YEAR_PART.match(parts[i]):
+        out["year"] = _YEAR_PART.match(parts[i]).group(1)
+        i += 1
+    if not (out["resolution"] or out["year"]):
+        return None
+    if i < len(parts):
+        out["equipment"] = parts[i]
+        i += 1
+    return out if i == len(parts) else None
+
+
 def own_line(text: str) -> bool:
-    return str(text or "").startswith(PREFIX)
+    return parse_own(text) is not None
 
 
-def year_in_name(folder_name: str, pressing_year: str = "") -> str:
-    """VIN-3: the year ripped a folder name gives: a year right before "Vinyl Rip" in a bracket
-    ("[2022 Vinyl Rip 24bit 192khz Anthem R1-83736]", "[2019 DMM Vinyl Rip ...]") - unless it is
-    the pressing's own year (a 2015 reissue's "[2015 Vinyl Rip ... B0022376-01]")."""
-    for content in re.findall(r"[\(\[\{]([^\)\]\}]+)[\)\]\}]", str(folder_name or "")):
-        m = re.search(r"\b((?:19[89]|20[0-9])\d)\b(?:\s+[A-Za-z]{1,8}){0,2}?\s+vinyl\s*-?\s*rip\b", content, re.I)
-        if m and m.group(1) != str(pressing_year or "")[:4]:
+def own_in(comments) -> dict:
+    """TagMender's own line in these comment values, read back ({} when none)."""
+    for c in comments or ():
+        for ln in re.split(r"\r?\n", str(c or "")):
+            got = parse_own(ln)
+            if got:
+                return got
+    return {}
+
+
+def year_in_name(folder_name: str, pressing_year: str = "", original_year: str = "") -> str:
+    """VIN-3: the year ripped a folder name gives: your own form, a year right before "Vinyl
+    Rip" in a bracket that also names the rip's resolution ("[2022 Vinyl Rip 24bit 192khz Anthem
+    R1-83736]") - never ED-2's own "[1985 Vinyl Rip]" nor a word between ("[1985 UK Vinyl
+    Rip]", "[2019 DMM Vinyl Rip]": a pressing's), nor the pressing's or the album's own year;
+    or TagMender's own "... ripped 2022]"."""
+    skip = {str(y)[:4] for y in (pressing_year, original_year) if y}
+    for content in _brackets(folder_name):
+        m = re.match(r"^\s*((?:19[89]|20[0-9])\d)\s+vinyl\s*-?\s*rip\b(.*)$", content, re.I)
+        if m and _RES_IN_NAME.search(m.group(2)) and m.group(1) not in skip:
             return m.group(1)
+        m = _OWN_FOLDER.match(content.strip())
+        if m and m.group("year") and not _RES_IN_NAME.search(content):
+            return m.group("year")
     return ""
 
 
-def describe(folder, files, catno: str = "", notes: str | None = None, comments=(), pressing_year: str = "") -> dict:
+def describe(folder, files, catno: str = "", notes: str | None = None, comments=(), pressing_year: str = "",
+             original_year: str = "", artist: str = "", parent_notes: str = "") -> dict:
     """What tells this rip apart: {"resolution": (bits, rate) or (), "ripper", "catno", "year",
     "equipment"} (each "" or () when not known). folder: the copy's album folder (its name and
     notes); comments: the files' comment tags (rip notes are often kept there; TagMender's own
-    line is left out); pressing_year: the release's own year (a folder name's year that is the
-    pressing's is no year ripped)."""
+    line is read back, never as notes); pressing_year / original_year: the release's own years
+    (no year ripped); artist: the album artist (never a ripper). The ripper: the folder name's
+    (a known ripper, "rip by X", TagMender's own folder form), TagMender's own comment line, the
+    notes' signature, then a capitalised word after "Vinyl Rip" the notes name too."""
     folder = Path(str(folder)) if folder else None
     notes = notes_of(folder) if notes is None and folder else (notes or "")
-    said = "\n".join(dict.fromkeys("\n".join(ln for ln in str(c).splitlines() if not own_line(ln))
+    own = own_in(comments)
+    said = "\n".join(dict.fromkeys("\n".join(ln for ln in str(c).splitlines() if not own_line(ln.rstrip("\r")))
                                    for c in comments or () if c))
-    text = notes + "\n" + said
-    who = ripper_in_name(folder.name) if folder else ""
+    text = notes + "\n" + said + "\n" + (parent_notes or "")
+    name = folder.name if folder else ""
+    mine = own_folder(name, catno)
+    who = ripper_in_name(name) or mine.get("ripper") or own.get("ripper") or ripper_in_notes(text)
     if not who:
-        who = ripper_in_notes(text)
-    named = year_in_name(folder.name, pressing_year) if folder else ""
+        cap = caps_in_name(name)
+        if cap and re.search(rf"\b{re.escape(cap)}\b", text, re.I):
+            who = cap
+    if who and artist and who.casefold() == str(artist).casefold():
+        who = ""
+    year = year_in_name(name, pressing_year, original_year) or own.get("year") or \
+        rip_year(text, (pressing_year, original_year))
     return {"resolution": resolution_of(files), "ripper": who, "catno": str(catno or "").strip(),
-            "year": named or rip_year(text), "year_named": bool(named), "equipment": equipment(text)}
+            "year": year, "equipment": equipment(text) or own.get("equipment") or ""}
 
 
 def name_tag(d: dict) -> str:
@@ -266,30 +418,51 @@ def name_tag(d: dict) -> str:
 
 def comment_line(d: dict) -> str:
     """VIN-4: "Vinyl rip: PBTHAL · 24-bit/96 kHz · ripped 2012 · VPI Scoutmaster, Zyx Airy 3X-SB"
-    ("" when nothing is known)."""
-    parts = [d.get("ripper") or "", resolution_words(d.get("resolution")),
-             f"ripped {d['year']}" if d.get("year") else "", d.get("equipment") or ""]
-    parts = [p for p in parts if p]
-    return PREFIX + SEP.join(parts) if parts else ""
+    ("" when neither the resolution nor the year ripped is known: the line is told by them)."""
+    res, year = resolution_words(d.get("resolution")), d.get("year") or ""
+    if not (res or year):
+        return ""
+    parts = [d.get("ripper") or "", res, f"ripped {year}" if year else "",
+             (d.get("equipment") or "").replace(SEP, ", ")]
+    line = PREFIX + SEP.join(p for p in parts if p)
+    return line if own_line(line) else ""
 
 
 def merged_comment(existing: str, line: str) -> str:
-    """VIN-4: the comment with TagMender's own line (told by its prefix) replaced by LINE, or
-    LINE added after the text already there - every other line kept as it is. Unchanged when
-    LINE is there already (idempotent); "" lines are never added."""
+    """VIN-4: the comment with TagMender's own line (one wholly in its form: parse_own) replaced
+    by LINE, or LINE added after the text already there - every other line kept as it is, a
+    line of yours that only starts "Vinyl rip: " too. Unchanged when LINE is there already
+    (idempotent); "" lines are never added."""
     existing = str(existing or "")
     if not line:
         return existing
-    lines = existing.splitlines()
+    nl = "\r\n" if "\r\n" in existing else "\n"
+    lines = re.split(r"\r?\n", existing)
+    if line in lines:
+        return existing
     own = [i for i, ln in enumerate(lines) if own_line(ln)]
     if own:
-        if len(own) == 1 and lines[own[0]] == line:
-            return existing
-        keep = [ln for i, ln in enumerate(lines) if i not in own[1:]]
-        keep[own[0]] = line
-        nl = "\r\n" if "\r\n" in existing else "\n"
-        return nl.join(keep)
+        lines[own[0]] = line
+        return nl.join(lines)
     if not existing.strip():
         return line
-    nl = "\r\n" if "\r\n" in existing else "\n"
     return existing.rstrip("\r\n") + nl + line
+
+
+def merged_values(values, line: str) -> list:
+    """merged_comment over a comment's values (a Vorbis comment may hold several): the value
+    holding TagMender's own line gets it, else the first; a value that is the line itself
+    alone is never added twice."""
+    values = [str(v) for v in values or ()]
+    if not line:
+        return values
+    if any(line in re.split(r"\r?\n", v) for v in values):
+        return values
+    at = next((i for i, v in enumerate(values) if any(own_line(ln) for ln in re.split(r"\r?\n", v))), None)
+    if at is None:
+        if not values:
+            return [line]
+        at = 0
+    out = list(values)
+    out[at] = merged_comment(values[at], line)
+    return out

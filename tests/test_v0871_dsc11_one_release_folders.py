@@ -342,6 +342,20 @@ class DSC11Review(DSC11Base):
         self.assertIn("Front.jpg", {Path(c["dst"]).name for c in x["companions"]
                                     if Path(c["dst"]).parent.name == "Piano Man"})
 
+    def test_DSC11_a_naming_with_no_album_folder_above_its_disc_folders_is_held(self):
+        for template in ("%albumartist%/%album% CD %discnumber%/%tracknumber%. %title%",
+                         "%albumartist%/%album% - Disc %discnumber%/%tracknumber%. %title%"):
+            with self.subTest(template):
+                self.tmp = Path(__import__("tempfile").mkdtemp())
+                self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+                self.lib = self.tmp / "lib"
+                self.both()
+                plan = self.named(template).plan(self.artist())
+                [x] = plan["albums"]
+                self.assertEqual(x["status"], "blocked", pl.preview(plan))
+                self.assertTrue(any("DSC-11" in c for c in x["conflicts"]), x["conflicts"])
+                self.assertFalse(x["companions"])
+
     def test_DSC11_folders_the_naming_files_apart_are_held(self):
         self.both(extras=False)
         plan = self.named("%albumartist%/%album% [%media%]/%tracknumber%. %title%").plan(self.artist())
@@ -393,8 +407,25 @@ class DSC11Review(DSC11Base):
         self.assertEqual(engine._one_release_units(eng, engine._Scan(eng), self.lib, ["Neil Young",
                                                                                        "Neil Young & Crazy Horse"]), [])
 
+    def test_DSC11_artist_folders_named_with_brackets_are_not_read_together(self):
+        top = self.lib / "Rock"
+        for artist in ("Neil Young [FLAC]", "Neil Young & Crazy Horse [FLAC]"):
+            for i in range(2):
+                d = top / artist / f"{1970 + i} - Album {i}"
+                d.mkdir(parents=True)
+                (d / "01. T.flac").write_bytes(b"")
+        eng = self.moving(self.http())
+        self.assertEqual(engine._one_release_units(eng, engine._Scan(eng), top, ["Neil Young [FLAC]",
+                                                                                  "Neil Young & Crazy Horse [FLAC]"]), [])
+        a, b = self.both(extras=False)
+        self.assertEqual(engine._one_release_units(eng, engine._Scan(eng), self.artist(), [a.name, b.name]),
+                         [sorted([a.name, b.name])])
+
     def test_DSC11_more_folders_than_the_cap_are_never_read_as_one(self):
         names = [f"1973 - Piano Man [{i}]" for i in range(engine.SET_TRIAL_MAX_DISCS + 1)]
+        for n in names:
+            (self.artist() / n).mkdir(parents=True)
+            (self.artist() / n / "01. T.flac").write_bytes(b"")
         eng = self.moving(self.http())
         self.assertEqual(engine._one_release_units(eng, engine._Scan(eng), self.artist(), names), [])
         self.assertEqual(len(engine._one_release_units(eng, engine._Scan(eng), self.artist(), names[:3])[0]), 3)
@@ -497,6 +528,33 @@ class DSC11Watched(DSC11Base):
             _age(self.lib)
             w.tick()
         self.assertEqual(self.filed(), [], "the undone album was filed again by the watcher")
+
+
+class DSC11WatchedOneFolder(DSC11Watched):
+    """The copies filed side by side in one album folder (MED-22c), watched: filed once as one
+    album; undone, no copy is filed again."""
+
+    def test_DSC11_copies_in_one_folder_undone_are_not_filed_again(self):
+        import executor
+        from test_v0868_dsc10_set_trial import _age
+        top = self.artist() / "1973 - Piano Man"
+        self.layer(top / "Disc 01", 2, None, disc=1, hires=False)
+        for i in range(4):
+            self.track(top / "Disc 02" / f"{i + 1:02d}. Bonus {i + 1}.flac", i, 2, BONUS_LENS[i] / 1000, hires=False,
+                       title=f"Bonus {i + 1}", DISCNUMBER="2")
+        self.layer(top / "Disc 01 (SACD Stereo)", 2, "Stereo", disc=1)
+        before = sorted(str(p.relative_to(self.lib)) for p in self.lib.rglob("*.flac"))
+        w, patched = self.watch()
+        with patched:
+            w.tick()
+            self.assertEqual(len(self.filed()), 10, self.filed())
+            self.assertEqual(len(executor.jobs(10)), 1)
+            for j, *_r in executor.jobs(10):
+                executor.undo(j)
+            self.assertEqual(sorted(str(p.relative_to(self.lib)) for p in self.lib.rglob("*.flac")), before)
+            _age(self.lib)
+            w.tick()
+        self.assertEqual(self.filed(), [], "an undone copy was filed again by the watcher")
 
 
 if __name__ == "__main__":

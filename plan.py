@@ -1742,6 +1742,9 @@ class Planner:
         if getattr(prop, "one_release_folders", None):
             # DSC-11: the album folders one release joins (each remembered by the watcher and undo)
             entry["one_release"] = list(dict.fromkeys(str(x) for x in prop.one_release_folders))
+            # (each copy's folder and own files: the watcher knows each copy as an album of its own)
+            entry["one_release_files"] = [[str(folder), [str(f) for f in fs]] for folder, fs in
+                                          zip(prop.one_release_folders, getattr(prop, "one_release_files", None) or ())]
         if getattr(prop, "held", "") and prop.status == "identified":     # WEB-1
             entry["held"] = prop.held
             entry["notes"].insert(0, prop.held)
@@ -2412,6 +2415,9 @@ class Planner:
                         comps = None
                     elif comps is not None:
                         dst, notes = fnm.make_path(dest_root, comps, f.suffix.lower(), self._name_limits(dest_root))
+                        if getattr(prop, "one_release_folders", None) and id(entry) not in self.__dict__.setdefault(
+                                "_album_last", {}):
+                            self._album_last[id(entry)] = self._album_is_last_folder(template, names, comps, f)
                     made = dst
                     if dst is not None and not renaming:
                         # (NAM-7: only an artist's own folder, as the script's first level names it)
@@ -2876,9 +2882,14 @@ class Planner:
             n = _disc_no((_vals(t.get("discnumber")) or [""])[0])
             discs.setdefault(Path(fe["dst"]).parent, set()).add(n)
         home = Path(os.path.commonpath([str(d) for d in discs]))
+        last = self.__dict__.get("_album_last", {}).get(id(entry))
         for d, ns in discs.items():
             if d == home:
                 continue
+            if last and not re.match(r"Disc \d+ \(SACD", d.name):
+                # (the naming's disc folders are the album's own folders, side by side: no album
+                # folder holds them - its scans would land in the artist's folder: held)
+                return None
             if d.parent != home:
                 return None
             named = bool(_DISC_NAME.match(d.name) or _LAYER_DIR.search(d.name)) or any(
@@ -3206,6 +3217,23 @@ class Planner:
         src = str(prop.source_dir)
         planned = any(c[1] != src for c in (self.__dict__.get("_album_claims") or {}).get(fnm.fold(album), ()))
         return planned or _other_copy_in(album, Path(src), pairs)
+
+    def _album_is_last_folder(self, template, names, comps, f) -> bool:
+        """DSC-11: the naming makes no album folder above its disc folders - the first folder that
+        another album title changes is the file's own ("Billy Joel/Piano Man CD 1/"): the discs'
+        folders lie side by side in the artist's folder, with no album folder for the album's own
+        files. True too when no folder names the album."""
+        try:
+            album = [str((_vals(names.get("album")) or [""])[0]) + " \u2060other"]
+            other = naming.render(template, {**names, "album": album}, self._picard(),
+                                  self.profile["filenames"].get("compat", "windows"), own=f.stem)
+        except Exception:
+            return True
+        folders = list(comps[:-1])
+        for i, c in enumerate(folders):
+            if i >= len(other) - 1 or fnm.fold(str(other[i])) != fnm.fold(str(c)):
+                return i >= len(folders) - 1
+        return True
 
     def _disc_level(self, template, names, comps, f):
         """MED-22c: the naming's last folder is its disc folder - the file named as another disc

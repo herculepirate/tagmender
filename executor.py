@@ -2601,9 +2601,10 @@ def _watcher_forgets(jd: Path):
                                     watcher.shape(where, mine), "undone", 0, 0, time.time(), ""))
             # DSC-11: album folders side by side one release joined are watched as the albums
             # they are (each its own group): each folder remembered undone by its own files
-            for top in a.get("one_release") or ():
-                top = Path(top)
-                mine = [p for p in group if top in p.parents]
+            copies = [(Path(t), [Path(f) for f in fs]) for t, fs in a.get("one_release_files") or ()]
+            # (each copy by its own files - one folder may hold two copies, MED-22c - else each folder's)
+            for top, mine in copies or [(Path(t), [p for p in group if Path(t) in p.parents])
+                                        for t in a.get("one_release") or ()]:
                 if mine:
                     sig = {watcher.shape(top, mine)} | (sigs if top == folder else set())
                     db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",

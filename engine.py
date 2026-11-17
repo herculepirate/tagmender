@@ -1209,10 +1209,9 @@ def _unit_of(eng, path, sc, own, roots) -> list[Group]:
 
 
 def _album_like(sc, folder: Path) -> bool:
-    """DSC-11: FOLDER looks like an album's own folder, not an artist's: its name carries a year
-    or brackets ("1973 - Piano Man [2024 CD]"), or it holds music at its top or in disc folders."""
-    if _NAME_EXTRAS.search(folder.name):
-        return True
+    """DSC-11: FOLDER is shaped as an album's own folder, not an artist's: it holds music at its
+    top or in disc folders ("Disc 02/", "CD1/") - never a folder of album folders ("Neil Young
+    [FLAC]/1970 - Album/"), whatever its name says."""
     got = sc.listed(folder)
     if not got:
         return False

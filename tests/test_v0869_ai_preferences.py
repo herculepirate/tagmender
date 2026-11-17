@@ -56,12 +56,13 @@ class KeysAI(unittest.TestCase):
             done(fn(None))
         self.pane.fields["ai_anthropic_key"].setText("sk-ant-typed-0123456789")
         with mock.patch.object(self.prefs, "start", run_now), \
-                mock.patch.object(ap, "test", return_value=(True, "ok", ["claude-haiku-5-5", "claude-opus-5-5"])) as t:
+                mock.patch.object(ap, "test", return_value=(True, "ok", ["claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"])) as t:
             self.ai.test("anthropic")
         self.assertEqual(t.call_args.kwargs["key"], "sk-ant-typed-0123456789")   # (the typed key, not saved yet)
         box = self.ai.models["anthropic"]
-        self.assertEqual([box.itemText(i) for i in range(box.count())], ["claude-haiku-5-5", "claude-opus-5-5"])
-        self.assertEqual(ap.load_config()["providers"]["anthropic"]["model"], "claude-opus-5-5")
+        self.assertEqual([box.itemText(i) for i in range(box.count())], ["claude-haiku-5-5", "claude-opus-5-5",
+                                                                     "claude-sonnet-5-5"])
+        self.assertEqual(ap.load_config()["providers"]["anthropic"]["model"], "claude-sonnet-5-5")
         self.assertNotIn("sk-ant-typed", ap.config_path().read_text())
 
     def test_ranking_tasks_cap_and_consent_saved(self):

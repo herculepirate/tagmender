@@ -9262,9 +9262,18 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         # AI-1 (optional AI, a profile's own choice): clues for an album still unsure, which a
         # database release must carry; never a sure pick on its own (ai_assist.clue_step)
         import ai_assist
+        before = final
         mb_res, dg_res, final = ai_assist.clue_step(
             http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, images if use_ocr else [],
             use_mb, use_discogs, out, ai, provider_errors)
+        if final is not before and not _ai_tie_keeps(before, final, album, cfg, rules, anyway, mb_res, dg_res,
+                                                      ocr_txt):
+            # (AI-1: a tie AI broke may change nothing the rules after the databases decided -
+            # an excluded release, album known, the version your copy names, R9: then it stays)
+            final = before
+            out.pop("ai_pick", None)
+            out["ai_notes"] = list(out.get("ai_notes") or []) + [
+                "AI-1: the tie AI's clue would break was left as it was (the rules decide it otherwise)"]
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     if (status == "auto" and not album.get("unlisted_barcodes")
@@ -9373,6 +9382,37 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         if ao:
             out["album_only"], out["status"] = ao, "review"
     return out
+
+
+def _album_only_of(final, album, cfg, results):
+    """What _process_album's end makes of an unsure FINAL: its album-only answer (album known,
+    EDN-2, R9), as a truth value."""
+    ao = mc.album_only(final, cfg, tie_source(album, final)) or \
+        mc.edition_named_another(final, album, cfg, tie_source(album, final))
+    if not ao:
+        ao = mc.unofficial_album_only(final, cfg, tie_source(album, final), results)
+    return bool(ao)
+
+
+def _ai_tie_keeps(before, after, album, cfg, rules, anyway, mb_res, dg_res, ocr_txt):
+    """AI-1: the tie AI broke (AFTER's pick instead of BEFORE's) leaves every later rule as it
+    was: the same status, an exclusion rule does not exclude the new pick, the album-only answer
+    is the same, the version your copy names is the same, and R9 settles it no differently."""
+    if after.get("status") != before.get("status"):
+        return False
+    best = after.get("best") or {}
+    if not anyway:
+        kept = [Path(t["path"]) for t in album["tracks"] if t.get("path")]
+        dec = exclusions.gate(kept, "match", rules, release=release_fields(best["cand"])) if kept else None
+        if dec is not None and dec.all_excluded:
+            return False
+    results = (mb_res, dg_res)
+    if _album_only_of(after, album, cfg, results) != _album_only_of(before, album, cfg, results):
+        return False
+    if (best.get("copy_version") or "") != ((before.get("best") or {}).get("copy_version") or ""):
+        return False
+    return mc.unofficial_settled(after, results, album, cfg, ocr_txt).get("status") == \
+        mc.unofficial_settled(before, results, album, cfg, ocr_txt).get("status")
 
 
 # --- Reporting only: what the scans showed about the pick, and how it was found. Nothing

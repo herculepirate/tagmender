@@ -174,12 +174,14 @@ class Matcher(unittest.TestCase):
             {"kind": "catno", "value": "SICP-1015", "quote": "品番は「ＳＩＣＰ－１０１５」です。"},
             {"kind": "country", "value": "JP", "quote": "日本盤。"}]}})
         on = self.run_album(self.tie_http(), row, ai=ai)
+        self.assert_not_raised(off, on)
         self.assertEqual(on["best"]["id"], "mb-b")
         self.assertEqual(on["status"], "review")
         self.assertEqual(on["ai_pick"], "mb:mb-b")
         self.assertFalse(on.get("ai_held"))
         self.assertTrue(any(w.startswith("AI-1: ai:openai/stub-model read catalogue number SICP-1015")
-                            and "mb:mb-b carries it" in w for w in on["why"]), on["why"])
+                            and "mb:mb-b carries it" in w for w in on["ai_notes"]), on["ai_notes"])
+        self.assertEqual(on["why"], off["why"])                       # (the databases' reasons, unchanged)
         self.assertTrue(any("country JP" in n and "not used by the matcher" in n for n in on["ai_notes"]))
         self.assertTrue(any(n.startswith("ai:openai/stub-model notes: sent names; notes text") for n in on["ai_notes"]),
                         on["ai_notes"])
@@ -236,47 +238,117 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any("outage" in n for n in o["ai_notes"]), o["ai_notes"])
         self.assertEqual(ai.calls, 0)
 
-    def test_a_release_only_ai_found_is_held(self):
-        """The files' title finds nothing; AI's suggested original title finds the release, and
-        it fits the files - but only AI found it, and nothing of the copy proves it: held."""
+    def assert_not_raised(self, off, on):
+        """AI-1's invariant: status never rises, the AI-off pick stays unless a true tie was broken."""
+        rank = {"nomatch": 0, "error": 0, "review": 1, "auto": 2}
+        self.assertLessEqual(rank.get(on["status"], 0), rank.get(off["status"], 0), (off["status"], on["status"]))
+        self.assertEqual(on["status"], off["status"])
+        if not on.get("ai_pick"):
+            self.assertEqual((on.get("best") or {}).get("id"), (off.get("best") or {}).get("id"))
+        self.assertEqual(on.get("album_only"), off.get("album_only"))
+
+    def test_a_release_only_ai_found_is_shown_never_the_pick(self):
+        """The files' title finds nothing; AI's suggested original title finds a release that fits
+        the files: shown as an alternative for you to choose, the album stays as AI-off left it."""
         http = FakeHttp([mb_release("mb-a", "First Light", "SICP-1015")], {"First Light": ["mb-a"]})
         row = make_album(self.root, "Erstes Licht")
         off = self.run_album(http, row)
         self.assertIsNone(off.get("best"))
         ai, _stub = self.assistant({"queries": {"queries": [{"kind": "title", "text": "First Light"}]}})
         on = self.run_album(http, row, ai=ai)
-        self.assertEqual(on["best"]["id"], "mb-a")
-        self.assertNotEqual(on["status"], "auto")
-        self.assertTrue(on["ai_held"])
-        self.assertTrue(any("found only by AI's searches" in w for w in on["why"]), on["why"])
-        # the engine: held as unresolved, the AI's find kept as the pick to review (never album-only,
-        # Partial or web tags; a watched folder never files it)
+        self.assert_not_raised(off, on)
+        self.assertIsNone(on.get("best"))
+        self.assertTrue(on["ai_alternatives"][0].startswith("mb:mb-a "), on["ai_alternatives"])
+        self.assertNotIn("ai_held", on)
+        # the engine plans it as with AI off (no hold of its own), the alternative in the evidence
         import engine
         import profiles as pf
         eng = engine.Engine(pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
                                           "artwork": {"enabled": False}}), http=http)
         self.assertIsNone(eng.ai)                                     # (a profile's AI is off by default)
-        with mock.patch.object(ma, "process", return_value=on), \
-                mock.patch.object(engine.Engine, "_partial") as partial, \
-                mock.patch.object(engine.Engine, "_album_only") as album_only:
-            p = eng.identify(eng.albums_in(Path(row["FullPath"]))[0])
-        partial.assert_not_called()
-        album_only.assert_not_called()
-        self.assertEqual((p.status, p.tier, p.release_id), ("unresolved", "unresolved", "mb-a"))
-        self.assertTrue(any(n.startswith("AI-1") for n in p.evidence), p.evidence)
+        with mock.patch.object(ma, "process", return_value=off):
+            p_off = eng.identify(eng.albums_in(Path(row["FullPath"]))[0])
+        with mock.patch.object(ma, "process", return_value=on):
+            p_on = eng.identify(eng.albums_in(Path(row["FullPath"]))[0])
+        self.assertEqual((p_on.status, p_on.tier, p_on.release_id), (p_off.status, p_off.tier, p_off.release_id))
+        self.assertTrue(any("found by AI's searches" in n for n in p_on.evidence), p_on.evidence)
 
-    def test_a_cited_web_release_is_fetched_and_scored_never_sure_alone(self):
+    def test_an_ai_found_release_never_outranks_the_review_pick(self):
+        """AI_REVIEW-12: the album is at review (a tie); AI's search finds a release scoring better:
+        the pick, its tier and tags stay; the find is an alternative."""
+        http = self.tie_http()
+        http.mb["mb-c"] = mb_release("mb-c", "First Light", "SICP-1015")
+        row = make_album(self.root, "First Light", notes=NOTES)
+        off = self.run_album(self.tie_http(), row)
+        ai, _stub = self.assistant({"queries": {"queries": [{"kind": "title", "text": "Hikari"}]}})
+        http.titles["Hikari"] = ["mb-c"]
+        on = self.run_album(http, row, ai=ai)
+        self.assert_not_raised(off, on)
+        self.assertEqual(on["best"]["id"], off["best"]["id"])
+        self.assertTrue(any(a.startswith("mb:mb-c ") for a in on["ai_alternatives"]))
+
+    def test_a_cited_web_release_is_fetched_scored_and_shown_only(self):
         http = FakeHttp([mb_release("mb-a", "First Light", "SICP-1015")], {})
         row = make_album(self.root, "Erstes Licht")
         url = "https://musicbrainz.org/release/0a1b2c3d-1111-2222-3333-444455556666"
         http.mb["0a1b2c3d-1111-2222-3333-444455556666"] = dict(
             mb_release("0a1b2c3d-1111-2222-3333-444455556666", "First Light", "SICP-1015"))
+        off = self.run_album(http, row)
         ai, _stub = self.assistant({"web": {"releases": [{"url": url, "why": "the label's page"}]},
                                     "web_cited": [url]})
         on = self.run_album(http, row, ai=ai)
-        self.assertEqual(on["best"]["id"], "0a1b2c3d-1111-2222-3333-444455556666")
-        self.assertNotEqual(on["status"], "auto")
-        self.assertTrue(on["ai_held"])
+        self.assert_not_raised(off, on)
+        self.assertTrue(on["ai_alternatives"][0].startswith("mb:0a1b2c3d-1111-2222-3333-444455556666 "))
+
+    def test_nomatch_never_becomes_review_on_an_ai_code(self):
+        """AI_REVIEW-1 (the reviewer's probe): a lone weak candidate carrying a code the notes name
+        for another album does not turn nomatch into review."""
+        import ai_assist as A
+        s1 = {"cand": {"source": "mb", "id": "unrelated", "catnos": ["abc1234"], "barcodes": []},
+              "confidence": 30.0, "clues": {}}
+        mb = {"status": "nomatch", "best": s1, "scored": [s1], "why": ["low"]}
+        final = {"status": "nomatch", "best": s1, "why": ["low"]}
+        ai, _stub = self.assistant({"notes": {"clues": [{"kind": "catno", "value": "ABC-1234", "quote": "ABC-1234"}]}})
+        out = {}
+        with mock.patch.object(ma, "probe_search", lambda *a, **k: (a[6], a[7], [], [])):
+            _m, _d, f2 = A.clue_step(None, {"artist": "A", "title": "T", "folder": "A - T", "tracks": [], "catnos": []},
+                                     {"auto_min_margin": 8.0}, None, mb, None, final, "",
+                                     "Cat no: ABC-1234 (a different album advertised)", [], True, False, out, ai)
+        self.assertEqual(f2["status"], "nomatch")
+        self.assertIsNone(out.get("ai_pick"))
+
+    def test_a_tie_between_countries_is_left_to_the_country_order(self):
+        """TIE-2 holds: AI breaks a tie only between releases of one country, format and type."""
+        http = FakeHttp([mb_release("mb-a", "First Light", "ABCD-200", country="US"),
+                         mb_release("mb-b", "First Light", "SICP-1015", country="JP")],
+                        {"First Light": ["mb-a", "mb-b"]})
+        row = make_album(self.root, "First Light", notes=NOTES)
+        off = self.run_album(http, row)
+        ai, _stub = self.assistant({"notes": {"clues": [
+            {"kind": "catno", "value": "SICP-1015", "quote": "品番は「ＳＩＣＰ－１０１５」です。"}]}})
+        on = self.run_album(http, row, ai=ai)
+        self.assert_not_raised(off, on)
+        self.assertNotIn("ai_pick", on)
+
+    def test_an_excluded_release_never_becomes_the_pick(self):
+        """The exclusion rules still hold: a tie AI would break toward a release a rule excludes stays."""
+        row = make_album(self.root, "First Light", notes=NOTES)
+        off = self.run_album(self.tie_http(), row)
+        ai, _stub = self.assistant({"notes": {"clues": [
+            {"kind": "catno", "value": "SICP-1015", "quote": "品番は「ＳＩＣＰ－１０１５」です。"}]}})
+        real, fields = ma.exclusions.gate, ma.release_fields
+
+        def gate(paths, stage, rules, release=None, **kw):
+            if release and release.get("_id") == ["mb-b"]:        # (a rule excluding mb-b)
+                return types.SimpleNamespace(all_excluded=True)
+            return real(paths, stage, rules, **kw)
+        with mock.patch.object(ma.exclusions, "gate", gate), \
+                mock.patch.object(ma, "release_fields", lambda c: dict(fields(c), _id=[str(c["id"])])):
+            on = self.run_album(self.tie_http(), row, ai=ai)
+        self.assert_not_raised(off, on)
+        self.assertEqual(on["best"]["id"], "mb-a")
+        self.assertNotIn("ai_pick", on)
+        self.assertTrue(any("left as it was" in n for n in on["ai_notes"]))
 
 
 class Profiles(unittest.TestCase):

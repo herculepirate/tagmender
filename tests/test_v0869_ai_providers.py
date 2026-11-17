@@ -151,6 +151,10 @@ class OpenAI(Base):
     def test_openai_alone_serves_every_task_covers_too(self):
         cfg = self.setup(openai=OPENAI_KEY)
         ap.save_config(cfg)
+        import profiles as pf                                   # (a profile turns AI on, covers too)
+        pf.profiles_dir().mkdir(parents=True, exist_ok=True)
+        (pf.profiles_dir() / "ai.json").write_text(json.dumps({"name": "ai", "ai": {"enabled": True}}))
+        self.addCleanup((pf.profiles_dir() / "ai.json").unlink)
         for task in ap.TASKS:
             self.assertEqual(getattr(ap.provider_for(task, cfg), "name", None), "openai", task)
         import covers_ai
@@ -184,7 +188,7 @@ class Anthropic(Base):
         self.assertNotIn("authorization", head)
         self.assertEqual(body["output_config"]["format"]["type"], "json_schema")
         self.assertEqual(body["messages"][0]["content"][-1]["type"], "text")
-        self.assertEqual(clues[0]["provenance"], "ai:anthropic/claude-opus-5-5")
+        self.assertEqual(clues[0]["provenance"], "ai:anthropic/claude-sonnet-5-5")
 
     def test_images_as_base64_blocks(self):
         cfg = self.setup(anthropic=CLAUDE_KEY)
@@ -201,7 +205,8 @@ class Anthropic(Base):
             {"type": "server_tool_use", "id": "s1", "name": "web_search", "input": {"query": "x"}},
             {"type": "web_search_tool_result", "tool_use_id": "s1",
              "content": [{"type": "web_search_result", "url": mb, "title": "MB"}]},
-            {"type": "text", "text": json.dumps({"releases": [{"url": mb, "why": "the catno"}]})}],
+            {"type": "text", "text": json.dumps({"releases": [{"url": mb, "why": "the catno"}]}),
+             "citations": [{"type": "web_search_result_location", "url": mb}]}],
             "stop_reason": "end_turn", "usage": {"input_tokens": 2000, "output_tokens": 50}}
         wire = Wire(http_error(400), answer)
         with mock.patch.object(ap.urllib.request, "urlopen", wire):
@@ -286,7 +291,7 @@ class Guardrails(Base):
                 self.assertEqual(a.read_notes({}, f"Каталог: SICP 1015{n}"), [])
         self.assertEqual(len(wire.sent), ap.PAUSE_AFTER * ap.ATTEMPTS)       # paused after: not asked again
         self.assertEqual(a.calls, 0)
-        self.assertEqual(ap.usage("openai")["requests"], 0)
+        self.assertEqual(ap.usage("openai")["requests"], len(wire.sent))    # (each request sent counts)
         self.assertTrue(all("gave nothing" in n for n in a.notes))
 
     def test_rate_limit_honours_retry_after(self):
@@ -366,12 +371,13 @@ class Guardrails(Base):
 
     def test_model_list_after_test_and_a_suggested_model(self):
         cfg = self.setup(anthropic=CLAUDE_KEY)
-        wire = Wire({"data": [{"id": "claude-haiku-5-5"}, {"id": "claude-opus-5-5"}], "has_more": False})
+        wire = Wire({"data": [{"id": "claude-haiku-5-5"}, {"id": "claude-sonnet-5-5"}, {"id": "claude-opus-5-5"}],
+                     "has_more": False})
         with mock.patch.object(ap.urllib.request, "urlopen", wire):
             ok, said, models = ap.test("anthropic", cfg)
         self.assertTrue(ok, said)
         self.assertEqual(wire.sent[0][0], "https://api.anthropic.com/v1/models?limit=100")
-        self.assertEqual(ap.suggested_model("anthropic", models), "claude-opus-5-5")
+        self.assertEqual(ap.suggested_model("anthropic", models), "claude-sonnet-5-5")
         self.assertEqual(ap.suggested_model("compatible", ["x", "y"]), "x")
         self.assertEqual(ap.usage("anthropic")["requests"], 0)                    # (a model list is free)
 

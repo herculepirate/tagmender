@@ -94,12 +94,36 @@ class CoverAIError(Exception):
 
 
 # ---- the service ----------------------------------------------------------------------------
-def service() -> dict:
+def ai_covers_allowed(profile=None) -> bool:
+    """An AI provider may make covers: you accepted its first-use sheet, and the profile (PROFILE,
+    else any of your profiles) turns AI on with covers among its tasks. Your own image service's
+    key (Generated covers) needs neither."""
+    try:
+        import ai_providers as ap
+        if not ap.load_config().get("consent"):
+            return False
+        import profiles as pf
+        if profile is not None:
+            want = [profile.ai_settings()]
+        else:
+            want = []
+            for name in pf.names():
+                try:
+                    want.append(pf.load(name).ai_settings())
+                except Exception:
+                    continue
+        return any(w.get("enabled") and "covers" in (w.get("tasks") or ()) for w in want)
+    except Exception:
+        return False
+
+
+def service(profile=None) -> dict:
     """{"url", "key", "model", "provider"} of the image service. Your own image service's keys
-    (Preferences › Keys › Generated covers) first, as before; else the first AI provider you
-    rank that makes images (ai_providers: an OpenAI key alone is enough; an OpenAI-compatible
-    endpoint with an image model named). Claude does not make images: an Anthropic key alone
-    serves no covers (not_ready says so). key is "" when none is set up."""
+    (Preferences › Keys › Generated covers) first, as before; else - when ai_covers_allowed - the
+    first AI provider you rank that makes images (ai_providers: an OpenAI key alone is enough; an
+    OpenAI-compatible endpoint with an image model named). Claude does not make images: an
+    Anthropic key alone serves no covers (not_ready says so). key is "" when none is set up.
+    The covers sheet listing every request is still confirmed before anything is sent."""
     import credentials
     try:
         key = credentials.get("image_api_key")
@@ -109,28 +133,31 @@ def service() -> dict:
         raise CoverAIError(str(exc)) from None
     if key:
         return {"url": url.rstrip("/"), "key": key, "model": model, "provider": ""}
-    try:
-        import ai_providers as ap
-        cfg = ap.load_config()
-        p = ap.provider_for("covers", cfg)
-    except Exception:
-        p = None
+    p = None
+    if ai_covers_allowed(profile):
+        try:
+            import ai_providers as ap
+            p = ap.provider_for("covers", ap.load_config())
+        except Exception:
+            p = None
     if p is not None:
         image_model = (p.options.get("image_model") if p.name == "compatible" else "") or \
             credentials.get("image_model") or ap.IMAGE_MODEL
-        return {"url": p.url, "key": p.key, "model": image_model, "provider": p.name}
+        return {"url": p.url, "key": p.key, "model": image_model, "provider": p.name, "cap": p.cap}
     return {"url": url.rstrip("/"), "key": "", "model": model, "provider": ""}
 
 
 CLAUDE_NO_IMAGES = ("an image service: Claude does not make images, so an Anthropic key alone cannot make "
                     "covers (add an OpenAI key or another image service under Preferences › Keys; real covers "
                     "and scan clean-up still work)")
+AI_OFF = ("an image service key (Preferences › Keys › Generated covers), or AI assistance allowed (What Is "
+          "Sent…) and turned on with covers in a profile")
 
 
-def not_ready() -> str:
+def not_ready(profile=None) -> str:
     """What is missing to make AI covers ("" when ready)."""
     try:
-        s = service()
+        s = service(profile)
         if s["key"] or (s.get("provider") == "compatible" and s["url"]):
             return ""
     except (CoverAIError, KeyError):
@@ -140,8 +167,10 @@ def not_ready() -> str:
         names = {p.name for p in ap.configured()}
     except Exception:
         names = set()
-    if "anthropic" in names:
+    if "anthropic" in names and not (names & {"openai", "compatible"}):
         return CLAUDE_NO_IMAGES
+    if names & {"openai", "compatible"}:
+        return AI_OFF
     return "an image service key (Preferences › Keys › Generated covers)"
 
 
@@ -271,10 +300,9 @@ def generate(prompt: str, refs: list[bytes]) -> bytes:
     if s.get("provider"):
         # (an AI provider's key: counted against its monthly cap, as its other requests are)
         import ai_providers as ap
-        cap = ap.cap_of(s["provider"])
-        if ap.usage(s["provider"])["requests"] >= cap:
+        cap = s.get("cap") if s.get("cap") is not None else ap.cap_of(s["provider"])
+        if not ap.reserve(s["provider"], cap):                 # (atomic: the watcher and the app share it)
             raise CoverAIError(f"{ap.LABELS[s['provider']]}'s monthly cap of {cap} requests is reached")
-        ap.count_usage(s["provider"])
     head = {"Authorization": f"Bearer {s['key']}"} if s["key"] else {}
     if refs:
         body, ctype = _multipart({"model": s["model"], "prompt": prompt, "size": SIZE, "n": "1"}, refs)

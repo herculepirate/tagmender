@@ -2311,10 +2311,6 @@ class Engine:
                 self.log.warning("tags for %s: %s", g.folder, exc)
                 return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
                                         reason=f"matched, but the release's tracks do not line up with the files: {exc}")
-        if out and out.get("ai_held"):
-            # AI-1: the pick is a release only AI's searches found, and nothing of your copy proves
-            # it: held for you (never album-only, Partial or web tags from it, never filed unattended)
-            return self._unresolved(out, files, base, errors)
         if trialling:
             # (DSC-10: the set is one release only when one is proven for it; no album-only,
             # Partial, web, fingerprint or disc-by-disc answer is looked for)

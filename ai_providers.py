@@ -51,7 +51,8 @@ DEFAULT_URLS = {"openai": "https://api.openai.com/v1", "anthropic": "https://api
 # suggested only, until you press Test and pick from the provider's own list (models change
 # faster than releases): the first of these the list holds, else the provider's first
 SUGGESTED = {"openai": ("gpt-5-mini", "gpt-5", "gpt-4.1-mini", "gpt-4o-mini"),
-             "anthropic": ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"),
+             # (balanced cost and quality first; never the most expensive by default)
+             "anthropic": ("claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"),
              "compatible": ()}
 IMAGE_MODEL = "gpt-image-1"
 ANTHROPIC_VERSION = "2026-10-21"
@@ -64,11 +65,15 @@ NEEDS = {"notes": "text", "vision": "vision", "queries": "text", "web": "web", "
          "ties": "text", "covers": "images"}
 MONTHLY_CAP = 500            # live requests a month per provider, unless you set another
 TIMEOUT = {"text": 60, "vision": 120, "web": 180, "models": 30}
-ATTEMPTS = 3                 # a 429, 5xx or 529 (overloaded), or a network error: tried again
+ATTEMPTS = 3                 # a 5xx or 529 (overloaded), or a network error: tried again
+ATTEMPTS_429 = 2             # a 429: asked once more at most (a quota error: never)
 BACKOFF_MAX = 60
+RETRY_AFTER_MAX = 20         # the longest a 429's Retry-After is waited out before giving up
 PAUSE_AFTER = 3              # failures in a row before a provider is left alone ...
 PAUSE_S = 1800               # ... for this long (as the optional web hosts are)
-MAX_TOKENS = 4096
+MAX_TOKENS = 16000           # (room for an always-thinking model's reasoning and the answer)
+ANTHROPIC_EFFORT = "low"     # extraction and short answers: low effort (dropped if a model refuses it)
+WEB_CONTINUE = 2             # a web search turn Anthropic pauses (pause_turn) is continued at most this often
 SLEEP = time.sleep           # (tests replace it)
 
 CONFIG_VERSION = 1
@@ -130,6 +135,28 @@ def load_config() -> dict:
     return cfg
 
 
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+
+
+def url_problem(url: str) -> str:
+    """"" for an https address, or http to this computer (a local Ollama, LM Studio); else why
+    not (a key over plain http to another host would travel in clear)."""
+    import urllib.parse
+    if not url:
+        return ""
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "not an address"
+    if u.scheme == "https" and u.hostname:
+        return ""
+    if u.scheme == "http" and (u.hostname or "") in ("localhost", "127.0.0.1", "::1"):
+        return ""
+    if u.scheme == "http":
+        return "plain http only to this computer (localhost); another host needs https"
+    return "must be an https address (or http://localhost)"
+
+
 def config_problems(cfg: dict) -> list[str]:
     p = []
     if not isinstance(cfg.get("ranking"), list) or any(x not in PROVIDERS for x in cfg["ranking"]):
@@ -141,9 +168,9 @@ def config_problems(cfg: dict) -> list[str]:
         if name not in PROVIDERS or isinstance(cap, bool) or not isinstance(cap, int) or not 0 <= cap <= 1_000_000:
             p.append(f"monthly_cap.{name} must be a whole number from 0 to 1000000")
     for name, conf in (cfg.get("providers") or {}).items():
-        url = (conf or {}).get("url") or ""
-        if url and not re.match(r"https?://[^\s/]+", url):
-            p.append(f"providers.{name}.url must be an http(s) address")
+        why = url_problem((conf or {}).get("url") or "")
+        if why:
+            p.append(f"providers.{name}.url: {why}")
     return p
 
 
@@ -214,6 +241,44 @@ def usage(provider: str, month=None) -> dict:
     return {"requests": int(r[0] or 0), "input_tokens": int(r[1] or 0), "output_tokens": int(r[2] or 0)}
 
 
+def reserve(provider: str, cap: int) -> bool:
+    """One request of PROVIDER's monthly CAP taken, atomically across threads and processes (the
+    watcher, the app, the command line): False, and nothing taken, when the cap is reached."""
+    try:
+        with _DB_LOCK:
+            db = _db()
+            try:
+                db.isolation_level = None
+                db.execute("BEGIN IMMEDIATE")          # (the database file's write lock: one at a time)
+                row = db.execute("SELECT requests FROM ai_usage WHERE provider=? AND month=?",
+                                 (provider, _month())).fetchone()
+                if int((row or (0,))[0] or 0) >= cap:
+                    db.execute("ROLLBACK")
+                    return False
+                db.execute("INSERT INTO ai_usage VALUES (?, ?, 1, 0, 0) ON CONFLICT(provider, month) DO UPDATE "
+                           "SET requests=requests+1", (provider, _month()))
+                db.execute("COMMIT")
+                return True
+            finally:
+                db.close()
+    except sqlite3.Error:
+        return False                                   # (the counter cannot be kept: nothing sent)
+
+
+def add_tokens(provider: str, input_tokens=0, output_tokens=0):
+    try:
+        with _DB_LOCK:
+            db = _db()
+            try:
+                db.execute("UPDATE ai_usage SET input_tokens=input_tokens+?, output_tokens=output_tokens+? "
+                           "WHERE provider=? AND month=?", (int(input_tokens), int(output_tokens), provider, _month()))
+                db.commit()
+            finally:
+                db.close()
+    except sqlite3.Error:
+        pass
+
+
 def count_usage(provider: str, input_tokens=0, output_tokens=0):
     try:
         with _DB_LOCK:
@@ -235,10 +300,11 @@ def cap_of(provider: str, cfg=None) -> int:
     return MONTHLY_CAP if cap is None else int(cap)
 
 
-def cache_key(provider, model, task, payload) -> str:
-    """The cache key of a request: provider, model, task and what was sent (text, schema, image
-    digests), hashed. Never the key, the address or anything else secret."""
-    blob = json.dumps({"p": provider, "m": model, "t": task, "x": payload}, sort_keys=True, ensure_ascii=False)
+def cache_key(provider, model, task, payload, url="") -> str:
+    """The cache key of a request: provider, its address, model, task and what was sent (text,
+    schema, image digests), hashed. Never the key."""
+    blob = json.dumps({"p": provider, "u": url, "m": model, "t": task, "x": payload}, sort_keys=True,
+                      ensure_ascii=False)
     return "ai:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -354,8 +420,9 @@ class Provider:
     """One provider with your key. capabilities(): {"text", "vision", "web", "images"} it can do."""
     name = ""
 
-    def __init__(self, key="", model="", url="", options=None):
+    def __init__(self, key="", model="", url="", options=None, cap=None):
         self.key = key or ""
+        self.cap = cap                 # (requests a month; None: not counted - a Test's model list)
         self.options = dict(options or {})
         self.url = (url or DEFAULT_URLS.get(self.name) or "").rstrip("/")
         self.model = model or next(iter(SUGGESTED.get(self.name) or ()), "")
@@ -373,6 +440,8 @@ class Provider:
 
     def ready(self) -> str:
         """What is missing ("" when it can be asked)."""
+        if url_problem(self.url):
+            return url_problem(self.url)
         if not self.key:
             return "no key"
         if not self.model:
@@ -384,16 +453,22 @@ class Provider:
         return {}
 
     def _request(self, method, path, body=None, kind="text"):
-        """JSON from METHOD URL/PATH; retries a 429/5xx/529 or a network error with back-off
-        (a Retry-After is honoured, at most BACKOFF_MAX s); AIUnavailable otherwise."""
+        """JSON from METHOD URL/PATH. Every HTTP request sent takes one of the monthly cap first
+        (reserve; a model list is free). A 5xx, 529 or network error is tried again with back-off;
+        a 429 once more at most (its Retry-After up to RETRY_AFTER_MAX s), a quota error never.
+        A provider that keeps failing or rate-limiting is left alone for PAUSE_S."""
         with _DOWN_LOCK:
             fails, until = _DOWN.get(self.name, (0, 0))
         if until > time.time():
             raise AIUnavailable(self.name, "outage", "failed repeatedly, asked again later")
         data = json.dumps(body).encode("utf-8") if body is not None else None
         head = dict({"Content-Type": "application/json", "Accept": "application/json"}, **self.headers())
-        last = ""
+        last, kind_failed, tries_429 = "", "outage", 0
+        if url_problem(self.url):
+            raise AIUnavailable(self.name, "invalid_request", url_problem(self.url))
         for attempt in range(ATTEMPTS):
+            if kind != "models" and self.cap is not None and not reserve(self.name, self.cap):
+                raise AIUnavailable(self.name, "cap_reached", f"the monthly cap of {self.cap} requests is reached")
             req = urllib.request.Request(f"{self.url}{path}", data=data, method=method, headers=head)
             try:
                 with urllib.request.urlopen(req, timeout=TIMEOUT.get(kind, 60)) as r:
@@ -411,22 +486,32 @@ class Provider:
                 if exc.code in (401, 403):
                     raise AIUnavailable(self.name, "missing_credentials", f"HTTP {exc.code}: the key was refused") \
                         from None
+                if exc.code == 429 and re.search(r"quota|billing|credit", detail, re.I):
+                    self._pause()                      # (no money left: asking again cannot help)
+                    raise AIUnavailable(self.name, "rate_limited", "HTTP 429: quota or credit used up") from None
                 if exc.code in (400, 404, 413, 422):
                     raise AIUnavailable(self.name, "invalid_request", f"HTTP {exc.code}: {detail}") from None
                 last = f"HTTP {exc.code}"
                 kind_failed = "rate_limited" if exc.code == 429 else "outage"
                 wait = _retry_after(exc.headers)
+                if exc.code == 429:
+                    tries_429 += 1
+                    if tries_429 >= ATTEMPTS_429 or wait > RETRY_AFTER_MAX:
+                        break
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last, kind_failed, wait = type(exc).__name__, "outage", 0
             except ValueError:
                 raise AIUnavailable(self.name, "invalid_response", "not JSON") from None
             if attempt + 1 < ATTEMPTS:
                 SLEEP(min(BACKOFF_MAX, wait or (2 ** attempt + random.uniform(0, 1))))
-        if kind_failed == "outage":
-            with _DOWN_LOCK:
-                fails = _DOWN.get(self.name, (0, 0))[0] + 1
-                _DOWN[self.name] = (0, time.time() + PAUSE_S) if fails >= PAUSE_AFTER else (fails, 0)
+        with _DOWN_LOCK:
+            fails = _DOWN.get(self.name, (0, 0))[0] + 1
+            _DOWN[self.name] = (0, time.time() + PAUSE_S) if fails >= PAUSE_AFTER else (fails, 0)
         raise AIUnavailable(self.name, kind_failed, last)
+
+    def _pause(self):
+        with _DOWN_LOCK:
+            _DOWN[self.name] = (0, time.time() + PAUSE_S)
 
     def list_models(self) -> list[str]:
         raise NotImplementedError
@@ -531,6 +616,8 @@ class CompatibleProvider(OpenAIProvider):
     def ready(self):
         if not self.url:
             return "no address"
+        if url_problem(self.url):
+            return url_problem(self.url)
         if not self.model:
             return "no model chosen"
         return ""
@@ -591,16 +678,25 @@ class AnthropicProvider(Provider):
     def json_task(self, system, text, schema, images=()):
         body = {"model": self.model, "max_tokens": MAX_TOKENS, "system": system,
                 "messages": [{"role": "user", "content": self._content(text, images)}],
-                "output_config": {"format": {"type": "json_schema", "schema": wire_schema(schema)}}}
-        data = self._request("POST", "/messages", body, kind="vision" if images else "text")
+                "output_config": {"format": {"type": "json_schema", "schema": wire_schema(schema)},
+                                  "effort": ANTHROPIC_EFFORT}}
+        kind = "vision" if images else "text"
+        try:
+            data = self._request("POST", "/messages", body, kind=kind)
+        except AIUnavailable as exc:
+            if exc.kind != "invalid_request":
+                raise
+            # (a model that takes no effort setting: asked once more without it)
+            body["output_config"] = {"format": body["output_config"]["format"]}
+            data = self._request("POST", "/messages", body, kind=kind)
         use = self._read(data)
         return "".join(b.get("text") or "" for b in data.get("content") or () if b.get("type") == "text"), use
 
     def web_task(self, system, text):
-        data, last = None, None
+        data, last, tool = None, None, None
+        messages = [{"role": "user", "content": text}]
         for tool in ANTHROPIC_WEB_TOOLS:          # (an older model takes only the basic variant)
-            body = {"model": self.model, "max_tokens": MAX_TOKENS, "system": system,
-                    "messages": [{"role": "user", "content": text}],
+            body = {"model": self.model, "max_tokens": MAX_TOKENS, "system": system, "messages": messages,
                     "tools": [{"type": tool, "name": "web_search", "max_uses": 3}]}
             try:
                 data = self._request("POST", "/messages", body, kind="web")
@@ -611,15 +707,26 @@ class AnthropicProvider(Provider):
                 last = exc
         if data is None:
             raise last
-        use = self._read(data)
+        content = list(data.get("content") or ())
+        use = {"input_tokens": 0, "output_tokens": 0}
+        for _n in range(WEB_CONTINUE):            # (a paused turn is continued, the content so far sent back)
+            if data.get("stop_reason") != "pause_turn":
+                break
+            u = data.get("usage") or {}
+            use = {k: use[k] + int(u.get(k) or 0) for k in use}
+            body = dict(body, messages=messages + [{"role": "assistant", "content": content}])
+            data = self._request("POST", "/messages", body, kind="web")
+            content += list(data.get("content") or ())
+        if data.get("stop_reason") == "pause_turn":
+            raise AIUnavailable(self.name, "invalid_response", "the web search did not finish")
+        last_use = self._read(data)
+        use = {k: use[k] + last_use[k] for k in use}
         texts, urls = [], []
-        for b in data.get("content") or ():
+        for b in content:
             if b.get("type") == "text":
                 texts.append(str(b.get("text") or ""))
+                # (only what the answer cites: a search result it did not cite is no citation)
                 urls += [str(c.get("url")) for c in b.get("citations") or () if c.get("url")]
-            elif b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
-                urls += [str(r.get("url")) for r in b["content"] if r.get("type") == "web_search_result"
-                         and r.get("url")]
         return "".join(texts), urls, use
 
 
@@ -631,7 +738,7 @@ def make(name: str, cfg=None, key=None) -> Provider:
     cfg = cfg or load_config()
     conf = dict((cfg.get("providers") or {}).get(name) or {})
     return CLASSES[name](key=key_of(name) if key is None else key, model=conf.get("model") or "",
-                         url=conf.get("url") or "", options=conf)
+                         url=conf.get("url") or "", options=conf, cap=cap_of(name, cfg))
 
 
 def configured(cfg=None) -> list[Provider]:

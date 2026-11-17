@@ -106,17 +106,16 @@ AI_TASK_WORDS = {"notes": N_("Read notes and info files"), "vision": N_("Read sc
                  "queries": N_("Suggest searches"), "web": N_("Web research"), "explain": N_("Explain holds"),
                  "ties": N_("Advise on ties"), "covers": N_("Generate covers")}
 AI_RANKS = ((0, N_("First")), (1, N_("Second")), (2, N_("Third")))
-AI_SENT_WORDS = {"notes": N_("Reading notes: the artist, album title, folder name and track titles; the text "
-                             "of the folder's notes, NFO, info and log files; the text read off the scans."),
-                 "vision": N_("Reading scans: the same names, and up to four scan images (only when OCR "
-                              "found no codes on them)."),
-                 "queries": N_("Suggesting searches: the names and the catalogue numbers already known."),
-                 "web": N_("Web research: the names, year and known codes; the provider searches the web "
-                           "with them."),
-                 "explain": N_("Explaining a hold: the names and the evidence gathered (only when you ask)."),
-                 "ties": N_("Advising on a tie: the names and the tied releases' details (only when you ask)."),
-                 "covers": N_("Generating covers: artist, title, year and genre, and for Faithful your own "
-                              "cover (only after you confirm the covers sheet).")}
+# the words for each field a task sends (ai_assist.SENT: the sheet is made from what is really sent)
+AI_FIELD_WORDS = {"artist": N_("the artist"), "title": N_("the album title"), "folder": N_("the folder name"),
+                  "year": N_("the year"), "tracks": N_("the track titles"), "discs": N_("the number of discs"),
+                  "notes_text": N_("the text of the folder's notes, NFO, info and log files"),
+                  "scan_text": N_("the text OCR read off the scans"),
+                  "scan_images": N_("up to four scan images (only when OCR found no codes on them)"),
+                  "catalogue_numbers": N_("the catalogue numbers already known"),
+                  "codes": N_("the catalogue numbers and barcodes already known (the provider searches the web)"),
+                  "evidence": N_("the evidence TagMender gathered"), "candidates": N_("the tied releases' details"),
+                  "genre": N_("the genre"), "own_cover": N_("for Faithful, your own cover image")}
 # a check's state as every status in the app says it: icon, STATUS colour key and word
 CHECK_STATE = {"ok": ("circle-check", "done", N_("OK")), "warn": ("circle-alert", "unresolved", N_("Needs a look")),
                "fail": ("circle-x", "failed", N_("Problem"))}
@@ -1005,7 +1004,10 @@ class AISection(QWidget):
         self.save()
 
     def review_consent(self):
-        body = "\n\n".join(tr(AI_SENT_WORDS[t]) for t in self.ap.TASKS) + "\n\n" + tr(
+        import ai_assist
+        body = "\n\n".join(tr("{task}: {fields}.").format(
+            task=tr(AI_TASK_WORDS[t]), fields=", ".join(tr(AI_FIELD_WORDS[f]) for f in fields))
+            for t, fields in ai_assist.what_is_sent()) + "\n\n" + tr(
             "Audio is never sent. Each request goes to the provider you rank first that can do it, with your own "
             "key, and may cost money; answers are kept on this computer so the same album never asks twice. A "
             "local model (Ollama, LM Studio) keeps everything on your network. A profile still has to turn AI on.")

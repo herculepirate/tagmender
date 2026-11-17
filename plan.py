@@ -857,8 +857,21 @@ def _moves_a_file(entry) -> bool:
 
 def _prop_discs(prop) -> set:
     """MOV-4: the disc numbers an album brings, as integers (its targets' disc numbers; 1 when
-    none is a number)."""
-    return _disc_nos(str((t.get("discnumber") or ["1"])[0]) for t in prop.targets or [{}]) or {1}
+    none is a number). MED-22c: an SACD layer's copy of a disc filed beside its CD layer's
+    brings (disc, layer label) - "Disc 01 (SACD Stereo)" is no copy of "Disc 01"."""
+    out = set()
+    for t in prop.targets or [{}]:
+        n = _disc_no(str((t.get("discnumber") or ["1"])[0]))
+        lay = str((_vals(t.get("~layer")) or [""])[0])
+        if n is not None:
+            out.add((n, lay) if lay else n)
+    return out or {1}
+
+
+def _disc_keys(values) -> set:
+    """MOV-4: _disc_nos, an SACD layer's (disc, layer label) kept as it is (MED-22c)."""
+    return {v for v in values or () if isinstance(v, tuple)} | _disc_nos(v for v in values or ()
+                                                                         if not isinstance(v, tuple))
 
 
 def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set) -> bool:
@@ -866,7 +879,7 @@ def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set)
     release (a release ID shared) on every one of these discs: another copy of the album (a new
     rip arriving in a watched folder while the library has it). A copy bringing a disc the
     folder lacks is not a duplicate (it joins its set: BOX-2)."""
-    want = _disc_nos(discs) or {1}
+    want = _disc_keys(discs) or {1}
     if not album_dir.is_dir():
         return False
     found = set()
@@ -884,9 +897,78 @@ def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set)
             except Exception:
                 continue
             if _ids_of(t) & me:
-                found |= _disc_nos([(t.get("discnumber") or ["1"])[0]])
+                ns = _disc_nos([(t.get("discnumber") or ["1"])[0]])
+                lay = _layer_label(str((t.get("media") or [""])[0]))
+                found |= ns | {(n, lay) for n in ns if lay}     # (MED-22c: an SACD layer's copy of the disc)
                 if want <= found:
                     return True
+    return False
+
+
+def _layer_label(media) -> str:
+    import mb_tags
+    return mb_tags.layer_label(media)
+
+
+def _is_layer(media) -> bool:
+    """MED-22c: the medium is one layer of a hybrid SACD or one area of an SACD listed apart."""
+    import mb_tags
+    return bool(mb_tags._layer_kind(media)[1])
+
+
+def _layer_dir(dst: Path, label: str, disc, compat) -> Path:
+    """MED-22c: the folder of an SACD layer's copy of a disc, beside the CD layer's: the disc
+    folder the naming made with the layer named after it ("Disc 01" -> "Disc 01 (SACD Stereo)"),
+    or - the naming making none (one disc, a flat script) - such a folder inside the one it made."""
+    name = f"{dst.parent.name} ({label})" if _DISC_NAME.match(dst.parent.name) else \
+        f"Disc {_disc_no((_vals(disc) or ['1'])[0]) or 1:02d} ({label})"
+    name = fnm.safe_component(name, compat)
+    return (dst.parent.with_name(name) if _DISC_NAME.match(dst.parent.name) else dst.parent / name) / dst.name
+
+
+def _layer_of(t) -> tuple:
+    """MED-22c: (disc number, medium) of a target: what one folder may hold of one disc."""
+    t = t or {}
+    return (_disc_no((_vals(t.get("discnumber")) or ["1"])[0]),
+            str((_vals(t.get("media")) or [""])[0]), str((_vals(t.get("~layer")) or [""])[0]))
+
+
+def _mixed_layers(files, targets) -> list:
+    """MED-22c: the folders this plan would fill with two layers (or other media) of one disc -
+    a hybrid SACD's CD layer and its SACD layer, its stereo and its multichannel layer: never
+    one folder (each layer's copy has its own, "Disc 01 (SACD Stereo)"). files: the plan's
+    entries (src, dst); targets: {source path: its tags}."""
+    seen = {}
+    for fe in files:
+        if not fe.get("dst"):
+            continue
+        disc, media, layer = _layer_of(targets.get(fe.get("copy_of") or fe["src"]))
+        seen.setdefault((os.path.dirname(fe["dst"]), disc), set()).add((media, layer))
+    return sorted({d for (d, _n), kinds in seen.items() if len(kinds) > 1})
+
+
+def _layer_there(folder: str, me: frozenset, disc, media: str, ignore: set) -> bool:
+    """MED-22c: FOLDER already holds, on disk and outside this plan, music tagged as this release
+    (a release ID shared) on disc DISC from another medium than MEDIA - another layer of the disc
+    (a CD layer's "Disc 01" for an SACD layer's files): never filed into it."""
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return False
+    for n in names:
+        pth = os.path.join(folder, n)
+        if Path(n).suffix.lower() not in AUDIO_EXT or n.startswith("."):
+            continue
+        try:
+            st = os.stat(pth)
+            if pth in ignore or (st.st_dev, st.st_ino) in ignore:
+                continue
+            t = tagio.read(pth)
+        except Exception:
+            continue
+        if _ids_of(t) & me and _disc_no((t.get("discnumber") or ["1"])[0]) == disc and \
+                str((t.get("media") or [""])[0]) != media:
+            return True
     return False
 
 
@@ -2285,6 +2367,12 @@ class Planner:
                         # its own inside the one the naming made - "Disc 02/5.1/201.T.flac")
                         dst = dst.parent / fnm.safe_component(str(ver_[0]), p["filenames"].get("compat", "windows")) \
                             / dst.name
+                    lay_ = _vals((targets.get(f) or {}).get("~layer"))
+                    if dst is not None and not renaming and lay_:
+                        # MED-22c: an SACD layer's copy of a disc, beside its CD layer's copy: in a
+                        # folder of that layer's own - "Disc 01 (SACD Stereo)/101.T.flac"
+                        dst = _layer_dir(dst, str(lay_[0]), (targets.get(f) or {}).get("discnumber"),
+                                         p["filenames"].get("compat", "windows"))
                 entry["notes"] += notes
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
@@ -2354,6 +2442,23 @@ class Planner:
                         if op == "copy" and not changes and not fe.get("fix_pictures"):
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
+        if identified:
+            # MED-22c: never two layers of one disc in one folder - in this plan, or beside a copy of
+            # another layer already there (a CD layer's "Disc 01" for an SACD layer's files)
+            by_src = {str(k): v for k, v in targets.items()}
+            for d in _mixed_layers(entry["files"], by_src):
+                entry["conflicts"].append(f"{Path(d).name}: two layers (media) of one disc would share this "
+                                          "folder; held for review (MED-22c)")
+            me_, checked = _release_ids(prop), set()
+            for fe in entry["files"]:
+                disc_, media_, _l = _layer_of(by_src.get(fe.get("copy_of") or fe["src"]))
+                key_ = (os.path.dirname(fe.get("dst") or ""), disc_, media_)
+                if not fe.get("dst") or key_ in checked or not _is_layer(media_):
+                    continue
+                checked.add(key_)
+                if _layer_there(key_[0], me_, disc_, media_, self._planned):
+                    entry["conflicts"].append(f"{Path(key_[0]).name}: another layer of disc {disc_} of this release "
+                                              "is filed in this folder; held for review (MED-22c)")
         if stale_credits:
             # REP-2: in words, once for the album
             entry["notes"].append(
@@ -2896,7 +3001,7 @@ class Planner:
         for f in kept:
             t = targets.get(f) or {}
             ver = _vals(t.get("~version"))
-            if not ver:
+            if not ver or t.get("~layer"):       # (MED-22c: an SACD layer's copy has its own folder)
                 continue
             seen.append(str(ver[0]))
             # (two versions on one disc - a DVD's or Blu-ray's mixes: apart too, whatever their
@@ -2951,7 +3056,7 @@ class Planner:
             if not clash and not shared and not here:
                 claimed = set().union(*[discs for ids, src, discs in claims.get(key, ())
                                         if ids & me and src != str(prop.source_dir)])
-                resident = set().union(*[_disc_nos(self.__dict__.get("_res_discs", {}).get(d, ()))
+                resident = set().union(*[_disc_keys(self.__dict__.get("_res_discs", {}).get(d, ()))
                                          for d, ids, _src in self._resident if d == key and ids & me])
                 if claimed and mine <= claimed:
                     # (another copy claimed it in this plan: it is filed there only when that

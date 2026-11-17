@@ -471,7 +471,10 @@ spreadsheet (Export as Web Page…, Export as CSV…).
   `BD Stereo 24-96` and `BD Atmos`. Keep the SACD ripper's `SACD_AREA` tag. A disc word in the
   folder name (DVD, DVD-A, BD, Blu-ray) says which disc a mix came from; the sample rate alone does
   not. Each mix is matched to its own disc of the release (an SACD's stereo and multichannel layers
-  are two discs) and filed into its own folder.
+  are two discs) and filed into its own folder. The SACD layers of a hybrid SACD (CD layer and
+  SACD layers listed apart) are tagged as their physical disc and filed beside that disc's CD
+  layer, each in a folder of its own: `Disc 01` (the CD layer), `Disc 01 (SACD Stereo)`,
+  `Disc 01 (SACD Multichannel)`, `Disc 02`.
 
 ## Requirements
 

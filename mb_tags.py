@@ -701,6 +701,14 @@ def _layer_kind(fmt) -> tuple:
     return (family, "sacd") if re.search(r"sacd layer", f) else ("", "")
 
 
+def layer_label(fmt) -> str:
+    """MED-22c: the folder label of an SACD layer's copy filed beside its disc's CD layer:
+    "SACD Stereo" ("... (SACD layer, 2 channels)"), "SACD Multichannel", "SACD" (an SACD layer
+    or area naming no channels); "" for a CD layer and any other medium."""
+    kind = _layer_kind(fmt)[1]
+    return {"stereo": "SACD Stereo", "multichannel": "SACD Multichannel", "sacd": "SACD"}.get(kind, "")
+
+
 def _layer_count(m) -> int:
     try:
         return len(m.get("tracks") or ()) or int(m.get("track-count") or 0)

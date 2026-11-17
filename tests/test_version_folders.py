@@ -212,15 +212,18 @@ class Versions(VersionsBase):
         by_file = {Path(f).parent.name + "/" + Path(f).name: t for f, t in zip(p.files, p.targets)}
         for name, t in by_file.items():
             want = "2" if name.startswith("2.0/") else "3"
-            # (MED-17: the set's DVD-Video, its last disc, is no disc of these audio rips: of 4)
-            self.assertEqual((t["discnumber"], t["totaldiscs"]), ([want], ["4"]), name)
+            # (MED-22c: the SACD layers of the set's disc 1 - its CD layer, stereo and multichannel
+            # layers one disc, MED-22 - are disc 1; MED-17: the set's DVD-Video, its last disc, is
+            # no disc of these audio rips: of 2, the Blu-spec CD the other)
+            self.assertEqual((t["discnumber"], t["totaldiscs"]), (["1"], ["2"]), name)
             self.assertEqual(t["media"], [SET_MEDIA[int(want) - 1]], name)
         self.assertNotIn("tagmender_missing", p.targets[0])
         plan = eng.plan(top)
         a = plan["albums"][0]
         dsts = [fe["dst"] for fe in a["files"]]
         self.assertTrue(all("~" not in Path(x).name for x in dsts), dsts)
-        self.assertEqual(sorted({Path(x).parent.name for x in dsts}), ["Disc 02", "Disc 03"], dsts)
+        self.assertEqual(sorted({Path(x).parent.name for x in dsts}),
+                         ["Disc 01 (SACD Multichannel)", "Disc 01 (SACD Stereo)"], dsts)
         self.assertEqual(len({Path(x).parent.parent for x in dsts}), 1, dsts)
 
     def test_media_that_do_not_name_their_layout_leave_the_versions_for_you(self):
@@ -256,7 +259,8 @@ class Versions(VersionsBase):
                             for a in plan["albums"] for fe in a["files"]), plan["albums"])
 
     def test_versions_already_filed_as_discs_are_unchanged_on_a_second_run(self):
-        """Filed into Disc 02/ and Disc 03/ (folders no longer named after layouts): the same
+        """Filed into "Disc 01 (SACD Stereo)/" and "Disc 01 (SACD Multichannel)/" (MED-22c; folders
+        no longer named after layouts): the same
         release is found, each disc its own medium again by its SACD_AREA and media tags, and
         nothing - no TAGMENDER_MISSING for the other media - is written again."""
         import executor

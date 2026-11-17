@@ -2916,6 +2916,7 @@ class Engine:
                     raise
                 mb_down, rel = exc, None
                 self._note_mb_down(exc)
+            full_rel = rel
             if rel and not best.get("version_tracks"):
                 # MED-22: a hybrid SACD's layers listed as media of their own are one disc: your
                 # copy's layer of each, numbered as the discs are (2 hybrid SACDs listed as 4
@@ -3060,6 +3061,10 @@ class Engine:
             with_gap = mb_tags.release_tags(rel, ps, pregap=True)
             tags_mb = with_gap if len(with_gap) == n else tags_mb
         tags_mb = tags_mb if tags_mb and len(tags_mb) == n else None
+        if tags_mb and rel and mbid and self.use_mb:
+            # MED-22c: a copy of a disc's SACD layers (beside its CD layer's copy) numbered by the
+            # physical disc and filed in a folder of that layer's own
+            tags_mb = _layer_copy(full_rel, tags_mb, vtracks)
         if dparts and (dparts[1] is None or len(dparts[1]) != n):
             dparts = None if not tags_mb else (dparts[0], None, dparts[2])
         if tags_mb and dparts and es["merge_mode"] == "mb_only":
@@ -6701,6 +6706,63 @@ def _layer_prefer(album, rel, box=None) -> dict:
     if not box and discs == list(range(1, len(audio) + 1)):
         for d in discs:
             out[audio[d - 1]] = _disc_layer(album, [t for t in tracks if int(t.get("disc") or 1) == d])
+    return out
+
+
+def _layer_copy(rel, tags, vtracks=None) -> list:
+    """MED-22c (decided 2026-11-16): a copy of a hybrid SACD's SACD layers - one disc's stereo or
+    multichannel layer, or both of them in one copy - is numbered by the physical disc as MED-22
+    counts them (Billy Joel - Piano Man 50th, CD layer, stereo and multichannel SACD layers of
+    disc 1 and a bonus CD: its layers' copy is disc 1 of 2, never discs 2 and 3 of 4), its media
+    and tracks its own layer's, and each of its files carries "~layer" ("SACD Stereo", "SACD
+    Multichannel", "SACD": mb_tags.layer_label) - the planner files it in "Disc 01 (SACD
+    Stereo)" beside the CD layer's "Disc 01". Version folders (VTRACKS: [[medium position, track
+    index]], match_core.version_view) are numbered here; other copies were numbered by
+    mb_tags.one_layer already. Only an SACD layer of a disc listed as two layers or more, and
+    only in a copy of part of the set (a disc or two layers of one disc): a copy of every disc
+    in one layer keeps its plain disc folders (MED-22). TAGS unchanged otherwise."""
+    groups = mb_tags.layer_groups(rel or {})
+    if not tags or not any(len(g) > 1 for g in groups):
+        return tags
+    media = rel.get("media") or []
+    at = {int(m.get("position") or k): m for k, m in enumerate(media, 1)}
+    disc_of = {id(m): k for k, g in enumerate(groups, 1) for m in g}
+    joined = {id(m) for g in groups if len(g) > 1 for m in g}
+    one = mb_tags.one_layer(rel)
+    out = [dict(t) for t in tags]
+    if vtracks:
+        if len(vtracks) != len(out) or any(int(p) not in at for p, _k in vtracks):
+            return tags
+        mine = [at[int(p)] for p, _k in vtracks]
+        total = str(mb_tags.disc_total(one, media={disc_of[id(m)] for m in mine}))
+        for t, m in zip(out, mine):
+            t["discnumber"], t["totaldiscs"] = [str(disc_of[id(m)])], [total]
+    else:
+        mine = []
+        for t in out:
+            try:
+                disc = int(str((t.get("discnumber") or ["1"])[0]).partition("/")[0])
+            except ValueError:
+                return tags
+            fmt = str((t.get("media") or [""])[0])
+            g = groups[disc - 1] if 0 < disc <= len(groups) else []
+            m = next((x for x in g if x.get("format") == fmt), None)
+            if m is None:
+                return tags
+            mine.append(m)
+    discs = {}
+    for m in mine:
+        discs.setdefault(disc_of[id(m)], set()).add(mb_tags._layer_kind(m.get("format"))[1])
+    # (the set's audio discs: a video disc or a download - MED-17, MED-20 - is none your copy lacks)
+    sound = {id(x) for x in mb_tags.audio_media(one) if "digital" not in str(x.get("format") or "").casefold()}
+    audio = {k for k, m in enumerate(one.get("media") or [], 1) if id(m) in sound}
+    part = any(len(v) > 1 for v in discs.values()) or not audio <= set(discs)
+    if not part:
+        return out if vtracks else tags
+    for t, m in zip(out, mine):
+        label = mb_tags.layer_label(m.get("format")) if id(m) in joined else ""
+        if label:
+            t["~layer"] = [label]
     return out
 
 

@@ -300,9 +300,14 @@ class VIN5_RecordCatalogueNumbers(unittest.TestCase):
                 ("1989 - Presto [Vinyl Rip PBTHAL 24bit 96khz Atlantic 7-82040-1]", ["7-82040-1"]),
                 ("2012 - Clockwork Angels [Vinyl Rip 24bit 96khz RR 1686-176561]", ["RR 1686-176561"]),
                 ("1984 - Grace Under Pressure [Vinyl Rip 24bit 96khz DE Mercury 818 476-1]", ["818 476-1"]),
-                ("1985 - Power Windows [Vinyl Rip 24bit 192khz Mercury 422 826 098-1 M-1]", ["422 826 098-1"]),
+                ("1985 - Power Windows [Vinyl Rip 24bit 192khz Mercury 422 826 098-1 M-1]", ["422 826 098-1 M-1"]),
                 ("1976 - 2112 [2015 Vinyl Rip 32bit 384khz B0022371-01-9]", ["B0022371-01-9"]),
-                ("1987 - Hold Your Fire [Vinyl Rip 24bit 96khz Mercury 832-464-1 Q-1]", ["832-464-1"])):
+                ("1987 - Hold Your Fire [Vinyl Rip 24bit 96khz Mercury 832-464-1 Q-1]", ["832-464-1 Q-1"])):
+            self.assertEqual(mc.catno_hints(name), want, name)
+        # (the US format suffix makes the US pressing's number: "832 464-1 Q-1", never the EU "832 464-1")
+        self.assertTrue(mc.catno_same("832-464-1 Q-1", "832 464-1 Q-1"))
+        self.assertFalse(mc.catno_same("832-464-1 Q-1", "832 464-1"))
+        for name, want in ():
             self.assertEqual(mc.catno_hints(name), want, name)
 
     def test_VIN5_dates_and_resolutions_are_no_catalogue_numbers(self):

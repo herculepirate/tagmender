@@ -311,7 +311,13 @@ def catno_hints(text, variants=False):
                 # group ("RR 1686-176561"), or numbers in groups with a dashed last one ("818 476-1",
                 # "422 826 098-1"); never a date ("1974-12-02", "02-12-1974")
                 elif _vin_code(w):
-                    found.append(w)
+                    # (a US Mercury/PolyGram record's format suffix belongs to it: "832-464-1 Q-1",
+                    # the US pressing; "832 464-1" alone is the European one)
+                    if re.fullmatch(r"[A-Z]-?\d", nxt) and re.fullmatch(r"\d{3}-\d{3}-\d", w):
+                        found.append(f"{w} {nxt}")
+                        skip.add(i + 1)
+                    else:
+                        found.append(w)
                 elif re.fullmatch(r"[A-Z]{1,3}\d-\d{4,7}", w) and w.split("-")[1] not in _VIN_RATES \
                         and not _YEAR.match(w.split("-")[1]):
                     found.append(w)
@@ -322,8 +328,13 @@ def catno_hints(text, variants=False):
                     found.append(f"{prev} {w}" if re.fullmatch(r"[A-Z]{1,4}", prev) else w)
                 elif re.fullmatch(r"\d{3}", w) and re.fullmatch(r"\d{3}", nxt) and \
                         re.fullmatch(r"\d{3}-\d{1,2}", nxt2):
-                    found.append(f"{w} {nxt} {nxt2}")
-                    skip.update((i + 1, i + 2))
+                    nxt3 = words[i + 3] if i + 3 < len(words) else ""
+                    if re.fullmatch(r"[A-Z]-?\d", nxt3):             # ("422 826 098-1 M-1")
+                        found.append(f"{w} {nxt} {nxt2} {nxt3}")
+                        skip.update((i + 1, i + 2, i + 3))
+                    else:
+                        found.append(f"{w} {nxt} {nxt2}")
+                        skip.update((i + 1, i + 2))
                 elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt) \
                         and not _YEAR.match(prev):
                     found.append(f"{w} {nxt}")

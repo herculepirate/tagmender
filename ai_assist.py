@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import unicodedata
 
 import ai_providers as ap
@@ -179,7 +180,28 @@ class Assistant:
         self.tasks = set(ap.TASKS if tasks is None else tasks)
         self.providers = ap.configured(self.cfg) if providers is None else list(providers)
         self.calls, self.cache_hits = 0, 0
-        self.records, self.notes = [], []
+        self._count = threading.Lock()
+        self._local = threading.local()           # (records and notes: each album's own thread)
+
+    @property
+    def records(self) -> list:
+        if not hasattr(self._local, "records"):
+            self._local.records = []
+        return self._local.records
+
+    @records.setter
+    def records(self, value):
+        self._local.records = value
+
+    @property
+    def notes(self) -> list:
+        if not hasattr(self._local, "notes"):
+            self._local.notes = []
+        return self._local.notes
+
+    @notes.setter
+    def notes(self, value):
+        self._local.notes = value
 
     def ready(self) -> bool:
         return bool(self.cfg.get("consent")) and bool(self.providers) and bool(self.tasks)
@@ -205,7 +227,8 @@ class Assistant:
         if hit is not None:
             answer, urls = str(hit.get("text") or ""), list(hit.get("urls") or ())
             record["cached"] = True
-            self.cache_hits += 1
+            with self._count:
+                self.cache_hits += 1
         else:
             cap = ap.cap_of(p.name, self.cfg)
             if ap.usage(p.name)["requests"] >= cap:
@@ -224,7 +247,8 @@ class Assistant:
             except Exception as exc:                  # (never the album's error)
                 self.notes.append(f"{p.tag}: {type(exc).__name__}; {task} gave nothing")
                 return None, [], None
-            self.calls += 1
+            with self._count:
+                self.calls += 1
             ap.count_usage(p.name, use.get("input_tokens", 0), use.get("output_tokens", 0))
             ap.store_answer(key, p.name, p.model, task, {"text": answer, "urls": urls})
         record["got"] = answer[:2000]
@@ -391,6 +415,7 @@ def clue_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, im
         return mb_res, dg_res, final
     facts = album_facts(album)
     notes_out = []
+    ai.records, ai.notes = [], []                # (this album's only)
     clues = ai.read_notes(facts, docs_txt, ocr_txt)
     printed = mc.codes_from_ocr_text(ocr_txt or "")
     if images and not (printed["catnos"] or printed["barcodes"]):
@@ -500,7 +525,8 @@ def clue_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, im
                     + (r.get("discarded") or f"got {_short(r['got'])}") for r in ai.records]
     out["ai_notes"] = list(out.get("ai_notes") or []) + lines + record_lines + \
         [f"AI: {n}" for n in notes_out + ai.notes]
-    out["ai"] = {"calls": ai.calls, "cache_hits": ai.cache_hits, "records": list(ai.records),
+    out["ai"] = {"calls": sum(1 for r in ai.records if not r["cached"]),
+                 "cache_hits": sum(1 for r in ai.records if r["cached"]), "records": list(ai.records),
                  "clues": clues, "queries": queries, "research": research}
     ai.records, ai.notes = [], []
     return mb_res, dg_res, final

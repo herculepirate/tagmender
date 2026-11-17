@@ -2271,6 +2271,9 @@ class Engine:
                 self.log.warning("%s", exc, extra={"provider": exc.host})
         if errors.get("musicbrainz") in ("outage", "rate_limited", "invalid_response"):
             self._note_mb_down(argparse.Namespace(kind=errors["musicbrainz"]))
+        if out and out.get("ai"):                    # (AI-1: counted in the planner's log)
+            self.log.info("AI for %s: %d requests, %d answers from the cache", g.folder,
+                          out["ai"]["calls"], out["ai"]["cache_hits"], extra={"provider": "ai"})
         self._last_out = out                         # (the matcher's answer: _versions_split's candidates)
         held = self._preferred_down(errors, g.folder, [str(f) for f in g.files])
         if held is not None:

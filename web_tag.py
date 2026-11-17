@@ -1305,6 +1305,14 @@ def main(argv=None):
         # Deadly Lullabyes Live: "barcode differs" was the Massacre CD's barcode in the tags)
         album = ma.read_album(base, o.get("artist_folder") or base.parent.name, o.get("album_folder") or base.name,
                               exclude=pre.excluded, blind=chosen)
+        # FLD-2: as the matcher read it - unless that reading is only proposed for you to confirm
+        if o.get("reading_capped"):
+            print(f"  ?   {base.parent.name} | {base.name}: artist read from the folder name only; "
+                  "confirm the release in the preview")
+            report.append({"album": o["path"], "source": "", "page": "", "matched": "", "confidence": "",
+                           "result": "artist read from the folder name only; not tagged here"})
+            continue
+        album = ma.with_reading(album, o.get("folder_reading"))
         if not album["tracks"]:
             continue
         text = album_text(db, base)

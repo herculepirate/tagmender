@@ -971,7 +971,9 @@ def evidence_of(out, best):
     and an AcoustID disagreement: clues for whoever reviews the album, kept out of the
     match's own notes so nothing reads them as proof."""
     out = out or {}
-    return (list(best.get("notes") or []) + list(out.get("shop_notes") or []) + list(out.get("gnudb_notes") or [])
+    # (FLD-2: the artist and album read from the folder name, when the lookup used that reading)
+    return (list(best.get("notes") or []) + list(out.get("reading_notes") or [])
+            + list(out.get("shop_notes") or []) + list(out.get("gnudb_notes") or [])
             + list(out.get("acoustid_notes") or []) + list(out.get("ai_notes") or []))
 
 
@@ -2540,8 +2542,13 @@ class Engine:
         # folder, its second disc's other takes under the same titles): the matcher is asked first
         mixed = mixed_versions(g.files)
         where = stage[0] if stage else g.folder         # DSC-1 (a set side by side: its stage)
+        # (FLD-2: the folder the album's name belongs to - a disc's or version's folder is read with
+        # its set's name, a set side by side through a stage: the folders beside that one tell
+        # whether the layout is flat)
+        layout = next((p for p in (g.folder, *g.folder.parents) if p.parent != p and p.parent.name == artist_folder),
+                      g.folder)
         row = {"FullPath": str(where), "AlbumArtistFolder": artist_folder, "AlbumFolder": album_folder,
-               "Status": "untagged"}
+               "Status": "untagged", "LayoutDir": str(layout)}
         outside = [] if stage else self._outside(g)
         args = argparse.Namespace(ocr=self.ocr, max_images=getattr(self, "ocr_images", 15), process_anyway=False,
                                   use_mb=self.use_mb, rules=self.rules,
@@ -2583,6 +2590,9 @@ class Engine:
                                         reason="set search: no one release holds every file")
             return self._split_or_mixed(g, mixed, errors)
         album = ma.read_album(where, artist_folder, album_folder, exclude={str(x) for x in outside})
+        # FLD-2: the reading of the folder name the matcher's answer rests on ("Artist - Album" of a
+        # flat layout): the plan, tags and naming read the album as it did
+        album = ma.with_reading(album, (out or {}).get("folder_reading"))
         if stage:                                        # (the real files, not the stage's links)
             for t in album["tracks"]:
                 if t.get("path"):
@@ -2629,6 +2639,11 @@ class Engine:
                 held.notes = list(held.notes or []) + [
                     "what TagMender's earlier job wrote of that release is taken back (TAG-1)"]
             return held
+        if out and out.get("reading_capped"):
+            # FLD-2: found only under the folder name's "Artist - Album" reading, and the folder
+            # above is no flat layout (it may be the artist's own folder): the release is proposed
+            # for you to confirm - no album-known, Partial or web tags are written on that reading
+            return self._unresolved(out, files, base, errors)
         if out and out.get("album_only") and out.get("best") and self._accepts("album") and \
                 not _provider_failed(errors):
             # the album is certain, only its pressing is not: tag what every pressing shares
@@ -3114,6 +3129,13 @@ class Engine:
             return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
                                     reason=f"the release you chose was not found: {ref}")
         sc = mc.score_candidate(album, cand, self.cfg)
+        if album.get("folder_reading"):
+            # (FLD-2: the release you chose, scored under the folder name's "Artist - Album" reading
+            # too - a flat layout's folder above is no artist: the reading that agrees better)
+            alt = ma.with_reading(album, album["folder_reading"])
+            s2 = mc.score_candidate(alt, cand, self.cfg)
+            if float(s2.get("confidence") or 0) > float(sc.get("confidence") or 0):
+                album, sc = alt, s2
         if claimed is not None:
             # (DSC-10: a set's title is its folder's, or the title one of its discs is tagged with -
             # "The Stranger" on the disc of the album in "The Stranger Legacy Edition (with BestBuy
@@ -4881,8 +4903,9 @@ class Engine:
         prop = planmod.Proposal(**base, targets=targets, status="identified", tier="partial",
                                 provider=f"web:{name}", release_id="", url=page,
                                 confidence=float(sc.get("confidence") or 0), why=notes,
-                                evidence=list(sc.get("notes") or []), reason=words,
-                                reason_codes=["web_fallback_only"],
+                                # (FLD-2: the artist and album read from the folder name, when they were)
+                                evidence=list(sc.get("notes") or []) + list((out or {}).get("reading_notes") or []),
+                                reason=words, reason_codes=["web_fallback_only"],
                                 provenance={k: "web" for t in targets for k in t if not k.startswith("~")},
                                 release={"album": [targets[0].get("album", [""])[0]] if targets else [],
                                          "albumartist": [cand.get("artist", "")],

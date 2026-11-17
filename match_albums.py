@@ -2001,6 +2001,90 @@ def _set_title(infos, folder_title) -> str:
     return t if len(t) >= 4 and not re.fullmatch(r"[\dIVXLC\s.#-]+", t) else folder_title
 
 
+_DISC_HEAD = re.compile(r"[\(\[]?\s*(?:cd|disc|disk|dvd|lp|side|vol(?:ume)?|part|pt)\.?\s*[-_.#]?\s*"
+                        r"(?:\d{1,3}|[ivx]{1,4}|[a-d])?\s*[\)\]]?", re.I)
+
+
+# (a compilation's folder: "VA - Now 50" names no artist)
+_VARIOUS_HEAD = re.compile(r"v\.?\s*a\.?|various(?:\s+artists?)?", re.I)
+
+
+def folder_reading(album_folder):
+    """FLD-2: a folder name read as "Artist - Album": (head, rest, year), else None.
+    The leading year ("1997 - ...") is skipped, as read_album does, and a year between the two
+    ("Artist - 1997 - Album") is the year; one after the album ("Album - 2010", "Album (2010)") is
+    taken out of the rest, never made the year. Only " - " (or " – ") splits: "Jay-Z" is one
+    name. Never a head that is a year, a disc word ("CD1 - ...", "Vol. 2 - ..."), a catalogue
+    number, numbers alone or Various Artists ("VA - ..."); never an empty rest."""
+    name = str(album_folder or "").strip()
+    lead = re.match(r"\s*(\d{4})\s*[-–]\s*(.*)", name)
+    year = int(lead.group(1)) if lead else 0
+    name = lead.group(2) if lead else name
+    parts = re.split(r"\s+[-–]\s+", name, maxsplit=1)
+    if len(parts) != 2:
+        return None
+    head, rest = parts[0].strip(), parts[1].strip()
+    mid = re.match(r"(\d{4})\s+[-–]\s+(.+)$", rest)
+    if mid:
+        year, rest = year or int(mid.group(1)), mid.group(2).strip()
+    # a year after the album ("Album - 2010", "Album (2010)") is taken out of the title searched,
+    # never made the album's year: it is as often a reissue's ("(2009)" of a 1997 album), and a
+    # year that disagrees would lower a sure pick (YR-1). A range keeps its two years ("The Early
+    # Years 1965 - 1972": no year cut off).
+    tail = re.match(r"(.+?)\s*(?:\s[-–]\s+(\d{4})|[\(\[](\d{4})[\)\]])\s*$", rest)
+    if tail and mc.fold(tail.group(1)) and not (tail.group(2) and re.search(r"\b\d{4}$", tail.group(1))):
+        rest = tail.group(1).strip()
+    if not mc.fold(head) or not mc.fold(rest):
+        return None
+    if re.fullmatch(r"[\d\W_]+", head) or _DISC_HEAD.fullmatch(head) or _VARIOUS_HEAD.fullmatch(head):
+        return None
+    if mc.catno_hints(head) or mc.catno_hints(f"[{head}]"):
+        return None
+    return head, rest, year
+
+
+def with_reading(album, reading):
+    """FLD-2: ALBUM read under its folder name's reading (read_album's "folder_reading"): its
+    artist and title, and its year when the files and folder gave none. The same ALBUM when
+    READING is empty."""
+    if not reading:
+        return album
+    out = dict(album, artist=reading["artist"], title=reading["title"], read_from_folder=reading["folder"])
+    if not out.get("year") and reading.get("year"):
+        out["year"] = reading["year"]
+    return out
+
+
+_FLAT_CACHE = {}
+
+
+def flat_layout(album_dir, artist_folder):
+    """FLD-2: the folder ALBUM_DIR sits in looks like a flat layout ("Downloads/Artist - Album"):
+    at least three of its folders, and most of them, are named "Head - Rest" with a head that is
+    not that folder's own name nor holds it ("Miles Davis Quintet - Relaxin'" in "Miles Davis/" is
+    the artist's own), and two heads or more differ. One listing per folder, read again when the
+    folder changes (its modification time: one stat)."""
+    parent = Path(album_dir).parent
+    try:
+        key = (str(parent), os.stat(parent).st_mtime_ns)
+    except OSError:
+        return False
+    flat = _FLAT_CACHE.get(key)
+    if flat is None:
+        try:
+            names = [e.name for e in os.scandir(parent) if e.is_dir()]
+        except OSError:
+            names = []
+        own = mc.fold(artist_folder)
+        heads = [mc.fold(r[0]) for r in map(folder_reading, names) if r]
+        heads = [h for h in heads if not own or (h != own and not re.search(rf"\b{re.escape(own)}\b", h))]
+        flat = len(heads) >= 3 and 2 * len(heads) > len(names) and len(set(heads)) >= 2
+        if len(_FLAT_CACHE) > 256:
+            _FLAT_CACHE.clear()
+        _FLAT_CACHE[key] = flat
+    return flat
+
+
 def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     """blind=True (validate.py): the files were tagged already, so their release IDs,
     ISRCs, label, catalogue number, barcode, country, date and year came FROM a release
@@ -2189,7 +2273,24 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     year = top("year") or (int(m.group(1)) if m else 0)
     title = tag_title or _set_title(infos, m.group(2) if m else album_folder) or top("album") or \
         (m.group(2) if m else album_folder)
-    n_discs = len({i["disc_eff"] for _p, i in infos}) or 1
+    # FLD-2: a folder named "Artist - Album" (a flat layout: "Music/Radiohead - OK Computer", or
+    # inside its artist's folder). Its head the artist we know already (the folder above, or the
+    # files' artist tag): the album is the rest. Its head another name, and the files naming no
+    # artist: kept as a second reading, which the lookup tries too (process) - never proof of a
+    # release, only a name to search.
+    reading = folder_reading(album_folder)
+    folder_read = None
+    if reading:
+        head, rest, r_year = reading
+        untitled = not (tag_title or top("album"))
+        if mc.fold(head) in {mc.fold(artist_folder), mc.fold(top("artist"))} - {""}:
+            if untitled:
+                title = rest
+                year = year or r_year
+        elif not top("artist"):
+            folder_read = {"artist": head, "title": rest if untitled else title, "year": r_year or None,
+                           "folder": str(album_folder)}
+    n_discs =len({i["disc_eff"] for _p, i in infos}) or 1
     folder_hints = mc.catno_hints(album_folder) + [h for h in mc.catno_hints(title)
                                                    if h not in mc.catno_hints(album_folder)]
     folder_match = set(mc.catno_hints(album_folder, variants=True)) | set(
@@ -2323,6 +2424,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "enhanced": enhanced_marks(album_dir, logs),
         "tracktotal": _track_total(infos),
         "folder": album_folder, "artist_folder": artist_folder,
+        # FLD-2: the folder name's own "Artist - Album" reading, when the files name no artist
+        # and its head is not the folder above (with_reading; None otherwise)
+        "folder_reading": folder_read,
         "tag_label": top("label"), "tag_country": top("country"),
         # labels to search with the catalogue number: the tags', then the ripper's notes'
         "search_labels": search_labels(top("label"), notes),
@@ -8808,8 +8912,79 @@ def process(row, http, cfg, dm, args):
     full_cfg = cfg
     # (evidence_pass: a pick by date or entry is held back for the country order: TIE-2)
     cfg = dict(cfg, preferred_countries=[], evidence_pass=bool(full_cfg.get("preferred_countries")))
-    out = _process(row, http, cfg, dm, args, full_cfg)
+    # FLD-2: a folder named "Artist - Album" whose files name no artist is read two ways: the
+    # folder above as the artist (an artist's folder), and the folder name's own head (a flat
+    # layout, "Downloads/Radiohead - OK Computer"). The first reading is looked up first - the
+    # folder name's own when the folder above looks like a flat layout (flat_layout); the other
+    # only when the first is not sure, and it is taken only when its result is strictly better
+    # by tier (sure, over album known or for review, over no match): never on a score alone.
+    # Every gate applies to either reading as to any album (artist, title, lengths, pressings).
+    # Only beside a flat layout may the folder name's reading be sure: elsewhere the folder above
+    # may well be the artist ("Radiohead/Live - At Wembley"), and what that reading finds is
+    # proposed for you to confirm (review), never tagged by itself - also not as album known or
+    # Partial (engine: reading_capped).
+    # The cap comes before the comparison: away from a flat layout the folder name's reading is
+    # at best for review, so it is never preferred to an album-known or review result of the
+    # folder above's reading - only to no match.
+    # (row "LayoutDir": the folder the album folder's name belongs to, when the matcher reads
+    # another - one disc's or version's folder, a set's stage - engine._identify_album)
+    first = dict(row)
+    flat = bool(folder_reading(row.get("AlbumFolder")) and
+                flat_layout(row.get("LayoutDir") or row["FullPath"], row.get("AlbumArtistFolder")))
+    if flat:
+        first["FolderReading"] = True
+    out = _process(first, http, cfg, dm, args, full_cfg)
+    best_other = 3 if flat else 2               # (what the other reading can reach)
+    if out.pop("_other_reading", False) and out.get("status") not in ("auto", "error", "moved", "ignored",
+                                                                      "skipped") \
+            and _reading_tier(out) < best_other:
+        other = dict(row, FolderReading=not first.get("FolderReading"), ReadingCapped=not flat)
+        # (the optional AI step had its turn with the first reading: not asked twice for one album)
+        args2 = copy.copy(args)
+        args2.ai = None
+        try:
+            again = _process(other, http, cfg, dm, args2, full_cfg)
+        except (ProviderUnavailable, AuthError):
+            raise                                   # (an outage: retried as any lookup)
+        except Exception as exc:                    # (the first reading's answer stands)
+            _tell(f"FLD-2: the folder name's other reading of {row.get('FullPath')} failed "
+                  f"({type(exc).__name__}: {exc}); the first reading's result is kept")
+            again = None
+        if again is not None:
+            again.pop("_other_reading", None)
+            if other["ReadingCapped"] and again.get("folder_reading"):
+                _cap_reading(again, row)
+            if _reading_tier(again) > _reading_tier(out):
+                out = again
+    if out.get("reading_notes") and out.get("status") != "auto":
+        out["why"] = list(out.get("why") or []) + out["reading_notes"]       # (a sure pick: its evidence)
     return out
+
+
+def _cap_reading(out, row):
+    """FLD-2: OUT, found under the folder name's reading away from a flat layout: proposed for you
+    to confirm (review), never sure - nor album known or Partial (engine: reading_capped)."""
+    out["reading_capped"] = True
+    parent = row.get("AlbumArtistFolder") or ""
+    cap = (f"artist read from the folder name; the folder above, '{parent}', names another artist - "
+           "confirm the release (FLD-2)" if parent else
+           "artist read from the folder name; the folder above names no artist - confirm the release (FLD-2)")
+    if out.get("status") == "auto":
+        out["status"] = "review"
+    out["why"] = list(out.get("why") or []) + [cap]
+
+
+def _reading_tier(out):
+    """FLD-2: how far a result got - sure 3, album known or for review 2, no match 1, an error
+    or a lookup that failed (or nothing looked up) 0."""
+    status = (out or {}).get("status")
+    if status in ("error", "moved", "ignored", "skipped") or not status:
+        return 0
+    if status == "auto":
+        return 3
+    if status == "review" or (out or {}).get("album_only"):
+        return 2
+    return 1 if status == "nomatch" else 0
 
 
 # The Discogs search runs on a worker thread while MusicBrainz is searched (each host on one
@@ -8861,10 +9036,18 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     others = {str(x) for x in getattr(args, "exclude_files", ()) or ()}
     album = read_album(base, row["AlbumArtistFolder"], row["AlbumFolder"],
                        exclude={str(x) for x in dec.excluded} | others, blind=getattr(args, "blind", False))
+    # FLD-2: looked up under the folder name's "Artist - Album" reading when process asks for it
+    # (row "FolderReading"); either way process is told a second reading exists
+    reading = album.get("folder_reading")
+    if reading and row.get("FolderReading"):
+        album = with_reading(album, reading)
     out = {"path": row["FullPath"], "artist_folder": row["AlbumArtistFolder"],
            "album_folder": row["AlbumFolder"], "tag_artist": album["artist"],
            "tag_title": album["title"], "tag_year": album["year"],
-           "tracks": len(album["tracks"])}
+           "tracks": len(album["tracks"]), "_other_reading": bool(reading)}
+    if reading and row.get("FolderReading"):
+        out["folder_reading"] = reading
+        out["reading_notes"] = [f"artist and album read from the folder name '{reading['folder']}' (FLD-2)"]
     if dec.excluded:                                     # a mixed folder: the rest is still matched
         out["excluded_files"] = [[p.name, e.label, e.rule.name] for p, e in dec.excluded.items()]
     if not album["tracks"]:
@@ -9370,10 +9553,13 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             if cov:
                 report["coverage"] = cov
         out["via"] = found_via(final["best"], album)
-    if status == "auto" and getattr(args, "learn_scan_order", True):
+    # (FLD-2: a sure pick on the folder name's capped reading is unconfirmed: nothing learnt or
+    # checked on it)
+    unconfirmed = bool(row.get("ReadingCapped") and row.get("FolderReading"))
+    if status == "auto" and getattr(args, "learn_scan_order", True) and not unconfirmed:
         learn_scan_order(scan_log, final)
     mb_pick = (out.get("best") or {}).get("mb_id")
-    if status == "auto" and fp_mode == "always" and fingerprint_ready():
+    if status == "auto" and fp_mode == "always" and fingerprint_ready() and not unconfirmed:
         # acoustid: always - a sure album is fingerprinted too; a disagreement is noted for
         # whoever reviews it, and the pick stands (the fingerprint is one more clue).
         # "acoustid_checked" marks it done (or nothing to compare: a pick without

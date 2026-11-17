@@ -937,8 +937,6 @@ class Overview(QWidget):
         self.win.update_album_actions()
 
     def refresh_profiles(self):
-        if hasattr(self, "profile_delegate"):
-            self.profile_delegate.refresh()                # (its column: the profiles' names now)
         from .common import forget_profile_colours
         forget_profile_colours()                      # (a profile's colour may have changed)
         cur = self._above or self.starting_profile()

@@ -754,9 +754,31 @@ class AlbumsModel(LazyTree):
             st = _stamp(al)
             if n.album is not al or n.data.get("stamp") != st:
                 n.album, n.data["stamp"] = al, st
-                self.reset_kids(n)
+                self._refresh_kids(n)
         if lo <= hi:
             self.dataChanged.emit(self.index(lo, 0), self.index(hi, len(self.COLS) - 1))
+
+    def _refresh_kids(self, n):
+        """Album row N's entry changed (your edit, a look-up): its discs and tracks read again - in
+        place when they are as many as before, so a disc or track selected stays selected; else
+        made again when next opened."""
+        if n.kids is None:
+            return
+        new = album_discs(n.album or {})
+        old = n.kids
+        if len(new) != len(old) or any(d.kids is not None and len(d.kids) != len(nd["tracks"])
+                                       for d, nd in zip(old, new)):
+            self.reset_kids(n)
+            return
+        last = len(self.COLS) - 1
+        for d, nd in zip(old, new):
+            d.album, d.data = n.album, nd
+            if d.kids:
+                for t, nt in zip(d.kids, nd["tracks"]):
+                    t.album, t.data = n.album, nt
+                self.dataChanged.emit(self.index_of(d.kids[0]), self.index_of(d.kids[-1], last))
+        if old:
+            self.dataChanged.emit(self.index_of(old[0]), self.index_of(old[-1], last))
 
     def node_of(self, album):
         return next((n for n in self.top.kids if n.album is album), None)

@@ -66,7 +66,7 @@ def registry_checks() -> list[Check]:
                       else "not installed") + " (optional)"
             fix = row["notice"]
             if e.kind == "key":
-                fix += f" Without it: {e.without} Add it in Preferences \u203a Keys."
+                fix += f" Without it: {e.without} Add it in Preferences \u203a Keys (or: tagmender setup)."
         out.append(Check(e.check or e.id, status, detail, fix if not row["ready"] else row["notice"],
                          group=e.group))
     return out

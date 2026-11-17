@@ -117,7 +117,7 @@ class TagMatchExpression:
         for group, tag in self._group_map.items():
             value = m.group(group).strip()
             if tag in self._numeric_tags:
-                value = value.lstrip("0")
+                value = value.lstrip("0") or ("0" if value else "")    # ("00": track 0, a hidden track)
             if self.replace_underscores:
                 value = value.replace("_", " ")
             result.setdefault(tag, []).append(value)
@@ -131,7 +131,7 @@ def relative(path, base) -> str | None:
         rel = os.path.relpath(str(path), str(base))
     except ValueError:
         return None
-    if rel.startswith(".."):
+    if rel == ".." or rel.startswith(".." + os.sep):        # (a folder named "..x" below it is below it)
         return None
     return rel.replace(os.sep, "/")
 

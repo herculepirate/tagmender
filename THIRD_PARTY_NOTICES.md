@@ -12,7 +12,7 @@ TagMender is licensed GPL-2.0-or-later (see LICENSE).
 | MusicBrainz Picard 3.0.2, `picard/mbjson.py` (ported) | GPL-2.0-or-later | the artist-credit, alias, translation and relationship logic in `mb_tags.py` |
 | MusicBrainz Picard 3.0.2, `test/data/ws_data/*.json` | GPL-2.0-or-later | `tests/data/picard_parity/ws_data` (test data only) |
 | MusicBrainz Picard 3.0.2, `picard/const/tags.py` (tag display names) | GPL-2.0-or-later | `gui/tagnames.py`, the names only, made translatable |
-| MusicBrainz Picard 3.0.2, `picard/ui/tagsfromfilenames.py` (`TagMatchExpression`; modified: optionally anchored to a chosen folder) | GPL-2.0-or-later | `gui/dialogs/tags_from_filenames.py` |
+| MusicBrainz Picard 3.0.2, `picard/ui/tagsfromfilenames.py` (`TagMatchExpression`; modified: optionally anchored to a chosen folder, a track or disc number 0 kept) | GPL-2.0-or-later | `gui/dialogs/tags_from_filenames.py` |
 | MusicBrainz Picard 3.0.2, `picard/options.py`, `picard/const/defaults.py` (default values) | GPL-2.0-or-later | `tagger_options.py`, Picard's defaults for the options TagMender reads |
 | Discogs and CoverUp plugins (by TagMender's author, previously separate projects) | GPL-2.0-or-later | `plugins_builtin/discogs` (0.3.8), `plugins_builtin/coverup` (0.6.1): their parts that run without another tagger |
 | Lucide icons 0.460.0 (lucide-static) | ISC | `assets/icons/lucide/`, 44 SVG files unchanged, licence in `assets/icons/lucide/LICENSE`; shipped in the .deb, the AppImage and the Flatpak with that file |

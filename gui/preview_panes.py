@@ -313,6 +313,14 @@ def tag_rows(files, current=None) -> list:
             if f.startswith("~") or f in named or f in (fe.get("changes") or {}):
                 continue
             per.setdefault(f, []).append((_vals(v), _vals(v), "=", False))
+    # (a tag only some of the files have: the others, read and without it, count as files without
+    # a value - the row is not one shared value, and setting it for all asks first. A file not read
+    # (past READ_MOST) is not counted: what it holds is not known)
+    read = [fe for fe in files if fe.get("src") in current]
+    if len(read) > 1:
+        for f, entries in per.items():
+            have = sum(1 for fe in read if f in _fields_of(fe, current))
+            entries += [([], [], "=", False)] * (len(read) - have)
     rows = [_row(f, tag_name(f), e) for f, e in per.items()]
     for key, name, get in ((FOLDER, tr("Folder"), lambda p: str(Path(p).parent)),
                            (FILENAME, tr("File name"), lambda p: Path(p).name)):
@@ -348,20 +356,39 @@ def row_order(r):
     return (0, _ALBUM_AT[f], "") if f in _ALBUM_AT else (1, 0, r["name"].lower())
 
 
+def _fields_of(fe, current) -> set:
+    """The tags file entry FE holds or will hold: its diff's, its changes', its tags as read."""
+    out = {r.get("field") for r in fe.get("diff") or []}
+    out |= set(fe.get("changes") or {})
+    out |= set(current.get(fe.get("src")) or {})
+    return out
+
+
+def _mixed_words(values, n) -> str:
+    """The cell of a tag the files do not share: "Jazz in 1 of 2 files" when the files holding it
+    agree and the others have none, else "different in N files"."""
+    held = {v for v in values if v}
+    if len(held) == 1:
+        k = sum(1 for v in values if v)
+        return tr("{value} in {k} of {n} files").format(value=_join(list(next(iter(held)))), k=k, n=n)
+    return tr("different in {0} files").format(n)
+
+
 def _row(field_, name, entries) -> dict:
     befores = {tuple(b) for b, _a, _m, _y in entries}
     afters = {tuple(a) for _b, a, _m, _y in entries}
     marks = {m for _b, _a, m, _y in entries}
     n = len(entries)
     mark = "=" if marks == {"="} else next(iter(marks - {"="})) if len(marks - {"="}) == 1 else "→"
-    differ = tr("different in {0} files").format(n)
     bv = list(next(iter(befores))) if len(befores) == 1 else None
     av = list(next(iter(afters))) if len(afters) == 1 else None
     return {"field": field_, "name": name, "mark": mark, "n": n, "path": False,
             "mine": any(y for _b, _a, _m, y in entries),
             "before_vals": bv, "after_vals": av, "mixed_before": bv is None, "mixed_after": av is None,
-            "before": (_join(bv) or tr(NONE)) if bv is not None else differ,
-            "after": (_join(av) or tr(NONE)) if av is not None else differ}
+            "before": (_join(bv) or tr(NONE)) if bv is not None else
+            _mixed_words([tuple(b) for b, _a, _m, _y in entries], n),
+            "after": (_join(av) or tr(NONE)) if av is not None else
+            _mixed_words([tuple(a) for _b, a, _m, _y in entries], n)}
 
 
 def segments(old: str, new: str) -> tuple:
@@ -1115,6 +1142,18 @@ class AlbumsView(QTreeView):
 # --------------------------------------------------------------------------
 # tag changes
 # --------------------------------------------------------------------------
+_COLOURS = {}                           # (theme colour name, its value) -> QColor: made once per theme
+
+
+def _colour(name) -> QColor:
+    """style.color(NAME) as a QColor, made once for each value it has (a theme change: a new one)."""
+    value = style.color(name)
+    got = _COLOURS.get((name, value))
+    if got is None:
+        got = _COLOURS[(name, value)] = QColor(value)
+    return got
+
+
 class TagModel(QAbstractTableModel):
     COLS = ("", N_("Tag"), N_("Original"), N_("New"))
     SEGMENTS = R_USER + 3                         # [(text, changed)] for the delegate
@@ -1184,9 +1223,9 @@ class TagModel(QAbstractTableModel):
                                                                   if c == 3 and self.can_edit(r) else "")
             return f"{r['name']} ({r['field']})" if not r.get("path") else r["name"]
         if role == R_FOREGROUND and c == 0:
-            return QColor(style.color({"+": "accent", "→": "attention", "−": "error"}.get(r["mark"], "muted")))
+            return _colour({"+": "accent", "→": "attention", "−": "error"}.get(r["mark"], "muted"))
         if role == R_FOREGROUND and c in (1, 3) and r["mark"] == "=":
-            return QColor(style.color("muted"))           # (kept: its new value the same, dimmed)
+            return _colour("muted")                         # (kept: its new value the same, dimmed)
         if role == R_TEXTALIGNMENT and c == 0:
             return int(Qt.AlignCenter)
         if role == R_FONT and r["mine"] and c in (1, 3):
@@ -2094,8 +2133,10 @@ class PreviewPanes(QWidget):
         if self.tag_worker is not None:
             self.tag_worker.cancelled = True
         self.tag_worker = None
-        self.current = {}
         files = [fe["src"] for fe in self.scope_files()][:READ_MOST]
+        # (what was read of these files stays shown until the new read arrives: an edit or a
+        # reselection never empties the rows in between)
+        self.current = {f: self.current[f] for f in files if f in (self.current or {})}
         if not files or self.owner is None:
             return
         scope = self.scope

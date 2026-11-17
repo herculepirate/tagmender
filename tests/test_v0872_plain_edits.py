@@ -761,6 +761,50 @@ class TagsShown(PlainEdits):
         self.assertEqual(m.data(m.index(r, 3), self.gui.preview_panes.R_FOREGROUND),
                          QColor(self.gui.style.color("muted")))
 
+    def test_a_tag_only_some_files_have_is_not_one_shared_value(self):
+        f1, f2 = self.flac / "01 Song.flac", self.flac / "02 Song.flac"
+        tagio.write(f1, {"lyricist": ["Writer"]})
+        self.open_list()
+        self.show(self.flac)
+        r = self.row("lyricist")
+        self.assertTrue(r["mixed_after"])
+        self.assertEqual(r["after"], "Writer in 1 of 2 files")
+        self.assertFalse(self.panes.tag_model.inline(r))                 # (never typed in place for all)
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=False) as asked, \
+                mock.patch.object(self.gui.inspector, "tag_sheet", return_value=("lyricist", ["Other"])) as sheet:
+            self.panes.tag_view.selectRow(self.panes.tag_model.rows.index(r))
+            self.panes.edit_selected()
+        asked.assert_called_once()                                       # (set for all: asked first)
+        sheet.assert_not_called()                                        # (No: nothing changes)
+        self.assertEqual(self.insp.edits, {})
+        self.assertEqual(self.row("genre")["after"], "different in 2 files")
+
+    def test_the_rows_stay_while_the_tags_are_read_again(self):
+        self.open_list()
+        self.show(self.mp3)
+        n = len(self.panes.tag_model.rows)
+        gate = __import__("threading").Event()
+        real = tagio.read
+
+        def slow(*a, **k):
+            gate.wait(5)
+            return real(*a, **k)
+        with mock.patch.object(tagio, "read", slow):
+            self.panes.read_tags()
+            self.panes.fill_tags()
+            self.assertEqual(len(self.panes.tag_model.rows), n)         # (not emptied meanwhile)
+            gate.set()
+            self.assertTrue(wait(lambda: self.panes.tag_worker is None, self.app))
+
+    def test_pattern_nits(self):
+        from gui.dialogs import tags_from_filenames as t
+        self.assertEqual(t.relative("/m/..x/a.flac", "/m"), "..x/a.flac")
+        self.assertIsNone(t.relative("/a.flac", "/m"))
+        self.assertEqual(t.parse(["/m/00 Intro.flac"], "%tracknumber% %title%", base="/m"),
+                         {"/m/00 Intro.flac": {"tracknumber": ["0"], "title": ["Intro"]}})
+        self.assertEqual(t.parse(["/m/07 X.flac"], "%tracknumber% %title%", base="/m")["/m/07 X.flac"]["tracknumber"],
+                         ["7"])
+
     def test_patterns_over_folders(self):
         from gui.dialogs import tags_from_filenames as t
         base = "/m/Band J"

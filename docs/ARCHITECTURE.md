@@ -77,7 +77,8 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys, settin
     - PRF-2: the files' tags are remembered for the app's session (`exclusions.meta_memo`) while
       their size, times and inode are unchanged, for a working day at most (an edit that keeps
       every stamp, on FAT/exFAT or by a tagger told to keep the modification time, is seen the
-      next day); a pass forgets only what is gone from the folders it read whole.
+      next day); a pass forgets only what is gone from the folders it read whole. Each entry is
+      kept compressed, about 1 KB a file: ~90 MB for 90,000 files, ~500 MB at the 500,000 cap.
     - PRF-3: `albums_in` reads a folder tree unit by unit (`engine._scan_units`): a folder whose
       grouping cannot reach its siblings or its parent is split, each sub-folder grouped as soon
       as it is read, exactly as the whole tree is (`_albums_whole`, compared in the tests).

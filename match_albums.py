@@ -1805,6 +1805,12 @@ def _audio_files(d):
         return []
 
 
+def deluxe_named(album_name, name) -> bool:
+    """NAME is "<album_name> (Deluxe Edition)" or "[Deluxe]": the name deluxe_sibling looks for
+    (engine._splits asks the same, so the two never disagree)."""
+    return re.fullmatch(re.escape(album_name) + _DELUXE_DIR, name, re.I) is not None
+
+
 def deluxe_sibling(album_dir):
     """The sibling folder holding the rest of this album, or None: "<this folder's name>
     (Deluxe Edition)", whose files have the same album artist and the same track total
@@ -1812,11 +1818,11 @@ def deluxe_sibling(album_dir):
     the two folders together holding exactly that many tracks, none twice (Rotting Christ -
     The Heretics: tracks 1-10 here, 11 and 12 in the deluxe folder)."""
     album_dir = Path(album_dir)
-    rx = re.compile(re.escape(album_dir.name) + _DELUXE_DIR, re.I)
     try:
         # (the name first: a stat for each sibling is slow in a large folder, once per album there)
         sib = next((d for d in (album_dir.parent / n for n in sorted(
-            n for n in os.listdir(album_dir.parent) if rx.fullmatch(n))) if d != album_dir and d.is_dir()), None)
+            n for n in os.listdir(album_dir.parent) if deluxe_named(album_dir.name, n)))
+            if d != album_dir and d.is_dir()), None)
     except OSError:
         return None
     if sib is None:
@@ -4542,6 +4548,7 @@ class Http:
                         self.last[limit] = max(self.last.get(limit, 0), time.time() + pause - delay)
                         break
                     _tell(f"    {host} HTTP {e.code}, waiting {pause:.0f}s")
+                    stagetimes.back_off(stagetimes.provider_of(host), pause)   # (the app shows the wait)
                     with stagetimes.stage(stagetimes.provider_of(host) + " back-off"):
                         self._pause(pause)                  # (a given-up clone: stops at once)
                     continue
@@ -4556,8 +4563,10 @@ class Http:
                 if attempt == attempts - 1:
                     break                                   # giving up: no sleep first
                 _tell(f"    {host} network error {e}, retrying")
+                pause = 10 * (attempt + 1) + random.uniform(0, 1)
+                stagetimes.back_off(stagetimes.provider_of(host), pause)       # (the app shows the wait)
                 with stagetimes.stage(stagetimes.provider_of(host) + " back-off"):
-                    self._pause(10 * (attempt + 1) + random.uniform(0, 1))
+                    self._pause(pause)
             except (OSError, _HTTPException, ValueError) as e:
                 # a broken answer (connection reset, incomplete read, SSL error, not UTF-8)
                 last_err = f"{type(e).__name__}: {e}"

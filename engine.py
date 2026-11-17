@@ -1103,9 +1103,8 @@ def _splits(d: Path, dirs, audio, names) -> bool:
                 return False                         # (two discs of one set filed side by side: DSC-1)
             stems.add(mc.fold(sd[0]))
     for n in names:                                  # (an album and its "(Deluxe Edition)" folder)
-        low = n.casefold()
-        if "deluxe" in low and any(c != n and low.startswith(c.casefold())
-                                   and re.fullmatch(re.escape(c) + ma._DELUXE_DIR, n, re.I) for c in dirs):
+        # (the cheap word first; then deluxe_sibling's own match - re.I, never casefold: "İSTANBUL")
+        if "deluxe" in n.casefold() and any(c != n and ma.deluxe_named(c, n) for c in dirs):
             return False
     return True
 
@@ -1633,6 +1632,11 @@ class Engine:
         the albums inside these folders come out as albums_in(path) has them, beside the other
         albums of the folders read with them (a disc folder's album folder, a set's siblings)."""
         return _albums_iter(self, path, skip, within)
+
+    def _logger(self):
+        """The engine's log - or, for an engine made without one (a test's, by __new__), the
+        module's logger: its look-ups still plan, their timing and failure lines logged."""
+        return getattr(self, "log", None) or logging.getLogger("tagmender.engine")
 
     def _own_scan(self) -> bool:
         """albums_in is the engine's own (not a stand-in put in its place: plan_each's, a test's)."""
@@ -5145,9 +5149,7 @@ class Engine:
             # (PRF-4: a look-up of some albums reads only the folders holding them)
             groups = _albums_of_keys(self, path, only) if only is not None and self._own_scan() else self.albums_in(path)
         took = time.monotonic() - start
-        # (an engine made without its log - a test's, by __new__ - still plans: the timing lines go
-        # to the module's logger)
-        log = getattr(self, "log", None) or logging.getLogger("tagmender.engine")
+        log = self._logger()
         if took >= 0.1:                           # (PRF-1: a scan the look-up waited for; plan_each's later ones are remembered)
             log.info("timing scan %s: %d albums in %.1f s (tags %.1f s)", path, len(groups), took,
                           secs.get("tags", 0.0))
@@ -5190,7 +5192,7 @@ class Engine:
                     finally:
                         log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
             except Exception as exc:                          # one bad album never stops the run
-                self.log.exception("identifying %s failed", g.folder)
+                log.exception("identifying %s failed", g.folder)
                 p = planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
                                      status="unresolved", reason=f"error: {exc}", reason_codes=["other"])
                 p.group_key = key

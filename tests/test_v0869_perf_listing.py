@@ -213,6 +213,20 @@ class UnitsAreTheWholeScan(Base):
         self.assertEqual([sig(g) for g in self.e.albums_in(self.lib, skip)],
                          [sig(g) for g in engine._albums_whole(self.e, self.lib, skip)])
 
+    def test_deluxe_names_match_as_deluxe_sibling_matches_them(self):
+        # (re.I, as match_albums.deluxe_sibling: "İSTANBUL" beside "istanbul" - casefold differs)
+        for main, deluxe in (("istanbul", "İSTANBUL (Deluxe)"), ("izmir", "İzmir (Deluxe Edition)"),
+                             ("Işık", "IŞIK (Deluxe)")):
+            with self.subTest(main=main):
+                top = self.tmp / "turk" / main
+                album(top.parent / main, "Turk", "Album", n=2, tracktotal=3)
+                album(top.parent / deluxe, "Turk", "Album", n=1, start=3, tracktotal=3)
+                whole = [sig(g) for g in engine._albums_whole(self.e, self.tmp / "turk")]
+                self.assertEqual([sig(g) for g in self.e.albums_in(self.tmp / "turk")], whole)
+                self.assertEqual([len(g[1]) for g in whole], [3])
+                self.assertFalse(engine._splits(top.parent, [main, deluxe], [], [main, deluxe]))
+                shutil.rmtree(top.parent)
+
     def test_split_rules(self):
         S = engine._splits
         p = self.lib
@@ -340,6 +354,18 @@ class LookUpReadsItsFolders(Base):
             self.assertEqual(seen[True], seen[False], a["source_dir"])
             self.assertTrue(seen[True])
 
+    def test_an_engine_without_its_log_still_reports_a_failed_album(self):
+        e = engine.Engine.__new__(engine.Engine)
+        e.profile, e.job, e.notes = self.e.profile, "t", {}
+
+        def boom(g):
+            raise RuntimeError("no network here")
+        e.identify_all = boom
+        w = self.lib / "A Band" / "1977 - The Stranger"
+        with self.assertLogs("tagmender.engine", "ERROR"):
+            out = e.proposals(w)
+        self.assertEqual([(p.status, p.reason) for p in out], [("unresolved", "error: no network here")])
+
     def test_plan_each_reads_only_the_folders_of_its_albums(self):
         listed = self.e.listing(self.lib)["albums"]
         keys = [x["key"] for x in listed if "/A Band/" in x["source_dir"] and "1992" not in x["source_dir"]]
@@ -360,6 +386,73 @@ class LookUpReadsItsFolders(Base):
         self.assertTrue(r.calls)
         self.assertTrue(all("/A Band/" in c for c in r.calls), r.calls)
         self.assertNotIn("albums_in", e.__dict__)
+
+
+# ---- a provider's back-off told as it starts (the app's status line) ----------------------------
+class BackOffTold(unittest.TestCase):
+    def setUp(self):
+        import sqlite3
+        import match_albums as ma
+        import match_core as mc
+        self.ma = ma
+        self.http = ma.Http(sqlite3.connect(":memory:"), dict(mc.DEFAULT_CFG, mb_delay=0, discogs_delay=0), "")
+
+    def run_with(self, errors, host="mb", url="https://musicbrainz.org/ws/2/release/x?fmt=json"):
+        import io
+        import urllib.error
+        ma = self.ma
+        tries = []
+
+        def urlopen(req, timeout=None):
+            tries.append(1)
+            if len(tries) <= len(errors):
+                e = errors[len(tries) - 1]
+                if isinstance(e, int):
+                    raise urllib.error.HTTPError(req.full_url, e, "busy", {"Retry-After": "2"}, None)
+                raise e
+            return io.BytesIO(b'{"ok": 1}')
+        waited = []
+        with mock.patch.object(ma.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(ma.Http, "_pause", lambda self, s: waited.append(s)), \
+                mock.patch.object(ma, "_tell", lambda text: None):
+            self.assertEqual(self.http.get_json(url, host), {"ok": 1})
+        return waited
+
+    def test_each_listener_is_told_of_each_back_off_and_only_of_those(self):
+        import stagetimes as st
+        import urllib.error
+        a, b = [], []
+        stop_a = st.on_back_off(lambda p, s: a.append((p, s)))
+        st.on_back_off(lambda p, s: b.append((p, s)))
+        st.on_back_off(lambda p, s: 1 / 0)                      # (a listener's error never reaches the request)
+        try:
+            waited = self.run_with([503, urllib.error.URLError("down")])
+            self.assertEqual(len(waited), 2)
+            self.assertEqual(a, [("musicbrainz", waited[0]), ("musicbrainz", waited[1])])
+            self.assertEqual(b, a)
+            stop_a()
+            a.clear()
+            b.clear()
+            self.run_with([], url="https://musicbrainz.org/ws/2/release/y?fmt=json")   # (pacing only)
+            self.assertEqual((a, b), ([], []))
+            waited = self.run_with([429], host="discogs", url="https://api.discogs.com/releases/1")
+            self.assertEqual(a, [])
+            self.assertEqual(b, [("discogs", waited[0])])
+        finally:
+            with st._BACK_OFF_LOCK:
+                st._BACK_OFF.clear()
+
+    def test_off_back_off_removes_a_listener(self):
+        import stagetimes as st
+        got = []
+
+        def fn(p, s):
+            got.append(p)
+        st.on_back_off(fn)
+        st.off_back_off(fn)
+        st.off_back_off(fn)                                      # (never raises)
+        st.back_off("web", 1.0)
+        self.assertEqual(got, [])
 
 
 # ---- PRF-2: the remembered tags ---------------------------------------------------------------

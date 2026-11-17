@@ -1,5 +1,54 @@
 # Release notes
 
+## 0.8.68
+
+**A multi-disc set is one album, whatever its folders are called**
+- Sibling folders that are the discs of one release ("Disc 1 - The Original Album",
+  "Disc 2 - Live At ...", "CD1", "CD2") are now matched together and filed as one album, its
+  discs in "Disc 01", "Disc 02" ... under one folder. Before, folders titled differently were
+  matched one by one and could be filed apart or as the wrong release. A disc's sure match
+  claims the sibling folders that fit its other discs; otherwise the whole set is searched for.
+  The joined album must reach the filing confidence as one album (DSC-10).
+- A watched folder waits while a sibling disc is still being copied in.
+- Volume folders ("Volume I", "Volume II") of a parent folder whose name says it holds them
+  ("Greatest Hits Volume I & II") are one album of 2 discs, never two albums numbered 1 (DSC-9).
+
+**Hybrid SACDs: one disc, whatever layers are listed**
+- MusicBrainz lists a hybrid SACD's CD layer, its stereo SACD layer and its multichannel SACD
+  layer as media of their own. They are now one disc: a rip of two hybrid SACDs is discs 1 and 2
+  of 2, never "1 and 3 of 4" (MED-22). This also holds when the CD layer carries bonus tracks
+  the SACD layers lack (MED-22b).
+- A rip of an SACD layer is tagged as the disc it is (disc 1 of 2, its own layer as the medium)
+  and filed inside the same album as "Disc 01 (SACD Stereo)" or "Disc 01 (SACD Multichannel)",
+  beside the CD layer's "Disc 01". Albums already filed this way are read back as they are; an
+  SACD-layer rip filed earlier in a plain "Disc 01" is moved once into its layer folder
+  (MED-22c).
+- Two version folders ("2.0", "5.1") whose files would get the same names are held for you
+  instead of being filed side by side with renamed files.
+
+**Folder names for SACD, DVD-Audio and Blu-ray**
+- Profiles still holding the edition lines TagMender's scripts carried before 0.8.12 named every
+  SACD, DVD-Audio and Blu-ray "CD" ("[2024 CD]" for an SACD rip) and could repeat an edition
+  already in the album title ("[2024 SACD] [2024 CD]"). Those exact lines are brought up to date
+  when the profile is read, with a backup of the old profile beside it (`.bak`); a line you
+  changed yourself is left alone (ED-8). A CD + Blu-ray edition is now named "[Blu-ray]".
+
+**The right Discogs entry, and only that one**
+- A Discogs release that MusicBrainz links is used only when it has the same audio discs: a
+  3-CD edition no longer takes the fields of the 1-CD bonus EP it links (TAG-4). A Discogs ID
+  TagMender wrote earlier that disc shapes prove to be another pressing is removed.
+- A Discogs track list whose DVD repeats a suite as an index ("DVD-2.1", "DVD-2.2") no longer
+  puts those parts on the CD before it (TRK-6).
+
+**Known limits**
+- A hand-written naming script that removes the album's edition another way can still name an
+  SACD album "[2024 SACD] [2024 SACD]" (no worse than before).
+- Sibling folders named without a number or disc word are not joined; separate albums whose
+  folders hold every disc of a box one of them is found only in may be joined as the box.
+- In one plan, an SACD-layer copy that also holds a plain disc, planned before the CD layer's
+  copy, puts its cover and log in the album folder, and the CD copy's arrive beside them with a
+  "~" name. Nothing is lost or overwritten.
+
 ## 0.8.67
 
 **Vinyl rips the ripper names**

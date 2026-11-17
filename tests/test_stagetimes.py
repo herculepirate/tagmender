@@ -59,13 +59,13 @@ class Accounting(unittest.TestCase):
 
     def test_the_log_line_reads_back(self):
         line = st.line("/m/Band: Live/2005 - A, B", 12.34, {"musicbrainz": 5.1, "discogs back-off": 3.0,
-                                                             "tags": 0.01})
-        self.assertEqual(line, "timing /m/Band: Live/2005 - A, B: 12.3 s: musicbrainz 5.1, "
-                               "discogs back-off 3.0, other 4.2")
+                                                             "tags": 0.001})
+        self.assertEqual(line, "timing /m/Band: Live/2005 - A, B: 12.34 s: musicbrainz 5.10, "
+                               "discogs back-off 3.00, other 4.24")
         folder, total, secs = st.parse("2026-11-16 INFO  job=x engine provider=-  " + line)
         self.assertEqual(folder, "/m/Band: Live/2005 - A, B")
-        self.assertEqual(total, 12.3)
-        self.assertEqual(secs, {"musicbrainz": 5.1, "discogs back-off": 3.0, "other": 4.2})
+        self.assertEqual(total, 12.34)
+        self.assertEqual(secs, {"musicbrainz": 5.1, "discogs back-off": 3.0, "other": 4.24})
         self.assertIsNone(st.parse("an ordinary line"))
 
 

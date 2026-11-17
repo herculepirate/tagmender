@@ -6,7 +6,7 @@ stages of an album add up to its wall time and what no stage covers is "other". 
 every call is a no-op costing one context-variable lookup, so the hooks stay in place for good.
 
 The engine writes one line per album to the log (line()), e.g.
-  timing /music/Band/2005 - Album: 12.4 s: musicbrainz 5.1, musicbrainz back-off 3.0, tags 0.4, other 3.9
+  timing /music/Band/2005 - Album: 12.41 s: musicbrainz 5.10, musicbrainz back-off 3.00, tags 0.40, other 3.91
 which tools/perf_check.py and a release check read back (parse()).
 
 Stage names: scan (finding the albums), tags (reading a file's tags), ocr (reading scans),
@@ -76,12 +76,12 @@ def provider_of(host) -> str:
 
 
 def line(folder, total, secs) -> str:
-    """The log line for one album: its wall time, then each stage that took 0.05 s or more,
+    """The log line for one album: its wall time, then each stage that took 0.005 s or more,
     longest first, then what no stage covered."""
-    parts = [(n, s) for n, s in sorted(secs.items(), key=lambda x: -x[1]) if s >= 0.05]
+    parts = [(n, s) for n, s in sorted(secs.items(), key=lambda x: -x[1]) if s >= 0.005]
     other = max(0.0, total - sum(secs.values()))
     parts.append(("other", other))
-    return f"timing {folder}: {total:.1f} s: " + ", ".join(f"{n} {s:.1f}" for n, s in parts)
+    return f"timing {folder}: {total:.2f} s: " + ", ".join(f"{n} {s:.2f}" for n, s in parts)
 
 
 _LINE = re.compile(r"timing (?P<folder>.+): (?P<total>\d+(?:\.\d+)?) s: (?P<rest>.*)$")

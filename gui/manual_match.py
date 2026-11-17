@@ -413,26 +413,18 @@ def new_paths(page, paths) -> tuple[list, list]:
     resolved every file's path on each drop.)"""
     root = getattr(page, "path", None)
     plan = getattr(page, "plan", None) or {}
-    # folder -> (resolved, names of its links): asked of the disk on each call, never kept from
-    # one drop to the next (a folder held wrongly as new is listed, and applied, twice)
+    # (each folder resolved once per call, never kept from one drop to the next: a folder held
+    # wrongly as new is listed, and applied, twice)
     real_dirs = {}
-
-    def links(r) -> set:
-        try:
-            with os.scandir(r) as it:                   # (one read of the folder, not a stat per file)
-                return {e.name for e in it if e.is_symlink()}
-        except OSError:
-            return set()
 
     def real(f):
         d, name = os.path.split(str(f))
-        got = real_dirs.get(d)
-        if got is None:
-            r = os.path.realpath(d or ".")
-            got = real_dirs[d] = (r, links(r))
-        joined = os.path.join(got[0], name)
+        r = real_dirs.get(d)
+        if r is None:
+            r = real_dirs[d] = os.path.realpath(d or ".")
+        joined = os.path.join(r, name)
         # (a file that is itself a link: held as the file it points to, as before)
-        return os.path.realpath(joined) if name in got[1] else joined
+        return os.path.realpath(joined) if os.path.islink(joined) else joined
     held = {real(f) for a in plan.get("albums") or []
             for f in [fe.get("src") for fe in a.get("files") or []] + list(a.get("album_files") or []) if f}
     folders = {os.path.dirname(f) for f in held}

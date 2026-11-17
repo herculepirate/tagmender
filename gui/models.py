@@ -395,8 +395,8 @@ class PlanModel(QAbstractTableModel):
 # --------------------------------------------------------------------------
 def sort_key(v):
     """A cell's value as the list sorts it, as Qt's QSortFilterProxyModel compared it: a value
-    before none (none after every value, ascending or descending), numbers by value, text
-    case-sensitively by its characters."""
+    before none ascending, none first descending (sorted with reverse=True, as in Qt), numbers
+    by value, text case-sensitively by its characters."""
     if v is None:
         return (1,)
     if isinstance(v, (int, float)) and not isinstance(v, bool):

@@ -61,7 +61,23 @@ class TRK6(unittest.TestCase):
         self.assertEqual([t["disc"] for t in tracks].count(1), 9)
 
 
+    def test_TRK6_the_engines_own_readers_agree(self):
+        for read in (engine._dg_tracks, engine._flatten_raw):
+            with self.subTest(read=read.__name__):
+                pos = [t["position"] for t in read(cd_dvd()["tracklist"])]
+                self.assertEqual(pos[1:3], ["CD1-2.1", "CD1-2.2"])
+                self.assertIn("DVD-2.1", pos)
+                self.assertNotIn("", pos)
+
+
 class TRK6_Limits(unittest.TestCase):
+    def test_TRK6_a_br_position_of_an_audio_release_stays_as_it_was(self):
+        rel = cd_dvd("BR", "Blu-ray")
+        rel["formats"][2]["descriptions"] = ["Blu-ray Audio"]
+        dm = ma.load_plugin(str(HERE / "plugins_builtin" / "discogs"))
+        tracks = ma.discogs_candidate(rel, dm)["tracks"]
+        self.assertIn("i. After", [t["title"] for t in tracks if t["disc"] == 1][3:])   # (audio: kept)
+
     def test_TRK6_only_video_names_with_no_number(self):
         for pos in ("DVD-2.1", "BD-1.2", "Blu-ray-3.1", "dvd - 4.1", "CD1-2.1", "2-3"):
             with self.subTest(pos=pos):

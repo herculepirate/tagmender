@@ -591,10 +591,13 @@ def _one_release_groups(eng, groups, path) -> list:
             continue
         if not (d.parent == path or path in d.parent.parents):
             continue
-        if any(not (Path(f).parent == d or d in Path(f).parents) for f in g.files):
-            continue                                 # (a deluxe sibling's files joined in)
         by_parent.setdefault(d.parent, []).append(g)
     for parent, members in by_parent.items():
+        # (most folders' names pair with none: asked first, before each file of them is looked at)
+        if len(members) < 2 or not one_release_pairs([g.folder.name for g in members]):
+            continue
+        members = [g for g in members                # (a deluxe sibling's files joined in: never)
+                   if all(Path(f).parent == g.folder or g.folder in Path(f).parents for f in g.files)]
         if len(members) < 2:
             continue
         up = list(range(len(members)))
@@ -1225,6 +1228,9 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
     library or the profile's own folders themselves (their artist folders: "Neil Young" and
     "Neil Young & Crazy Horse" are two artists), clusters of SET_TRIAL_MAX_DISCS at most (a
     larger one is read as before, and logged)."""
+    pairs = one_release_pairs(names)                 # (first: most folders' names pair with none)
+    if not pairs:
+        return []
     try:
         import profiles
         prof = eng.profile
@@ -1235,9 +1241,6 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
     except Exception:
         roots = set()
     if os.path.realpath(str(d)) in roots:
-        return []
-    pairs = one_release_pairs(names)
-    if not pairs:
         return []
     like = {}
 
@@ -1296,9 +1299,10 @@ def _plan_folder(eng, path, sc, d: Path, got):
             if b == _CORE:
                 a, b = b, a
             up[b] = a
-    stems = {}
+    stems, discs = {}, set()
     for c in kids:
         if _disc_like(d, c):
+            discs.add(c)
             join(_CORE, c)
             continue
         sd = sibling_disc(d / c)
@@ -1315,7 +1319,7 @@ def _plan_folder(eng, path, sc, d: Path, got):
                     join(c, n)
     # DSC-11: album folders whose names may be one release's are read together (a release may
     # join them: _one_release_groups)
-    for ms in _one_release_units(eng, sc, d, [c for c in kids if not _disc_like(d, c)]):
+    for ms in _one_release_units(eng, sc, d, [c for c in kids if c not in discs]):
         for c in ms[1:]:
             join(ms[0], c)
     members = {}

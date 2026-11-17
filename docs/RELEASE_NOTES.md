@@ -1,5 +1,44 @@
 # Release notes
 
+## 0.8.71
+
+**A simpler main window**
+- The Overview is one window now: your files on the left, the albums as they will be on the right
+  (each album one row with its status and score; open it for its discs and tracks, each with the
+  folder or file it comes from), and below them the tag changes, why this release was chosen, and
+  the cover. The old album table, the page title, the Sources bar and the Library folder bar are
+  gone: Sources is part of the profile (right-click › Look Up ▸ for one look-up), the library
+  folder is under File.
+- The toolbar holds Add Folder, Look Up, a filter (All / Ready / Needs Attention, with counts),
+  the profile, search, the Inspector button and one Apply button that says how many albums it
+  applies.
+- The Inspector button shows or hides the bottom pane; your choice is remembered.
+
+**Profiles by selection, in colour**
+- Select folders or albums and choose a profile in the toolbar (it says "Mixed" when they differ)
+  or with right-click › Profile ▸: those albums are looked up again with it.
+- Every profile has a colour, and its albums' rows are tinted with it, a coloured dot before the
+  profile's name. LossyLess profiles are green and Extreme profiles orange from their names; the
+  others get a colour of their own. Choose another in the profile's settings.
+
+**A pressing chosen by a tie-break is suggested, not written**
+- When nothing of your copy tells pressings apart (barcode, catalogue number, scans, rip logs, disc
+  IDs), the pressing your country order, the original release date or your Sources preference
+  would pick is no longer written as if proven. The album is tagged with what all those pressings
+  share (album known), and the pick is suggested: Album › Use Suggested Pressing (also in the
+  album's menu, the Why This Release tab and Needs attention) tags it in full. Watched folders
+  never write a suggested pressing's barcode or catalogue number (TIE-1). Albums tagged by earlier
+  versions keep their pressing.
+
+**One release in two folders is one album**
+- Two album folders of the same release, each proven on its own (Billy Joel - Piano Man 50th
+  Anniversary: the SACD's CD layer and the bonus CD in one folder, its SACD layers from the ISO in
+  another) are now one album: one row, each disc and layer from its folder, filed into one album
+  folder with the box's scans at its top (DSC-11). Folders that hold the same disc twice stay
+  apart. Read again after filing, it is still one album.
+- Its evidence says "disc 1's SACD stereo layer" instead of the release's disc position, and the
+  "HD Audio" mark goes only on the high-resolution copies.
+
 ## 0.8.70
 
 **Folders named "Artist - Album" in a folder that is not the artist's**

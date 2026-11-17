@@ -184,6 +184,9 @@ class PlanModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self.albums = []
+        self._cells = {}                # (row, column) -> its QModelIndex: cell()
+        self.modelReset.connect(self._cells.clear)
+        self.rowsRemoved.connect(lambda *_: self._cells.clear())
         # set by the page that shows a Profile column: album -> (profile name, chosen for it),
         # and (albums, name) for a profile chosen in a row ("": the one chosen above)
         self.profile_of = None
@@ -200,6 +203,17 @@ class PlanModel(QAbstractTableModel):
         if idx.isValid() and idx.column() == self.PROFILE and self.choose_profile and not self.locked:
             f |= Qt.ItemIsEditable                       # (an album applied too: filed again with it)
         return f
+
+    def cell(self, row, col):
+        """The index of ROW and COL, made once (a table's index is its row and column alone, so
+        it never goes stale): made by Qt each time, every call let another thread take Python's
+        lock and waited for it back - the albums pane asks the list for its rows' words often."""
+        got = self._cells.get((row, col))
+        if got is None:
+            got = self.index(row, col)
+            if got.isValid():
+                self._cells[(row, col)] = got
+        return got
 
     def refresh_rows(self):
         if self.albums:
@@ -663,7 +677,7 @@ class SortedRows(QAbstractProxyModel):
     def mapToSource(self, idx):
         if not idx.isValid() or not (0 <= idx.row() < len(self._rows)):
             return QModelIndex()
-        return self._src.index(self._rows[idx.row()], idx.column())
+        return self._src_index(self._rows[idx.row()], idx.column())
 
     def mapFromSource(self, idx):
         if not idx.isValid():
@@ -674,14 +688,18 @@ class SortedRows(QAbstractProxyModel):
     def data(self, idx, role=R_DISPLAY):
         if not idx.isValid() or not (0 <= idx.row() < len(self._rows)):
             return None
-        return self._src.data(self._src.index(self._rows[idx.row()], idx.column()), role)
+        return self._src.data(self._src_index(self._rows[idx.row()], idx.column()), role)
 
     def multiData(self, idx, span):
         if not idx.isValid() or not (0 <= idx.row() < len(self._rows)):
             for rd in span:
                 rd.clearData()
             return
-        fill_roles(self._src.data, self._src.index(self._rows[idx.row()], idx.column()), span)
+        fill_roles(self._src.data, self._src_index(self._rows[idx.row()], idx.column()), span)
+
+    def _src_index(self, row, col):
+        cell = getattr(self._src, "cell", None)
+        return cell(row, col) if cell is not None else self._src.index(row, col)
 
     def setData(self, idx, value, role=R_EDIT):
         return self._src.setData(self.mapToSource(idx), value, role)

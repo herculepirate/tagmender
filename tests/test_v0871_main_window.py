@@ -162,7 +162,9 @@ class MainWindow(unittest.TestCase):
         a = self.win.act("apply")
         n = ov.actionable()
         self.assertTrue(n)
-        self.assertEqual(a.iconText(), "Apply 1 Album" if n == 1 else f"Apply {n} Albums")
+        # (the count is what matters: a narrow toolbar - a test screen's, the window at its narrowest -
+        # drops the word "Albums" and keeps the number, fit_toolbar)
+        self.assertRegex(a.iconText(), rf"^Apply {n}( Albums?)?$")
         b = self.win.toolbar.widgetForAction(a)
         self.assertEqual(b.property("role"), "primary")
         self.assertIs(self.win.toolbar.actions()[-1], a)                  # (last: the one prominent button)

@@ -13,11 +13,12 @@ from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QStackedWidget, QV
 
 from . import icons, setup, sheets, style
 from .common import (album_words, counts_by_label, counts_text, ex, load_profile, notify, pf, planmod, plural,
-                     popup_menu, profile_names)
+                     popup_menu, profile_names, suggested_pressing)
 from .i18n import N_, tr
 from .work import start
 from .models import PlanModel, SortedRows, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
+from .preview_panes import _held
 
 STREAM_MS = 100                                       # ms: albums read meanwhile are put in the list this often
 APPLY_LISTED = 5                                     # albums named in the Apply sheet (then "and N more")
@@ -592,9 +593,9 @@ class Overview(QWidget):
     @staticmethod
     def needs_you(a) -> bool:
         """The album waits for your decision: held (no release proven, a conflict), its scans name
-        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm)."""
-        from .common import suggested_pressing
-        from .preview_panes import _held
+        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm). (Asked of
+        every album each time the counts are shown: no import in it - an import statement costs
+        microseconds under PySide's import hook.)"""
         return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs" \
             or bool(suggested_pressing(a))                  # (TIE-1: album known, a pressing to confirm)
 
@@ -615,9 +616,22 @@ class Overview(QWidget):
     def show_counts_line(self):
         """The status bar's left end, and the toolbar's segment counts."""
         albums = self.model.albums
-        ready = sum(1 for a in albums if self.ready_now(a))
-        need = sum(1 for a in albums if self.needs_you(a))
-        files = sum(len(a.get("files") or []) for a in albums)
+        # (worked out once per turn of the event loop, and again when a row changes, as
+        # applicable: a row chosen asks for the counts several times)
+        memo = getattr(self, "_counts_memo", None)
+        if memo is not None and memo[0] is albums and memo[1] == len(albums):
+            ready, need, files, tip = memo[2]
+        else:
+            ready = need = 0
+            for a in albums:                                # (each album asked once)
+                if self.needs_you(a):
+                    need += 1
+                elif can_apply(a):
+                    ready += 1
+            files = sum(len(a.get("files") or []) for a in albums)
+            tip = counts_by_label(albums) if albums else ""
+            self._counts_memo = (albums, len(albums), (ready, need, files, tip))
+            QTimer.singleShot(0, self, self.forget_applicable)
         self.counts = {"all": len(albums), "ready": ready, "attention": need}
         if albums:
             text = " · ".join((tr("1 album ready") if ready == 1 else tr("{0} albums ready").format(ready),
@@ -626,7 +640,7 @@ class Overview(QWidget):
         else:
             text = ""
         self.counts_line.setText(text)
-        self.counts_line.setToolTip(counts_by_label(albums) if albums else "")
+        self.counts_line.setToolTip(tip)
         self.win.show_filter_counts(self.counts)
 
     # ---- the preview's panes (gui/preview_panes.py) -----------------------------------------
@@ -698,13 +712,35 @@ class Overview(QWidget):
         if AlbumsModel.STATUS in self._sized_by_you:
             return
         lo, hi = self.STATUS_WIDTH
-        want = max(lo, min(hi, self.table.sizeHintForColumn(AlbumsModel.STATUS) + 8))
+        want = max(lo, min(hi, self.status_wants() + 8))
         if self.table.columnWidth(AlbumsModel.STATUS) != want:
             self._fitting = True
             try:
                 self.table.header().resizeSection(AlbumsModel.STATUS, want)
             finally:
                 self._fitting = False
+
+    def status_wants(self) -> int:
+        """The Status column's widest cell as the view measures it (sizeHintForColumn): a cell of
+        each of the words its rows show (album rows; discs and tracks opened) measured - not each
+        row, as sizeHintForColumn does (a thousand rows of a big preview, each a call into Python,
+        at every row added)."""
+        from .preview_panes import AlbumsModel
+        v, m, col = self.table, self.table.model(), AlbumsModel.STATUS
+        if not isinstance(m, AlbumsModel):
+            return v.sizeHintForColumn(col)
+        seen = {}
+
+        def walk(nodes):
+            for n in nodes:
+                idx = m.index_of(n, col)
+                k = (n.kind, m.data(idx))
+                if k not in seen:
+                    seen[k] = idx
+                if n.kids and n.kind in m.OPENS and v.isExpanded(m.index_of(n)):
+                    walk(n.kids)
+        walk(m.top.kids)
+        return max((v.sizeHintForIndex(idx).width() for idx in seen.values()), default=0)
 
     def fill_profile_menu(self, menu, chosen):
         """Profile ▸: As Above (the preview's profile), then each profile, the one CHOSEN albums
@@ -2311,7 +2347,8 @@ class Overview(QWidget):
             order = self._lookup_order
             if i < len(order) and self.states.get(order[i]) == "waiting":
                 self.states[order[i]] = "looking"
-                self.model.refresh_rows()
+                key = order[i]
+                self.refresh_rows_of(lambda a: self.album_key(a) == key)    # (its row only: Looking up…)
             i = max(0, sum(1 for k in order if self.states.get(k) != "waiting") - 1)
         self.service_status()
         self.bar.setMaximum(max(n, 1))
@@ -2378,9 +2415,25 @@ class Overview(QWidget):
             return
         me = id(mine[i])
         if self.states.get(me) != "applying":
+            was = {k for k, v in self.states.items() if v == "applying"}
             self.states = {k: v for k, v in self.states.items() if v != "applying"}   # (the one before: done)
             self.states[me] = "applying"
-            self.model.refresh_rows()
+            self.refresh_rows_of(lambda a: id(a) == me or id(a) in was or self.album_key(a) in was)
+
+    def refresh_rows_of(self, pick):
+        """The rows of the albums PICK takes told changed (their state shown: Looking up…,
+        Applying…), not every row: each row told changed is asked again, and the albums pane's
+        tree answers each row it is told of with calls into Python - with a look-up running on
+        another thread, each a wait for Python's lock (a list of a hundred albums held the UI
+        thread up for tens of milliseconds at each album started)."""
+        m = self.model
+        last = m.columnCount() - 1
+        rows = [r for r, a in enumerate(m.albums) if pick(a)]
+        if len(rows) > 50:
+            m.refresh_rows()
+            return
+        for r in rows:
+            m.dataChanged.emit(m.index(r, 0), m.index(r, last))
 
     def state_of(self, a) -> str:
         """What is being done with album A now (its Status column), or ""."""
@@ -2544,6 +2597,7 @@ class Overview(QWidget):
 
     def forget_applicable(self, *_):
         self._applicable = None
+        self._counts_memo = None
 
     def to_apply(self):
         """The albums Apply carries out: those with changes, unless left out (unticked); with

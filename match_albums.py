@@ -8140,6 +8140,22 @@ def release_fields(c):
 TWIN_LENGTHS_MIN_FRAC = 0.55     # (FIL-3: as auto_min_duration_frac_with_code)
 
 
+def legacy_view(o):
+    """TIE-1, for the tools that read saved results (tag_albums.py, web_tag.py, inbox.py): a sure
+    result whose pressing a tie-break only suggested (best "tie_guess") is album known - status
+    "review" with the tied pressings as an album-only answer - never a pressing to tag in full.
+    Any other result as it is."""
+    best = (o or {}).get("best") or {}
+    guess = best.get("tie_guess")
+    if not isinstance(o, dict) or o.get("status") != "auto" or not guess:
+        return o
+    keys = ("source", "id", "label", "country", "formats", "year", "layout")
+    tied = [{k: x.get(k) for k in keys} for x in [guess.get("pick") or {}] + list(guess.get("others") or [])]
+    return dict(o, status="review", album_only={"source": "", "no_lengths": False, "other_kind": False,
+                                                 "tied": tied, "suggested": True},
+                why=list(o.get("why") or []) + [f"pressing suggested ({guess.get('by')}), not proven (TIE-1)"])
+
+
 def summarize(res):
     b = res["best"]
     if not b:

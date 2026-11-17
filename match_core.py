@@ -4479,6 +4479,9 @@ def tie_guess(best, pool, why):
     against = set(best.get("clues_against") or ())
     others = [s for s in pool if s is not best and not s.get("unproven_media") and not s.get("other_version")
               and set(s.get("clues_against") or ()) <= against]
+    # (another entry of the pick's own pressing - one pressing listed twice, TIE-6 - is no
+    # alternative: _country_listed_twice chose the fuller of them)
+    others = [s for s in others if not same_pressing_listed_twice([best, s])]
     if len(others) > 1:
         weight = {id(s): w for w, _t, s in _weigh([best] + others)}
         others = [s for s in others if weight.get(id(s)) == weight.get(id(best))] or others
@@ -4487,13 +4490,39 @@ def tie_guess(best, pool, why):
     return {"by": "; ".join(by), "pick": pressing_facts(best), "others": [pressing_facts(s) for s in others]}
 
 
+def _twin_settles(res, twin, mb_result, twins):
+    """TIE-1: RES's Discogs pick was a tie-break's guess among Discogs's pressings, but TWIN -
+    MusicBrainz's entry of that same pressing, written beside it - carries evidence of your copy
+    the Discogs entry lacks (your barcode, your exact disc ID ...) that no other MusicBrainz
+    candidate (none of the pick's twins) carries alike: the pressing is proven, no guess. RES
+    with a copy of its pick without the tie_guess, and a note; else RES as it is."""
+    best = (res or {}).get("best") or {}
+    if not best.get("tie_guess") or not twin:
+        return res
+    mine, theirs = _evidence(twin), _evidence(best)
+    told = {k: v for k, v in mine.items() if k not in theirs}
+    rest = [s for s in (mb_result or {}).get("scored") or () if not any(s is t for t in twins)]
+    proof = [k for k, v in told.items() if not any(_evidence(o).get(k) == v for o in rest)]
+    if not proof:
+        return res
+    clean = {k: v for k, v in best.items() if k != "tie_guess"}
+    clean["notes"] = list(best.get("notes") or []) + [
+        f"pressing chosen by {', '.join(proof)} on MusicBrainz's entry of it ({twin['cand']['id']}), "
+        "which the other pressings lack (TIE-1: no guess)"]
+    return dict(res, best=clean)
+
+
 def _guessed_between(res, other, by):
     """TIE-1 (combine): RES's pick was chosen over OTHER's (the other database's sure pick) by a
     tie-break or a preference alone: RES with a copy of its pick marked tie_guess (the other
     pressing added to any it was already chosen over)."""
     best = res["best"]
     was = best.get("tie_guess") or {}
-    others = {(x["source"], x["id"]): x for x in list(was.get("others") or []) + [pressing_facts(other)]}
+    # (the other database's pick was itself a guess among its tied pressings: those are tied too)
+    theirs = list((other.get("tie_guess") or {}).get("others") or [])
+    mine = pressing_facts(best)
+    others = {(x["source"], x["id"]): x for x in list(was.get("others") or []) + [pressing_facts(other)] + theirs
+              if (x["source"], x["id"]) != (mine["source"], mine["id"])}
     words = [x for x in str(was.get("by") or "").split("; ") if x]
     # (on a copy of the pick: the scored entry keeps only classify's own guess, so a later
     # combine of the same results never finds this one on it)
@@ -6194,6 +6223,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                     if note and overrule.get("best"):
                         overrule["best"] = dict(overrule["best"],
                                                 notes=list(overrule["best"].get("notes") or []) + [note])
+                    overrule = _twin_settles(overrule, chosen, mb_result, twins)
             return overrule
         if twins:
             # the release carrying your disc ID first (Stygian Bough: the CD with the
@@ -6203,6 +6233,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             note = twin_note(twins, chosen)
             if note:
                 out["best"] = dict(out["best"], notes=list(out["best"].get("notes") or []) + [note])
+            out = _twin_settles(out, chosen, mb_result, twins)
         elif (mb_result and mb_result["status"] == "auto" and mb_best
               and not has_evidence(dg_result["best"], mb_best) and (has_evidence(mb_best, dg_result["best"])
                                                                          or countries)):
@@ -6270,6 +6301,10 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             dg_result["best"]["notes"] = dg_result["best"]["notes"] + [
                 f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; Discogs decides"]
             if prefer == "discogs" and not has_evidence(dg_result["best"], mb_best):
+                # (TAG-1 / CHG-1: your files tagged with one of the two by TagMender or by you: kept)
+                tagged = _tagged_one(mb_result, dg_result)
+                if tagged:
+                    return tagged
                 # (TIE-1 / HF-2: nothing of your copy behind either pick - the Sources preference
                 # is a preference, not evidence: Discogs's pick is proposed, MusicBrainz's beside it)
                 return _guessed_between(out, mb_best, "Sources prefers Discogs")

@@ -1059,7 +1059,8 @@ class EvidenceView(QScrollArea):
             doubts.insert(0, tr("{0} by the rule “{1}”.").format(a.get('label') or tr('Ignored'),
                                                                  a['rule'].get('name', '')))
         self.set("Doubts", "\n".join(f"• {x}" for x in doubts) or tr("None"))
-        sg = suggested_pressing(a) if ident.get("tier") == "album_only" else {}
+        from .search import can_use_suggested
+        sg = suggested_pressing(a) if can_use_suggested(a) else {}
         self.suggest.setVisible(bool(sg))
         if sg:
             self.suggest.setToolTip(tr("Tag this album with the suggested pressing, {ref} ({by})")

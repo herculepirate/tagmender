@@ -110,7 +110,8 @@ def handle(folder, args, http, cfg, dm, db, log):
         return out["status"]
     log(f"{folder.name}: {out['status']} {best.get('source', '')} {best.get('artist', '')} - {best.get('title', '')}")
     py = sys.executable
-    if out["status"] == "auto" and best.get("mb_id"):         # Picard tags the MusicBrainz twin
+    # (TIE-1: a pressing a tie-break only suggested is album known: web_tag.py, below, tags it so)
+    if ma.legacy_view(out)["status"] == "auto" and best.get("mb_id"):   # Picard tags the MusicBrainz twin
         if ta.picard_running():
             log("  the external tagger is open: will tag on a later pass")
             return "waiting"

@@ -103,7 +103,9 @@ def can_use_suggested(album) -> bool:
     the original date, your preferred release types or formats) and not chosen yet."""
     from .common import suggested_pressing
     ident = (album or {}).get("identification") or {}
-    return bool(album) and ident.get("tier") == "album_only" and bool(suggested_pressing(album))
+    # (album known, or held Unresolved by a profile that accepts exact releases only)
+    return bool(album) and (ident.get("tier") == "album_only" or ident.get("status") == "unresolved"
+                            or album.get("status") == "unresolved") and bool(suggested_pressing(album))
 
 
 def use_suggested(page, album=None) -> bool:

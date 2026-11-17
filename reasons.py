@@ -103,10 +103,12 @@ def parse(value: str) -> tuple[list[str], str]:
 
 
 # TIE-1: what an album-known album's TAGMENDER_REASON says when a tie-break suggested its
-# pressing - followed by the release to choose ("<MBID>" or "discogs:<ID>"), as `plan --release` takes it
+# pressing - followed by the release to choose ("<MBID>", "discogs:<ID>" or "discogs:<ID>+<MBID>"),
+# as `plan --release` takes it
 SUGGESTED_WORDS = "pressing suggested, not confirmed: "
-_SUGGESTED = re.compile(re.escape(SUGGESTED_WORDS) + r"(discogs:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
-                        re.IGNORECASE)
+_MBID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+# (a Discogs pressing may come paired with MusicBrainz's entry of it: "discogs:123+<MBID>")
+_SUGGESTED = re.compile(re.escape(SUGGESTED_WORDS) + rf"(discogs:\d+(?:\+{_MBID})?|{_MBID})", re.IGNORECASE)
 
 
 def suggested_ref(value: str) -> str:

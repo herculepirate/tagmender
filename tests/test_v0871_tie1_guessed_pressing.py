@@ -17,13 +17,16 @@ import shutil  # noqa: E402
 import sys  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
+from unittest import mock  # noqa: E402
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "tests"))
 import match_core as mc  # noqa: E402
 import plan as pl  # noqa: E402
+import engine  # noqa: E402
 import test_engine as te  # noqa: E402
+import test_v0847_tag3_one_release as t3  # noqa: E402
 from test_v0868_dsc10_set_trial import DSC10Base, DiscHttp, release  # noqa: E402
 
 CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])
@@ -136,6 +139,94 @@ class TIE1_Matcher(unittest.TestCase):
         self.assertEqual([x["ref"] for x in g["others"]], ["discogs:77"])
         again = mc.combine(mb, dg, ["CA"])                          # (combine runs more than once)
         self.assertEqual(len(again["best"]["tie_guess"]["others"]), 1)
+
+    # ---- the independent review's cases --------------------------------------------------------
+    def twins(self, a, mb_extra=None, prefer="discogs"):
+        """MusicBrainz and Discogs each list the CA and the GB pressing; Discogs's CA entry and
+        MusicBrainz's are one pressing (same label, number, country)."""
+        cfg = dict(CFG, preferred_countries=["CA"], prefer_source=prefer)
+        mb_a = cand("mbA", country="CA", catnos={"CA-1"}, label="Maple", **(mb_extra or {}))
+        mb_b = cand("mbB", country="GB", catnos={"GB-1"}, label="Brit")
+        dg_a = cand("11", country="Canada", catnos={"CA-1"}, label="Maple", source="discogs",
+                    url="https://www.discogs.com/release/11", release_group="")
+        dg_b = cand("22", country="UK", catnos={"GB-1"}, label="Brit", source="discogs",
+                    url="https://www.discogs.com/release/22", release_group="")
+        ms = [mc.score_candidate(a, x, cfg) for x in (mb_a, mb_b)]
+        ds = [mc.score_candidate(a, x, cfg) for x in (dg_a, dg_b)]
+        mb, dg = mc.classify(ms, cfg), mc.classify(ds, cfg)
+        mb["scored"], dg["scored"] = ms, ds
+        self.assertTrue(dg["best"].get("tie_guess"))            # (Discogs alone: a guess between its two)
+        return mc.combine(mb, dg, ["CA"])
+
+    def test_TIE1_your_barcode_on_musicbrainzs_twin_only_proves_the_pressing(self):
+        """C1: Discogs's entry lists no barcode; MusicBrainz's entry of the same pressing carries
+        yours: the pressing is proven, never suggested to itself."""
+        for prefer in ("discogs", ""):
+            out = self.twins(album(barcodes={"0123456789012"}), {"barcodes": {"0123456789012"}}, prefer)
+            self.assertEqual((out["status"], out["best"]["cand"]["id"], out.get("mb_twin")), ("auto", "11", "mbA"))
+            self.assertNotIn("tie_guess", out["best"], prefer)
+
+    def test_TIE1_your_disc_id_on_musicbrainzs_twin_only_proves_the_pressing(self):
+        a = album(tocs={1: TOC}, tocs_fit=[1], toc_releases={"mbA"}, exact_toc_releases={"mbA"},
+                  exact_toc_media={"mbA": {1}}, exact_toc_on={"mbA": {TOC: {1}}})
+        for prefer in ("discogs", ""):
+            out = self.twins(a, prefer=prefer)
+            self.assertEqual((out["best"]["cand"]["id"], out.get("mb_twin")), ("11", "mbA"))
+            self.assertNotIn("tie_guess", out["best"], prefer)
+
+    def test_TIE1_a_twin_without_evidence_leaves_the_guess(self):
+        out = self.twins(album())
+        self.assertEqual(out["best"]["cand"]["id"], "11")
+        self.assertEqual([x["id"] for x in out["best"]["tie_guess"]["others"]], ["22"])
+
+    def test_TIE1_the_other_databases_tied_pressings_are_tied_too(self):
+        """M1: Discogs guessed between DE and US, MusicBrainz is sure of CA; the country order
+        picks CA - DE and US are both its alternatives (their labels then not written)."""
+        order = ["CA", "DE", "US"]
+        cfg = dict(CFG, preferred_countries=order)
+        ms = [mc.score_candidate(album(), cand("mbCA", country="CA", catnos={"CA-1"}, label="Maple"), cfg)]
+        ds = [mc.score_candidate(album(), x, cfg) for x in (
+            cand("11", country="Germany", catnos={"DE-1"}, label="Maple", source="discogs", url="u", release_group=""),
+            cand("22", country="US", catnos={"US-1"}, label="Eagle", source="discogs", url="u", release_group=""))]
+        mb, dg = mc.classify(ms, cfg), mc.classify(ds, cfg)
+        mb["scored"], dg["scored"] = ms, ds
+        out = mc.combine(mb, dg, order)
+        g = out["best"]["tie_guess"]
+        self.assertEqual(out["best"]["cand"]["id"], "mbCA")
+        self.assertEqual(sorted((x["id"], x["label"]) for x in g["others"]), [("11", "Maple"), ("22", "Eagle")])
+
+    def test_TIE1_your_earlier_choice_beats_the_sources_preference(self):
+        """M2: no country order, Sources prefers Discogs - but your files are tagged with
+        MusicBrainz's pressing (TagMender's or your choice): kept, no guess."""
+        for countries in ([], ["US"]):
+            cfg = dict(CFG, preferred_countries=countries, prefer_source="discogs")
+            ms = [mc.score_candidate(album(), cand("mbX", country="CA", catnos={"X-1"}), cfg)]
+            ms[0]["tagged"] = True
+            ds = [mc.score_candidate(album(), cand("77", country="Germany", catnos={"Y-1"}, source="discogs", url="u",
+                                                   release_group=""), cfg)]
+            mb, dg = mc.classify(ms, cfg), mc.classify(ds, cfg)
+            mb["scored"], dg["scored"] = ms, ds
+            out = mc.combine(mb, dg, countries or None)
+            self.assertEqual(out["best"]["cand"]["id"], "mbX", countries)
+            self.assertNotIn("tie_guess", out["best"], countries)
+
+    def test_TIE1_one_pressing_listed_twice_alone_is_tagged_in_full(self):
+        """m3/m7: two entries of one pressing (same label, number, barcode, country) and nothing
+        else: the fuller one, exact - no guess."""
+        twin = dict(label="Maple", catnos={"CA-1"}, barcodes={"0628261234567"}, country="CA")
+        r = pick(album(), [cand("a", **twin), cand("b", date="", year=None, **twin)],
+                 dict(CFG, preferred_countries=["CA"]))
+        self.assertEqual(r["status"], "auto", r["why"])
+        self.assertNotIn("tie_guess", r["best"])
+
+    def test_TIE1_a_pressing_listed_twice_is_not_its_own_alternative(self):
+        """m3: CA listed twice and GB: the country order chose CA (a guess) - its other entry is
+        no alternative, GB is."""
+        twin = dict(label="Maple", catnos={"CA-1"}, barcodes={"0628261234567"}, country="CA")
+        r = pick(album(), [cand("ca1", **twin), cand("ca2", date="", year=None, **twin),
+                           cand("gb", label="Brit", catnos={"GB-1"})], dict(CFG, preferred_countries=["CA"]))
+        self.assertEqual(r["best"]["cand"]["id"], "ca1", r["why"])
+        self.assertEqual([x["id"] for x in r["best"]["tie_guess"]["others"]], ["gb"])
 
 
 CA, US = "0a8e97fd-4f6a-4bd7-8e4b-6d3a0b2ad2f1", "1b9f08ae-5a7b-4ce8-9f5c-7e4b1c3be3a2"
@@ -318,6 +409,74 @@ class TIE1_Engine(te.Base):
         p = e.identify(e.albums_in(d)[0])
         self.assertEqual((p.tier, p.release_id), ("exact", CA), (p.why, p.evidence))
 
+    def discogs_pair(self):
+        d = self.album("Band T", "Album T")
+        mb = self.rel(CA, "CA", "CA-100", "Maple", "0000000000017")          # (links no Discogs release)
+        ca = te.dg_release(904, "Band T", "Album T", catno="CA-100", country="Canada")
+        ca["labels"], ca["identifiers"] = [{"name": "Maple", "catno": "CA-100"}], \
+            [{"type": "Barcode", "value": "0000000000017"}]
+        gb = te.dg_release(905, "Band T", "Album T", catno="GB-200", country="UK")
+        gb["labels"], gb["identifiers"] = [{"name": "Brit", "catno": "GB-200"}], \
+            [{"type": "Barcode", "value": "0000000000024"}]
+        e = self.eng(te.FakeHttp(mb=[mb], dg=[ca, gb]))
+        e.use_discogs = True
+        e.cfg["prefer_source"] = "discogs"
+        return d, e
+
+    def test_TIE1_a_suggested_discogs_pressing_confirms_with_its_musicbrainz_twin(self):
+        """M4: the suggestion names the Discogs pressing with MusicBrainz's entry of it; choosing it
+        tags from both, as the matcher's own pick would, though MusicBrainz links no Discogs entry."""
+        d, e = self.discogs_pair()
+        p = e.identify(e.albums_in(d)[0])
+        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
+        ref = p.suggested["ref"]
+        self.assertEqual(ref, f"discogs:904+{CA}")
+        self.assertEqual(engine.parse_release_ref(ref), ("discogs", "904"))
+        self.assertEqual(engine.release_twin(ref), ("mb", CA))
+        e.force = {os.path.realpath(str(d)): ref}
+        q = e.identify(e.albums_in(d)[0])
+        self.assertEqual((q.status, q.tier), ("identified", "exact"), q.why)
+        t = q.targets[0]
+        self.assertEqual((t.get("discogs_release_id"), t.get("musicbrainz_albumid")), (["904"], [CA]))
+
+    def test_TIE1_exact_only_profile_reason_names_the_release_to_confirm(self):
+        """m1: held Unresolved, the reason in the form Needs attention reads; the GUI command is
+        offered for it."""
+        import reasons
+        from gui import search
+        d = self.album("Band T", "Album T")
+        e = self.eng(self.http(), identification={"accept": "exact"})
+        a = e.plan(str(d))["albums"][0]
+        self.assertEqual(a["status"], "unresolved")
+        self.assertEqual(reasons.suggested_ref(a["identification"]["reason"]), CA)
+        self.assertTrue(search.can_use_suggested(a))
+
+    def test_TIE1_tag1_withdrawal_keeps_the_suggestion(self):
+        """m2: TAG-1 withdrew TagMender's own pick and a tie-break chose in its place: album only,
+        the tie-break's pick still suggested."""
+        d = self.album("Band T", "Album T")
+        e = self.eng(self.http())
+
+        def withdrawn(p, out):
+            return e._album_only(p, {"tied": [{"source": "mb", "id": CA}, {"source": "mb", "id": US}],
+                                     "doubt": "TagMender chose this album's pressing earlier by ..."})
+        with mock.patch.object(e, "_own_guess_withdrawn", side_effect=withdrawn):
+            p = e.identify(e.albums_in(d)[0])
+        self.assertEqual((p.tier, p.suggested.get("ref")), ("album_only", CA))
+
+    def test_TIE1_tools_reading_saved_results_treat_a_suggestion_as_album_known(self):
+        """m4: tag_albums.py, web_tag.py, inbox.py read the matcher's saved results."""
+        import match_albums as ma
+        import web_tag
+        o = {"status": "auto", "path": "/x", "best": {"source": "discogs", "id": "904", "tie_guess": {
+            "by": "your country order", "pick": {"source": "discogs", "id": "904", "label": "Maple"},
+            "others": [{"source": "discogs", "id": "905", "label": "Brit"}]}}}
+        v = ma.legacy_view(o)
+        self.assertEqual(v["status"], "review")
+        self.assertEqual([x["id"] for x in v["album_only"]["tied"]], ["904", "905"])
+        self.assertEqual(web_tag.chosen_discogs(o), "")
+        self.assertIs(ma.legacy_view(dict(o, best={"source": "discogs", "id": "904"}))["status"], "auto")
+
 
 class TIE1_Set(DSC10Base):
     """DSC-10: a set searched for as a whole whose pressings tie is album known as one set."""
@@ -341,6 +500,52 @@ class TIE1_Set(DSC10Base):
         self.assertEqual([t["discnumber"][0] for t in p.targets], ["1"] * 3 + ["2"] * 3 + ["3"] * 3)
         self.assertFalse([k for t in p.targets for k in PRESSING_FIELDS if k in t])
         self.assertTrue(any("found searching for the set" in n for n in p.notes), p.notes)
+
+
+class TIE1_TAG3(te.Base):
+    """TAG-3 / REP-1 under the default profile (Sources: Discogs preferred, a country order): a
+    pick your copy proves stays exact and replaces another pressing's IDs; a pick only the
+    preference made is album known - and what TagMender's own job wrote of the other pressing is
+    still taken back (M3)."""
+
+    def make(self, **tags):
+        return self.album("Band T", "Album T", folder="1991 - Album T", **tags)
+
+    def eng(self, http):
+        e = self.engine(http, thresholds={"organize_min_confidence": 95, "replace_min_confidence": 90})
+        e.cfg["preferred_countries"] = ["US"]
+        return e
+
+    def test_TIE1_TAG3_tagmenders_writes_of_the_other_pressing_are_taken_back(self):
+        y = "11111111-2222-3333-4444-555555555555"
+        d = self.make(MUSICBRAINZ_ALBUMID=y, LABEL="Label MB", RELEASECOUNTRY="DE")
+        files = sorted(str(f) for f in d.glob("*.flac"))
+        writes = {f: {"musicbrainz_albumid": ((), (y,)), "label": (("PDU",), ("Label MB",)),
+                      "releasecountry": ((), ("DE",))} for f in files}
+        http = te.FakeHttp(mb=[t3._mb(y, catno="Y-1", country="DE", barcode="825646406456")],
+                           dg=[t3._dg(904, barcode=t3.PICK_BARCODE)])
+        e = self.eng(http)
+        with mock.patch.object(t3.ma, "tagmender_pressing_writes", return_value=writes):
+            p = e.identify(e.albums_in(d)[0])
+        self.assertEqual((p.tier, p.suggested.get("ref")), ("album_only", "discogs:904"), (p.why, p.notes))
+        self.assertEqual(set(p.restore), set(files))
+        ch = pl.build([p], e.profile)["albums"][0]["files"][0]["changes"]
+        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"), "TagMender's own ID of the other pressing goes")
+        self.assertEqual(ch.get("label"), ["PDU"], "the label as it was before TagMender's job")
+        self.assertIsNone(ch.get("releasecountry", "kept"))
+        self.assertNotIn("discogs_release_id", ch)
+
+    def test_TIE1_TAG3_your_barcode_proves_the_pick_and_replaces_the_other_pressing(self):
+        d = self.make(MUSICBRAINZ_ALBUMID=t3.OLD_MB, BARCODE=t3.PICK_BARCODE)
+        http = te.FakeHttp(mb=[t3._mb(t3.OLD_MB, catno="R2-53704", country="US", barcode="825646406456")],
+                           dg=[t3._dg(904, catno="CDCHR 20135", country="Europe", barcode=t3.PICK_BARCODE)])
+        e = self.eng(http)
+        p = e.identify(e.albums_in(d)[0])
+        self.assertEqual((p.tier, p.release_id), ("exact", "904"), (p.why, p.notes))
+        self.assertFalse(p.suggested)
+        ch = pl.build([p], e.profile)["albums"][0]["files"][0]["changes"]
+        self.assertEqual(ch.get("discogs_release_id"), ["904"])
+        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"), "the other pressing's ID goes (TAG-3)")
 
 
 try:
@@ -451,7 +656,8 @@ class TIE1_NeedsAttention(unittest.TestCase):
         from unittest import mock
         att = self.win.pages["Needs attention"]
         self.win.go("Needs attention")
-        rows = [{"folder": "/m/Band/Suggested", "codes": ["ambiguous_release"], "mark": "Partial", "files": 3,
+        rows = [{"folder": "/m/Band/Suggested", "codes": ["ambiguous_release"], "mark": "Partial", "files": 1,
+                 "paths": ["/m/Band/Suggested/01.flac"],
                  "reason": f"album known, pressing not established: pressing suggested, not confirmed: {CA}"},
                 {"folder": "/m/Band/Tied", "codes": ["ambiguous_release"], "mark": "Partial", "files": 3,
                  "reason": "album known, pressing not established: pressing unknown (2 pressings fit equally)"}]
@@ -470,7 +676,7 @@ class TIE1_NeedsAttention(unittest.TestCase):
         with mock.patch.object(type(ov), "preview_release", return_value=True) as pr:
             self.win.inspector.evidence.suggest.click()               # (the Evidence tab's button)
             self.shell.settle(self.app)
-        pr.assert_called_once_with("/m/Band/Suggested", CA)
+        pr.assert_called_once_with("/m/Band/Suggested", CA, files=["/m/Band/Suggested/01.flac"])  # (its own files)
         self.assertIs(self.win.stack.currentWidget(), ov)
 
 

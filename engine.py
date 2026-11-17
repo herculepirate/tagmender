@@ -2626,9 +2626,13 @@ class Engine:
             try:
                 p = self._identified(out, album, files, base)
                 withdrawn = self._own_guess_withdrawn(p, out)
+                guess = (out["best"] or {}).get("tie_guess")
+                if withdrawn is not None and guess and withdrawn.status == "identified":
+                    # (TAG-1's album only, its pick a tie-break's: still yours to confirm - TIE-1)
+                    withdrawn.suggested = suggestion_of(guess, out["best"])
                 if withdrawn is None:
                     # TIE-1: a pressing only a tie-break chose is proposed; the album is album known
-                    withdrawn = self._tie_suggested(p, out)
+                    withdrawn = self._tie_suggested(p, out, album)
                 return withdrawn if withdrawn is not None else self._one_release(p, out, album)
             except ma.ProviderUnavailable as exc:             # fetching the release failed: retry later
                 self.log.warning("tags for %s: %s", g.folder, exc)
@@ -3184,6 +3188,11 @@ class Engine:
             best["mb_id"] = cand["id"]
         else:
             best["discogs_id"] = cand["id"]
+            twin = release_twin(ref)
+            if twin:
+                # (TIE-1: the suggested Discogs pressing confirmed with MusicBrainz's entry of it -
+                # tagged from both, as the matcher's own pick would have been)
+                best["mb_id"] = twin[1]
         why = [f"the release you chose ({ref}); the matcher scores it {sc.get('confidence', 0):.0f}"] \
             if claimed is None else []
         fits = sc.get("tracks_ok") or (best.get("slots") and mc.score_candidate(
@@ -3651,7 +3660,7 @@ class Engine:
             + ("; what TagMender's earlier job wrote of that pressing is taken back" if p.restore else "")]
         return p
 
-    def _tie_suggested(self, p, out):
+    def _tie_suggested(self, p, out, album=None):
         """TIE-1 (decided 2026-11-17): the matcher's pick among pressings of the album was made by
         a tie-break alone (your country order, the original release date, your preferred release
         types or formats: match_core.tie_guess), every clue of your copy having been tried. The
@@ -3660,25 +3669,54 @@ class Engine:
         by choosing that release (Album > Use Suggested Pressing, Change Release, or `tagmender
         plan PATH --release REF`), which tags it in full as your choice. A profile that accepts
         exact releases only leaves the album unresolved, the suggestion named. None when the pick
-        rests on your copy's evidence."""
+        rests on your copy's evidence.
+        TAG-3 / REP-1 as on any album only (_one_release): what TagMender's own earlier job wrote of
+        a pressing your files' release IDs name, other than the pick, is taken back, and a release
+        ID your copy's printed number contradicts goes."""
         guess = ((out or {}).get("best") or {}).get("tie_guess")
         if not guess or p.status != "identified" or planmod.tier_of(p) != "exact":
             return None
         suggested = suggestion_of(guess, (out or {}).get("best") or {})
         words = suggested["why"]
         if not self._accepts("album"):
+            # (the reason starts with the release, in the form Needs attention reads: never cut off)
             held = planmod.Proposal(source_dir=p.source_dir, files=p.files, provider_errors=p.provider_errors,
                                     status="unresolved", reason_codes=["ambiguous_release"],
-                                    reason=f"pressing not established: {words}", why=list(p.why) + [words],
+                                    reason=f"pressing not established: {reasons.SUGGESTED_WORDS}{suggested['ref']}; "
+                                           f"{words}", why=list(p.why) + [words],
                                     candidates=list(getattr(p, "candidates", None) or []))
             held.suggested = suggested
             return held
+        # (TAG-3: your files' release IDs naming another pressing than the pick, as _one_release
+        # finds them - worked out while the pick is still the exact release)
+        view = (out or {}).get("release_ids") or {}
+        clash, facts, pick, side = {}, [], {}, {}
+        if view.get("pick") and p.targets:
+            view = dict(view, copy_tocs={str(d): t for d, t in ((album or {}).get("tocs_read") or {}).items()})
+            p.release_view = view
+            clash, facts = self._clashing(p, view, (album or {}).get("file_release_ids") or {})
+            pick = view["pick"]
+            side = self._pick_side(p, view) if clash else {}
         keys = ("source", "id", "label", "country", "formats", "year", "layout")
         tied = [{k: x.get(k) for k in keys} for x in [guess["pick"]] + list(guess.get("others") or [])]
         p = self._album_only(p, {"tied": tied})
         p.suggested = suggested
         p.why = list(p.why) + [words]
         p.notes = list(getattr(p, "notes", None) or []) + [words]
+        if clash:
+            for x in facts:
+                x["shares_number"] = bool(_catnos_agree(pick, x)
+                                          or set(pick.get("barcodes") or ()) & set(x.get("barcodes") or ()))
+            first = {str(v)[:4] for t in p.targets for k in ("originaldate", "originalyear") for v in t.get(k) or ()}
+            back = {} if _provider_failed(p.provider_errors or {}) else \
+                self._restore_own(p.files, clash, facts, pick, side, first)
+            gone = self._copy_contradicts(p, out, clash, facts, pick, side)
+            for f, fields in gone.items():
+                back.setdefault(f, {}).update({k: [] for k in fields if k not in back.get(f, {})})
+            if back:
+                p.restore = back
+                p.notes = list(p.notes) + ["what TagMender's earlier job wrote of another pressing your files' "
+                                           "release IDs name is taken back (TAG-3)"]
         return p
 
     @staticmethod
@@ -6554,16 +6592,17 @@ def suggestion_of(guess, best) -> dict:
     {"source", "id", "url", "ref", "label", "country", "formats", "year", "catnos", "barcodes",
     "by" (the tie-break, in words), "why" (the sentence the plan and the GUI show), "others"
     (the tied pressings it was chosen over, each with the same facts)}. "ref" is what forcing the
-    release takes (Change Release, `tagmender plan PATH --release REF`): MusicBrainz's entry of
-    the pressing when the pick is Discogs's and MusicBrainz lists the same pressing (its tags
-    then come from both databases, as the matcher's pick would)."""
+    release takes (Change Release, `tagmender plan PATH --release REF`): the pick's own release;
+    a Discogs pick that MusicBrainz lists as the same pressing (its twin) is the pair
+    "discogs:<ID>+<MBID>" (release_twin), so its tags come from both databases, as the matcher's
+    pick would."""
     pick = dict(guess.get("pick") or {})
     others = [dict(x) for x in guess.get("others") or ()]
     for x in [pick] + others:
         x["source"] = "musicbrainz" if x.get("source") == "mb" else x.get("source") or ""
         x["url"] = x.get("url") or release_url(x["source"], x.get("id"))
     if pick.get("source") == "discogs" and (best or {}).get("mb_id"):
-        pick["ref"] = str(best["mb_id"])
+        pick["ref"] = f"discogs:{pick.get('id')}+{best['mb_id']}"
     by = re.sub(r";\s*nothing about your copy tells the pressings apart\s*$", "", str(guess.get("by") or ""))
     n = 1 + len(others)
     pick["by"] = by
@@ -6852,11 +6891,26 @@ def plan_entry_files(a: dict) -> list:
                   set(a.get("album_files") or []) | set(a.get("excluded_files") or []))
 
 
+def release_twin(ref: str):
+    """TIE-1: ("mb", MBID) of MusicBrainz's entry of the same pressing a Discogs ref pairs with it
+    ("discogs:123+<mbid>": the matcher's pick with its twin, as Use Suggested Pressing confirms it),
+    else None."""
+    ref = str(ref or "")
+    if "+" not in ref:
+        return None
+    first, second = (x.strip() for x in ref.split("+", 1))
+    one, two = parse_release_ref(first), parse_release_ref(second)
+    return two if one[0] == "discogs" and two[0] == "mb" else None
+
+
 def parse_release_ref(ref: str):
     """("mb", MBID) or ("discogs", "123") for a MusicBrainz or Discogs release link or ID
     ("https://musicbrainz.org/release/<mbid>", a bare MBID, "https://www.discogs.com/release/123-...",
-    "discogs:123", "[r123]"); (None, "") otherwise."""
+    "discogs:123", "[r123]"); (None, "") otherwise. A pair "discogs:123+<mbid>" (TIE-1's suggestion of
+    a Discogs pressing and MusicBrainz's entry of it: release_twin) is its first release."""
     ref = str(ref or "").strip()
+    if "+" in ref:
+        ref = ref.split("+", 1)[0].strip()
     m = re.search(r"musicbrainz\.org/release/" + _MBID.pattern, ref, re.IGNORECASE) or \
         (re.fullmatch(_MBID.pattern, ref, re.IGNORECASE) and re.match(_MBID.pattern, ref, re.IGNORECASE))
     if m:

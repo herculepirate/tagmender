@@ -373,7 +373,8 @@ class Attention(QWidget):
             self.win.statusBar().showMessage(tr(BUSY), 4000)
             return False
         self.win.go("Overview")
-        return bool(ov.preview_release(f, ref))
+        # (this album's own files: a folder may hold another album, which keeps its own choice)
+        return bool(ov.preview_release(f, ref, files=(self.row() or {}).get("paths") or None))
 
     def show_report(self):
         """The report of the albums listed (gui.report): Partial ones need your decision, Unresolved

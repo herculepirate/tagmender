@@ -3470,7 +3470,9 @@ def _album_only_reason(prop) -> str:
     """TAGMENDER_REASON of an album-only album: the album is known, its pressing is not."""
     tied = next((w for w in prop.why or [] if str(w).startswith("pressing unknown")), "")
     ref = str((getattr(prop, "suggested", None) or {}).get("ref") or "")
-    if ref:
+    # (TAG-1's withdrawal of TagMender's own pick keeps its reason: a later plan reads it to stay
+    # album only as this one is - engine._withdrawn_before; the suggestion is in the plan then)
+    if ref and "TagMender chose this album's pressing earlier" not in tied:
         # TIE-1: a tie-break suggested the pressing - which one, so you can confirm it later
         # (Needs attention, `tagmender plan PATH --release REF`)
         return reasons.encode(f"album known, pressing not established: {reasons.SUGGESTED_WORDS}{ref}",
@@ -3626,7 +3628,9 @@ def preview(plan: dict, verbose=False) -> str:
                 head += (f"\n    suggested pressing: {sg.get('source')} {sg['id']}" + (f" ({facts})" if facts else "")
                          + f" — {sg.get('by')}; {len(sg.get('others') or [])} other pressing(s) tie"
                          + f"\n    to tag it in full: tagmender plan {shlex.quote(a['source_dir'])} "
-                           f"--release {sg.get('ref')}")
+                           f"--release {sg.get('ref')}"
+                         + (" (the Discogs release with MusicBrainz's entry of the same pressing)"
+                            if "+" in str(sg.get("ref") or "") else ""))
             if ident.get("evidence"):
                 head += "\n    agreed: " + "; ".join(ident["evidence"][:6])
             if ident.get("why"):

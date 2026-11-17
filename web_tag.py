@@ -803,6 +803,7 @@ def chosen_discogs(matched):
     """The Discogs release ID the matcher is sure of (or you approved) when MusicBrainz has
     no twin of it, else "". Only web_tag.py's own run meets these: the engine tags such an
     album from the Discogs release itself and never asks the web."""
+    matched = ma.legacy_view(matched)           # (TIE-1: a suggested pressing is not chosen)
     best = (matched or {}).get("best") or {}
     if (matched or {}).get("status") == "auto" and best.get("source") == "discogs" and best.get("id"):
         return str(best["id"])
@@ -1220,7 +1221,7 @@ def unresolved(matches_db, only=None, include_review=False, include_discogs=True
     out = []
     wanted = {"nomatch"} | ({"review"} if include_review else set())
     for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
-        o = json.loads(blob)
+        o = ma.legacy_view(json.loads(blob))   # (TIE-1: a suggested pressing is album known)
         discogs_only = (include_discogs and o.get("status") == "auto"
                         and (o.get("best") or {}).get("source") == "discogs"
                         and not (o.get("best") or {}).get("mb_id"))   # else Picard tags its MB twin

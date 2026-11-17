@@ -627,7 +627,10 @@ class Main(QMainWindow):
         # TIE-1: only an album known whose pressing a tie-break proposed (Overview's plan, or the
         # TAGMENDER_REASON of an album Needs attention lists)
         att = self.pages.get("Needs attention")
-        sugg = idle and ((kind == "overview" and search.can_use_suggested(x))
+        # (one album at a time: with several selected in Overview it is off - each has its own
+        # suggestion, confirmed one by one)
+        many = kind == "overview" and ov is not None and len(ov.selected_albums()) > 1
+        sugg = idle and ((kind == "overview" and not many and search.can_use_suggested(x))
                          or (kind == "attention" and att is not None and bool(att.suggested())))
         self.commands["use_suggested_pressing"].setEnabled(sugg)
         manual_match.update_commands(self.commands, ov, kind == "overview" and idle)

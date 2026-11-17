@@ -1433,6 +1433,14 @@ class Engine:
             elif len(by_album) > 1 and spans_discs and numbered_disc_set(folder, files, keys, metas) \
                     and not self._box_part_left_out(folder, sorted({f.parent for f in files}), path):
                 by_album = {tagged[0]: files}                                  # DSC-7
+            copies = _layer_copies(files, metas) if len(by_album) == 1 and folder not in whole_boxes else None
+            if copies:
+                # MED-22c: the CD layer's copy and SACD layers' copies of a disc filed side by side
+                # ("Disc 01", "Disc 01 (SACD Stereo)"): each copy an album of its own, as filed
+                for members in copies:
+                    groups.append(Group(folder, members, [f for f in files if f not in members],
+                                        single=len(members) == 1))
+                continue
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
                 continue
@@ -6709,6 +6717,54 @@ def _layer_prefer(album, rel, box=None) -> dict:
     return out
 
 
+_LAYER_FOLDER = re.compile(r"\((SACD(?: Stereo| Multichannel)?)\)\s*$", re.I)
+
+
+def _layer_copies(files, metas):
+    """MED-22c: an album folder holding a disc's CD-layer copy beside copies of its SACD layers
+    ("Disc 01", "Disc 01 (SACD Stereo)", "Disc 01 (SACD Multichannel)", "Disc 02"; or, as an
+    earlier job filed them, "Disc 01", "Disc 02" and "Disc 03" the SACD layers, "Disc 04"): [the
+    files of each copy] - the CD layer's with the discs of no layer (the bonus CD) - when a
+    disc is there twice: an SACD layer's files numbered as a disc the others hold, or with that
+    disc's titles. Each file's layer from its media tag (as TagMender wrote it), its SACD_AREA
+    tag, else its folder's "(SACD Stereo)". None for any other album (version folders "2.0/"
+    and "5.1/", a copy of disc 1's CD layer and disc 2's SACD layer)."""
+    bucket = {}
+    for f in files:
+        m = metas.get(f) or {}
+        label = mb_tags.layer_label((m.get("media") or [""])[0])
+        if not label:
+            lay = mc.layout_of_channels(0, (m.get("sacd_area") or [""])[0])
+            label = {"stereo": "SACD Stereo", "multichannel": "SACD Multichannel"}.get(lay, "")
+        if not label:
+            got = _LAYER_FOLDER.search(Path(f).parent.name)
+            label = got.group(1) if got else ""
+        bucket.setdefault(label.casefold(), []).append(f)
+    if len(bucket) < 2 or "" not in bucket:
+        return None
+    where = {}
+    for k, fs in bucket.items():
+        for f in fs:
+            where.setdefault(Path(f).parent, set()).add(k)
+    if any(len(v) > 1 for v in where.values()) or any(mc.parse_version(d.name) for d in where):
+        return None                              # (a folder of two layers; version folders: one album)
+
+    def discs(fs):
+        out = {}
+        for f in fs:
+            m = metas.get(f) or {}
+            try:
+                n = int(str((m.get("discnumber") or ["1"])[0]).partition("/")[0] or 1)
+            except ValueError:
+                n = 1
+            out.setdefault(n, set()).add(mc.fold((m.get("title") or [Path(f).stem])[0]))
+        return out
+    cd = discs(bucket[""])
+    twice = any(n in cd or (len(t) > 1 and t in cd.values())
+                for k, fs in bucket.items() if k for n, t in discs(fs).items())
+    return [bucket[k] for k in sorted(bucket)] if twice else None
+
+
 def _layer_copy(rel, tags, vtracks=None) -> list:
     """MED-22c (decided 2026-11-16): a copy of a hybrid SACD's SACD layers - one disc's stereo or
     multichannel layer, or both of them in one copy - is numbered by the physical disc as MED-22
@@ -6718,9 +6774,10 @@ def _layer_copy(rel, tags, vtracks=None) -> list:
     Multichannel", "SACD": mb_tags.layer_label) - the planner files it in "Disc 01 (SACD
     Stereo)" beside the CD layer's "Disc 01". Version folders (VTRACKS: [[medium position, track
     index]], match_core.version_view) are numbered here; other copies were numbered by
-    mb_tags.one_layer already. Only an SACD layer of a disc listed as two layers or more, and
-    only in a copy of part of the set (a disc or two layers of one disc): a copy of every disc
-    in one layer keeps its plain disc folders (MED-22). TAGS unchanged otherwise."""
+    mb_tags.one_layer already. Only an SACD layer of a disc listed as two layers or more; the
+    label follows the layer, whatever else the copy holds (a copy of every disc in one SACD
+    layer too: a CD layer's copy arriving later is filed beside it, in the plain "Disc 01").
+    TAGS unchanged otherwise."""
     groups = mb_tags.layer_groups(rel or {})
     if not tags or not any(len(g) > 1 for g in groups):
         return tags
@@ -6750,15 +6807,6 @@ def _layer_copy(rel, tags, vtracks=None) -> list:
             if m is None:
                 return tags
             mine.append(m)
-    discs = {}
-    for m in mine:
-        discs.setdefault(disc_of[id(m)], set()).add(mb_tags._layer_kind(m.get("format"))[1])
-    # (the set's audio discs: a video disc or a download - MED-17, MED-20 - is none your copy lacks)
-    sound = {id(x) for x in mb_tags.audio_media(one) if "digital" not in str(x.get("format") or "").casefold()}
-    audio = {k for k, m in enumerate(one.get("media") or [], 1) if id(m) in sound}
-    part = any(len(v) > 1 for v in discs.values()) or not audio <= set(discs)
-    if not part:
-        return out if vtracks else tags
     for t, m in zip(out, mine):
         label = mb_tags.layer_label(m.get("format")) if id(m) in joined else ""
         if label:

@@ -655,6 +655,10 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     if src_dir in dmap and _DISC_NAME.match(dmap[src_dir].name) and \
             any(v != dmap[src_dir] and v.parent == dmap[src_dir].parent for v in dmap.values()):
         dmap[src_dir] = dmap[src_dir].parent        # disc 1 in the album folder, disc 2 inside it
+    if src_dir not in dmap and dmap and all(_LAYER_DIR.search(v.name) for v in dmap.values()):
+        # MED-22c: an SACD layer's copy filed beside the CD layer's: its own cover, logs and scans
+        # go into its (first) layer folder - never beside the CD layer's copy's, renamed
+        dmap[src_dir] = dmap[min(dmap, key=lambda d: (len(d.parts), str(d).casefold()))]
     if src_dir not in dmap:
         top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
         if any(d != top and d.parent != top for d in dmap.values()):
@@ -868,6 +872,11 @@ def _prop_discs(prop) -> set:
     return out or {1}
 
 
+def _disc_order(d):
+    """A sort key for MOV-4's disc keys: 1, (1, "SACD Stereo"), 2 (MED-22c)."""
+    return (d[0], d[1]) if isinstance(d, tuple) else (d, "")
+
+
 def _disc_keys(values) -> set:
     """MOV-4: _disc_nos, an SACD layer's (disc, layer label) kept as it is (MED-22c)."""
     return {v for v in values or () if isinstance(v, tuple)} | _disc_nos(v for v in values or ()
@@ -899,7 +908,8 @@ def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set)
             if _ids_of(t) & me:
                 ns = _disc_nos([(t.get("discnumber") or ["1"])[0]])
                 lay = _layer_label(str((t.get("media") or [""])[0]))
-                found |= ns | {(n, lay) for n in ns if lay}     # (MED-22c: an SACD layer's copy of the disc)
+                # (MED-22c: an SACD layer's copy of a disc is that layer's, never the CD layer's disc)
+                found |= {(n, lay) for n in ns} if lay else ns
                 if want <= found:
                     return True
     return False
@@ -916,14 +926,27 @@ def _is_layer(media) -> bool:
     return bool(mb_tags._layer_kind(media)[1])
 
 
+_LAYER_DIR = re.compile(r"\(SACD(?: Stereo| Multichannel)?\)\s*$", re.I)
+
+
 def _layer_dir(dst: Path, label: str, disc, compat) -> Path:
     """MED-22c: the folder of an SACD layer's copy of a disc, beside the CD layer's: the disc
-    folder the naming made with the layer named after it ("Disc 01" -> "Disc 01 (SACD Stereo)"),
-    or - the naming making none (one disc, a flat script) - such a folder inside the one it made."""
-    name = f"{dst.parent.name} ({label})" if _DISC_NAME.match(dst.parent.name) else \
-        f"Disc {_disc_no((_vals(disc) or ['1'])[0]) or 1:02d} ({label})"
-    name = fnm.safe_component(name, compat)
-    return (dst.parent.with_name(name) if _DISC_NAME.match(dst.parent.name) else dst.parent / name) / dst.name
+    folder the naming made with the layer named after it ("Disc 01" -> "Disc 01 (SACD Stereo)",
+    "Piano Man - Disc 1" -> "Piano Man - Disc 1 (SACD Stereo)": a folder naming the disc's number
+    is the disc's), or - the naming making none (one disc, a flat script) - such a folder inside
+    the one it made."""
+    n = _disc_no((_vals(disc) or ["1"])[0]) or 1
+    own = dst.parent.name
+    is_disc = bool(_DISC_NAME.match(own)) or re.search(rf"(?<![^\W_])(?:cd|dis[ck])\s*0*{n}(?!\d)", own, re.I)
+    name = fnm.safe_component(f"{own} ({label})" if is_disc else f"Disc {n:02d} ({label})", compat)
+    return (dst.parent.with_name(name) if is_disc else dst.parent / name) / dst.name
+
+
+def _version_folder(d: Path) -> bool:
+    """A folder named after a channel layout ("2.0", "5.1", "Stereo") or an SACD layer's
+    (MED-22c: "Disc 01 (SACD Stereo)")."""
+    import match_core as mc
+    return bool(mc.parse_version(d.name)) or bool(_LAYER_DIR.search(d.name))
 
 
 def _layer_of(t) -> tuple:
@@ -1438,7 +1461,8 @@ class Planner:
         for c in self._seed_claims:
             try:
                 self._album_claims.setdefault(c["dir"], []).append(
-                    (frozenset(c["ids"]), str(c["src"]), {int(d) for d in c["discs"]}))
+                    (frozenset(c["ids"]), str(c["src"]), {(int(d[0]), str(d[1])) if isinstance(d, (list, tuple)) else int(d)
+                                                       for d in c["discs"]}))
             except (KeyError, TypeError, ValueError):
                 continue
         self._resident = []
@@ -1578,7 +1602,8 @@ class Planner:
                 self._unclaim_album_dirs(prop)
             else:
                 src, me = str(prop.source_dir), _release_ids(prop)
-                mine = [{"dir": k, "ids": sorted(c[0]), "src": c[1], "discs": sorted(c[2])}
+                mine = [{"dir": k, "ids": sorted(c[0]), "src": c[1], "discs": [list(d) if isinstance(d, tuple) else d
+                                                                          for d in sorted(c[2], key=_disc_order)]}
                         for k, cs in (self.__dict__.get("_album_claims") or {}).items()
                         for c in cs if c[1] == src and c[0] == me]
                 if mine:
@@ -2373,6 +2398,7 @@ class Planner:
                         # folder of that layer's own - "Disc 01 (SACD Stereo)/101.T.flac"
                         dst = _layer_dir(dst, str(lay_[0]), (targets.get(f) or {}).get("discnumber"),
                                          p["filenames"].get("compat", "windows"))
+                        dst = self._spelled(dst, dest_root, artist_level)   # ("disc 01 (sacd stereo)" there)
                 entry["notes"] += notes
                 if dst is None:
                     entry["conflicts"].append(f"{f.name}: " + (notes[-1] if notes else "no destination path"))
@@ -2427,6 +2453,16 @@ class Planner:
                     fe.update(src=str(dst), dst=str(dst), op="tag" if (changes2 or fe.get("fix_pictures")) else "none",
                               changes=changes2, diff=rows2, fingerprint=_fp(dst), copy_of=str(f))
                     entry["files"].append(fe)
+                    continue
+                twin_ = self.claimed.get(fnm.fold(dst))
+                if twin_ and twin_ != str(f) and Path(twin_).parent != f.parent and \
+                        twin_ in {fe_.get("copy_of") or fe_["src"] for fe_ in entry["files"]} and \
+                        _version_folder(f.parent) and _version_folder(Path(twin_).parent):
+                    # MED-22c: two version folders' files ("2.0/" and "5.1/") named alike: never filed
+                    # into one folder side by side ("01.B ~814b.flac")
+                    entry["conflicts"].append(f"{f.parent.name}/{f.name} and {Path(twin_).parent.name}/"
+                                              f"{Path(twin_).name} would be filed as one {dst.name}: versions of a "
+                                              "disc are never put in one folder; held for review (MED-22c)")
                     continue
                 dst = self._unique(dst, f, entry)
                 if dst is None:

@@ -884,6 +884,11 @@ class Profiles(QWidget):
         ov = (getattr(self.win, "pages", None) or {}).get("Overview")
         if ov is not None and hasattr(ov, "check_stale"):
             ov.check_stale()
+        if ov is not None and hasattr(ov, "model"):
+            from .common import forget_profile_colours
+            forget_profile_colours()                        # (its colour may have changed: the rows' tint)
+            ov.model.refresh_rows()
+            ov.panes.folder_view.viewport().update()
 
 
 def offer_previous_builtin(win) -> bool:

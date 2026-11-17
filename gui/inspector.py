@@ -1386,6 +1386,22 @@ class Inspector(QDockWidget):
         self._drop_if_empty(album)
         self.reapply(album)
 
+    def clear_tag_files(self, field_, files, album=None):
+        """Your edit of a tag dropped for several files of the album (a disc, a folder: the preview's
+        Tags pane), in one step (one Undo Edit puts it back)."""
+        album = album or self.album
+        e = self.edit_of(album) if self.can_edit(album) else None
+        if e is None or not files:
+            return
+        self.remember()
+        for f in files:
+            (e["file_tags"].get(f) or {}).pop(field_, None)
+        if len(files) == len(e.get("files") or []) or set(files) >= set(e.get("files") or []):
+            e["tags"].pop(field_, None)
+        e["file_tags"] = {k: v for k, v in e["file_tags"].items() if v}
+        self._drop_if_empty(album)
+        self.reapply(album)
+
     def set_cover(self, cover: dict, album=None):
         """Your image (stage_cover's dict) as the album's new cover."""
         album = album or self.album

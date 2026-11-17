@@ -224,6 +224,36 @@ def load_profile(name):
     return pf.default() if name == "default" else pf.load(name)
 
 
+_COLOURS: dict = {}                     # profile name -> its colour (PROFILE_TINTS' name, "#RRGGBB" or "")
+# a profile with no colour of its own: one by its name (the person's choice, 2026-11-17), never
+# written into the profile; Preferences › Profiles › Colour sets one (or None)
+NAME_COLOURS = (("lossyless", "green"), ("extreme", "orange"))
+
+
+def default_colour(name) -> str:
+    low = str(name or "").lower()
+    return next((c for word, c in NAME_COLOURS if word in low), "")
+
+
+def profile_colour(name) -> str:
+    """The colour profile NAME's rows are tinted with: its own ("colour"; "none" for none), else
+    the one its name gives (default_colour). Read once per name until forget_profile_colours()."""
+    if not name:
+        return ""
+    if name not in _COLOURS:
+        try:
+            own = (pf.raw_file(name) if name != "default" else {}).get("colour")
+        except Exception:
+            own = None
+        own = str(own).strip() if isinstance(own, str) else ""
+        _COLOURS[name] = "" if own == "none" else own or default_colour(name)
+    return _COLOURS[name]
+
+
+def forget_profile_colours():
+    _COLOURS.clear()
+
+
 def open_folder(path):
     QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 

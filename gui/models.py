@@ -426,6 +426,7 @@ class SortedRows(QAbstractProxyModel):
         self._cs = Qt.CaseInsensitive
         self._key_col = -1
         self._keys = {}                  # source row -> its sort key, as the rows were last sorted
+        self._only = None                # album -> shown (the toolbar's All / Ready / Needs Attention)
 
     # ---- the source ---------------------------------------------------------------------------
     def setSourceModel(self, m):
@@ -457,6 +458,10 @@ class SortedRows(QAbstractProxyModel):
         return m.data(m.index(row, col), role)
 
     def _accepts(self, row) -> bool:
+        if self._only is not None:
+            albums = getattr(self._src, "albums", None)
+            if albums is not None and 0 <= row < len(albums) and not self._only(albums[row]):
+                return False
         if not self._text:
             return True
         cols = range(self._src.columnCount()) if self._key_col < 0 else (self._key_col,)
@@ -602,7 +607,7 @@ class SortedRows(QAbstractProxyModel):
             return
         rows = list(self._rows)
         new = []
-        if self._text:                                        # (filtered again: rows in or out)
+        if self._text or self._only is not None:              # (filtered again: rows in or out)
             out = {s for s in changed if s in self._pos and not self._accepts(s)}
             new = [s for s in changed if s not in self._pos and self._accepts(s)]
             rows = [s for s in rows if s not in out]
@@ -711,6 +716,11 @@ class SortedRows(QAbstractProxyModel):
         have = set(self._rows)
         n = self._src.rowCount() if self._src is not None else 0
         self._move_to(self._placed(rows, [r for r in range(n) if r not in have and self._accepts(r)]))
+
+    def set_only(self, fn):
+        """Only the albums FN(album) keeps (None: every album), with the words' filter too."""
+        self._only = fn
+        self.setFilterFixedString(self._text)
 
     def setFilterCaseSensitivity(self, cs):
         self._cs = cs

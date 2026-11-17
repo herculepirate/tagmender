@@ -121,8 +121,9 @@ class Shell(unittest.TestCase):
             if a["status"] == status and (tier is None or a["identification"].get("tier") == tier):
                 # (that row alone: selectRow would follow Ctrl or Shift a key click left held)
                 from PySide6.QtCore import QItemSelectionModel
+                # (0.8.71: the albums pane's top rows are the list's rows, one for one)
                 ov.table.selectionModel().setCurrentIndex(
-                    ov.proxy.index(r, 0), QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+                    ov.tree.index(r, 0), QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
                 settle(self.app)
                 return ov.selected()                                  # (the plan's own entry, not a copy)
         self.fail(f"no {status} album")

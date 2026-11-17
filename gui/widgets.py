@@ -1,15 +1,73 @@
-"""gui/widgets.py - Small widgets shared by pages: the drop area, the sidebar source list and
-empty states."""
+"""gui/widgets.py - Small widgets shared by pages: the drop area, the sidebar source list, empty
+states and the segmented control (the toolbar's filter, the inspector pane's tabs)."""
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
-from PySide6.QtWidgets import (QAbstractItemView, QFrame, QLabel, QLayout, QListWidget,
-                               QListWidgetItem, QStyle, QStyledItemDelegate, QVBoxLayout)
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLayout, QListWidget,
+                               QListWidgetItem, QStyle, QStyledItemDelegate, QToolButton, QVBoxLayout)
 
 from . import icons, style
 from .common import music_paths
 from .i18n import N_, tr
+
+
+class Segmented(QFrame):
+    """A Mac segmented control: one choice of a few, each a word (and a count), the chosen one
+    raised on a grey track (style.py: QFrame#segmented). ITEMS: [(key, words)]. Each segment is a
+    button with its own accessible name, reached with Tab and pressed with Space; the arrow keys
+    move the choice along. changed(key) when the choice changes (by you or by set_current)."""
+    changed = Signal(str)
+
+    def __init__(self, items, name="", parent=None):
+        super().__init__(parent)
+        self.setObjectName("segmented")
+        self.setAccessibleName(name)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(0)
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        self.buttons = {}
+        for key, words in items:
+            b = QToolButton()
+            b.setProperty("role", "segment")
+            b.setCheckable(True)
+            b.setText(words)
+            b.setAccessibleName(words)
+            b.setFocusPolicy(Qt.TabFocus)
+            b.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            b.installEventFilter(self)
+            self.group.addButton(b)
+            lay.addWidget(b)
+            self.buttons[key] = b
+            b.toggled.connect(lambda on, k=key: on and self.changed.emit(k))
+        if self.buttons:
+            next(iter(self.buttons.values())).setChecked(True)
+
+    def current(self) -> str:
+        return next((k for k, b in self.buttons.items() if b.isChecked()), "")
+
+    def set_current(self, key):
+        if key in self.buttons and not self.buttons[key].isChecked():
+            self.buttons[key].setChecked(True)
+
+    def set_text(self, key, words, accessible=None):
+        b = self.buttons[key]
+        if b.text() != words:
+            b.setText(words)
+        b.setAccessibleName(accessible or words)
+
+    def eventFilter(self, obj, e):
+        """Left and Right move the choice to the segment beside, as in a tab bar."""
+        if e.type() == QEvent.KeyPress and e.key() in (Qt.Key_Left, Qt.Key_Right) and obj in self.buttons.values():
+            keys = list(self.buttons)
+            i = keys.index(self.current() or keys[0]) + (1 if e.key() == Qt.Key_Right else -1)
+            if 0 <= i < len(keys):
+                self.set_current(keys[i])
+                self.buttons[keys[i]].setFocus()
+            return True
+        return super().eventFilter(obj, e)
 
 
 class ElidedPath(QLabel):

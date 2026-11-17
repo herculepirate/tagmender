@@ -3409,25 +3409,26 @@ class Planner:
     @staticmethod
     def _rip_comment(f, before, changes, rows, p, line, tier=""):
         """VIN-4: TagMender's own line about a vinyl rip ("Vinyl rip: PBTHAL · 24-bit/96 kHz ...")
-        in the comment: added after the text already there, or put in place of its own earlier
+        in the comment: added below the text already there, or put in place of its own earlier
         line (vinylrip.merged_values: only a line wholly in its form is its own); every other line
-        and value kept. Never where the comment's policy is preserve, lock or remove, fill_missing
-        (yours, the profile's default, or Picard's "Preserve these tags") with a comment there,
-        cleanup.comments "remove", nor where the level writes no comment (Basic, a dropped
-        field). Nothing when the comment already says it (idempotent). Your edit wins (apply_edits)."""
+        and value kept exactly. A comment kept by a preserve or fill_missing policy (yours, the
+        profile's default, or Picard's "Preserve these tags") gets the line below its text too
+        (decided 2026-11-17: "add it below your text" - its text is never changed). Never where
+        the comment's policy is lock (no write at all) or remove, nor with cleanup.comments
+        "remove", nor where the level writes no comment (Basic, a dropped field). Nothing when the
+        comment already says it (idempotent). Your edit wins (apply_edits)."""
         import levels
         import vinylrip
         pol = p.policy("comment")
-        if pol in ("preserve", "lock", "remove") or not tagio.holds(f, "comment"):
+        if pol in ("lock", "remove") or not tagio.holds(f, "comment"):
             return
         if ((p.get("cleanup") or {}).get("comments")) == "remove":
             return
         if not levels.restrict({"comment": [line]}, p, tier=tier).get("comment"):
             return
         had = _vals(before.get("comment"))
-        base = _vals(changes["comment"]) if "comment" in changes else had
-        if pol == "fill_missing" and had:
-            return                                     # (a comment there is kept as it is)
+        # (a kept comment is the file's own text, whatever a script or the release would have put)
+        base = had if pol in ("preserve", "fill_missing") or "comment" not in changes else _vals(changes["comment"])
         after = vinylrip.merged_values(base, line)
         if after == had:
             if "comment" in changes:                   # (the plan would write only what is there)

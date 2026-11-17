@@ -272,15 +272,28 @@ class VIN4_CommentLine(VinBase):
         plan = self.moving(self.http()).plan(top)
         self.assertTrue(all("comment" not in fe["changes"] for a in plan["albums"] for fe in a["files"]))
 
-    def test_VIN4_comment_policy_preserve_leaves_it_alone(self):
-        top = self.rip(PB, 96000, PB_NOTES, comment="Final Master")
-        self.dest = self.tmp / "library"
-        self.dest.mkdir(exist_ok=True)
-        eng = self.engine(self.http(), operation="move", destination=str(self.dest),
-                          naming={"preset": "tagmender", "template": "", "editions": "edition_year"},
-                          field_policy={"default": "replace", "fields": {"comment": "preserve"}})
-        plan = eng.plan(top)
-        self.assertTrue(all("comment" not in fe["changes"] for a in plan["albums"] for fe in a["files"]))
+    def test_VIN4_a_kept_comment_gets_the_line_below_it_lock_none(self):
+        # (decided 2026-11-17: "add it below your text" - preserve and fill_missing included; lock: no write)
+        import executor
+        want = "Final Master\nVinyl rip: PBTHAL Final Master · 24-bit/96 kHz · VPI Scoutmaster, Zyx Airy 3X-SB"
+        for pol, line in (("preserve", True), ("fill_missing", True), ("lock", False)):
+            with self.subTest(policy=pol):
+                import shutil
+                shutil.rmtree(self.lib, ignore_errors=True)
+                shutil.rmtree(self.tmp / "library", ignore_errors=True)
+                top = self.rip(PB, 96000, PB_NOTES, comment="Final Master")
+                self.dest = self.tmp / "library"
+                self.dest.mkdir()
+                eng = self.engine(self.http(), operation="move", destination=str(self.dest),
+                                  naming={"preset": "tagmender", "template": "", "editions": "edition_year"},
+                                  field_policy={"default": "replace", "fields": {"comment": pol}})
+                plan = eng.plan(top)
+                got = {tuple(fe["changes"].get("comment") or ()) for a in plan["albums"] for fe in a["files"]}
+                self.assertEqual(got, {(want,)} if line else {()})
+                if line:
+                    executor.Executor(plan).run()
+                    written = [tagio.read(fe["dst"]).get("comment") for a in plan["albums"] for fe in a["files"]]
+                    self.assertEqual({tuple(x) for x in written}, {(want,)})   # (your text first, exactly)
 
     def test_VIN4_no_line_on_a_cd(self):
         top = self.rip("1973 - Piano Man [CD]", 44100)
@@ -458,25 +471,33 @@ class VIN_Review(VinBase):
         top = self.rip(PB, 96000, PB_NOTES, comment="Final Master")
         self.dest = self.tmp / "library"
         self.dest.mkdir(exist_ok=True)
-        for extra in ({"field_policy": {"default": "replace", "fields": {"comment": "fill_missing"}}},
-                      {"field_policy": {"default": "fill_missing", "fields": {}}},
-                      {"cleanup": {"comments": "remove"}}):
+        for extra, line in (({"field_policy": {"default": "replace", "fields": {"comment": "fill_missing"}}}, True),
+                            ({"field_policy": {"default": "fill_missing", "fields": {}}}, True),
+                            ({"cleanup": {"comments": "remove"}}, False)):
             with self.subTest(extra=extra):
                 eng = self.engine(self.http(), operation="move", destination=str(self.dest),
                                   naming={"preset": "tagmender", "template": "", "editions": "edition_year"}, **extra)
                 plan = eng.plan(top)
-                self.assertFalse(any("Vinyl rip" in str(fe["changes"].get("comment"))
-                                     for a in plan["albums"] for fe in a["files"]))
+                self.assertEqual(any("Vinyl rip" in str(fe["changes"].get("comment"))
+                                     for a in plan["albums"] for fe in a["files"]), line)
         import plan as planmod
         self.assertFalse(planmod.Planner._vinyl_file({"media": ["CD"]}, False))
         self.assertTrue(planmod.Planner._vinyl_file({"media": ['12" Vinyl']}, False))
 
-    def test_VIN4_picard_preserved_comment_gets_no_line(self):
+    def test_VIN4_picard_preserved_comment_gets_the_line_below_it(self):
         top = self.rip(PB, 96000, PB_NOTES, comment="Final Master")
         self.picard_ini(preserved="comment")
         plan = self.moving(self.http()).plan(top)
-        self.assertFalse(any("Vinyl rip" in str(fe["changes"].get("comment"))
-                             for a in plan["albums"] for fe in a["files"]))
+        self.assertEqual({tuple(fe["changes"].get("comment") or ()) for a in plan["albums"] for fe in a["files"]},
+                         {("Final Master\nVinyl rip: PBTHAL Final Master · 24-bit/96 kHz · VPI Scoutmaster, Zyx Airy 3X-SB",)})
+
+    def test_ED5_an_album_known_vinyl_rip_shows_no_hd(self):
+        # (ED-5: vinyl never adds HD - an album known whose copy is a vinyl rip too)
+        t = {"album": ["Hemispheres"], "media": ['12" Vinyl'], "date": ["1978"], "originaldate": ["1978"],
+             "~edition_unproven": ["1"], "~edition_hd": ["1"]}
+        self.assertEqual(naming.edition(t), "")
+        self.assertEqual(naming.edition({k: v for k, v in t.items() if k != "media"}), "HD")
+        self.assertEqual(naming.edition(dict({k: v for k, v in t.items() if k != "media"}, **{"~rip_vinyl": ["1"]})), "")
 
     def test_VIN1_a_cd_beside_an_lp_and_a_ripper_named_on_one_side_only_join(self):
         # M2: only vinyl members compared; one ripper named and one not is no difference
@@ -902,6 +923,43 @@ class VIN_ReReviewWords(unittest.TestCase):
         with mock.patch.object(dynamics.subprocess, "Popen", side_effect=stuck):
             self.assertIsNone(dynamics.measure_file(f, timeout=1.0))
         self.assertLess(time.monotonic() - t, 10)
+
+
+class VIN2_FolderNumberOverAnotherTaggersTitle(VinBase):
+    UK = "0c0b0c0d-7777-4888-9999-aaaabbbbcccc"
+
+    def releases(self):
+        us = vinyl_release()
+        uk = release(self.UK, [medium(1, '12" Vinyl', TITLES, LENS)], date="1977-09-01", country="GB",
+                     catno="9100 059", label="Mercury", barcode="")
+        return [us, uk]
+
+    def test_VIN2_the_folders_catalogue_number_outranks_the_album_tags(self):
+        # (Hemispheres "[Vinyl Rip Fran Solo SRM-1-3743]": its files tagged by another tagger with the
+        # UK release - album "Hemispheres [Vinyl Rip 24bit 96khz Mercury 9100 059]", its release ID -
+        # came out album known with the UK suggested: the album tag's "9100 059" was read as the
+        # folder's own number. TAG-2: another tagger's tags are a lead, never your copy's evidence)
+        top = self.lib / "Billy Joel" / "1973 - Piano Man [Vinyl Rip Fran Solo SRM-1-1184]"
+        for i, t in enumerate(TITLES):
+            top.mkdir(parents=True, exist_ok=True)
+            f = top / f"{i + 1:02d}. {t}.flac"
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                            f"sine=frequency={300 + 50 * i}:duration={LENS[i] / 1000}", "-ar", "96000",
+                            "-sample_fmt", "s32", "-ac", "2", "-metadata", f"title={t}",
+                            "-metadata", "album=Piano Man [Vinyl Rip 24bit 96khz Mercury 9100 059]",
+                            "-metadata", "albumartist=Billy Joel", "-metadata", "artist=Billy Joel",
+                            "-metadata", f"track={i + 1}", "-metadata", f"ISRC=USSM1730050{i}",
+                            "-metadata", f"MUSICBRAINZ_ALBUMID={self.UK}", "-metadata", "CATALOGNUMBER=9100 059",
+                            "-metadata", "RELEASECOUNTRY=GB", str(f), "-y"], check=True)
+        import match_albums as ma
+        a = ma.read_album(top, "Billy Joel", top.name)
+        self.assertEqual(a["catnos_from_folder"], {"srm11184"})
+        plan = self.moving(SetHttp(mb=self.releases())).plan(top)
+        [al] = plan["albums"]
+        ident = al["identification"]
+        picked = ident.get("release_id") or (ident.get("suggested") or {}).get("id") or ""
+        self.assertIn(RID, picked + str((ident.get("suggested") or {}).get("ref") or ""), pl.preview(plan))
+        self.assertNotIn(self.UK, picked)
 
 
 class TestUndo:

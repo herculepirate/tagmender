@@ -151,7 +151,9 @@ def edition(tags: dict, mode: str = "edition_year") -> str:
         return ""
     hd = bool(tags.get("~edition_hd"))
     if tags.get("~edition_unproven"):
-        return "HD" if hd else ""                   # ED-5: an album known shows only its HD
+        # ED-5: an album known shows only its HD - never a vinyl rip's (vinyl never adds HD: its
+        # pressing unproven, the copy is a vinyl rip by its own evidence, VIN-3's ~rip_vinyl)
+        return "HD" if hd and not tags.get("~rip_vinyl") and edition_parts(tags)[0] != "Vinyl" else ""
     kind, reissue = edition_parts(tags)
     if kind in _ALWAYS_MARKED:
         word = _ALWAYS_MARKED[kind]

@@ -2291,10 +2291,15 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
             folder_read = {"artist": head, "title": rest if untitled else title, "year": r_year or None,
                            "folder": str(album_folder)}
     n_discs =len({i["disc_eff"] for _p, i in infos}) or 1
-    folder_hints = mc.catno_hints(album_folder) + [h for h in mc.catno_hints(title)
-                                                   if h not in mc.catno_hints(album_folder)]
-    folder_match = set(mc.catno_hints(album_folder, variants=True)) | set(
-        mc.catno_hints(title, variants=True))
+    # VIN-2 / TAG-2: the folder's own name is your copy's word; a catalogue number in the album
+    # tag's brackets only stands in for it where the folder name names none - an album title
+    # another tagger (or an earlier name) wrote, "Hemispheres [Vinyl Rip ... 9100 059]", never
+    # outvotes the folder's "[Vinyl Rip Fran Solo SRM-1-3743]"
+    own_hints = mc.catno_hints(album_folder)
+    title_hints = [] if own_hints else mc.catno_hints(title)
+    folder_hints = own_hints + [h for h in title_hints if h not in own_hints]
+    folder_match = set(mc.catno_hints(album_folder, variants=True)) | (
+        set() if own_hints else set(mc.catno_hints(title, variants=True)))
     # a Japanese set's numbers as a range with "-" ("SICP 10151-4"): the "~" form MusicBrainz
     # and Discogs list it by is the folder's too, and searched as well (never its single numbers:
     # mc.catno_range)

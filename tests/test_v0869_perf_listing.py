@@ -598,6 +598,36 @@ class RememberedTags(Base):
                     self.assertEqual(ex.read_meta(f), meta)
         self.assertEqual(r.calls, [str(f)])                                           # (opened once)
 
+    def test_id3_frames_of_bytes_are_no_text(self):
+        from mutagen.id3 import ID3, GEOB, PRIV, TXXX
+        f = self.tmp / "dj" / "01.mp3"
+        f.parent.mkdir(parents=True)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", "-ar", "8000",
+                        "-c:a", "libmp3lame", "-metadata", "album=DJ", str(f), "-y"], check=True)
+        tags = ID3(f)
+        tags.add(GEOB(encoding=3, mime="application/octet-stream", filename="", desc="Serato Markers2",
+                      data=os.urandom(70_000)))
+        tags.add(PRIV(owner="TRAKTOR4", data=os.urandom(5_000)))
+        tags.add(TXXX(encoding=3, desc="MusicBrainz Album Id", text=["0b0c0d0e-1111-4222-8333-944445555666"]))
+        tags.save(f)
+        meta = ex._read_file_meta(f)
+        self.assertEqual(meta["geob:serato markers2"], ["[binary data (70000 bytes)]"])
+        self.assertEqual([v for k, v in meta.items() if k.startswith("priv:")], [["[binary data (5000 bytes)]"]])
+        self.assertEqual(meta["musicbrainz album id"], ["0b0c0d0e-1111-4222-8333-944445555666"])
+        self.assertEqual(meta["album"], ["DJ"])
+        self.assertLessEqual(ex._meta_size(meta), ex.META_STORE_MAX)
+        store = {}
+        with ex.meta_memo(store, True):
+            ex.read_meta(f)
+        self.assertEqual([k[0] for k in store], [str(f)])                            # (remembered)
+
+    def test_text_in_bytes_stays_text(self):
+        from mutagen.mp4 import MP4FreeForm, AtomDataType
+        self.assertIsNone(ex._binary_text("----:com.apple.iTunes:MusicBrainz Album Id",
+                                          MP4FreeForm(b"0b0c0d0e-1111", dataformat=AtomDataType.UTF8)))
+        self.assertIsNone(ex._binary_text("x", b"plain text"))
+        self.assertEqual(ex._binary_text("x", b"\x00\xff\x10data"), "[binary data (7 bytes)]")
+
     def test_a_pass_that_failed_drops_nothing(self):
         store = {}
         self.engine(te.FakeHttp()).listing(self.lib, meta=store)

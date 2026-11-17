@@ -394,8 +394,10 @@ def _read_meta(path):
 
 # PRF-2: a picture or other binary item among the tags is no text: its value is "[binary data
 # (N bytes)]" (as mutagen names an ASF one), never the picture's bytes written out as text - an
-# APEv2 cover, an ID3 APIC, an MP4 covr, a Vorbis METADATA_BLOCK_PICTURE (base64). Nothing reads
-# a picture from here (artwork reads the files itself); written out, one picture made a file's
+# APEv2 cover, an ID3 frame carrying bytes (APIC, GEOB, PRIV: a DJ program's data, UFID, MCDI),
+# an MP4 covr or other non-text bytes, a Vorbis METADATA_BLOCK_PICTURE (base64). Text frames and
+# text in bytes (an MP4 free-form tag's UTF-8) stay text. Nothing reads such data from here
+# (artwork reads the files itself); written out, one picture or DJ frame made a file's
 # metadata too large to be remembered (META_STORE_MAX), so every such track was opened again on
 # each pass.
 _PICTURE_FIELDS = {"metadata_block_picture", "coverart"}
@@ -405,16 +407,26 @@ def _binary_text(key, value):
     """The text a binary tag value stands as ("[binary data (N bytes)]"); None for text."""
     try:
         from mutagen.apev2 import APEBinaryValue
-        from mutagen.id3 import APIC
-        from mutagen.mp4 import MP4Cover
+        from mutagen.mp4 import MP4Cover, MP4FreeForm, AtomDataType
     except ImportError:                              # pragma: no cover
         return None
+    data = getattr(value, "data", None)
     if isinstance(value, APEBinaryValue):
         n = len(value.value)
     elif isinstance(value, MP4Cover):
         n = len(value)
-    elif isinstance(value, APIC):
-        n = len(value.data)
+    elif isinstance(data, (bytes, bytearray)) and not hasattr(value, "text"):
+        n = len(data)                                # (an ID3 frame of bytes: APIC, GEOB, PRIV, UFID ...)
+    elif isinstance(value, (bytes, bytearray)):
+        if isinstance(value, MP4FreeForm) and value.dataformat in (AtomDataType.UTF8, AtomDataType.UTF16):
+            return None                              # (a free-form tag's text)
+        try:
+            text = bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+        if text is not None and not any(c < " " and c not in "\t\n\r" for c in text):
+            return None                              # (text, as bytes)
+        n = len(value)
     elif isinstance(value, str) and str(key).casefold() in _PICTURE_FIELDS:
         n = len(value) * 3 // 4                      # (base64: the picture's own size)
     else:

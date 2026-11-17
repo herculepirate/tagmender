@@ -1,7 +1,8 @@
 """covers_ai.py - AI covers for an album, from four presets (Find Covers… › Make AI Covers…).
 
 An image model makes them: your own OpenAI-compatible images service (its address, key and model
-under Preferences › Keys; gpt-image-1 or a compatible one). Tavily only FINDS the reference images
+under Preferences › Keys; gpt-image-1 or a compatible one), else the AI provider you rank first
+that makes images (ai_providers.py: an OpenAI key alone is enough). Claude does not make images. Tavily only FINDS the reference images
 some presets need - it draws nothing:
 
   faithful   restore the album's own (small) cover          reference: the album's own front
@@ -94,7 +95,11 @@ class CoverAIError(Exception):
 
 # ---- the service ----------------------------------------------------------------------------
 def service() -> dict:
-    """{"url", "key", "model"} of the image service, from the keys (url and model default)."""
+    """{"url", "key", "model", "provider"} of the image service. Your own image service's keys
+    (Preferences › Keys › Generated covers) first, as before; else the first AI provider you
+    rank that makes images (ai_providers: an OpenAI key alone is enough; an OpenAI-compatible
+    endpoint with an image model named). Claude does not make images: an Anthropic key alone
+    serves no covers (not_ready says so). key is "" when none is set up."""
     import credentials
     try:
         key = credentials.get("image_api_key")
@@ -102,17 +107,42 @@ def service() -> dict:
         model = credentials.get("image_model") or DEFAULT_MODEL
     except Exception as exc:
         raise CoverAIError(str(exc)) from None
-    return {"url": url.rstrip("/"), "key": key, "model": model}
+    if key:
+        return {"url": url.rstrip("/"), "key": key, "model": model, "provider": ""}
+    try:
+        import ai_providers as ap
+        cfg = ap.load_config()
+        p = ap.provider_for("covers", cfg)
+    except Exception:
+        p = None
+    if p is not None:
+        image_model = (p.options.get("image_model") if p.name == "compatible" else "") or \
+            credentials.get("image_model") or ap.IMAGE_MODEL
+        return {"url": p.url, "key": p.key, "model": image_model, "provider": p.name}
+    return {"url": url.rstrip("/"), "key": "", "model": model, "provider": ""}
+
+
+CLAUDE_NO_IMAGES = ("an image service: Claude does not make images, so an Anthropic key alone cannot make "
+                    "covers (add an OpenAI key or another image service under Preferences › Keys; real covers "
+                    "and scan clean-up still work)")
 
 
 def not_ready() -> str:
     """What is missing to make AI covers ("" when ready)."""
     try:
-        if not service()["key"]:
-            return "an image service key (Preferences › Keys › Generated covers)"
+        s = service()
+        if s["key"] or (s.get("provider") == "compatible" and s["url"]):
+            return ""
     except (CoverAIError, KeyError):
-        return "an image service key (Preferences › Keys › Generated covers)"
-    return ""
+        pass
+    try:
+        import ai_providers as ap
+        names = {p.name for p in ap.configured()}
+    except Exception:
+        names = set()
+    if "anthropic" in names:
+        return CLAUDE_NO_IMAGES
+    return "an image service key (Preferences › Keys › Generated covers)"
 
 
 def tavily_key() -> str:
@@ -236,9 +266,16 @@ def generate(prompt: str, refs: list[bytes]) -> bytes:
     """One image from the service: its edits endpoint with the references as images, else its
     generations endpoint."""
     s = service()
-    if not s["key"]:
+    if not s["key"] and not (s.get("provider") == "compatible" and s["url"]):
         raise CoverAIError("no image service key is set up (Preferences › Keys › Generated covers)")
-    head = {"Authorization": f"Bearer {s['key']}"}
+    if s.get("provider"):
+        # (an AI provider's key: counted against its monthly cap, as its other requests are)
+        import ai_providers as ap
+        cap = ap.cap_of(s["provider"])
+        if ap.usage(s["provider"])["requests"] >= cap:
+            raise CoverAIError(f"{ap.LABELS[s['provider']]}'s monthly cap of {cap} requests is reached")
+        ap.count_usage(s["provider"])
+    head = {"Authorization": f"Bearer {s['key']}"} if s["key"] else {}
     if refs:
         body, ctype = _multipart({"model": s["model"], "prompt": prompt, "size": SIZE, "n": "1"}, refs)
         req = urllib.request.Request(f"{s['url']}/images/edits", data=body, method="POST",

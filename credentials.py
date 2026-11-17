@@ -3,7 +3,8 @@
 Looked up in this order, the first found wins:
   1. the environment: DISCOGS_TOKEN, TAGMENDER_ACOUSTID_KEY, TAGMENDER_GNUDB_USER, ...
   2. a file only you can read: ~/.config/tagmender/discogs_token, .../acoustid_key, .../gnudb_user,
-     and for the optional web search: .../mojeek_key, .../marginalia_key, .../tavily_key
+     and for the optional web search: .../mojeek_key, .../marginalia_key, .../tavily_key;
+     for optional AI assistance: .../ai_openai_key, .../ai_anthropic_key, .../ai_compatible_key
      (written by `tagmender setup`, mode 0600; a file others can read is refused)
 
 Your own MusicBrainz application (client ID and secret: mb_client_id, mb_client_secret) and your
@@ -32,12 +33,17 @@ ENV = {"discogs": "DISCOGS_TOKEN", "acoustid": "TAGMENDER_ACOUSTID_KEY",
        "acoustid_user": "TAGMENDER_ACOUSTID_USER_KEY",
        # your own AI image service, for AI covers (covers_ai.py): OpenAI-compatible
        "image_api_key": "TAGMENDER_IMAGE_API_KEY", "image_api_url": "TAGMENDER_IMAGE_API_URL",
-       "image_model": "TAGMENDER_IMAGE_MODEL"}
+       "image_model": "TAGMENDER_IMAGE_MODEL",
+       # optional AI assistance with your own key (ai_providers.py; one provider is enough)
+       "ai_openai_key": "TAGMENDER_OPENAI_API_KEY", "ai_anthropic_key": "TAGMENDER_ANTHROPIC_API_KEY",
+       "ai_compatible_key": "TAGMENDER_AI_COMPATIBLE_KEY"}
 FILES = {"discogs": "discogs_token", "acoustid": "acoustid_key",
          "fanart": "fanart_key", "audiodb": "audiodb_key", "lastfm": "lastfm_key", "gnudb": "gnudb_user",
          "mojeek": "mojeek_key", "marginalia": "marginalia_key", "tavily": "tavily_key",
          "mb_client_id": "mb_client_id", "mb_client_secret": "mb_client_secret", "acoustid_user": "acoustid_user_key",
-         "image_api_key": "image_api_key", "image_api_url": "image_api_url", "image_model": "image_model"}
+         "image_api_key": "image_api_key", "image_api_url": "image_api_url", "image_model": "image_model",
+         "ai_openai_key": "ai_openai_key", "ai_anthropic_key": "ai_anthropic_key",
+         "ai_compatible_key": "ai_compatible_key"}
 # saved logins (JSON, not one secret a file): kept 0600 by their own module, checked by doctor
 TOKEN_FILES = {"musicbrainz_login": "musicbrainz_login.json"}
 # CoverUp's own setting names for the keys it can take from here when Picard.ini has none
@@ -59,7 +65,12 @@ LABELS = {"discogs": "Discogs personal access token (discogs.com/settings/develo
                            "not the application key; optional)",
           "image_api_key": "API key of your image generation service, for generated covers (one with a standard images API; optional)",
           "image_api_url": "address of your image generation service (empty for the built-in default; optional)",
-          "image_model": "the image model to use (empty for the built-in default; optional)"}
+          "image_model": "the image model to use (empty for the built-in default; optional)",
+          "ai_openai_key": "OpenAI API key, for optional AI assistance and generated covers (platform.openai.com/api-keys)",
+          "ai_anthropic_key": "Anthropic API key, for optional AI assistance (platform.claude.com; "
+                              "Claude does not make images)",
+          "ai_compatible_key": "key of an OpenAI-compatible AI service such as OpenRouter (optional; "
+                               "a local Ollama or LM Studio needs none)"}
 
 
 class CredentialError(RuntimeError):

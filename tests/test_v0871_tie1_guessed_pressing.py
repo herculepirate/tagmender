@@ -174,6 +174,30 @@ class TIE1_Matcher(unittest.TestCase):
             self.assertEqual((out["best"]["cand"]["id"], out.get("mb_twin")), ("11", "mbA"))
             self.assertNotIn("tie_guess", out["best"], prefer)
 
+    def test_TIE1_a_disc_id_every_tied_pressing_carries_on_the_twin_is_no_proof(self):
+        """N1 / TOC-3: your exact disc ID on MusicBrainz's twin, and (CTDB, TOC-2) on both tied
+        Discogs pressings: it proves the disc, not the pressing - still a guess."""
+        cfg = dict(CFG, preferred_countries=["CA"])
+        a = album(tocs={1: TOC}, tocs_fit=[1], toc_releases={"mbA"}, exact_toc_releases={"mbA"},
+                  exact_toc_media={"mbA": {1}}, exact_toc_on={"mbA": {TOC: {1}}}, toc_discogs={"11", "22"})
+        ms = [mc.score_candidate(a, cand("mbA", country="CA", catnos={"CA-1"}, label="Maple"), cfg)]
+        ds = [mc.score_candidate(a, x, cfg) for x in (
+            cand("11", country="Canada", catnos={"CA-1"}, label="Maple", source="discogs", url="u", release_group=""),
+            cand("22", country="UK", catnos={"GB-1"}, label="Brit", source="discogs", url="u", release_group=""))]
+        self.assertTrue(all("disc TOC" in (s.get("clues") or {}) for s in ds))
+        mb, dg = mc.classify(ms, cfg), mc.classify(ds, cfg)
+        mb["scored"], dg["scored"] = ms, ds
+        out = mc.combine(mb, dg, ["CA"])
+        self.assertEqual(out["best"]["cand"]["id"], "11")
+        self.assertEqual([x["id"] for x in out["best"]["tie_guess"]["others"]], ["22"])
+
+    def test_TIE1_manual_match_keeps_the_pair(self):
+        """m-b: Match Files Manually never takes a pair for the Discogs release alone."""
+        from gui import manual_match as mm
+        self.assertFalse(mm.same_ref(f"discogs:904+{CA}", "discogs:904"))
+        self.assertTrue(mm.same_ref(f"discogs:904+{CA}", f"https://www.discogs.com/release/904+{CA}"))
+        self.assertTrue(mm.same_ref("discogs:904", "https://www.discogs.com/release/904"))
+
     def test_TIE1_a_twin_without_evidence_leaves_the_guess(self):
         out = self.twins(album())
         self.assertEqual(out["best"]["cand"]["id"], "11")
@@ -422,6 +446,22 @@ class TIE1_Engine(te.Base):
         e.use_discogs = True
         e.cfg["prefer_source"] = "discogs"
         return d, e
+
+    def test_TIE1_a_pair_naming_another_pressing_is_never_paired(self):
+        """m-a: "discogs:904+<MBID>" whose MusicBrainz release is another pressing (or cannot be
+        read): tagged from Discogs alone, said so - never two pressings' IDs together."""
+        for mbid in (US, "9e9e9e9e-0000-4000-8000-000000000000"):
+            d, e = self.discogs_pair()
+            e.http.mb[US] = self.rel(US, "US", "US-200", "Eagle", "0000000000031")
+            e.force = {os.path.realpath(str(d)): f"discogs:904+{mbid}"}
+            q = e.identify(e.albums_in(d)[0])
+            self.assertEqual((q.status, q.tier), ("identified", "exact"), q.why)
+            t = q.targets[0]
+            self.assertEqual(t.get("discogs_release_id"), ["904"])
+            self.assertNotIn("musicbrainz_albumid", t, mbid)
+            self.assertTrue(any("is not this Discogs pressing" in w for w in q.why), q.why)
+            import shutil
+            shutil.rmtree(d)
 
     def test_TIE1_a_suggested_discogs_pressing_confirms_with_its_musicbrainz_twin(self):
         """M4: the suggestion names the Discogs pressing with MusicBrainz's entry of it; choosing it

@@ -3189,12 +3189,21 @@ class Engine:
         else:
             best["discogs_id"] = cand["id"]
             twin = release_twin(ref)
+            twin_note = ""
             if twin:
                 # (TIE-1: the suggested Discogs pressing confirmed with MusicBrainz's entry of it -
-                # tagged from both, as the matcher's own pick would have been)
-                best["mb_id"] = twin[1]
+                # tagged from both, as the matcher's own pick would have been - only when that
+                # MusicBrainz release is this pressing: it links it, or barcode / catalogue number
+                # and country agree; never two pressings paired)
+                if self._is_twin(twin[1], cand):
+                    best["mb_id"] = twin[1]
+                else:
+                    twin_note = (f"MusicBrainz release {twin[1]} is not this Discogs pressing (or could not be "
+                                 "read): tagged from Discogs alone")
         why = [f"the release you chose ({ref}); the matcher scores it {sc.get('confidence', 0):.0f}"] \
             if claimed is None else []
+        if kind != "mb" and twin_note:
+            why.append(twin_note)
         fits = sc.get("tracks_ok") or (best.get("slots") and mc.score_candidate(
             album, mc.slot_view(album, cand) or cand, self.cfg).get("tracks_ok"))
         if best.get("slots") and best.get("missing"):
@@ -3215,6 +3224,18 @@ class Engine:
                                     reason=f"the release you chose does not fit the files: {exc}")
         prop.why = why + [w for w in prop.why if w not in why]
         return prop
+
+    def _is_twin(self, mbid, dg_cand) -> bool:
+        """TIE-1 / M4: MusicBrainz release MBID is the Discogs candidate's own pressing
+        (match_core.same_pressing: it links it, or its barcode or catalogue number and country
+        agree). False when it cannot be read."""
+        try:
+            det = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}"
+                                     f"?inc=recordings+artist-credits+labels+url-rels+release-groups&fmt=json", "mb")
+        except ma.ProviderUnavailable:
+            return False
+        mb = ma.mb_candidate(det) if det else None
+        return bool(mb) and bool(mc.same_pressing(mb, dg_cand))
 
     CODE_TWIN_VERSIONS = 20         # (BAR-13, a hand-chosen release: its master's versions read at most)
 

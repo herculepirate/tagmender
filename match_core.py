@@ -4490,7 +4490,7 @@ def tie_guess(best, pool, why):
     return {"by": "; ".join(by), "pick": pressing_facts(best), "others": [pressing_facts(s) for s in others]}
 
 
-def _twin_settles(res, twin, mb_result, twins):
+def _twin_settles(res, twin, mb_result, twins, dg_result=None):
     """TIE-1: RES's Discogs pick was a tie-break's guess among Discogs's pressings, but TWIN -
     MusicBrainz's entry of that same pressing, written beside it - carries evidence of your copy
     the Discogs entry lacks (your barcode, your exact disc ID ...) that no other MusicBrainz
@@ -4502,7 +4502,13 @@ def _twin_settles(res, twin, mb_result, twins):
     mine, theirs = _evidence(twin), _evidence(best)
     told = {k: v for k, v in mine.items() if k not in theirs}
     rest = [s for s in (mb_result or {}).get("scored") or () if not any(s is t for t in twins)]
-    proof = [k for k, v in told.items() if not any(_evidence(o).get(k) == v for o in rest)]
+    # the guess's other pressings as Discogs scored them: a clue any of them carries too (your
+    # disc ID linked to each through CTDB, TOC-2/TOC-3; your barcode) tells none apart
+    other_ids = {str(x.get("id")) for x in best["tie_guess"].get("others") or () if x.get("source") == "discogs"}
+    tied = [s for s in (dg_result or {}).get("scored") or ()
+            if s["cand"].get("source") == "discogs" and str(s["cand"].get("id")) in other_ids]
+    proof = [k for k, v in told.items() if not any(_evidence(o).get(k) == v for o in rest)
+             and not any(k in (o.get("clues") or {}) or k in _evidence(o) for o in tied)]
     if not proof:
         return res
     clean = {k: v for k, v in best.items() if k != "tie_guess"}
@@ -6223,7 +6229,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                     if note and overrule.get("best"):
                         overrule["best"] = dict(overrule["best"],
                                                 notes=list(overrule["best"].get("notes") or []) + [note])
-                    overrule = _twin_settles(overrule, chosen, mb_result, twins)
+                    overrule = _twin_settles(overrule, chosen, mb_result, twins, dg_result)
             return overrule
         if twins:
             # the release carrying your disc ID first (Stygian Bough: the CD with the
@@ -6233,7 +6239,7 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             note = twin_note(twins, chosen)
             if note:
                 out["best"] = dict(out["best"], notes=list(out["best"].get("notes") or []) + [note])
-            out = _twin_settles(out, chosen, mb_result, twins)
+            out = _twin_settles(out, chosen, mb_result, twins, dg_result)
         elif (mb_result and mb_result["status"] == "auto" and mb_best
               and not has_evidence(dg_result["best"], mb_best) and (has_evidence(mb_best, dg_result["best"])
                                                                          or countries)):

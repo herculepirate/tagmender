@@ -265,6 +265,19 @@ def job_lock(job, active=True):
             fcntl.flock(fh, fcntl.LOCK_UN)
 
 
+@contextmanager
+def changing_files():
+    """Say "a job is changing files" (job_running) while held - for work around a job that must
+    finish before the watcher looks (EDT-2: Save Tags tells the watcher of the albums it wrote)."""
+    ex.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(ex.STATE_DIR / "jobs.active", "a") as act:
+        fcntl.flock(act, fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(act, fcntl.LOCK_UN)
+
+
 def job_running() -> bool:
     """A job (apply, undo, recover) is changing files now, in any TagMender process or thread."""
     try:
@@ -2143,6 +2156,8 @@ def _write_extras(fe) -> dict:
         out["license_count"] = fe["license_count"]
     if fe.get("fix_pictures"):
         out["fix_pictures"] = True
+    if fe.get("plain"):                  # (EDT-2: a plain edit - the file's own frames as they are)
+        out["plain"] = True
     return out
 
 
@@ -2571,6 +2586,10 @@ def _watcher_forgets(jd: Path):
                    " status TEXT, attempts INTEGER, next_try REAL, ts REAL, detail TEXT)")
         for a in plan.get("albums") or []:
             files = [Path(fe["src"]) for fe in a.get("files") or [] if not fe.get("copy_of")]
+            if plan.get("plain") and a.get("album_files"):
+                # EDT-2: a plain save wrote only the files you edited - the watcher knows the album
+                # by all of its files (as it groups it), so it is remembered undone by those
+                files = [Path(f) for f in a["album_files"]]
             if not files:
                 continue
             folder = Path(a["source_dir"])

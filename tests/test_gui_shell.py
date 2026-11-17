@@ -142,8 +142,9 @@ class Shell(unittest.TestCase):
             self.assertIn(a, in_menu, f"{key} is in no menu")
             sc = a.shortcut().toString()
             if sc:
-                # (Delete: Remove Rule on Profiles, Remove Tag in the inspector's Tags, never both at once)
-                if {key, seen.get(sc)} != {"delete_rule", "remove_tag"}:
+                # (Delete: Remove Rule on Profiles, Remove Tag in the inspector's Tags, never both at once;
+                # Ctrl+S: Save Profile on Profiles, Save Tags on Overview - EDT-2 - never both on at once)
+                if {key, seen.get(sc)} not in ({"delete_rule", "remove_tag"}, {"save_profile", "save_tags"}):
                     self.assertNotIn(sc, seen, f"{key} and {seen.get(sc)} share {sc}")
                 seen[sc] = key
         menu_only = {k for k, a in self.win.commands.items() if a.shortcut().isEmpty()}

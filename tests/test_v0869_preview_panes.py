@@ -2,9 +2,9 @@
 # Your folders | Albums as they will be | Tag changes, over Cover art - built from a synthetic plan
 # holding a set joined from three disc folders (DSC-10) and an SACD layer's album filed in its layer
 # folder (MED-22c). Checked: the panes and the cover strip are built; each pane folds to a strip and
-# folds, widths and Changes only are remembered per user; a selection in one pane is followed by the
+# folds and widths are remembered per user; a selection in one pane is followed by the
 # others and by the album list; the Tag changes rows agree with the plan (plan.preview's own data)
-# for a file, a disc and a whole album, "different in N files" included; Changes only; the
+# for a file, a disc and a whole album, "different in N files" included; the
 # background reads (tags, covers) finish and a newer selection cancels an older one; a preview of
 # 2,000 albums opens within a measured bound. Synthetic data in temporary folders only.
 # TAGMENDER_SHOTS869=<dir> saves screenshots of the panes there.
@@ -293,16 +293,11 @@ class Folding(PreviewPanesBase):
         p = ov.panes
         p.hsplit.setSizes([300, 700])
         p.vsplit.setSizes([400, 300])
-        p.changes_only.setChecked(False)
         p.save_sizes()
         saved = self.gui.common._gui_prefs()["preview_panes"]
         self.assertEqual(saved["sizes"][:2], p.hsplit.sizes())
         self.assertEqual(saved["vsizes"], p.vsplit.sizes())
-        self.assertFalse(saved["changes_only"])
-        from gui.preview_panes import PreviewPanes
-        again = PreviewPanes(None)
-        self.assertFalse(again.changes_only.isChecked())
-        again.deleteLater()
+        self.assertFalse(hasattr(p, "changes_only"))             # (0.8.72: every tag is always shown)
 
     def test_dark_style(self):
         self.gui.style.apply(self.app, "dark")
@@ -404,7 +399,6 @@ class TagValues(PreviewPanesBase):
         import plan as planmod
         ov = self.show_plan()
         p = ov.panes
-        p.changes_only.setChecked(False)
         joined = ov.model.albums[0]
         text = planmod.preview(dict(self.plan, albums=[joined]), verbose=False)
         # one file
@@ -457,18 +451,17 @@ class TagValues(PreviewPanesBase):
             self.assertEqual(rows[f]["after"] == f"different in {rows[f]['n']} files", len(afters) > 1, f)
         self.shot(self.win, "album-tags")
 
-    def test_changes_only_hides_the_tags_that_stay(self):
+    def test_every_tag_is_shown_the_albums_first(self):
         ov = self.show_plan()
         p = ov.panes
         joined = ov.model.albums[0]
         p.select("album", None, joined)
-        p.changes_only.setChecked(True)
-        marks = {r["mark"] for r in p.tag_model.rows}
-        self.assertNotIn("=", marks)
-        self.assertNotIn("albumartist", self.rows(p))
-        p.changes_only.setChecked(False)
-        self.assertEqual(self.rows(p)["albumartist"]["mark"], "=")
-        self.assertIn("albumartist", self.rows(p))
+        fields = [r["field"] for r in p.tag_model.rows]
+        self.assertIn("=", {r["mark"] for r in p.tag_model.rows})      # (kept tags shown too)
+        self.assertLess(fields.index("album"), fields.index("albumartist"))
+        self.assertLess(fields.index("albumartist"), fields.index("tracknumber"))
+        self.assertLess(fields.index("label"), fields.index("title"))
+        self.assertEqual(fields[-2:], ["~folder", "~filename"])
 
     def test_a_new_value_edited_goes_through_the_inspectors_edits(self):
         ov = self.show_plan()
@@ -513,7 +506,6 @@ class Background(PreviewPanesBase):
         import tagio
         ov = self.show_plan()
         p = ov.panes
-        p.changes_only.setChecked(False)
         joined, layer = ov.model.albums[0], ov.model.albums[1]
         gate, started = threading.Event(), threading.Event()
         seen = []
@@ -720,12 +712,9 @@ class ReviewFixes(PreviewPanesBase):
         from gui import preview_panes as pp
         ov = self.show_plan()
         p = ov.panes
-        p.changes_only.setChecked(False)
         with mock.patch.object(pp, "READ_MOST", 2):
             p.select("disc", (1, ""), ov.model.albums[0])
             self.assertIn("first 2 files", p.tag_note.text())
-            p.changes_only.setChecked(True)
-            self.assertNotIn("first 2 files", p.tag_note.text())
 
     def test_the_reads_stop_when_the_panes_go(self):
         from gui.preview_panes import PreviewPanes

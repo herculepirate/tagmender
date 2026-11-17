@@ -3841,7 +3841,66 @@ def preview(plan: dict, verbose=False) -> str:
 # undoable. What you typed wins over the profile's field policy and the match's confidence.
 KEEP = {"keep": True}
 EDITABLE = ("ready", "unchanged", "unresolved")      # (an album blocked or excluded is never written)
+LISTED = "listed"                                    # an album not looked up (List first: engine.listing)
 BY_YOU = "you"                                       # a row's "by": the value is your edit
+
+
+def editable(entry) -> bool:
+    """Your edits can be made to this album: one of a preview (EDITABLE), or (EDT-2) one not
+    looked up whose files are known - a plain edit, written by Save Tags (plain_plan)."""
+    st = (entry or {}).get("status")
+    return st in EDITABLE or (st == LISTED and bool((entry or {}).get("files")))
+
+
+def plain_files(entry) -> list:
+    """EDT-2: an album not looked up (engine.listing: "files" empty, "album_files" its files) as
+    file entries a plain edit is made on: each file stays where it is, nothing is to be written
+    (op "none") until you edit it. The entry is given them (once; never for another status)."""
+    if entry.get("status") != LISTED or entry.get("files"):
+        return entry.get("files") or []
+    entry["files"] = [{"src": str(f), "dst": str(f), "op": "none", "changes": {}, "diff": []}
+                      for f in entry.get("album_files") or []]
+    return entry["files"]
+
+
+def plain_pending(entry) -> bool:
+    """EDT-2: an album not looked up with a plain edit not saved yet (Save Tags writes it)."""
+    return (entry or {}).get("status") == LISTED and not edit_empty((entry or {}).get("edited")) and \
+        has_work(entry)
+
+
+def plain_plan(albums, job, profile="default") -> dict:
+    """EDT-2: the plan Save Tags gives the executor for your plain edits of ALBUMS (not looked up,
+    plain_pending): only the files your edits write, each where it is, with only your values
+    (and your cover, embedded as any new cover is) - no look-up, no rename or move, no
+    companion, no TagMender mark beyond the job's own journal. The files' fingerprints are those
+    taken when the edit read them (apply_edits): one changed since is left alone (Changed). No
+    Picard file settings (fmt): each file keeps its own ID3 version, ID3v1 and other tags."""
+    import copy
+    out = []
+    for a in albums:
+        if not plain_pending(a):
+            continue
+        e = copy.deepcopy({k: v for k, v in a.items() if not k.startswith("_") and k != "auto_artwork"})
+        art = e.get("artwork") or {}
+        embeds = set(art.get("embed_into") or [])
+        e["files"] = [fe for fe in e.get("files") or [] if fe.get("op") != "none" or fe.get("dst") in embeds]
+        for fe in e["files"]:
+            fe.pop("auto", None)
+            fe["op"] = "tag"
+            fe["dst"] = fe["src"]
+            fe["plain"] = True                        # (tagio.write: no frame moved or renamed)
+        if art:                                       # (no cover file: a plain edit embeds only)
+            art["file"] = None
+        e.update(status="ready", companions=[], sidecars=[], skipped=[], conflicts=[], notes=[], plain=True)
+        e.pop("held", None)
+        e.pop("artist_photo", None)
+        out.append(e)
+    roots = sorted({os.path.realpath(d) for a in out for d in [a["source_dir"]] +
+                    [str(Path(fe["src"]).parent) for fe in a["files"]]})
+    return {"version": PLAN_VERSION, "job": job, "created": time.time(), "profile": profile or "default",
+            "operation": "in_place", "plain": True, "roots": roots, "library_roots": [], "albums": out,
+            "summary": {"ready": len(out)}}
 _AUTO = ("changes", "diff", "op", "format", "names", "first", "lenient")
 
 
@@ -4136,9 +4195,28 @@ def apply_edits(entry: dict, edit: dict | None, profile=None, settings=None) -> 
     excluded, done) is left as it is."""
     _restore(entry)
     _note_renames(entry, edit)
-    if edit_empty(edit) or entry.get("status") not in EDITABLE:
+    if edit_empty(edit) or not editable(entry):
         return entry
+    plain = entry.get("status") == LISTED
+    if plain:                                         # EDT-2: a plain edit keeps each file's own format:
+        profile = settings = None                     # no profile's ID3 version, ID3v1 or tags removed
     _snapshot(entry)
+    if plain:
+        # (each file as your edit first read it: Save Tags writes none changed since - the
+        # executor's "Changed". Kept until that file's own values change - never for an edit of the
+        # whole album or its cover, so a change another program made after your first edit is
+        # never taken for the file your edit was made on)
+        for fe in entry.get("files") or []:
+            mine = (edit.get("file_tags") or {}).get(fe["src"]) or \
+                (edit.get("file_tags") or {}).get(os.path.realpath(fe["src"])) or {}
+            stamp = json.dumps(mine, sort_keys=True, default=str)
+            if fe.get("fingerprint") and fe.get("edit_stamp") == stamp:
+                continue
+            fe["edit_stamp"] = stamp
+            try:
+                fe["fingerprint"] = _fp(fe["src"])
+            except OSError:
+                fe["fingerprint"] = {"size": -1, "mtime_ns": -1}
     album_tags = dict(edit.get("tags") or {})
     per_file = {os.path.realpath(k): v for k, v in (edit.get("file_tags") or {}).items()}
     for fe in entry.get("files") or []:

@@ -591,7 +591,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 | Inspector > Tags (Album > Tag) | The selection's tags, original and new; edit a value (double-click, Return or F2), revert it, use the suggested value, add or remove a tag (Delete), and rate the tracks, for the album, a disc or a track; Edit > Undo Edit (Ctrl+Z) takes back the last edit |
 | Inspector > Cover (Album > Artwork) | The new cover large, your own pictures under it; Choose Cover… uses one of them, finds covers online, takes a file or a link, or generates one; drop an image file or link on it to use it |
 | Tools > Script Editor… (Ctrl+Shift+E) | The profile's file naming script and tagger scripts, with highlighting, completion, function help, errors marked where they are and a preview on the selected album; the language is in the [Scripting guide](SCRIPTING.md) |
-| Tools > Tags from File Names… (Ctrl+Shift+G) | A pattern such as `%artist% - %album%/%tracknumber% %title%` read from the selected album's file names, with a preview; the tags become your edits |
+| Album > Tags from File and Folder Names… (Ctrl+Shift+G; also Tools and the album's menu) | A pattern such as `%albumartist%/%date% - %album% [%catalognumber%]/%discnumber%-%tracknumber% - %title%` read from the selected files' names and their folders' (**Read from**: the album's folder, the folder holding it, two folders up, or the end of each path), with patterns guessed from the names offered first and a preview of what each file gives (a file the pattern does not fit is flagged); the tags become your edits of the files selected in the Tags pane (else of the whole album) - of an album not looked up too, written by Save Tags |
 | Edit > Job Details… (Ctrl+Shift+J) | What a job did, file by file and tag by tag (on the Jobs page), with Undo |
 | Edit > Show Report… (Ctrl+Shift+B) | The report of the selected job, the preview or the albums needing attention: what needs your decision, what could not finish, what was done, with folder links and Apply This Release (see [The report](#the-report-what-a-run-did-and-what-is-left-for-you)) |
 | Window > Log (Ctrl+Shift+Y) | TagMender's log: by level, searched as you type, following new lines |
@@ -628,16 +628,60 @@ The Overview shows the preview in linked panes, Mac-style: no title or option ba
 |---|---|---|
 | **Your files** (top left) | The folders and files as they are on disk, each marked with where it goes: *→ Disc 02* for a disc folder of a set, *→ Disc 01 #3* for a file, *needs you* for an album waiting for your choice, *other pressing* when your scans name another pressing, *extra* for a file the release has no track for | Select folders or files (Shift, Ctrl: several); right-click › Profile for the albums they hold; drag a folder onto an album in *Albums as they will be* to add it to that album (Match Files Manually opens for it) |
 | **Albums as they will be** (top right) | The list: an album a row with its release's facts and profile, its **Status** (a symbol and a word) and **Score**; under it its discs, each naming the folder it came from (a set joined from folders such as *Disc 1 - …*; an SACD layer's copy filed as *Disc 01 (SACD Stereo)*), and their tracks, each with its file. A track not in your folders is greyed; files not on the release are under *Not on the release*. Pointing at an album says its source, changes, why and scans | Select albums as in a folder (click, Shift, Ctrl), sort by a column, untick an album to leave it out of Apply, press Delete to take it out of the list, right-click for the album's commands, Space to play it |
-| **Tags** (bottom left) | Tag, Original and New for what you selected: an album, a disc, a track, a folder or a file, then the *Folder* and *File name* rows. Where the files do not share a value it says *different in N files*. The mark says what happens: **+** added, **→** changed, **−** removed, **=** kept; only the part of a value that changes is tinted (new text blue, the text it replaces orange and struck through) | **Changes only** hides the tags that stay; double-click a New value (or F2, Return) to edit it; Revert to Original, Use Suggested Value, Remove Tag (Delete), Add Tag…, the rating stars |
+| **Tags** (bottom left) | Every tag of what you selected - an album, a disc, a track, a folder or a file; looked up, up to date, unresolved or not looked up: the album's own tags first (album, album artist, dates, label, catalogue number, barcode, genre, totals, release IDs), then the tracks' (title, artist, track number …), then the *Folder* and *File name* rows. One file shows its own tags; several show each value they share, else *different in N files*. Original is the files' value, New the value they will have; the mark says what happens: **+** added, **→** changed, **−** removed, **=** kept (its New value dimmed); only the part of a value that changes is tinted (new text blue, the text it replaces orange and struck through) | Double-click a New value (or F2, Return) to edit it; Revert to Original, Use Suggested Value, Remove Tag (Delete), Add Tag…, the rating stars |
 | **Why This Release** (beside Tags) | What agreed (✓), what differs (≠), what to do (→), then the score in words, the source, what matched, the doubts, where each tag came from and the codes, and the full preview text | **Use Suggested Pressing** for an album whose pressing a tie-break proposed |
 | **Cover** (bottom right) | The new front cover the profile found (Cover Art Archive, Discogs …) large, then your own scans and covers and the picture in the tracks | **Choose Cover…**: Use as Front Cover (or double-click a picture), Find Online…, Choose a File…, Use Image Link…, Generate…, Use Suggested Cover |
 
 Selecting in one pane selects its counterpart in the other (a disc folder selects its disc; a track
 selects its file). The toolbar's **Inspector** button (Ctrl+Alt+I) shows or hides the bottom panes;
-they are shown at first, and your choice, the panes' sizes and *Changes only* are remembered. On
+they are shown at first, and your choice and the panes' sizes are remembered. On
 Needs attention the Inspector button shows the inspector on the right instead. The panes read only
 the preview: nothing on disk changes until you apply, and a preview of thousands of albums opens at
 once (an album's discs and tracks are made when you open it).
+
+### Editing tags without a look-up
+
+TagMender is also a plain tag editor: change tags by hand and save them, nothing looked up. Choose
+**When you add a folder: List its albums first** (Preferences › General), then add the folder: its
+albums are listed *Not looked up*, and nothing is asked of any database. Select an album, a disc,
+a track, a folder or a file (in either pane) and the **Tags** pane shows its tags as they are. Where the selected files differ it says
+*different in N files*; Edit Value… (F2, Return or a double-click) sets one value for all of them
+after asking; Add Tag…, Remove Tag (Delete), Revert to Original, the rating stars and **Cover** work
+as on a looked-up album. Edit > Undo Edit (Ctrl+Z) takes back the last edit. **Album › Tags from
+File and Folder Names…** (Ctrl+Shift+G) reads tags from the names of the selected files and their
+folders - `%albumartist%/%date% - %album% [%catalognumber%]/%discnumber%-%tracknumber% - %title%`
+read from two folders above the album - and puts them in as your edits, to check and save.
+
+An edited album says *Not looked up · Edited, not saved*, its edited files *edited* in Your files.
+**File › Save Tags** (Ctrl+S) writes your edits of every album not looked up, after a sheet that
+lists them; when they are all there is to write, the toolbar's prominent button says **Save Tags**
+(**Save N Albums**) and does the same. Saving is one job, as Apply is: each file is written on a
+copy, its audio checked unchanged and its tags read back before it takes the file's place, and the
+job is journaled - Edit > Undo Last Job, or Jobs, puts every file back (a file you changed again
+since is protected, as after any job). It writes only what you changed: no look-up, no new file
+name, no move, no cover file, log or other companion, and no TagMender marks (TAGMENDER and its
+reason tags are written only when TagMender identifies an album). Each file keeps its own format:
+its ID3 version, its ID3v1 tag, custom tags and their spelling (frames other taggers move or
+rename on saving stay as they are), multiple values; a value you set as it already is writes
+nothing. A cover you choose is embedded into the tracks, as a new cover
+is. A file another program changed after you first edited it is left as it is (*Changed*), with the
+rest of its album: your edit is read again against it and kept, to save once more. Your Ignore and
+Skip rules still apply: a file they exclude is left as it was, and the sheet after saving says so
+(its edit is kept), as is a file whose only change was a cover image gone since you chose it. A
+folder dropped while a save runs is added to the list when it ends. Apply writes only looked-up albums: your edits of albums not looked up stay,
+for Save Tags.
+
+Saving never starts a look-up, and the watcher does not look at an album again because you saved
+it: an album it filed keeps its record, one in a watched folder it never handled is remembered as
+yours (*Your edits saved* under Recently) until its files change or you choose Process Folder
+Again. Later, **Look Up** works on the album as on any other: the database's values are proposed
+for every tag (your saved values are not kept as edits of yours). Edits you have not saved yet
+when you look an album up are kept by the look-up, as any edit of yours, and written by Apply.
+
+Adding another folder, taking an edited album out of the list (Delete) or closing the window with
+edits not saved asks **Save**, **Don't Save** or **Cancel**; closing while a save runs closes once
+it is done (or stays open, saying which albums could not be saved). Listing the same folder again
+keeps your edits not saved, shown again.
 
 ## Hands-off
 

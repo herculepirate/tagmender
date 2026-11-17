@@ -9,7 +9,8 @@
   Tag changes (right)        Tag | Original | New for the selection (a file, a track, a disc, a
                              folder or the whole album); "different in N files" where the files
                              differ; + → − = marks; only the changed part of a value tinted (the
-                             style's diff_* tokens); Folder and File name rows; Changes only
+                             style's diff_* tokens); Folder and File name rows; every tag shown,
+                             the album's first
   Cover art (bottom)         your scans and the pictures in the tracks, the new front the profile
                              found (Discogs, Cover Art Archive ...), Find Online…, Choose a File…
                              and Generate… (the existing Find Covers sheet and its Make Covers)
@@ -22,7 +23,7 @@ workers (gui.work.start), a newer selection cancelling the older read.
 
 Editing goes through the inspector's edit path (Inspector.set_tag / set_tag_files, plan.apply_edits):
 nothing is written until Apply. Each pane folds to a labelled strip; which are folded, the
-widths and Changes only are remembered per user (gui.json "preview_panes")."""
+widths are remembered per user (gui.json "preview_panes")."""
 from __future__ import annotations
 
 import difflib
@@ -35,7 +36,7 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractItemModel, QAbstractTableModel, QItemSelectionModel, QMimeData, QModelIndex,
                             QSize, Qt, QTimer, QUrl, Signal)
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QListView, QListWidget, QListWidgetItem, QMenu, QSizePolicy, QSplitter,
                                QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
                                QToolButton, QTreeView, QVBoxLayout, QWidget)
@@ -50,8 +51,7 @@ from .tagnames import display as tag_name
 from .widgets import Segmented
 from .work import start
 
-PREF = "preview_panes"                  # gui.json: {"collapsed": {pane: bool}, "sizes": [..], "vsizes": [..],
-#                                         "changes_only": bool}
+PREF = "preview_panes"                  # gui.json: {"collapsed": {pane: bool}, "sizes": [..], "vsizes": [..]}
 PANES = ("folders", "albums", "tags", "covers")
 STRIP = 34                              # a folded side pane: a strip this wide
 SIDE_MIN = 100                          # an open side pane's narrowest (960 px wide, the inspector open: three fit)
@@ -85,8 +85,6 @@ def clean_prefs(p) -> dict:
         v = _ints(p.get(key), n)
         if v is not None:
             out[key] = v
-    if isinstance(p.get("changes_only"), bool):
-        out["changes_only"] = p["changes_only"]
     return out
 
 
@@ -201,7 +199,7 @@ def album_discs(a) -> list:
     then "Not on the release" (files the release has no track for, files left out by a rule,
     files found with the album that are not of it). Each track {"number", "title", "fe" (None:
     the release's track is not in your folders), "missing", "note"}."""
-    files = a.get("files") or []
+    files = planmod.plain_files(a) if a.get("status") == planmod.LISTED else a.get("files") or []
     identified = (a.get("identification") or {}).get("status") == "identified"
     discs, extra = {}, []
     for fe in files:
@@ -315,6 +313,14 @@ def tag_rows(files, current=None) -> list:
             if f.startswith("~") or f in named or f in (fe.get("changes") or {}):
                 continue
             per.setdefault(f, []).append((_vals(v), _vals(v), "=", False))
+    # (a tag only some of the files have: the others, read and without it, count as files without
+    # a value - the row is not one shared value, and setting it for all asks first. A file not read
+    # (past READ_MOST) is not counted: what it holds is not known)
+    read = [fe for fe in files if fe.get("src") in current]
+    if len(read) > 1:
+        for f, entries in per.items():
+            have = sum(1 for fe in read if f in _fields_of(fe, current))
+            entries += [([], [], "=", False)] * (len(read) - have)
     rows = [_row(f, tag_name(f), e) for f, e in per.items()]
     for key, name, get in ((FOLDER, tr("Folder"), lambda p: str(Path(p).parent)),
                            (FILENAME, tr("File name"), lambda p: Path(p).name)):
@@ -327,8 +333,45 @@ def tag_rows(files, current=None) -> list:
             r = _row(key, name, e)
             r["path"] = True
             rows.append(r)
-    rows.sort(key=lambda r: (r["mark"] == "=", r.get("path", False), not r["mine"], r["name"].lower()))
+    rows.sort(key=row_order)
     return rows
+
+
+# the album's own tags, in this order, before the tracks' (title, artist, track number ...): what
+# the album is, then where it was released, then its numbering and its database IDs
+ALBUM_FIELDS = ("album", "albumartist", "albumartistsort", "date", "originaldate", "originalyear", "releasedate",
+                "label", "catalognumber", "barcode", "asin", "genre", "style", "releasecountry", "releasetype",
+                "releasestatus", "media", "totaldiscs", "totaltracks", "discsubtitle", "compilation",
+                "musicbrainz_albumid", "musicbrainz_releasegroupid", "musicbrainz_albumartistid",
+                "discogs_release_id", "discogs_master_id", "discogs_label_id", "discogs_artist_id")
+_ALBUM_AT = {f: i for i, f in enumerate(ALBUM_FIELDS)}
+
+
+def row_order(r):
+    """Album-level tags first (ALBUM_FIELDS' order), then the tracks' by name, then Folder and File
+    name; the marks say what changes - a row is never moved for it."""
+    if r.get("path"):
+        return (2, 0 if r["field"] == FOLDER else 1, "")
+    f = str(r["field"]).lower()
+    return (0, _ALBUM_AT[f], "") if f in _ALBUM_AT else (1, 0, r["name"].lower())
+
+
+def _fields_of(fe, current) -> set:
+    """The tags file entry FE holds or will hold: its diff's, its changes', its tags as read."""
+    out = {r.get("field") for r in fe.get("diff") or []}
+    out |= set(fe.get("changes") or {})
+    out |= set(current.get(fe.get("src")) or {})
+    return out
+
+
+def _mixed_words(values, n) -> str:
+    """The cell of a tag the files do not share: "Jazz in 1 of 2 files" when the files holding it
+    agree and the others have none, else "different in N files"."""
+    held = {v for v in values if v}
+    if len(held) == 1:
+        k = sum(1 for v in values if v)
+        return tr("{value} in {k} of {n} files").format(value=_join(list(next(iter(held)))), k=k, n=n)
+    return tr("different in {0} files").format(n)
 
 
 def _row(field_, name, entries) -> dict:
@@ -337,14 +380,15 @@ def _row(field_, name, entries) -> dict:
     marks = {m for _b, _a, m, _y in entries}
     n = len(entries)
     mark = "=" if marks == {"="} else next(iter(marks - {"="})) if len(marks - {"="}) == 1 else "→"
-    differ = tr("different in {0} files").format(n)
     bv = list(next(iter(befores))) if len(befores) == 1 else None
     av = list(next(iter(afters))) if len(afters) == 1 else None
     return {"field": field_, "name": name, "mark": mark, "n": n, "path": False,
             "mine": any(y for _b, _a, _m, y in entries),
             "before_vals": bv, "after_vals": av, "mixed_before": bv is None, "mixed_after": av is None,
-            "before": (_join(bv) or tr(NONE)) if bv is not None else differ,
-            "after": (_join(av) or tr(NONE)) if av is not None else differ}
+            "before": (_join(bv) or tr(NONE)) if bv is not None else
+            _mixed_words([tuple(b) for b, _a, _m, _y in entries], n),
+            "after": (_join(av) or tr(NONE)) if av is not None else
+            _mixed_words([tuple(a) for _b, a, _m, _y in entries], n)}
 
 
 def segments(old: str, new: str) -> tuple:
@@ -367,8 +411,9 @@ def segments(old: str, new: str) -> tuple:
 
 
 def _scope_files(album, kind, key):
-    """The file entries a selection stands for."""
-    files = (album or {}).get("files") or []
+    """The file entries a selection stands for (EDT-2: an album not looked up, its own files)."""
+    files = planmod.plain_files(album) if (album or {}).get("status") == planmod.LISTED else \
+        (album or {}).get("files") or []
     if kind == "album":
         return list(files)
     if kind == "disc":
@@ -558,7 +603,7 @@ class FoldersModel(LazyTree):
         a = albums[0]
         st = a.get("status")
         if st == "listed":
-            return tr("not looked up"), "own"
+            return (tr("edited, not saved"), "hold") if planmod.plain_pending(a) else (tr("not looked up"), "own")
         if st in ("excluded", "skipped"):
             return tr("left alone"), "own"
         if st == "done":
@@ -653,6 +698,8 @@ def forget(album=None):
 def files_of(a) -> list:
     """Every file an album shows in Your folders, with where it goes: [{"fe", "goes", "tone",
     "disc"}] (remembered until the album's files change)."""
+    if a.get("status") == planmod.LISTED:
+        planmod.plain_files(a)                        # (EDT-2: its files, to select and edit)
     stamp = id(a.get("files")), len(a.get("files") or [])
     hit = _FILES.get(id(a))
     if hit is not None and hit[0] is a and hit[1] == stamp:
@@ -667,6 +714,8 @@ def files_of(a) -> list:
                 continue
             if d.get("extra"):
                 out.append({"fe": fe, "goes": t["note"], "tone": "extra", "disc": False})
+            elif a.get("status") == "listed" and fe.get("op", "none") != "none":
+                out.append({"fe": fe, "goes": tr("edited"), "tone": "hold", "disc": True})   # (EDT-2: not saved)
             elif held or a.get("status") in ("listed", "excluded", "skipped"):
                 out.append({"fe": fe, "goes": "", "tone": "own", "disc": True})
             else:
@@ -1093,6 +1142,18 @@ class AlbumsView(QTreeView):
 # --------------------------------------------------------------------------
 # tag changes
 # --------------------------------------------------------------------------
+_COLOURS = {}                           # (theme colour name, its value) -> QColor: made once per theme
+
+
+def _colour(name) -> QColor:
+    """style.color(NAME) as a QColor, made once for each value it has (a theme change: a new one)."""
+    value = style.color(name)
+    got = _COLOURS.get((name, value))
+    if got is None:
+        got = _COLOURS[(name, value)] = QColor(value)
+    return got
+
+
 class TagModel(QAbstractTableModel):
     COLS = ("", N_("Tag"), N_("Original"), N_("New"))
     SEGMENTS = R_USER + 3                         # [(text, changed)] for the delegate
@@ -1162,9 +1223,9 @@ class TagModel(QAbstractTableModel):
                                                                   if c == 3 and self.can_edit(r) else "")
             return f"{r['name']} ({r['field']})" if not r.get("path") else r["name"]
         if role == R_FOREGROUND and c == 0:
-            return QColor(style.color({"+": "accent", "→": "attention", "−": "error"}.get(r["mark"], "muted")))
-        if role == R_FOREGROUND and c == 1 and r["mark"] == "=":
-            return QColor(style.color("muted"))
+            return _colour({"+": "accent", "→": "attention", "−": "error"}.get(r["mark"], "muted"))
+        if role == R_FOREGROUND and c in (1, 3) and r["mark"] == "=":
+            return _colour("muted")                         # (kept: its new value the same, dimmed)
         if role == R_TEXTALIGNMENT and c == 0:
             return int(Qt.AlignCenter)
         if role == R_FONT and r["mine"] and c in (1, 3):
@@ -1555,11 +1616,6 @@ class PreviewPanes(QWidget):
         self.tabs.changed.connect(self.tab_changed)
         p.head_lay.insertWidget(0, self.tabs)
         p.subtitle.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.changes_only = QCheckBox(tr("Changes only"))
-        self.changes_only.setAccessibleName(tr("Show only the tags that change"))
-        self.changes_only.setChecked(bool(self._prefs().get("changes_only", True)))
-        self.changes_only.toggled.connect(lambda on: (self._save(changes_only=bool(on)), self.fill_tags()))
-        p.head_lay.addWidget(self.changes_only)
         self.stack = QStackedWidget()
         p.add(self.stack, 1)
         # Tags
@@ -1775,7 +1831,6 @@ class PreviewPanes(QWidget):
 
     def tab_changed(self, key):
         self.stack.setCurrentIndex(0 if key == "tags" else 1)
-        self.changes_only.setVisible(key == "tags")
         self._save(tab=key)
 
     def show_tab(self, key):
@@ -2078,8 +2133,10 @@ class PreviewPanes(QWidget):
         if self.tag_worker is not None:
             self.tag_worker.cancelled = True
         self.tag_worker = None
-        self.current = {}
         files = [fe["src"] for fe in self.scope_files()][:READ_MOST]
+        # (what was read of these files stays shown until the new read arrives: an edit or a
+        # reselection never empties the rows in between)
+        self.current = {f: self.current[f] for f in files if f in (self.current or {})}
         if not files or self.owner is None:
             return
         scope = self.scope
@@ -2118,9 +2175,8 @@ class PreviewPanes(QWidget):
         p = self.panes["tags"]
         say(p.subtitle, tr("Selection"), f"{title} · {sub}" if sub else title)
         files = self.scope_files()
+        # (every tag, always: the album's own first, then the tracks'; what changes is marked)
         rows = tag_rows(files, self.current) if files else []
-        if self.changes_only.isChecked():
-            rows = [r for r in rows if r["mark"] != "="]
         self.tag_model.set_rows(rows, self.editable())
         n = sum(1 for r in rows if r["mark"] != "=")
         if not self.scope:
@@ -2128,13 +2184,16 @@ class PreviewPanes(QWidget):
         elif not files:
             note = sub
         elif not rows:
-            note = tr("No tag changes for this selection.")
+            note = tr("No tags in this selection.") if self.tag_worker is None else tr("Reading the tags…")
         else:
             note = tr("{0} in {1}.").format(plural(n, tr("change"), tr("changes")),
                                             plural(len(files), tr("file"), tr("files")))
-            if len(files) > READ_MOST and not self.changes_only.isChecked():
+            if len(files) > READ_MOST:
                 note += " " + tr("The tags that stay are read from the first {0} files.").format(READ_MOST)
-            if self.editable():
+            if self.editable() and self.plain():
+                note += " " + tr("Double-click a new value to edit it; nothing is written until you save "
+                                 "(File › Save Tags). Nothing is looked up.")
+            elif self.editable():
                 note += " " + tr("Double-click a new value to edit it; nothing is written until you apply.")
         self.tag_note.setText(note)
         self._tag_buttons()
@@ -2203,8 +2262,17 @@ class PreviewPanes(QWidget):
         return sheets.confirm(self, tr("{what} {tag} on all {n} files?").format(what=what, tag=row["name"], n=row["n"]),
                               tr("The selected files have different values for {tag}; each would then have the "
                                  "same.").format(tag=row["name"]),
-                              tr("Nothing is written until you apply; Edit › Undo Edit takes it back."),
+                              tr("Nothing is written until you save; Edit › Undo Edit takes it back.") if self.plain()
+                              else tr("Nothing is written until you apply; Edit › Undo Edit takes it back."),
                               what, destructive=True)
+
+    def plain(self) -> bool:
+        """EDT-2: the selection is of an album not looked up - its edits are saved with Save Tags."""
+        return bool(self.scope) and (self.scope[0] or {}).get("status") == planmod.LISTED
+
+    def until_words(self) -> str:
+        return tr(" Nothing is written until you save (Save Tags).") if self.plain() else \
+            tr(" Nothing is written until you apply the preview.")
 
     def edit_key(self):
         """F2 or Return on a row: its New value typed in place when it is one value, else Edit
@@ -2230,8 +2298,7 @@ class PreviewPanes(QWidget):
             return
         from . import inspector
         files = self.scope_files()
-        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + \
-            tr(" Nothing is written until you apply the preview.")
+        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + self.until_words()
         got = inspector.tag_sheet(self, tr("Edit {0}").format(r["name"]), scope, name=r["field"],
                                   values=r["after_vals"] or [])
         # (an empty sheet removes nothing: Remove Tag does; OK with the values unchanged is no edit -
@@ -2245,8 +2312,7 @@ class PreviewPanes(QWidget):
             return
         from . import inspector, sheets
         files = self.scope_files()
-        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + \
-            tr(" Nothing is written until you apply the preview.")
+        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + self.until_words()
         got = inspector.tag_sheet(self, tr("Add a Tag"), scope, ask_name=True, action=tr("Add Tag"))
         if got is None:
             return

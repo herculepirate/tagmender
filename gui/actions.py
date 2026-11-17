@@ -25,6 +25,10 @@ COMMANDS = {
                    "you apply")),
     "preview": (N_("&Preview"), "Ctrl+P", "eye", N_("Work out what would change; nothing is written")),
     "apply": (N_("Appl&y"), "Ctrl+Return", "check", N_("Make the previewed changes (they can be undone)")),
+    # EDT-2: your edits of albums not looked up, written as they are (Ctrl+S: Save Profile's key on Profiles only)
+    "save_tags": (N_("Sa&ve Tags"), "Ctrl+S", None,
+                  N_("Write your tag edits of the albums not looked up; nothing is looked up, renamed or moved "
+                     "(it can be undone)")),
     "cancel": (N_("&Cancel"), "Ctrl+.", "x", N_("Stop after the album being worked on")),
     "read_scans": (N_("&Read Scans for This Preview"), None, None,
                    N_("Read barcodes and catalog numbers from every album's cover scans (slower)")),
@@ -137,8 +141,8 @@ COMMANDS = {
                       N_("The naming and tagger script lines, in the tagging script language, that do the same")),
     "edit_scripts": (N_("&Script Editor…"), "Ctrl+Shift+E", None,
                      N_("Edit the profile's file naming script and tagger scripts, with a preview")),
-    "tags_from_filenames": (N_("Ta&gs from File Names…"), "Ctrl+Shift+G", None,
-                            N_("Read tags from the selected album's file names into the preview")),
+    "tags_from_filenames": (N_("Tags from File and Folder &Names…"), "Ctrl+Shift+G", None,
+                            N_("Read tags from the names of the selected files and their folders into the preview")),
     "recover": (N_("Rec&over Interrupted Jobs…"), None, "rotate-ccw",
                 N_("Put back albums a stopped job left half-done")),
     "run_checks": (N_("Run Chec&ks"), "Ctrl+Shift+D", "stethoscope", N_("Check what TagMender needs is set up")),
@@ -197,7 +201,7 @@ RELEASE_MENU = ("use_release", *_search.MENU)
 # or ticks a box elsewhere); the other commands' keys work in the whole window
 SCOPED = ("edit_tag", "remove_tag", "play_pause")    # (Space: the album tables and the player bar only)
 MENUS = (
-    (N_("&File"), ("add_folder", "lookup_cd", None, "look_up", "preview", "apply", "cancel", "read_scans",
+    (N_("&File"), ("add_folder", "lookup_cd", None, "look_up", "preview", "apply", "save_tags", "cancel", "read_scans",
                "choose_library", None, "watch_folder",
                "new_profile", "save_profile", None, "close_window", "quit")),
     (N_("&Edit"),
@@ -205,7 +209,7 @@ MENUS = (
       "paste", "select_all", None, "copy_path", "find", None, "clear_done", None, "preferences")),
     (N_("&View"), ("@pages", None, "show_sidebar", "show_inspector", None, "tab_tags", "tab_artwork", "tab_evidence",
                None, "refresh")),
-    (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), (N_("Pro&file"), ()), "use_suggested_pressing", "match_files", None, (N_("&Tag"), TAG_MENU),
+    (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), (N_("Pro&file"), ()), "use_suggested_pressing", "match_files", "tags_from_filenames", None, (N_("&Tag"), TAG_MENU),
                 (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "exclude_again", "retry", None,
                 "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
                 "open_folder", "copy_path")),

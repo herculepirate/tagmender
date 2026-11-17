@@ -1448,7 +1448,7 @@ def fragmented(path) -> bool:
 
 def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None,
           names: dict | None = None, first: dict | None = None, keep=(), license_count=None,
-          fix_pictures=False, padding=None) -> None:
+          fix_pictures=False, padding=None, plain=False) -> None:
     """Apply {field: [values] | None}. Raises Unsupported for a field the format cannot
     hold (nothing is written then). fmt: file_options() - what else saving the file does, as
     Picard's settings say (ID3v2 version, ID3v1, APEv2 or ID3 tags removed). names: {field:
@@ -1460,7 +1460,10 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
     your stars (["4"], None removes them), saved as Picard saves ratings (mb_account.write_rating)
     and read back here - a rating that does not read back raises (the executor's read-back has
     no "~rating" to compare; plan.apply_edits marks it lenient there). padding: mutagen's
-    padding= for a FLAC's save (the executor's staged FLAC keeps the room it was built with)."""
+    padding= for a FLAC's save (the executor's staged FLAC keeps the room it was built with).
+    plain: EDT-2, a plain edit (Save Tags) - only the values changed are written; the frames
+    Picard moves or renames on any save (TXXX:ALBUMARTISTSORT into TSO2, TXXX:Artists to
+    ARTISTS ...) stay as the file has them."""
     names = {field_name(k): v for k, v in (names or {}).items()}
     if fix_pictures and not fragmented(path):
         fix_opus_pictures(path)
@@ -1582,13 +1585,14 @@ def write(path, changes: dict, riff: dict | None = None, fmt: dict | None = None
                     tags[x] = [MP4FreeForm(str(v).encode("utf-8")) for v in vals]
     if fam == "id3":
         # (the older places Picard moves on loading - and so writes the frame from on any save:
-        # TXXX:ALBUMARTISTSORT into TSO2, TXXX:COMPOSERSORT into TSOC, where the file has none)
-        for old, fid in (("TXXX:ALBUMARTISTSORT", "TSO2"), ("TXXX:COMPOSERSORT", "TSOC")):
+        # TXXX:ALBUMARTISTSORT into TSO2, TXXX:COMPOSERSORT into TSOC, where the file has none;
+        # never on a plain edit's save: the file's own frames stay as they are)
+        for old, fid in () if plain else (("TXXX:ALBUMARTISTSORT", "TSO2"), ("TXXX:COMPOSERSORT", "TSOC")):
             if old in tags and fid not in tags:
                 fr = tags.pop(old)
                 tags.add(Frames[fid](encoding=fr.encoding, text=list(fr.text)))
         # (and the obsolete names it renames on saving: TXXX:Artists, TXXX:Work)
-        for old, new in (("Artists", "ARTISTS"), ("Work", "WORK")):
+        for old, new in () if plain else (("Artists", "ARTISTS"), ("Work", "WORK")):
             if "TXXX:" + old in tags and "TXXX:" + new not in tags:
                 fr = tags.pop("TXXX:" + old)
                 tags.add(TXXX(encoding=fr.encoding, desc=new, text=list(fr.text)))

@@ -1,6 +1,6 @@
 """gui/dialogs - Picard's small dialogs, as sheets of the main window.
 
-  tags_from_filenames   Tags from File Names: a pattern such as "%artist% - %album%/%tracknumber% %title%",
+  tags_from_filenames   Tags from File and Folder Names: a pattern such as "%artist% - %album%/%tracknumber% %title%",
                         a preview of what each file name gives, then the tags become plan overrides
                         (nothing is written until the plan is applied)
   info                  File Info: format, codec, bitrate, length, every tag as stored, embedded pictures
@@ -12,6 +12,6 @@ Each module has one function the window calls: show_tags_from_filenames, show_fi
 show_job_details."""
 from .info import FileInfo, read_info, show_file_info  # noqa: F401
 from .logs import JobDetails, LogViewer, job_details, show_job_details, show_logs  # noqa: F401
-from .tags_from_filenames import (PRESETS, TagMatchExpression, TagsFromFileNames, apply_in_background,  # noqa: F401
-                                  apply_to_plan, merge_into_store, merged_edit, parse, plan_files,
+from .tags_from_filenames import (FOLDER_PRESETS, PRESETS, TagMatchExpression, TagsFromFileNames, apply_in_background,  # noqa: F401
+                                  apply_to_plan, guess, merge_into_store, merged_edit, parse, plan_files,
                                   show_tags_from_filenames)

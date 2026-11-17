@@ -62,6 +62,8 @@ def label_for(album):
         return STATUS[st][0], album["label"]
     sym, word = STATUS.get(st, ("·", st.title()))[:2]
     word = tr(word)
+    if st == planmod.LISTED and planmod.plain_pending(album):
+        return sym, tr("{0} · Edited, not saved").format(word)       # (EDT-2: Save Tags writes it)
     # how far identification got, beside the status: an album whose pressing, or release, is not
     # proven says so ("Ready · Partial")
     tier = (album.get("identification") or {}).get("tier")

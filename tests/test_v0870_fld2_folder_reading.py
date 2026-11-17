@@ -95,7 +95,7 @@ class Reading(unittest.TestCase):
         self.assertEqual(ma.folder_reading("Radiohead - OK Computer"), ("Radiohead", "OK Computer", 0))
         self.assertEqual(ma.folder_reading("1997 - Radiohead - OK Computer"), ("Radiohead", "OK Computer", 1997))
         self.assertEqual(ma.folder_reading("Radiohead - 1997 - OK Computer"), ("Radiohead", "OK Computer", 1997))
-        self.assertEqual(ma.folder_reading("Radiohead – Kid A (2000)"), ("Radiohead", "Kid A", 2000))
+        self.assertEqual(ma.folder_reading("Radiohead – Kid A (2000)"), ("Radiohead", "Kid A", 0))   # (a year after the album: never its year)
         self.assertEqual(ma.folder_reading("Jay-Z - The Blueprint")[0], "Jay-Z")
         for name in ("Jay-Z", "OK Computer", "1997 - OK Computer", "CD1 - Songs", "Disc 2 - Songs",
                      "Vol. 2 - Songs", "[SICP 1234] - Songs", "DOMO 71063-2 - Songs", "01 - Songs", "Band -",
@@ -210,7 +210,7 @@ class Lookup(Base):
         self.assertEqual(out["status"], "auto", out.get("why"))
         self.assertEqual({a for a, _t in db.searches}, {"Radiohead"})   # never looked up as "Downloads"
         self.assertEqual(out["folder_reading"]["title"], "OK Computer")      # (its year taken out)
-        self.assertEqual(out["folder_reading"]["year"], 1997)
+        self.assertFalse(out["folder_reading"]["year"])          # (a reissue's, as often as not)
 
     def test_FLD2_artist_folder_reading_wins_for_live_at_wembley(self):
         d = self.root / "Radiohead" / "Live - At Wembley"
@@ -462,8 +462,10 @@ class Layout(Base):
     def test_FLD2_folder_names_and_years(self):
         self.assertEqual(ma.folder_reading("1997 \u2013 Radiohead \u2013 OK Computer"),
                          ("Radiohead", "OK Computer", 1997))
-        self.assertEqual(ma.folder_reading("Eminem - Recovery (Deluxe) - 2010"), ("Eminem", "Recovery (Deluxe)", 2010))
-        self.assertEqual(ma.folder_reading("Eminem - Recovery [2010]"), ("Eminem", "Recovery", 2010))
+        self.assertEqual(ma.folder_reading("Eminem - Recovery (Deluxe) - 2010"), ("Eminem", "Recovery (Deluxe)", 0))
+        self.assertEqual(ma.folder_reading("Eminem - Recovery [2010]"), ("Eminem", "Recovery", 0))
+        self.assertEqual(ma.folder_reading("Pink Floyd - The Early Years 1965 - 1972"),
+                         ("Pink Floyd", "The Early Years 1965 - 1972", 0))     # (a range keeps both years)
         self.assertEqual(ma.folder_reading("Prince - 1999"), ("Prince", "1999", 0))
         for name in ("VA - Now 50", "Various Artists - Now 50", "Various - Hits", "V.A. - Hits"):
             self.assertIsNone(ma.folder_reading(name), name)

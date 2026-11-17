@@ -2012,10 +2012,10 @@ _VARIOUS_HEAD = re.compile(r"v\.?\s*a\.?|various(?:\s+artists?)?", re.I)
 def folder_reading(album_folder):
     """FLD-2: a folder name read as "Artist - Album": (head, rest, year), else None.
     The leading year ("1997 - ...") is skipped, as read_album does, and a year between the two
-    ("Artist - 1997 - Album") or after the album ("Album - 2010", "Album (2010)") is taken out of
-    the rest. Only " - " (or " – ") splits: "Jay-Z" is one name. Never a head that is a year, a
-    disc word ("CD1 - ...", "Vol. 2 - ..."), a catalogue number, numbers alone or Various Artists
-    ("VA - ..."); never an empty rest."""
+    ("Artist - 1997 - Album") is the year; one after the album ("Album - 2010", "Album (2010)") is
+    taken out of the rest, never made the year. Only " - " (or " – ") splits: "Jay-Z" is one
+    name. Never a head that is a year, a disc word ("CD1 - ...", "Vol. 2 - ..."), a catalogue
+    number, numbers alone or Various Artists ("VA - ..."); never an empty rest."""
     name = str(album_folder or "").strip()
     lead = re.match(r"\s*(\d{4})\s*[-–]\s*(.*)", name)
     year = int(lead.group(1)) if lead else 0
@@ -2027,9 +2027,13 @@ def folder_reading(album_folder):
     mid = re.match(r"(\d{4})\s+[-–]\s+(.+)$", rest)
     if mid:
         year, rest = year or int(mid.group(1)), mid.group(2).strip()
+    # a year after the album ("Album - 2010", "Album (2010)") is taken out of the title searched,
+    # never made the album's year: it is as often a reissue's ("(2009)" of a 1997 album), and a
+    # year that disagrees would lower a sure pick (YR-1). A range keeps its two years ("The Early
+    # Years 1965 - 1972": no year cut off).
     tail = re.match(r"(.+?)\s*(?:\s[-–]\s+(\d{4})|[\(\[](\d{4})[\)\]])\s*$", rest)
-    if tail and mc.fold(tail.group(1)):
-        year, rest = year or int(tail.group(2) or tail.group(3)), tail.group(1).strip()
+    if tail and mc.fold(tail.group(1)) and not (tail.group(2) and re.search(r"\b\d{4}$", tail.group(1))):
+        rest = tail.group(1).strip()
     if not mc.fold(head) or not mc.fold(rest):
         return None
     if re.fullmatch(r"[\d\W_]+", head) or _DISC_HEAD.fullmatch(head) or _VARIOUS_HEAD.fullmatch(head):

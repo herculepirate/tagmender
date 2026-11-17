@@ -720,9 +720,11 @@ def layer_groups(rel) -> list:
     each) are one disc; so are an SACD's stereo and multichannel areas listed apart. A layer
     joins the disc listed right before it only when it is of the same kind of disc (a hybrid
     SACD's layer a hybrid's, a plain SACD's area a plain SACD's), that disc holds no layer of
-    its kind yet, and it lists as many tracks with the same titles. Where the lookup carried no
-    tracks (inc=discids+media) only the counts can be compared: then only a CD layer followed
-    by its SACD layers joins, and only when every layer of the release is in such a disc
+    its kind yet, and it lists as many tracks with the same titles - or (MED-22b) it and that
+    disc are a CD layer and an SACD layer, the CD layer's titles the SACD layer's followed by
+    bonus tracks, up to as many again. Where the lookup carried no tracks (inc=discids+media)
+    only the counts can be compared: then only a CD layer followed by its SACD layers (as many
+    tracks, or fewer down to half) joins, and only when every layer of the release is in such a disc
     (CD layer, SACD layer, CD layer, SACD layer - never CD, CD, SACD, SACD). Any other medium
     is a disc of its own."""
     media = rel.get("media") or []
@@ -734,11 +736,19 @@ def layer_groups(rel) -> list:
         head = last[0] if last else None
         join = bool(kind and head and head[2] and head[1] == family and
                     kind not in {k for _m, _f, k in last} and
-                    _layer_count(m) and _layer_count(m) == _layer_count(head[0]))
+                    _layer_count(m) and _layer_count(head[0]))
         if join and counted:
-            join = head[2] == "cd" and kind != "cd"
+            # (MED-22b: the CD layer may count bonus tracks of its own - up to as many again)
+            join = head[2] == "cd" and kind != "cd" and \
+                _layer_count(head[0]) >= _layer_count(m) and _layer_count(m) * 2 >= _layer_count(head[0])
         elif join:
-            join = _layer_titles(m) == _layer_titles(head[0])
+            # MED-22b: the same titles - or a CD layer's bonus tracks after its SACD layers' own
+            # (Billy Joel - Streetlife Serenade 50th, SICP 10157: CD layer 14 tracks, its SACD
+            # layers the first 10), the shorter list at least half the longer
+            a, b = _layer_titles(m), _layer_titles(head[0])
+            n = min(len(a), len(b))
+            join = a == b or ("cd" in (kind, head[2]) and n * 2 >= max(len(a), len(b))
+                              and a[:n] == b[:n] and (len(a) > n) == (kind == "cd"))
         if join:
             last.append((m, family, kind))
         else:

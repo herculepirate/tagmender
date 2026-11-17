@@ -21,7 +21,7 @@ from .work import start
 from .models import PlanModel, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
 
-FIT_ROWS = 100                                        # the rows a column's width is fitted to (the list's)
+FIT_ROWS = 60                                         # the rows a column's width is fitted to (the list's)
 FIT_DELAY = 500                                       # ms: the columns are fitted at most this often ...
 FIT_QUICK = 60                                        # ... when the list has more rows than this (else at once)
 FIT_SOON = 60                                         # ms: the list's room changed (a resize, a column shown)
@@ -801,9 +801,10 @@ class Overview(QWidget):
             hide = self.width() < w
             if self.table.isColumnHidden(c) != hide:
                 self.table.setColumnHidden(c, hide)
-                if not hide and hasattr(self, "_fit_timer"):
-                    self.request_fit(FIT_SOON)        # (shown again: fitted to its text)
-        self.fit_status()
+        if hasattr(self, "_fit_timer"):
+            # (a column shown again fitted to its text, the Status column to the room: soon, once
+            # - not measured again on each step of a resize, or a status bar message)
+            self.request_fit(FIT_SOON)
 
     COLUMN_MOST = {1: 340, 4: 260, 2: 300, 7: 300}       # (fitted, at most: drag for more)
     # when the fitted columns are wider than the list: these give way first, down to this much
@@ -1395,10 +1396,9 @@ class Overview(QWidget):
         extra = len({os.path.realpath(r) for r in self.roots.values()})
         self.where.setText(tr("{0} (and {1} more)").format(self.path, plural(extra, tr("folder"), tr("folders"))))
         if fresh:
-            self.model.replace_rows([], fresh)
+            self.model.replace_rows([], fresh)               # (fitted as rows come: request_fit)
             self.plan["listed"] = True
             self.show_profile_column()
-            self.fit_status()
         return fresh
 
     def added(self, got, folders, list_only, streamed=()):
@@ -1754,7 +1754,7 @@ class Overview(QWidget):
                 plural(missing, tr("album"), tr("albums"))), 6000)
         self.plan["listed"] = any(a.get("status") == "listed" for a in self.model.albums)
         self.show_profile_column()
-        self.fit_status()
+        self.request_fit()
         if fresh:
             self.look_up(self.sources.currentData() or "profile", fresh, again=True, queued=True)
 
@@ -2185,7 +2185,10 @@ class Overview(QWidget):
         self.show_profile_column()
         self.request_fit()                                 # (the rows' words now: fitted once)
         self.check_stale()
-        self.table.sortByColumn(0, Qt.AscendingOrder)
+        if getattr(self, "apply_worker", None) is not None:
+            self.table.sortByColumn(0, Qt.AscendingOrder)  # (APL-1: Apply goes on, the rows stay put)
+        else:
+            self.sort_by_status()
         self.show_counts()
         self.refresh_overrides()
         self.busy(False)
@@ -2491,6 +2494,15 @@ class Overview(QWidget):
             p.setDynamicSortFilter(True)
             self.table.sortByColumn(0, Qt.AscendingOrder)
         self.model.set_plan(plan)
+
+    def sort_by_status(self):
+        """The rows sorted by Status, and kept so from now on (as busy(False) would): one sort,
+        not one for the column and another as the order is switched back on."""
+        p = self.proxy
+        if not p.dynamicSortFilter():
+            p.setDynamicSortFilter(True)                    # (sorts by the column it had)
+        if p.sortColumn() != 0 or p.sortOrder() != Qt.AscendingOrder:
+            self.table.sortByColumn(0, Qt.AscendingOrder)
 
     def show_first_soon(self, plan):
         """The first row shown in the inspector once the list is on screen (its own turn of the

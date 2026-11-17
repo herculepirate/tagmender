@@ -47,6 +47,7 @@ import tagio  # noqa: E402
 import ocr_order  # noqa: E402
 import requirements  # noqa: E402
 import companions  # noqa: E402
+import stagetimes  # noqa: E402
 
 try:
     import mutagen
@@ -3275,8 +3276,9 @@ def fingerprint(path, db=None):
 
     def compute():
         try:
-            r = subprocess.run(["fpcalc", "-json", "-length", "120", str(path)],
-                               capture_output=True, text=True, timeout=120)
+            with stagetimes.stage("fingerprint"):
+                r = subprocess.run(["fpcalc", "-json", "-length", "120", str(path)],
+                                   capture_output=True, text=True, timeout=120)
             d = json.loads(r.stdout)
             return {"duration": round(d["duration"]), "fingerprint": d["fingerprint"]}
         except Exception:
@@ -4304,7 +4306,7 @@ class Http:
                                      headers=dict({"User-Agent": USER_AGENT, "Content-Type": "application/json",
                                                    "Accept": "application/json"}, **(headers or {})))
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with stagetimes.stage(stagetimes.provider_of(host)), urllib.request.urlopen(req, timeout=timeout) as r:
                 text = r.read().decode("utf-8")
             data = json.loads(text)
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
@@ -4451,15 +4453,16 @@ class Http:
         shared, every Http of the process: share_pace). A clone whose look-up is given up while
         it waits for the host stops waiting."""
         lock = self._host_lock(host)
-        if self.__dict__.get("_stop") is None:
-            with lock:
+        with stagetimes.stage(stagetimes.provider_of(host)):
+            if self.__dict__.get("_stop") is None:
+                with lock:
+                    return self._fetch_paced(url, host, key, extra, at_most, trial)
+            while not lock.acquire(timeout=0.25):
+                self._check_stop(host)
+            try:
                 return self._fetch_paced(url, host, key, extra, at_most, trial)
-        while not lock.acquire(timeout=0.25):
-            self._check_stop(host)
-        try:
-            return self._fetch_paced(url, host, key, extra, at_most, trial)
-        finally:
-            lock.release()
+            finally:
+                lock.release()
 
     def _fetch_paced(self, url, host, key, extra, at_most, trial):
         """get_text's live request, with the host's retries (at_most: fewer)."""
@@ -4539,7 +4542,8 @@ class Http:
                         self.last[limit] = max(self.last.get(limit, 0), time.time() + pause - delay)
                         break
                     _tell(f"    {host} HTTP {e.code}, waiting {pause:.0f}s")
-                    self._pause(pause)                      # (a given-up clone: stops at once)
+                    with stagetimes.stage(stagetimes.provider_of(host) + " back-off"):
+                        self._pause(pause)                  # (a given-up clone: stops at once)
                     continue
                 # another refusal (400, 403, 410): no retry, but the failure is recorded
                 # so outage_notes and doctor see it and an optional host backs off
@@ -4552,7 +4556,8 @@ class Http:
                 if attempt == attempts - 1:
                     break                                   # giving up: no sleep first
                 _tell(f"    {host} network error {e}, retrying")
-                self._pause(10 * (attempt + 1) + random.uniform(0, 1))
+                with stagetimes.stage(stagetimes.provider_of(host) + " back-off"):
+                    self._pause(10 * (attempt + 1) + random.uniform(0, 1))
             except (OSError, _HTTPException, ValueError) as e:
                 # a broken answer (connection reset, incomplete read, SSL error, not UTF-8)
                 last_err = f"{type(e).__name__}: {e}"
@@ -5892,7 +5897,7 @@ def _tesseract(*args, **kw):
     with _TESSERACT_GUARD:
         if _TESSERACT_SLOTS is None:
             _TESSERACT_SLOTS = threading.BoundedSemaphore(max(1, ocr_workers()))
-    with _TESSERACT_SLOTS:
+    with _TESSERACT_SLOTS, stagetimes.stage("ocr"):
         return subprocess.run(*args, **kw)
 
 
@@ -5911,8 +5916,8 @@ def _pmap(fn, items):
             return fn(x)
         finally:
             _POOL.inside = False
-    with ThreadPoolExecutor(max_workers=min(n, len(items))) as pool:
-        return list(pool.map(run, items))
+    with ThreadPoolExecutor(max_workers=min(n, len(items))) as pool, stagetimes.stage("ocr"):
+        return list(pool.map(run, items))           # (the pool's wall time: its scans' reading)
 
 
 def _tess_env():
@@ -5956,7 +5961,13 @@ def _cache_value(v):
     return json.dumps(BLANK_READING if v == "" else v)
 
 
-def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
+def each_scan(*args, **kw):
+    """_each_scan, charged to the "ocr" stage of an album being timed (stagetimes): reading the scans."""
+    with stagetimes.stage("ocr"):
+        return _each_scan(*args, **kw)
+
+
+def _each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
     """read(path) for each scan, cached per scan (its contents and the OCR version, so a
     scan read once is not read again wherever it is in the list), several at once.
     Returns the readings in the order of IMAGES; a scan not started within budget_s
@@ -6154,7 +6165,13 @@ class _DiscogsAhead:
         self.clone.close_clone()
 
 
-def decoded_barcodes(db, images, log=None):
+def decoded_barcodes(*args, **kw):
+    """_scan_barcodes, charged to the "ocr" stage of an album being timed (stagetimes): reading the scans."""
+    with stagetimes.stage("ocr"):
+        return _scan_barcodes(*args, **kw)
+
+
+def _scan_barcodes(db, images, log=None):
     """ocr_barcodes(images), cached for exactly these scans ("barcodes3"), with the scan
     each code was decoded on noted in log["barcodes"]. A code an older reading ("barcodes2")
     decoded is kept; an older empty reading is read again once (the crops were tried only in
@@ -8857,7 +8874,8 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     use_ocr = ocr_wanted(getattr(args, "ocr", False), base)
     if use_ocr:
         album["scan_inventory"] = inventory = {}           # SCN-1: what the cap left out
-        images, img_key = list_images(base, getattr(args, "max_images", 15), inventory)
+        with stagetimes.stage("ocr"):                   # (finding and ordering the scans)
+            images, img_key = list_images(base, getattr(args, "max_images", 15), inventory)
         if images:
             found = decoded_barcodes(db, images, scan_log)
             album["ocr_barcodes"] = found               # decoded off the scans, whatever the tags say
@@ -8880,7 +8898,8 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             if cover_bytes:
                 # cached per language set, as the scans: a new language pack reads it again
                 kind = page_kind("cover")
-                cover = _cached(db, kind, cover_key, lambda: ocr_cover(cover_bytes))
+                with stagetimes.stage("ocr"):
+                    cover = _cached(db, kind, cover_key, lambda: ocr_cover(cover_bytes))
                 album["cover_text"] = cover.get("text") or ""
                 found = set(cover.get("barcodes") or ())
                 if found and not album["barcodes"]:

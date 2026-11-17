@@ -17,7 +17,16 @@ publishes them as the `latest` release. These steps apply to every contributor a
    in code and tests.
 3. Run the full suite once on the commit you will push: `./run_tests.sh`. The pre-push hook in
    `tools/git-hooks/pre-push` runs it (`git config core.hooksPath tools/git-hooks`).
-4. Scan the diff for personal data: no home-directory paths, mount points, network addresses,
+4. Run the performance check: `env -u VIRTUAL_ENV /usr/bin/python3 tools/perf_check.py` (about two
+   minutes; a synthetic library, the providers stood in for, Qt offscreen; nothing of yours is read
+   or written). It prints each measure beside its target and the stored numbers in
+   `tools/perf_baseline.json`, and fails on a missed target or on anything more than 20% slower
+   than those. A slowdown you accept (a feature that costs time on purpose) is stored with
+   `--update-baseline` in the release commit, its reason in the release notes. To time finding the
+   albums in your own folders too (read only): `--scan /path/to/music` (repeatable); to read where a
+   real run's time went: `--from-log ~/.local/state/tagmender/logs/tagmender.log` (each album's
+   "timing" line: scan, tags, OCR, MusicBrainz, Discogs, web and their back-off waits).
+5. Scan the diff for personal data: no home-directory paths, mount points, network addresses,
    library or machine names, credentials or account details in tracked files.
 
 ## A release is verified only after all three checks

@@ -35,6 +35,7 @@ import queue
 import re
 import sqlite3
 import threading
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,7 @@ import tagger_settings
 import tagio
 import plan as planmod
 import reasons
+import stagetimes
 
 DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd|side)\s*[-_.]?\s*(?:\d+|one|two|three|four|five|six|seven|eight|"
                       r"nine|ten|[a-h])\b|^\d{1,2}$", re.I)
@@ -4969,7 +4971,13 @@ class Engine:
     def proposals(self, path, progress=None, cancel=None, only=None):
         """The albums in PATH, each identified; only: the group_key()s of the albums to look up
         (List first's Look Up), the others left out."""
-        groups = self.albums_in(path)
+        start = time.monotonic()
+        with stagetimes.album() as secs:
+            groups = self.albums_in(path)
+        took = time.monotonic() - start
+        if took >= 0.1:                           # (PRF-1: a scan the look-up waited for; plan_each's later ones are remembered)
+            self.log.info("timing scan %s: %d albums in %.1f s (tags %.1f s)", path, len(groups), took,
+                          secs.get("tags", 0.0))
         per_folder = {}
         for g in groups:
             k = os.path.realpath(str(g.folder))
@@ -4991,17 +4999,23 @@ class Engine:
             # (the album as found and listed: every disc or version it is planned as keeps it,
             # so a later Look Up or Refresh of those rows asks for this album again)
             key = group_key(g.folder, g.files)
+            start = time.monotonic()
             try:
-                self._alone = per_folder[os.path.realpath(str(g.folder))] == 1     # (a folder's only album?)
-                for p in self.identify_all(g):           # (each disc of _per_disc as an album)
-                    if id(p) in told:
-                        continue                         # (DSC-10: a set's one album, found by each of its folders)
-                    told.add(id(p))
-                    self.add_artwork(p)
-                    self.apply_level(p)
-                    # (DSC-10: a set's album is its first folder's, whichever folder found it)
-                    p.group_key = getattr(p, "set_key", None) or key
-                    out.append(p)
+                # PRF-1: where the album's time went, one line in the log (stagetimes)
+                with stagetimes.album() as secs:
+                    try:
+                        self._alone = per_folder[os.path.realpath(str(g.folder))] == 1   # (a folder's only album?)
+                        for p in self.identify_all(g):           # (each disc of _per_disc as an album)
+                            if id(p) in told:
+                                continue                         # (DSC-10: a set's one album, found by each of its folders)
+                            told.add(id(p))
+                            self.add_artwork(p)
+                            self.apply_level(p)
+                            # (DSC-10: a set's album is its first folder's, whichever folder found it)
+                            p.group_key = getattr(p, "set_key", None) or key
+                            out.append(p)
+                    finally:
+                        self.log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
             except Exception as exc:                          # one bad album never stops the run
                 self.log.exception("identifying %s failed", g.folder)
                 p = planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],

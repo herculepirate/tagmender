@@ -1081,10 +1081,12 @@ def _home_conflict(album_dir: Path, me: frozenset, ignore: set, mine: set, slot)
     return other, taken
 
 
-def _audio_besides(folder: Path, ignore: set, me=None) -> bool:
+def _audio_besides(folder: Path, ignore: set, me=None, slots=()) -> bool:
     """DSC-12: FOLDER holds audio (hidden files aside) of no file of this plan (IGNORE: its paths and
-    inodes) - and, given ME, not tagged as that very release (another of its discs or layers there
-    is MOV-4's and MED-22c's to judge)."""
+    inodes), whatever its release - but for a file tagged as this very release (ME) that is another
+    layer of a disc this album brings to the folder (SLOTS: (disc, layer)): its disc number one of
+    theirs, its layer none of that disc's - MED-22c's to judge. A file with no disc number, or of
+    another disc, always counts."""
     try:
         names = os.listdir(folder)
     except OSError:
@@ -1101,7 +1103,11 @@ def _audio_besides(folder: Path, ignore: set, me=None) -> bool:
             continue
         if me is not None:
             try:
-                if _same_pressing(me, _ids_of(tagio.read(pth))):
+                t = tagio.read(pth)
+                n_ = _disc_no(str((t.get("discnumber") or [""])[0]))
+                lay_ = _layer_label(str((t.get("media") or [""])[0]))
+                mine_ = {l_ for d_, l_ in slots if d_ == n_}
+                if n_ is not None and mine_ and lay_ not in mine_ and _same_pressing(me, _ids_of(t)):
                     continue
             except Exception:
                 pass
@@ -3687,8 +3693,15 @@ class Planner:
                 root = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in moving]))
                 if _DISC_NAME.match(root.name):
                     root = root.parent
-            busy = sorted(d for d in {Path(fe["dst"]).parent for fe in moving}
-                          if d != root and root in d.parents and _audio_besides(d, self._planned, _release_ids(prop)))
+            by_src = {str(f): t for f, t in zip(prop.files or [], prop.targets or [])}
+            slots = {}
+            for fe in moving:
+                t = by_src.get(str(fe.get("copy_of") or fe["src"])) or {}
+                slots.setdefault(Path(fe["dst"]).parent, set()).add(
+                    (_disc_no(str((_vals(t.get("discnumber")) or ["1"])[0])) or 1,
+                     _layer_label(str((_vals(t.get("media")) or [""])[0]))))
+            busy = sorted(d for d in slots if d != root and root in d.parents
+                          and _audio_besides(d, self._planned, _release_ids(prop), slots[d]))
             if busy:
                 mine_src = {str(f) for f in prop.files}
                 for k_ in [k_ for k_, v_ in self.claimed.items() if v_ in mine_src]:

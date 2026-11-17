@@ -593,19 +593,25 @@ class Overview(QWidget):
     @staticmethod
     def needs_you(a) -> bool:
         """The album waits for your decision: held (no release proven, a conflict), its scans name
-        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm); or it is
-        listed for your attention, applied all the same (DSC-12: "disc 2 missing"). (Asked of
-        every album each time the counts are shown: no import in it - an import statement costs
+        another pressing, a tie-break only suggested its pressing (TIE-1: to confirm), or it is
+        another copy of an album you have, kept where it is (DSC-12: "attention_decide"). (Asked
+        of every album each time the counts are shown: no import in it - an import statement costs
         microseconds under PySide's import hook.)"""
         return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs" \
-            or bool(suggested_pressing(a)) \
-            or bool(a.get("attention"))                     # (DSC-12: a disc of its set missing - still applied)
+            or bool(suggested_pressing(a)) or bool(a.get("attention_decide"))
+
+    @classmethod
+    def listed_for_attention(cls, a) -> bool:
+        """The Needs Attention filter: albums needing your decision, and those whose notes are for
+        your attention only (DSC-12: "disc 2 missing", another pressing kept apart) - counted as
+        ready, applied as any other."""
+        return cls.needs_you(a) or bool(a.get("attention"))
 
     @classmethod
     def ready_now(cls, a) -> bool:
         return can_apply(a) and not cls.needs_you(a)
 
-    SHOW = {"all": None, "ready": "ready_now", "attention": "needs_you"}
+    SHOW = {"all": None, "ready": "ready_now", "attention": "listed_for_attention"}
 
     def set_show(self, kind):
         """Only the albums ready, or only those needing you, or all (the toolbar's segments)."""

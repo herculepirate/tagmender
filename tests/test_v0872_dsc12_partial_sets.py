@@ -18,6 +18,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_engine as te  # noqa: E402,F401  (isolates XDG dirs and Picard.ini first)
 from test_version_folders import SetHttp, release  # noqa: E402
+from test_v0868_med22c_layer_copies import Base as LayerBase, LENS as LAYER_LENS, the_set  # noqa: E402
 import engine  # noqa: E402
 import executor  # noqa: E402
 import plan as pl  # noqa: E402
@@ -143,10 +144,19 @@ class DSC12LoneDisc(Base):
             from gui.overview import Overview
         except Exception as exc:                           # (no Qt here: the plan's own field is tested above)
             self.skipTest(f"no GUI: {exc}")
-        a = {"status": "ready", "files": [{"src": "/x/1.flac", "dst": "/y/1.flac", "op": "move"}],
+        a = {"status": "ready", "files": [{"src": "/x/1.flac", "dst": "/y/1.flac", "op": "move",
+                                           "changes": {"album": ["Double"]}}],
              "identification": {"tier": "exact"}, "attention": ["disc 2 missing"]}
-        self.assertTrue(Overview.needs_you(a))
-        self.assertFalse(Overview.needs_you(dict(a, attention=[])))
+        # (for your attention only: listed under Needs Attention, counted and shown as ready)
+        self.assertTrue(Overview.listed_for_attention(a))
+        self.assertFalse(Overview.needs_you(a))
+        self.assertTrue(Overview.ready_now(a))
+        self.assertFalse(Overview.listed_for_attention(dict(a, attention=[])))
+        # (another copy of an album you have, kept where it is: yours to decide)
+        b = dict(a, attention=["another copy of an album you have (disc 1 already filed in 'x')"],
+                 attention_decide=True)
+        self.assertTrue(Overview.needs_you(b) and Overview.listed_for_attention(b))
+        self.assertFalse(Overview.ready_now(b))
 
 
 class DSC12Joins(Base):
@@ -284,6 +294,45 @@ class DSC12KeptApart(Base):
         self.apply(plan)
         self.assertEqual(sorted(p.name for p in album.rglob("*.flac")), ["101.A.flac", "102.B.flac", "103.C.flac"])
 
+    def test_DSC12_a_full_set_where_disc_one_is_filed_is_kept_apart_whole(self):
+        # (decided 2026-11-17: never a second copy of disc 1 inside the album - nor the set split
+        # in two: tagged where it is, listed for your decision)
+        album = self.file_disc_one()
+        full = self.lib / "Inbox" / "Double 2CD"
+        self.disc(full / "CD1", 1, freq=1)
+        self.disc(full / "CD2", 2, freq=1)
+        plan = self.plan_of(full)
+        [a] = plan["albums"]
+        self.assertEqual(a["status"], "ready", pl.preview(plan))
+        self.assertNotIn("joins", a)
+        self.assertTrue(all(fe["dst"] == fe["src"] for fe in a["files"]), pl.preview(plan))
+        self.assertEqual(a["attention"], [f"another copy of an album you have (disc 1 already filed in '{album.name}')"])
+        self.assertTrue(a.get("attention_decide"))
+        self.assertTrue(any("MOV-4, DSC-12" in n for n in a["notes"]), a["notes"])
+        self.apply(plan)
+        self.assertEqual(sorted(p.name for p in album.rglob("*.flac")), ["101.A.flac", "102.B.flac", "103.C.flac"])
+        self.assertEqual(len(list(full.rglob("*.flac"))), 6)
+
+    def test_DSC12_discs_two_and_three_where_disc_two_is_filed_are_kept_apart_whole(self):
+        # (a renamed album found by its IDs: discs 2 and 3 of 3 arriving where discs 1 and 2 are
+        # filed - disc 3 never joins alone, disc 2 never goes in twice)
+        self.rels = [the_release(discs=3, dvd=False)]
+        album = self.file_disc_one()
+        self.apply(self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2)))
+        mine = album.with_name("Double (renamed)")
+        album.rename(mine)
+        more = self.lib / "Inbox" / "Double 2-3"
+        self.disc(more / "CD2", 2, freq=1)
+        self.disc(more / "CD3", 3)
+        for d, n in (("CD2", 2), ("CD3", 3)):
+            for p in (more / d).glob("*.flac"):
+                tagio.write(p, {"discnumber": [str(n)]})
+        plan = self.plan_of(more)
+        for a in plan["albums"]:
+            self.assertNotIn("joins", a, pl.preview(plan))
+            self.assertTrue(all(fe["dst"] == fe["src"] for fe in a["files"]), pl.preview(plan))
+        self.assertEqual(sorted({p.parent.name for p in mine.rglob("*.flac")}), ["Disc 01", "Disc 02"])
+
     def test_DSC12_another_pressing_never_joins_the_renamed_album(self):
         self.rels = [the_release(), the_release(OTHER)]
         album = self.file_disc_one()
@@ -418,41 +467,34 @@ class DSC12Words(unittest.TestCase):
         self.assertIn("not joined to either", planner._joins[id(prop)]["note"])
 
 
-def _layers_case():
-    from test_v0868_med22c_layer_copies import Base as LayerBase, the_set, LENS as LAYER_LENS
-
-    class DSC12Layers(LayerBase):
-        def test_DSC12_an_sacd_layer_copy_still_goes_inside_the_renamed_album(self):
-            # (disc 1's CD layer, filed alone - "1 of 2" - and renamed by you; a copy of disc 1's
-            # stereo SACD layer is no second copy of it: MED-22c's folder of its own, inside)
-            eng = self.moving(SetHttp(mb=[the_set()]))
-            cd = self.lib / "Billy Joel" / "1973 - Piano Man [CD layer]"
-            for i in range(3):                           # (its own barcode: the release proven)
-                self.track(cd / f"{i + 1:02d}. Track {i + 1}.flac", i, 2, LAYER_LENS[i] / 1000, hires=False,
-                           shift=3, DISCNUMBER="1", BARCODE="4547366000000", ISRC=f"USSM1730050{i}")
-            plan = eng.plan(cd)
-            [a] = plan["albums"]
-            self.assertEqual(a["status"], "ready", pl.preview(plan))
-            self.assertEqual(a.get("attention"), ["disc 2 missing"])
-            executor.Executor(plan).run()
-            [album] = [d for d in (self.dest / "Billy Joel").iterdir()]
-            self.assertEqual(sorted({p.parent.name for p in album.rglob("*.flac")}), ["Disc 01"])
-            mine = album.with_name("Piano Man (mine)")
-            album.rename(mine)
-            st = self.lib / "Inbox" / "Piano Man (SACD stereo)"
-            self.layer(st, 2, "Stereo")
-            plan = self.moving(SetHttp(mb=[the_set()])).plan(st)
-            [a] = plan["albums"]
-            self.assertEqual(a["status"], "ready", pl.preview(plan))
-            self.assertEqual(a.get("joins"), str(mine))
-            self.assertEqual({Path(fe["dst"]).parent for fe in a["files"]}, {mine / "Disc 01 (SACD Stereo)"})
-            self.assertEqual(a.get("attention"), ["disc 2 missing"])
-            executor.Executor(plan).run()
-            self.assertEqual(sorted({p.parent.name for p in mine.rglob("*.flac")}), ["Disc 01", "Disc 01 (SACD Stereo)"])
-    return DSC12Layers
-
-
-DSC12Layers = _layers_case()
+class DSC12Layers(LayerBase):
+    def test_DSC12_an_sacd_layer_copy_still_goes_inside_the_renamed_album(self):
+        # (disc 1's CD layer, filed alone - "1 of 2" - and renamed by you; a copy of disc 1's
+        # stereo SACD layer is no second copy of it: MED-22c's folder of its own, inside)
+        eng = self.moving(SetHttp(mb=[the_set()]))
+        cd = self.lib / "Billy Joel" / "1973 - Piano Man [CD layer]"
+        for i in range(3):                           # (its own barcode: the release proven)
+            self.track(cd / f"{i + 1:02d}. Track {i + 1}.flac", i, 2, LAYER_LENS[i] / 1000, hires=False,
+                       shift=3, DISCNUMBER="1", BARCODE="4547366000000", ISRC=f"USSM1730050{i}")
+        plan = eng.plan(cd)
+        [a] = plan["albums"]
+        self.assertEqual(a["status"], "ready", pl.preview(plan))
+        self.assertEqual(a.get("attention"), ["disc 2 missing"])
+        executor.Executor(plan).run()
+        [album] = [d for d in (self.dest / "Billy Joel").iterdir()]
+        self.assertEqual(sorted({p.parent.name for p in album.rglob("*.flac")}), ["Disc 01"])
+        mine = album.with_name("Piano Man (mine)")
+        album.rename(mine)
+        st = self.lib / "Inbox" / "Piano Man (SACD stereo)"
+        self.layer(st, 2, "Stereo")
+        plan = self.moving(SetHttp(mb=[the_set()])).plan(st)
+        [a] = plan["albums"]
+        self.assertEqual(a["status"], "ready", pl.preview(plan))
+        self.assertEqual(a.get("joins"), str(mine))
+        self.assertEqual({Path(fe["dst"]).parent for fe in a["files"]}, {mine / "Disc 01 (SACD Stereo)"})
+        self.assertEqual(a.get("attention"), ["disc 2 missing"])
+        executor.Executor(plan).run()
+        self.assertEqual(sorted({p.parent.name for p in mine.rglob("*.flac")}), ["Disc 01", "Disc 01 (SACD Stereo)"])
 
 
 if __name__ == "__main__":

@@ -394,7 +394,7 @@ class MED22c_Minor(Base):
         album = {Path(fe["dst"]).parent.parent for fe in a["files"]}.pop()
         self.assertTrue((album / "cover.jpg").exists(), sorted(map(str, album.rglob("*"))))
 
-    def test_MED22c_a_layer_with_its_bonus_cd_takes_its_cover_into_the_layer_folder(self):
+    def test_MED22c_a_layer_with_a_second_bonus_cd_is_kept_apart_whole(self):
         import executor
         cd = self.cd_copy()
         (cd / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"C" * 100)
@@ -411,12 +411,16 @@ class MED22c_Minor(Base):
         (top / "rip.log").write_text("SAC")
         b, plan2 = self.plan_of(top)
         self.assertEqual(b["status"], "ready", pl.preview(plan2))
+        # (DSC-12 / MOV-4, decided 2026-11-17: its bonus CD is a second copy of the album's disc 2 -
+        # the copy is kept apart whole, tagged where it is and listed for your decision; never a
+        # second disc 2 inside the album, nor its layer filed without it)
+        self.assertTrue(all(fe["dst"] == fe["src"] for fe in b["files"]), pl.preview(plan2))
+        self.assertEqual(b["attention"], [f"another copy of an album you have (disc 2 already filed in '{album.name}')"])
+        before = sorted(str(p.relative_to(album)) for p in album.rglob("*"))
         executor.Executor(plan2).run()
-        names = sorted(str(p.relative_to(album)) for p in album.rglob("*") if p.suffix != ".flac")
-        self.assertFalse([n for n in names if "~" in n], names)
-        self.assertIn(b"S", (album / "Disc 01 (SACD Stereo)" / "cover.jpg").read_bytes()[3:])
-        self.assertEqual((album / "Disc 01 (SACD Stereo)" / "rip.log").read_text(), "SAC")
+        self.assertEqual(sorted(str(p.relative_to(album)) for p in album.rglob("*")), before)
         self.assertEqual((album / "rip.log").read_text(), "CDL")
+        self.assertEqual((top / "cover.jpg").read_bytes()[3:4], b"S")
 
     def extras(self, top, tag):
         (top / "cover.jpg").write_bytes(b"\xff\xd8\xff" + tag * 50)

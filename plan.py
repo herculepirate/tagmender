@@ -882,7 +882,35 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
 
 
 class _DuplicateCopy(Exception):
-    """MOV-4: the album is a second copy of a release already filed in its destination folder."""
+    """MOV-4: the album is a second copy of a release already filed in its destination folder.
+    attention: DSC-12 - what it is listed for (a set of which some discs are filed already)."""
+
+    def __init__(self, text, attention=""):
+        super().__init__(text)
+        self.attention = attention
+
+
+def _disc_words(discs) -> str:
+    """MOV-4 / DSC-12: disc keys in words - "disc 1", "discs 1, 2", "disc 1 (SACD Stereo)"."""
+    ds = sorted(discs, key=_disc_order)
+    one = [f"{d[0]} ({d[1]})" if isinstance(d, tuple) else str(d) for d in ds]
+    return f"disc{'s' if len(one) > 1 else ''} {', '.join(one)}"
+
+
+def _second_copy(album_dir: Path, dup_discs, mine, planned=False) -> "_DuplicateCopy":
+    """MOV-4: the exception for an album some or all of whose discs are already filed (or planned
+    to be) in album_dir: tagged where it is - never a second copy of a disc beside the first; a set
+    bringing other discs too is listed for your decision (DSC-12)."""
+    where = "planned to be filed" if planned else "filed"
+    if mine <= dup_discs:
+        return _DuplicateCopy(f"another copy of this release is {where} in {album_dir.name}: this one is tagged "
+                              "where it is, not put beside it (MOV-4)")
+    have = mine & dup_discs
+    return _DuplicateCopy(f"another copy of an album you have: {_disc_words(have)} of this release "
+                          f"{'is' if len(have) == 1 else 'are'} {where} in {album_dir.name}; this one is tagged where "
+                          "it is, not filed beside it - its other discs neither (MOV-4, DSC-12)",
+                          attention=f"another copy of an album you have ({_disc_words(have)} already {where} in "
+                                    f"'{album_dir.name}')")
 
 
 def _disc_no(value):
@@ -958,7 +986,7 @@ def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set)
     return False
 
 
-def _discs_there(album_dir: Path, me: frozenset, ignore: set) -> tuple:
+def _discs_there(album_dir: Path, me: frozenset, ignore: set, strict=True) -> tuple:
     """DSC-12: (the disc keys - MOV-4's: 1, 2, (1, "SACD Stereo") - album_dir holds on disk of this
     very release (a release ID shared), outside this plan; [(path, tags)] of those files). Its
     files and its disc and layer folders are looked at, nothing else."""
@@ -978,7 +1006,7 @@ def _discs_there(album_dir: Path, me: frozenset, ignore: set) -> tuple:
                 t = tagio.read(pth)
             except Exception:
                 continue
-            if _same_pressing(me, _ids_of(t)):
+            if (_same_pressing(me, _ids_of(t)) if strict else _ids_of(t) & me):
                 ns = _disc_nos([(t.get("discnumber") or ["1"])[0]]) or {1}
                 lay = _layer_label(str((t.get("media") or [""])[0]))
                 found |= {(x, lay) for x in ns} if lay else ns
@@ -1017,11 +1045,15 @@ def _set_total(prop) -> int:
     return n
 
 
+def _proven(prop) -> bool:
+    """DSC-12: an album proven exactly - never a pressing guessed, a tie-break's suggestion, album known."""
+    return prop.status == "identified" and tier_of(prop) == "exact" and not getattr(prop, "guessed_pick", False) \
+        and not getattr(prop, "suggested", None)
+
+
 def _lone_discs(prop) -> bool:
-    """DSC-12: an album proven exactly (never a pressing guessed, a tie-break's suggestion, album
-    known) that brings some discs only of a release of two or more."""
-    if prop.status != "identified" or tier_of(prop) != "exact" or getattr(prop, "guessed_pick", False) \
-            or getattr(prop, "suggested", None):
+    """DSC-12: an album proven exactly (_proven) that brings some discs only of a release of two or more."""
+    if not _proven(prop):
         return False
     total = _set_total(prop)
     mine = {d for d in _prop_discs(prop) if not isinstance(d, tuple)} | \
@@ -1066,7 +1098,7 @@ def _sets_missing(albums):
             words.append(f"disc{'s' if len(mine) > 1 else ''} {nums} of another pressing of an album you have "
                          f"('{Path(a['other_pressing']).name}'): kept apart")
         if words:
-            a["attention"] = words
+            a["attention"] = list(dict.fromkeys(list(a.get("attention") or []) + words))
             for w in words:
                 note = f"{w} (DSC-12)"
                 if note not in a["notes"]:
@@ -1776,9 +1808,13 @@ class Planner:
             # MOV-4: another copy of this release is already filed there: tagged where it is
             self._in_place_note = str(dup)
             try:
-                return self._album(prop)
+                entry = self._album(prop)
             finally:
                 self._in_place_note = None
+            if dup.attention:                    # (DSC-12: for your decision)
+                entry["attention"] = list(entry.get("attention") or []) + [dup.attention]
+                entry["attention_decide"] = True
+            return entry
 
     # (the placement state a trial planner starts from, copied: _would_file)
     _TRIAL_STATE = ("claimed", "_comp_moved", "created_dirs", "_dirs", "_inodes", "_album_dirs", "_planned", "_album_claims",
@@ -3494,7 +3530,7 @@ class Planner:
                 return d
         return None
 
-    def _join_home(self, prop, album_dir: Path, me: frozenset):
+    def _join_home(self, prop, album_dir: Path, me: frozenset, lone=True):
         """DSC-12: the album of this very release already filed in the profile's library that this
         album - some discs of the release, proven exactly - joins (its discs' slots there empty),
         as {"home", "held", "files", "how"}; None when there is none (recorded with a note why)."""
@@ -3526,7 +3562,7 @@ class Planner:
         if gone and not homes:
             info["note"] = (f"the album of this release filed in '{gone[0].name}' is not there any more (moved or "
                             "renamed elsewhere): this one is filed as its own album (DSC-12)")
-        if homes:
+        if homes or not lone:
             return None
         other = self._other_pressing_filed(prop, album_dir, me)
         if other is not None:
@@ -3607,21 +3643,20 @@ class Planner:
         if "map" not in cache and _lone_discs(prop) and fnm.fold(album_dir) != fnm.fold(Path(prop.source_dir)):
             # DSC-12: some discs of a release whose album is filed already (disc 1 alone, now disc 2):
             # into that album's folder - found by the release IDs TagMender wrote, wherever you
-            # renamed it - when every disc they bring has its slot there empty
+            # renamed it - when every disc they bring has its slot there empty; some discs bringing
+            # one it holds too are another copy, kept apart whole
             me = _release_ids(prop)
-            join = self._join_home(prop, album_dir, me)
+            join = self._join_home(prop, album_dir, me, lone=_lone_discs(prop))
             if join and fnm.fold(join["home"]) != fnm.fold(album_dir):
                 home, mine = join["home"], _prop_discs(prop)
                 claims = self.__dict__.setdefault("_album_claims", {})
                 claimed = set().union(*[discs for ids, src, discs in claims.get(fnm.fold(home), ())
                                         if ids & me and src != str(prop.source_dir)])
                 if mine & (join["held"] | claimed):
+                    # (a disc of it there already: another copy - tagged where it is, the whole of it)
                     self._joins.pop(id(prop), None)
-                    if mine <= (join["held"] | claimed):
-                        raise _DuplicateCopy(
-                            f"another copy of this release is {'filed' if mine & join['held'] else 'planned to be filed'} "
-                            f"in {home.name}: this one is tagged where it is, not put beside it (MOV-4)")
-                else:
+                    raise _second_copy(home, join["held"] | claimed, mine, planned=not (mine & join["held"]))
+                elif _lone_discs(prop):
                     claims.setdefault(fnm.fold(home), []).append((me, str(prop.source_dir), mine))
                     self._album_dirs[fnm.fold(home)] = me
                     cache["map"] = (album_dir, home)
@@ -3650,25 +3685,29 @@ class Planner:
             claims = self.__dict__.setdefault("_album_claims", {})
             dup = None
             here = fnm.fold(album_dir) == fnm.fold(Path(prop.source_dir))
-            # (a duplicate brings no disc the other copy lacks: a full set arriving where the
-            # library has disc 1 alone joins it, BOX-2; disc numbers compared as integers)
-            planned = False
+            # (a copy of a disc the folder holds is a duplicate: one disc of a set joining its
+            # set's folder brings only discs it lacks, BOX-2 / DSC-12; a set bringing a disc the
+            # folder has beside others it lacks is another copy too, kept apart whole - never a
+            # second copy of that disc beside the first, decided 2026-11-17; disc numbers compared
+            # as integers)
+            planned, dup_discs = False, set()
             if not clash and not shared and not here:
                 claimed = set().union(*[discs for ids, src, discs in claims.get(key, ())
                                         if ids & me and src != str(prop.source_dir)])
                 resident = set().union(*[_disc_keys(self.__dict__.get("_res_discs", {}).get(d, ()))
                                          for d, ids, _src in self._resident if d == key and ids & me])
-                if claimed and mine <= claimed:
+                if claimed and mine & claimed:
                     # (another copy claimed it in this plan: it is filed there only when that
                     # album's plan is carried out)
-                    dup, planned = album_dir, True
-                elif owner is not None and owner & me and resident and mine <= resident:
-                    dup = album_dir                      # (another copy of this plan sits there)
-                elif owner is None and _same_release_there(album_dir, me, ignore, mine):
-                    dup = album_dir                      # (a copy already filed there, on disk)
+                    dup, planned, dup_discs = album_dir, True, claimed
+                elif owner is not None and owner & me and resident and mine & resident:
+                    dup, dup_discs = album_dir, resident     # (another copy of this plan sits there)
+                elif owner is None:
+                    there = _discs_there(album_dir, me, ignore, strict=False)[0]
+                    if mine & there:
+                        dup, dup_discs = album_dir, there    # (a copy already filed there, on disk)
             if dup is not None:
-                raise _DuplicateCopy(f"another copy of this release is {'planned to be filed' if planned else 'filed'} "
-                                     f"in {dup.name}: this one is tagged where it is, not put beside it (MOV-4)")
+                raise _second_copy(dup, dup_discs, mine, planned=planned)
             if not shared:
                 claims.setdefault(fnm.fold(album_dir), []).append((me, str(prop.source_dir), mine))
             if clash:

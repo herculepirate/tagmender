@@ -593,11 +593,13 @@ class Overview(QWidget):
     @staticmethod
     def needs_you(a) -> bool:
         """The album waits for your decision: held (no release proven, a conflict), its scans name
-        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm). (Asked of
+        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm); or it is
+        listed for your attention, applied all the same (DSC-12: "disc 2 missing"). (Asked of
         every album each time the counts are shown: no import in it - an import statement costs
         microseconds under PySide's import hook.)"""
         return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs" \
-            or bool(suggested_pressing(a))                  # (TIE-1: album known, a pressing to confirm)
+            or bool(suggested_pressing(a)) \
+            or bool(a.get("attention"))                     # (DSC-12: a disc of its set missing - still applied)
 
     @classmethod
     def ready_now(cls, a) -> bool:

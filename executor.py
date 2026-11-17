@@ -2570,7 +2570,8 @@ def _watcher_forgets(jd: Path):
         db.execute("CREATE TABLE IF NOT EXISTS processed (folder TEXT PRIMARY KEY, profile TEXT, signature TEXT,"
                    " status TEXT, attempts INTEGER, next_try REAL, ts REAL, detail TEXT)")
         for a in plan.get("albums") or []:
-            files = [Path(fe["src"]) for fe in a.get("files") or [] if not fe.get("copy_of")]
+            # (DSC-12: the files of the album it joined, already filed, are no part of its group)
+            files = [Path(fe["src"]) for fe in a.get("files") or [] if not fe.get("copy_of") and not fe.get("joined")]
             if not files:
                 continue
             folder = Path(a["source_dir"])

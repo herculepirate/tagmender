@@ -958,6 +958,121 @@ def _same_release_there(album_dir: Path, me: frozenset, ignore: set, discs: set)
     return False
 
 
+def _discs_there(album_dir: Path, me: frozenset, ignore: set) -> tuple:
+    """DSC-12: (the disc keys - MOV-4's: 1, 2, (1, "SACD Stereo") - album_dir holds on disk of this
+    very release (a release ID shared), outside this plan; [(path, tags)] of those files). Its
+    files and its disc and layer folders are looked at, nothing else."""
+    found, files = set(), []
+    if not album_dir.is_dir():
+        return found, files
+    for dirpath, dirs, names in os.walk(album_dir):
+        dirs[:] = [d for d in dirs if _DISC_NAME.match(d)]
+        for n in sorted(names):
+            pth = os.path.join(dirpath, n)
+            if Path(n).suffix.lower() not in AUDIO_EXT or n.startswith("."):
+                continue
+            try:
+                st = os.stat(pth)
+                if pth in ignore or (st.st_dev, st.st_ino) in ignore:
+                    continue
+                t = tagio.read(pth)
+            except Exception:
+                continue
+            if _same_pressing(me, _ids_of(t)):
+                ns = _disc_nos([(t.get("discnumber") or ["1"])[0]]) or {1}
+                lay = _layer_label(str((t.get("media") or [""])[0]))
+                found |= {(x, lay) for x in ns} if lay else ns
+                files.append((Path(pth), t))
+    return found, files
+
+
+def _same_pressing(me, ids) -> bool:
+    """DSC-12: release IDs IDS (a file's) name the release ME (an album's) - one shared, and none
+    of either database another release's (a MusicBrainz release of another pressing beside a
+    Discogs entry both were linked to is another pressing)."""
+    ids, me = {_norm_id(x) for x in ids}, {_norm_id(x) for x in me}
+    if not ids & me:
+        return False
+    for db_ in ("musicbrainz:", "discogs:"):
+        a, b = {x for x in ids if x.startswith(db_)}, {x for x in me if x.startswith(db_)}
+        if a and b and not a & b:
+            return False
+    return True
+
+
+def _norm_id(x) -> str:
+    x = str(x)
+    return x.lower() if x.startswith("musicbrainz:") else x
+
+
+def _set_total(prop) -> int:
+    """DSC-12: the release's disc count as this album is tagged with it (MED-17: its audio discs;
+    MED-22: its physical discs), 0 when not told."""
+    n = 0
+    for t in prop.targets or ():
+        for k in ("totaldiscs", "disctotal"):
+            v = str((_vals(t.get(k)) or [""])[0]).strip()
+            if v.isdigit():
+                n = max(n, int(v))
+    return n
+
+
+def _lone_discs(prop) -> bool:
+    """DSC-12: an album proven exactly (never a pressing guessed, a tie-break's suggestion, album
+    known) that brings some discs only of a release of two or more."""
+    if prop.status != "identified" or tier_of(prop) != "exact" or getattr(prop, "guessed_pick", False) \
+            or getattr(prop, "suggested", None):
+        return False
+    total = _set_total(prop)
+    mine = {d for d in _prop_discs(prop) if not isinstance(d, tuple)} | \
+        {d[0] for d in _prop_discs(prop) if isinstance(d, tuple)}
+    return total >= 2 and len(mine) < total
+
+
+def _swap_disc_no(name: str, was: int, now: int) -> str | None:
+    """DSC-12: a disc folder's name for another disc ("Disc 02" for disc 2 -> "Disc 01" for disc 1),
+    its number's padding kept; None when the name holds no such number."""
+    m = re.match(r"^(\D*?)(0*)(\d+)(?!\d)", name)
+    if not m or int(m.group(3)) != was:
+        return None
+    width = len(m.group(2)) + len(m.group(3))
+    return m.group(1) + str(now).zfill(width) + name[m.end():]
+
+
+def _sets_missing(albums):
+    """DSC-12: an album of some discs of a release (disc 1 of 2 alone) is filed as the whole
+    release and listed for your attention ("attention"), never held: the discs of the release not
+    there yet - neither in its album folder nor brought by another album of this plan joining
+    it - and an album of the same title of another pressing filed beside it."""
+    for a in albums:
+        ds = a.get("disc_set")
+        if a.get("status") not in ("ready", "unchanged") or (not ds and not a.get("other_pressing")):
+            continue
+        words = []
+        if ds:
+            have = set(ds.get("have") or ())
+            for b in albums:
+                db_ = b.get("disc_set")
+                if b is not a and db_ and b.get("status") in ("ready", "unchanged") and \
+                        fnm.fold(db_["folder"]) == fnm.fold(ds["folder"]) and set(db_["ids"]) & set(ds["ids"]):
+                    have |= set(db_.get("have") or ())
+            gone = [n for n in range(1, int(ds["total"]) + 1) if n not in have]
+            if gone:
+                import match_core as _mc
+                words.append(f"disc{'s' if len(gone) > 1 else ''} {_mc.compact_numbers(gone)} missing")
+        if a.get("other_pressing"):
+            mine = sorted(set((a.get("disc_set") or {}).get("have") or ()))
+            nums = ", ".join(map(str, mine)) or "1"
+            words.append(f"disc{'s' if len(mine) > 1 else ''} {nums} of another pressing of an album you have "
+                         f"('{Path(a['other_pressing']).name}'): kept apart")
+        if words:
+            a["attention"] = words
+            for w in words:
+                note = f"{w} (DSC-12)"
+                if note not in a["notes"]:
+                    a["notes"].append(note)
+
+
 def _layer_label(media) -> str:
     import mb_tags
     return mb_tags.layer_label(media)
@@ -1727,6 +1842,7 @@ class Planner:
 
     def _album(self, prop: Proposal) -> dict:
         self._win_album = f"{prop.source_dir}#{sorted(map(str, prop.files))}"   # (one of several albums of a folder)
+        self.__dict__.setdefault("_joins", {}).pop(id(prop), None)     # (DSC-12: found again as it is planned)
         p = self.profile
         files = [Path(f) for f in prop.files]
         entry = {"source_dir": str(prop.source_dir), "status": "ready", "label": "", "rule": None,
@@ -2540,6 +2656,8 @@ class Planner:
                             fe["op"] = "none"            # already there
             entry["files"].append(fe)
         if identified:
+            self._join_files(entry, prop)
+        if identified:
             # MED-22c: never two layers of one disc in one folder - in this plan, or beside a copy of
             # another layer already there (a CD layer's "Disc 01" for an SACD layer's files)
             by_src = {str(k): v for k, v in targets.items()}
@@ -2647,10 +2765,24 @@ class Planner:
                     real_src not in self.library_roots() and \
                     (real_src not in self.extra_roots or _named_after_album(src_root, prop))
                 copies = [] if at_root else second_copies(getattr(prop, "group_files", None), pairs, src_root)
+                # DSC-12: some discs of a release, filed as the whole release into one disc folder of
+                # its album ("Double/Disc 02", joining the album you have, or "Disc 01" alone): the
+                # folder's own pictures and folders (cover, scans) are the album's - at its root,
+                # beside what is there under another name, never over it; its rip log and cue sheet
+                # stay with its disc
+                lands = {Path(d_).parent for d_ in pairs.values()}
+                root_to = None
+                if _lone_discs(prop) and len(lands) == 1 and not vsplit:
+                    land = next(iter(lands))
+                    if _DISC_NAME.match(land.name) and not _LAYER_DIR.search(land.name) and \
+                            Path(prop.source_dir) in {Path(s_).parent for s_ in pairs} and \
+                            os.path.realpath(land) != os.path.realpath(prop.source_dir):
+                        root_to = land.parent
                 comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
                                              artist=[who] + sort,
                                              single=single, extra=tidy.extensions(sub), everything=whole,
-                                             copies=copies, beside=self._beside_copy(pairs, prop))
+                                             copies=copies, beside=self._beside_copy(pairs, prop),
+                                             root_to=root_to)
                 for c in copies:
                     entry["notes"].append(f"{c.name} is a second copy of one of the album's tracks: left where it is")
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
@@ -3252,6 +3384,219 @@ class Planner:
             return None                 # (another shape: a script making a disc folder from disc 2 on)
         return fnm.fold(str(other[-2])) != fnm.fold(str(comps[-2]))
 
+    def _filing_root(self, folder: Path) -> str | None:
+        """The profile's library (a filing root) FOLDER lies in, or None."""
+        import profiles
+        real = os.path.realpath(str(folder))
+        for r in profiles.filing_roots(getattr(self.profile, "data", self.profile)):
+            r = os.path.realpath(os.path.expanduser(r))
+            if real == r or real.startswith(r.rstrip(os.sep) + os.sep):
+                return r
+        return None
+
+    def _filed_homes(self, me: frozenset, root: str) -> tuple:
+        """DSC-12: ([album folders], how, [folders gone]) of the album TagMender filed of this very release in the
+        library ROOT, found by the release IDs its jobs wrote and left in the files (the job
+        history's own index: match_albums._own_index) - never by a folder's name. A folder renamed
+        or moved within its artist's folder since is found by the files' own names there, their
+        tags naming the release still. Each folder returned holds music tagged as this release."""
+        import match_albums as _ma
+        owned = _ma._own_index()
+        if not owned:
+            return [], "", []
+        rev = self.__dict__.get("_own_rev")
+        if rev is None or rev[0] is not owned:
+            idx = {}
+            for path, (mb, dg) in owned.items():
+                for v in mb:
+                    idx.setdefault(f"musicbrainz:{str(v).lower()}", []).append(path)
+                for v in dg:
+                    idx.setdefault(f"discogs:{v}", []).append(path)
+            rev = (owned, idx)
+            self._own_rev = rev
+        paths = set()
+        for k in me:
+            db_, _s, v = str(k).partition(":")
+            paths.update(rev[1].get(f"{db_}:{v.lower()}" if db_ == "musicbrainz" else str(k), ()))
+        by_album = {}
+        for pth in sorted(paths):
+            real = os.path.realpath(pth) if os.path.exists(pth) else os.path.normpath(pth)
+            if not (real == root or real.startswith(root.rstrip(os.sep) + os.sep)):
+                continue
+            par = Path(real).parent
+            album = par.parent if _DISC_NAME.match(par.name) else par
+            by_album.setdefault(album, []).append(Path(real))
+        homes, how, gone = [], "ids", []
+        for album, fs in by_album.items():
+            if any(f.exists() for f in fs):
+                cand = album
+            else:
+                # (renamed or moved by you since, within its artist's folder: found by the files'
+                # own names, their tags naming this release still)
+                cand = None
+                try:
+                    subs = sorted(d for d in album.parent.iterdir() if d.is_dir() and d != album)
+                except OSError:
+                    subs = []
+                for d in subs[:500]:
+                    hit = next((d / f.relative_to(album) for f in fs if (d / f.relative_to(album)).is_file()), None)
+                    if hit is None:
+                        continue
+                    try:
+                        if _ids_of(tagio.read(str(hit))) & me:
+                            cand = d
+                            how = "renamed"
+                            break
+                    except Exception:
+                        continue
+            if cand is None:
+                gone.append(album)
+            elif cand not in homes:
+                homes.append(cand)
+        return homes, how, gone
+
+    def _other_pressing_filed(self, prop, album_dir: Path, me: frozenset) -> Path | None:
+        """DSC-12: an album folder of the profile's library, in the artist's folder this album is
+        filed in, holding the same album (its MusicBrainz release group or Discogs master, as the
+        files are tagged) of another pressing: release IDs, none of them this album's."""
+        t0 = (prop.targets or [{}])[0]
+        groups = {("musicbrainz_releasegroupid", str(v).lower()) for v in _vals(t0.get("musicbrainz_releasegroupid"))} | \
+            {("discogs_master_id", str(v)) for v in _vals(t0.get("discogs_master_id"))}
+        groups = {g for g in groups if g[1]}
+        artist = album_dir.parent
+        if not groups or not artist.is_dir():
+            return None
+        try:
+            subs = sorted(d for d in artist.iterdir() if d.is_dir() and not d.name.startswith("."))
+        except OSError:
+            return None
+        for d in subs[:500]:
+            if os.path.realpath(d) == os.path.realpath(prop.source_dir):
+                continue
+            first = None
+            for dirpath, dirs, names in os.walk(d):
+                dirs[:] = sorted(x for x in dirs if _DISC_NAME.match(x))
+                first = next((os.path.join(dirpath, n) for n in sorted(names)
+                              if Path(n).suffix.lower() in AUDIO_EXT and not n.startswith(".")
+                              and os.path.join(dirpath, n) not in self._planned), None)
+                if first:
+                    break
+            if not first:
+                continue
+            try:
+                t = tagio.read(first)
+            except Exception:
+                continue
+            ids = _ids_of(t)
+            mine = {("musicbrainz_releasegroupid", str(v).lower()) for v in _vals(t.get("musicbrainz_releasegroupid"))} | \
+                {("discogs_master_id", str(v)) for v in _vals(t.get("discogs_master_id"))}
+            if ids and not (ids & me) and mine & groups:
+                return d
+        return None
+
+    def _join_home(self, prop, album_dir: Path, me: frozenset):
+        """DSC-12: the album of this very release already filed in the profile's library that this
+        album - some discs of the release, proven exactly - joins (its discs' slots there empty),
+        as {"home", "held", "files", "how"}; None when there is none (recorded with a note why)."""
+        info = {"home": None, "held": set(), "files": [], "how": ""}
+        self.__dict__.setdefault("_joins", {})[id(prop)] = info
+        root = self._filing_root(album_dir)
+        if root is None:
+            return None
+        held, files = _discs_there(album_dir, me, self._planned)
+        if held:
+            info.update(home=album_dir, held=held, files=files, how="naming")
+            return info
+        homes, how, gone = self._filed_homes(me, root)
+        found = []
+        for h in homes:
+            if fnm.fold(h) == fnm.fold(album_dir):
+                continue
+            hd, fs = _discs_there(h, me, self._planned)
+            if hd:
+                found.append((h, hd, fs))
+        if len(found) == 1:
+            h, hd, fs = found[0]
+            info.update(home=h, held=hd, files=fs, how=how)
+            return info
+        if len(found) > 1:
+            info["note"] = ("this release's other discs are filed in " + " and ".join(f"'{h.name}'" for h, _x, _y in found)
+                            + ": not joined to either (DSC-12)")
+            return None
+        if gone and not homes:
+            info["note"] = (f"the album of this release filed in '{gone[0].name}' is not there any more (moved or "
+                            "renamed elsewhere): this one is filed as its own album (DSC-12)")
+        if homes:
+            return None
+        other = self._other_pressing_filed(prop, album_dir, me)
+        if other is not None:
+            info["other"] = other
+        return None
+
+    def _join_files(self, entry, prop):
+        """DSC-12: an album joining the album of its release you have (_join_home) says so, and the
+        album's files already there are made consistent with it in the same job: the release's disc
+        count where theirs differs (an older job's "1 of 1"), and a disc filed at the album folder's
+        top moved into its own disc folder beside the one joining it. Also the note why an album of
+        some discs of a release joined none ("" when there is nothing to say), and the album's set
+        (entry "disc_set") for the discs still missing (build)."""
+        join = (self.__dict__.get("_joins") or {}).get(id(prop))
+        mine = _prop_discs(prop)
+        total = _set_total(prop) if _lone_discs(prop) else 0
+        if join is not None and join.get("note"):
+            entry["notes"].append(join["note"])
+        if join is not None and join.get("other") is not None:
+            entry["other_pressing"] = str(join["other"])
+        home = join.get("home") if join else None
+        files = [fe for fe in entry["files"] if fe.get("dst")]
+        if home is not None and (mine & join["held"] or not files or not any(
+                fe.get("op") in ("copy", "move") for fe in files) or not all(
+                home in Path(fe["dst"]).parents for fe in files)):
+            home = None                 # (not joined: a copy of a disc there, or not filed into it)
+        if total:
+            have = {d if not isinstance(d, tuple) else d[0] for d in mine | (join["held"] if home is not None else set())}
+            where = home if home is not None else (Path(os.path.commonpath([fe["dst"] for fe in files])) if files
+                                                   else Path(prop.source_dir))
+            if home is None and _DISC_NAME.match(where.name):
+                where = where.parent
+            entry["disc_set"] = {"folder": str(where), "ids": sorted(_release_ids(prop)), "total": total,
+                                 "have": sorted(have)}
+        if home is None:
+            return
+        entry["joins"] = str(home)
+        words = ", ".join(f"disc {d[0]} ({d[1]})" if isinstance(d, tuple) else f"disc {d}"
+                          for d in sorted(mine, key=_disc_order))
+        entry["notes"].append(f"joins the album you have in '{home.name}': {words} into "
+                              f"{'its empty slots' if len(mine) > 1 else 'its empty slot'} (DSC-12)")
+        # the album's files already there: the release's disc count, and a disc filed flat into
+        # a disc folder of its own beside the one joining it
+        landing = sorted({Path(fe["dst"]).parent for fe in files})
+        disc_dir = landing[0] if len(landing) == 1 and landing[0].parent == home and \
+            _DISC_NAME.match(landing[0].name) else None
+        arriving = next(iter(sorted(d for d in mine if not isinstance(d, tuple))), None)
+        fixed = 0
+        for path, t in join["files"]:
+            changes, rows = diff_tags(t, {"totaldiscs": [str(total)]} if total else {}, self.profile, 100.0)
+            dst = path
+            if disc_dir is not None and arriving is not None and path.parent == home:
+                n = _disc_no(str((_vals(t.get("discnumber")) or ["1"])[0])) or 1
+                name = _swap_disc_no(disc_dir.name, arriving, n)
+                if name is not None and n != arriving:
+                    dst = self._unique(home / name / path.name, path, entry) or path
+            if not changes and dst == path:
+                continue
+            fe = {"src": str(path), "dst": str(dst), "op": "move" if dst != path else "tag", "changes": changes,
+                  "diff": rows, "fingerprint": _fp(path), "joined": True}
+            fmt = tagio.file_options(path, self._file_settings()) if changes else None
+            if fmt:
+                fe["format"] = fmt
+            entry["files"].append(fe)
+            fixed += 1
+        if fixed:
+            entry["notes"].append(f"the album's {fixed} file{'s' if fixed != 1 else ''} already in '{home.name}' "
+                                  f"{'are' if fixed != 1 else 'is'} made consistent with it (the release's "
+                                  f"{total} discs) in the same job (DSC-12)")
+
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release
         the same folder as a different release (in this plan, or already on disk): "Now
@@ -3259,6 +3604,27 @@ class Planner:
         album_dir = dst.parent.parent if _DISC_NAME.match(dst.parent.name) else dst.parent
         if "map" not in cache and cache.get("prior") is not None:
             cache["map"] = (album_dir, cache["prior"])
+        if "map" not in cache and _lone_discs(prop) and fnm.fold(album_dir) != fnm.fold(Path(prop.source_dir)):
+            # DSC-12: some discs of a release whose album is filed already (disc 1 alone, now disc 2):
+            # into that album's folder - found by the release IDs TagMender wrote, wherever you
+            # renamed it - when every disc they bring has its slot there empty
+            me = _release_ids(prop)
+            join = self._join_home(prop, album_dir, me)
+            if join and fnm.fold(join["home"]) != fnm.fold(album_dir):
+                home, mine = join["home"], _prop_discs(prop)
+                claims = self.__dict__.setdefault("_album_claims", {})
+                claimed = set().union(*[discs for ids, src, discs in claims.get(fnm.fold(home), ())
+                                        if ids & me and src != str(prop.source_dir)])
+                if mine & (join["held"] | claimed):
+                    self._joins.pop(id(prop), None)
+                    if mine <= (join["held"] | claimed):
+                        raise _DuplicateCopy(
+                            f"another copy of this release is {'filed' if mine & join['held'] else 'planned to be filed'} "
+                            f"in {home.name}: this one is tagged where it is, not put beside it (MOV-4)")
+                else:
+                    claims.setdefault(fnm.fold(home), []).append((me, str(prop.source_dir), mine))
+                    self._album_dirs[fnm.fold(home)] = me
+                    cache["map"] = (album_dir, home)
         if "map" not in cache:
             me = _release_ids(prop)
             key = fnm.fold(album_dir)
@@ -3535,6 +3901,7 @@ class Planner:
                 res_discs.setdefault(fnm.fold(pr.source_dir), set()).update(_prop_discs(pr))   # (MOV-4)
         albums = [self.album(pr) for pr in proposals]
         _split_together(albums)
+        _sets_missing(albums)
         for a in albums:                                  # (your edits: kept by a new preview)
             e = edit_for(self.edits, a["source_dir"], [fe["src"] for fe in a["files"]] or a.get("album_files"))
             if e:
@@ -3656,6 +4023,34 @@ def _stale_credits(f, before, target, own, profile, changes, removals, read=None
             continue
         out[k] = _vals(was)
     return out
+
+
+def completes_filed_set(props, profile) -> bool:
+    """DSC-12: every album of PROPS is some discs of a release proven exactly whose album TagMender
+    filed in the profile's library (found by its release IDs, _filed_homes), and those discs fill
+    that album's empty slots - the watcher then waits for no other disc (DSC-1): the album you have
+    holds them."""
+    ok = False
+    for prop in props or ():
+        if prop.status != "identified":
+            continue
+        if not _lone_discs(prop):
+            return False
+        planner = Planner(profile, rules=[], overrides={})
+        me, mine, total = _release_ids(prop), _prop_discs(prop), _set_total(prop)
+        planner._planned |= {str(f) for f in prop.files}
+        found = False
+        for r in profile.filing_roots() if hasattr(profile, "filing_roots") else ():
+            homes, _how, _gone = planner._filed_homes(me, os.path.realpath(os.path.expanduser(r)))
+            for h in homes:
+                held, _f = _discs_there(h, me, planner._planned)
+                ints = {d if not isinstance(d, tuple) else d[0] for d in held | mine}
+                if held and not (held & mine) and all(n in ints for n in range(1, total + 1)):
+                    found = True
+        if not found:
+            return False
+        ok = True
+    return ok
 
 
 def tier_of(prop) -> str:

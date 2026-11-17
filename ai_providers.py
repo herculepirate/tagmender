@@ -78,7 +78,7 @@ CONFIG_DEFAULTS = {
     "providers": {"openai": {"model": "", "url": ""},
                   "anthropic": {"model": "", "url": ""},
                   "compatible": {"model": "", "url": "", "vision": False, "web": False, "image_model": ""}},
-    # per provider: the tasks it serves ([] or missing: every task it can do)
+    # per provider: the tasks it serves (missing: every task it can do; []: none)
     "tasks": {},
     "monthly_cap": {},
     # what you pay per million tokens, if you want an estimate in money ({"input": 1.0, "output": 4.0});
@@ -646,11 +646,11 @@ def configured(cfg=None) -> list[Provider]:
 
 
 def serves(p: Provider, task: str, cfg=None) -> bool:
-    """P can do TASK and you let it (ai.json tasks; none listed: every task it can)."""
+    """P can do TASK and you let it (ai.json tasks; not listed: every task it can)."""
     if NEEDS[task] not in p.capabilities():
         return False
     allowed = ((cfg or load_config()).get("tasks") or {}).get(p.name)
-    return not allowed or task in allowed
+    return allowed is None or task in allowed
 
 
 def provider_for(task: str, cfg=None, providers=None):

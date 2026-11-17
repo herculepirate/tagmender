@@ -80,7 +80,17 @@ KEYS.update({
     "image_api_url": (N_("Image service address"),
                       N_("Leave empty for the built-in default address, or give another service that "
                          "speaks the same images API.")),
-    "image_model": (N_("Image model"), N_("Leave empty for the built-in default model."))})
+    "image_model": (N_("Image model"), N_("Leave empty for the built-in default model.")),
+    "ai_openai_key": (N_("OpenAI key"),
+                      N_("Optional AI assistance with your own key (platform.openai.com/api-keys). One provider "
+                         "is enough: OpenAI alone serves every AI task, generated covers too.")),
+    "ai_anthropic_key": (N_("Anthropic key"),
+                         N_("Optional AI assistance with Claude (platform.claude.com). Claude does not make "
+                            "images: generated covers need OpenAI or an image service; real covers and scan "
+                            "clean-up still work.")),
+    "ai_compatible_key": (N_("Compatible service key"),
+                          N_("For an OpenAI-compatible service such as OpenRouter (optional; a local Ollama or "
+                             "LM Studio needs none). Its address is set under AI assistance below."))})
 # the keys entered on the Account pane, not under Keys (yours, not a provider's)
 ACCOUNT_KEYS = ("mb_client_id", "mb_client_secret", "acoustid_user")
 SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the environment"),
@@ -89,7 +99,24 @@ SOURCE = {"file": N_("Saved on this computer"), "environment": N_("Set by the en
 KEY_GROUPS = ((N_("Identification"), ("discogs", "acoustid", "gnudb")),
               (N_("Covers and artist photos"), ("fanart", "audiodb", "lastfm")),
               (N_("Web search (optional)"), ("mojeek", "marginalia", "tavily")),
-              (N_("Generated covers (optional)"), ("image_api_key", "image_api_url", "image_model")))
+              (N_("Generated covers (optional)"), ("image_api_key", "image_api_url", "image_model")),
+              (N_("AI assistance (optional)"), ("ai_openai_key", "ai_anthropic_key", "ai_compatible_key")))
+# optional AI (ai_providers.py, rule AI-1): each task's words, and a provider's place in your ranking
+AI_TASK_WORDS = {"notes": N_("Read notes and info files"), "vision": N_("Read scans"),
+                 "queries": N_("Suggest searches"), "web": N_("Web research"), "explain": N_("Explain holds"),
+                 "ties": N_("Advise on ties"), "covers": N_("Generate covers")}
+AI_RANKS = ((0, N_("First")), (1, N_("Second")), (2, N_("Third")))
+AI_SENT_WORDS = {"notes": N_("Reading notes: the artist, album title, folder name and track titles; the text "
+                             "of the folder's notes, NFO, info and log files; the text read off the scans."),
+                 "vision": N_("Reading scans: the same names, and up to four scan images (only when OCR "
+                              "found no codes on them)."),
+                 "queries": N_("Suggesting searches: the names and the catalogue numbers already known."),
+                 "web": N_("Web research: the names, year and known codes; the provider searches the web "
+                           "with them."),
+                 "explain": N_("Explaining a hold: the names and the evidence gathered (only when you ask)."),
+                 "ties": N_("Advising on a tie: the names and the tied releases' details (only when you ask)."),
+                 "covers": N_("Generating covers: artist, title, year and genre, and for Faithful your own "
+                              "cover (only after you confirm the covers sheet).")}
 # a check's state as every status in the app says it: icon, STATUS colour key and word
 CHECK_STATE = {"ok": ("circle-check", "done", N_("OK")), "warn": ("circle-alert", "unresolved", N_("Needs a look")),
                "fail": ("circle-x", "failed", N_("Problem"))}
@@ -758,6 +785,8 @@ class KeysPane(QWidget):
             e.returnPressed.connect(self.save)              # (Return saves, as the default button would)
             self.fields[name] = e
             form.addRow(short, _with_caption(e, note) if note else e)
+        self.ai = AISection(self)                             # (provider, model, ranking, tasks, cap)
+        form.addRow(self.ai)
         scroll = QScrollArea()                                # (ten keys: at 520 px high they scroll)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -802,6 +831,237 @@ class KeysPane(QWidget):
                 n += 1
         self.saved.setText(tr("Saved {0}.").format(plural(n, tr("key"), tr("keys"))) if n else
                            tr("Nothing to save: type a key first."))
+
+
+class AISection(QWidget):
+    """Preferences › Keys › AI assistance: for each provider its place in your ranking, its model
+    (picked from the provider's own list after Test), what it may do, its monthly cap and what it
+    was used for this month; the first-use sheet (what is sent); a batch's estimate. Saved to
+    ai.json at once (ai_providers.save_config); keys stay in the credentials store."""
+
+    def __init__(self, keys=None):
+        super().__init__()
+        import ai_providers as ap
+        self.ap, self.keys = ap, keys
+        self.cfg = ap.load_config()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 8, 0, 0)
+        v.setSpacing(8)
+        v.addLayout(section(tr("AI assistance")))
+        v.addWidget(_caption(tr("TagMender tags fully without AI. With your own key (one provider is enough) a "
+                                "profile may let AI read notes and scans, suggest searches and research the "
+                                "web. Its clues count only when a MusicBrainz or Discogs release carries them, "
+                                "and an album only AI supports is held for you. Audio is never sent.")))
+        row = QHBoxLayout()
+        self.consent_said = QLabel("")
+        self.consent_said.setWordWrap(True)
+        row.addWidget(self.consent_said, 1)
+        self.consent_btn = QPushButton(tr("What Is Sent…"))
+        self.consent_btn.setAccessibleName(tr("What is sent to AI providers"))
+        self.consent_btn.clicked.connect(self.review_consent)
+        row.addWidget(self.consent_btn)
+        v.addLayout(row)
+        self.models, self.ranks, self.status, self.tasks, self.caps, self.used = {}, {}, {}, {}, {}, {}
+        self.extra = {}
+        for name in ap.PROVIDERS:
+            v.addWidget(self._provider_box(name))
+        self.estimate = _caption("")
+        v.addWidget(self.estimate)
+        self.refresh()
+
+    def _provider_box(self, name):
+        ap = self.ap
+        box = QWidget()
+        f = QFormLayout(box)
+        f.setContentsMargins(0, 4, 0, 4)
+        f.setLabelAlignment(Qt.AlignRight)
+        title = QLabel(f"<b>{html.escape(tr(ap.LABELS[name]))}</b>")
+        f.addRow(title)
+        rank = _popup(tr("Rank of {0}").format(tr(ap.LABELS[name])), AI_RANKS, self.cfg["ranking"].index(name))
+        rank.currentIndexChanged.connect(lambda _i, n=name: self.set_rank(n))
+        self.ranks[name] = rank
+        f.addRow(tr("Ranking"), rank)
+        conf = self.cfg["providers"].get(name) or {}
+        if name == "compatible":
+            url = QLineEdit(conf.get("url") or "")
+            url.setPlaceholderText("http://localhost:11434/v1")
+            url.setAccessibleName(tr("Address of the OpenAI-compatible service"))
+            url.editingFinished.connect(lambda n=name, e=url: self.set_option(n, "url", e.text().strip()))
+            f.addRow(tr("Address"), _with_caption(url, tr("OpenRouter: https://openrouter.ai/api/v1; Ollama: "
+                                                         "http://localhost:11434/v1; LM Studio: "
+                                                         "http://localhost:1234/v1")))
+            self.extra["url"] = url
+            for opt, words in (("vision", tr("Its model reads images")), ("web", tr("It searches the web"))):
+                c = QCheckBox(words)
+                c.setChecked(bool(conf.get(opt)))
+                c.toggled.connect(lambda on, n=name, o=opt: self.set_option(n, o, bool(on)))
+                f.addRow("", c)
+                self.extra[opt] = c
+            im = QLineEdit(conf.get("image_model") or "")
+            im.setAccessibleName(tr("Image model of the OpenAI-compatible service"))
+            im.editingFinished.connect(lambda n=name, e=im: self.set_option(n, "image_model", e.text().strip()))
+            f.addRow(tr("Image model"), _with_caption(im, tr("Empty: it makes no covers.")))
+            self.extra["image_model"] = im
+        model = QComboBox()
+        model.setEditable(True)
+        model.setAccessibleName(tr("Model of {0}").format(tr(ap.LABELS[name])))
+        model.setMinimumWidth(220)
+        model.setPlaceholderText(tr("Press Test to list the models"))
+        if conf.get("model"):
+            model.addItem(conf["model"])
+        model.setCurrentText(conf.get("model") or "")
+        model.lineEdit().editingFinished.connect(lambda n=name: self.set_option(n, "model",
+                                                                               self.models[n].currentText().strip()))
+        model.activated.connect(lambda _i, n=name: self.set_option(n, "model", self.models[n].currentText().strip()))
+        self.models[name] = model
+        test = QPushButton(tr("Test"))
+        test.setAccessibleName(tr("Test {0}").format(tr(ap.LABELS[name])))
+        test.clicked.connect(lambda _c=False, n=name: self.test(n))
+        line = QHBoxLayout()
+        line.addWidget(model, 1)
+        line.addWidget(test)
+        holder = QWidget()
+        holder.setLayout(line)
+        line.setContentsMargins(0, 0, 0, 0)
+        st = _caption("")
+        self.status[name] = st
+        f.addRow(tr("Model"), holder)
+        f.addRow("", st)
+        if name == "anthropic":
+            f.addRow("", _caption(tr("Claude does not make images: generated covers need OpenAI or another "
+                                    "image service. Real covers and scan clean-up still work.")))
+        grid = QHBoxLayout()
+        grid.setSpacing(10)
+        allowed = (self.cfg.get("tasks") or {}).get(name)
+        self.tasks[name] = {}
+        col = QVBoxLayout()
+        for i, task in enumerate(ap.TASKS):
+            c = QCheckBox(tr(AI_TASK_WORDS[task]))
+            c.setChecked(allowed is None or task in allowed)
+            c.toggled.connect(lambda _on, n=name: self.set_tasks(n))
+            self.tasks[name][task] = c
+            col.addWidget(c)
+            if i % 4 == 3:
+                grid.addLayout(col)
+                col = QVBoxLayout()
+        grid.addLayout(col)
+        grid.addStretch(1)
+        tasks_box = QWidget()
+        tasks_box.setLayout(grid)
+        f.addRow(tr("Serves"), tasks_box)
+        from PySide6.QtWidgets import QSpinBox
+        cap = QSpinBox()
+        cap.setRange(0, 1_000_000)
+        cap.setSuffix(tr(" requests a month"))
+        cap.setValue(ap.cap_of(name, self.cfg))
+        cap.setAccessibleName(tr("Monthly cap of {0}").format(tr(ap.LABELS[name])))
+        cap.editingFinished.connect(lambda n=name: self.set_cap(n))
+        self.caps[name] = cap
+        used = _caption("")
+        self.used[name] = used
+        f.addRow(tr("Monthly cap"), cap)
+        f.addRow("", used)
+        return box
+
+    # ---- what changes ----
+    def save(self) -> bool:
+        try:
+            self.ap.save_config(self.cfg)
+        except (OSError, ValueError) as exc:
+            sheets.warning(self, tr("That setting could not be saved."), str(exc))
+            self.cfg = self.ap.load_config()
+            return False
+        self.refresh()
+        return True
+
+    def set_option(self, name, opt, value):
+        conf = self.cfg["providers"].setdefault(name, {})
+        if conf.get(opt) == value:
+            return
+        conf[opt] = value
+        self.save()
+
+    def set_rank(self, name):
+        order = [n for n in self.cfg["ranking"] if n != name]
+        order.insert(self.ranks[name].currentData(), name)
+        self.cfg["ranking"] = order
+        self.save()
+        for n, box in self.ranks.items():                 # (the others move down or up)
+            box.blockSignals(True)
+            box.setCurrentIndex(self.cfg["ranking"].index(n))
+            box.blockSignals(False)
+
+    def set_tasks(self, name):
+        on = [t for t, c in self.tasks[name].items() if c.isChecked()]
+        tasks = self.cfg.setdefault("tasks", {})
+        if len(on) == len(self.ap.TASKS):
+            tasks.pop(name, None)                         # (every task it can, new ones too)
+        else:
+            tasks[name] = on                              # ([]: none)
+        self.save()
+
+    def set_cap(self, name):
+        self.cfg.setdefault("monthly_cap", {})[name] = int(self.caps[name].value())
+        self.save()
+
+    def review_consent(self):
+        body = "\n\n".join(tr(AI_SENT_WORDS[t]) for t in self.ap.TASKS) + "\n\n" + tr(
+            "Audio is never sent. Each request goes to the provider you rank first that can do it, with your own "
+            "key, and may cost money; answers are kept on this computer so the same album never asks twice. A "
+            "local model (Ollama, LM Studio) keeps everything on your network. A profile still has to turn AI on.")
+        if self.cfg.get("consent"):
+            if sheets.question(self, tr("What is sent to AI providers"), body, action=tr("Stop Sending"),
+                               cancel=tr("Close")):
+                self.cfg["consent"] = False
+                self.save()
+            return
+        if sheets.question(self, tr("What is sent to AI providers"), body, action=tr("Allow")):
+            self.cfg["consent"] = True
+            self.save()
+
+    def test(self, name):
+        """The provider's model list, on a worker (a network call): the model is picked from it."""
+        typed = ""
+        if self.keys is not None and self.ap.CREDENTIAL[name] in getattr(self.keys, "fields", {}):
+            typed = self.keys.fields[self.ap.CREDENTIAL[name]].text().strip()
+        cfg = self.ap.load_config()
+        self.status[name].setText(tr("Asking {0}…").format(tr(self.ap.LABELS[name])))
+
+        def done(result):
+            ok, said, models = result
+            self.status[name].setText(said if ok else tr("Test failed: {0}").format(said))
+            if not ok:
+                return
+            box, current = self.models[name], self.models[name].currentText().strip()
+            box.blockSignals(True)
+            box.clear()
+            box.addItems(models)
+            pick = current if current in models else self.ap.suggested_model(name, models)
+            box.setCurrentText(pick)
+            box.blockSignals(False)
+            self.set_option(name, "model", pick)
+
+        def failed(msg):
+            self.status[name].setText(tr("Test failed: {0}").format(msg))
+        start(self, lambda _w: self.ap.test(name, cfg, key=typed or None), done, failed=failed)
+
+    def refresh(self):
+        ap = self.ap
+        self.consent_said.setText(tr("Allowed: AI may be asked when a profile turns it on.")
+                                  if self.cfg.get("consent") else
+                                  tr("Not allowed yet: nothing is sent until you read what is sent and allow it."))
+        self.consent_btn.setText(tr("What Is Sent…"))
+        for name in ap.PROVIDERS:
+            u = ap.usage(name)
+            self.used[name].setText(tr("This month: {0} requests, {1} tokens in, {2} out").format(
+                u["requests"], u["input_tokens"], u["output_tokens"]))
+        est = __import__("ai_assist").estimate(100, cfg=self.cfg)
+        words = tr("For 100 unsure albums, at most {0} requests (about {1} tokens).").format(
+            est["requests"], est["input_tokens"] + est["output_tokens"])
+        if est["cost"] is not None:
+            words += " " + tr("About {0} at the prices you entered.").format(est["cost"])
+        self.estimate.setText(words + " " + tr("Albums a barcode or disc ID proves never ask AI; an album asked "
+                                               "before costs nothing again."))
 
 
 def key_field(cr, name, save):

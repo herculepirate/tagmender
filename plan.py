@@ -692,8 +692,13 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
             dmap[src_dir] = dmap[layers[0]]
         elif dmap.get(src_dir) is not None and dmap[src_dir].parent == album:
             dmap[src_dir] = album
+    flat_home = None
     if root_to is not None:
-        dmap[src_dir] = Path(root_to)                 # DSC-11: the joined album's root
+        # DSC-11: the joined album's root. A folder whose music is at its top is that copy's disc
+        # folder too: its own rip log, cue sheet and other papers there stay with its music;
+        # only its pictures and its folders (scans, covers, notes) go to the root
+        flat_home = dmap.get(src_dir) if src_dir in {s_.parent for s_ in moved} else None
+        dmap[src_dir] = Path(root_to)
     if src_dir not in dmap:
         top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
         if any(d != top and d.parent != top for d in dmap.values()):
@@ -842,6 +847,7 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         compat = (profile.get("filenames") or {}).get("compat", "windows")
         dest_dir = dmap[anchor].joinpath(*[fnm.safe_component(x, compat) for x in d.relative_to(anchor).parts])
         holder = disc_holder(d) if d not in dmap else None
+        own_dir = flat_home if d == src_dir and flat_home is not None else None
         if holder:
             dest_dir = holder[1].joinpath(*[fnm.safe_component(x, compat) for x in d.relative_to(holder[0]).parts])
         for p in sorted(here):
@@ -858,7 +864,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
                 continue                                    # the album folder is shared with another album
             if d == src_dir and p in keep:
                 continue                                    # the artist folder's own photo and art
-            out.append((p, track.with_name(track.stem + p.suffix) if track else dest_dir / p.name))
+            here_dir = own_dir if own_dir is not None and p.suffix.lower() not in IMAGE_EXT else dest_dir
+            out.append((p, track.with_name(track.stem + p.suffix) if track else here_dir / p.name))
             if holder and not track:
                 moved_up[len(out) - 1] = holder
     if moved_up:
@@ -1734,7 +1741,7 @@ class Planner:
         entry["notes"].extend(getattr(prop, "notes", None) or [])
         if getattr(prop, "one_release_folders", None):
             # DSC-11: the album folders one release joins (each remembered by the watcher and undo)
-            entry["one_release"] = [str(x) for x in prop.one_release_folders]
+            entry["one_release"] = list(dict.fromkeys(str(x) for x in prop.one_release_folders))
         if getattr(prop, "held", "") and prop.status == "identified":     # WEB-1
             entry["held"] = prop.held
             entry["notes"].insert(0, prop.held)
@@ -2005,7 +2012,10 @@ class Planner:
         # an album known (its pressing unproven) shows
         if identified and (folder_mode != "off" or album_mode != "off") and kept:
             import marks
-            if any(marks.is_hd(f) for f in kept[:3]):
+            # (DSC-11: an album joined from album folders - the first tracks of each copy, so which
+            # folder comes first never decides it)
+            firsts = [f for fs in getattr(prop, "one_release_files", None) or () for f in list(fs)[:3]] or kept[:3]
+            if any(marks.is_hd(f) for f in firsts):
                 rel_tags["~edition_hd"] = ["1"]
             if unproven:
                 rel_tags["~edition_unproven"] = ["1"]
@@ -2857,11 +2867,25 @@ class Planner:
             return None
         if all(Path(fe["dst"]).parent == Path(fe["src"]).parent and not fe.get("copy_of") for fe in entry["files"]):
             return None if filed else Path(prop.source_dir)
-        tops = set()
+        # (one album folder: the folder all its music lands in or in a disc folder of - one the
+        # naming names after its disc ("Disc 01", "CD1", "Piano Man - Disc 1") or a layer's
+        # folder ("Disc 01 (SACD Stereo)"); two album folders side by side are none)
+        discs, by = {}, {str(f): t for f, t in zip(prop.files or [], prop.targets or [])}
         for fe in entry["files"]:
-            d = Path(fe["dst"]).parent
-            tops.add(d.parent if (_DISC_NAME.match(d.name) or _LAYER_DIR.search(d.name)) else d)
-        return next(iter(tops)) if len(tops) == 1 else None
+            t = by.get(str(fe.get("copy_of") or fe["src"])) or {}
+            n = _disc_no((_vals(t.get("discnumber")) or [""])[0])
+            discs.setdefault(Path(fe["dst"]).parent, set()).add(n)
+        home = Path(os.path.commonpath([str(d) for d in discs]))
+        for d, ns in discs.items():
+            if d == home:
+                continue
+            if d.parent != home:
+                return None
+            named = bool(_DISC_NAME.match(d.name) or _LAYER_DIR.search(d.name)) or any(
+                n is not None and re.search(rf"(?:disc|disk|cd)\s*[-_.]?\s*0*{n}(?!\d)", d.name, re.I) for n in ns)
+            if not named:
+                return None
+        return home
 
     def _one_release_companions(self, entry, prop, pairs, artist, single, extra):
         """DSC-11: (companions, why not, own, {companion: (album folder, its music's folders)}) of
@@ -2872,7 +2896,7 @@ class Planner:
         kept with a suffix: _unique), in its own folder when tagged where it is."""
         home = self._one_release_home(entry, prop, filed=True)
         comps, why_not, own_from, tidy_of = [], "", set(), {}
-        for folder in getattr(prop, "one_release_folders", None) or ():
+        for folder in dict.fromkeys(getattr(prop, "one_release_folders", None) or ()):
             src = Path(folder)
             if os.path.realpath(src) in self.roots():
                 continue                             # (never a watched or library folder itself)

@@ -290,6 +290,184 @@ class DSC11StayApart(DSC11Base):
                          sorted([(CD_DIR, SACD_DIR)]))
 
 
+RID2 = "99999999-1111-4222-8333-944445555666"
+
+
+def the_us_box():
+    """Another pressing of the same discs (US, its own barcode and number)."""
+    import copy
+    r = copy.deepcopy(the_box())
+    r.update(id=RID2, date="2024-03-30", country="US", barcode="1234567890128")
+    r["label-info"] = [{"label": {"name": "Columbia"}, "catalog-number": "XYZ 1"}]
+    return r
+
+
+class DSC11Review(DSC11Base):
+    def named(self, template):
+        self.dest = self.tmp / "library"
+        self.dest.mkdir(exist_ok=True)
+        return self.engine(self.http(), operation="move", destination=str(self.dest),
+                           naming={"preset": "", "template": template})
+
+    def test_DSC11_a_release_you_choose_for_the_joined_row_is_the_whole_albums(self):
+        import os
+        self.both(extras=False)
+        http = SetHttp(mb=[the_box(), the_us_box()])
+        [p] = self.moving(http).proposals(self.artist())
+        eng = self.moving(SetHttp(mb=[the_box(), the_us_box()]))
+        # (Change Release on the row: kept under its first folder, naming every file of it)
+        eng.force = {os.path.realpath(p.source_dir): [{"ref": RID2, "files": list(p.files)}]}
+        props = eng.proposals(self.artist())
+        self.assertEqual([(q.status, q.release_id, len(q.files)) for q in props], [("identified", RID2, 13)])
+        self.assertEqual(self.slots(props[0]), self.slots(p))
+        self.assertTrue(props[0].one_release_folders)
+
+    def test_DSC11_each_folder_takes_its_own_grouping_mark(self):
+        a, b = self.both(extras=False)
+        plan = self.moving(self.http()).plan(self.artist())
+        [x] = plan["albums"]
+        marks_ = {(Path(fe["src"]).parent.parent.name, str((fe["changes"].get("grouping") or [""])[0]))
+                  for fe in x["files"]}
+        self.assertEqual(marks_, {(SACD_DIR, ""), (CD_DIR, "HD Audio")})
+
+    def test_DSC11_a_disc_folder_the_naming_names_its_own_way(self):
+        self.both()
+        plan = self.named("%albumartist%/%album%/%album% - Disc %discnumber%/%tracknumber%. %title%").plan(
+            self.artist())
+        [x] = plan["albums"]
+        self.assertEqual(x["status"], "ready", pl.preview(plan))
+        self.assertEqual(sorted({Path(fe["dst"]).parent.name for fe in x["files"]}), [
+            "Piano Man - Disc 1", "Piano Man - Disc 1 (SACD Multichannel)", "Piano Man - Disc 1 (SACD Stereo)",
+            "Piano Man - Disc 2"])
+        self.assertIn("Front.jpg", {Path(c["dst"]).name for c in x["companions"]
+                                    if Path(c["dst"]).parent.name == "Piano Man"})
+
+    def test_DSC11_folders_the_naming_files_apart_are_held(self):
+        self.both(extras=False)
+        plan = self.named("%albumartist%/%album% [%media%]/%tracknumber%. %title%").plan(self.artist())
+        [x] = plan["albums"]
+        self.assertEqual(x["status"], "blocked", pl.preview(plan))
+        self.assertTrue(any("DSC-11" in c for c in x["conflicts"]), x["conflicts"])
+
+    def test_DSC11_filed_and_read_again_it_is_one_album_unchanged(self):
+        import executor
+        self.both()
+        plan = self.moving(self.http()).plan(self.artist())
+        executor.Executor(plan).run()
+        eng = self.moving(self.http())
+        self.assertEqual(sorted(len(g.files) for g in eng.albums_in(self.dest)), [3, 3, 7])
+        again = self.moving(self.http()).plan(self.dest)
+        self.assertEqual(len(again["albums"]), 1, pl.preview(again))
+        [x] = again["albums"]
+        self.assertEqual(x["status"], "unchanged", pl.preview(again))
+        self.assertEqual(len(x["files"]), 13)
+        self.assertEqual({fe["op"] for fe in x["files"]}, {"none"})
+        self.assertEqual(x["companions"], [])
+
+    def test_DSC11_a_folder_with_its_music_at_its_top_keeps_its_log_and_cue(self):
+        self.cd_folder()
+        b = self.artist() / CD_DIR
+        self.layer(b, 2, "Stereo", disc=2)
+        (b / "Piano Man.cue").write_text("".join(f'FILE "{x.name}" WAVE\n  TRACK 01 AUDIO\n'
+                                                 for x in sorted(b.glob("*.flac"))))
+        (b / "Piano Man.log").write_text("log B")
+        (b / "folder.jpg").write_bytes(b"\xff\xd8\xff" + b"B" * 50)
+        plan = self.moving(self.http()).plan(self.artist())
+        [x] = plan["albums"]
+        self.assertEqual(x["status"], "ready", pl.preview(plan))
+        where = {Path(c["src"]).name: Path(c["dst"]).parent.name for c in x["companions"]
+                 if Path(c["src"]).parent == b}
+        self.assertEqual(where, {"Piano Man.cue": "Disc 01 (SACD Stereo)", "Piano Man.log": "Disc 01 (SACD Stereo)",
+                                 "folder.jpg": "1973 - Piano Man"})
+
+    def test_DSC11_a_library_roots_artist_folders_are_not_read_together(self):
+        for artist, n in (("Neil Young", 3), ("Neil Young & Crazy Horse", 2)):
+            for i in range(n):
+                d = self.lib / artist / f"{1970 + i} - Album {i}"
+                d.mkdir(parents=True)
+                for t in range(3):
+                    (d / f"{t + 1:02d}. T.flac").write_bytes(b"")
+        eng = self.moving(self.http())
+        got = engine._within_pieces(eng, self.lib, [self.lib / "Neil Young" / "1970 - Album 0"], engine._Scan(eng))
+        self.assertEqual([k for k, _f, _ms in got[0]], ["all"])
+        self.assertEqual(engine._one_release_units(eng, engine._Scan(eng), self.lib, ["Neil Young",
+                                                                                       "Neil Young & Crazy Horse"]), [])
+
+    def test_DSC11_more_folders_than_the_cap_are_never_read_as_one(self):
+        names = [f"1973 - Piano Man [{i}]" for i in range(engine.SET_TRIAL_MAX_DISCS + 1)]
+        eng = self.moving(self.http())
+        self.assertEqual(engine._one_release_units(eng, engine._Scan(eng), self.artist(), names), [])
+        self.assertEqual(len(engine._one_release_units(eng, engine._Scan(eng), self.artist(), names[:3])[0]), 3)
+
+
+class DSC11Gates(DSC11Base):
+    downgraded = DSC11StayApart.downgraded
+
+    def test_DSC11_disc_totals_that_differ_keep_them_apart(self):
+        self.both(extras=False)
+
+        def three(p):
+            for t in p.targets:
+                t["totaldiscs"] = ["3"]
+        with self.downgraded(three):
+            props = self.moving(self.http()).proposals(self.artist())
+        self.assertEqual(len(props), 2)
+
+    def test_DSC11_a_pressing_picked_by_country_order_is_not_joined(self):
+        self.both(extras=False)
+
+        def guessed(p):
+            p.guessed_pick = True
+        with self.downgraded(guessed):
+            props = self.moving(self.http()).proposals(self.artist())
+        self.assertEqual(len(props), 2)
+
+    def test_DSC11_three_folders_one_disc_held_twice_none_joined(self):
+        self.both(extras=False)
+        c = self.artist() / "1973 - Piano Man 50th Anniversary Deluxe [2024 SACD ISO]"
+        self.layer(c / "Disc 02", 2, "Stereo", disc=2)
+        props = self.moving(self.http()).proposals(self.artist())
+        self.assertEqual(len(props), 3, [(p.source_dir, len(p.files)) for p in props])
+
+    def test_DSC11_a_folder_matched_to_the_releases_twin_joins(self):
+        self.both(extras=False)
+        twin = ("discogs", "29934862")
+
+        def on_discogs(p):
+            p.provider, p.release_id = "discogs", twin[1]
+        real = engine.Engine._same_key
+
+        def same(eng, key, other, cand):
+            return {key, other} == {("mb", RID), twin} or real(eng, key, other, cand)
+        with self.downgraded(on_discogs), mock.patch.object(engine.Engine, "_same_key", same), \
+                mock.patch.object(engine.Engine, "_release_cand", lambda *a: {}):
+            props = self.moving(self.http()).proposals(self.artist())
+        self.assertEqual(len(props), 1)
+        self.assertEqual(len(props[0].files), 13)
+
+    def test_DSC11_an_apply_broken_off_is_put_back_in_both_folders(self):
+        import os
+        import executor
+        a, b = self.both()
+        before = sorted(str(p.relative_to(self.lib)) for p in self.lib.rglob("*") if p.is_file())
+        plan = self.moving(self.http()).plan(self.artist())
+        [x] = plan["albums"]
+        last = next(fe["src"] for fe in reversed(x["files"]) if Path(fe["src"]).parent.parent == b)
+        real_unlink = os.unlink
+
+        def crash(path, *args, **kw):
+            if str(path) == last:
+                raise KeyboardInterrupt
+            return real_unlink(path, *args, **kw)
+        with mock.patch.object(executor.os, "unlink", crash):
+            with self.assertRaises(KeyboardInterrupt):
+                executor.Executor(plan).run()
+        executor.recover(plan["job"])
+        after = sorted(str(p.relative_to(self.lib)) for p in self.lib.rglob("*") if p.is_file())
+        self.assertEqual(after, before)
+        self.assertFalse([p for p in self.dest.rglob("*") if p.is_file()])
+
+
 class DSC11Watched(DSC11Base):
     """The watcher: the two folders are filed once, as one album; undone, neither is filed again."""
 

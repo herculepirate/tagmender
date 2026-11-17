@@ -237,7 +237,9 @@ class MED22c_Filed(Base):
             self.track(top / "Disc 04" / f"{i + 1:02d}. Bonus {i + 1}.flac", i, 2, BONUS_LENS[i] / 1000, hires=False,
                        title=f"Bonus {i + 1}", DISCNUMBER="4")
         plan = self.moving(SetHttp(mb=[the_set()])).plan(top)
-        self.assertEqual([x["status"] for x in plan["albums"]], ["ready"] * 3, pl.preview(plan))
+        # (DSC-11: the three copies, each matched for sure to the release, no disc or layer held
+        # twice, are one album of it)
+        self.assertEqual([x["status"] for x in plan["albums"]], ["ready"], pl.preview(plan))
         got = sorted({(Path(fe["src"]).parent.name, Path(fe["dst"]).parent.name) for x in plan["albums"]
                       for fe in x["files"]})
         self.assertEqual(got, [("Disc 01", "Disc 01"), ("Disc 02", "Disc 01 (SACD Stereo)"),

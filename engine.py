@@ -611,6 +611,10 @@ def _one_release_groups(eng, groups, path) -> list:
         for i, g in enumerate(members):
             clusters.setdefault(top(i), []).append(g)
         for parts in clusters.values():
+            if len(parts) > SET_TRIAL_MAX_DISCS:
+                (eng._logger() if hasattr(eng, "_logger") else logging.getLogger(__name__)).info(
+                    "%s: %d album folders whose names may be one release's: more than %d, each planned alone",
+                    parent, len(parts), SET_TRIAL_MAX_DISCS)
             if not 2 <= len(parts) <= SET_TRIAL_MAX_DISCS:
                 continue
             parts = sorted(parts, key=lambda g: str(g.folder))
@@ -1204,6 +1208,70 @@ def _unit_of(eng, path, sc, own, roots) -> list[Group]:
     return _group_unit(eng, path, found, sc) if found else []
 
 
+def _album_like(sc, folder: Path) -> bool:
+    """DSC-11: FOLDER looks like an album's own folder, not an artist's: its name carries a year
+    or brackets ("1973 - Piano Man [2024 CD]"), or it holds music at its top or in disc folders."""
+    if _NAME_EXTRAS.search(folder.name):
+        return True
+    got = sc.listed(folder)
+    if not got:
+        return False
+    dirs, audio, _names = got
+    return bool(audio) or any(is_disc_dir(folder / x) for x in dirs)
+
+
+def _one_release_units(eng, sc, d: Path, names) -> list:
+    """DSC-11: the sub-folders of D read together because a release may join them
+    (one_release_pairs): album-like folders only (_album_like), never in a watched folder, a
+    library or the profile's own folders themselves (their artist folders: "Neil Young" and
+    "Neil Young & Crazy Horse" are two artists), clusters of SET_TRIAL_MAX_DISCS at most (a
+    larger one is read as before, and logged)."""
+    try:
+        import profiles
+        prof = eng.profile
+        roots = {os.path.realpath(os.path.expanduser(str(r))) for r in
+                 profiles.filing_roots(getattr(prof, "data", prof)) if r}
+        roots |= {os.path.realpath(os.path.expanduser(str(x.get("path"))))
+                  for x in (prof.get("sources") or []) if isinstance(x, dict) and x.get("path")}
+    except Exception:
+        roots = set()
+    if os.path.realpath(str(d)) in roots:
+        return []
+    pairs = one_release_pairs(names)
+    if not pairs:
+        return []
+    like = {}
+
+    def ok(c):
+        if c not in like:
+            like[c] = _album_like(sc, d / c)
+        return like[c]
+    up = {}
+
+    def top(c):
+        up.setdefault(c, c)
+        while up[c] != c:
+            up[c] = up[up[c]]
+            c = up[c]
+        return c
+    for a, b in pairs:
+        if ok(a) and ok(b):
+            up[top(b)] = top(a)
+    clusters = {}
+    for c in up:
+        clusters.setdefault(top(c), []).append(c)
+    out = []
+    for ms in clusters.values():
+        if len(ms) > SET_TRIAL_MAX_DISCS:
+            (eng._logger() if hasattr(eng, "_logger") else logging.getLogger(__name__)).info(
+                "%s: %d folders whose names may be one release's (%s ...): more than %d, each read as before",
+                d, len(ms), ", ".join(sorted(ms)[:3]), SET_TRIAL_MAX_DISCS)
+            continue
+        if len(ms) > 1:
+            out.append(sorted(ms))
+    return out
+
+
 def _plan_folder(eng, path, sc, d: Path, got):
     """PRF-3: how folder D (its listing GOT) is read. None: as one piece with everything below
     it. Else (its core's albums, its core sub-folders, [(first sub-folder, [the sub-folders read
@@ -1248,8 +1316,9 @@ def _plan_folder(eng, path, sc, d: Path, got):
                     join(c, n)
     # DSC-11: album folders whose names may be one release's are read together (a release may
     # join them: _one_release_groups)
-    for a, b in one_release_pairs([c for c in kids if not _disc_like(d, c)]):
-        join(a, b)
+    for ms in _one_release_units(eng, sc, d, [c for c in kids if not _disc_like(d, c)]):
+        for c in ms[1:]:
+            join(ms[0], c)
     members = {}
     for c in kids:
         members.setdefault(top(c), []).append(c)
@@ -1518,9 +1587,17 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
         if copies:
             # MED-22c: the CD layer's copy and SACD layers' copies of a disc filed side by side
             # ("Disc 01", "Disc 01 (SACD Stereo)"): each copy an album of its own, as filed
+            mine = []
             for members, hold in copies:
-                groups.append(Group(folder, members, [f for f in files if f not in members],
-                                    single=len(members) == 1, layer_hold=hold))
+                mine.append(Group(folder, members, [f for f in files if f not in members],
+                                  single=len(members) == 1, layer_hold=hold))
+            groups += mine
+            if 2 <= len(mine) <= SET_TRIAL_MAX_DISCS:
+                # DSC-11: the copies of one release's discs and layers in one album folder (as a
+                # move filed them) are one album again when each is matched for sure to it, no disc
+                # or layer held twice (Engine._release_folders); else each stays its own album
+                for g in mine:
+                    g.siblings, g.set_folder, g.set_shape = mine, folder, "albums"
             continue
         if len(by_album) == 1:
             groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
@@ -2005,7 +2082,13 @@ class Engine:
         def alone(part):
             return count[os.path.realpath(str(part.folder))] == 1
         out = {"own": {}, "members": set(), "joined": []}
-        chosen = self._chosen_join(folder, parts)
+        albums = g.set_shape == "albums"
+        # (DSC-11: a release you chose for the joined row - kept under its first folder - is each
+        # covered folder's own choice: each planned alone with it, then joined as usual)
+        chosen = set() if albums else self._chosen_join(folder, parts)
+        was_force = getattr(self, "force", None)
+        if albums:
+            self.force = self._albums_chosen(parts)
         was_in, self._in_set = getattr(self, "_in_set", False), True
         try:
             for i, part in enumerate(parts):
@@ -2041,6 +2124,8 @@ class Engine:
                 got = self._set_search(folder, parts, per)
         finally:
             self._in_set, self._alone = was_in, was_alone
+            if albums:
+                self.force = was_force
         if got is None:
             return out
         prop, mapping, how = got
@@ -2061,6 +2146,34 @@ class Engine:
         out["members"], out["joined"] = members, [prop]
         self.log.info("%s: %s", folder, "; ".join([note] + left))
         return out
+
+    def _albums_chosen(self, parts):
+        """DSC-11: the choices (force) with a release you chose for a joined row of album folders
+        (kept under its first folder, naming every file of it) given to each folder it covers as
+        that folder's own - each album then planned alone with it (exact: _sure) and joined as
+        usual. A choice covering one folder only stays as it was. A new dict; force unchanged."""
+        force = dict(getattr(self, "force", None) or {})
+        mine = [{os.path.realpath(str(f)) for f in q.files} for q in parts]
+        given = {}
+        for v in list(force.values()):
+            for c in ([v] if isinstance(v, dict) else v if isinstance(v, list) else []):
+                if not isinstance(c, dict) or not c.get("ref") or c.get("only"):
+                    continue
+                named = {os.path.realpath(str(f)) for f in c.get("files") or []}
+                covered = [i for i, m in enumerate(mine) if m and m <= named]
+                if len(covered) < 2:
+                    continue
+                for i in covered:
+                    k = os.path.realpath(str(parts[i].folder))
+                    given.setdefault(k, []).append({"ref": c["ref"], "files": [str(f) for f in parts[i].files]})
+        for k, cs in given.items():
+            v = force.get(k)
+            # (a folder's other albums keep their own choices; its covered albums take the joined one)
+            covered = {os.path.realpath(f) for c in cs for f in c["files"]}
+            rest = [c for c in ([v] if isinstance(v, dict) else v if isinstance(v, list) else [])
+                    if isinstance(c, dict) and not {os.path.realpath(str(f)) for f in c.get("files") or []} <= covered]
+            force[k] = cs + rest
+        return force
 
     def _chosen_join(self, folder: Path, parts) -> set:
         """DSC-10: the parts a release you chose for several of them together names (the
@@ -2643,6 +2756,8 @@ class Engine:
         joined.set_key = group_key(lead_part.folder, lead_part.files)
         joined.set_members = [part for _i, part, _p in members]
         joined.one_release_folders = [str(part.folder) for _i, part, _p in members]
+        # (each copy's own files: its own mark, apply_level - one folder may hold two copies, MED-22c)
+        joined.one_release_files = [[str(f) for f in p.files] for _i, _part, p in members]
         out["members"], out["joined"] = {i for i, _part, _p in members}, [joined]
         self.log.info("%s: %s", folder, note)
         return out
@@ -3386,6 +3501,10 @@ class Engine:
                 s2 = mc.score_candidate(alt, cand, self.cfg)
                 if float(s2.get("confidence") or 0) > float(sc.get("confidence") or 0):
                     album, sc = alt, s2
+        if (sc.get("cand") or {}).get("version_media"):
+            # (MED-22c: a copy of an SACD's layers, chosen by hand - scored, and tagged, as the
+            # layers' own tracks of the release, as the matcher's own pick is: version_view)
+            cand = sc["cand"]
         if kind != "mb":
             # BAR-13: a pressing your code names, chosen by hand, listing too few tracks to tag -
             # tagged from the full entry of its master, as when the matcher picks it
@@ -5577,7 +5696,20 @@ class Engine:
                                                   getattr(self, "_band_ids", None))
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
-        if prop.status == "identified":
+        if prop.status == "identified" and getattr(prop, "one_release_folders", None) and \
+                len(prop.files or []) == len(prop.targets or []):
+            # DSC-11: each album folder of the joined album takes the mark of its own copy (its
+            # SACD layers' rip "HD Audio", the CD layer's rip none), as planned alone
+            files, out = [str(f) for f in prop.files], list(prop.targets)
+            for top, mine in zip(prop.one_release_folders, getattr(prop, "one_release_files", None) or ()):
+                mine = set(map(str, mine))
+                at = [i for i, f in enumerate(files) if f in mine]
+                got = marks.apply([out[i] for i in at], [files[i] for i in at], top, self.profile,
+                                  [prop.full_targets[i] for i in at])
+                for i, t in zip(at, got):
+                    out[i] = t
+            prop.targets = out
+        elif prop.status == "identified":
             prop.targets = marks.apply(prop.targets, prop.files, prop.source_dir, self.profile,
                                        prop.full_targets)
 

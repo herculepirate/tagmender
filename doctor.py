@@ -48,6 +48,7 @@ def registry_checks() -> list[Check]:
         e, state = rq.entry(row["id"]), row["status"]
         if e.web_search:
             continue                          # (web_search_checks says those, with their profiles)
+        fix = row["notice"]
         if state == rq.UNSAFE:
             status, detail = "fail", "file readable by others"
         elif row["ready"]:
@@ -59,10 +60,15 @@ def registry_checks() -> list[Check]:
             else:
                 detail = "installed" if state == rq.INSTALLED else "shared public key"
         else:
-            status = "fail" if e.id == "discogs" else "warn"
+            # everything here is optional (MusicBrainz alone identifies albums): a warning, never a failure
+            status = "warn"
             detail = ("not set" if e.kind == "key" else "not logged in" if e.kind == "login"
-                      else "not installed") + ("" if e.group == rq.RECOMMENDED else " (optional)")
-        out.append(Check(e.check or e.id, status, detail, row["notice"], group=e.group))
+                      else "not installed") + " (optional)"
+            fix = row["notice"]
+            if e.kind == "key":
+                fix += f" Without it: {e.without} Add it in Preferences \u203a Keys (or: tagmender setup)."
+        out.append(Check(e.check or e.id, status, detail, fix if not row["ready"] else row["notice"],
+                         group=e.group))
     return out
 
 

@@ -126,7 +126,11 @@ tagmender doctor --connection    # also: do MusicBrainz, Discogs, AcoustID and t
 
 `tagmender setup` types secrets without echo. Press Enter to keep what is there. `tagmender
 doctor` lists "Required for best results", "Optional" and "Other checks", and adds a `note:` line
-for each missing item. It says where a key comes from (environment or file), never the key itself.
+for each missing item. A missing key, login or program is only a `WARN`: every one of them is
+optional (MusicBrainz alone identifies albums), and the note says what you lose and that you can
+add it in Preferences › Keys (or with `tagmender setup`). `doctor` exits 1 only when something is
+really broken (an unreadable config, a missing required module, a key file others can read) and 0
+otherwise. It says where a key comes from (environment or file), never the key itself.
 
 ### Test Connection
 

@@ -673,6 +673,81 @@ def _progress(i, n, what):
         print(f"\r[{i + 1}/{n}] {Path(what).name[:60]:<60}", end="", file=sys.stderr, flush=True)
 
 
+_STAGE_WORDS = {"musicbrainz": "MusicBrainz", "discogs": "Discogs", "web": "web search",
+                "tags": "reading tags", "ocr": "reading scans", "fingerprint": "fingerprinting",
+                "ai": "asking your AI"}
+_PROVIDER_WORDS = {"musicbrainz": "MusicBrainz", "discogs": "Discogs", "web": "the web search"}
+
+
+def _album_label(folder):
+    """The folder's last two names, "Parent/Album" (no tag reading just to say where we are; the
+    parent may be a library folder, not the artist, so it is not written as an artist)."""
+    p = Path(folder)
+    if p.parent.name and p.parent != p.parent.parent:
+        return f"{p.parent.name}/{p.name}"
+    return p.name
+
+
+class PlanProgress:
+    """What the command line says on stderr while albums are looked up (stdout is never touched).
+    A terminal gets one line rewritten in place; anything else gets one plain line per album
+    (and per wait for a busy service, at most one every 10 s)."""
+
+    def __init__(self, stream=None):
+        import stagetimes
+        self.out = stream if stream is not None else sys.stderr
+        self.tty = bool(getattr(self.out, "isatty", lambda: False)())
+        self.head = ""
+        self.stage = ""
+        self.wait = None                 # (text, until)
+        self._last_wait_line = 0.0
+        self._width = 0
+        self._offs = [stagetimes.on_stage(self._on_stage), stagetimes.on_back_off(self._on_wait)]
+
+    def _text(self):
+        if self.wait and time.monotonic() < self.wait[1]:
+            return f"{self.head}: {self.wait[0]}" if self.head else self.wait[0]
+        return self.head + (f" ({self.stage})" if self.stage else "")
+
+    def _draw(self):
+        if self.tty:
+            text = self._text()
+            print("\r" + text + " " * max(0, self._width - len(text)), end="", file=self.out, flush=True)
+            self._width = len(text)
+
+    def __call__(self, i, n, what):
+        self.stage, self.wait = "", None
+        self.head = f"Looking up {i + 1}/{n}: {_album_label(what)}"
+        if self.tty:
+            self._draw()
+        else:
+            print(self.head, file=self.out, flush=True)
+
+    def _on_stage(self, name):
+        if name.endswith("back-off"):
+            return
+        self.wait = None
+        self.stage = _STAGE_WORDS.get(name, "")
+        self._draw()
+
+    def _on_wait(self, provider, seconds):
+        who = _PROVIDER_WORDS.get(provider, provider)
+        text = f"waiting for {who} (busy, retrying in {max(1, round(seconds))} s)"
+        now = time.monotonic()
+        self.wait = (text, now + seconds)
+        if self.tty:
+            self._draw()
+        elif now - self._last_wait_line >= 10:
+            self._last_wait_line = now
+            print(text, file=self.out, flush=True)
+
+    def done(self):
+        for off in self._offs:
+            off()
+        if self.tty and self._width:
+            print("\r" + " " * self._width + "\r", end="", file=self.out, flush=True)
+
+
 def _plain_note(note):
     """A run note without its reason code ("missing_credentials: Discogs is not used: ..."):
     the Setup notice reads on its own."""
@@ -695,9 +770,11 @@ def _make_plan(args):
         e.force = {os.path.realpath(os.path.expanduser(args.path)): ref}
     if getattr(args, "file_below_score", False):
         e.file_anyway = True          # MOV-5: you asked, for every album of this run
-    p = e.plan(args.path, progress=_progress)
-    if sys.stderr.isatty():
-        print(file=sys.stderr)
+    prog = PlanProgress()
+    try:
+        p = e.plan(args.path, progress=prog)
+    finally:
+        prog.done()
     # what the run itself found (a host whose every call failed): said here, not only in --json
     for prov, note in (p.get("provider_notes") or {}).items():
         if told.get(prov) != note:

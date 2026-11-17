@@ -150,7 +150,7 @@ class Doctor(Base):
         import doctor
         rq.store("acoustid", SECRET)
         found = {c.name: c for c in doctor.registry_checks()}
-        self.assertEqual((found["Discogs token"].status, found["Discogs token"].group), ("fail", rq.RECOMMENDED))
+        self.assertEqual((found["Discogs token"].status, found["Discogs token"].group), ("warn", rq.RECOMMENDED))
         self.assertIn("Discogs is not used", found["Discogs token"].fix)
         app = found["AcoustID application key"]
         self.assertEqual((app.status, app.detail), ("ok", "set (file)"))

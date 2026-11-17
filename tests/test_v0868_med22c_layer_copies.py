@@ -441,12 +441,21 @@ class MED22c_Minor(Base):
                 self.extras(cd, b"CDL")
                 self.extras(ly, b"SAC")
                 if order == "same run":
+                    # DSC-11: planned in one run, the two album folders are one album of the
+                    # release - each folder's own cover, log and scans at its root, a name both
+                    # use kept twice (the second with a suffix), none in a layer's folder
                     plan = self.moving(SetHttp(mb=[the_set()])).plan(self.lib / "Billy Joel")
-                    self.assertEqual([a["status"] for a in plan["albums"]], ["ready", "ready"], pl.preview(plan))
+                    self.assertEqual([a["status"] for a in plan["albums"]], ["ready"], pl.preview(plan))
                     executor.Executor(plan).run()
-                else:
-                    for top in ((cd, ly) if order == "cd first" else (ly, cd)):
-                        executor.Executor(self.moving(SetHttp(mb=[the_set()])).plan(top)).run()
+                    album = self.dest / "Billy Joel" / "1973 - Piano Man"
+                    for n in ("cover", "rip", "Scans/back"):
+                        got = sorted(p_.read_bytes() for p_ in album.glob(n + "*"))
+                        self.assertEqual(len(got), 2, sorted(map(str, album.rglob("*"))))
+                        self.assertTrue(any(b"CDL" in g for g in got) and any(b"SAC" in g for g in got), n)
+                    self.assertEqual({p_.suffix for p_ in (album / "Disc 01 (SACD Stereo)").iterdir()}, {".flac"})
+                    continue
+                for top in ((cd, ly) if order == "cd first" else (ly, cd)):
+                    executor.Executor(self.moving(SetHttp(mb=[the_set()])).plan(top)).run()
                 self.same_end(self.dest / "Billy Joel" / "1973 - Piano Man")
 
     def test_MED22c_a_cd_and_an_sacd_of_one_album_stay_one_album(self):

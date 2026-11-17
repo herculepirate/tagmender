@@ -541,6 +541,86 @@ def _release_set_groups(eng, groups, found, metas, path) -> list:
     return groups
 
 
+def one_release_names(a, b) -> bool:
+    """DSC-11: two sibling folders' names may be one release's - their titles (without the year
+    in front and the brackets: "1973 - Piano Man 50th Anniversary Deluxe Edition [2024 SACD]")
+    the same, or the shorter the longer's first words, half of them at least ("Piano Man 50th
+    Anniversary Deluxe [2024 CD]"). Only such folders are read and looked up together."""
+    x, y = _title_fold(_bare_name(a)).split(), _title_fold(_bare_name(b)).split()
+    if not x or not y:
+        return False
+    if len(x) > len(y):
+        x, y = y, x
+    return y[:len(x)] == x and 2 * len(x) >= len(y)
+
+
+def one_release_pairs(names) -> list:
+    """DSC-11: the pairs of NAMES (folder names, in one parent) one_release_names takes - found
+    by each name's leading words, never by trying every pair (a library's root of thousands of
+    artist folders is asked too)."""
+    words = {n: tuple(_title_fold(_bare_name(n)).split()) for n in names}
+    by = {}
+    for n, w in words.items():
+        if w:
+            by.setdefault(w, []).append(n)
+    out = []
+    for n, w in words.items():
+        for k in range((len(w) + 1) // 2, len(w) + 1):
+            for m in by.get(w[:k], ()):
+                if m != n and (k < len(w) or n < m):
+                    out.append((m, n))
+    return out
+
+
+def _one_release_groups(eng, groups, path) -> list:
+    """DSC-11: album folders side by side in one parent (any parent, an artist's folder too),
+    whose names may be one release's (one_release_names), each an album of its own folder:
+    they stay the albums they are - listed, watched and remembered each as before - and each
+    knows the others (Group.siblings, set_shape "albums"): Engine.identify_all plans them
+    each alone and then joins those each matched for sure to one release, its different discs
+    or layers (Engine._release_folders). Never a folder of two albums, a set of disc folders
+    (DSC-1), a folder joined with its deluxe sibling, DSC-10's sets, a folder excluded or
+    ignored; only below the folder planned."""
+    per_folder = {}
+    for g in groups:
+        per_folder[g.folder] = per_folder.get(g.folder, 0) + 1
+    by_parent = {}
+    for g in groups:
+        d = g.folder
+        if g.siblings or g.discs or g.box or per_folder[d] != 1 or d.parent == d:
+            continue
+        if not (d.parent == path or path in d.parent.parents):
+            continue
+        if any(not (Path(f).parent == d or d in Path(f).parents) for f in g.files):
+            continue                                 # (a deluxe sibling's files joined in)
+        by_parent.setdefault(d.parent, []).append(g)
+    for parent, members in by_parent.items():
+        if len(members) < 2:
+            continue
+        up = list(range(len(members)))
+
+        def top(i):
+            while up[i] != i:
+                up[i] = up[up[i]]
+                i = up[i]
+            return i
+        at = {g.folder.name: i for i, g in enumerate(members)}
+        for a, b in one_release_pairs(list(at)):
+            up[top(at[b])] = top(at[a])
+        clusters = {}
+        for i, g in enumerate(members):
+            clusters.setdefault(top(i), []).append(g)
+        for parts in clusters.values():
+            if not 2 <= len(parts) <= SET_TRIAL_MAX_DISCS:
+                continue
+            parts = sorted(parts, key=lambda g: str(g.folder))
+            if _left_out(eng.profile, parent, [g.folder for g in parts], path):
+                continue
+            for g in parts:
+                g.siblings, g.set_folder, g.set_shape = parts, parent, "albums"
+    return groups
+
+
 def _bare_name(name) -> str:
     """A folder name or title without its year in front and its brackets ("1992 - Title (2CD)
     [Label]" -> "Title")."""
@@ -1166,6 +1246,10 @@ def _plan_folder(eng, path, sc, d: Path, got):
             for c in kids:
                 if c != n and ma.deluxe_named(c, n):
                     join(c, n)
+    # DSC-11: album folders whose names may be one release's are read together (a release may
+    # join them: _one_release_groups)
+    for a, b in one_release_pairs([c for c in kids if not _disc_like(d, c)]):
+        join(a, b)
     members = {}
     for c in kids:
         members.setdefault(top(c), []).append(c)
@@ -1450,9 +1534,9 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
                 groups.append(Group(folder, members, others, single=len(members) == 1))
     groups = _release_set_groups(eng, groups, found, metas, path)    # DSC-10
     groups = _disc_sets(groups, metas)               # DSC-1
-    if hasattr(eng.profile, "joins_deluxe") and not eng.profile.joins_deluxe():
-        return groups
-    return _with_deluxe(eng.profile, groups, path, sc.skip)
+    if not (hasattr(eng.profile, "joins_deluxe") and not eng.profile.joins_deluxe()):
+        groups = _with_deluxe(eng.profile, groups, path, sc.skip)
+    return _one_release_groups(eng, groups, path)    # DSC-11
 
 
 # notes told once for the run, never as each album's provider error (OCR, gnudb, fingerprints
@@ -1948,6 +2032,8 @@ class Engine:
                 out["members"], out["joined"] = set(chosen), props
                 return out
             per = [(i, parts[i], ps) for i, ps in sorted(out["own"].items()) if isinstance(ps, list)]
+            if g.set_shape == "albums":                  # DSC-11: album folders of one release
+                return self._release_folders(folder, parts, per, out)
             if any(self._choice_for(part, alone(part)) for _i, part, _ps in per):
                 return out                               # (a release you chose for one of them)
             got = self._claim(folder, parts, per)
@@ -2431,6 +2517,135 @@ class Engine:
             return self.identify(g)
         finally:
             self._trialling, self._alone = was, alone
+
+    @staticmethod
+    def _slots(p) -> set:
+        """DSC-11: the discs and layers of its release album p's files take: {(disc number,
+        layer)}, the layer "disc" for a plain disc or a hybrid SACD's CD layer (one copy of the
+        disc's CD audio), "stereo" / "multichannel" / "sacd" for an SACD layer (MED-22)."""
+        full = getattr(p, "full_targets", None)
+        ts = full if full and len(full) == len(p.targets or []) else p.targets or []
+        out = set()
+        for t in ts:
+            disc = str((t.get("discnumber") or ["1"])[0]).partition("/")[0].strip() or "1"
+            kind = mb_tags._layer_kind(str((t.get("media") or [""])[0]))[1]
+            lay = str((t.get("~layer") or [""])[0]).casefold()
+            if not kind and lay:
+                kind = "stereo" if "stereo" in lay else "multichannel" if "multi" in lay else "sacd"
+            out.add((disc, kind if kind and kind != "cd" else "disc"))
+        return out
+
+    @staticmethod
+    def _slots_overlap(a: set, b: set) -> bool:
+        """DSC-11: two copies hold one disc or layer alike - the same disc's same layer, or an
+        SACD layer naming no channels beside either of that disc's SACD layers."""
+        for d, k in a:
+            for d2, k2 in b:
+                if d == d2 and (k == k2 or ("sacd" in (k, k2) and "disc" not in (k, k2))):
+                    return True
+        return False
+
+    def _release_folders(self, folder: Path, parts, per, out) -> dict:
+        """DSC-11: album folders side by side (_one_release_groups), each planned alone first, as
+        before. Those each matched for sure on their own evidence (_sure: exact at the auto
+        threshold - never album known, a TIE-1 suggestion nor a pressing picked by country
+        order) to one release - or its twin on the other database, the same pressing (_same_key)
+        - whose files take different discs or layers of it (_slots: a hybrid SACD's CD layer
+        and its stereo and multichannel layers are three; any disc or layer taken twice is two
+        copies of it: they stay apart) are one album of it: one Proposal, its files and targets
+        each folder's own as planned alone (their discs, layers and the release's audio disc
+        total), its group_key the first folder's (set_key), its folders remembered
+        (set_members, one_release_folders: plan.Planner files their own covers, scans and notes
+        at the album's root). Else each folder keeps its own plan. {"own", "members", "joined"}
+        as _release_set."""
+        sure = []
+        for i, part, ps in per:
+            if len(ps) != 1:
+                continue
+            p = ps[0]
+            if not self._sure(p) or getattr(p, "guessed_pick", False) or getattr(p, "suggested", None) \
+                    or getattr(p, "disc_folder", None) is not None or getattr(p, "split", None) \
+                    or getattr(p, "suspect_lossy", "") or getattr(p, "parts", None) \
+                    or getattr(p, "awaits", "") or len(p.targets or []) != len(p.files or []) or not p.files:
+                continue
+            if self._release_of(p) is None:
+                continue
+            sure.append((i, part, p))
+        kinds = []                                       # [(release key, its candidate or None, [(i, part, p)])]
+        for i, part, p in sure:
+            key = self._release_of(p)
+            for k in kinds:
+                if key == k[0]:
+                    k[2].append((i, part, p))
+                    break
+                if key[0] != k[0][0]:
+                    if k[1] is None:
+                        k[1] = self._release_cand(*k[0]) or {}
+                    if self._same_key(k[0], key, k[1]):
+                        k[2].append((i, part, p))
+                        break
+            else:
+                kinds.append([key, None, [(i, part, p)]])
+        kinds = sorted((k for k in kinds if len(k[2]) >= 2), key=lambda k: -len(k[2]))
+        if not kinds:
+            return out
+        if len(kinds) > 1 and len(kinds[1][2]) == len(kinds[0][2]):
+            self.log.info("%s: two releases each hold as many of its album folders: each planned alone", folder)
+            return out
+        key, _cand, members = kinds[0]
+        # (no disc or layer taken twice: two copies of one disc stay apart, never joined)
+        slots = [self._slots(p) for _i, _part, p in members]
+        for a in range(len(slots)):
+            for b in range(a + 1, len(slots)):
+                if self._slots_overlap(slots[a], slots[b]):
+                    self.log.info("%s: '%s' and '%s' both hold a disc of %s: two copies, each planned alone", folder,
+                                  members[a][1].folder.name, members[b][1].folder.name, key[1])
+                    return out
+        totals = {str((t.get("totaldiscs") or [""])[0]).strip() for _i, _part, p in members for t in p.targets}
+        if len(totals) != 1:
+            self.log.info("%s: its album folders count %s discs of %s: each planned alone", folder,
+                          " / ".join(sorted(totals)), key[1])
+            return out
+        members.sort(key=lambda m: m[0])
+        lead_i, lead_part, lead = members[0]
+        joined = copy.copy(lead)
+
+        def every(attr):
+            return [x for _i, _part, p in members for x in (getattr(p, attr, None) or [])]
+
+        def once(attr):
+            return list(dict.fromkeys(every(attr)))
+        joined.files = every("files")
+        joined.targets = every("targets")
+        fulls = [getattr(p, "full_targets", None) for _i, _part, p in members]
+        if all(f and len(f) == len(p.files) for f, (_i, _part, p) in zip(fulls, members)):
+            joined.full_targets = [t for f in fulls for t in f]
+        joined.group_files = list(dict.fromkeys(str(f) for _i, part, p in members
+                                                for f in (getattr(p, "group_files", None) or part.files)))
+        for attr in ("sidecars", "restore", "provider_errors"):
+            merged = {}
+            for _i, _part, p in members:
+                merged.update(getattr(p, attr, None) or {})
+            setattr(joined, attr, merged)
+        for attr in ("evidence", "why", "reason_codes", "release_proven_over"):
+            setattr(joined, attr, once(attr))
+        cr = [getattr(p, "credits_read", None) or {} for _i, _part, p in members]
+        if all(cr):
+            # (REP-2: credits taken back only where every folder's database read them whole)
+            joined.credits_read = {k: (all(c.get(k) for c in cr) if k != "protected" else
+                                       sorted({x for c in cr for x in c.get(k) or ()})) for k in cr[0]}
+        names = ", ".join(f"'{part.folder.name}' -> " + ", ".join(
+            f"disc {d}" + ("" if k == "disc" else f" ({k} layer)")
+            for d, k in sorted(self._slots(p), key=lambda s: (int(s[0]) if s[0].isdigit() else 0, s[1])))
+            for _i, part, p in members)
+        note = f"one release, {len(members)} album folders: {names} ({_release_words(lead)})"
+        joined.notes = [note] + once("notes")
+        joined.set_key = group_key(lead_part.folder, lead_part.files)
+        joined.set_members = [part for _i, part, _p in members]
+        joined.one_release_folders = [str(part.folder) for _i, part, _p in members]
+        out["members"], out["joined"] = {i for i, _part, _p in members}, [joined]
+        self.log.info("%s: %s", folder, note)
+        return out
 
     def _tagged_disc(self, g: Group):
         """IDM-1: the disc folder of a set (its folder's subfolder) holding all of this album's

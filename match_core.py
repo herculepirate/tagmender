@@ -3790,6 +3790,27 @@ def with_pregap(album, cand):
                 pregap_proven=all((p.get("disc") or 1) in proven for p in used))
 
 
+def _medium_words(cand, position, fmt) -> str:
+    """MED-22 / DSC-11: a release's medium (its POSITION in the release's listing) in words, as
+    your copy's discs are numbered - by the physical disc (layer_positions): "disc 1's SACD
+    stereo layer (Hybrid SACD (SACD layer, 2 channels))", never "disc 2" for the second medium
+    of a hybrid SACD listed layer by layer; "disc 2 (CD)" for a disc of its own."""
+    import mb_tags
+    lp = {int(k): int(v) for k, v in (cand.get("layer_positions") or {}).items()}
+    try:
+        pos = int(position)
+    except (TypeError, ValueError):
+        pos = None
+    disc = lp.get(pos, position)
+    fmt_words = fmt or "its format unnamed"
+    label = mb_tags.layer_label(fmt) if fmt else ""
+    if label and pos in lp:
+        layer = {"SACD Stereo": "SACD stereo layer", "SACD Multichannel": "SACD multichannel layer"}.get(
+            label, "SACD layer")
+        return f"disc {disc}'s {layer} ({fmt_words})"
+    return f"disc {disc} ({fmt_words})"
+
+
 def score_candidate(album, cand, cfg, ocr_text=""):
     """Score one candidate against one album. Returns a dict with the
     confidence (0-100), the evidence for it and every gate that failed."""
@@ -3830,7 +3851,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         fmts = {m.get("position"): m.get("format") for m in cand.get("media_info") or ()}
         labels = album.get("version_labels") or {}
         box_note = "; ".join([f"your {labels.get(d) or (album.get('version_discs') or {}).get(d, '')} folder is "
-                              f"disc {m} ({fmts.get(m) or 'its format unnamed'})"
+                              f"{_medium_words(cand, m, fmts.get(m))}"
                               for d, m in sorted(cand["version_media"].items())] + list(cand.get("version_notes") or []))
     t_sim = title_sim(album["title"], cand["title"])
     pts += cfg["w_artist"] * a_sim

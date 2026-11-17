@@ -102,5 +102,18 @@ def parse(value: str) -> tuple[list[str], str]:
     return (classify(value) if value else []), value
 
 
+# TIE-1: what an album-known album's TAGMENDER_REASON says when a tie-break suggested its
+# pressing - followed by the release to choose ("<MBID>" or "discogs:<ID>"), as `plan --release` takes it
+SUGGESTED_WORDS = "pressing suggested, not confirmed: "
+_SUGGESTED = re.compile(re.escape(SUGGESTED_WORDS) + r"(discogs:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+                        re.IGNORECASE)
+
+
+def suggested_ref(value: str) -> str:
+    """TIE-1: the suggested release a TAGMENDER_REASON (or its words) names, or ""."""
+    m = _SUGGESTED.search(str(value or ""))
+    return m.group(1) if m else ""
+
+
 def describe(code: str) -> str:
     return CODES.get(code, code)

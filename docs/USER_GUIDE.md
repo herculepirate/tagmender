@@ -270,7 +270,10 @@ Each album ends in one tier, shown in the plan (after the score) and in the app'
    (your country order, the original release, your preferred release types or formats), that
    pressing is suggested - the status reads "Album known · pressing suggested" and the plan names
    it - and Album > Use Suggested Pressing (or `tagmender plan PATH --release REF`) tags it in full
-   (TIE-1). Marked Partial, not Resolved, because no release is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
+   (TIE-1). So too when only your Sources preference chose between MusicBrainz's and Discogs's
+   pressings. The files' `TAGMENDER_REASON` names the suggested release ("pressing suggested, not
+   confirmed: <release>"), and Needs attention lists such albums as "Pressing suggested — confirm",
+   with Use Suggested Pressing there too. Marked Partial, not Resolved, because no release is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
    again. `web_tag.py --apply` marks its album-only albums the same way.
 3. **Partial** (`TAGMENDER=Partial`, the reason in `TAGMENDER_REASON`): the matcher would not
    pick a release, but the best candidate is the same album - same track count, artist and title

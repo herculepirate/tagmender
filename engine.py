@@ -2033,6 +2033,22 @@ class Engine:
         return p.status == "identified" and planmod.tier_of(p) == "exact" and \
             float(p.confidence or 0) >= planmod._threshold(self.profile, "auto_min_confidence")
 
+    def _suggested_set(self, p) -> bool:
+        """DSC-10 / TIE-1: the album is album known only because its pressings tie and a tie-break
+        suggested one (Proposal.suggested), at the profile's auto threshold at least: as sure of
+        the album as _sure, the pressing proposed."""
+        sg = getattr(p, "suggested", None) or {}
+        return p.status == "identified" and planmod.tier_of(p) == "album_only" and bool(sg.get("id")) and \
+            float(p.confidence or 0) >= planmod._threshold(self.profile, "auto_min_confidence")
+
+    @staticmethod
+    def _suggested_key(p):
+        """("mb" | "discogs", ID) of the release suggested for p (TIE-1), or None."""
+        sg = getattr(p, "suggested", None) or {}
+        if not sg.get("id"):
+            return None
+        return ("mb" if sg.get("source") in ("mb", "musicbrainz") else "discogs", str(sg["id"]))
+
     def _same_release(self, key, q, cand) -> bool:
         """DSC-10: Proposal q's release is the release key (cand): _same_key."""
         other = self._release_of(q)
@@ -2386,11 +2402,14 @@ class Engine:
             trial = Group(folder, files, [f for f in every if f not in files])
             prop = self._set_trial_identify(trial)
             mapping = {d: n for n, d in enumerate(dirs, 1)}
-            if not self._sure(prop) or getattr(prop, "parts", None) or not self._complete(prop):
+            # (TIE-1: a set whose pressings tie, one only suggested, is the set all the same - album
+            # known with the set's suggestion; never left to its discs, each the same guess alone)
+            if not (self._sure(prop) or self._suggested_set(prop)) or getattr(prop, "parts", None) \
+                    or not self._complete(prop):
                 continue
             if len(prop.targets or []) != len(files) or not _discs_as(prop, mapping, total=j):
                 continue
-            key = self._release_of(prop)
+            key = self._release_of(prop) or self._suggested_key(prop)
             foreign = {x for q in parts if {Path(f).parent for f in q.files} <= set(dirs)
                        for x in self._foreign_ids(q.files)}
             if foreign and any(not self._same_key(key, x, self._release_cand(*key) or {}) for x in foreign):
@@ -6249,6 +6268,9 @@ def _release_words(p) -> str:
     if str(p.provider).startswith("web:"):
         return f"{p.provider[4:]} \"{album}\""
     name = {"musicbrainz": "MusicBrainz", "discogs": "Discogs"}.get(str(p.provider).split("+")[0], p.provider)
+    sg = getattr(p, "suggested", None) or {}
+    if not p.release_id and sg.get("id"):                 # (TIE-1: album known, a pressing suggested)
+        return f"album known \"{album}\", {name} release {sg['id']} suggested"
     return f"{name} release {p.release_id} \"{album}\""
 
 

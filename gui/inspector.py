@@ -1078,7 +1078,10 @@ class EvidenceView(QScrollArea):
             (tr("Reason codes: ") + ", ".join(codes)) if codes else ""])) or tr("None"))
 
     def show_row(self, row):
-        self.suggest.hide()
+        ref = reasons.suggested_ref(row.get("reason"))         # (TIE-1: its TAGMENDER_REASON names one)
+        self.suggest.setVisible(bool(ref))
+        if ref:
+            self.suggest.setToolTip(tr("Tag this album with the suggested pressing, {ref}").format(ref=ref))
         self.set("Score", tr("Not identified: marked Unresolved by an earlier run"))
         self.set("Source", "")
         self.set("What matched", "")

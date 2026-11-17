@@ -3469,6 +3469,12 @@ TIER_WORDS = {"exact": "exact release", "album_only": "album only (pressing unkn
 def _album_only_reason(prop) -> str:
     """TAGMENDER_REASON of an album-only album: the album is known, its pressing is not."""
     tied = next((w for w in prop.why or [] if str(w).startswith("pressing unknown")), "")
+    ref = str((getattr(prop, "suggested", None) or {}).get("ref") or "")
+    if ref:
+        # TIE-1: a tie-break suggested the pressing - which one, so you can confirm it later
+        # (Needs attention, `tagmender plan PATH --release REF`)
+        return reasons.encode(f"album known, pressing not established: {reasons.SUGGESTED_WORDS}{ref}",
+                              ["ambiguous_release"])
     words = "album known, pressing not established" + (f": {tied.split(':', 1)[0]}" if tied else "")
     return reasons.encode(words, ["ambiguous_release"])
 

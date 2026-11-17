@@ -33,6 +33,9 @@ SHORT = {"no_candidate": N_("Not found"), "incomplete_album": N_("Track count di
          "partially_tagged": N_("Partly tagged"), "other": N_("Not identified")}
 
 
+# TIE-1: an album known whose pressing a tie-break suggested (its TAGMENDER_REASON names it)
+SUGGESTED = N_("Pressing suggested — confirm")
+
 WATCH_LOOK_MS = 5 * 60 * 1000
 
 
@@ -98,8 +101,8 @@ class Attention(QWidget):
         self.table.activated.connect(lambda *_: self.retry())       # (Return, or a double click)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(
-            lambda pos: popup_menu(self, self.table, pos, [self.win.act(k) for k in ("retry", "search_web",
-                                                                                     "open_folder", "copy_path")]))
+            lambda pos: popup_menu(self, self.table, pos, [self.win.act(k) for k in (
+                "retry", "use_suggested_pressing", "search_web", "open_folder", "copy_path")]))
         self.views.addWidget(self.table)
         lay.addWidget(self.views, 1)
         acts = FlowLayout()                     # (wraps when narrow; the commands' own words: one name each)
@@ -272,6 +275,8 @@ class Attention(QWidget):
             text = tr("{0} and {1}").format(short_reason(codes[0]), plural(len(codes) - 1, tr("more reason"),
                                                                           tr("more reasons"))) \
                 if len(codes) > 1 else short_reason(codes[0])
+            if reasons.suggested_ref(r.get("reason")):
+                text = tr(SUGGESTED)                    # (TIE-1: album known, a pressing yours to confirm)
             it = status_cell(QTableWidgetItem(), "unresolved", text)
             tip = [reasons.describe(c).capitalize() for c in codes]
             if "missing_credentials" in codes:                     # (which key, and where to set it)
@@ -347,6 +352,28 @@ class Attention(QWidget):
             ov.set_folders(fs)
         else:
             ov.set_path(fs[0])
+
+    def suggested(self) -> str:
+        """TIE-1: the release suggested for the one album selected (its TAGMENDER_REASON), or ""."""
+        r = self.row()
+        if not r or len(self.folders()) != 1:
+            return ""
+        return reasons.suggested_ref(r.get("reason"))
+
+    def use_suggested(self) -> bool:
+        """TIE-1: confirm the suggested pressing of the album selected: it is previewed in Overview
+        with that release chosen (Overview.preview_release, as Change Release), tagged in full once
+        you apply. False when there is none, or a run is going on."""
+        ref, f = self.suggested(), self.folder()
+        if not ref or not f:
+            return False
+        ov = self.win.pages["Overview"]
+        if getattr(ov, "running", False):
+            from .search import BUSY
+            self.win.statusBar().showMessage(tr(BUSY), 4000)
+            return False
+        self.win.go("Overview")
+        return bool(ov.preview_release(f, ref))
 
     def show_report(self):
         """The report of the albums listed (gui.report): Partial ones need your decision, Unresolved

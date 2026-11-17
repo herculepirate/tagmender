@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE / "tests"))
 import match_core as mc  # noqa: E402
 import plan as pl  # noqa: E402
 import test_engine as te  # noqa: E402
+from test_v0868_dsc10_set_trial import DSC10Base, DiscHttp, release  # noqa: E402
 
 CFG = dict(mc.DEFAULT_CFG, preferred_countries=[])
 SECS = [219.0, 450.0, 539.0, 186.0, 330.0, 470.0, 288.0, 245.0, 238.0, 115.0]
@@ -138,6 +139,7 @@ class TIE1_Matcher(unittest.TestCase):
 
 
 CA, US = "0a8e97fd-4f6a-4bd7-8e4b-6d3a0b2ad2f1", "1b9f08ae-5a7b-4ce8-9f5c-7e4b1c3be3a2"
+VOY_DE, VOY_US = "4e2b3cd1-8d9e-4f1b-a27f-0b7e4f6e16d5", "5f3c4de2-9e0f-4a2c-b380-1c8f5a7f27e6"
 FIRST, LATER = "2c0f19bf-6b7c-4df9-a05d-8f5c2d4cf4b3", "3d1a2bc0-7c8d-4e0a-b16e-9a6d3e5d05c4"
 
 
@@ -251,8 +253,98 @@ class TIE1_Engine(te.Base):
         self.assertEqual(p.suggested["ref"], CA)
         self.assertIn("pressing suggested", p.reason)
 
+    def test_TIE1_the_reason_names_the_suggestion(self):
+        d = self.album("Band T", "Album T")
+        e = self.eng(self.http())
+        a = pl.build([e.identify(e.albums_in(d)[0])], e.profile, "job", extra_roots=[self.lib])["albums"][0]
+        import reasons
+        why = a["identification"]["reason"]
+        self.assertEqual(why, f"ambiguous_release: album known, pressing not established: "
+                              f"pressing suggested, not confirmed: {CA}")
+        self.assertLessEqual(len(why), reasons.MAX_LEN)
+        self.assertEqual(reasons.suggested_ref(why), CA)
+        self.assertEqual(reasons.suggested_ref("ambiguous_release: album known, pressing not established"), "")
+        # (written to the files as TAGMENDER_REASON)
+        self.assertEqual({str((fe["changes"].get("tagmender_reason") or [""])[0]) for fe in a["files"]}, {why})
+
+    def test_TIE1_needs_attention_report_lists_it_to_confirm(self):
+        import report
+        rows = [{"folder": "/m/A", "codes": ["ambiguous_release"], "mark": "Partial",
+                 "reason": f"album known, pressing not established: pressing suggested, not confirmed: {CA}"},
+                {"folder": "/m/B", "codes": ["ambiguous_release"], "mark": "Partial",
+                 "reason": "album known, pressing not established: pressing unknown (2 pressings fit equally)"}]
+        rep = report.for_attention(rows, look_up=False)
+        self.assertEqual([(r["folder"], r["section"]) for r in rep["rows"]], [("/m/A", "decide")])
+        self.assertIn(f"--release {CA}", rep["rows"][0]["issue"])
+
+    def sources(self, prefer, linked=False):
+        d = self.album("Band T", "Album T")
+        mb = self.rel(CA, "CA", "CA-100", "Maple", "0000000000017")
+        if linked:                                       # (MusicBrainz's entry links Discogs's: one pressing)
+            mb["relations"] = [{"type": "discogs", "url": {"resource": "https://www.discogs.com/release/904"}}]
+        dg = te.dg_release(904, "Band T", "Album T", catno="DG-904", country="Germany")
+        if linked:                                       # (and Discogs's entry is that same pressing)
+            dg = te.dg_release(904, "Band T", "Album T", catno="CA-100", country="Canada")
+            dg["labels"] = [{"name": "Maple", "catno": "CA-100"}]
+            dg["identifiers"] = [{"type": "Barcode", "value": "0000000000017"}]
+        e = self.eng(te.FakeHttp(mb=[mb], dg=[dg]))
+        e.use_discogs = True
+        e.cfg["preferred_countries"] = []
+        e.cfg["prefer_source"] = prefer
+        return e.identify(e.albums_in(d)[0])
+
+    def test_TIE1_the_sources_preference_alone_only_suggests(self):
+        """HF-2 / TIE-1: two different pressings, nothing of your copy behind either."""
+        p = self.sources("musicbrainz")
+        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
+        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), (CA, ["discogs:904"]))
+        self.assertIn("Sources prefers MusicBrainz", p.suggested["by"])
+        self.assertFalse([k for k in PRESSING_FIELDS if k in p.targets[0]], p.targets[0])
+        p = self.sources("discogs")
+        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
+        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), ("discogs:904", [CA]))
+
+    def test_TIE1_the_two_databases_one_pressing_stays_exact(self):
+        p = self.sources("musicbrainz", linked=True)
+        self.assertEqual((p.tier, p.release_id), ("exact", CA), (p.why, p.evidence))
+        self.assertFalse(p.suggested)
+
+    def test_TIE1_your_barcode_on_one_database_pick_stays_exact(self):
+        d = self.album("Band T", "Album T", barcode="0000000000017")
+        mb = self.rel(CA, "CA", "CA-100", "Maple", "0000000000017")
+        e = self.eng(te.FakeHttp(mb=[mb], dg=[te.dg_release(904, "Band T", "Album T", catno="DG-904")]))
+        e.use_discogs = True
+        e.cfg["preferred_countries"], e.cfg["prefer_source"] = [], "discogs"
+        p = e.identify(e.albums_in(d)[0])
+        self.assertEqual((p.tier, p.release_id), ("exact", CA), (p.why, p.evidence))
+
+
+class TIE1_Set(DSC10Base):
+    """DSC-10: a set searched for as a whole whose pressings tie is album known as one set."""
+
+    def test_TIE1_a_set_whose_pressings_tie_is_one_album_known(self):
+        top = self.voyage()
+        rels = []
+        for rid, country, code in ((VOY_DE, "DE", "0123456789012"), (VOY_US, "US", "0123456789029")):
+            r = release(rid, "Voyage", ("Dreams", "Live", "Questions"), barcode=code)
+            r["country"], r["release-group"]["id"] = country, "rg-voyage"
+            r["label-info"] = [{"label": {"name": f"Label {country}"}, "catalog-number": f"V-{country}"}]
+            rels.append(r)
+        eng = self.engine(DiscHttp(mb=rels))
+        eng.cfg["preferred_countries"] = ["US"]
+        props = eng.proposals(self.lib)
+        self.assertEqual(len(props), 1, self.summary(props))           # (never each disc on its own)
+        p = props[0]
+        self.assertEqual((p.status, p.tier, p.release_id, p.source_dir), ("identified", "album_only", "", str(top)),
+                         (p.why, p.notes))
+        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), (VOY_US, [VOY_DE]))
+        self.assertEqual([t["discnumber"][0] for t in p.targets], ["1"] * 3 + ["2"] * 3 + ["3"] * 3)
+        self.assertFalse([k for t in p.targets for k in PRESSING_FIELDS if k in t])
+        self.assertTrue(any("found searching for the set" in n for n in p.notes), p.notes)
+
 
 try:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QComboBox, QMainWindow
 except ImportError:                                                   # GUI is optional
     QApplication = None
@@ -332,6 +424,54 @@ class TIE1_Gui(unittest.TestCase):
         v.show_album(self.album(suggested=False), None)
         self.assertTrue(v.suggest.isHidden())
         v.deleteLater()
+
+
+@unittest.skipIf(QApplication is None, "PySide6 not installed")
+class TIE1_NeedsAttention(unittest.TestCase):
+    """The command and the Evidence button on an album Needs attention lists (its TAGMENDER_REASON)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import gui
+        cls.gui = gui
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        import test_gui_shell
+        self.shell = test_gui_shell
+        self.gui.common._set_gui_pref("reduce_motion", True)
+        self.win = self.gui.Main()
+        self.win.show()
+        test_gui_shell.settle(self.app)
+
+    def tearDown(self):
+        self.shell.Shell.dispose(self, self.win)
+
+    def test_TIE1_use_suggested_pressing_from_needs_attention(self):
+        from unittest import mock
+        att = self.win.pages["Needs attention"]
+        self.win.go("Needs attention")
+        rows = [{"folder": "/m/Band/Suggested", "codes": ["ambiguous_release"], "mark": "Partial", "files": 3,
+                 "reason": f"album known, pressing not established: pressing suggested, not confirmed: {CA}"},
+                {"folder": "/m/Band/Tied", "codes": ["ambiguous_release"], "mark": "Partial", "files": 3,
+                 "reason": "album known, pressing not established: pressing unknown (2 pressings fit equally)"}]
+        att.show_rows(rows)
+        texts = {att.table.item(i, 1).data(Qt.UserRole): att.table.item(i, 0).text() for i in range(2)}
+        self.assertEqual(texts["/m/Band/Suggested"], "Pressing suggested — confirm")
+        cmd = self.win.commands["use_suggested_pressing"]
+        for folder, on in (("/m/Band/Tied", False), ("/m/Band/Suggested", True)):
+            i = next(i for i in range(2) if att.table.item(i, 1).data(Qt.UserRole) == folder)
+            att.table.selectRow(i)
+            self.shell.settle(self.app)
+            self.win.update_album_actions()
+            self.assertEqual(cmd.isEnabled(), on, folder)
+            self.assertEqual(not self.win.inspector.evidence.suggest.isHidden(), on, folder)
+        ov = self.win.pages["Overview"]
+        with mock.patch.object(type(ov), "preview_release", return_value=True) as pr:
+            self.win.inspector.evidence.suggest.click()               # (the Evidence tab's button)
+            self.shell.settle(self.app)
+        pr.assert_called_once_with("/m/Band/Suggested", CA)
+        self.assertIs(self.win.stack.currentWidget(), ov)
 
 
 if __name__ == "__main__":

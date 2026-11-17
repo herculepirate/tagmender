@@ -4489,15 +4489,17 @@ def tie_guess(best, pool, why):
 
 def _guessed_between(res, other, by):
     """TIE-1 (combine): RES's pick was chosen over OTHER's (the other database's sure pick) by a
-    tie-break alone: marked as tie_guess (the other pressing added to any it was already chosen
-    over). RES is returned."""
+    tie-break or a preference alone: RES with a copy of its pick marked tie_guess (the other
+    pressing added to any it was already chosen over)."""
     best = res["best"]
     was = best.get("tie_guess") or {}
     others = {(x["source"], x["id"]): x for x in list(was.get("others") or []) + [pressing_facts(other)]}
     words = [x for x in str(was.get("by") or "").split("; ") if x]
-    best["tie_guess"] = {"by": "; ".join(dict.fromkeys(words + [by])), "pick": pressing_facts(best),
-                         "others": list(others.values())}       # (combine runs more than once: each once)
-    return res
+    # (on a copy of the pick: the scored entry keeps only classify's own guess, so a later
+    # combine of the same results never finds this one on it)
+    guess = {"by": "; ".join(dict.fromkeys(words + [by])), "pick": pressing_facts(best),
+             "others": list(others.values())}
+    return dict(res, best=dict(best, tie_guess=guess))
 
 
 def _one_length_off(best, cfg):
@@ -5835,8 +5837,14 @@ def _musicbrainz_decides(mb_result, dg_result):
     tagged = _tagged_one(mb_result, dg_result)
     if tagged:
         return tagged
-    return _noted(mb_result, f"Discogs's pick ({dg_best['cand']['id']}) is another pressing; MusicBrainz "
-                             "decides (Sources: MusicBrainz preferred)")
+    if mine:
+        return _noted(mb_result, f"Discogs's pick ({dg_best['cand']['id']}) is another pressing; MusicBrainz "
+                                 "chosen: only its pressing has evidence about your copy behind it")
+    # TIE-1 / HF-2: two pressings, nothing of your copy behind either: the Sources preference is a
+    # preference, not evidence - MusicBrainz's pick is proposed, Discogs's beside it (album known)
+    return _guessed_between(_noted(mb_result, f"Discogs's pick ({dg_best['cand']['id']}) is another pressing; "
+                                              "MusicBrainz decides (Sources: MusicBrainz preferred)"),
+                            dg_best, "Sources prefers MusicBrainz")
 
 
 def _tagged_one(*results):
@@ -6212,8 +6220,10 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             if prefer == "discogs":
                 # (neither pick has evidence about your copy: the preference breaks the tie,
                 # in place of a guess by date or country order)
-                return _noted(out, f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; "
-                                   "Discogs decides (Sources: Discogs preferred)")
+                # (TIE-1 / HF-2: a preference, not evidence - Discogs's pick is proposed, album known)
+                return _guessed_between(_noted(out, f"MusicBrainz's pick ({mb_best['cand']['id']}) is another "
+                                                    "pressing; Discogs decides (Sources: Discogs preferred)"),
+                                        mb_best, "Sources prefers Discogs")
             if not countries and (mb_result.get("cfg", {}).get("evidence_pass")
                                   or dg_result.get("cfg", {}).get("evidence_pass")):
                 return _guessed(out, mb_result)          # (the country order is still to come: TIE-2)
@@ -6259,6 +6269,10 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
         elif mb_result and mb_result["status"] == "auto" and mb_best:
             dg_result["best"]["notes"] = dg_result["best"]["notes"] + [
                 f"MusicBrainz's pick ({mb_best['cand']['id']}) is another pressing; Discogs decides"]
+            if prefer == "discogs" and not has_evidence(dg_result["best"], mb_best):
+                # (TIE-1 / HF-2: nothing of your copy behind either pick - the Sources preference
+                # is a preference, not evidence: Discogs's pick is proposed, MusicBrainz's beside it)
+                return _guessed_between(out, mb_best, "Sources prefers Discogs")
         return out
     if mb_result and mb_result["status"] == "auto":
         folder = _folder_fit_disputes(mb_result, dg_result)

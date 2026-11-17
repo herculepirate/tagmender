@@ -229,7 +229,7 @@ class Main(QMainWindow):
             "tab_artwork": lambda: self.inspector.show_tab("Artwork"),
             "tab_evidence": lambda: self.inspector.show_tab("Evidence"),
             "use_release": lambda: ov().choose_release(),
-            "use_suggested_pressing": lambda: search.use_suggested(ov()),     # TIE-1
+            "use_suggested_pressing": self.use_suggested_pressing,            # TIE-1
             **search.handlers(ov),                               # Search for Release, Other Versions, Pressing
             **manual_match.handlers(ov),                         # Match Files Manually
             "lookup_cd": self.lookup_cd,
@@ -389,6 +389,13 @@ class Main(QMainWindow):
             QApplication.clipboard().setText(text)
             self.statusBar().showMessage(tr("Copied the folder.") if os.path.isabs(text) else tr("Copied the row."),
                                          3000)
+
+    def use_suggested_pressing(self):
+        """TIE-1: Album > Use Suggested Pressing, for the album selected on the page shown."""
+        att = self.pages.get("Needs attention")
+        if att is not None and self.stack.currentWidget() is att:
+            return att.use_suggested()
+        return search.use_suggested(self.pages["Overview"])
 
     def album(self):
         """("overview", album) or ("attention", folder) for the page shown, else (None, None)."""
@@ -617,8 +624,11 @@ class Main(QMainWindow):
             self.commands[k].setEnabled(bool(kind) and idle)
         self.commands["use_release"].setEnabled(kind == "overview" and idle)
         search.update_commands(self.commands, ov, kind == "overview" and idle)
-        # TIE-1: only an album known whose pressing a tie-break proposed
-        sugg = kind == "overview" and idle and search.can_use_suggested(x)
+        # TIE-1: only an album known whose pressing a tie-break proposed (Overview's plan, or the
+        # TAGMENDER_REASON of an album Needs attention lists)
+        att = self.pages.get("Needs attention")
+        sugg = idle and ((kind == "overview" and search.can_use_suggested(x))
+                         or (kind == "attention" and att is not None and bool(att.suggested())))
         self.commands["use_suggested_pressing"].setEnabled(sugg)
         manual_match.update_commands(self.commands, ov, kind == "overview" and idle)
         self.update_m8_actions(kind, x, idle)

@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from test_engine import Base  # noqa: E402  (isolated settings and state)
 
 try:
@@ -353,15 +354,207 @@ class PerfGui(Base):
             ov.busy(False)
         self.assertEqual(ov.wait_words(), "")                               # (the work ended)
 
-    def test_a_back_off_hook_is_listened_to_where_there_is_one(self):
+    def test_a_back_off_hook_is_listened_to_and_let_go(self):
         import stagetimes
         from gui import overview
-        got = []
-        with mock.patch.object(stagetimes, "on_back_off", got.append, create=True):
-            self.assertTrue(overview.listen_for_back_off(print))
-        self.assertEqual(got, [print])
-        if not hasattr(stagetimes, "on_back_off"):
-            self.assertFalse(overview.listen_for_back_off(print))
+        seen = []
+        stop = overview.listen_for_back_off(lambda p, sec: seen.append((p, sec)))
+        self.assertTrue(callable(stop))
+        stagetimes.back_off("web", 2.0)
+        stop()
+        stagetimes.back_off("web", 2.0)
+        self.assertEqual(seen, [("web", 2.0)])
+        with mock.patch.object(stagetimes, "on_back_off", None):
+            self.assertIsNone(overview.listen_for_back_off(print))
+
+    def test_a_real_back_off_is_said_in_the_status_bar(self):
+        """The matcher's own Http, refused once with a 503 (a stand-in urlopen: nothing is asked
+        of the network): the page says the wait as the request's thread reports it."""
+        import io
+        import sqlite3
+        import urllib.error
+        import match_albums as ma
+        import match_core as mc
+        http = ma.Http(sqlite3.connect(":memory:", check_same_thread=False),
+                       dict(mc.DEFAULT_CFG, mb_delay=0, discogs_delay=0), "")
+        tries = []
+
+        def urlopen(req, timeout=None):
+            tries.append(1)
+            if len(tries) == 1:
+                raise urllib.error.HTTPError(req.full_url, 503, "busy", {"Retry-After": "20"}, None)
+            return io.BytesIO(b'{"ok": 1}')
+        out = []
+        ov = self.ov
+        ov.busy(True)
+        try:
+            with mock.patch.object(ma.urllib.request, "urlopen", urlopen), \
+                    mock.patch.object(ma.Http, "_pause", lambda _s, _sec: None), \
+                    mock.patch.object(ma, "_tell", lambda text: None):
+                th = threading.Thread(target=lambda: out.append(
+                    http.get_json("https://musicbrainz.org/ws/2/release/x?fmt=json", "mb")))
+                th.start()
+                th.join(10)
+            self.assertEqual(out, [{"ok": 1}])
+            self.assertTrue(until(self.app, lambda: "Waiting for" in self.win.statusBar().currentMessage()))
+            self.assertRegex(self.win.statusBar().currentMessage(),
+                             r"^Waiting for MusicBrainz \(busy, retrying in 2[01] s\)$")
+        finally:
+            ov.busy(False)
+
+    def test_a_real_listing_streams_its_albums_into_the_list(self):
+        """The engine's own listing of synthetic albums: each album's row comes as it is read
+        (on_album), and the list ends as the listing's, each album once."""
+        import engine
+        from gui import overview
+        from test_v0869_perf_listing import album
+        lib = self.top / "lib"
+        for i in range(4):
+            album(lib / f"Band {i}" / f"2001 - Album {i}", f"Band {i}", f"Album {i}", n=2)
+        streamed, real = [], engine.Engine.listing
+
+        def listing(e, path, within=None, meta=None, on_album=None):
+            def each(a):                                                   # (a share: each folder takes a while)
+                streamed.append(a)
+                on_album(a)
+                time.sleep(0.25)
+            return real(e, path, within=within, meta=meta, on_album=each if on_album else None)
+        shown = []
+        orig = overview.Overview.listed_some
+        with mock.patch.object(engine.Engine, "listing", listing), \
+                mock.patch.object(overview.Overview, "listed_some",
+                                  lambda s_, albums: shown.append(len(albums)) or orig(s_, albums)):
+            self.ov.set_path(str(lib))
+            self.wait_idle()
+        keys = self.keys(self.ov.plan["albums"])
+        self.assertEqual(len(keys), 4)
+        self.assertEqual(len(set(keys)), 4)
+        self.assertEqual([self.ov.album_key(a) for a in streamed], keys)    # (the same albums, in order)
+        self.assertGreater(sum(shown), 0)                                   # (rows came before its end)
+        self.assertIs(self.ov.model.albums, self.ov.plan["albums"])
+
+    # ---- review fixes -----------------------------------------------------------------------
+    def test_a_folder_dropped_during_a_refile_waits_and_is_listed_once(self):
+        import engine
+        libx = self.top / "lib" / "X"
+        libx.mkdir(parents=True)
+        (libx / "01.flac").write_bytes(b"")
+        self.albums[str(libx)] = [entry(libx, "lib-X"), dict(entry(libx, "lib-X2"), album_files=[str(libx / "02.flac")])]
+        s = StandIn(self.albums, hold=[libx])
+        with mock.patch.object(engine.Engine, "listing", s.listing):
+            self.ov.set_path(str(self.first))
+            self.wait_idle()
+            a = self.ov.plan["albums"][0]
+            a["status"] = "done"
+            a["files"] = [{"src": a["album_files"][0], "dst": str(libx / "01.flac"), "op": "move"}]
+            with mock.patch.object(type(self.ov), "look_up", lambda *_a, **_k: None):
+                self.ov.refile([a], "")
+                self.assertTrue(until(self.app, lambda: self.ov.running))
+                self.assertEqual(self.ov.add_later([str(libx)]), [str(libx)])
+                self.assertEqual(self.ov._reading, [])                    # (not read at once: it waits)
+                s.release()
+                self.wait_idle()
+        keys = self.keys(self.ov.plan["albums"])
+        self.assertEqual(len(keys), len(set(keys)), keys)
+        self.assertIn("lib-X", keys)
+
+    def test_refound_never_lists_an_album_twice(self):
+        ov = self.ov
+        ov.path = str(self.first)
+        listed = entry(self.other / "A", "other-A")
+        done = dict(entry(self.first / "A", "first-A"), status="done")
+        ov.plan = {"albums": [done, listed], "listed": True}
+        ov.model.set_plan(ov.plan)
+        with mock.patch.object(type(ov), "look_up") as look_up:
+            ov.refound([(done, str(self.other), [dict(listed), entry(self.other / "B", "other-B")])], "")
+        self.assertEqual(self.keys(ov.plan["albums"]), ["other-B", "other-A"])
+        self.assertEqual(sorted(ov.album_key(x) for x in look_up.call_args.args[1]), ["other-A", "other-B"])
+
+    def test_a_folder_dropped_into_one_being_added_waits(self):
+        import engine
+        s = StandIn(self.albums, hold=[self.other])
+        with mock.patch.object(engine.Engine, "listing", s.listing):
+            self.ov.set_path(str(self.first))
+            self.wait_idle()
+            self.ov.add_to_list([str(self.other)])
+            self.assertTrue(until(self.app, lambda: self.ov.running and "other-A" in self.keys()))
+            self.ov.add_later([str(self.other / "B")])                   # (inside the folder being added)
+            self.assertEqual(self.ov._reading, [])
+            s.release()
+            self.wait_idle()
+        keys = self.keys(self.ov.plan["albums"])
+        self.assertEqual(len(keys), len(set(keys)), keys)
+
+    def test_an_early_read_cancelled_and_dropped_again_is_the_newer_one(self):
+        from gui import overview
+        ov = self.ov
+        ov.path = str(self.first)
+        calls = []
+        with mock.patch.object(overview, "start", lambda _o, work, done, **kw: calls.append(done)):
+            ov.busy(True)
+            ov._work_kind = "listing"
+            ov.later = [str(self.other)]
+            self.assertTrue(ov.read_early([str(self.other)]))
+            ov.worker = mock.Mock(cancelled=False)
+            ov.cancel()                                                    # (the first read: let go)
+            ov.worker = None
+            ov.later = [str(self.other)]
+            self.assertTrue(ov.read_early([str(self.other)]))
+        old, new = calls
+        f = str(self.other)
+        stale = [(f, entry(self.other / "A", "stale-A"))]
+        old(stale)                                                         # (the first read ends late)
+        self.assertNotIn("stale-A", self.keys())
+        self.assertIsNone(ov._early[f][1])                                 # (still the second one's)
+        new([(f, entry(self.other / "A", "other-A"))])
+        self.assertEqual(self.keys(), ["other-A"])
+        ov.later, ov._early = [], {}
+        ov.drop_provisional()
+        ov.busy(False)
+
+    def test_look_up_ending_beside_an_apply_leaves_the_rows_in_place(self):
+        ov = self.ov
+        ov.path = str(self.first)
+        ov.plan = {"albums": self.many(5)}
+        ov.model.set_plan(ov.plan)
+        ov.busy(True)
+        ov.apply_worker = object()                                         # (APL-1: an Apply beside it)
+        try:
+            with mock.patch.object(ov.table, "sortByColumn") as by_column, \
+                    mock.patch.object(ov.proxy, "setDynamicSortFilter") as dyn:
+                ov.look_up_ended()
+            by_column.assert_not_called()
+            dyn.assert_not_called()
+            self.assertTrue(ov.running)
+            with mock.patch.object(ov, "sort_by_status") as sort:
+                ov.alongside_ended()                                       # (it ends: sorted once)
+            sort.assert_called_once()
+        finally:
+            ov.apply_worker = None
+            ov.busy(False)
+
+    def test_apply_is_not_started_when_work_began_while_you_confirmed(self):
+        import gui_screens
+        from gui import overview
+        ov = self.ov
+        ov.path = str(self.first)
+        ov.planned(gui_screens.sample_plan(self.top))
+        settle(self.app, 100)
+        self.assertTrue(ov.actionable())
+        chosen = ov.selected_albums()
+
+        def confirm(*_a, **_k):                                            # (a look-up starts meanwhile)
+            ov.busy(True)
+            return True
+        try:
+            with mock.patch.object(overview.sheets, "confirm", confirm), \
+                    mock.patch.object(type(ov), "start_apply") as start_apply:
+                ov.apply()
+            start_apply.assert_not_called()
+            self.assertIn("Not applied", self.win.statusBar().currentMessage())
+            self.assertEqual(ov.selected_albums(), chosen)                  # (your selection kept)
+        finally:
+            ov.busy(False)
 
     # ---- a drop's paths, resolved per folder ------------------------------------------------
     def test_a_drop_is_held_through_a_link_to_a_folder_listed(self):
@@ -376,6 +569,22 @@ class PerfGui(Base):
                                                    str(self.first / "B"), str(self.third)])
         self.assertEqual(present, [str(self.other / "A"), str(self.other / "A" / "01.flac"), str(self.first / "B")])
         self.assertEqual(new, [str(self.third)])
+        ov.plan = None
+
+    def test_the_target_of_a_linked_album_file_is_held(self):
+        import os
+        from gui import manual_match
+        elsewhere = self.top / "elsewhere"
+        elsewhere.mkdir()
+        target = elsewhere / "01.flac"
+        target.write_bytes(b"")
+        link = self.first / "A" / "01.flac"
+        os.symlink(target, link)
+        ov = self.ov
+        ov.path = None
+        ov.plan = {"albums": [{"source_dir": str(link.parent), "files": [{"src": str(link)}],
+                               "album_files": [str(link)]}]}
+        self.assertEqual(manual_match.new_paths(ov, [str(target)]), ([], [str(target)]))
         ov.plan = None
 
 

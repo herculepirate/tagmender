@@ -420,7 +420,9 @@ def new_paths(page, paths) -> tuple[list, list]:
         r = real_dirs.get(d)
         if r is None:
             r = real_dirs[d] = os.path.realpath(d or ".")
-        return os.path.join(r, name)
+        joined = os.path.join(r, name)
+        # (a file that is itself a link: held as the file it points to, as before)
+        return os.path.realpath(joined) if os.path.islink(joined) else joined
     held = {real(f) for a in plan.get("albums") or []
             for f in [fe.get("src") for fe in a.get("files") or []] + list(a.get("album_files") or []) if f}
     folders = {os.path.dirname(f) for f in held}

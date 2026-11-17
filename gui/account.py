@@ -715,6 +715,7 @@ class RatingBox(QWidget):
         self.note.setProperty("role", "caption")
         row.addWidget(self.note, 1)
         self._token = None
+        self._read = (None, None, None)                 # (what was read last: its key, its token, what it read)
 
     def show_album(self, album, file=None):
         """Show the rating of album's file (None: all its files), read on a worker."""
@@ -728,7 +729,19 @@ class RatingBox(QWidget):
             self.stars.set_value(mba.stars(mine))
             self.note.setText(tr("Your rating"))
             return
+        # (the same files of the same album entry shown again - its row was drawn again, a look-up
+        # of another album went on: what was read is shown, or the read still running is awaited;
+        # never read again each time)
+        key = (id(album), file, tuple(files), (album or {}).get("status"))
+        was, was_token, was_got = self._read
+        if key == was and was_got is not None:
+            self._token = None
+            self._show(was_got)
+            return
+        if key == was and was_token is not None and self._token is was_token:
+            return
         token = self._token = object()
+        self._read = (key, token, None)
 
         def work(_w):
             got = set()
@@ -740,12 +753,21 @@ class RatingBox(QWidget):
             return got
 
         def done(got):
+            if self._read[1] is token:
+                self._read = (key, token, got)
             if self._token is not token:
                 return
-            self.stars.set_value(next(iter(got)) if len(got) == 1 else None)
-            self.note.setText(tr("Differs between files") if len(got) > 1
-                              else tr("No rating") if self.stars.value() is None else "")
-        start(self, work, done, failed=lambda _m: None)
+            self._show(got)
+
+        def failed(_m):
+            if self._read[1] is token:
+                self._read = (None, None, None)
+        start(self, work, done, failed=failed)
+
+    def _show(self, got):
+        self.stars.set_value(next(iter(got)) if len(got) == 1 else None)
+        self.note.setText(tr("Differs between files") if len(got) > 1
+                          else tr("No rating") if self.stars.value() is None else "")
 
     def _mine(self):
         """Your edit's rating value for what is shown, or None."""

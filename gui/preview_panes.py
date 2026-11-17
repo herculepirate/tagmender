@@ -41,9 +41,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFram
                                QToolButton, QTreeView, QVBoxLayout, QWidget)
 
 from . import icons, style
-from .common import _gui_prefs, _set_gui_pref, album_words, label_for, left_header, plural, popup_menu, reasons, say
+from .common import (_gui_prefs, _set_gui_pref, album_words, label_for, left_header, planmod, plural, popup_menu,
+                     profile_colour, reasons, say)
 from .i18n import N_, tr
-from .models import (fill_roles, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
+from .models import (PlanModel, can_apply, fill_roles, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
 from .tagnames import display as tag_name
 from .widgets import Segmented
@@ -192,7 +193,6 @@ def album_facts(a) -> str:
 
 
 def _held(a) -> bool:
-    import plan as planmod
     return a.get("status") in ("unresolved", "failed", "conflict") or (a.get("status") == "ready" and planmod.held(a))
 
 
@@ -385,11 +385,12 @@ def _scope_files(album, kind, key):
 # lazy trees
 # --------------------------------------------------------------------------
 class Node:
-    __slots__ = ("kind", "parent", "row", "kids", "album", "data", "__weakref__")
+    __slots__ = ("kind", "parent", "row", "kids", "album", "data", "ix", "__weakref__")
 
     def __init__(self, kind, parent, row, album=None, data=None):
         self.kind, self.parent, self.row, self.album, self.data = kind, parent, row, album, data or {}
         self.kids = None
+        self.ix = None                                # ({column: (row, its index)}: LazyTree.index_of)
 
 
 class LazyTree(QAbstractItemModel):
@@ -420,16 +421,29 @@ class LazyTree(QAbstractItemModel):
         kids = self.kids(p)
         if not (0 <= row < len(kids) and 0 <= col < len(self.COLS)):
             return QModelIndex()
-        return self.createIndex(row, col, kids[row])
+        return self.index_of(kids[row], col)
 
     def index_of(self, node, col=0):
-        return QModelIndex() if node is None or node is self.top else self.createIndex(node.row, col, node)
+        """NODE's index in column COL, made once while its row stays (a view asks for the same
+        indexes again at each redraw, and each made by Qt let another thread take Python's lock,
+        and waited for it back)."""
+        if node is None or node is self.top:
+            return QModelIndex()
+        ix = node.ix
+        if ix is None:
+            ix = node.ix = {}
+        got = ix.get(col)
+        if got is not None and got[0] == node.row:
+            return got[1]
+        made = self.createIndex(node.row, col, node)
+        ix[col] = (node.row, made)
+        return made
 
     def parent(self, idx=QModelIndex()):
         if not idx.isValid():
             return QModelIndex()
         p = idx.internalPointer().parent
-        return QModelIndex() if p is None or p is self.top else self.createIndex(p.row, 0, p)
+        return QModelIndex() if p is None or p is self.top else self.index_of(p)
 
     def rowCount(self, parent=QModelIndex()):
         if parent.isValid() and parent.column() != 0:
@@ -465,9 +479,26 @@ class LazyTree(QAbstractItemModel):
             node.kids = None
 
 
+CELLS_ONE_BY_ONE = 4                    # (rows changed at most, told cell by cell)
+
+
+def cells_changed(model, lo, hi, cols):
+    """Top rows LO..HI of MODEL changed, in its COLS columns. A few rows: each cell told on its
+    own, so the view draws those rows again, not every row it shows (a range of cells is drawn
+    again whole: the albums pane's tree asks Python a few hundred times for a full redraw - with
+    a look-up running on another thread each call waits for Python's lock - at each album looked
+    up). More rows: the range."""
+    if hi - lo < CELLS_ONE_BY_ONE:
+        for r in range(lo, hi + 1):
+            for c in range(cols):
+                i = model.index(r, c)
+                model.dataChanged.emit(i, i)
+    else:
+        model.dataChanged.emit(model.index(lo, 0), model.index(hi, cols - 1))
+
+
 def tint_of(name):
     """The wash of profile NAME's colour (gui.common.profile_colour), or None."""
-    from .common import profile_colour
     return style.profile_tint(profile_colour(name)) if name else None
 
 
@@ -691,8 +722,12 @@ class AlbumsModel(LazyTree):
 
     # ---- the list's rows, followed --------------------------------------------------------------
     def album_at(self, r):
-        src = self.rows.mapToSource(self.rows.index(r, 0))
         albums = getattr(self.rows.sourceModel(), "albums", None) or []
+        order = getattr(self.rows, "_rows", None)          # (SortedRows: its rows' source rows, read
+        if isinstance(order, list):                       # directly - asked of every row at each change)
+            s = order[r] if 0 <= r < len(order) else -1
+            return albums[s] if 0 <= s < len(albums) else None
+        src = self.rows.mapToSource(self.rows.index(r, 0))
         return albums[src.row()] if src.isValid() and 0 <= src.row() < len(albums) else None
 
     def _nodes(self, a, b) -> list:
@@ -752,13 +787,14 @@ class AlbumsModel(LazyTree):
         lo, hi = max(0, top.row()), min(len(self.top.kids) - 1, bottom.row())
         for r in range(lo, hi + 1):
             n = self.top.kids[r]
+            n.data.pop("memo", None)                     # (what its row shows: asked again)
             al = self.album_at(r)
             st = _stamp(al)
             if n.album is not al or n.data.get("stamp") != st:
                 n.album, n.data["stamp"] = al, st
                 self._refresh_kids(n)
         if lo <= hi:
-            self.dataChanged.emit(self.index(lo, 0), self.index(hi, len(self.COLS) - 1))
+            cells_changed(self, lo, hi, len(self.COLS))
 
     def _refresh_kids(self, n):
         """Album row N's entry changed (your edit, a look-up): its discs and tracks read again - in
@@ -785,6 +821,11 @@ class AlbumsModel(LazyTree):
     def node_of(self, album):
         return next((n for n in self.top.kids if n.album is album), None)
 
+    def forget_looks(self):
+        """What the album rows show asked again when next drawn (the scheme, a profile's colour)."""
+        for n in self.top.kids:
+            n.data.pop("memo", None)
+
     def sort(self, column, order=Qt.AscendingOrder):
         self.rows.sort(self.SRC.get(column, 0), order)
 
@@ -797,7 +838,12 @@ class AlbumsModel(LazyTree):
         return []
 
     def _list(self, n, col, role):
-        """What the list says in its column COL for album row N."""
+        """What the list says in its column COL for album row N (asked of the list's own model
+        directly when it can be: no index of the sorted rows made for it)."""
+        order = getattr(self.rows, "_rows", None)
+        src = self.rows.sourceModel()
+        if isinstance(order, list) and isinstance(src, PlanModel) and 0 <= n.row < len(order):
+            return src.data(src.cell(order[n.row], col), role)
         return self.rows.data(self.rows.index(n.row, col), role)
 
     def album_tip(self, n) -> str:
@@ -813,17 +859,38 @@ class AlbumsModel(LazyTree):
         return "<p style='white-space:pre-wrap'>" + html.escape("\n".join(x for x in lines if x)) + "</p>"
 
     def data(self, idx, role=R_DISPLAY):
+        """A cell's ROLE. An album row's are remembered until its row changes (the list's
+        dataChanged: a look-up, your edit, a profile chosen) or forget_looks: a row is drawn
+        again at every change of any row, and asks a dozen roles of each of its cells, many of
+        them through the list (its profile, its tick)."""
         if not idx.isValid():
             return None
-        n, c = idx.internalPointer(), idx.column()
-        a = n.album or {}
+        n = idx.internalPointer()
         if role == R_USER:
-            return a
+            return n.album or {}
         if role == R_BACKGROUND:
             top = n
             while top.parent is not self.top and top.parent is not None:
                 top = top.parent
-            return tint_of(self._list(top, 6, R_DISPLAY))
+            memo = top.data.get("memo")
+            if memo is None:
+                memo = top.data["memo"] = {}
+            if "tint" not in memo:
+                memo["tint"] = tint_of(self._list(top, 6, R_DISPLAY))
+            return memo["tint"]
+        if n.kind != "album":
+            return self._data(idx, n, role)
+        memo = n.data.get("memo")
+        if memo is None:
+            memo = n.data["memo"] = {}
+        key = (idx.column(), role)
+        if key not in memo:
+            memo[key] = self._data(idx, n, role)
+        return memo[key]
+
+    def _data(self, idx, n, role):
+        c = idx.column()
+        a = n.album or {}
         if n.kind == "album":
             if c == self.NAME:
                 if role == R_DISPLAY:
@@ -852,8 +919,7 @@ class AlbumsModel(LazyTree):
                 # symbol and the word; how far to trust the score is in its tooltip and read out)
                 return QColor(style.color("muted")) if role == R_FOREGROUND else None
             if c == self.STATUS and role == R_FOREGROUND:
-                from .style import status_color
-                return status_color(a.get("status")) if not self._list(n, 0, R_DISPLAY) != \
+                return style.status_color(a.get("status")) if not self._list(n, 0, R_DISPLAY) != \
                     label_for(a)[1] else QColor(style.color("muted"))
             return self._list(n, src, role)
         if n.kind == "disc":
@@ -902,11 +968,25 @@ class AlbumsModel(LazyTree):
         return super().headerData(s, o, role)
 
     def flags(self, idx):
-        f = super().flags(idx)
-        if idx.isValid() and idx.internalPointer().kind == "album":
-            f |= Qt.ItemIsDropEnabled
-            if idx.column() == self.NAME:
+        n = idx.internalPointer() if idx.isValid() else None
+        memo = n.data.get("memo") if n is not None and n.kind == "album" else None
+        if memo is None and n is not None and n.kind == "album":
+            memo = n.data["memo"] = {}
+        key = ("flags", idx.column())
+        if memo is not None and key in memo:
+            return memo[key]
+        if n is None or n.kind != "album":
+            return super().flags(idx)
+        # (an album row's: worked out here, not asked of Qt and the list - the tree asks each of
+        # its rows as it lays them out, a call into Python each)
+        f = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled
+        if idx.column() == self.NAME:
+            if isinstance(self.rows.sourceModel(), PlanModel):
+                if n.album is not None and can_apply(n.album):
+                    f |= Qt.ItemIsUserCheckable                 # (as the list's: ticked, applied)
+            else:
                 f |= self.rows.flags(self.rows.index(idx.row(), 1)) & Qt.ItemIsUserCheckable
+        memo[key] = f
         return f
 
     def setData(self, idx, value, role=R_EDIT):
@@ -980,7 +1060,6 @@ class NameDelegate(QStyledItemDelegate):
     def paint_profile(painter, r, prof, sel):
         """A Finder-style dot of the profile's colour, then its name (muted): the profile reads
         in both schemes without its row's wash."""
-        from .common import profile_colour
         dot = style.profile_dot(profile_colour(prof))
         x = r.left()
         if dot is not None:
@@ -1708,6 +1787,7 @@ class PreviewPanes(QWidget):
         for key, _w, icon, _f in BUTTONS:
             self.tag_buttons[key].setIcon(icons.icon(icon, "ink"))
         self.release_btn.setIcon(icons.icon("disc-3", "ink"))
+        self.album_model.forget_looks()
         self.album_view.viewport().update()
         self.folder_view.viewport().update()
 
@@ -1778,7 +1858,7 @@ class PreviewPanes(QWidget):
                     lo = n.row if lo is None else min(lo, n.row)
                     hi = n.row if hi is None else max(hi, n.row)
             if lo is not None:
-                self.folders.dataChanged.emit(self.folders.index(lo, 0), self.folders.index(hi, 1))
+                cells_changed(self.folders, lo, hi, 2)
         finally:
             self._quiet = False
         if self.scope and id(self.scope[0]) in ids:

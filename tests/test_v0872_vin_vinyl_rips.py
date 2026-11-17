@@ -517,6 +517,19 @@ class VIN_Review(VinBase):
                      "[CD1 12345]", "[HD1 192000]", "MC5-1969"):
             self.assertEqual(mc.catno_hints(name), [], name)
 
+    def test_VIN3_an_album_knowns_shared_year_is_no_year_ripped(self):
+        # (Presto "[2025 Vinyl Rip 32bit 96khz Anthem RD1 83736]": two 2025 pressings tie, album known
+        # with their date 2025 - the folder's 2025 is the pressing's, not the year ripped)
+        import plan as planmod
+        from types import SimpleNamespace as NS
+        top = self.rip("1973 - Piano Man [2025 Vinyl Rip 32bit 96khz Anthem RD1 83736]", 96000)
+        kept = sorted(top.glob("*.flac"))
+        targets = {f: {"media": ['12" Vinyl'], "date": ["2025"], "originaldate": ["1973"]} for f in kept}
+        rip = planmod.Planner._vinyl_rip(NS(source_dir=str(top)), kept, targets, {}, True)
+        self.assertEqual(rip["year"], "")
+        targets = {f: {"media": ['12" Vinyl'], "date": ["2015"], "originaldate": ["1973"]} for f in kept}
+        self.assertEqual(planmod.Planner._vinyl_rip(NS(source_dir=str(top)), kept, targets, {}, True)["year"], "2025")
+
     def test_VIN3_year_ripped_never_a_pressing_year(self):
         # M5
         for text in ("Ripped from my 1985 UK first pressing", "Recorded live 1981, ripped from LP",

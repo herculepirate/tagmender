@@ -3461,7 +3461,9 @@ class Planner:
             return {}
         first = targets.get(kept[0]) or {}
         catno = "" if unproven else str((first.get("catalognumber") or [""])[0]).strip()
-        pressing = "" if unproven else str((rel.get("date") or first.get("date") or [""])[0])[:4]
+        # (an album known writes the date its tied pressings share: a year in your folder name that is
+        # theirs - "[2025 Vinyl Rip ...]" of 2025 reissues - is the pressing's, never the year ripped)
+        pressing = str((rel.get("date") or first.get("date") or [""])[0])[:4]
         original = str((first.get("originalyear") or first.get("originaldate") or [""])[0])[:4]
         artist = str((first.get("albumartist") or [""])[0])
         comments = []

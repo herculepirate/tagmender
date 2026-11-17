@@ -1,5 +1,33 @@
 # Release notes
 
+## 0.8.70
+
+**Folders named "Artist - Album" in a folder that is not the artist's**
+- An untagged album in a flat folder ("Music/Radiohead - OK Computer") was looked up with the
+  folder above it ("Music") as its artist, and was left unresolved. The folder name is now read as
+  artist and album too, and the album is looked up both ways (FLD-2). Beside other "Artist - Album"
+  folders it can be tagged as usual; elsewhere what the folder name finds is proposed for you to
+  confirm, since the folder above may be the artist's own ("Radiohead/Live - At Wembley").
+- "Radiohead/Radiohead - OK Computer" is looked up as "OK Computer", and "Artist - 1997 - Album"
+  gives the year.
+
+**The command line says where it is**
+- While a plan runs, `tagmender plan` and `run` say on stderr which album is being looked up
+  ("Looking up 2/7: Music/Radiohead - OK Computer (MusicBrainz)") and when a database asks
+  TagMender to wait. Standard output is unchanged.
+- `tagmender doctor` no longer fails without a Discogs token: every key is optional (MusicBrainz
+  alone identifies albums). It warns, says what you lose without it and where to add it, and exits
+  0 unless something is really broken.
+
+**Licences and releases**
+- The AppImage and the Flatpak now carry TagMender's licence, the third-party notices and the
+  licence texts of everything they bundle (fpcalc, Tesseract, Leptonica, zbar, their libraries).
+  The notices list every bundled component with its version and licence. Because the Japanese
+  reading library (pykakasi) is GPL-3.0-or-later, the AppImage as a whole is distributed under
+  GPL-3.0-or-later; TagMender's own code stays GPL-2.0-or-later.
+- Each version now gets a permanent release of its own (vX.Y.Z) beside the rolling "latest"
+  build, so an older version can be downloaded again.
+
 ## 0.8.69
 
 **Albums show up at once**

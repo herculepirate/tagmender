@@ -730,6 +730,35 @@ to your own list, e.g. `{"map": {"funeral doom metal": "Doom Metal"}, "allowed":
 ["Doom Metal", "Black Metal", "Ambient"], "max": 3}`. Navidrome:
 `~/.config/tagmender/navidrome.json` with `url`, `user`, `password`.
 
+## AI assistance (optional)
+
+TagMender tags fully without AI, and AI is off in every profile until you turn it on. With your
+own key for OpenAI, Anthropic (Claude) or an OpenAI-compatible service (OpenRouter, or a local
+Ollama or LM Studio) - one is enough - it can help with what the rules find hardest:
+
+- read rip notes, NFO and info files in any language (a Japanese 品番, a Russian info file) and
+  scans OCR could not read, for catalogue numbers, barcodes, labels and editions;
+- suggest searches (an original-language title, another way of writing a catalogue number);
+- look for the release's MusicBrainz or Discogs page on the web, with citations;
+- explain a held album or advise on two pressings that tie, when you ask;
+- make covers (Find Covers… › Make AI Covers…): an OpenAI key alone is enough. Claude does not make
+  images; with only an Anthropic key, real covers and scan clean-up still work.
+
+What AI finds is a clue, never proof (rule AI-1). A catalogue number it read counts only when a
+release MusicBrainz or Discogs lists carries it: then that release is the one offered for you to
+confirm, never tagged as sure on that alone. A release only AI's searches found is held for you,
+and a watched folder never files it. An album its barcode or disc ID already proves never asks AI.
+AI never writes release IDs, titles or credits from its own knowledge and never fills a field the
+databases leave empty.
+
+To set it up: Preferences › Keys - enter the key and press Save Keys; under AI assistance press
+Test and pick a model from the list, rank the providers if you have several, choose what each may
+do and its monthly cap, then read **What Is Sent…** and allow it. Turn it on in a profile with
+`"ai": {"enabled": true}` (and `"tasks"` to allow only some of: notes, vision, queries, web,
+explain, ties, covers). Each clue in an album's Evidence names the provider and model it came from
+and what was sent and answered. Audio is never sent. What is sent where, and the costs:
+[PROVIDERS.md](PROVIDERS.md#ai-assistance-optional-off-by-default).
+
 ## Albums no database has
 
 ```bash

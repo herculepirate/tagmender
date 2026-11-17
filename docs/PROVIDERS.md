@@ -27,6 +27,9 @@ each key comes from, never the key.
 | Mojeek (web search) | `mojeek` | `TAGMENDER_MOJEEK_KEY` | `mojeek_key` |
 | Marginalia (web search; else the shared `public` key) | `marginalia` | `TAGMENDER_MARGINALIA_KEY` | `marginalia_key` |
 | Tavily (web search; a paid search service) | `tavily` | `TAVILY_API_KEY` | `tavily_key` |
+| OpenAI (optional AI; covers too) | `ai_openai_key` | `TAGMENDER_OPENAI_API_KEY` | `ai_openai_key` |
+| Anthropic (optional AI; Claude makes no images) | `ai_anthropic_key` | `TAGMENDER_ANTHROPIC_API_KEY` | `ai_anthropic_key` |
+| OpenAI-compatible AI service (OpenRouter; a local model needs none) | `ai_compatible_key` | `TAGMENDER_AI_COMPATIBLE_KEY` | `ai_compatible_key` |
 
 CoverUp uses its keys only where its own options, in settings imported from an existing tagger
 installation, have none.
@@ -120,6 +123,56 @@ stored. `tagmender doctor` shows each profile's chain in order with each
 engine's count this month against its cap (`Web: tavily 12/1000, then marginalia 3/500`), which
 engine answered last and whether its answer linked a release, and each engine set up with the
 profiles using it. The app runs these checks off the window's thread.
+
+## AI assistance (optional, off by default)
+
+TagMender tags fully without AI. With your own key - one provider is enough - a profile may let
+AI help where the rules are weakest; it is never the proof of a release (AI-1 in
+[MATCHING_RULES.md](MATCHING_RULES.md)). Nothing is sent until a profile turns AI on
+(`"ai": {"enabled": true, "tasks": [...]}`), a provider is set up under Preferences › Keys › AI
+assistance, and you allowed it on the first-use sheet ("What Is Sent…").
+
+| Task (profile `ai.tasks`) | What is sent | What comes back, and what it counts for |
+|---|---|---|
+| `notes` | artist, album title, folder name, track titles; the text of the folder's notes, NFO, info and log files; the text OCR read off the scans | catalogue numbers, barcodes, labels, countries, editions, source media, each with the words it was read from; a code must be written in the text sent; it counts only when a database release carries it |
+| `vision` | the same names and up to 4 scan images (JPEG, at most 1600 px), only when OCR found no codes | the same clues, with where on which scan |
+| `queries` | the names and the catalogue numbers already known | up to 4 searches (a transliterated or original-language title, another way of writing a known number), run on MusicBrainz and Discogs |
+| `web` | the names, year and known codes | MusicBrainz or Discogs release pages the provider found and cites; each fetched through the database's API and scored like any match |
+| `explain`, `ties` | the names and the evidence or tied releases' details (only when you ask) | words for you; never change the plan |
+| `covers` | artist, title, year, genre; for Faithful your own cover (after the covers sheet) | a generated cover, marked generated |
+
+Audio is never sent. AI is asked only for an album still unsure once every database step is done;
+an album a barcode or disc ID proves never asks it. Every clue carries `ai:<provider>/<model>`, and
+the plan's Evidence lists what was sent and what came back.
+
+| Provider | Text | Images read | Web search | Makes images | Requests |
+|---|---|---|---|---|---|
+| OpenAI | yes | yes | yes (Responses API `web_search`) | yes (images API, `gpt-image-1` or the image model you name) | `POST /v1/chat/completions` with a JSON schema; `/v1/responses`; `/v1/images/*`; `GET /v1/models` for Test; `Authorization: Bearer` |
+| Anthropic (Claude) | yes | yes | yes (`web_search` server tool) | **no**: Claude does not make images; real covers and scan clean-up still work | `POST /v1/messages` with `output_config.format` JSON schema; `GET /v1/models`; `x-api-key`, `anthropic-version` |
+| OpenAI-compatible (OpenRouter, Ollama, LM Studio) | yes | when you tick "Its model reads images" | when you tick "It searches the web" (cited links read from the answer) | when you name an image model | Chat Completions at your address (`http://localhost:11434/v1` for Ollama, `http://localhost:1234/v1` for LM Studio); a key only when the service needs one; an endpoint without structured output is asked once more without it |
+
+With several providers set up, each task uses the first one in your ranking that can do it and
+that you let serve it. The model is picked from the provider's own list after **Test** (a model
+list costs nothing); TagMender only suggests one. Gemini and Perplexity can be added later as
+providers of the same kind.
+
+**Costs and limits.** Each request may cost money at your provider's rates. Every live request is
+counted per provider and month (Preferences shows this month's requests and tokens); none is sent
+past the provider's monthly cap (500 requests unless you set another; covers count too). Answers
+are cached on this computer by a hash of the request (no key in it), so planning the same folder
+again gives the same answer and costs nothing. Preferences estimates what 100 unsure albums may
+take (requests and tokens; money only when you enter your prices in `ai.json`, `"prices"`).
+TagMender never guesses a price. A local model (Ollama, LM Studio) keeps everything on your
+network and costs nothing per request.
+
+**Failures.** A rejected key, a refusal, a rate limit (429, honouring `Retry-After`), an
+overloaded or failing service (5xx, 529, network errors; tried 3 times with back-off, then left
+alone for 30 minutes after 3 failures in a row), the cap, or an answer that does not parse as the
+task's JSON schema all give nothing: the album is planned as if AI were off, never as "no
+release". Keys are never logged, never in a cache key, and redacted from error messages.
+
+Settings that are not secret (ranking, models, addresses, tasks, caps, prices, consent) are in
+`~/.config/tagmender/ai.json` (mode 600).
 
 ## What each service allows, and what TagMender does (checked 2026-10-24)
 

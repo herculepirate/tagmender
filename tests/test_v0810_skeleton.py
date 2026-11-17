@@ -132,7 +132,7 @@ class ReadyLine(Base):
             ov.model.set_left_out([first], True) if hasattr(ov.model, "set_left_out") else first.update(
                 {PlanModel.LEAVE_OUT: True})
             win.update_album_actions()
-            self.assertIn(f"Apply {n - 1} Album", apply.iconText())          # (unticked: one fewer)
+            self.assertRegex(apply.iconText(), rf"^Apply {n - 1}( Albums?)?$")   # (unticked: one fewer)
             ov.plan = None
             ov.model.set_plan(None)
             win.update_album_actions()

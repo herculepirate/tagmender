@@ -812,7 +812,7 @@ def cmd_plan(args):
     if args.output:
         planmod.save(p, args.output)
         _err(f"Plan saved to {args.output}  (apply with: tagmender apply {args.output})")
-    if not getattr(args, "no_measure", False):
+    if not getattr(args, "no_measure", False) and _prof.get("compare_copies", True) is not False:
         _measure_copies(p)                     # (after the plan is saved: it never waits on this)
     if args.json:
         print(json.dumps(p, indent=1, ensure_ascii=False, default=str))

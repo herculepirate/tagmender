@@ -167,7 +167,7 @@ def edition(tags: dict, mode: str = "edition_year") -> str:
 
 
 # VIN-3: what a vinyl rip's folder adds (plan.Planner sets them; never in the Album tag)
-RIP_FIELDS = ("~ripper", "~rip_catalog")
+RIP_FIELDS = ("~ripper", "~rip_version", "~rip_catalog")
 
 
 def _tag1(tags, k) -> str:
@@ -195,6 +195,8 @@ def folder_edition(tags: dict, mode: str = "edition_year") -> str:
     "1977 Vinyl Rip PBTHAL SRM-1-1184 ripped 2012". An album known (its pressing unproven) whose
     copy is a vinyl rip by its own evidence: "Vinyl Rip" and its ripper, never a catalogue number.
     Mode "off": "Vinyl Rip ..." for a vinyl rip all the same (decided 2026-11-17: always), else ""."""
+    if tags.get("~rip_plain"):                     # (the profile's vinyl_rip_folders off: as any album)
+        return edition(tags, mode) if mode in EDITION_VAR else ""
     if mode not in EDITION_VAR:
         if not (tags.get("~rip_vinyl") or (riptag(tags) and edition_parts(tags)[0] == "Vinyl")):
             return ""

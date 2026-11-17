@@ -3449,6 +3449,8 @@ class Engine:
         threshold, every track of the release there and every length agreeing), each a record's (its media vinyl) - into a copy each,
         filed apart as any two copies (their folders named by their rips, VIN-3); or (None, why
         not): the folder is then held, named in Needs Attention ("two rips in one folder")."""
+        if self.profile.get("vinyl_rip_folders", True) is False:
+            return None, "the profile keeps vinyl rips as any album (vinyl_rip_folders off)"
         for p in props:
             if p.status != "identified" or (p.tier or "exact") != "exact" or not self._complete(p) \
                     or len(p.targets or []) != len(p.files or []) or not self._sure(p) \
@@ -3466,8 +3468,15 @@ class Engine:
         note = (f"two rips of this record were in one folder ({lines}): each goes to a folder of its own, "
                 "a copy of its own (VIN-7)")
         first = self._as_split(g, props, note, errors)
+        import tagio
         for p in props:
             p.split["rips"] = True
+            # (what each rip says of itself - its comment: plan._rips_apart gives a scan folder
+            # to the rip whose words are on its scans)
+            try:
+                p.split["words"] = "\n".join(str(x) for x in tagio.read(p.files[0]).get("comment") or ())
+            except Exception:
+                p.split["words"] = ""
         return first, ""
 
     def _rips_held(self, g, groups, why, errors):

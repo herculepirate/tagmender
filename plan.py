@@ -1214,13 +1214,21 @@ def _rips_apart(of, group):
     the folder it was found in, its files named there as the naming names them."""
     group.sort(key=lambda a: int(a["split"].get("index") or 0))
     first = group[0]
+    owners = _rip_owners(of, group)
+    for k, a in enumerate(group):
+        mine = [c for c in a.get("companions") or () if owners.get(c["src"], 0) == k]
+        theirs = [c for c in a.get("companions") or () if owners.get(c["src"], 0) != k]
+        if owners and theirs:
+            a["companions"] = mine
+            a["notes"].append("the scans of the other rip (" + ", ".join(sorted({str(Path(c["src"]).parent.relative_to(of))
+                                                                                  for c in theirs})) + ") go with it")
+        for c in mine:
+            if c.get("shared") and c["op"] == "copy":
+                c["op"] = "move"
     took = {c["src"] for c in first.get("companions") or ()}
-    for c in first.get("companions") or ():
-        if c.get("shared") and c["op"] == "copy":
-            c["op"] = "move"
     seen = {fnm.fold(first["split"].get("folder") or "")}
     for a in group[1:]:
-        gone = [c for c in a.get("companions") or () if c.get("shared") or c["src"] in took]
+        gone = [c for c in a.get("companions") or () if c["src"] in took or (c.get("shared") and c["src"] not in owners)]
         if gone:
             a["companions"] = [c for c in a["companions"] if c not in gone]
             a["notes"].append("the files both rips shared (" + ", ".join(sorted(Path(c["src"]).name for c in gone))
@@ -1237,6 +1245,79 @@ def _rips_apart(of, group):
             a["notes"].append("another copy of this release takes the folder this one would be named into: "
                               "this one is tagged where it is, in the folder it was found in (MOV-4)")
         seen.add(fnm.fold(a["split"].get("folder") or ""))
+
+
+_SCAN_IMAGE = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif")
+_COMMON_RIP_WORDS = {"original", "pressing", "vinyl", "rip", "ripped", "first", "press", "edition", "records",
+                     "record", "notes", "posted", "master", "final", "transfer"}
+
+
+def _scan_sets(of, srcs) -> dict:
+    """VIN-7: the scan folders of a folder that held two rips: {set folder: [its files]} - a folder
+    of pictures below OF, and a folder of pictures nested in it ("covers/" and "covers/covers/",
+    its own sub-folders with it: "covers/covers/spectr/") is a set of its own. Files at OF's top
+    belong to no set."""
+    of = Path(of)
+    pics = {Path(x).parent for x in srcs if Path(x).suffix.lower() in _SCAN_IMAGE and Path(x).parent != of}
+    sets = {}
+    for x in srcs:
+        d = Path(x).parent
+        if d == of:
+            continue
+        chain = [p for p in reversed(d.parents) if of in p.parents] + [d]
+        roots = [p for p in chain if p in pics]
+        if not roots:
+            continue
+        root = roots[0]
+        nested = [p for p in roots[1:] if p.parent == root]
+        sets.setdefault(nested[0] if nested else root, []).append(x)
+    return sets
+
+
+def _rip_owners(of, group) -> dict:
+    """VIN-7: {companion file: the rip it goes with} - each of exactly two scan sets (_scan_sets)
+    given to a rip by evidence: a set whose names, notes or scans (OCR: a ripper's watermark,
+    "SOLO Ediciones") carry words only one rip's own comment says ("Fran Solo, Ediciones") is
+    that rip's; the only other set is the other rip's. {} when that is not clear: everything
+    shared stays with the first copy."""
+    if len(group) != 2:
+        return {}
+    srcs = sorted({c["src"] for a in group for c in a.get("companions") or ()})
+    sets = _scan_sets(of, srcs)
+    if len(sets) != 2:
+        return {}
+    words = []
+    for a in group:
+        ws = {w.casefold() for w in re.findall(r"\b(?:[A-Z][a-z]{3,}|[A-Z]{4,})\b", a["split"].get("words") or "")}
+        words.append(ws - _COMMON_RIP_WORDS)
+    only = [words[0] - words[1], words[1] - words[0]]
+    if not any(only):
+        return {}
+    import vinylrip
+    hit = {}
+    for root, files in sets.items():
+        text = " ".join(Path(f).stem for f in files)
+        for f in files:
+            if Path(f).suffix.lower() in (".txt", ".nfo") and os.path.getsize(f) < 20000:
+                try:
+                    text += " " + Path(f).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
+        low = text.casefold()
+        found = {k for k in (0, 1) if any(re.search(rf"\b{re.escape(w)}\b", low) for w in only[k])}
+        if not found:
+            seen = vinylrip.scan_text([f for f in files if Path(f).suffix.lower() in _SCAN_IMAGE][:3]).casefold()
+            found = {k for k in (0, 1) if any(re.search(rf"\b{re.escape(w)}\b", seen) for w in only[k])}
+        hit[root] = found
+    roots = list(sets)
+    told = [r for r in roots if len(hit[r]) == 1]
+    if not told or (len(told) == 2 and hit[told[0]] == hit[told[1]]):
+        return {}
+    k = next(iter(hit[told[0]]))
+    other = next(r for r in roots if r != told[0])
+    if hit[other] and hit[other] != {1 - k}:
+        return {}
+    return {**{f: k for f in sets[told[0]]}, **{f: 1 - k for f in sets[other]}}
 
 
 def _split_together(albums):
@@ -1872,6 +1953,7 @@ class Planner:
             entry["split"] = {k: vsplit[k] for k in ("of", "index", "count")}
             if vsplit.get("rips"):
                 entry["split"]["rips"] = True              # VIN-7: two rips of one record
+                entry["split"]["words"] = str(vsplit.get("words") or "")[:2000]
             entry["split_with"] = list(vsplit.get("others") or [])
         if not identified:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
@@ -2069,8 +2151,12 @@ class Planner:
             rip = self._vinyl_rip(prop, kept, targets, rel, unproven)
             if rip:
                 import vinylrip
-                rip_line = vinylrip.comment_line(rip)
-                for k_, v_ in (("~ripper", rip.get("ripper")), ("~rip_catalog", rip.get("catno")),
+                # (the profile's vinyl_rip_comment / vinyl_rip_folders, both on by default)
+                rip_line = vinylrip.comment_line(rip) if p.get("vinyl_rip_comment", True) is not False else ""
+                if p.get("vinyl_rip_folders", True) is False:
+                    rel_tags["~rip_plain"] = ["1"]         # (the fields stay for a script: no folder edition)
+                for k_, v_ in (("~ripper", rip.get("ripper")), ("~rip_version", rip.get("version")),
+                               ("~rip_catalog", rip.get("catno")),
                                ("~rip_resolution", vinylrip.resolution_name(rip.get("resolution"))),
                                ("~rip_year", rip.get("year"))):
                     if v_:

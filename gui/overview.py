@@ -2143,8 +2143,8 @@ class Overview(QWidget):
         look-up (never in its way), then shown with each copy's row (its tooltip, Why This
         Release). Nothing is chosen or changed by it."""
         plan = self.plan
-        if not plan:
-            return
+        if not plan or (plan.get("profile_data") or {}).get("compare_copies") is False:
+            return                                         # (the profile's compare_copies off)
         if getattr(self, "_copies_worker", None) is not None:
             self._copies_again = True                      # (another plan meanwhile: measured after)
             return

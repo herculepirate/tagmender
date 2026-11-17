@@ -41,6 +41,8 @@ from pathlib import Path
 
 import mutagen
 
+import stagetimes
+
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "tagmender"
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "tagmender"
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".mp4", ".ogg", ".opus", ".oga", ".wv", ".ape", ".wav", ".aiff", ".aif",
@@ -340,6 +342,12 @@ def _store_meta(store, key, meta):
 
 
 def _read_meta(path):
+    """_read_file_meta, charged to the "tags" stage of an album being timed (stagetimes)."""
+    with stagetimes.stage("tags"):
+        return _read_file_meta(path)
+
+
+def _read_file_meta(path):
     p = Path(path)
     meta = {"filename": [p.name], "folder": [p.parent.name], "path": [str(p)],
             "format": [p.suffix.lower().lstrip(".")]}

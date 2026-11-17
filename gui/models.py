@@ -125,6 +125,10 @@ def below_floor_text(a) -> str:
 
 def album_changes_text(a) -> str:
     """The Changes column: changes_text, and what MOV-5 kept from happening (below_floor_text)."""
+    if a.get("status") == planmod.LISTED:              # (EDT-2: your plain edits, until Save Tags)
+        n = sum(1 for fe in a.get("files") or [] if fe.get("op", "none") != "none")
+        return tr("{0} edited, not saved").format(plural(n, tr("track"), tr("tracks"))) if n and \
+            planmod.plain_pending(a) else ""
     parts = [t for t in (changes_text(a.get("files") or []), below_floor_text(a)) if t]
     return "; ".join(parts)
 

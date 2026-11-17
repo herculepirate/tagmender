@@ -639,6 +639,42 @@ Needs attention the Inspector button shows the inspector on the right instead. T
 the preview: nothing on disk changes until you apply, and a preview of thousands of albums opens at
 once (an album's discs and tracks are made when you open it).
 
+### Editing tags without a look-up
+
+TagMender is also a plain tag editor: change tags by hand and save them, nothing looked up. Choose
+**When you add a folder: List its albums first** (Preferences › General), then add the folder: its
+albums are listed *Not looked up*, and nothing is asked of any database. Select an album, a disc,
+a track, a folder or a file (in either pane) and the **Tags** pane shows its tags as they are
+(*Changes only* does not apply: nothing is planned for it). Where the selected files differ it says
+*different in N files*; Edit Value… (F2, Return or a double-click) sets one value for all of them
+after asking; Add Tag…, Remove Tag (Delete), Revert to Original, the rating stars and **Cover** work
+as on a looked-up album. Edit > Undo Edit (Ctrl+Z) takes back the last edit.
+
+An edited album says *Not looked up · Edited, not saved*, its edited files *edited* in Your files.
+**File › Save Tags** (Ctrl+S) writes your edits of every album not looked up, after a sheet that
+lists them; when they are all there is to write, the toolbar's prominent button says **Save Tags**
+(**Save N Albums**) and does the same. Saving is one job, as Apply is: each file is written on a
+copy, its audio checked unchanged and its tags read back before it takes the file's place, and the
+job is journaled - Edit > Undo Last Job, or Jobs, puts every file back (a file you changed again
+since is protected, as after any job). It writes only what you changed: no look-up, no new file
+name, no move, no cover file, log or other companion, and no TagMender marks (TAGMENDER and its
+reason tags are written only when TagMender identifies an album). Each file keeps its own format:
+its ID3 version, its ID3v1 tag, custom tags and their spelling, multiple values; a value you set
+as it already is writes nothing. A cover you choose is embedded into the tracks, as a new cover
+is. A file another program changed after you edited it is left as it is (*Changed*): your edit is
+read again against it and kept, to save once more. Your Ignore and Skip rules still apply.
+
+Saving never starts a look-up, and the watcher does not look at an album again because you saved
+it: an album it filed keeps its record, one in a watched folder it never handled is remembered as
+yours (*Your edits saved* under Recently) until its files change or you choose Process Folder
+Again. Later, **Look Up** works on the album as on any other: the database's values are proposed
+for every tag (your saved values are not kept as edits of yours). Edits you have not saved yet
+when you look an album up are kept by the look-up, as any edit of yours, and written by Apply.
+
+Adding another folder or closing the window with edits not saved asks **Save**, **Don't Save** or
+**Cancel**.
+
+## Hands-off
 ## Hands-off
 
 ### Watched folders

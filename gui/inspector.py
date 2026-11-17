@@ -412,8 +412,10 @@ class TagsView(QWidget):
         return sorted(out, key=lambda r: (not change(r), r.get("by") != planmod.BY_YOU, r["field"]))
 
     def editable(self) -> bool:
+        if self.album is not None:
+            planmod.plain_files(self.album)              # (EDT-2: an album not looked up: its files)
         return self.owner is not None and not self.owner.busy(self.album) and bool((self.album or {}).get("files")) and \
-            (self.album or {}).get("status") in planmod.EDITABLE
+            planmod.editable(self.album)
 
     def fill(self, *_):
         """Wide: Tag | Original | New. Narrow (under WRAP_UNDER): New under Original in one
@@ -805,8 +807,10 @@ class ArtworkView(QWidget):
             self.buttons[key].setIcon(icons.icon(icon, "ink"))
 
     def editable(self) -> bool:
+        if self.album is not None:
+            planmod.plain_files(self.album)              # (EDT-2: an album not looked up: its files)
         return not self.owner.busy(self.album) and bool((self.album or {}).get("files")) and \
-            (self.album or {}).get("status") in planmod.EDITABLE
+            planmod.editable(self.album)
 
     def show_album(self, album):
         self.album = album
@@ -1289,7 +1293,10 @@ class Inspector(QDockWidget):
         return bool(getattr(ov, "running", False))
 
     def can_edit(self, album) -> bool:
-        return bool(album) and album.get("status") in planmod.EDITABLE and not self.busy(album)
+        """An album of the preview, or (EDT-2) one not looked up: a plain edit, saved by Save Tags."""
+        if album:
+            planmod.plain_files(album)
+        return bool(album) and planmod.editable(album) and not self.busy(album)
 
     def pending(self) -> bool:
         """An edit or a cover is still on its way to the preview (Apply waits for it)."""
@@ -1304,6 +1311,28 @@ class Inspector(QDockWidget):
         self.edits = {}
         self.history = []
         self._wanted = {}
+        self._actions_changed()
+
+    def forget_edits_of(self, album):
+        """EDT-2: the album's edits are written (Save Tags): dropped, from Undo Edit's history too -
+        a later look-up plans it afresh (the database's values win), and Undo Edit never brings
+        back an edit already saved (Edit > Undo Last Job takes the save back)."""
+        key = os.path.realpath(album["source_dir"])
+        files = {os.path.realpath(fe["src"]) for fe in album.get("files") or []}
+
+        def drop(edits):
+            mine = [e for e in edits.get(key) or [] if isinstance(e, dict) and
+                    (not files or files & {os.path.realpath(str(f)) for f in e.get("files") or []})]
+            rest = [e for e in edits.get(key) or [] if not any(e is m for m in mine)]
+            if rest:
+                edits[key] = rest
+            else:
+                edits.pop(key, None)
+        drop(self.edits)
+        for old in self.history:
+            drop(old)
+        self.history = [h for i, h in enumerate(self.history) if i == 0 or h != self.history[i - 1]]
+        self._wanted.pop(id(album), None)
         self._actions_changed()
 
     HISTORY = 50                                         # the edits Undo Edit can take back, newest last
@@ -1471,7 +1500,7 @@ class Inspector(QDockWidget):
                 return                                   # (a later edit of it is on its way)
             self._wanted.pop(id(album), None)
             ov = (getattr(self.win, "pages", None) or {}).get("Overview")
-            if self.busy(album) or album.get("status") not in planmod.EDITABLE or \
+            if self.busy(album) or not planmod.editable(album) or \
                     (plan is not None and ov is not None and plan is not getattr(ov, "plan", None)) or \
                     (plan is not None and not any(a is album for a in plan.get("albums") or [])):
                 if self.album is album:                  # (applied, or a new preview: this plan is gone)

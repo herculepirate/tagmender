@@ -25,6 +25,7 @@ WATCH_STATUS = {"done": (N_("Done"), "done", "circle-check"),
                 "excluded": (N_("Excluded by a rule"), "excluded", "ban"),
                 "ignored": (N_("Ignored"), "excluded", "ban"),
                 "skipped": (N_("Skipped"), "skipped", "ban"), "undone": (N_("Undone"), "excluded", "undo-2"),
+                "edited": (N_("Your edits saved"), "excluded", "pencil"),     # (EDT-2: left as you saved it)
                 "unresolved": (N_("Unresolved"), "unresolved", "circle-alert"),
                 "provider_error": (N_("Will retry (provider unreachable)"), "unresolved", "circle-alert"),
                 "waiting_destination": (N_("Waiting for the library folder"), "unresolved", "circle-alert"),
@@ -693,6 +694,10 @@ class Watched(QWidget):
                 word, colour, icon = watch_word(st)
                 cell = status_cell(QTableWidgetItem(), colour, word, icon)
                 cell.setData(Qt.UserRole, st)                # (the status itself: Process Again asks it)
+                if st == "edited":
+                    cell.setToolTip(tr("You saved your own edits of this album (Save Tags): the watcher leaves it "
+                                       "as it is until its files change. Right-click › Process Again to have it "
+                                       "handled."))
                 if st == "undone":
                     cell.setToolTip(tr("You undid this job: the watcher leaves the album as it is. "
                                        "Right-click › Process Again to have it handled again."))

@@ -232,6 +232,7 @@ class Main(QMainWindow):
             "clear_done": lambda: ov().clear_done(),
             "preview": lambda: ov().preview(),
             "apply": lambda: ov().apply(),
+            "save_tags": lambda: ov().save_tags(),
             "cancel": self.cancel,
             "watch_folder": lambda: (self.go("Watched folders"), self.pages["Watched folders"].add()),
             "new_profile": lambda: (self.go("Profiles"), self.pages["Profiles"].new()),
@@ -644,8 +645,15 @@ class Main(QMainWindow):
             self.commands["choose_library"].setEnabled(idle and bool(ov.path) and not ov.in_place())
             self.commands["clear_done"].setEnabled(on_ov and ov.clear_done_btn.isEnabled())
             n = ov.actionable() if ov.plan else 0
-            self.commands["apply"].setEnabled(on_ov and ov.may_apply_now() and bool(ov.plan) and n > 0)
+            # EDT-2: nothing to apply but your plain edits of albums not looked up: Apply is Save Tags
+            plain = len(ov.plain_albums()) if ov.plan and on_ov else 0
+            saves = ov.may_save_tags() if plain else False
+            self.commands["apply"].setEnabled(on_ov and bool(ov.plan) and (
+                (ov.may_apply_now() and n > 0) or (n == 0 and saves)))
+            # (Ctrl+S is Save Profile's on Profiles: never both on at once)
+            self.commands["save_tags"].setEnabled(on_ov and saves and not self.showing("Profiles"))
             self._apply_n = n if on_ov else 0
+            self._save_n = plain if on_ov and not n else 0
             if self.show_apply_words():
                 self.fit_toolbar()
             self.commands["exclude_again"].setEnabled(kind == "overview" and idle and bool(ov.overridden(x)))
@@ -870,7 +878,11 @@ class Main(QMainWindow):
         """The toolbar's Apply says how many: "Apply 2 Albums" ("Apply 2" in the narrowest window);
         none, "Apply". True when its words changed."""
         n = getattr(self, "_apply_n", 0)
-        if not n:
+        saves = getattr(self, "_save_n", 0)                  # (EDT-2: only plain edits to write)
+        if not n and saves:
+            words = tr("Save Tags") if saves == 1 or getattr(self, "_narrowest", False) else \
+                tr("Save {0} Albums").format(saves)
+        elif not n:
             words = tr("Apply")
         elif getattr(self, "_narrowest", False):
             words = tr("Apply {0}").format(n)
@@ -882,8 +894,8 @@ class Main(QMainWindow):
         a.setIconText(words)
         b = self.toolbar.widgetForAction(a) if hasattr(self, "toolbar") else None
         if b is not None:
-            b.setAccessibleName(tr("Apply 1 album") if n == 1 else tr("Apply {0} albums").format(n) if n
-                                else tr("Apply"))
+            b.setAccessibleName(words if not n and saves else tr("Apply 1 album") if n == 1 else
+                                tr("Apply {0} albums").format(n) if n else tr("Apply"))
         return True
 
     # ---- the toolbar's filter: All / Ready / Needs Attention ---------------------------------
@@ -1279,6 +1291,11 @@ class Main(QMainWindow):
             return
         if not getattr(self, "_closing", False) and not self.pages["Setup"].may_leave():
             event.ignore()                                     # (Cancel on "Save the keys you typed?")
+            return
+        ov = self.pages.get("Overview")
+        if not getattr(self, "_closing", False) and ov is not None and getattr(ov, "_work_kind", None) != "save" and \
+                not ov.may_drop_plain(then=self.close):
+            event.ignore()                                     # (EDT-2: Cancel, or closed once saved)
             return
         self.pages["Watched folders"].finish()
         if self.prefs_window is not None and self.prefs_window.isVisible() and not self.prefs_window.close():

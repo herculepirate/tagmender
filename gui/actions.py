@@ -25,6 +25,10 @@ COMMANDS = {
                    "you apply")),
     "preview": (N_("&Preview"), "Ctrl+P", "eye", N_("Work out what would change; nothing is written")),
     "apply": (N_("Appl&y"), "Ctrl+Return", "check", N_("Make the previewed changes (they can be undone)")),
+    # EDT-2: your edits of albums not looked up, written as they are (Ctrl+S: Save Profile's key on Profiles only)
+    "save_tags": (N_("Sa&ve Tags"), "Ctrl+S", None,
+                  N_("Write your tag edits of the albums not looked up; nothing is looked up, renamed or moved "
+                     "(it can be undone)")),
     "cancel": (N_("&Cancel"), "Ctrl+.", "x", N_("Stop after the album being worked on")),
     "read_scans": (N_("&Read Scans for This Preview"), None, None,
                    N_("Read barcodes and catalog numbers from every album's cover scans (slower)")),
@@ -197,7 +201,7 @@ RELEASE_MENU = ("use_release", *_search.MENU)
 # or ticks a box elsewhere); the other commands' keys work in the whole window
 SCOPED = ("edit_tag", "remove_tag", "play_pause")    # (Space: the album tables and the player bar only)
 MENUS = (
-    (N_("&File"), ("add_folder", "lookup_cd", None, "look_up", "preview", "apply", "cancel", "read_scans",
+    (N_("&File"), ("add_folder", "lookup_cd", None, "look_up", "preview", "apply", "save_tags", "cancel", "read_scans",
                "choose_library", None, "watch_folder",
                "new_profile", "save_profile", None, "close_window", "quit")),
     (N_("&Edit"),

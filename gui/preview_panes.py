@@ -201,7 +201,7 @@ def album_discs(a) -> list:
     then "Not on the release" (files the release has no track for, files left out by a rule,
     files found with the album that are not of it). Each track {"number", "title", "fe" (None:
     the release's track is not in your folders), "missing", "note"}."""
-    files = a.get("files") or []
+    files = planmod.plain_files(a) if a.get("status") == planmod.LISTED else a.get("files") or []
     identified = (a.get("identification") or {}).get("status") == "identified"
     discs, extra = {}, []
     for fe in files:
@@ -367,8 +367,9 @@ def segments(old: str, new: str) -> tuple:
 
 
 def _scope_files(album, kind, key):
-    """The file entries a selection stands for."""
-    files = (album or {}).get("files") or []
+    """The file entries a selection stands for (EDT-2: an album not looked up, its own files)."""
+    files = planmod.plain_files(album) if (album or {}).get("status") == planmod.LISTED else \
+        (album or {}).get("files") or []
     if kind == "album":
         return list(files)
     if kind == "disc":
@@ -558,7 +559,7 @@ class FoldersModel(LazyTree):
         a = albums[0]
         st = a.get("status")
         if st == "listed":
-            return tr("not looked up"), "own"
+            return (tr("edited, not saved"), "hold") if planmod.plain_pending(a) else (tr("not looked up"), "own")
         if st in ("excluded", "skipped"):
             return tr("left alone"), "own"
         if st == "done":
@@ -653,6 +654,8 @@ def forget(album=None):
 def files_of(a) -> list:
     """Every file an album shows in Your folders, with where it goes: [{"fe", "goes", "tone",
     "disc"}] (remembered until the album's files change)."""
+    if a.get("status") == planmod.LISTED:
+        planmod.plain_files(a)                        # (EDT-2: its files, to select and edit)
     stamp = id(a.get("files")), len(a.get("files") or [])
     hit = _FILES.get(id(a))
     if hit is not None and hit[0] is a and hit[1] == stamp:
@@ -667,6 +670,8 @@ def files_of(a) -> list:
                 continue
             if d.get("extra"):
                 out.append({"fe": fe, "goes": t["note"], "tone": "extra", "disc": False})
+            elif a.get("status") == "listed" and fe.get("op", "none") != "none":
+                out.append({"fe": fe, "goes": tr("edited"), "tone": "hold", "disc": True})   # (EDT-2: not saved)
             elif held or a.get("status") in ("listed", "excluded", "skipped"):
                 out.append({"fe": fe, "goes": "", "tone": "own", "disc": True})
             else:
@@ -2119,7 +2124,10 @@ class PreviewPanes(QWidget):
         say(p.subtitle, tr("Selection"), f"{title} · {sub}" if sub else title)
         files = self.scope_files()
         rows = tag_rows(files, self.current) if files else []
-        if self.changes_only.isChecked():
+        # (EDT-2: an album not looked up has no planned change - its tags as they are, to edit)
+        only = self.changes_only.isChecked() and not self.plain()
+        self.changes_only.setEnabled(not self.plain())
+        if only:
             rows = [r for r in rows if r["mark"] != "="]
         self.tag_model.set_rows(rows, self.editable())
         n = sum(1 for r in rows if r["mark"] != "=")
@@ -2132,9 +2140,12 @@ class PreviewPanes(QWidget):
         else:
             note = tr("{0} in {1}.").format(plural(n, tr("change"), tr("changes")),
                                             plural(len(files), tr("file"), tr("files")))
-            if len(files) > READ_MOST and not self.changes_only.isChecked():
+            if len(files) > READ_MOST and not only:
                 note += " " + tr("The tags that stay are read from the first {0} files.").format(READ_MOST)
-            if self.editable():
+            if self.editable() and self.plain():
+                note += " " + tr("Double-click a new value to edit it; nothing is written until you save "
+                                 "(File › Save Tags). Nothing is looked up.")
+            elif self.editable():
                 note += " " + tr("Double-click a new value to edit it; nothing is written until you apply.")
         self.tag_note.setText(note)
         self._tag_buttons()
@@ -2203,8 +2214,17 @@ class PreviewPanes(QWidget):
         return sheets.confirm(self, tr("{what} {tag} on all {n} files?").format(what=what, tag=row["name"], n=row["n"]),
                               tr("The selected files have different values for {tag}; each would then have the "
                                  "same.").format(tag=row["name"]),
-                              tr("Nothing is written until you apply; Edit › Undo Edit takes it back."),
+                              tr("Nothing is written until you save; Edit › Undo Edit takes it back.") if self.plain()
+                              else tr("Nothing is written until you apply; Edit › Undo Edit takes it back."),
                               what, destructive=True)
+
+    def plain(self) -> bool:
+        """EDT-2: the selection is of an album not looked up - its edits are saved with Save Tags."""
+        return bool(self.scope) and (self.scope[0] or {}).get("status") == planmod.LISTED
+
+    def until_words(self) -> str:
+        return tr(" Nothing is written until you save (Save Tags).") if self.plain() else \
+            tr(" Nothing is written until you apply the preview.")
 
     def edit_key(self):
         """F2 or Return on a row: its New value typed in place when it is one value, else Edit
@@ -2230,8 +2250,7 @@ class PreviewPanes(QWidget):
             return
         from . import inspector
         files = self.scope_files()
-        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + \
-            tr(" Nothing is written until you apply the preview.")
+        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + self.until_words()
         got = inspector.tag_sheet(self, tr("Edit {0}").format(r["name"]), scope, name=r["field"],
                                   values=r["after_vals"] or [])
         # (an empty sheet removes nothing: Remove Tag does; OK with the values unchanged is no edit -
@@ -2245,8 +2264,7 @@ class PreviewPanes(QWidget):
             return
         from . import inspector, sheets
         files = self.scope_files()
-        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + \
-            tr(" Nothing is written until you apply the preview.")
+        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + self.until_words()
         got = inspector.tag_sheet(self, tr("Add a Tag"), scope, ask_name=True, action=tr("Add Tag"))
         if got is None:
             return

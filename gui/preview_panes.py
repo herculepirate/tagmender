@@ -9,7 +9,8 @@
   Tag changes (right)        Tag | Original | New for the selection (a file, a track, a disc, a
                              folder or the whole album); "different in N files" where the files
                              differ; + → − = marks; only the changed part of a value tinted (the
-                             style's diff_* tokens); Folder and File name rows; Changes only
+                             style's diff_* tokens); Folder and File name rows; every tag shown,
+                             the album's first
   Cover art (bottom)         your scans and the pictures in the tracks, the new front the profile
                              found (Discogs, Cover Art Archive ...), Find Online…, Choose a File…
                              and Generate… (the existing Find Covers sheet and its Make Covers)
@@ -22,7 +23,7 @@ workers (gui.work.start), a newer selection cancelling the older read.
 
 Editing goes through the inspector's edit path (Inspector.set_tag / set_tag_files, plan.apply_edits):
 nothing is written until Apply. Each pane folds to a labelled strip; which are folded, the
-widths and Changes only are remembered per user (gui.json "preview_panes")."""
+widths are remembered per user (gui.json "preview_panes")."""
 from __future__ import annotations
 
 import difflib
@@ -35,7 +36,7 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractItemModel, QAbstractTableModel, QItemSelectionModel, QMimeData, QModelIndex,
                             QSize, Qt, QTimer, QUrl, Signal)
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QListView, QListWidget, QListWidgetItem, QMenu, QSizePolicy, QSplitter,
                                QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
                                QToolButton, QTreeView, QVBoxLayout, QWidget)
@@ -50,8 +51,7 @@ from .tagnames import display as tag_name
 from .widgets import Segmented
 from .work import start
 
-PREF = "preview_panes"                  # gui.json: {"collapsed": {pane: bool}, "sizes": [..], "vsizes": [..],
-#                                         "changes_only": bool}
+PREF = "preview_panes"                  # gui.json: {"collapsed": {pane: bool}, "sizes": [..], "vsizes": [..]}
 PANES = ("folders", "albums", "tags", "covers")
 STRIP = 34                              # a folded side pane: a strip this wide
 SIDE_MIN = 100                          # an open side pane's narrowest (960 px wide, the inspector open: three fit)
@@ -85,8 +85,6 @@ def clean_prefs(p) -> dict:
         v = _ints(p.get(key), n)
         if v is not None:
             out[key] = v
-    if isinstance(p.get("changes_only"), bool):
-        out["changes_only"] = p["changes_only"]
     return out
 
 
@@ -327,8 +325,27 @@ def tag_rows(files, current=None) -> list:
             r = _row(key, name, e)
             r["path"] = True
             rows.append(r)
-    rows.sort(key=lambda r: (r["mark"] == "=", r.get("path", False), not r["mine"], r["name"].lower()))
+    rows.sort(key=row_order)
     return rows
+
+
+# the album's own tags, in this order, before the tracks' (title, artist, track number ...): what
+# the album is, then where it was released, then its numbering and its database IDs
+ALBUM_FIELDS = ("album", "albumartist", "albumartistsort", "date", "originaldate", "originalyear", "releasedate",
+                "label", "catalognumber", "barcode", "asin", "genre", "style", "releasecountry", "releasetype",
+                "releasestatus", "media", "totaldiscs", "totaltracks", "discsubtitle", "compilation",
+                "musicbrainz_albumid", "musicbrainz_releasegroupid", "musicbrainz_albumartistid",
+                "discogs_release_id", "discogs_master_id", "discogs_label_id", "discogs_artist_id")
+_ALBUM_AT = {f: i for i, f in enumerate(ALBUM_FIELDS)}
+
+
+def row_order(r):
+    """Album-level tags first (ALBUM_FIELDS' order), then the tracks' by name, then Folder and File
+    name; the marks say what changes - a row is never moved for it."""
+    if r.get("path"):
+        return (2, 0 if r["field"] == FOLDER else 1, "")
+    f = str(r["field"]).lower()
+    return (0, _ALBUM_AT[f], "") if f in _ALBUM_AT else (1, 0, r["name"].lower())
 
 
 def _row(field_, name, entries) -> dict:
@@ -1168,8 +1185,8 @@ class TagModel(QAbstractTableModel):
             return f"{r['name']} ({r['field']})" if not r.get("path") else r["name"]
         if role == R_FOREGROUND and c == 0:
             return QColor(style.color({"+": "accent", "→": "attention", "−": "error"}.get(r["mark"], "muted")))
-        if role == R_FOREGROUND and c == 1 and r["mark"] == "=":
-            return QColor(style.color("muted"))
+        if role == R_FOREGROUND and c in (1, 3) and r["mark"] == "=":
+            return QColor(style.color("muted"))           # (kept: its new value the same, dimmed)
         if role == R_TEXTALIGNMENT and c == 0:
             return int(Qt.AlignCenter)
         if role == R_FONT and r["mine"] and c in (1, 3):
@@ -1560,11 +1577,6 @@ class PreviewPanes(QWidget):
         self.tabs.changed.connect(self.tab_changed)
         p.head_lay.insertWidget(0, self.tabs)
         p.subtitle.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.changes_only = QCheckBox(tr("Changes only"))
-        self.changes_only.setAccessibleName(tr("Show only the tags that change"))
-        self.changes_only.setChecked(bool(self._prefs().get("changes_only", True)))
-        self.changes_only.toggled.connect(lambda on: (self._save(changes_only=bool(on)), self.fill_tags()))
-        p.head_lay.addWidget(self.changes_only)
         self.stack = QStackedWidget()
         p.add(self.stack, 1)
         # Tags
@@ -1780,7 +1792,6 @@ class PreviewPanes(QWidget):
 
     def tab_changed(self, key):
         self.stack.setCurrentIndex(0 if key == "tags" else 1)
-        self.changes_only.setVisible(key == "tags")
         self._save(tab=key)
 
     def show_tab(self, key):
@@ -2123,12 +2134,8 @@ class PreviewPanes(QWidget):
         p = self.panes["tags"]
         say(p.subtitle, tr("Selection"), f"{title} · {sub}" if sub else title)
         files = self.scope_files()
+        # (every tag, always: the album's own first, then the tracks'; what changes is marked)
         rows = tag_rows(files, self.current) if files else []
-        # (EDT-2: an album not looked up has no planned change - its tags as they are, to edit)
-        only = self.changes_only.isChecked() and not self.plain()
-        self.changes_only.setEnabled(not self.plain())
-        if only:
-            rows = [r for r in rows if r["mark"] != "="]
         self.tag_model.set_rows(rows, self.editable())
         n = sum(1 for r in rows if r["mark"] != "=")
         if not self.scope:
@@ -2136,11 +2143,11 @@ class PreviewPanes(QWidget):
         elif not files:
             note = sub
         elif not rows:
-            note = tr("No tag changes for this selection.")
+            note = tr("No tags in this selection.") if self.tag_worker is None else tr("Reading the tags…")
         else:
             note = tr("{0} in {1}.").format(plural(n, tr("change"), tr("changes")),
                                             plural(len(files), tr("file"), tr("files")))
-            if len(files) > READ_MOST and not only:
+            if len(files) > READ_MOST:
                 note += " " + tr("The tags that stay are read from the first {0} files.").format(READ_MOST)
             if self.editable() and self.plain():
                 note += " " + tr("Double-click a new value to edit it; nothing is written until you save "

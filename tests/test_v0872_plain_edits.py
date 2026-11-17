@@ -710,5 +710,125 @@ class PlainPlan(unittest.TestCase):
         self.assertEqual(p["roots"], [_os.path.realpath("/m/A")])
 
 
+
+@unittest.skipIf(QApplication is None, "PySide6 not installed")
+class TagsShown(PlainEdits):
+    """0.8.72: the Tags pane shows every tag of what is selected (no Changes only), the album's
+    own first; Tags from File and Folder Names reads folders too, for albums not looked up."""
+
+    def fields(self):
+        return [r["field"] for r in self.panes.tag_model.rows]
+
+    def test_there_is_no_changes_only_control(self):
+        self.assertFalse(hasattr(self.panes, "changes_only"))
+
+    def test_an_up_to_date_album_shows_its_tags(self):
+        import plan as planmod
+        self.open_list()
+        a = self.album_of(self.flac)
+        planmod.plain_files(a)
+        a.update(status="unchanged", identification={"status": "identified", "confidence": 99,
+                                                     "provider": "musicbrainz", "release_id": "x"})
+        self.ov.model.refresh_rows()
+        self.show(self.flac)                                             # (the album)
+        rows = {r["field"]: r for r in self.panes.tag_model.rows}
+        self.assertEqual(rows["album"]["after"], "Beta")
+        self.assertEqual(rows["genre"]["after"], "different in 2 files")
+        self.assertEqual(rows["title"]["after"], "different in 2 files")
+        self.assertEqual({r["mark"] for r in rows.values()}, {"="})
+        f = self.fields()
+        self.assertLess(f.index("album"), f.index("albumartist"))
+        self.assertLess(f.index("genre"), f.index("artist"))           # (the album's own tags first)
+        self.assertLess(f.index("artist"), f.index("title"))
+        self.assertEqual(f[-2:], ["~folder", "~filename"])
+        self.assertNotIn("No tags", self.panes.tag_note.text())
+        self.show(self.flac, "track", str(self.flac / "02 Song.flac"))  # (one file: its full tags)
+        rows = {r["field"]: r for r in self.panes.tag_model.rows}
+        self.assertEqual((rows["title"]["after"], rows["genre"]["after"], rows["comment"]["after"]),
+                         ("Song 2", "Pop", "kept as it is"))
+        self.assertIn("mytag", {k.lower() for k in rows})
+        self.show(self.flac, "folder", str(self.flac))                   # (a folder: both files)
+        self.assertEqual({r["field"]: r for r in self.panes.tag_model.rows}["tracknumber"]["after"],
+                         "different in 2 files")
+
+    def test_a_kept_value_is_shown_dimmed_in_new(self):
+        from PySide6.QtGui import QColor
+        self.open_list()
+        self.show(self.mp3)
+        m = self.panes.tag_model
+        r = next(i for i, x in enumerate(m.rows) if x["field"] == "album")
+        self.assertEqual(m.data(m.index(r, 3)), "Alpha")
+        self.assertEqual(m.data(m.index(r, 3), self.gui.preview_panes.R_FOREGROUND),
+                         QColor(self.gui.style.color("muted")))
+
+    def test_patterns_over_folders(self):
+        from gui.dialogs import tags_from_filenames as t
+        base = "/m/Band J"
+        fs = ["/m/Band J/1994 - Voyage [478 091-2]/CD1/01 - No Man.flac",
+              "/m/Band J/1994 - Voyage [478 091-2]/CD2/03 - Live.flac"]
+        self.assertEqual(t.guess(fs, "/m"),
+                         ["%albumartist%/%date% - %album% [%catalognumber%]/CD%discnumber%/%tracknumber% - %title%"])
+        self.assertEqual(t.guess(fs, base + "/1994 - Voyage [478 091-2]"), ["CD%discnumber%/%tracknumber% - %title%"])
+        got = t.parse(fs, "%albumartist%/%date% - %album% [%catalognumber%]/CD%discnumber%/%tracknumber% - %title%",
+                      base="/m")
+        self.assertEqual(got[fs[1]], {"albumartist": ["Band J"], "date": ["1994"], "album": ["Voyage"],
+                                      "catalognumber": ["478 091-2"], "discnumber": ["2"], "tracknumber": ["3"],
+                                      "title": ["Live"]})
+        one = ["/m/A/2001 - X [CAT-1]/02-05 - Song.flac"]
+        pat = "%albumartist%/%date% - %album% [%catalognumber%]/%discnumber%-%tracknumber% - %title%"
+        self.assertEqual(t.guess(one, "/m"), [pat])
+        self.assertEqual(t.parse(one, pat, base="/m")[one[0]]["discnumber"], ["2"])
+        self.assertEqual(t.parse(one, "%tracknumber% - %title%", base="/m"), {})      # (anchored: the whole path)
+        self.assertEqual(t.parse(["/elsewhere/x.flac"], "%title%", base="/m"), {})    # (not below the folder)
+
+    def test_tags_from_folder_names_on_an_album_not_looked_up_then_save(self):
+        top = self.lib / "Band J" / "1994 - Voyage [478 091-2]"
+        for d, n in (("CD1", "01 - No Man"), ("CD2", "01 - Live")):
+            make(top / d / f"{n}.flac", {"title": ["x"], "comment": ["kept"]})
+        self.open_list()
+        a = next(x for x in self.ov.plan["albums"] if Path(x["source_dir"]) == top)
+        files = sorted(str(p) for p in top.rglob("*.flac"))
+        before = {f: tagio.read(f) for f in files}
+        digests = {f: payload.digest(f) for f in files}
+        r = self.ov.model.albums.index(a)
+        self.ov.table.selectionModel().clear()
+        self.ov.show_row(self.ov.proxy.mapFromSource(self.ov.model.index(r, 0)).row())
+        self.ov.table.selectRow(self.ov.proxy.mapFromSource(self.ov.model.index(r, 0)).row())
+        self.app.processEvents()
+        self.assertIs(self.ov.selected(), a)
+        self.win.update_album_actions()
+        self.assertTrue(self.win.act("tags_from_filenames").isEnabled())
+        self.assertIn(self.win.act("tags_from_filenames"), self.win.menus["Album"].actions())
+        dlg = self.win.tags_from_filenames()
+        self.assertEqual(sorted(dlg.files), files)
+        dlg.base.setCurrentIndex([dlg.base.itemData(i) for i in range(dlg.base.count())].index("grandparent"))
+        pat = "%albumartist%/%date% - %album% [%catalognumber%]/CD%discnumber%/%tracknumber% - %title%"
+        self.assertEqual(dlg.text(), pat)                               # (guessed from the names)
+        heads = [dlg.table.horizontalHeaderItem(c).text() for c in range(dlg.table.columnCount())]
+        self.assertEqual(heads[0], "File")
+        self.assertEqual(dlg.table.item(0, 0).text(), "Band J/1994 - Voyage [478 091-2]/CD1/01 - No Man.flac")
+        self.assertEqual(dlg.summary.text(), "2 files of 2 match.")
+        dlg.pattern.setEditText("%tracknumber% - %title%")              # (anchored: matches nothing)
+        dlg.preview()
+        self.assertEqual(dlg.table.item(0, 1).text(), "Does not match the pattern")
+        dlg.pattern.setEditText(pat)
+        dlg.preview()
+        dlg.ok.click()
+        self.settle_edits()
+        self.assertEqual(self.ov.plain_albums(), [a])
+        self.save()
+        want = {"albumartist": ["Band J"], "date": ["1994"], "album": ["Voyage"], "catalognumber": ["478 091-2"]}
+        for f in files:
+            got = tagio.read(f)
+            disc, title = ("1", "No Man") if "CD1" in f else ("2", "Live")
+            exp = dict(before[f], **want, discnumber=[disc], tracknumber=["1"], title=[title])
+            self.assertEqual(got, exp, f)
+            self.assertEqual(payload.digest(f), digests[f])
+
+
+for _name in [n for n in dir(PlainEdits) if n.startswith("test_") and n not in TagsShown.__dict__]:
+    setattr(TagsShown, _name, None)                                  # (PlainEdits' own tests run once, there)
+
+
 if __name__ == "__main__":
     unittest.main()

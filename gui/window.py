@@ -560,18 +560,25 @@ class Main(QMainWindow):
         return dialogs.show_file_info(self, path) if path else None
 
     def tags_from_filenames(self):
-        """The selected album's file names, read as tags into the preview as your edits (the
-        inspector's store: a new preview keeps them); nothing is written until Apply."""
+        """The selected album's file and folder names (the files selected in the inspector pane,
+        else all of the album's), read as tags into the preview as your edits (the inspector's
+        store: a new preview keeps them; EDT-2: an album not looked up, Save Tags writes them);
+        nothing is written until Apply or Save Tags."""
         ov = self.pages["Overview"]
         a = ov.selected()
         if not a or ov.running or not ov.plan:
             return None
         plan = ov.plan
+        planmod.plain_files(a)
+        scope = ov.panes.scope
+        files = [fe["src"] for fe in ov.panes.scope_files()] if scope and scope[0] is a else []
+        files = files or dialogs.plan_files(a)
 
         def done(_plan, result):
             n, out, _store = result
             msg = (tr("Tags from the file names are in the preview of {0}, in place of earlier "
-                      "values of those tags; nothing is written until you apply. Edit > Undo Edit (Ctrl+Z) takes "
+                      "values of those tags; nothing is written until you apply (or save, for an album not looked up). "
+                      "Edit > Undo Edit (Ctrl+Z) takes "
                       "them back.").format(plural(n, tr('album'),
                                                tr('albums'))) if n else tr("No tags were taken from the file names."))
             if out:
@@ -590,7 +597,7 @@ class Main(QMainWindow):
             insp.remember()                                          # (Undo Edit takes them back)
             reapply = insp.reapply if insp.plan is plan else None   # (its own plan: the edit goes its way)
             dialogs.apply_in_background(self, plan, overrides, done, store=insp.edits, reapply=reapply)
-        return dialogs.show_tags_from_filenames(self, dialogs.plan_files(a), use)
+        return dialogs.show_tags_from_filenames(self, files, use, folder=a.get("source_dir"))
 
     def job_details(self):
         j = self.pages["Jobs"]
@@ -712,8 +719,10 @@ class Main(QMainWindow):
         manual_match.update_commands(self.commands, ov, kind == "overview" and idle)
         self.update_m8_actions(kind, x, idle)
         self.commands["file_info"].setEnabled(self.info_file() is not None)
+        if kind == "overview" and x:
+            planmod.plain_files(x)                           # (EDT-2: an album not looked up: its files)
         self.commands["tags_from_filenames"].setEnabled(kind == "overview" and idle and bool(x.get("files"))
-                                                        and x.get("status") in planmod.EDITABLE)
+                                                        and planmod.editable(x))
         self.commands["job_details"].setEnabled(j is not None and page is j and bool(j.job()))
         self.commands["show_report"].setEnabled(report_mod.can_report(self))
         self.commands["process_anyway"].setEnabled(kind == "overview" and idle and x.get("status") == "excluded")

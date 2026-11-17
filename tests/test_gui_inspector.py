@@ -339,7 +339,6 @@ class InspectorEditing(Base):
     def pane_select(self, field_):
         """FIELD's row chosen in the Overview's inspector pane (the album shown whole)."""
         p = self.ov.panes
-        p.changes_only.setChecked(False)
         p.select("album", None, self.a)
         settle(self.app)
         p.tag_view.selectRow([r["field"] for r in p.tag_model.rows].index(field_))

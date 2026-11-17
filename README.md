@@ -134,6 +134,8 @@ Nothing is sent to an online account until a sheet lists it, for an album you ch
 
 The newest build of `main`, rebuilt after every change once all tests pass:
 **[Latest build →](https://github.com/herculepirate/tagmender/releases/tag/latest)**
+Every version also has its own permanent release on the
+[Releases page](https://github.com/herculepirate/tagmender/releases) (vX.Y.Z, with its notes).
 
 | Package | For | Install |
 |---|---|---|

@@ -1,7 +1,8 @@
 # Every push to main: the whole test suite runs while the .deb, the AppImage and the Flatpak are
 # built and checked; when all pass, they replace the files of the "latest" GitHub Release (the newest build of
-# main, always at https://github.com/herculepirate/tagmender/releases/tag/latest).
-# Versioned releases still come from tags (release.yml).
+# main, always at https://github.com/herculepirate/tagmender/releases/tag/latest). The first push
+# of a version also creates that version's own permanent release (vX.Y.Z, its notes from
+# docs/RELEASE_NOTES.md); a later push of the same version leaves it alone.
 # Actions are pinned to a commit (the version in the comment); all run on Node.js 24.
 name: build
 on:
@@ -105,7 +106,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write                 # (only this job writes: it replaces the "latest" release)
+      contents: write                 # (only this job writes: the "latest" release and the first release of a version)
     concurrency:
       group: publish-latest           # one publish at a time, never cancelled half-way
       cancel-in-progress: false
@@ -139,3 +140,28 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest --target "$GITHUB_SHA" --title "TagMender: latest build of main" \
             --notes-file notes.md --latest dist/*
+      - name: A release of its own for this version
+        # (created once: a version that has a release is never touched again, so a fix-up push
+        # of the same version cannot overwrite what people already downloaded; the rolling
+        # "latest" stays GitHub's Latest, so releases/tag/latest and releases/latest keep working)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(python3 -c "import version; print(version.VERSION)")
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "v$v already has a release: left alone"
+            exit 0
+          fi
+          awk -v v="## $v" 'index($0, v) == 1 {on=1; next} /^## / && on {exit} on' \
+            docs/RELEASE_NOTES.md > release-notes.md
+          test -s release-notes.md || echo "See docs/RELEASE_NOTES.md." > release-notes.md
+          cat >> release-notes.md <<TXT
+
+          **Install** (Linux, x86_64): download the AppImage, \`chmod +x\` it and run it (no installation),
+          or on Debian/Ubuntu/Mint \`sudo apt install ./tagmender_${v}_all.deb\`; the Flatpak is
+          \`flatpak install --user TagMender.flatpak\`. First time? Read
+          [First run](https://github.com/herculepirate/tagmender/blob/main/docs/FIRST_RUN.md):
+          preview first, try one folder, undo once.
+          TXT
+          gh release create "v$v" --target "$GITHUB_SHA" --title "TagMender $v" \
+            --notes-file release-notes.md --latest=false dist/*

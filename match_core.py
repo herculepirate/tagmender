@@ -218,6 +218,9 @@ _CATNO_ONE_TOKEN = re.compile(r"^[A-Za-z]{1,10}-?\d{2,7}(?:[-/]\d{1,3})?(?:CD|LP
                               re.I)                                         # Warpcd92, BRC-67, DiN34, FO40CD
 _CATNO_NUMBER = re.compile(r"^\d{2,7}(?:[-/]\d{1,3})?$")                         # 71063-2, 058, 2357
 _YEAR = re.compile(r"^(19|20)\d\d$")
+# VIN-5: a code in three or four groups of letters and digits ("SRM-1-1184", "25-3P-378", "25·3P-269")
+_VIN_GROUPED = re.compile(r"^[A-Za-z0-9]{1,8}(?:[-·・][A-Za-z0-9]{1,8}){2,3}$")
+_VIN_DATE = re.compile(r"^(?:(?:19|20)\d\d[-.·]\d{1,2}[-.·]\d{1,2}|\d{1,2}[-.·]\d{1,2}[-.·](?:19|20)\d\d)$")
 
 
 # CAT-3: disc formats and audio editions spelled like a label code ("[HDCD 1]", "[UHQCD 2]")
@@ -270,6 +273,27 @@ def catno_hints(text, variants=False):
                     skip.add(i + 1)
                 elif re.fullmatch(r"\d{5}-\d{4}-\d", w):
                     found.append(w.replace("-", " "))
+                # VIN-5: a record's catalogue number as vinyl rips' folders write it - in three or
+                # four groups ("SRM-1-1184", "25-3P-378", "25·3P-269", "7567-82293-1", "832-464-1",
+                # "B0022371-01-9"), a prefix with a digit ("R1-83736", "RD1 83736"), a long second
+                # group ("RR 1686-176561"), or numbers in groups with a dashed last one ("818 476-1",
+                # "422 826 098-1"); never a date ("1974-12-02", "02-12-1974")
+                elif _VIN_GROUPED.match(w) and sum(c.isdigit() for c in w) >= 5 and not _VIN_DATE.match(w):
+                    found.append(w)
+                elif re.fullmatch(r"[A-Za-z]{1,4}\d{1,2}-\d{4,7}", w):
+                    found.append(w)
+                elif re.fullmatch(r"\d{5,6}", w) and re.fullmatch(r"[A-Za-z]{1,4}\d", prev) and \
+                        not re.fullmatch(r"(?:cd|lp|dvd|bd|disc|disk|vol|pt|part|side|ep)\d", prev, re.I):
+                    found.append(f"{prev} {w}")
+                elif re.fullmatch(r"\d{3,5}-\d{4,7}", w) and not all(_YEAR.match(x) for x in w.split("-")):
+                    found.append(f"{prev} {w}" if re.fullmatch(r"[A-Z]{1,4}", prev) else w)
+                elif re.fullmatch(r"\d{3}", w) and re.fullmatch(r"\d{3}", nxt) and \
+                        re.fullmatch(r"\d{3}(?:-\d{1,2})?", nxt2):
+                    found.append(f"{w} {nxt} {nxt2}")
+                    skip.update((i + 1, i + 2))
+                elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt):
+                    found.append(f"{w} {nxt}")
+                    skip.add(i + 1)
                 # "479 7050": a number in two groups (Deutsche Grammophon style)
                 elif re.fullmatch(r"\d{2,4}", w) and re.fullmatch(r"\d{3,5}", nxt) \
                         and not _YEAR.match(w) and len(w + nxt) >= 6:

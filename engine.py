@@ -2657,6 +2657,21 @@ class Engine:
                     return True
         return False
 
+    @staticmethod
+    def _vinyl_rips(members) -> list:
+        """VIN-1: [(resolution, ripper)] of each member folder when the release is on vinyl (its
+        files' media), else [] - the audio's own bits and rate (vinylrip.resolution_of) and the
+        ripper its name or notes clearly name."""
+        import vinylrip
+        media = [m for _i, _part, p in members for t in p.targets or () for m in t.get("media") or ()]
+        if not media or not any(mc.media_kind(m) == "vinyl" for m in media):
+            return []
+        out = []
+        for _i, part, p in members:
+            d = vinylrip.describe(part.folder, p.files, notes=vinylrip.notes_of(part.folder))
+            out.append((vinylrip.resolution_name(d["resolution"]), d["ripper"]))
+        return out
+
     def _release_folders(self, folder: Path, parts, per, out) -> dict:
         """DSC-11: album folders side by side (_one_release_groups), each planned alone first, as
         before. Those each matched for sure on their own evidence (_sure: exact at the auto
@@ -2713,6 +2728,14 @@ class Engine:
                     self.log.info("%s: '%s' and '%s' both hold a disc of %s: two copies, each planned alone", folder,
                                   members[a][1].folder.name, members[b][1].folder.name, key[1])
                     return out
+        # VIN-1: rips of a record are copies, never layers: vinyl rips at another resolution or by
+        # another ripper stay apart even where they hold different discs (side 1-2 by one ripper,
+        # 3-4 by another are two partial rips, not one copy)
+        rips = self._vinyl_rips(members)
+        if rips and len(set(rips)) > 1:
+            self.log.info("%s: its album folders are different rips of a record of %s (%s): each planned alone",
+                          folder, key[1], " / ".join(sorted({" ".join(x for x in r if x) for r in rips})))
+            return out
         totals = {str((t.get("totaldiscs") or [""])[0]).strip() for _i, _part, p in members for t in p.targets}
         if len(totals) != 1:
             self.log.info("%s: its album folders count %s discs of %s: each planned alone", folder,

@@ -1655,9 +1655,20 @@ class Planner:
             return entry
 
     def _album_placed(self, prop) -> dict:
+        self._rip_year_known = ""
         try:
             return self._album(prop)
         except _DuplicateCopy as dup:
+            if getattr(self, "_rip_year_known", "") and not self.__dict__.get("_rip_dated"):
+                # VIN-3: another rip of this record would take its folder - the year ripped, when
+                # known, names this one's apart ("[2022 Vinyl Rip SRM-1-4013]")
+                self._rip_dated = True
+                try:
+                    return self._album(prop)
+                except _DuplicateCopy as again:
+                    dup = again
+                finally:
+                    self._rip_dated = False
             # MOV-4: another copy of this release is already filed there: tagged where it is
             self._in_place_note = str(dup)
             try:
@@ -2022,6 +2033,26 @@ class Planner:
                 rel_tags["~edition_hd"] = ["1"]
             if unproven:
                 rel_tags["~edition_unproven"] = ["1"]
+        # VIN-3 / VIN-4: a vinyl rip's own details - its ripper and the pressing's catalogue number
+        # for the folder name, the comment line (resolution, ripper, year ripped, equipment)
+        rip_line = ""
+        self._rip_year_known = ""
+        if identified and kept:
+            rip = self._vinyl_rip(prop, kept, targets, rel, unproven)
+            if rip:
+                import vinylrip
+                rip_line = vinylrip.comment_line(rip)
+                for k_, v_ in (("~ripper", rip.get("ripper")), ("~rip_catalog", rip.get("catno")),
+                               ("~rip_resolution", vinylrip.resolution_name(rip.get("resolution")))):
+                    if v_:
+                        rel_tags[k_] = [v_]
+                if unproven:
+                    rel_tags["~rip_vinyl"] = ["1"]
+                self._rip_year_known = rip.get("year") or ""
+                if rip.get("year") and (rip.get("year_named") or self.__dict__.get("_rip_dated")):
+                    # (the year ripped your folder name gives - "[2022 Vinyl Rip ...]" - or, from the rip
+                    # notes, where two copies of this release would share one folder: it tells them apart)
+                    rel_tags["~rip_year"] = [rip["year"]]
         # a Partial album whose files already name a release (Picard's or TagMender's tags):
         # only what they lack is filled; their date, album, titles and mark stay as they are
         held = partial and _names_release(kept)
@@ -2184,6 +2215,9 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
+            if rip_line and not held:
+                self._rip_comment(f, before, changes, rows, p, rip_line,
+                                  "album_only" if album_only or unproven else "partial" if partial else "")
             # (filled by the engine only for: an album only (TAG-3's pressing fields), an album held
             # whose pick TagMender withdrew (TAG-1), TRK-4b's disc numbers TagMender's own job wrote)
             back = (getattr(prop, "restore", None) or {}).get(str(f))
@@ -3252,6 +3286,75 @@ class Planner:
             return None                 # (another shape: a script making a disc folder from disc 2 on)
         return fnm.fold(str(other[-2])) != fnm.fold(str(comps[-2]))
 
+    @staticmethod
+    def _rip_comment(f, before, changes, rows, p, line, tier=""):
+        """VIN-4: TagMender's own line about a vinyl rip ("Vinyl rip: PBTHAL · 24-bit/96 kHz ...")
+        in the comment: added after the text already there, or put in place of its own earlier
+        line (vinylrip.merged_comment); every other line kept. Never where the comment's policy
+        is preserve or lock, nor where your own fill_missing policy keeps a comment already
+        there, nor where the level writes no comment (Basic, a dropped field); a value Picard's
+        "Preserve these tags" keeps stays whole, the line beside it. Nothing when the comment
+        already says it (idempotent). Your edit of the comment wins over it (apply_edits)."""
+        import levels
+        import vinylrip
+        pol = p.policy("comment")
+        if pol in ("preserve", "lock", "remove") or not tagio.holds(f, "comment"):
+            return
+        if not levels.restrict({"comment": [line]}, p, tier=tier).get("comment"):
+            return
+        had = _vals(before.get("comment"))
+        if "comment" in changes:
+            base = _vals(changes["comment"])           # (what this plan writes: a script's, or none)
+        else:
+            base = had
+        if pol == "fill_missing" and had and "comment" in ((p["field_policy"].get("fields") or {})):
+            return                                     # (your own policy: only where there is none)
+        first = vinylrip.merged_comment(base[0] if base else "", line)
+        after = [first] + list(base[1:])
+        if after == had:
+            if "comment" in changes:                   # (the plan would write only what is there)
+                changes.pop("comment")
+                rows[:] = [r for r in rows if r.get("field") != "comment"]
+            return
+        changes["comment"] = after
+        rows[:] = [r for r in rows if r.get("field") != "comment"]
+        rows.append({"field": "comment", "before": had, "after": after, "action": "changed" if had else "added",
+                     "note": "the vinyl rip's own line (ripper, resolution, year ripped, equipment), "
+                             "beside what the comment already says"})
+
+    @staticmethod
+    def _vinyl_rip(prop, kept, targets, rel, unproven) -> dict:
+        """VIN-3: this album's vinyl rip details (vinylrip.describe), or {} when it is no vinyl
+        rip: its release's media is vinyl (the first disc's, as the edition reads it) - or, its
+        pressing unproven, the tags all name vinyl or its folder's name says vinyl rip. The
+        catalogue number only of a proven release (the one written), the year ripped from the
+        folder name (not the pressing's own year) or the rip notes."""
+        import match_core as mc
+        import vinylrip
+        media = [m for f in kept for m in ((targets.get(f) or {}).get("media") or ())]
+        if rel.get("media"):
+            vinyl = naming.edition_parts({"media": rel["media"]})[0] == "Vinyl"
+        elif unproven:
+            vinyl = (bool(media) and all(mc.media_kind(m) == "vinyl" for m in media)) or \
+                mc.media_hint(Path(str(prop.source_dir)).name) == "vinyl"
+        else:
+            vinyl = bool(media) and mc.media_kind(media[0]) == "vinyl"
+        if not vinyl:
+            return {}
+        first = targets.get(kept[0]) or {}
+        catno = "" if unproven else str((first.get("catalognumber") or [""])[0]).strip()
+        pressing = "" if unproven else str((rel.get("date") or first.get("date") or [""])[0])[:4]
+        comments = []
+        for f in kept[:3]:
+            try:
+                comments += [str(x) for x in tagio.read(f).get("comment") or ()]
+            except Exception:
+                pass
+        try:
+            return vinylrip.describe(prop.source_dir, kept, catno, comments=comments, pressing_year=pressing)
+        except Exception:
+            return {}
+
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release
         the same folder as a different release (in this plan, or already on disk): "Now
@@ -3767,6 +3870,9 @@ def preview(plan: dict, verbose=False) -> str:
                 head += "\n    agreed: " + "; ".join(ident["evidence"][:6])
             if ident.get("why"):
                 head += "\n    doubts: " + "; ".join(ident["why"][:4])
+            if a.get("copies"):
+                import dynamics
+                head += "\n    copies: " + dynamics.words(a["copies"])     # VIN-6
         else:
             codes, words = reasons.parse(ident.get("reason", ""))
             head += f"\n    Unresolved: {', '.join(codes)} — {words}"

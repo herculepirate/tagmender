@@ -273,6 +273,9 @@ def _why_lines(a) -> tuple:
             ([("≠", words)] if words else [])
     if (ident.get("scans") or {}).get("state") == "differs":
         out.append(("≠", tr("Your scans name another pressing")))
+    if a.get("copies"):                                     # VIN-6: shown, never deciding anything
+        import dynamics
+        out.append(("·", dynamics.words(a["copies"])))
     if _held(a):
         if a.get("held"):
             out.append(("→", str(a["held"])))
@@ -1949,7 +1952,8 @@ class PreviewPanes(QWidget):
             self.evidence.setVisible(self.stack.currentWidget() is self.evidence)
             return
         title, lines = why_lines(album)
-        colour = {"✓": style.color("identified"), "≠": style.color("attention"), "→": style.color("muted")}
+        colour = {"✓": style.color("identified"), "≠": style.color("attention"), "→": style.color("muted"),
+                  "·": style.color("muted")}
         body = "".join(f"<tr><td style='color:{colour[m]};font-weight:600;padding-right:8px'>{m}</td>"
                        f"<td>{html.escape(w)}</td></tr>" for m, w in lines)
         self.why.setText(f"<b>{html.escape(title)}</b><table cellspacing='0'>{body}</table>" if lines else

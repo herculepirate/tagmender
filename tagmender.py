@@ -789,9 +789,22 @@ def _make_plan(args):
     return prof, p
 
 
+def _measure_copies(p):
+    """VIN-6: two or more copies of one release in the plan (or one filed before): each measured
+    (dynamic range, clipping) after the plan, shown side by side in its preview."""
+    try:
+        import dynamics
+        if dynamics.copies(p):
+            _err("Measuring the copies of one release (dynamic range, clipping)…")
+            dynamics.annotate(p, dynamics.measure(p))
+    except Exception as exc:                      # (a measure is only shown: never fails the plan)
+        _err(f"The copies were not measured: {exc}")
+
+
 def cmd_plan(args):
     import plan as planmod
     _prof, p = _make_plan(args)
+    _measure_copies(p)
     if args.output:
         planmod.save(p, args.output)
         _err(f"Plan saved to {args.output}  (apply with: tagmender apply {args.output})")

@@ -16,6 +16,11 @@ the syntax and every function. TagMender's own variables:
   %_edition%                 the edition: "<reissue year> <kind>" ("2019 Vinyl", "Vinyl", "2015 WEB",
                              "2014 CD"); empty for an original CD and when the media is unknown
   %_edition_kind%            the kind alone ("Vinyl", "WEB", "Tape"); empty for a CD
+  %_riptag%                  VIN-3: a vinyl rip's ripper and catalogue number ("PBTHAL SRM-1-1184"),
+                             the folder's edition after "Vinyl Rip"; empty for anything else
+  %_ripper%, %_rip_catalog%  its parts; %_rip_year% the year ripped (set only where two copies
+                             of one release would share a folder); %_rip_resolution% the audio's
+                             own bits and kHz ("24-96": in no preset's folder name)
 
 Naming never changes tags: $set, $copy, $delete ... only change variables for the rest of
 the name. An unknown function is an error when the template is checked, not a silent
@@ -159,6 +164,44 @@ def edition(tags: dict, mode: str = "edition_year") -> str:
         return "HD" if hd else ""
     word = _reissue_word(tags) + (" HD" if hd else "")
     return word if mode == "edition" else f"{reissue} {word}"
+
+
+# VIN-3: what a vinyl rip's folder adds (plan.Planner sets them; never in the Album tag)
+RIP_FIELDS = ("~ripper", "~rip_catalog")
+
+
+def _tag1(tags, k) -> str:
+    v = tags.get(k)
+    v = (v if isinstance(v, list) else [v]) if v not in (None, "") else []
+    return str(v[0]).strip() if v else ""
+
+
+def riptag(tags: dict) -> str:
+    """VIN-3: "PBTHAL SRM-1-1184" - the ripper and the catalogue number a vinyl rip's folder
+    names (those known), "" for anything else."""
+    return " ".join(x for x in (_tag1(tags, k) for k in RIP_FIELDS) if x)
+
+
+def folder_edition(tags: dict, mode: str = "edition_year") -> str:
+    """The edition a folder name carries: naming.edition, with a vinyl rip's own details
+    (VIN-3) - "Vinyl Rip PBTHAL SRM-1-1184" in place of ED-2's "1977 Vinyl Rip" where a ripper
+    or catalogue number is known (the catalogue number names the pressing), the year ripped in
+    front only where planner set it ("2022 Vinyl Rip SRM-1-4013": two copies would otherwise
+    share one folder). An album known (its pressing unproven) whose copy is a vinyl rip by its
+    own evidence: "Vinyl Rip" and its ripper, never a catalogue number."""
+    ed = edition(tags, mode)
+    if mode not in EDITION_VAR:
+        return ed
+    tag = riptag(tags)
+    year = _tag1(tags, "~rip_year")
+    if tags.get("~edition_unproven"):
+        if tags.get("~rip_vinyl"):
+            who = _tag1(tags, "~ripper")
+            return " ".join(x for x in (year, "Vinyl Rip", who) if x)
+        return ed
+    if tag and ed.endswith("Vinyl Rip"):
+        return " ".join(x for x in (year, "Vinyl Rip", tag) if x)
+    return ed
 
 
 _ALBUM_EXPR = re.compile(r"\$words\(%album%,\s*\d+\)|%album%", re.I)
@@ -334,17 +377,26 @@ class Ctx:
         if t.get("albumartists") and "_albumartists" not in t:     # Picard's %_albumartists%
             t["_albumartists"] = list(t["albumartists"])
         album = str((t.get("album") or [""])[0])
+        tag = riptag(t)
+        if tag:                                            # VIN-3
+            t["_riptag"] = [tag]
         for var, mode in (("_edition", "edition_year"), ("_edition_kind", "edition")):
-            ed = edition(t, mode)
+            ed = folder_edition(t, mode)
+            plain = edition(t, mode)
             if ed and not album.endswith(f"[{ed}]"):       # (the album tag may carry it already)
+                if ed != plain and plain and album.endswith(f"[{plain}]"):
+                    ed = ed[len(plain):].strip() if ed.startswith(plain) else (tag or ed)
                 t[var] = [ed]
         # (ED-1..4 for a script with its own edition lines: with_editions sets its %_edition%
         # from these, whatever the album tag carries)
         for var, mode in (("_ed_rule", "edition_year"), ("_ed_rule_kind", "edition")):
-            ed = edition(t, mode)
+            ed = folder_edition(t, mode)
             if ed:
                 t[var] = [ed]
                 if not album.endswith(f"[{ed}]"):         # (for a script that keeps the album's suffix)
+                    plain = edition(t, mode)
+                    if ed != plain and plain and album.endswith(f"[{plain}]"):
+                        ed = tag or ed                    # (VIN-3: the rip details beside it, once)
                     t[var + "_add"] = [ed]
 
     @property

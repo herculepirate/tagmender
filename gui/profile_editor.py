@@ -229,7 +229,7 @@ def colour_swatch(name):
     px.fill(QColor(0, 0, 0, 0))
     p = QPainter(px)
     p.setPen(QColor(style.color("field")))
-    tint = style.profile_tint(name) if name not in ("", "none") else None
+    tint = style.profile_dot(name) if name not in ("", "none") else None
     p.setBrush(tint if tint is not None else QColor(0, 0, 0, 0))
     p.drawRoundedRect(0, 0, 13, 13, 3, 3)
     p.end()
@@ -831,17 +831,24 @@ def _colour_put(d, v, _vals):
 
 
 def _colour_note(v):
-    from .common import default_colour
+    """What Automatic gives this profile: its name's colour, else one given in the order of the
+    profiles' names (gui.common.auto_colour)."""
+    from .common import auto_colour, default_colour
     from .style import PROFILE_TINTS
     if v.get("colour"):
         return ""
-    auto = default_colour(v.get("name") or "")
-    return tr("Automatic: {0}, from the profile's name.").format(tr(PROFILE_TINTS[auto][0])) if auto else \
-        tr("Automatic: none.")
+    name = str((v.get("_full") or {}).get("name") or (v.get("_loaded") or {}).get("name") or "")
+    auto = auto_colour(name) if name else ""
+    if not auto:
+        return tr("Automatic: a colour of its own, given in the order of the profiles' names.")
+    why = tr(", from the profile's name") if default_colour(name) == auto else ""
+    return tr("Automatic: {0}{1}.").format(tr(PROFILE_TINTS[auto][0]) if auto in PROFILE_TINTS else auto, why)
 
 
-COLOUR_CHOICES = (("", N_("Automatic")), ("none", N_("None")), ("green", N_("Green")), ("orange", N_("Orange")),
-                  ("blue", N_("Blue")), ("purple", N_("Purple")), ("red", N_("Red")), ("grey", N_("Grey")))
+# (Automatic first: every profile has a colour - its name's or one given; None only if you choose it)
+COLOUR_CHOICES = (("", N_("Automatic")), ("green", N_("Green")), ("orange", N_("Orange")), ("blue", N_("Blue")),
+                  ("purple", N_("Purple")), ("teal", N_("Teal")), ("pink", N_("Pink")), ("amber", N_("Amber")),
+                  ("red", N_("Red")), ("grey", N_("Grey")), ("none", N_("None")))
 
 
 SETTINGS = [
@@ -849,8 +856,9 @@ SETTINGS = [
     S("description", N_("Description"), "text", "general", personal=True, attr="desc"),
     S("colour", N_("Colour"), "popup", "general", personal=True, choices=COLOUR_CHOICES, get=_colour_get,
       put=_colour_put, note=_colour_note, words={k: w for k, w in COLOUR_CHOICES},
-      foot=N_("The album and folder rows filed with this profile are tinted with it in the preview, beside "
-              "its name. Automatic: green for a profile named LossyLess, orange for Extreme, else none.")),
+      foot=N_("The album and folder rows filed with this profile are tinted with it in the preview, and a dot "
+              "of it is before the profile's name. Automatic: green for a profile named LossyLess, orange for "
+              "Extreme, the others each a colour of their own.")),
     # Source
     S("formats", N_("Audio files"), "popup", "audio", attr="formats", custom="check",
       choices=(([], N_("All formats")), (["lossless"], N_("Lossless only")), (["lossy"], N_("Lossy only"))),

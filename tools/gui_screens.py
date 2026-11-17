@@ -501,10 +501,11 @@ def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPa
     sh.take(theme, size, 2, "overview", "Overview", lambda: win.grab)
 
     def tints():
-        """Some albums with a profile of their own (made-up keys, no look-up): their rows tinted with
-        the profile's colour, its name on each (0.8.71)."""
-        names = ("LossyLess Unraid", "LossyLess Unraid", "Extreme Unraid", "Extreme Unraid", "LossyLess Unraid",
-                 "Extreme Unraid")
+        """Some albums with a profile of their own (made-up keys, no look-up): every row tinted with its
+        profile's colour, a dot of it before the profile's name on each (0.8.71)."""
+        # (five profiles in all: two coloured by their names, the others by the automatic colours)
+        names = ("LossyLess Unraid", "LossyLess Unraid", "Extreme Unraid", "Extreme Unraid", "Inbox", "In place",
+                 "Inbox")
         for a, name in zip(ov.model.albums, names):
             ov.album_profiles[ov.album_key(a)] = name
         ov.model.refresh_rows()

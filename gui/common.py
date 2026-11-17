@@ -234,29 +234,71 @@ def load_profile(name):
 
 
 _COLOURS: dict = {}                     # profile name -> its colour (PROFILE_TINTS' name, "#RRGGBB" or "")
-# a profile with no colour of its own: one by its name (the person's choice, 2026-11-17), never
-# written into the profile; Preferences › Profiles › Colour sets one (or None)
+# a profile with no colour of its own: one by its name first (the person's choice, 2026-11-17), then
+# one of these, given in the order of the profiles' names, skipping the colours already taken - never
+# written into the profile; Preferences › Profiles › Colour sets one (or None, chosen)
 NAME_COLOURS = (("lossyless", "green"), ("extreme", "orange"))
+AUTO_COLOURS = ("blue", "purple", "teal", "pink", "amber", "grey", "red", "green", "orange")
 
 
 def default_colour(name) -> str:
+    """The colour a profile's name gives it ("" when its name gives none)."""
     low = str(name or "").lower()
     return next((c for word, c in NAME_COLOURS if word in low), "")
 
 
+def _own_colour(name):
+    """The colour saved in profile NAME ("none": none, chosen), or None when it has none."""
+    try:
+        own = (pf.raw_file(name) if name != "default" else {}).get("colour")
+    except Exception:
+        return None
+    return own.strip() if isinstance(own, str) and own.strip() else None
+
+
+def _colours():
+    """Every profile's colour (made once, until forget_profile_colours): its own, else its name's,
+    else the next of AUTO_COLOURS not taken, profiles in the order of their names - so a profile
+    keeps its colour from run to run until profiles are added, renamed or given colours."""
+    if "\0done" in _COLOURS:
+        return _COLOURS
+    try:
+        names = sorted(profile_names(), key=str.lower)
+    except Exception:
+        names = []
+    own = {n: _own_colour(n) for n in names}
+    rule = {n: default_colour(n) for n in names}
+    taken = {c for c in own.values() if c and c != "none"} | {rule[n] for n in names if rule[n] and own[n] is None}
+    free = [c for c in AUTO_COLOURS if c not in taken] or list(AUTO_COLOURS)
+    k = 0
+    for n in names:
+        if own[n] is not None:
+            _COLOURS[n] = "" if own[n] == "none" else own[n]
+            _COLOURS["\0auto:" + n] = rule[n] or free[k % len(free)] if not rule[n] else rule[n]
+            if not rule[n]:
+                k += 1
+        elif rule[n]:
+            _COLOURS[n] = _COLOURS["\0auto:" + n] = rule[n]
+        else:
+            _COLOURS[n] = _COLOURS["\0auto:" + n] = free[k % len(free)]
+            k += 1
+    _COLOURS["\0done"] = ""
+    return _COLOURS
+
+
 def profile_colour(name) -> str:
-    """The colour profile NAME's rows are tinted with: its own ("colour"; "none" for none), else
-    the one its name gives (default_colour). Read once per name until forget_profile_colours()."""
+    """The colour profile NAME's rows are tinted and dotted with: its own ("" for None, chosen),
+    else its name's, else one given automatically (_colours). A profile no longer saved: its name's."""
     if not name:
         return ""
-    if name not in _COLOURS:
-        try:
-            own = (pf.raw_file(name) if name != "default" else {}).get("colour")
-        except Exception:
-            own = None
-        own = str(own).strip() if isinstance(own, str) else ""
-        _COLOURS[name] = "" if own == "none" else own or default_colour(name)
-    return _COLOURS[name]
+    got = _colours().get(name)
+    return got if got is not None else default_colour(name)
+
+
+def auto_colour(name) -> str:
+    """The colour Automatic gives profile NAME (whatever it has chosen)."""
+    got = _colours().get("\0auto:" + str(name))
+    return got if got is not None else default_colour(name)
 
 
 def forget_profile_colours():

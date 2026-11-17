@@ -455,6 +455,42 @@ class Shell(unittest.TestCase):
         import gui_screens
         return gui_screens.fixed_rows(self.tmp)
 
+    def test_the_inspector_is_hidden_at_first_and_its_toolbar_button_says_so(self):
+        # (0.8.71: hidden until shown; the toolbar's button carries its word, beside Ctrl+Alt+I. An
+        # older "inspector": true, written each time the dock was shown, is no choice of the person's)
+        from PySide6.QtCore import Qt as _Qt
+        common = self.gui.common
+        common._set_gui_pref("inspector", True)
+        common._set_gui_pref("inspector_open", None)          # (nothing chosen yet)
+        self.show_plan()
+        self.win.restore()
+        settle(self.app)
+        self.assertFalse(self.win.inspector_wanted)
+        self.assertFalse(self.win.inspector.isVisible())
+        a = self.win.act("show_inspector")
+        b = self.win.toolbar.widgetForAction(a)
+        self.win.resize(1280, self.win.height())                 # (a usual width: its word shown)
+        settle(self.app)
+        self.assertEqual(b.text(), "Inspector")
+        self.assertEqual(b.toolButtonStyle(), _Qt.ToolButtonTextBesideIcon)
+        self.assertTrue(b.isVisible())                          # (never in the overflow menu)
+        self.win.resize(self.win.minimumWidth(), self.win.height())
+        self.win.show_progress(True)                           # (the narrowest window, during work)
+        settle(self.app)
+        self.assertTrue(b.isVisible())
+        self.assertLessEqual(self.win.toolbar.sizeHint().width(), self.win.width())
+        self.win.show_progress(False)
+        self.win.resize(1280, self.win.height())
+        settle(self.app)
+        b.click()
+        settle(self.app)
+        self.assertTrue(self.win.inspector.isVisible())
+        self.assertTrue(common._gui_prefs().get("inspector_open"))
+        b.click()
+        settle(self.app)
+        self.assertFalse(self.win.inspector.isVisible())
+        self.assertFalse(common._gui_prefs().get("inspector_open"))
+
     def test_the_inspector_steps_aside_on_pages_without_albums_and_comes_back(self):
         self.show_plan()
         self.win.inspector_wanted = True
@@ -466,7 +502,7 @@ class Shell(unittest.TestCase):
             settle(self.app)
             self.assertFalse(self.win.inspector.isVisible(), name)
             self.assertFalse(self.win.act("show_inspector").isEnabled(), name)
-        self.assertTrue(self.gui.common._gui_prefs().get("inspector", True))  # (not the person's choice)
+        self.assertTrue(self.gui.common._gui_prefs().get("inspector_open", True))  # (not the person's choice)
         self.win.go("Needs attention")
         settle(self.app)
         self.assertTrue(self.win.inspector.isVisible())

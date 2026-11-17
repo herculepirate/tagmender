@@ -375,8 +375,10 @@ def toolbar_end(bar, widgets, acts):
             bar.addWidget(w)
     a = acts["show_inspector"]
     bar.addAction(a)
+    a.setIconText(tr("Inspector"))                    # (its word beside the icon: a button seen, not only a key)
     b = bar.widgetForAction(a)
-    b.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    b.setText(tr("Inspector"))
     b.setAccessibleName(tr("Show Inspector"))
     b.setFocusPolicy(Qt.TabFocus)
 

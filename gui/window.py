@@ -160,7 +160,8 @@ class Main(QMainWindow):
         bar.messageChanged.connect(lambda msg: bar.setVisible(bool(msg)))
         bar.hide()
         self.setStatusBar(bar)
-        self.inspector_wanted = True                          # the person's choice (View > Show Inspector)
+        self.inspector_wanted = False                         # the person's choice (View > Show Inspector,
+                                                              #  the toolbar's Inspector button): hidden at first
         self._placing = False
         self._nav_dragged = False                             # (the widths saved are the person's, never
         self._fit_width = None                                #  what fit_docks squeezed them to)
@@ -568,8 +569,11 @@ class Main(QMainWindow):
         # something not on screen (Watched folders has its own Apply for waiting plans)
         if ov is not None:
             self.profile_box.setEnabled(on_ov and idle)        # (it picks the profile the preview uses)
+            shown = [a.isVisible() for a in getattr(self, "profile_actions", ())]
             for a in getattr(self, "profile_actions", ()):     # (and is not shown where it picks nothing)
                 a.setVisible(on_ov)
+            if shown and shown != [a.isVisible() for a in self.profile_actions]:
+                self.fit_toolbar()                             # (room taken or given back)
             self.commands["preview"].setEnabled(on_ov and idle and bool(ov.path))
             self.commands["apply"].setEnabled(on_ov and ov.may_apply_now() and bool(ov.plan) and ov.actionable() > 0)
             self.commands["exclude_again"].setEnabled(kind == "overview" and idle and bool(ov.overridden(x)))
@@ -747,6 +751,7 @@ class Main(QMainWindow):
         """The toolbar's progress bar (a toolbar widget is shown and hidden through its action)."""
         if self.progress_action is not None:
             self.progress_action.setVisible(on)
+            self.fit_toolbar()
         if not on:
             self.show_count("")                          # (the next run says its own count)
 
@@ -933,7 +938,7 @@ class Main(QMainWindow):
             a.blockSignals(False)
         if self.isVisible() and not self.isMinimized():
             self.inspector_wanted = bool(on)
-            _set_gui_pref("inspector", bool(on))
+            _set_gui_pref("inspector_open", bool(on))
 
     def fit_docks(self):
         """With the inspector open the content keeps CONTENT_MIN: the inspector gives way first, and
@@ -971,7 +976,27 @@ class Main(QMainWindow):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        self.fit_toolbar()
         QTimer.singleShot(0, self, self.fit_docks if self.inspector.isVisible() else self.fit_sidebar)
+
+    def fit_toolbar(self):
+        """The toolbar never hides its Inspector button in its overflow menu: when the window is too
+        narrow for everything (its narrowest width, the progress bar shown during work), the button
+        loses its word, then the search field, the profile pop-up and the progress bar narrow."""
+        bar = getattr(self, "toolbar", None)
+        b = bar.widgetForAction(self.commands["show_inspector"]) if bar is not None else None
+        if b is None:
+            return
+        # (inspector's word, search's widest, profile pop-up, progress bar)
+        steps = ((True, 200, 160, 120), (False, 140, 160, 120), (False, 90, 120, 80))
+        for n, (word, search, profile, progress) in enumerate(steps):
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if word else Qt.ToolButtonIconOnly)
+            self.search_box.setMinimumWidth(min(140, search))
+            self.search_box.setMaximumWidth(search)
+            self.profile_box.setFixedWidth(profile)
+            self.progress.setFixedWidth(progress)
+            if n == len(steps) - 1 or bar.sizeHint().width() <= self.width():
+                break
 
     # ---- Preferences ---------------------------------------------------------
     def preferences(self):
@@ -998,7 +1023,10 @@ class Main(QMainWindow):
         self.go("Overview")                      # (a new session always opens on the Overview)
         tab = d.get("inspector_tab", "Tags")
         self.inspector.tabs.setCurrentIndex(TABS.index(tab) if tab in TABS else 0)
-        self.inspector_wanted = bool(d.get("inspector", True))
+        # (hidden until shown, 0.8.71: the preview's panes show the tag changes and the cover. Saved
+        # under a new name: the old "inspector" was written each time the dock was shown, so it
+        # holds no choice of the person's)
+        self.inspector_wanted = bool(d.get("inspector_open", False))
         self.place_inspector()
         QTimer.singleShot(0, self, self.fit_docks)
 

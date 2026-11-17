@@ -817,8 +817,7 @@ class AlbumsModel(LazyTree):
         a = n.album or {}
         if role == R_USER:
             return a
-        if role == R_BACKGROUND and not (n.kind == "album" and c == self.SCORE and
-                                         self._list(n, 3, R_BACKGROUND) is not None):
+        if role == R_BACKGROUND:
             top = n
             while top.parent is not self.top and top.parent is not None:
                 top = top.parent
@@ -842,6 +841,10 @@ class AlbumsModel(LazyTree):
                     return self._list(n, 1, role)
                 return None
             src = self.SRC[c]
+            if c == self.SCORE and role in (R_FONT, R_FOREGROUND):
+                # (plain numbers in the secondary colour, as the mockup: the status carries the
+                # symbol and the word; how far to trust the score is in its tooltip and read out)
+                return QColor(style.color("muted")) if role == R_FOREGROUND else None
             if c == self.STATUS and role == R_FOREGROUND:
                 from .style import status_color
                 return status_color(a.get("status")) if not self._list(n, 0, R_DISPLAY) != \

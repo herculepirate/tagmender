@@ -249,7 +249,14 @@ class MainWindow(unittest.TestCase):
         album = self.choose(ov, [r])[0]
         idx = ov.tree.index(r, 0)
         self.assertEqual(ov.tree.data(ov.tree.index(r, 1)).split(" · ")[0], "Ready")
-        self.assertTrue(ov.tree.data(ov.tree.index(r, 2)))                 # (its score)
+        score = ov.tree.index(r, 2)
+        self.assertTrue(ov.tree.data(score))                               # (its score: a plain number,
+        self.assertIsNone(ov.tree.data(score, Qt.BackgroundRole))          #  no wash - Plain has no colour -
+        self.assertIsNone(ov.tree.data(score, Qt.FontRole))                #  nor bold, in the secondary colour)
+        self.assertEqual(ov.tree.data(score, Qt.ForegroundRole).name().lower(),
+                         self.gui.style.color("muted").lower())
+        self.assertIn("not a probability", ov.tree.data(score, Qt.ToolTipRole))   # (how far to trust it: told)
+        self.assertTrue(int(ov.tree.data(score, Qt.TextAlignmentRole)) & int(Qt.AlignRight))
         self.assertTrue(ov.tree.hasChildren(idx))
         disc = ov.tree.index(0, 0, idx)
         self.assertTrue(ov.tree.data(disc, Qt.UserRole + 5).startswith("← "))   # (the folder it came from)

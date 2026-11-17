@@ -853,6 +853,11 @@ class VIN_ReReviewWords(unittest.TestCase):
         self.assertEqual(vr.describe(base / "X [Vinyl Rip Fran Solo SRM-1-3743]", [],
                                      comments=["US Pressing - Fran Solo, Ediciones MMXVII"], scans="")["ripper"],
                          "Fran Solo")
+        # (the user's own form, a label after the name: "[Vinyl Rip Fran Solo Mercury SRM-1-1184]")
+        self.assertEqual(vr.describe(base / "1977 - A Farewell To Kings [Vinyl Rip Fran Solo Mercury SRM-1-1184]", [],
+                                     comments=["US Pressing - Fran Solo, Ediciones MMXIV (Digitalizacion de Vinilo)"],
+                                     scans="")["ripper"], "Fran Solo")
+        self.assertEqual(vr.caps_in_name("X [Vinyl Rip JP Epic 25-3P-378]"), "")
         self.assertEqual(vr.describe(base / "X [Vinyl Rip KRONOS 24bit 96khz]", [],
                                      comments=["Vinyl rip by KRONOS"], scans="")["ripper"], "KRONOS")
 

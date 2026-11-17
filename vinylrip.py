@@ -196,8 +196,9 @@ def caps_in_name(folder_name: str) -> str:
         for w in content[m.end():].split():
             w = w.strip(",;:")
             if not w or _RES_IN_NAME.match(w) or re.search(r"\d", w) or _VERSION_NAME.match(w) or \
-                    w in ("Final", "Ultimate", "Definitive", "Flat", "Raw", "Redux", "-", "\u2013"):
-                break
+                    w in ("Final", "Ultimate", "Definitive", "Flat", "Raw", "Redux", "-", "\u2013") or \
+                    (words and (w.upper() in _NOT_RIPPER or w.upper() in _COUNTRY)):
+                break                                 # (a label after the name ends it: "Fran Solo Mercury ...")
             words.append(w)
         if not 1 <= len(words) <= 2:
             continue

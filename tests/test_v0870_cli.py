@@ -37,9 +37,9 @@ class PlanProgressTest(unittest.TestCase):
         finally:
             p.done()
         lines = err.getvalue().splitlines()
-        self.assertEqual(lines[0], "Looking up 2/7: Artist – 2000 - Album")
+        self.assertEqual(lines[0], "Looking up 2/7: Artist/2000 - Album")
         self.assertEqual(lines[1], "waiting for MusicBrainz (busy, retrying in 5 s)")
-        self.assertEqual(lines[2], "Looking up 3/7: Other – Thing")
+        self.assertEqual(lines[2], "Looking up 3/7: Other/Thing")
         self.assertEqual(len(lines), 3)
         self.assertNotIn("\r", err.getvalue())
         self.assertNotIn("%", err.getvalue())
@@ -56,7 +56,7 @@ class PlanProgressTest(unittest.TestCase):
             p.done()
         out = err.getvalue()
         self.assertNotIn("\n", out)
-        self.assertIn("\rLooking up 1/3: A – B (MusicBrainz)", out)
+        self.assertIn("\rLooking up 1/3: A/B (MusicBrainz)", out)
         self.assertIn("waiting for MusicBrainz (busy, retrying in 4 s)", out)
         self.assertTrue(out.endswith("\r"))              # cleared at the end
 
@@ -92,8 +92,8 @@ class PlanStdoutTest(unittest.TestCase):
         self.assertEqual((c1, c2), (0, 0))
         self.assertEqual(o1, o2)
         self.assertEqual(o1, "PLAN TEXT\n")
-        self.assertIn("Looking up 1/1: A – B", e1)
-        self.assertIn("Looking up 1/1: A – B", e2)
+        self.assertIn("Looking up 1/1: A/B", e1)
+        self.assertIn("Looking up 1/1: A/B", e2)
 
 
 class DoctorOptionalKeysTest(unittest.TestCase):

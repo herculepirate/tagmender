@@ -680,10 +680,11 @@ _PROVIDER_WORDS = {"musicbrainz": "MusicBrainz", "discogs": "Discogs", "web": "t
 
 
 def _album_label(folder):
-    """"Artist - Album" from a folder's last two names (no tag reading just to say where we are)."""
+    """The folder's last two names, "Parent/Album" (no tag reading just to say where we are; the
+    parent may be a library folder, not the artist, so it is not written as an artist)."""
     p = Path(folder)
     if p.parent.name and p.parent != p.parent.parent:
-        return f"{p.parent.name} \u2013 {p.name}"
+        return f"{p.parent.name}/{p.name}"
     return p.name
 
 

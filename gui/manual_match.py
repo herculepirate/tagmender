@@ -405,13 +405,6 @@ def can_match(album) -> bool:
 # --------------------------------------------------------------------------
 # the main window's drop: add folders and files not in the preview yet
 # --------------------------------------------------------------------------
-_REAL: dict = {}                    # new_paths' folders, resolved, for REAL_FOR seconds (a drop asks
-#                                     for each album's folder; asked of the disk, each wait let the
-#                                     look-up's threads take Python's lock)
-_REAL_AT = 0.0
-REAL_FOR = 30.0
-
-
 def new_paths(page, paths) -> tuple[list, list]:
     """(the dropped paths the preview does not hold yet, the ones it does). A path is held when
     it is a file of an album listed, a folder holding one, or inside the folder previewed;
@@ -420,12 +413,9 @@ def new_paths(page, paths) -> tuple[list, list]:
     resolved every file's path on each drop.)"""
     root = getattr(page, "path", None)
     plan = getattr(page, "plan", None) or {}
-    global _REAL_AT
-    import time
-    if time.monotonic() - _REAL_AT > REAL_FOR:          # (a drop asks two or three times: once)
-        _REAL.clear()
-    _REAL_AT = time.monotonic()
-    real_dirs = _REAL                                   # folder -> (resolved, names of its links)
+    # folder -> (resolved, names of its links): asked of the disk on each call, never kept from
+    # one drop to the next (a folder held wrongly as new is listed, and applied, twice)
+    real_dirs = {}
 
     def links(r) -> set:
         try:

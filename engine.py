@@ -2542,8 +2542,13 @@ class Engine:
         # folder, its second disc's other takes under the same titles): the matcher is asked first
         mixed = mixed_versions(g.files)
         where = stage[0] if stage else g.folder         # DSC-1 (a set side by side: its stage)
+        # (FLD-2: the folder the album's name belongs to - a disc's or version's folder is read with
+        # its set's name, a set side by side through a stage: the folders beside that one tell
+        # whether the layout is flat)
+        layout = next((p for p in (g.folder, *g.folder.parents) if p.parent != p and p.parent.name == artist_folder),
+                      g.folder)
         row = {"FullPath": str(where), "AlbumArtistFolder": artist_folder, "AlbumFolder": album_folder,
-               "Status": "untagged"}
+               "Status": "untagged", "LayoutDir": str(layout)}
         outside = [] if stage else self._outside(g)
         args = argparse.Namespace(ocr=self.ocr, max_images=getattr(self, "ocr_images", 15), process_anyway=False,
                                   use_mb=self.use_mb, rules=self.rules,
@@ -4898,8 +4903,9 @@ class Engine:
         prop = planmod.Proposal(**base, targets=targets, status="identified", tier="partial",
                                 provider=f"web:{name}", release_id="", url=page,
                                 confidence=float(sc.get("confidence") or 0), why=notes,
-                                evidence=list(sc.get("notes") or []), reason=words,
-                                reason_codes=["web_fallback_only"],
+                                # (FLD-2: the artist and album read from the folder name, when they were)
+                                evidence=list(sc.get("notes") or []) + list((out or {}).get("reading_notes") or []),
+                                reason=words, reason_codes=["web_fallback_only"],
                                 provenance={k: "web" for t in targets for k in t if not k.startswith("~")},
                                 release={"album": [targets[0].get("album", [""])[0]] if targets else [],
                                          "albumartist": [cand.get("artist", "")],

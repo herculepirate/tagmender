@@ -729,7 +729,18 @@ def layer_groups(rel) -> list:
     is a disc of its own."""
     media = rel.get("media") or []
     counted = not all(m.get("tracks") for m in media if _layer_kind(m.get("format"))[1])
-    groups = []
+    groups, loose = _group_layers(media, counted, bonus=True)
+    if (counted or loose) and _layer_astray(groups):
+        # (a layer left without its disc: the layers' order is not the discs' - joined only
+        # as their own titles or counts say, MED-22b; with counts alone nothing joined)
+        groups = [[x] for g in groups for x in g] if counted else _group_layers(media, False, bonus=False)[0]
+    return [[m for m, _f, _k in g] for g in groups]
+
+
+def _group_layers(media, counted, bonus):
+    """MED-22: layer_groups's grouping, as [[(medium, family, kind), ...], ...], and whether a
+    layer joined on bonus tracks (MED-22b: its count other than its disc's CD layer's)."""
+    groups, loose = [], False
     for m in media:
         family, kind = _layer_kind(m.get("format"))
         last = groups[-1] if groups else None
@@ -737,29 +748,39 @@ def layer_groups(rel) -> list:
         join = bool(kind and head and head[2] and head[1] == family and
                     kind not in {k for _m, _f, k in last} and
                     _layer_count(m) and _layer_count(head[0]))
+        # (an SACD layer agrees with the disc's other SACD layer as MED-22 asks: the same
+        # titles, or with counts alone as many tracks)
+        twin = next((x for x, _f, k in (last or ()) if k and k != "cd"), None) if join and kind != "cd" else None
         if join and counted:
+            same = _layer_count(head[0]) == _layer_count(m)
             # (MED-22b: the CD layer may count bonus tracks of its own - up to as many again)
-            join = head[2] == "cd" and kind != "cd" and \
-                _layer_count(head[0]) >= _layer_count(m) and _layer_count(m) * 2 >= _layer_count(head[0])
+            join = head[2] == "cd" and kind != "cd" and (same or bonus and _layer_count(head[0]) > _layer_count(m)
+                                                         and _layer_count(m) * 2 >= _layer_count(head[0]))
+            join = join and (twin is None or _layer_count(twin) == _layer_count(m))
         elif join:
             # MED-22b: the same titles - or a CD layer's bonus tracks after its SACD layers' own
             # (Billy Joel - Streetlife Serenade 50th, SICP 10157: CD layer 14 tracks, its SACD
             # layers the first 10), the shorter list at least half the longer
             a, b = _layer_titles(m), _layer_titles(head[0])
             n = min(len(a), len(b))
-            join = a == b or ("cd" in (kind, head[2]) and n * 2 >= max(len(a), len(b))
-                              and a[:n] == b[:n] and (len(a) > n) == (kind == "cd"))
+            same = a == b
+            join = same or (bonus and "cd" in (kind, head[2]) and n * 2 >= max(len(a), len(b))
+                            and a[:n] == b[:n] and (len(a) > n) == (kind == "cd"))
+            join = join and (twin is None or _layer_titles(twin) == a)
         if join:
+            loose = loose or not same
             last.append((m, family, kind))
         else:
             groups.append([(m, family, kind)])
+    return groups, loose
+
+
+def _layer_astray(groups) -> bool:
+    """MED-22: a CD layer alone, or an SACD layer heading a disc of a kind that has CD layers,
+    where some layers joined."""
     with_cd = {f for g in groups for _m, f, k in g if k == "cd"}
-    if counted and any((g[0][2] == "cd" and len(g) < 2) or (g[0][2] and g[0][2] != "cd" and g[0][1] in with_cd)
-                       for g in groups) and any(len(g) > 1 for g in groups):
-        # (counts alone, and a layer left without its disc: the layers' order is not the
-        # discs' - nothing joined)
-        groups = [[x] for g in groups for x in g]
-    return [[m for m, _f, _k in g] for g in groups]
+    return any(len(g) > 1 for g in groups) and any(
+        (g[0][2] == "cd" and len(g) < 2) or (g[0][2] and g[0][2] != "cd" and g[0][1] in with_cd) for g in groups)
 
 
 def _pick_layer(g, prefer):

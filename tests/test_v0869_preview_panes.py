@@ -705,6 +705,23 @@ class ReviewFixes(PreviewPanesBase):
         self.assertEqual(sheet.call_args.kwargs["values"], ["A", "B"])
         self.assertEqual(self.edit(insp, layer)[0], {"artist": ["A", "B", "C"]})
 
+    def test_ok_with_the_values_unchanged_records_no_edit(self):
+        plan = synthetic_plan(self.tmp)
+        for fe in plan["albums"][1]["files"]:
+            fe["diff"].append(ch("artist", [], ["A", "B"]))
+            fe["changes"]["artist"] = ["A", "B"]
+        ov = self.show_plan(plan)
+        p, layer, insp = ov.panes, ov.model.albums[1], self.win.inspector
+        p.select("album", None, layer)
+        r = self.rows(p)["artist"]
+        i = p.tag_model.rows.index(r)
+        from gui import inspector
+        p.tag_view.selectRow(i)
+        with mock.patch.object(inspector, "tag_sheet", return_value=("artist", ["A", "B"])), \
+                mock.patch.object(type(insp), "reapply"):
+            p.tag_view.doubleClicked.emit(p.tag_model.index(i, 3))
+        self.assertIsNone(insp.edit_of(layer))      # (not pinned as yours: the release may change it later)
+
     def test_settings_of_the_wrong_kind_never_stop_the_window_opening(self):
         from gui.common import _set_gui_pref
         from gui.preview_panes import clean_prefs

@@ -1731,7 +1731,9 @@ class PreviewPanes(QWidget):
             tr(" Nothing is written until you apply the preview.")
         got = inspector.tag_sheet(self, tr("Edit {0}").format(r["name"]), scope, name=r["field"],
                                   values=r["after_vals"] or [])
-        if got is not None and got[1]:                     # (an empty sheet removes nothing: Remove Tag does)
+        # (an empty sheet removes nothing: Remove Tag does; OK with the values unchanged is no edit -
+        # it would pin them as yours, kept when the release changes later)
+        if got is not None and got[1] and list(got[1]) != list(r["after_vals"] or []):
             self._edit(r["field"], got[1])
 
     def remove_selected(self):

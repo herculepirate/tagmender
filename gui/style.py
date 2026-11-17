@@ -51,12 +51,20 @@ DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1
         "diff_new_bg": "#1E3A5F", "diff_new_ink": "#D6E6FB", "diff_old_bg": "#4F2A16", "diff_old_ink": "#FBDCC6",
         "seg_track": "#2A3038", "seg_on": "#4A535E"}
 
-# a profile's colour (its rows in Your files and Albums are tinted with it): name -> (words, light
-# tint, dark tint). Washes faint enough that ink, muted and status words keep 4.5:1 on them; a
-# selected row is drawn in the selection colour over it
-PROFILE_TINTS = {"green": (N_("Green"), "#EDF7F0", "#1D3326"), "orange": (N_("Orange"), "#FDF1E5", "#3A2A18"),
-                 "blue": (N_("Blue"), "#EEF3FB", "#1C2B40"), "purple": (N_("Purple"), "#F6F2FB", "#2D2440"),
-                 "red": (N_("Red"), "#FDF1F0", "#3D2121"), "grey": (N_("Grey"), "#F3F4F6", "#2A2F36")}
+# a profile's colour: every profile has one - yours, or one given automatically (gui.common.
+# profile_colour). name -> (words, light row tint, dark row tint, its dot). The washes keep ink, muted
+# and status words at 4.5:1 or more on them (tests/test_v0871_main_window.py); a selected row is drawn
+# in the selection colour over it. The dot (Finder's tag colours) says the profile in both schemes
+# without the wash: before its name on the album row, in the Profile pop-up and menus
+PROFILE_TINTS = {"green": (N_("Green"), "#EDF7F0", "#233F2C", "#34C759"),
+                 "orange": (N_("Orange"), "#FDF1E5", "#4A3519", "#FF9500"),
+                 "blue": (N_("Blue"), "#EEF3FB", "#223A5C", "#0A84FF"),
+                 "purple": (N_("Purple"), "#F6F2FB", "#3B2E57", "#AF52DE"),
+                 "teal": (N_("Teal"), "#EAF6F6", "#1B3D40", "#30B0C7"),
+                 "pink": (N_("Pink"), "#FCEFF5", "#4D2640", "#FF2D7A"),
+                 "amber": (N_("Amber"), "#FCF6E1", "#3E3714", "#FFCC00"),
+                 "red": (N_("Red"), "#FDF1F0", "#4E2828", "#FF3B30"),
+                 "grey": (N_("Grey"), "#F3F4F6", "#31373F", "#8E8E93")}
 
 # status -> (symbol, word, light colour, dark colour, icon)
 STATUS = {
@@ -126,6 +134,33 @@ def profile_tint(name, dark=None):
     k = 0.18
     return QColor(round(base.red() + (c.red() - base.red()) * k), round(base.green() + (c.green() - base.green()) * k),
                   round(base.blue() + (c.blue() - base.blue()) * k))
+
+
+def profile_dot(name):
+    """The dot of profile colour NAME (or a #RRGGBB of the person's) as a QColor; None for none."""
+    if not name:
+        return None
+    if name in PROFILE_TINTS:
+        return QColor(PROFILE_TINTS[name][3])
+    c = QColor(str(name))
+    return c if str(name).startswith("#") and c.isValid() else None
+
+
+def dot_icon(name, side=10):
+    """A filled round dot of profile colour NAME, for a pop-up's or a menu's item (empty: none)."""
+    from PySide6.QtGui import QIcon, QPainter, QPixmap
+    px = QPixmap(side * 2, side * 2)
+    px.fill(QColor(0, 0, 0, 0))
+    c = profile_dot(name)
+    if c is not None:
+        p = QPainter(px)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(c)
+        p.drawEllipse(2, 2, side * 2 - 4, side * 2 - 4)
+        p.end()
+    px.setDevicePixelRatio(2.0)
+    return QIcon(px)
 
 
 def status_icon(key) -> str:

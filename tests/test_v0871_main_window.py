@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "tools"))
 try:
     from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
+    from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QApplication
 except ImportError:                                           # GUI is optional
     QApplication = None
@@ -251,7 +252,8 @@ class MainWindow(unittest.TestCase):
         self.assertEqual(ov.tree.data(ov.tree.index(r, 1)).split(" · ")[0], "Ready")
         score = ov.tree.index(r, 2)
         self.assertTrue(ov.tree.data(score))                               # (its score: a plain number,
-        self.assertIsNone(ov.tree.data(score, Qt.BackgroundRole))          #  no wash - Plain has no colour -
+        self.assertEqual(ov.tree.data(score, Qt.BackgroundRole),          #  no band's wash: the row's tint -
+                         ov.tree.data(ov.tree.index(r, 0), Qt.BackgroundRole))
         self.assertIsNone(ov.tree.data(score, Qt.FontRole))                #  nor bold, in the secondary colour)
         self.assertEqual(ov.tree.data(score, Qt.ForegroundRole).name().lower(),
                          self.gui.style.color("muted").lower())
@@ -364,43 +366,79 @@ class MainWindow(unittest.TestCase):
         self.assertEqual([ov.profile_of(a) for a in albums], ["Extreme Unraid"] * 2)
 
     # ---- a profile's colour -------------------------------------------------------------------------
-    def test_rows_are_tinted_with_their_profiles_colour_and_name_it(self):
+    def test_every_profile_has_a_colour_distinct_and_stable(self):
+        from gui.common import auto_colour, forget_profile_colours, profile_colour, profile_names
+        self.assertEqual(profile_colour("LossyLess Unraid"), "green")      # (the name's colour first)
+        self.assertEqual(profile_colour("Extreme Unraid"), "orange")
+        names = profile_names()
+        colours = [profile_colour(n) for n in names]
+        self.assertTrue(all(colours), dict(zip(names, colours)))         # (every profile has one)
+        self.assertEqual(len(set(colours)), len(colours), dict(zip(names, colours)))   # (each its own)
+        forget_profile_colours()
+        self.assertEqual([profile_colour(n) for n in names], colours)     # (the same next time)
+        # yours wins; None only when you choose it; Automatic still says what it would give
+        self.pf.save(self.pf.from_dict({"name": "Plain", "operation": "in_place", "colour": "teal"}))
+        forget_profile_colours()
+        self.assertEqual(profile_colour("Plain"), "teal")
+        self.pf.save(self.pf.from_dict({"name": "Plain", "operation": "in_place", "colour": "none"}))
+        forget_profile_colours()
+        self.assertEqual(profile_colour("Plain"), "")
+        self.assertTrue(auto_colour("Plain"))
+        self.pf.save(self.pf.from_dict({"name": "Plain", "operation": "in_place"}))
+        forget_profile_colours()
+        self.assertEqual(profile_colour("Plain"), colours[names.index("Plain")])
+        # a new profile takes a colour not used yet, the others keep theirs
+        self.pf.save(self.pf.from_dict({"name": "Zeta", "operation": "in_place"}))
+        self.addCleanup(lambda: (self.pf.path_of("Zeta").unlink(missing_ok=True), forget_profile_colours()))
+        forget_profile_colours()
+        self.assertNotIn(profile_colour("Zeta"), colours)
+        self.assertEqual([profile_colour(n) for n in names], colours)
+
+    def test_rows_are_tinted_with_their_profiles_colour_and_name_it_after_a_dot(self):
         from gui import style
         from gui.common import profile_colour
-        self.assertEqual(profile_colour("LossyLess VA Unraid"), "green")
-        self.assertEqual(profile_colour("Extreme Unraid"), "orange")
-        self.assertEqual(profile_colour("Plain"), "")
+        from gui.preview_panes import PROFILE
         ov = self.show_plan()
         r = self.rows_of(ov, "ready")[0]
         a = ov.tree.album_at(r)
         idx = ov.tree.index(r, 0)
-        self.assertIsNone(ov.tree.data(idx, Qt.BackgroundRole))          # (Plain: no colour)
-        self.assertIn("Plain", ov.tree.data(idx, Qt.UserRole + 5))        # (its profile, in words)
+        plain = style.profile_tint(profile_colour("Plain"))
+        self.assertIsNotNone(plain)
+        self.assertEqual(ov.tree.data(idx, Qt.BackgroundRole), plain)
+        self.assertEqual(ov.tree.data(idx, PROFILE), "Plain")              # (its profile, in words)
+        self.assertIn("Plain", ov.tree.data(idx, Qt.UserRole + 5))
         self.choose(ov, [r])
         items = self.menu_items(ov)
+        pm = self.named(items, "Profile").menu()
+        self.assertFalse(next(x for x in pm.actions() if x.text().replace("&", "") == "Extreme Unraid").icon().isNull())
         with mock.patch.object(type(ov), "look_up"):
-            next(x for x in self.named(items, "Profile").menu().actions() if x.text().replace("&", "") == "LossyLess Unraid").trigger()
+            next(x for x in pm.actions() if x.text().replace("&", "") == "LossyLess Unraid").trigger()
         settle(self.app)
         green = style.profile_tint("green")
         self.assertEqual(ov.tree.data(idx, Qt.BackgroundRole), green)
         self.assertEqual(ov.tree.data(ov.tree.index(0, 0, idx), Qt.BackgroundRole), green)    # (its discs)
-        self.assertIn("LossyLess Unraid", ov.tree.data(idx, Qt.UserRole + 5))
+        self.assertEqual(ov.tree.data(idx, PROFILE), "LossyLess Unraid")
         root = next(i for i in range(ov.panes.folders.rowCount())
                     if any(x is a for x in ov.panes.folders.top.kids[i].data["albums"]))
         self.assertEqual(ov.panes.folders.data(ov.panes.folders.index(root, 0), Qt.BackgroundRole), green)
-        # dark: the dark wash
+        # the dot: drawn before the profile's name, in the colour's own hue (both schemes)
+        from gui.preview_panes import NameDelegate
+        with mock.patch.object(NameDelegate, "paint_profile", wraps=NameDelegate.paint_profile) as drawn:
+            ov.table.viewport().repaint()
+        self.assertIn("LossyLess Unraid", [c.args[2] for c in drawn.call_args_list])
+        self.assertEqual(style.profile_dot("green").name().lower(), "#34c759")
+        # the Profile pop-up's items carry the dots too
+        i = ov.profile.findText("Extreme Unraid")
+        self.assertFalse(ov.profile.itemIcon(i).isNull())
+        # dark: the dark wash, lighter than before yet readable (test_profile_tints_keep_the_words_readable)
         self.gui.style.apply(self.app, "dark")
         self.assertEqual(ov.tree.data(idx, Qt.BackgroundRole), style.profile_tint("green", dark=True))
         self.assertNotEqual(style.profile_tint("green", dark=True), style.profile_tint("green", dark=False))
-        # a colour of the profile's own wins over its name's; "none" is none
-        self.pf.save(self.pf.from_dict({"name": "LossyLess Unraid", "operation": "in_place", "colour": "blue"}))
-        self.win.pages["Profiles"]._tell_overview()                       # (as Save does)
-        self.assertEqual(profile_colour("LossyLess Unraid"), "blue")
-        self.pf.save(self.pf.from_dict({"name": "LossyLess Unraid", "operation": "in_place", "colour": "none"}))
-        from gui.common import forget_profile_colours
-        forget_profile_colours()
-        self.assertEqual(profile_colour("LossyLess Unraid"), "")
-        self.pf.save(self.pf.from_dict({"name": "LossyLess Unraid", "operation": "in_place"}))
+        base = QColor(style.tokens(True)["base"])
+        before = QColor("#1D3326")                                        # (the first dark wash: lost on the base)
+        for name in style.PROFILE_TINTS:
+            self.assertGreater(style.profile_tint(name, dark=True).lightness() - base.lightness(),
+                               before.lightness() - base.lightness(), name)
 
     def test_profile_tints_keep_the_words_readable(self):
         from gui import style
@@ -415,7 +453,8 @@ class MainWindow(unittest.TestCase):
     def test_the_profile_editor_offers_a_colour_and_writes_none_until_chosen(self):
         from gui.profile_editor import BY_KEY
         spec = BY_KEY["colour"]
-        self.assertIn(("", "Automatic"), spec.choices)
+        self.assertEqual(spec.choices[0], ("", "Automatic"))           # (first: every profile has a colour)
+        self.assertIn(("none", "None"), spec.choices)                    # (none only when chosen)
         d = {"name": "X"}
         spec.write(d, "", {})
         self.assertNotIn("colour", d)

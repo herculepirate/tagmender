@@ -294,7 +294,12 @@ class PerfGui(Base):
                 for role in (tg_role("UserRole5"), tg_role("BackgroundRole")):
                     ov.tree.data(ov.tree.index(r, 0), role)
             self.assertEqual(names.call_count, 0)
-            self.assertLessEqual(read.call_count, 1)
+            # (the colours: each profile's file read once, all at the first row, never again)
+            self.assertLessEqual(read.call_count, len(common.profile_names()))
+            before = read.call_count
+            for r in range(ov.tree.rowCount()):
+                ov.tree.data(ov.tree.index(r, 0), tg_role("BackgroundRole"))
+            self.assertEqual(read.call_count, before)
 
     def test_a_column_you_sized_stays(self):
         from gui.preview_panes import AlbumsModel

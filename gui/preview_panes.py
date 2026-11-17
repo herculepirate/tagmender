@@ -34,7 +34,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (QAbstractItemModel, QAbstractTableModel, QItemSelectionModel, QMimeData, QModelIndex,
                             QSize, Qt, QTimer, QUrl, Signal)
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QTextDocument
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QListView, QListWidget, QListWidgetItem, QMenu, QSizePolicy, QSplitter,
                                QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
@@ -648,6 +648,8 @@ def files_of(a) -> list:
 
 
 SUB = R_USER + 5                        # the muted words after a row's name ("← Disc 01", the release's facts)
+FACTS = R_USER + 6                      # an album row's release facts alone (SUB without its profile)
+PROFILE = R_USER + 7                    # an album row's profile (its name, after a dot of its colour)
 
 
 def _stamp(a) -> tuple:
@@ -828,6 +830,10 @@ class AlbumsModel(LazyTree):
                     return album_title(a)
                 if role == SUB:                         # (the profile in words: never its tint alone)
                     return " · ".join(x for x in (album_facts(a), self._list(n, 6, R_DISPLAY)) if x)
+                if role == FACTS:
+                    return album_facts(a)
+                if role == PROFILE:
+                    return self._list(n, 6, R_DISPLAY) or ""
                 if role == R_ACCESSIBLETEXT:
                     sub = self.data(idx, SUB)
                     return f"{album_title(a)}, {sub}" if sub else album_title(a)
@@ -933,6 +939,9 @@ class NameDelegate(QStyledItemDelegate):
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
         name, sub = opt.text, index.data(SUB) or ""
+        prof = index.data(PROFILE) or ""
+        if prof:                                        # (an album: its profile's dot and name, then its facts)
+            sub = index.data(FACTS) or ""
         opt.text = ""
         w = opt.widget
         st = w.style() if w else QApplication.style()
@@ -945,10 +954,16 @@ class NameDelegate(QStyledItemDelegate):
         painter.save()
         painter.setFont(opt.font)
         fm = painter.fontMetrics()
-        shown = fm.elidedText(name, Qt.ElideRight, r.width())
+        # (an album's profile, its dot and name, is never cut away: the name gives it its room)
+        pw = (13 + QFontMetrics(style.font("body")).horizontalAdvance(prof) + 10) if prof else 0
+        room = max(r.width() // 2, r.width() - pw) if prof else r.width()
+        shown = fm.elidedText(name, Qt.ElideRight, room)
         painter.setPen(ink)
         painter.drawText(r, int(Qt.AlignLeft | Qt.AlignVCenter), shown)
         used = fm.horizontalAdvance(shown) + 10
+        if prof and used + 20 < r.width():
+            self.paint_profile(painter, r.adjusted(used, 0, 0, 0), prof, sel)
+            used += pw
         if sub and shown == name and used < r.width():
             f = style.font("body")
             painter.setFont(f)
@@ -960,6 +975,28 @@ class NameDelegate(QStyledItemDelegate):
             painter.drawText(rest, int(Qt.AlignLeft | Qt.AlignVCenter),
                              painter.fontMetrics().elidedText(sub, Qt.ElideRight, rest.width()))
         painter.restore()
+
+    @staticmethod
+    def paint_profile(painter, r, prof, sel):
+        """A Finder-style dot of the profile's colour, then its name (muted): the profile reads
+        in both schemes without its row's wash."""
+        from .common import profile_colour
+        dot = style.profile_dot(profile_colour(prof))
+        x = r.left()
+        if dot is not None:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QColor(style.color("on_selection")) if sel else Qt.NoPen)
+            painter.setBrush(dot)
+            painter.drawEllipse(x, r.center().y() - 4, 8, 8)
+            painter.restore()
+            x += 13
+        painter.setFont(style.font("body"))
+        muted = QColor(style.color("on_selection")) if sel else QColor(style.color("muted"))
+        painter.setPen(muted)
+        rest = r.adjusted(x - r.left(), 0, 0, 0)
+        painter.drawText(rest, int(Qt.AlignLeft | Qt.AlignVCenter),
+                         painter.fontMetrics().elidedText(prof, Qt.ElideRight, rest.width()))
 
 
 class AlbumsView(QTreeView):

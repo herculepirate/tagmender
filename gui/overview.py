@@ -722,13 +722,19 @@ class Overview(QWidget):
                     used.add(ch.lower())
                     return words[:i] + "&" + words[i:]
             return words
+        from .common import profile_colour
+        menu.setStyleSheet("QMenu { icon-size: 10px; }")   # (its items' dots: the profiles' colours)
         above = menu.addAction(lettered(tr("As Above ({0})").format(self.above())))
+        above.setIcon(style.dot_icon(profile_colour(self.above())))
+        above.setIconVisibleInMenu(True)
         above.setCheckable(True)
         above.setChecked(bool(chosen) and mine == {""})
         above.triggered.connect(lambda _=False, c=chosen: self.set_album_profile(c, ""))
         menu.addSeparator()
         for name in profile_names():
             act = menu.addAction(lettered(name))
+            act.setIcon(style.dot_icon(profile_colour(name)))
+            act.setIconVisibleInMenu(True)
             act.setCheckable(True)
             act.setChecked(bool(chosen) and names == {name} and mine != {""})
             act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
@@ -943,7 +949,9 @@ class Overview(QWidget):
         self._filling = True                          # (filling the list is no choice of yours)
         try:
             self.profile.clear()
-            self.profile.addItems(profile_names())
+            from .common import profile_colour
+            for name in profile_names():                # (each with its colour's dot)
+                self.profile.addItem(style.dot_icon(profile_colour(name)), name)
             if cur and self.profile.findText(cur) >= 0:
                 self.profile.setCurrentText(cur)
         finally:

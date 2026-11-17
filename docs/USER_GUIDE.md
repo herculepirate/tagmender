@@ -560,10 +560,12 @@ on its own from Jobs). Changing an album's profile after it was looked up looks 
 Apply, choosing another profile for a *Done* album reads it where Apply put it and looks it up
 with that profile; the next Apply files it that profile's way.
 
-Each album row names its profile, and a profile's **Colour** (Preferences › Profiles › General:
-Automatic, None or a colour) tints its rows in both panes; Automatic is green for a profile whose
-name holds *LossyLess* and orange for *Extreme*, none for the others. The colour is never the only
-sign: the profile's name is on the row.
+Every profile has a colour: its rows in both panes are tinted with it, and a dot of it stands
+before the profile's name on each album row, in the Profile pop-up and in the Profile menus. Choose
+it under Preferences › Profiles › General › **Colour**; *Automatic* gives green to a profile whose
+name holds *LossyLess*, orange to *Extreme*, and each other profile a colour of its own in the order
+of their names (it stays the same until profiles are added or renamed); *None* is there if you want
+none. The colour is never the only sign: the profile's name is on the row.
 
 A look-up uses the profile's **Sources**; right-click › Look Up asks one database alone or the web
 for the albums selected. File › Library Folder for This Preview… files this preview's albums into

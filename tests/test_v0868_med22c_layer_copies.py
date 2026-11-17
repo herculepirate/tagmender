@@ -381,7 +381,7 @@ class MED22c_Minor(Base):
         rel = release(RID, [medium(1, CDL, ALBUM, LENS), medium(2, SA2, ALBUM, LENS), medium(3, SAM, ALBUM, LENS)])
         rel["title"] = "Piano Man"
         self.dest = self.tmp / "library"
-        top = self.dest / "Billy Joel" / "1973 - Piano Man [2024 SACD]"
+        top = self.dest / "Billy Joel" / "1973 - Piano Man"           # (its own album folder already)
         self.layer(top, 2, "Stereo")
         (top / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"X" * 100)
         plan = self.moving(SetHttp(mb=[rel])).plan(top)
@@ -415,6 +415,39 @@ class MED22c_Minor(Base):
         self.assertIn(b"S", (album / "Disc 01 (SACD Stereo)" / "cover.jpg").read_bytes()[3:])
         self.assertEqual((album / "Disc 01 (SACD Stereo)" / "rip.log").read_text(), "SAC")
         self.assertEqual((album / "rip.log").read_text(), "CDL")
+
+    def extras(self, top, tag):
+        (top / "cover.jpg").write_bytes(b"\xff\xd8\xff" + tag * 50)
+        (top / "rip.log").write_text(tag.decode())
+        (top / "Scans").mkdir(exist_ok=True)
+        (top / "Scans" / "back.jpg").write_bytes(b"\xff\xd8\xff" + tag * 40)
+
+    def same_end(self, album):
+        names = sorted(str(p.relative_to(album)) for p in album.rglob("*") if p.suffix != ".flac")
+        self.assertFalse([n for n in names if "~" in n], names)
+        for n in ("cover.jpg", "rip.log", "Scans/back.jpg"):
+            self.assertIn(b"CDL", (album / n).read_bytes(), names)
+            self.assertIn(b"SAC", (album / "Disc 01 (SACD Stereo)" / n).read_bytes(), names)
+
+    def test_MED22c_companions_in_any_order(self):
+        import executor
+        for order in ("cd first", "layers first", "same run"):
+            with self.subTest(order):
+                self.tmp = Path(__import__("tempfile").mkdtemp())
+                self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+                self.lib = self.tmp / "lib"
+                self.dest = self.tmp / "library"
+                cd, ly = self.cd_copy(), self.layers_copy()
+                self.extras(cd, b"CDL")
+                self.extras(ly, b"SAC")
+                if order == "same run":
+                    plan = self.moving(SetHttp(mb=[the_set()])).plan(self.lib / "Billy Joel")
+                    self.assertEqual([a["status"] for a in plan["albums"]], ["ready", "ready"], pl.preview(plan))
+                    executor.Executor(plan).run()
+                else:
+                    for top in ((cd, ly) if order == "cd first" else (ly, cd)):
+                        executor.Executor(self.moving(SetHttp(mb=[the_set()])).plan(top)).run()
+                self.same_end(self.dest / "Billy Joel" / "1973 - Piano Man")
 
     def test_MED22c_a_cd_and_an_sacd_of_one_album_stay_one_album(self):
         # (a CD and a plain SACD of the album - two discs of their own, the same titles - are never

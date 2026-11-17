@@ -639,7 +639,7 @@ def _other_copy_in(album: Path, src_dir: Path, moved) -> bool:
 
 
 def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist="",
-                single=False, extra=(), everything=False, copies=()):
+                single=False, extra=(), everything=False, copies=(), beside=False):
     """([(companion, destination)], why not): the non-audio files that go with an album
     that moves or is copied, as Picard's "move additional files" and foobar2000's "move
     entire source folder content" do:
@@ -673,14 +673,18 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     layers = sorted((d for d in dmap if _LAYER_DIR.search(dmap[d].name)),
                     key=lambda d: (len(d.parts), str(d).casefold()))
     if layers:
+        # MED-22c: an SACD layer's copy, filed beside the CD layer's copy (now or later, in any
+        # order): its own cover, logs and scans go into its (first) layer folder - never beside
+        # the CD layer's copy's, renamed. An album re-filed in its own folder keeps its cover where
+        # it is; a copy that also brings a plain disc (the bonus CD) takes the album folder unless
+        # another copy is filed or planned there (beside)
         album = dmap[layers[0]].parent
-        if _other_copy_in(album, src_dir, moved):
-            # MED-22c: an SACD layer's copy filed beside the CD layer's (with a plain disc of its own,
-            # the bonus CD, too): its own cover, logs and scans go into its (first) layer folder -
-            # never beside the CD layer's copy's, renamed
+        if os.path.realpath(str(album)) == os.path.realpath(str(src_dir)):
+            dmap[src_dir] = src_dir
+        elif all(d in layers for d in dmap) or beside:
             dmap[src_dir] = dmap[layers[0]]
         elif dmap.get(src_dir) is not None and dmap[src_dir].parent == album:
-            dmap[src_dir] = album         # (an album of its own: its cover stays in its album folder)
+            dmap[src_dir] = album
     if src_dir not in dmap:
         top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
         if any(d != top and d.parent != top for d in dmap.values()):
@@ -730,7 +734,8 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
         seen += len(here) + len(dirs)
         if seen > MAX_TREE:
             return _companions(src_dir, moved, profile, shallow=True, tracks_only=tracks_only, artist=artist,
-                               single=single, extra=extra, everything=everything, copies=copies)[0], \
+                               single=single, extra=extra, everything=everything, copies=copies,
+                               beside=beside)[0], \
                 "album folder holds too many files to look through; only its own companion files go"
         tree.append((d, here))
     music_below = set()
@@ -2600,7 +2605,7 @@ class Planner:
                 comps, why_not = _companions(src_root, pairs, p, shallow=at_root, tracks_only=at_root,
                                              artist=[who] + sort,
                                              single=single, extra=tidy.extensions(sub), everything=whole,
-                                             copies=copies)
+                                             copies=copies, beside=self._beside_copy(pairs, prop))
                 for c in copies:
                     entry["notes"].append(f"{c.name} is a second copy of one of the album's tracks: left where it is")
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
@@ -3077,6 +3082,17 @@ class Planner:
         if not any(len(v) > 1 for v in list(by_name.values()) + list(by_disc.values())):
             return []
         return list(dict.fromkeys(seen))
+
+    def _beside_copy(self, pairs, prop) -> bool:
+        """MED-22c: this album's music goes into a layer folder ("Disc 01 (SACD Stereo)") of an album
+        folder that already holds, or that this plan files, another copy's music."""
+        dirs = {Path(v).parent for v in pairs.values() if _LAYER_DIR.search(Path(v).parent.name)}
+        if not dirs:
+            return False
+        album = next(iter(dirs)).parent
+        src = str(prop.source_dir)
+        planned = any(c[1] != src for c in (self.__dict__.get("_album_claims") or {}).get(fnm.fold(album), ()))
+        return planned or _other_copy_in(album, Path(src), pairs)
 
     def _disc_level(self, template, names, comps, f):
         """MED-22c: the naming's last folder is its disc folder - the file named as another disc

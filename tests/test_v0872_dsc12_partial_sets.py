@@ -179,10 +179,10 @@ class DSC12Joins(Base):
         # (the disc's own log with its music; its cover and scans at the album's root, never over
         # what is there)
         self.assertEqual(comps["rip.log"], "Disc 02/rip.log")
-        for name in ("cover.jpg", "Scans/back.jpg"):
-            self.assertNotEqual(comps[name], name)
-            self.assertEqual(Path(comps[name]).parent, Path(name).parent)
-            self.assertTrue(Path(comps[name]).stem.startswith(Path(name).stem), comps)
+        # (the album's own front cover at its root stays the album's: the disc's goes with the disc)
+        self.assertEqual(comps["cover.jpg"], "Disc 02/cover.jpg")
+        self.assertNotEqual(comps["Scans/back.jpg"], "Scans/back.jpg")
+        self.assertTrue(comps["Scans/back.jpg"].startswith("Scans/back"), comps)
         self.apply(plan)
         self.assertEqual((album / "cover.jpg").read_bytes(), b"\xff\xd8\xff" + bytes([1]) * 60)   # (never overwritten)
         self.assertEqual({self.tags(p) for p in album.rglob("*.flac")}, {("1", "2"), ("2", "2")})
@@ -282,7 +282,8 @@ class DSC12Joins(Base):
         new = sorted(set(after) - set(before))
         self.assertIn("Disc 02/rip.log", new)
         self.assertEqual(len([n for n in new if n.startswith("Disc 02/") and n.endswith(".flac")]), 3)
-        self.assertTrue(all(n.startswith(("Disc 02/", "cover", "Scans/")) for n in new), new)
+        self.assertTrue(all(n.startswith(("Disc 02/", "Scans/")) for n in new), new)
+        self.assertIn("Disc 02/cover.jpg", new)               # (the album's cover.jpg at its root stays its own)
         executor.undo(plan["job"])
         self.assertEqual(self.everything(album), before)
 
@@ -412,6 +413,26 @@ class DSC12Review(Base):
         self.assertIn("holds other audio where disc 2 would go", a["attention"][0])
         executor.Executor(plan).run()
         self.assertEqual(len(list((mine / "Disc 02").glob("*.flac"))), 3)
+
+    def test_DSC12_every_disc_folder_is_looked_at_not_only_the_first(self):
+        # (discs 2 and 3 arriving together; your own untagged rip of disc 3 already in "Disc 03")
+        from mutagen.flac import FLAC
+        self.rels = [the_release(discs=3, dvd=False)]
+        mine = self.renamed()
+        for p in self.disc(mine / "Disc 03", 3, freq=5).glob("*.flac"):
+            f = FLAC(str(p))
+            f.delete()
+            f.save()
+        inbox = self.lib / "Inbox"
+        self.disc(inbox / "Double CD2", 2)
+        self.disc(inbox / "Double CD3", 3)
+        plan = self.plan_of(inbox)
+        self.assertTrue(plan["albums"], pl.preview(plan))
+        for a in plan["albums"]:
+            self.assertFalse(any(Path(fe["dst"]).parent == mine / "Disc 03" for fe in a["files"]), pl.preview(plan))
+        executor.Executor(plan).run()
+        self.assertEqual(len(list((mine / "Disc 03").glob("*.flac"))), 3)
+        self.assertFalse([p for p in mine.rglob("*~*")])
 
     def test_DSC12_another_release_in_the_album_you_have_is_never_joined(self):
         self.rels = [the_release(), the_release(OTHER)]
@@ -692,6 +713,33 @@ class DSC12Layers(LayerBase):
         self.assertEqual(a.get("attention"), ["disc 2 missing"])
         executor.Executor(plan).run()
         self.assertEqual(sorted({p.parent.name for p in mine.rglob("*.flac")}), ["Disc 01", "Disc 01 (SACD Stereo)"])
+
+    def test_DSC12_your_own_layer_rip_in_the_layer_folder_is_never_joined(self):
+        from mutagen.flac import FLAC
+        eng = self.moving(SetHttp(mb=[the_set()]))
+        cd = self.lib / "Billy Joel" / "1973 - Piano Man [CD layer]"
+        for i in range(3):
+            self.track(cd / f"{i + 1:02d}. Track {i + 1}.flac", i, 2, LAYER_LENS[i] / 1000, hires=False,
+                       shift=3, DISCNUMBER="1", BARCODE="4547366000000", ISRC=f"USSM1730050{i}")
+        executor.Executor(eng.plan(cd)).run()
+        [album] = [d for d in (self.dest / "Billy Joel").iterdir()]
+        mine = album.with_name("Piano Man (mine)")
+        album.rename(mine)
+        own = mine / "Disc 01 (SACD Stereo)"
+        self.layer(own, 2, "Stereo")
+        for p in own.glob("*.flac"):                     # (your own rip: no tags at all)
+            f = FLAC(str(p))
+            f.delete()
+            f.save()
+        st = self.lib / "Inbox" / "Piano Man (SACD stereo)"
+        self.layer(st, 2, "Stereo")
+        plan = self.moving(SetHttp(mb=[the_set()])).plan(st)
+        [a] = plan["albums"]
+        self.assertNotIn("joins", a)
+        self.assertTrue(all(fe["dst"] == fe["src"] for fe in a["files"]), pl.preview(plan))
+        self.assertTrue(pl.held(a))
+        executor.Executor(plan).run()
+        self.assertEqual(len(list(own.glob("*.flac"))), 3)
 
 
 if __name__ == "__main__":

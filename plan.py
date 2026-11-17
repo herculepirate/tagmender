@@ -1081,6 +1081,34 @@ def _home_conflict(album_dir: Path, me: frozenset, ignore: set, mine: set, slot)
     return other, taken
 
 
+def _audio_besides(folder: Path, ignore: set, me=None) -> bool:
+    """DSC-12: FOLDER holds audio (hidden files aside) of no file of this plan (IGNORE: its paths and
+    inodes) - and, given ME, not tagged as that very release (another of its discs or layers there
+    is MOV-4's and MED-22c's to judge)."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return False
+    for n in names:
+        pth = os.path.join(folder, n)
+        if Path(n).suffix.lower() not in AUDIO_EXT or n.startswith(".") or pth in ignore:
+            continue
+        try:
+            st = os.stat(pth)
+        except OSError:
+            continue
+        if (st.st_dev, st.st_ino) in ignore:
+            continue
+        if me is not None:
+            try:
+                if _same_pressing(me, _ids_of(tagio.read(pth))):
+                    continue
+            except Exception:
+                pass
+        return True
+    return False
+
+
 def _set_total(prop) -> int:
     """DSC-12: the release's disc count as this album is tagged with it (MED-17: its audio discs;
     MED-22: its physical discs), 0 when not told."""
@@ -2862,6 +2890,18 @@ class Planner:
                                              single=single, extra=tidy.extensions(sub), everything=whole,
                                              copies=copies, beside=self._beside_copy(pairs, prop),
                                              root_to=root_to)
+                if root_to is not None:
+                    # (the album's own front cover at its root - folder.jpg, cover.jpg, front.png ...:
+                    # the disc's own goes into its disc folder, so players keep the album's art)
+                    def front(n_):
+                        return bool(tidy.FRONT.match(Path(n_).stem)) and Path(n_).suffix.lower() in tidy.COVER_EXT
+                    try:
+                        has_front = any(front(n_) for n_ in os.listdir(root_to))
+                    except OSError:
+                        has_front = False
+                    if has_front:
+                        comps = [(c_, land / w_.name if w_.parent == root_to and front(w_.name) else w_)
+                                 for c_, w_ in comps]
                 for c in copies:
                     entry["notes"].append(f"{c.name} is a second copy of one of the album's tracks: left where it is")
                 own_from = {c for c, _w in comps} if why_not == SHARED_FOLDER_NOTE else set()
@@ -3637,6 +3677,29 @@ class Planner:
                 fe.get("op") in ("copy", "move") for fe in files) or not all(
                 home in Path(fe["dst"]).parents for fe in files)):
             home = None                 # (not joined: a copy of a disc there, or not filed into it)
+        moving = [fe for fe in files if fe.get("op") in ("copy", "move")]
+        if _lone_discs(prop) and not apart and moving:
+            # every folder its files land in below the album's (each disc's, each layer's - not only
+            # the first file's): audio already there, of no file of this plan, is yours - the disc
+            # is never put beside it (two copies of disc 3), but kept where it is for your decision
+            root = home
+            if root is None:
+                root = Path(os.path.commonpath([str(Path(fe["dst"]).parent) for fe in moving]))
+                if _DISC_NAME.match(root.name):
+                    root = root.parent
+            busy = sorted(d for d in {Path(fe["dst"]).parent for fe in moving}
+                          if d != root and root in d.parents and _audio_besides(d, self._planned, _release_ids(prop)))
+            if busy:
+                mine_src = {str(f) for f in prop.files}
+                for k_ in [k_ for k_, v_ in self.claimed.items() if v_ in mine_src]:
+                    del self.claimed[k_]
+                self._joins.pop(id(prop), None)
+                where = ", ".join(f"'{d.name}'" for d in busy)
+                raise _DuplicateCopy(
+                    f"the album of this release in {root.name} holds other audio in {where}, where "
+                    f"{_disc_words(mine)} would go: this one is tagged where it is, not put beside it (DSC-12)",
+                    attention=f"{_disc_words(mine)} of an album you have, not joined: '{root.name}' holds other "
+                              f"audio in {where}")
         if total:
             have = {d if not isinstance(d, tuple) else d[0] for d in mine | (join["held"] if home is not None else set())}
             if home is not None:
@@ -3708,11 +3771,8 @@ class Planner:
                     # (a disc of it there already: another copy - tagged where it is, the whole of it)
                     self._joins.pop(id(prop), None)
                     raise _second_copy(home, join["held"] | claimed, mine, planned=not (mine & join["held"]))
-                # (the disc folder they go into - an SACD layer's copy goes into a folder of its
-                # own, MED-22c, told apart by its tags below)
-                slot = home / dst.parent.relative_to(album_dir) if dst.parent != album_dir and \
-                    not all(isinstance(d, tuple) for d in mine) else None
-                other, taken = _home_conflict(home, me, self._planned, mine, slot)
+                # (every folder its files land in is looked at once they are placed: _join_files)
+                other, taken = _home_conflict(home, me, self._planned, mine, None)
                 if other or taken:
                     # (the album folder holds music of another release or pressing, or audio no
                     # release names in this disc's slot - yours: never joined, kept apart for you)
@@ -3728,8 +3788,7 @@ class Planner:
                     self._album_dirs[fnm.fold(home)] = me
                     cache["map"] = (album_dir, home)
             elif album_dir.is_dir():
-                slot = dst.parent if dst.parent != album_dir and not all(isinstance(d, tuple) for d in mine) else None
-                other, taken = _home_conflict(album_dir, me, self._planned, mine, slot)
+                other, taken = _home_conflict(album_dir, me, self._planned, mine, None)
                 if other:
                     # (M2: where the naming files it, another pressing of the album - a release ID
                     # shared, another conflicting: an album folder of its own, flagged)
@@ -4179,6 +4238,12 @@ def completes_filed_set(props, profile) -> bool:
         ints = {d if not isinstance(d, tuple) else d[0] for d in held | mine}
         if held & mine or not all(n in ints for n in range(1, total + 1)) or \
                 any(_home_conflict(h, me, planner._planned, mine, None)):
+            return False
+        try:                                # (a disc folder holding audio none of it this release's: yours)
+            subs = [d for d in h.iterdir() if d.is_dir() and _DISC_NAME.match(d.name)]
+        except OSError:
+            subs = []
+        if any(_audio_besides(d, planner._planned) and not _discs_there(d, me, planner._planned)[0] for d in subs):
             return False
         ok = True
     return ok

@@ -1,7 +1,10 @@
 # Releasing TagMender
 
 Every push to `main` is a release: the `build` workflow tests it, builds the packages and
-publishes them as the `latest` release. These steps apply to every contributor and agent.
+publishes them as the `latest` release (the rolling newest build). The first push of a version
+also creates that version's own permanent release `vX.Y.Z` (notes from its section of
+`docs/RELEASE_NOTES.md`, the same files attached); a later push with the same version never
+touches it. Nobody creates releases or tags by hand. These steps apply to every contributor and agent.
 
 ## Before pushing
 
@@ -39,10 +42,12 @@ A passing local suite and a passing GitHub build are separate results; report ea
 2. **GitHub's required jobs.** For that run, every test shard, every packaging job and `publish`
    concluded `success` (`gh run view <id> --json conclusion,jobs`). A failed, cancelled or skipped
    job means the version is not released; its packages were not published.
-3. **The published artifact.** Download the AppImage from the `latest` release
-   (`gh release download latest -p 'TagMender-X.Y.Z-x86_64.AppImage*'`), check it against its
+3. **The published artifact.** Download the AppImage from the `latest` release, or for a new
+   version from its own `vX.Y.Z` release (`gh release download latest -p 'TagMender-X.Y.Z-x86_64.AppImage*'`), check it against its
    published `.sha256` (`sha256sum -c`), and for each installed copy confirm that `--version`
    reports X.Y.Z and that the GUI is bundled (PySide6 present in the extracted image:
-   `--appimage-extract`, then look for `site-packages/PySide6`).
+   `--appimage-extract`, then look for `site-packages/PySide6`, and `usr/share/doc/tagmender/LICENSE`
+   with `THIRD_PARTY_NOTICES.md`). A new version's run must also have created the `vX.Y.Z` release
+   (`gh release view vX.Y.Z`).
 
 Only then is the release reported as verified. Where an installed copy cannot be checked, say so.

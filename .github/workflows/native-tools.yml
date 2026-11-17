@@ -82,12 +82,30 @@ jobs:
             curl -fsSL -o $O/share/tessdata/$l.traineddata \
               "https://github.com/tesseract-ocr/tessdata_fast/raw/$TESSDATA_FAST/$l.traineddata"
           done
+          # licence texts that must travel with the binaries: the sources' own files, tessdata_fast's,
+          # and the system packages' (AlmaLinux 8) for every library copied in above
+          L=$O/licenses; mkdir -p $L/tesseract $L/leptonica $L/zbar $L/tessdata_fast
+          cp src/tesseract-$TESSERACT/LICENSE $L/tesseract/
+          cp src/leptonica-$LEPTONICA/leptonica-license.txt $L/leptonica/
+          cp src/zbar-$ZBAR/COPYING $L/zbar/
+          curl -fsSL -o $L/tessdata_fast/LICENSE "https://github.com/tesseract-ocr/tessdata_fast/raw/$TESSDATA_FAST/LICENSE"
+          for lib in $(ldd $O/bin/tesseract $O/lib/*.so* | awk '/=> \//{print $3}' | sort -u | grep -v "^$P"); do
+            pkg=$(rpm -qf --qf '%{NAME}\n' "$lib" 2>/dev/null | head -1) || continue
+            [ -n "$pkg" ] && [ -d "/usr/share/licenses/$pkg" ] && mkdir -p "$L/system/$pkg" && cp -a /usr/share/licenses/$pkg/. "$L/system/$pkg/"
+          done
+          for need in tesseract/LICENSE leptonica/leptonica-license.txt zbar/COPYING tessdata_fast/LICENSE; do
+            test -s "$L/$need"
+          done
           cat > $O/NOTICE <<EOF
           tesseract $TESSERACT (Apache-2.0) https://github.com/tesseract-ocr/tesseract
           leptonica $LEPTONICA (BSD-2-Clause) https://github.com/DanBloomberg/leptonica
           zbar $ZBAR (LGPL-2.1+) https://github.com/mchehab/zbar
           tessdata_fast $TESSDATA_FAST eng jpn rus osd (Apache-2.0) https://github.com/tesseract-ocr/tessdata_fast
-          libpng, libjpeg-turbo, libtiff, zlib: their own licenses, as shipped by AlmaLinux 8
+          libpng, libjpeg-turbo, libtiff, zlib and any other system library copied beside them: their own
+          licenses, as shipped by AlmaLinux 8 (texts in licenses/system/)
+          Sources: the pinned upstream release tarballs named in .github/workflows/native-tools.yml
+          (checksummed there); the system libraries' sources are AlmaLinux 8's source packages.
+          Licence texts: licenses/
           EOF
           ls -la $O/bin $O/lib
       - name: Check they run

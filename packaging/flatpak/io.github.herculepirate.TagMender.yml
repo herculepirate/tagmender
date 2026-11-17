@@ -64,6 +64,11 @@ modules:
         -o -path './assets/icons/lucide/*' -o -path './assets/i18n/*' -o -path './assets/icon/tagmender-icon.svg'
         -o -path './assets/ocr_order.json' \) -type f -not -path './tests/*'
         -not -path './tools/*' -not -path './.git/*' -exec install -Dm644 {} "${FLATPAK_DEST}/lib/tagmender/{}" \;
+      # licence notices: TagMender's LICENSE and THIRD_PARTY_NOTICES.md, and the texts libdiscid
+      # (LGPL-2.1+) and python-discid (LGPL-3.0+) need to travel with them
+      - install -Dm644 LICENSE THIRD_PARTY_NOTICES.md -t ${FLATPAK_DEST}/share/doc/tagmender
+      - install -Dm644 packaging/licenses/LGPL-2.1.txt packaging/licenses/LGPL-3.txt
+        packaging/licenses/GPL-3.txt -t ${FLATPAK_DEST}/share/doc/tagmender/licenses
       - install -Dm755 packaging/flatpak/tagmender.sh ${FLATPAK_DEST}/bin/tagmender
       - install -Dm644 packaging/io.github.herculepirate.TagMender.desktop
         ${FLATPAK_DEST}/share/applications/io.github.herculepirate.TagMender.desktop

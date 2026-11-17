@@ -90,8 +90,8 @@ find "$APPDIR/usr/python" -name __pycache__ -prune -exec rm -rf {} +
 LIBDISCID=$(ldconfig -p 2>/dev/null | sed -n 's/.*libdiscid\.so\.0 (libc6,x86-64) => //p' | head -1)
 install -D -m 0755 /dev/null "$APPDIR/usr/tools/bin/fpcalc"
 tar xzf "$FPCALC_TGZ" -O "chromaprint-fpcalc-$FPCALC_VER-linux-x86_64/fpcalc" > "$APPDIR/usr/tools/bin/fpcalc"
-printf 'fpcalc %s: Chromaprint (LGPL-2.1+, https://github.com/acoustid/chromaprint), statically linked with FFmpeg (LGPL-2.1+, https://ffmpeg.org); unmodified release binary.\n' \
-  "$FPCALC_VER" > "$APPDIR/usr/tools/NOTICE"
+printf 'fpcalc %s: Chromaprint (LGPL-2.1+, https://github.com/acoustid/chromaprint), statically linked with FFmpeg (LGPL-2.1+, https://ffmpeg.org); unmodified release binary. Source: https://github.com/acoustid/chromaprint/releases/tag/v%s (Chromaprint; its release build scripts name the FFmpeg source it links). Licence text: LGPL-2.1.txt.\n' \
+  "$FPCALC_VER" "$FPCALC_VER" > "$APPDIR/usr/tools/NOTICE.fpcalc"   # (not NOTICE: the native-tools archive has its own)
 NATIVE=${NATIVE:-$CACHE/native-tools-x86_64.tar.gz}
 if [ -f "$NATIVE" ]; then         # (issue #4: OCR and barcodes on scans without the system's tools)
   tar xzf "$NATIVE" -C "$APPDIR/usr/tools" --strip-components=1
@@ -106,6 +106,8 @@ WRAP
   chmod 0755 "$APPDIR/usr/tools/bin/tesseract"
   "$APPDIR/usr/tools/bin/tesseract" --version >/dev/null 2>&1 \
     || { echo "the bundled tesseract does not run" >&2; exit 1; }
+  [ -s "$APPDIR/usr/tools/licenses/tesseract/LICENSE" ] \
+    || { echo "the native-tools archive has no licence texts (rebuild it: the native-tools workflow)" >&2; exit 1; }
 else
   echo "warning: no native tools ($NATIVE; the native-tools workflow builds them): the AppImage uses the system's tesseract and zbar" >&2
 fi
@@ -143,6 +145,30 @@ install -D -m 0644 assets/icon/png/tagmender-256.png \
   "$APPDIR/usr/share/icons/hicolor/256x256/apps/io.github.herculepirate.TagMender.png"
 mkdir -p "$APPDIR/usr/share/metainfo"
 cp packaging/io.github.herculepirate.TagMender.metainfo.xml "$APPDIR/usr/share/metainfo/"
+
+# Licence notices that travel with the binaries: TagMender's own LICENSE and THIRD_PARTY_NOTICES.md,
+# the texts of the licences the bundled native tools and libraries require (the LGPL-2.1 for
+# fpcalc/Chromaprint, its static FFmpeg and zbar; the LGPL-3.0, GPL-3.0 and Apache-2.0 texts), and
+# what native-tools.yml collected (tesseract, leptonica, zbar, tessdata_fast, system libraries).
+# Python wheels keep theirs in their dist-info folders inside site-packages.
+DOC=$APPDIR/usr/share/doc/tagmender
+install -D -m 0644 LICENSE "$DOC/LICENSE"
+install -D -m 0644 THIRD_PARTY_NOTICES.md "$DOC/THIRD_PARTY_NOTICES.md"
+mkdir -p "$DOC/licenses"
+cp packaging/licenses/*.txt "$DOC/licenses/"
+if [ -d "$APPDIR/usr/tools/licenses" ]; then
+  cp -a "$APPDIR/usr/tools/licenses/." "$DOC/licenses/" && rm -rf "$APPDIR/usr/tools/licenses"
+fi
+cp "$APPDIR/usr/tools/NOTICE.fpcalc" "$DOC/licenses/fpcalc-NOTICE.txt"
+[ -f "$APPDIR/usr/tools/NOTICE" ] && cp "$APPDIR/usr/tools/NOTICE" "$DOC/licenses/native-tools-NOTICE.txt" || true
+for need in LICENSE THIRD_PARTY_NOTICES.md licenses/LGPL-2.1.txt; do
+  [ -s "$DOC/$need" ] || { echo "the AppDir has no $need: the AppImage must ship its licence notices" >&2; exit 1; }
+done
+if [ -f "$NATIVE" ]; then
+  for need in licenses/tesseract/LICENSE licenses/leptonica/leptonica-license.txt licenses/zbar/COPYING licenses/tessdata_fast/LICENSE; do
+    [ -s "$DOC/$need" ] || { echo "the AppDir has no $need" >&2; exit 1; }
+  done
+fi
 
 chmod -R a+rX "$APPDIR"          # (every file readable by every user, whatever the checkout's modes)
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextvars
 import re
+import threading
 import time
 from contextlib import contextmanager
 
@@ -68,6 +69,41 @@ def stage(name):
     finally:
         t.charge(time.monotonic())
         t.stack.pop()
+
+
+# Who is told of a back-off as it starts (the app's status line): fn(provider, seconds), from
+# whichever thread waits; provider as the "<provider> back-off" stage names it (provider_of).
+_BACK_OFF = []
+_BACK_OFF_LOCK = threading.Lock()
+
+
+def on_back_off(fn):
+    """Tell fn(provider, seconds) of each back-off from now on. Returns a function that stops
+    it (as off_back_off(fn) does)."""
+    with _BACK_OFF_LOCK:
+        _BACK_OFF.append(fn)
+    return lambda: off_back_off(fn)
+
+
+def off_back_off(fn) -> None:
+    """Stop telling fn of back-offs (once for each time it was registered; never raises)."""
+    with _BACK_OFF_LOCK:
+        try:
+            _BACK_OFF.remove(fn)
+        except ValueError:
+            pass
+
+
+def back_off(provider, seconds) -> None:
+    """A wait of SECONDS before retrying PROVIDER starts: each listener told; a listener's
+    error never reaches the request."""
+    with _BACK_OFF_LOCK:
+        fns = list(_BACK_OFF)
+    for fn in fns:
+        try:
+            fn(provider, seconds)
+        except Exception:
+            pass
 
 
 def provider_of(host) -> str:

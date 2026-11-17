@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import logging
 import os
 import queue
 import re
@@ -1029,6 +1030,307 @@ def _may_read(profile, folder, path, skip) -> bool:
     return not profile.excluded_path(folder, named=[path])
 
 
+# ---- PRF-3: a scan read unit by unit --------------------------------------------------------
+# albums_in groups the audio folders below a path by what their names and tags say of each
+# other: a disc folder belongs to its parent, a box to the folder naming its CD count, sibling
+# folders may be one set (DSC-1, DSC-10) or an album and its deluxe folder. A folder whose
+# grouping can reach none of its siblings or its parent - _splits: no audio of its own, a name
+# no box, twofer, volume set or range of discs has, and no sub-folder that is a disc or version
+# of it, a disc-range part, one of two numbered siblings, two discs of one set filed apart or an
+# album beside its deluxe folder - is split: each of its sub-folders is a unit of its own,
+# grouped as soon as it has been read, and exactly as the whole scan groups it (_group_unit).
+# Any other folder is one unit with everything below it. A unit's albums are albums_in's, in
+# its order: a unit is one sub-tree, read in order, and its albums' folders lie inside it.
+class _Scan:
+    """How albums_in reads one folder tree: the folders it never looks into (skip: real paths,
+    the profile's skip_paths too; skips: the profile's Skip These Folders, hidden folders,
+    TagMender's own) and each folder's real path, resolved once."""
+
+    def __init__(self, eng, skip=()):
+        prof = eng.profile
+        self.skip = {os.path.realpath(str(x)) for x in skip}
+        if hasattr(prof, "skip_paths"):              # (where unidentified albums are moved to)
+            self.skip |= prof.skip_paths()
+        self.skips = prof.folder_skipper() if hasattr(prof, "folder_skipper") else _skips_folder
+        self.real_of = {}
+
+    def skipped(self, dirpath, d) -> bool:
+        if not self.skip:
+            return False
+        child = os.path.join(dirpath, d)
+        if os.path.islink(child):
+            real = os.path.realpath(child)
+        else:                                        # (its folder's real path and its own name)
+            top = self.real_of.get(dirpath)
+            if top is None:
+                top = self.real_of[dirpath] = os.path.realpath(dirpath)
+            real = os.path.join(top, d)
+        self.real_of[child] = real
+        return real in self.skip
+
+    def read(self, dirpath, dirs, names) -> list:
+        """One folder of os.walk as albums_in reads it: DIRS narrowed (in place) to the folders it
+        looks into, in order; the folder's audio files, in order."""
+        dirs[:] = sorted(d for d in dirs if not self.skips(d) and not self.skipped(dirpath, d))
+        d = Path(dirpath)
+        return sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
+
+    def listed(self, folder: Path):
+        """(its folders looked into, its audio files, every name in it) of one folder, as the
+        walk reads it; None when it cannot be read."""
+        for dirpath, dirs, names in os.walk(folder):
+            every = list(dirs) + list(names)
+            return dirs, self.read(dirpath, dirs, names), every
+        return None
+
+
+def _splits(d: Path, dirs, audio, names) -> bool:
+    """PRF-3: folder d (its sub-folders looked into DIRS, its audio files AUDIO, every name in it
+    NAMES) groups no album with a sibling or with itself: each sub-folder is a unit of its own."""
+    if audio or box_cd_count(d.name) or ma.named_volume_count(d.name) or _DISC_RANGE.match(d.name) \
+            or _TITLE_JOIN.search(_bare_name(d.name)):
+        return False                                 # (its own tracks; a box, a twofer, volumes: DSC-3/5/6/9)
+    if sum(1 for c in dirs if _LEAD_NUMBER.match(c)) >= 2:
+        return False                                 # (numbered folders: a set by its release, DSC-10)
+    stems = set()
+    for c in dirs:
+        sub = d / c
+        if mc.version_layout(c) or _DISC_RANGE.match(c) or is_disc_dir(sub) or box_part_disc(sub) is not None:
+            return False                             # (a disc or a version of d: d is their album)
+        sd = sibling_disc(sub)
+        if sd is not None:
+            if mc.fold(sd[0]) in stems:
+                return False                         # (two discs of one set filed side by side: DSC-1)
+            stems.add(mc.fold(sd[0]))
+    for n in names:                                  # (an album and its "(Deluxe Edition)" folder)
+        # (the cheap word first; then deluxe_sibling's own match - re.I, never casefold: "İSTANBUL")
+        if "deluxe" in n.casefold() and any(c != n and ma.deluxe_named(c, n) for c in dirs):
+            return False
+    return True
+
+
+def _scan_units(eng, path: Path, top: Path, sc: _Scan):
+    """PRF-3: the albums below TOP (PATH itself, or a folder of it whose every folder above it,
+    up to PATH, is split), unit by unit, in albums_in's order."""
+    unit, found = None, {}
+    for dirpath, dirs, names in os.walk(top):
+        every = list(dirs) + list(names)
+        audio = sc.read(dirpath, dirs, names)
+        if unit is not None:
+            if dirpath.startswith(unit):
+                if audio:
+                    found[Path(dirpath)] = audio
+                continue
+            if found:
+                yield from _group_unit(eng, path, found, sc)
+            unit, found = None, {}
+        d = Path(dirpath)
+        if _splits(d, dirs, audio, every):
+            continue
+        unit, found = os.path.join(dirpath, ""), ({d: audio} if audio else {})
+    if found:
+        yield from _group_unit(eng, path, found, sc)
+
+
+def _within_tops(path: Path, within, sc: _Scan) -> list:
+    """PRF-3: the folders to read for the albums inside the folders WITHIN, as a scan of PATH
+    has them: each one itself when every folder above it up to PATH is split, else the unit
+    holding it (the first folder down from PATH that is not split). A folder outside PATH, or
+    one the scan never looks into (skipped, hidden, a linked folder), holds none of its albums."""
+    rp = os.path.realpath(str(path)).rstrip(os.sep)
+    tops, listed = set(), {}
+    for w in within:
+        rw = os.path.realpath(str(w))
+        if rp == rw.rstrip(os.sep) or rp.startswith(rw.rstrip(os.sep) + os.sep):
+            return [path]                                # (PATH itself, or a folder holding it)
+        if not rw.startswith(rp + os.sep):
+            continue
+        top = path
+        for part in rw[len(rp) + 1:].split(os.sep):
+            if top not in listed:                        # (each folder listed and judged once)
+                got = sc.listed(top)
+                listed[top] = (got, got is not None and _splits(top, *got))
+            got, split = listed[top]
+            if got is None:
+                top = None
+                break
+            if not split:
+                break                                    # (the unit holding it)
+            if part not in got[0] or os.path.islink(top / part):
+                top = None                               # (never looked into: no album of it)
+                break
+            top = top / part
+        if top is not None:
+            tops.add(top)
+    return [t for t in sorted(tops) if not any(u in tops for u in t.parents)]   # (one inside another: once)
+
+
+def _albums_iter(eng, path, skip=(), within=None, walked=None):
+    """Engine.albums_iter. walked: a list given is told each folder read whole (the scan's own
+    path, or the folders read for WITHIN)."""
+    path = Path(os.path.abspath(Path(path).expanduser()))  # plans and journals hold absolute paths
+    getattr(eng, "__dict__", {}).pop("_set_memo", None)   # (DSC-10: the sets as this scan finds them)
+    if path.is_file():
+        if walked is not None:
+            walked.append(path)
+        yield Group(path.parent, [path], [], single=True)
+        return
+    sc = _Scan(eng, skip)
+    for top in [path] if within is None else _within_tops(path, within, sc):
+        if walked is not None:
+            walked.append(top)
+        yield from _scan_units(eng, path, top, sc)
+
+
+def _albums_whole(eng, path, skip=()) -> list[Group]:
+    """albums_in as one unit: every folder below PATH read first, then grouped at once (the
+    scan before PRF-3; what its units must add up to)."""
+    path = Path(os.path.abspath(Path(path).expanduser()))
+    getattr(eng, "__dict__", {}).pop("_set_memo", None)
+    if path.is_file():
+        return [Group(path.parent, [path], [], single=True)]
+    sc, found = _Scan(eng, skip), {}
+    for dirpath, dirs, names in os.walk(path):
+        audio = sc.read(dirpath, dirs, names)
+        if audio:
+            found[Path(dirpath)] = audio
+    return _group_unit(eng, path, found, sc) if found else []
+
+
+def _albums_of_keys(eng, path, keys, skip=()) -> list[Group]:
+    """PRF-4: the albums of a scan of PATH that a look-up of KEYS (group_key()s, as List first
+    listed them) needs: those of the folders holding them only (albums_iter within), each read
+    again now - nothing is taken from the listing, so a folder changed since is read as it is.
+    The whole scan when a key is not among them (an album gone or changed since it was listed)."""
+    keys = {k for k in keys if k}
+    folders = sorted({k.split("|", 1)[0] for k in keys})
+    if keys and not Path(os.path.abspath(Path(path).expanduser())).is_file():
+        groups = list(_albums_iter(eng, path, skip, within=folders))
+        if keys <= {group_key(g.folder, g.files) for g in groups}:
+            return groups
+    return eng.albums_in(path, skip)
+
+
+def _group_unit(eng, path: Path, found: dict, sc: "_Scan") -> list[Group]:
+    """The albums of FOUND ({folder: its audio files}, in the order the scan read them): one
+    unit of a scan of PATH (_scan_units), or all its folders at once (_albums_whole)."""
+    # each audio folder's album folder: a disc folder belongs to its parent; a folder
+    # inside an album's folder belongs to that album (a bonus disc filed inside it, as
+    # match_albums._owners has it) only when both are tagged as that same album -
+    # otherwise it is an album of its own
+    metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}      # (each file opened once)
+    # (a version folder, "2.0/" beside "5.0/", too: the set's folder names the release)
+    sets = {}
+
+    def version_of(d):
+        if not mc.version_layout(d.name):
+            return False
+        if d.parent not in sets:
+            sets[d.parent] = version_dirs(d.parent, metas, sc.skips)
+        return d in sets[d.parent]
+    # (DSC-3: "CD02-03 .../Part 1" too - a part of a disc-range folder is one of its discs)
+    disc = {d: d != path and (is_disc_dir(d) or version_of(d) or box_part_disc(d) is not None) for d in found}
+    owner_of = {d: (d.parent if disc[d] else d) for d in found}
+    for d in found:          # ("Album/Disc 02/5.1/": versions filed inside a disc folder)
+        if disc[d] and version_of(d) and owner_of[d] != path and is_disc_dir(owner_of[d]):
+            owner_of[d] = owner_of[d].parent
+    # DSC-3: the box holding the disc-range folders ("Box (16CD)/CD02-03 .../Part 1"
+    # beside "CD01 1974 First Album"): its parts are its discs when the whole set is one
+    # box by DSC-2 (one album artist, each disc's own disc number, the parts' agreeing with
+    # the range) - else each range folder stays an album of its own
+    boxes = {owner_of[d].parent for d in found if box_part_disc(d) is not None and owner_of[d] == d.parent}
+    for box in sorted(boxes):
+        if box != path and path not in box.parents:
+            continue                                 # (only the range folder was asked for)
+        parts = [d for d in found if owner_of[d] == box or
+                 (box_part_disc(d) is not None and owner_of[d] == d.parent and d.parent.parent == box)]
+        fs = [f for d in parts for f in found[d]]
+        if _one_box(box, fs, album_keys(fs, box, metas), metas):
+            for d in parts:
+                owner_of[d] = box
+    # DSC-5 (BOX-1): a box set's folder naming its CD count, its discs in folders named as
+    # albums ("01. (1980) - Kenso ...", "CD4-5. 2005. Ca Ira (2CD, ...)/CD1"), each tagged as
+    # its disc of the box: the box is one album (numbered_box), never each folder an album of
+    # its own matched to the standalone release of that disc - only when the box folder
+    # itself is planned (or a folder above it)
+    whole_boxes = set()
+    near = {a for d in found for a in (d.parent, d.parent.parent)
+            if (a == path or path in a.parents) and box_cd_count(a.name)}
+    # DSC-6: a twofer's folder named after the albums it holds, joined ("The Stranger & An
+    # Innocent Man"): the set they were issued in, numbered as the release found lists it
+    # DSC-9: a folder of a set's volumes ("Volume 1", "Volume 2") that its name says it holds
+    # (each parent once: a library's every album folder asks of its artist's folder)
+    parents = {d.parent for d in found if (d.parent == path or path in d.parent.parents) and d.parent != d}
+    named = {b for b in parents if titled_box(b, found, metas) or volume_set(b, found, metas)}
+    for box in sorted(near | named, key=lambda a: len(a.parts)):
+        if any(b in box.parents for b in whole_boxes) or not (
+                numbered_box(box, found, metas) or box in named):
+            continue
+        if eng._box_part_left_out(box, [d for d in found if box in d.parents], path):
+            continue                                 # (a disc you excluded or ignored: no box)
+        whole_boxes.add(box)
+        for d in found:
+            if box in d.parents:
+                owner_of[d] = box
+    own_key = {}
+    for d in found:
+        own_key.setdefault(owner_of[d], []).extend(found[d])
+    own_key = {o: set(album_keys(fs, o, metas).values()) for o, fs in own_key.items()}
+    folders = {}
+    for d in sorted(found):
+        owner = owner_of[d]
+        keys = own_key.get(owner, set())
+        up = owner.parent
+        while up == path or path in up.parents:      # (the named folder itself too: "run Album")
+            if up in own_key and len(keys) == 1 and next(iter(keys))[0] == "tags" and own_key[up] == keys:
+                owner = up
+            up = up.parent
+        folders.setdefault(owner, []).extend(found[d])
+    groups = []
+    for folder in sorted(folders):
+        files = folders[folder]
+        if eng.profile.excluded_path(folder, named=[path]):
+            continue
+        by_album = {}
+        keys = album_keys(files, folder, metas)
+        for f in files:
+            by_album.setdefault(keys[f], []).append(f)
+        tagged = [k for k in by_album if k[0] == "tags"]
+        spans_discs = len({f.parent for f in files}) > 1
+        if len(by_album) > 1 and spans_discs and len(tagged) <= 1:
+            by_album = {(tagged or [("folder", str(folder))])[0]: files}   # one disc set, partly tagged
+        elif len(by_album) > 1 and sets.get(folder) and _one_album_titled(by_album):
+            by_album = {tagged[0]: files}            # versions of one disc tagged apart ("[HD]")
+        elif len(by_album) > 1 and (folder in whole_boxes or _one_box(folder, files, keys, metas)):
+            by_album = {tagged[0]: files}                                  # DSC-2, DSC-5
+        elif len(by_album) > 1 and spans_discs and numbered_disc_set(folder, files, keys, metas) \
+                and not eng._box_part_left_out(folder, sorted({f.parent for f in files}), path):
+            by_album = {tagged[0]: files}                                  # DSC-7
+        copies = _layer_copies(files, metas) if len(by_album) == 1 and folder not in whole_boxes else None
+        if copies:
+            # MED-22c: the CD layer's copy and SACD layers' copies of a disc filed side by side
+            # ("Disc 01", "Disc 01 (SACD Stereo)"): each copy an album of its own, as filed
+            for members, hold in copies:
+                groups.append(Group(folder, members, [f for f in files if f not in members],
+                                    single=len(members) == 1, layer_hold=hold))
+            continue
+        if len(by_album) == 1:
+            groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
+            continue
+        for key, members in by_album.items():            # a mixed folder: one group per album
+            others = [f for f in files if f not in members]
+            if key[0] == "folder":                       # untagged leftovers: each on its own
+                for m in members:
+                    groups.append(Group(folder, [m], [f for f in files if f != m], single=True))
+            else:
+                groups.append(Group(folder, members, others, single=len(members) == 1))
+    groups = _release_set_groups(eng, groups, found, metas, path)    # DSC-10
+    groups = _disc_sets(groups, metas)               # DSC-1
+    if hasattr(eng.profile, "joins_deluxe") and not eng.profile.joins_deluxe():
+        return groups
+    return _with_deluxe(eng.profile, groups, path, sc.skip)
+
+
 # notes told once for the run, never as each album's provider error (OCR, gnudb, fingerprints
 # and the cover sources' keys are not providers an album needs)
 RUN_NOTES = ("ocr", "gnudb", "acoustid", "fanart", "audiodb", "lastfm")
@@ -1321,153 +1623,24 @@ class Engine:
 
     def albums_in(self, path, skip=()) -> list[Group]:
         """The albums below path; skip: folders not looked into at all (a library inside a
-        watched folder: its tracks are never even opened)."""
-        path = Path(os.path.abspath(Path(path).expanduser()))  # plans and journals hold absolute paths
-        getattr(self, "__dict__", {}).pop("_set_memo", None)   # (DSC-10: the sets as this scan finds them)
-        if path.is_file():
-            return [Group(path.parent, [path], [], single=True)]
-        found = {}
-        skip = {os.path.realpath(str(x)) for x in skip}
-        if hasattr(self.profile, "skip_paths"):          # (where unidentified albums are moved to)
-            skip |= self.profile.skip_paths()
-        skips = self.profile.folder_skipper() if hasattr(self.profile, "folder_skipper") else _skips_folder
-        real_of = {}                                     # (each folder's real path, resolved once)
+        watched folder: its tracks are never even opened). Every album of albums_iter."""
+        return list(_albums_iter(self, path, skip))
 
-        def skipped(dirpath, d):
-            if not skip:
-                return False
-            child = os.path.join(dirpath, d)
-            if os.path.islink(child):
-                real = os.path.realpath(child)
-            else:                                        # (its folder's real path and its own name)
-                top = real_of.get(dirpath)
-                if top is None:
-                    top = real_of[dirpath] = os.path.realpath(dirpath)
-                real = os.path.join(top, d)
-            real_of[child] = real
-            return real in skip
-        for dirpath, dirs, names in os.walk(path):
-            # (the profile's Skip These Folders, hidden folders, TagMender's own folders)
-            dirs[:] = sorted(d for d in dirs if not skips(d) and not skipped(dirpath, d))
-            d = Path(dirpath)
-            audio = sorted(d / n for n in names if Path(n).suffix.lower() in ex.AUDIO_EXT and not n.startswith("."))
-            if audio:
-                found[d] = audio
-        # each audio folder's album folder: a disc folder belongs to its parent; a folder
-        # inside an album's folder belongs to that album (a bonus disc filed inside it, as
-        # match_albums._owners has it) only when both are tagged as that same album -
-        # otherwise it is an album of its own
-        metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}      # (each file opened once)
-        # (a version folder, "2.0/" beside "5.0/", too: the set's folder names the release)
-        sets = {}
+    def albums_iter(self, path, skip=(), within=None):
+        """albums_in's albums one at a time, in its order, each as soon as the folders it needs
+        are read (PRF-3: _scan_units). within: only the folders these albums need are read -
+        the albums inside these folders come out as albums_in(path) has them, beside the other
+        albums of the folders read with them (a disc folder's album folder, a set's siblings)."""
+        return _albums_iter(self, path, skip, within)
 
-        def version_of(d):
-            if not mc.version_layout(d.name):
-                return False
-            if d.parent not in sets:
-                sets[d.parent] = version_dirs(d.parent, metas, skips)
-            return d in sets[d.parent]
-        # (DSC-3: "CD02-03 .../Part 1" too - a part of a disc-range folder is one of its discs)
-        disc = {d: d != path and (is_disc_dir(d) or version_of(d) or box_part_disc(d) is not None) for d in found}
-        owner_of = {d: (d.parent if disc[d] else d) for d in found}
-        for d in found:          # ("Album/Disc 02/5.1/": versions filed inside a disc folder)
-            if disc[d] and version_of(d) and owner_of[d] != path and is_disc_dir(owner_of[d]):
-                owner_of[d] = owner_of[d].parent
-        # DSC-3: the box holding the disc-range folders ("Box (16CD)/CD02-03 .../Part 1"
-        # beside "CD01 1974 First Album"): its parts are its discs when the whole set is one
-        # box by DSC-2 (one album artist, each disc's own disc number, the parts' agreeing with
-        # the range) - else each range folder stays an album of its own
-        boxes = {owner_of[d].parent for d in found if box_part_disc(d) is not None and owner_of[d] == d.parent}
-        for box in sorted(boxes):
-            if box != path and path not in box.parents:
-                continue                                 # (only the range folder was asked for)
-            parts = [d for d in found if owner_of[d] == box or
-                     (box_part_disc(d) is not None and owner_of[d] == d.parent and d.parent.parent == box)]
-            fs = [f for d in parts for f in found[d]]
-            if _one_box(box, fs, album_keys(fs, box, metas), metas):
-                for d in parts:
-                    owner_of[d] = box
-        # DSC-5 (BOX-1): a box set's folder naming its CD count, its discs in folders named as
-        # albums ("01. (1980) - Kenso ...", "CD4-5. 2005. Ca Ira (2CD, ...)/CD1"), each tagged as
-        # its disc of the box: the box is one album (numbered_box), never each folder an album of
-        # its own matched to the standalone release of that disc - only when the box folder
-        # itself is planned (or a folder above it)
-        whole_boxes = set()
-        near = {a for d in found for a in (d.parent, d.parent.parent)
-                if (a == path or path in a.parents) and box_cd_count(a.name)}
-        # DSC-6: a twofer's folder named after the albums it holds, joined ("The Stranger & An
-        # Innocent Man"): the set they were issued in, numbered as the release found lists it
-        # DSC-9: a folder of a set's volumes ("Volume 1", "Volume 2") that its name says it holds
-        # (each parent once: a library's every album folder asks of its artist's folder)
-        parents = {d.parent for d in found if (d.parent == path or path in d.parent.parents) and d.parent != d}
-        named = {b for b in parents if titled_box(b, found, metas) or volume_set(b, found, metas)}
-        for box in sorted(near | named, key=lambda a: len(a.parts)):
-            if any(b in box.parents for b in whole_boxes) or not (
-                    numbered_box(box, found, metas) or box in named):
-                continue
-            if self._box_part_left_out(box, [d for d in found if box in d.parents], path):
-                continue                                 # (a disc you excluded or ignored: no box)
-            whole_boxes.add(box)
-            for d in found:
-                if box in d.parents:
-                    owner_of[d] = box
-        own_key = {}
-        for d in found:
-            own_key.setdefault(owner_of[d], []).extend(found[d])
-        own_key = {o: set(album_keys(fs, o, metas).values()) for o, fs in own_key.items()}
-        folders = {}
-        for d in sorted(found):
-            owner = owner_of[d]
-            keys = own_key.get(owner, set())
-            up = owner.parent
-            while up == path or path in up.parents:      # (the named folder itself too: "run Album")
-                if up in own_key and len(keys) == 1 and next(iter(keys))[0] == "tags" and own_key[up] == keys:
-                    owner = up
-                up = up.parent
-            folders.setdefault(owner, []).extend(found[d])
-        groups = []
-        for folder in sorted(folders):
-            files = folders[folder]
-            if self.profile.excluded_path(folder, named=[path]):
-                continue
-            by_album = {}
-            keys = album_keys(files, folder, metas)
-            for f in files:
-                by_album.setdefault(keys[f], []).append(f)
-            tagged = [k for k in by_album if k[0] == "tags"]
-            spans_discs = len({f.parent for f in files}) > 1
-            if len(by_album) > 1 and spans_discs and len(tagged) <= 1:
-                by_album = {(tagged or [("folder", str(folder))])[0]: files}   # one disc set, partly tagged
-            elif len(by_album) > 1 and sets.get(folder) and _one_album_titled(by_album):
-                by_album = {tagged[0]: files}            # versions of one disc tagged apart ("[HD]")
-            elif len(by_album) > 1 and (folder in whole_boxes or _one_box(folder, files, keys, metas)):
-                by_album = {tagged[0]: files}                                  # DSC-2, DSC-5
-            elif len(by_album) > 1 and spans_discs and numbered_disc_set(folder, files, keys, metas) \
-                    and not self._box_part_left_out(folder, sorted({f.parent for f in files}), path):
-                by_album = {tagged[0]: files}                                  # DSC-7
-            copies = _layer_copies(files, metas) if len(by_album) == 1 and folder not in whole_boxes else None
-            if copies:
-                # MED-22c: the CD layer's copy and SACD layers' copies of a disc filed side by side
-                # ("Disc 01", "Disc 01 (SACD Stereo)"): each copy an album of its own, as filed
-                for members, hold in copies:
-                    groups.append(Group(folder, members, [f for f in files if f not in members],
-                                        single=len(members) == 1, layer_hold=hold))
-                continue
-            if len(by_album) == 1:
-                groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
-                continue
-            for key, members in by_album.items():            # a mixed folder: one group per album
-                others = [f for f in files if f not in members]
-                if key[0] == "folder":                       # untagged leftovers: each on its own
-                    for m in members:
-                        groups.append(Group(folder, [m], [f for f in files if f != m], single=True))
-                else:
-                    groups.append(Group(folder, members, others, single=len(members) == 1))
-        groups = _release_set_groups(self, groups, found, metas, path)    # DSC-10
-        groups = _disc_sets(groups, metas)               # DSC-1
-        if hasattr(self.profile, "joins_deluxe") and not self.profile.joins_deluxe():
-            return groups
-        return _with_deluxe(self.profile, groups, path, skip)
+    def _logger(self):
+        """The engine's log - or, for an engine made without one (a test's, by __new__), the
+        module's logger: its look-ups still plan, their timing and failure lines logged."""
+        return getattr(self, "log", None) or logging.getLogger("tagmender.engine")
+
+    def _own_scan(self) -> bool:
+        """albums_in is the engine's own (not a stand-in put in its place: plan_each's, a test's)."""
+        return "albums_in" not in getattr(self, "__dict__", {}) and getattr(type(self), "albums_in", None) is _ALBUMS_IN
 
     def _box_part_left_out(self, box: Path, dirs, path) -> bool:
         """DSC-5: a folder of the box (one of its sub-folders, or a disc folder in one) that the
@@ -4973,10 +5146,12 @@ class Engine:
         (List first's Look Up), the others left out."""
         start = time.monotonic()
         with stagetimes.album() as secs:
-            groups = self.albums_in(path)
+            # (PRF-4: a look-up of some albums reads only the folders holding them)
+            groups = _albums_of_keys(self, path, only) if only is not None and self._own_scan() else self.albums_in(path)
         took = time.monotonic() - start
+        log = self._logger()
         if took >= 0.1:                           # (PRF-1: a scan the look-up waited for; plan_each's later ones are remembered)
-            self.log.info("timing scan %s: %d albums in %.1f s (tags %.1f s)", path, len(groups), took,
+            log.info("timing scan %s: %d albums in %.1f s (tags %.1f s)", path, len(groups), took,
                           secs.get("tags", 0.0))
         per_folder = {}
         for g in groups:
@@ -5015,9 +5190,9 @@ class Engine:
                             p.group_key = getattr(p, "set_key", None) or key
                             out.append(p)
                     finally:
-                        self.log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
+                        log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
             except Exception as exc:                          # one bad album never stops the run
-                self.log.exception("identifying %s failed", g.folder)
+                log.exception("identifying %s failed", g.folder)
                 p = planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
                                      status="unresolved", reason=f"error: {exc}", reason_codes=["other"])
                 p.group_key = key
@@ -5025,33 +5200,45 @@ class Engine:
             self.reached.add(key)
         return out
 
-    def listing(self, path, within=None, meta=None) -> dict:
+    def listing(self, path, within=None, meta=None, on_album=None) -> dict:
         """The albums PATH holds, not looked up yet (List first): a plan whose albums are
         "listed" - nothing is asked of any database and nothing can be applied. within: only
         the albums inside these folders (several folders dropped at once, listed under the folder
-        that holds them). meta: a dict kept by the caller, in which the files' metadata is
-        remembered for the next listing or look up (ex.meta_memo; what this listing did not
-        read again is dropped from it)."""
+        that holds them) - only the folders they need are read (PRF-3). meta: a dict kept by the
+        caller, in which the files' metadata is remembered for the next listing or look up
+        (ex.meta_memo; what this listing did not read again, of the folders it read whole, is
+        dropped from it). on_album(entry): told each album as soon as its folders are read
+        (PRF-3), the same dict, in the same order, as the plan's "albums" list holds."""
         roots = [os.path.realpath(str(w)) for w in within or ()]
-        albums = []
-        with ex.meta_memo(meta, True) if meta is not None else contextlib.nullcontext():
-            groups = self.albums_in(path)
-        for g in groups:
-            here = os.path.realpath(str(g.folder)) if roots else ""
-            if roots and not any(here == r or here.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
-                continue
-            files = sorted(str(f) for f in g.files)
-            albums.append({"source_dir": str(g.folder), "status": "listed", "label": "", "rule": None,
-                           "identification": {"status": "listed"}, "release": {}, "files": [],
-                           "companions": [], "artwork": None, "conflicts": [], "skipped": [], "notes": [],
-                           "album_files": files, "key": group_key(g.folder, g.files)})
+        albums, walked = [], []
+        if self._own_scan():
+            scan = _albums_iter(self, path, (), within if roots else None, walked)
+        else:                                            # (a stand-in scan: its albums, all at once)
+            def stand_in():                              # (run inside the meta_memo block below)
+                yield from self.albums_in(path)
+            scan = stand_in()
+            walked.append(Path(os.path.abspath(Path(path).expanduser())))
+        with ex.meta_memo(meta, walked) if meta is not None else contextlib.nullcontext():
+            for g in scan:
+                here = os.path.realpath(str(g.folder)) if roots else ""
+                if roots and not any(here == r or here.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
+                    continue
+                files = sorted(str(f) for f in g.files)
+                entry = {"source_dir": str(g.folder), "status": "listed", "label": "", "rule": None,
+                         "identification": {"status": "listed"}, "release": {}, "files": [],
+                         "companions": [], "artwork": None, "conflicts": [], "skipped": [], "notes": [],
+                         "album_files": files, "key": group_key(g.folder, g.files)}
+                albums.append(entry)
+                if on_album is not None:
+                    on_album(entry)
         return {"job": self.job, "profile": getattr(self.profile, "name", ""),
                 "operation": self.profile["operation"], "listed": True, "albums": albums, "provider_notes": {}}
 
     def plan(self, path, progress=None, cancel=None, only=None, meta=None) -> dict:
         """meta: a dict kept by the caller (see listing): files whose metadata it remembers, unchanged,
         are not opened again to find the albums (a plan of every album drops what it did not read)."""
-        with ex.meta_memo(meta, only is None) if meta is not None else contextlib.nullcontext():
+        whole = [Path(os.path.abspath(Path(path).expanduser()))] if only is None else False
+        with ex.meta_memo(meta, whole) if meta is not None else contextlib.nullcontext():
             props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
         p = planmod.build(props, self.profile, self.job, extra_roots=[Path(os.path.abspath(Path(path).expanduser()))],
@@ -5079,7 +5266,8 @@ class Engine:
         root = Path(os.path.abspath(Path(path).expanduser()))
         found = {}
         prev = self.__dict__.get("albums_in")
-        scan = self.albums_in
+        # (PRF-4: only the folders holding KEYS are read, once for them all)
+        scan = (lambda p, skip=(): _albums_of_keys(self, p, keys, skip)) if self._own_scan() else self.albums_in
 
         def albums_in(p, skip=()):                       # (the same folder: its albums as found once)
             k = (str(p), tuple(sorted(str(x) for x in skip)))
@@ -5173,7 +5361,8 @@ class Engine:
                 for name in ("edits", "force", "file_anyway", "seed_claims", "offer_file_anyway"):
                     if name in self.__dict__:
                         setattr(e, name, self.__dict__[name])
-                scan = e.albums_in
+                # (PRF-4: only the folders holding KEYS are read, once for them all)
+                scan = (lambda p, skip=(), e=e: _albums_of_keys(e, p, keys, skip)) if e._own_scan() else e.albums_in
 
                 def albums_in(p, skip=()):               # (the folder is scanned once, for them all)
                     k = (str(p), tuple(sorted(str(x) for x in skip)))
@@ -5245,6 +5434,7 @@ class Engine:
 # albums looked up at once: enough to use the waiting on scans, images and files, few enough
 # for a home machine and a network share (the providers' pace is shared and does not change)
 LOOKUP_WORKERS = 3
+_ALBUMS_IN = Engine.albums_in                  # (the engine's own scan: Engine._own_scan)
 _MAKING = threading.Lock()
 
 

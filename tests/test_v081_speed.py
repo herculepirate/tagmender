@@ -113,11 +113,12 @@ class AppKeepsMetadata(te.Base):
         self.assertEqual([x["source_dir"] for x in plan["albums"]], [str(a)])
         self.assertTrue(c.calls)
         self.assertFalse([p for p in c.calls if Path(p).parent == b], c.calls)
-        # (and as before without the store: every file of the folder opened to find the albums)
+        # (0.8.69, PRF-4: without the store too - a look-up reads only the folders of its albums)
         c = Opens()
         with mock.patch.object(mutagen, "File", c):
             self.engine(te.FakeHttp()).plan(self.lib, only={key})
-        self.assertTrue([p for p in c.calls if Path(p).parent == b])
+        self.assertTrue(c.calls)
+        self.assertFalse([p for p in c.calls if Path(p).parent == b], c.calls)
 
     def test_same_albums_and_plan_with_and_without_the_store(self):
         self.album("Band A", "Album A")

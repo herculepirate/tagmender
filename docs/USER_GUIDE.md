@@ -746,7 +746,8 @@ Ollama or LM Studio) - one is enough - it can help with what the rules find hard
 
 What AI finds is a clue, never proof (rule AI-1). Compared with planning the album without AI,
 nothing is ever more certain because of it: when two pressings tie and only one carries a
-catalogue number AI read in your notes, that one is offered first for you to confirm; releases
+catalogue number AI read in your notes, that one is suggested for you to choose (what is written
+stays what TagMender writes without AI); releases
 AI's searches find are listed as alternatives for you to choose. An album its barcode or disc ID
 already proves never asks AI. AI never writes release IDs, titles or credits from its own
 knowledge and never fills a field the databases leave empty.

@@ -164,7 +164,7 @@ class Matcher(unittest.TestCase):
 
     def test_ai_catno_picks_the_release_that_carries_it_but_holds_it(self):
         """AI-1: the two pressings tie; the Japanese info file names the catalogue number only one
-        carries. That one becomes the pick to review - never a sure pick."""
+        carries. That one is suggested for you to choose; the pick stays the databases' own."""
         row = make_album(self.root, "First Light", notes=NOTES)
         off = self.run_album(self.tie_http(), row)
         self.assertNotEqual(off["status"], "auto", off["why"])
@@ -175,9 +175,9 @@ class Matcher(unittest.TestCase):
             {"kind": "country", "value": "JP", "quote": "日本盤。"}]}})
         on = self.run_album(self.tie_http(), row, ai=ai)
         self.assert_not_raised(off, on)
-        self.assertEqual(on["best"]["id"], "mb-b")
+        self.assertEqual(on["best"]["id"], "mb-a")
         self.assertEqual(on["status"], "review")
-        self.assertEqual(on["ai_pick"], "mb:mb-b")
+        self.assertEqual(on["ai_tie_pick"], "mb:mb-b")
         self.assertFalse(on.get("ai_held"))
         self.assertTrue(any(w.startswith("AI-1: ai:openai/stub-model read catalogue number SICP-1015")
                             and "mb:mb-b carries it" in w for w in on["ai_notes"]), on["ai_notes"])
@@ -197,6 +197,32 @@ class Matcher(unittest.TestCase):
         with mock.patch.object(ma, "process", return_value=on):
             p = eng.identify(eng.albums_in(Path(row["FullPath"]))[0])
         self.assertNotEqual(p.tier, "exact", (p.status, p.tier, p.reason))
+
+    def test_a_tie_spelled_otherwise_writes_what_ai_off_writes(self):
+        """AI_REVIEW-13: the tied releases spell their track titles otherwise; AI's clue points to
+        the other one. Every target written (album known, Partial, exact) is AI-off's."""
+        rel_b = mb_release("mb-b", "First Light", "SICP-1015")
+        for i, t in enumerate(rel_b["media"][0]["tracks"]):
+            t["title"] = f"t{i}"                                       # (the same, spelled otherwise)
+
+        def http():
+            return FakeHttp([mb_release("mb-a", "First Light", "ABCD-200"), rel_b], {"First Light": ["mb-a", "mb-b"]})
+        row = make_album(self.root, "First Light", notes=NOTES)
+        off = self.run_album(http(), row)
+        ai, _stub = self.assistant({"notes": {"clues": [
+            {"kind": "catno", "value": "SICP-1015", "quote": "品番は「ＳＩＣＰ－１０１５」です。"}]}})
+        on = self.run_album(http(), row, ai=ai)
+        self.assertEqual(on["ai_tie_pick"], "mb:mb-b")
+        import engine
+        import profiles as pf
+        plans = []
+        for o in (off, on):
+            eng = engine.Engine(pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
+                                              "artwork": {"enabled": False}}), http=http())
+            with mock.patch.object(ma, "process", return_value=o):
+                p = eng.identify(eng.albums_in(Path(row["FullPath"]))[0])
+            plans.append((p.status, p.tier, p.release_id, json.dumps(p.targets, sort_keys=True, default=str)))
+        self.assertEqual(plans[1], plans[0])
 
     def test_a_code_no_release_carries_changes_nothing(self):
         row = make_album(self.root, "First Light", notes="Каталог: ZZZ-9999\n")
@@ -243,8 +269,7 @@ class Matcher(unittest.TestCase):
         rank = {"nomatch": 0, "error": 0, "review": 1, "auto": 2}
         self.assertLessEqual(rank.get(on["status"], 0), rank.get(off["status"], 0), (off["status"], on["status"]))
         self.assertEqual(on["status"], off["status"])
-        if not on.get("ai_pick"):
-            self.assertEqual((on.get("best") or {}).get("id"), (off.get("best") or {}).get("id"))
+        self.assertEqual(on.get("best"), off.get("best"))              # (what is written: never AI's choice)
         self.assertEqual(on.get("album_only"), off.get("album_only"))
 
     def test_a_release_only_ai_found_is_shown_never_the_pick(self):
@@ -315,7 +340,7 @@ class Matcher(unittest.TestCase):
                                      {"auto_min_margin": 8.0}, None, mb, None, final, "",
                                      "Cat no: ABC-1234 (a different album advertised)", [], True, False, out, ai)
         self.assertEqual(f2["status"], "nomatch")
-        self.assertIsNone(out.get("ai_pick"))
+        self.assertIsNone(out.get("ai_tie_pick"))
 
     def test_a_tie_between_countries_is_left_to_the_country_order(self):
         """TIE-2 holds: AI breaks a tie only between releases of one country, format and type."""
@@ -328,7 +353,7 @@ class Matcher(unittest.TestCase):
             {"kind": "catno", "value": "SICP-1015", "quote": "品番は「ＳＩＣＰ－１０１５」です。"}]}})
         on = self.run_album(http, row, ai=ai)
         self.assert_not_raised(off, on)
-        self.assertNotIn("ai_pick", on)
+        self.assertNotIn("ai_tie_pick", on)
 
     def test_an_excluded_release_never_becomes_the_pick(self):
         """The exclusion rules still hold: a tie AI would break toward a release a rule excludes stays."""
@@ -347,8 +372,8 @@ class Matcher(unittest.TestCase):
             on = self.run_album(self.tie_http(), row, ai=ai)
         self.assert_not_raised(off, on)
         self.assertEqual(on["best"]["id"], "mb-a")
-        self.assertNotIn("ai_pick", on)
-        self.assertTrue(any("left as it was" in n for n in on["ai_notes"]))
+        self.assertNotIn("ai_tie_pick", on)
+        self.assertTrue(any("is not suggested" in n for n in on["ai_notes"]))
 
 
 class Profiles(unittest.TestCase):

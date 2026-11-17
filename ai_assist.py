@@ -456,9 +456,9 @@ def clue_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, im
               out, ai, provider_errors=None):
     """AI-1, for an album still unsure once every database step is done (never one a barcode or
     disc ID proves). Returns (mb_res, dg_res, final): the databases' results are never changed;
-    final is the same, or - only at review - the same result with a tie broken: of releases of one
-    database that score exactly alike and are of one country, format and type, the one carrying a
-    catalogue number or barcode AI read, when the others do not. What AI's searches and cited web
+    final is always the same. Only at review it may suggest (out["ai_tie_pick"], shown, never written)
+    of releases of one database that score exactly alike and are of one country, format and type,
+    the one carrying a catalogue number or barcode AI read, when the others do not. What AI's searches and cited web
     pages find is scored against the files and shown as alternatives only (out["ai_alternatives"])."""
     import match_albums as ma
     import match_core as mc
@@ -542,12 +542,13 @@ def clue_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, im
         if len({_key(s) for s in tied}) > 1 and keys and len(keys) < len({_key(s) for s in tied}):
             pick, clue = carrying[0]
             if _key(pick) != _key(best):
-                # (the reasons stay the databases' own: album known reads them; AI's line is a note)
-                final = dict(final, best=pick, runner_up=best)
+                # (a suggestion only: the pick stays the databases' own, so everything written -
+                # album known, Partial, an exact pick, unattended - is what AI-off writes; you choose)
                 lines.append(f"{RULE}: {clue['provenance']} read {_kind_words(clue['kind'])} {clue['value']} "
-                             f"({clue['where']}); of the releases that tie, {_key(pick)} carries it - the pick to "
-                             "review, never filed on this alone")
-                out["ai_pick"] = _key(pick)
+                             f"({clue['where']}); of the releases that tie, {_key(pick)} carries it - suggested "
+                             "for you to choose, never written on this alone")
+                out["ai_tie_pick"] = _key(pick)
+                out["_ai_tie_scored"] = pick
     for c in code_clues:
         if not any(carries(s["cand"], c) for res in (mb_res, dg_res) for s in (res or {}).get("scored") or ()):
             alt = [k for k, s in found.items() if carries(s["cand"], c)]

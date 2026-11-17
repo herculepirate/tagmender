@@ -9262,18 +9262,18 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         # AI-1 (optional AI, a profile's own choice): clues for an album still unsure, which a
         # database release must carry; never a sure pick on its own (ai_assist.clue_step)
         import ai_assist
-        before = final
         mb_res, dg_res, final = ai_assist.clue_step(
             http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, images if use_ocr else [],
             use_mb, use_discogs, out, ai, provider_errors)
-        if final is not before and not _ai_tie_keeps(before, final, album, cfg, rules, anyway, mb_res, dg_res,
-                                                      ocr_txt):
-            # (AI-1: a tie AI broke may change nothing the rules after the databases decided -
-            # an excluded release, album known, the version your copy names, R9: then it stays)
-            final = before
-            out.pop("ai_pick", None)
+        tie = out.pop("_ai_tie_scored", None)
+        if tie is not None and not _ai_tie_keeps(final, dict(final, best=tie, runner_up=final.get("best")), album,
+                                                 cfg, rules, anyway, mb_res, dg_res, ocr_txt):
+            # (AI-1: a release the rules after the databases would treat otherwise - an excluded one,
+            # album known, the version your copy names, R9 - is not even suggested)
+            out.pop("ai_tie_pick", None)
             out["ai_notes"] = list(out.get("ai_notes") or []) + [
-                "AI-1: the tie AI's clue would break was left as it was (the rules decide it otherwise)"]
+                "AI-1: the release AI's clue points to among the tied ones is not suggested (the rules "
+                "decide it otherwise)"]
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     if (status == "auto" and not album.get("unlisted_barcodes")

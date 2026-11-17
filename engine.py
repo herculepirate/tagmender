@@ -921,6 +921,8 @@ class Group:
     siblings: list = field(default_factory=list, compare=False, repr=False)
     set_folder: Path | None = field(default=None, compare=False)
     set_shape: str = ""
+    # MED-22c: why a copy of a disc's layers, read apart from the CD layer's, is held ("" for none)
+    layer_hold: str = field(default="", compare=False)
 
 
 def _slots_of(album, cand, sc):
@@ -1437,9 +1439,9 @@ class Engine:
             if copies:
                 # MED-22c: the CD layer's copy and SACD layers' copies of a disc filed side by side
                 # ("Disc 01", "Disc 01 (SACD Stereo)"): each copy an album of its own, as filed
-                for members in copies:
+                for members, hold in copies:
                     groups.append(Group(folder, members, [f for f in files if f not in members],
-                                        single=len(members) == 1))
+                                        single=len(members) == 1, layer_hold=hold))
                 continue
             if len(by_album) == 1:
                 groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
@@ -2147,6 +2149,8 @@ class Engine:
                 not getattr(self, "_set_alone", False):           # (the watcher: watcher.siblings_settled)
             return self._set_member(g)
         prop = self.identify(g)
+        if getattr(g, "layer_hold", "") and prop.status != "identified":
+            prop.reason = g.layer_hold + (f" ({prop.reason})" if prop.reason else "")   # (MED-22c)
         return [prop] + list(getattr(prop, "parts", None) or [])
 
     def _finish(self, prop, g: Group):
@@ -6750,6 +6754,7 @@ def _layer_copies(files, metas):
         return None                              # (a folder of two layers; version folders: one album)
 
     def discs(fs):
+        """{disc number: (its titles, whether a media tag names a hybrid SACD's layer)}"""
         out = {}
         for f in fs:
             m = metas.get(f) or {}
@@ -6757,12 +6762,44 @@ def _layer_copies(files, metas):
                 n = int(str((m.get("discnumber") or ["1"])[0]).partition("/")[0] or 1)
             except ValueError:
                 n = 1
-            out.setdefault(n, set()).add(mc.fold((m.get("title") or [Path(f).stem])[0]))
+            fam, kind = mb_tags._layer_kind((m.get("media") or [""])[0])
+            got = out.setdefault(n, (set(), [False]))
+            got[0].add(mc.fold((m.get("title") or [Path(f).stem])[0]))
+            got[1][0] = got[1][0] or (bool(kind) and "hybrid" in fam) or Path(f).parent in unsure
         return out
+    # MED-22c: a folder of no layer whose audio is no CD's (hi-res, SACD_AREA naming none) is a
+    # layer nothing tells: held on its own, said why - never taken for the CD layer's copy
+    unsure = {d for d in where if "" in where[d] and _hires_folder([f for f in bucket[""] if Path(f).parent == d])}
     cd = discs(bucket[""])
-    twice = any(n in cd or (len(t) > 1 and t in cd.values())
-                for k, fs in bucket.items() if k for n, t in discs(fs).items())
-    return [bucket[k] for k in sorted(bucket)] if twice else None
+    # (the same titles only where a media tag names a hybrid SACD's layer, or the folder of no
+    # layer is hi-res: a CD and an SACD of one album, two discs of their own, are never one disc
+    # twice)
+    twice = any(n in cd or (len(t) > 1 and any(t == c[0] and (hy[0] or c[1][0]) for c in cd.values()))
+                for k, fs in bucket.items() if k for n, (t, hy) in discs(fs).items())
+    if not twice:
+        return None
+    out = [(bucket[k], "") for k in sorted(bucket) if k]
+    plain = [f for f in bucket[""] if Path(f).parent not in unsure]
+    lost = "which SACD layer this disc is cannot be told (no SACD area or media tag names it)"
+    out += [([f for f in bucket[""] if Path(f).parent == d], lost) for d in sorted(unsure)]
+    if plain:
+        out.insert(0, (plain, ""))
+    return out
+
+
+def _hires_folder(files) -> bool:
+    """Every one of these files holds audio no CD holds (past 16-bit or 48 kHz)."""
+    import mutagen
+    if not files:
+        return False
+    for f in files:
+        try:
+            info = mutagen.File(f).info
+        except Exception:
+            return False
+        if not ((getattr(info, "bits_per_sample", 0) or 0) > 16 or (getattr(info, "sample_rate", 0) or 0) > 48000):
+            return False
+    return True
 
 
 def _layer_copy(rel, tags, vtracks=None) -> list:

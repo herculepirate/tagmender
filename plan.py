@@ -623,6 +623,21 @@ def second_copies(group, moved, folder) -> list:
     return out
 
 
+def _other_copy_in(album: Path, src_dir: Path, moved) -> bool:
+    """MED-22c: ALBUM, another folder than SRC_DIR, already holds music not moving with this album
+    (another copy of the release: the CD layer's)."""
+    if os.path.realpath(str(album)) == os.path.realpath(str(src_dir)) or not album.is_dir():
+        return False
+    mine = {os.path.realpath(str(x)) for x in moved}
+    for dirpath, dirs, names in os.walk(album):
+        if Path(dirpath) != album:
+            dirs[:] = []
+        for n in names:
+            if Path(n).suffix.lower() in AUDIO_EXT and os.path.realpath(os.path.join(dirpath, n)) not in mine:
+                return True
+    return False
+
+
 def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=False, artist="",
                 single=False, extra=(), everything=False, copies=()):
     """([(companion, destination)], why not): the non-audio files that go with an album
@@ -655,10 +670,17 @@ def _companions(src_dir: Path, moved: dict, profile, shallow=False, tracks_only=
     if src_dir in dmap and _DISC_NAME.match(dmap[src_dir].name) and \
             any(v != dmap[src_dir] and v.parent == dmap[src_dir].parent for v in dmap.values()):
         dmap[src_dir] = dmap[src_dir].parent        # disc 1 in the album folder, disc 2 inside it
-    if src_dir not in dmap and dmap and all(_LAYER_DIR.search(v.name) for v in dmap.values()):
-        # MED-22c: an SACD layer's copy filed beside the CD layer's: its own cover, logs and scans
-        # go into its (first) layer folder - never beside the CD layer's copy's, renamed
-        dmap[src_dir] = dmap[min(dmap, key=lambda d: (len(d.parts), str(d).casefold()))]
+    layers = sorted((d for d in dmap if _LAYER_DIR.search(dmap[d].name)),
+                    key=lambda d: (len(d.parts), str(d).casefold()))
+    if layers:
+        album = dmap[layers[0]].parent
+        if _other_copy_in(album, src_dir, moved):
+            # MED-22c: an SACD layer's copy filed beside the CD layer's (with a plain disc of its own,
+            # the bonus CD, too): its own cover, logs and scans go into its (first) layer folder -
+            # never beside the CD layer's copy's, renamed
+            dmap[src_dir] = dmap[layers[0]]
+        elif dmap.get(src_dir) is not None and dmap[src_dir].parent == album:
+            dmap[src_dir] = album         # (an album of its own: its cover stays in its album folder)
     if src_dir not in dmap:
         top = Path(os.path.commonpath([str(d) for d in dmap.values()]))
         if any(d != top and d.parent != top for d in dmap.values()):
@@ -929,15 +951,16 @@ def _is_layer(media) -> bool:
 _LAYER_DIR = re.compile(r"\(SACD(?: Stereo| Multichannel)?\)\s*$", re.I)
 
 
-def _layer_dir(dst: Path, label: str, disc, compat) -> Path:
+def _layer_dir(dst: Path, label: str, disc, compat, disc_level=None) -> Path:
     """MED-22c: the folder of an SACD layer's copy of a disc, beside the CD layer's: the disc
     folder the naming made with the layer named after it ("Disc 01" -> "Disc 01 (SACD Stereo)",
-    "Piano Man - Disc 1" -> "Piano Man - Disc 1 (SACD Stereo)": a folder naming the disc's number
-    is the disc's), or - the naming making none (one disc, a flat script) - such a folder inside
-    the one it made."""
+    "Piano Man - Disc 1" -> "Piano Man - Disc 1 (SACD Stereo)"), or - the naming making none (one
+    disc, a flat script) - such a folder inside the one it made. disc_level: whether the folder
+    holding dst is the naming's disc folder (another disc number names it otherwise); None: by
+    its name alone ("Disc 01")."""
     n = _disc_no((_vals(disc) or ["1"])[0]) or 1
     own = dst.parent.name
-    is_disc = bool(_DISC_NAME.match(own)) or re.search(rf"(?<![^\W_])(?:cd|dis[ck])\s*0*{n}(?!\d)", own, re.I)
+    is_disc = bool(_DISC_NAME.match(own)) if disc_level is None else bool(disc_level)
     name = fnm.safe_component(f"{own} ({label})" if is_disc else f"Disc {n:02d} ({label})", compat)
     return (dst.parent.with_name(name) if is_disc else dst.parent / name) / dst.name
 
@@ -2397,7 +2420,8 @@ class Planner:
                         # MED-22c: an SACD layer's copy of a disc, beside its CD layer's copy: in a
                         # folder of that layer's own - "Disc 01 (SACD Stereo)/101.T.flac"
                         dst = _layer_dir(dst, str(lay_[0]), (targets.get(f) or {}).get("discnumber"),
-                                         p["filenames"].get("compat", "windows"))
+                                         p["filenames"].get("compat", "windows"),
+                                         disc_level=self._disc_level(template, names, comps, f))
                         dst = self._spelled(dst, dest_root, artist_level)   # ("disc 01 (sacd stereo)" there)
                 entry["notes"] += notes
                 if dst is None:
@@ -3053,6 +3077,23 @@ class Planner:
         if not any(len(v) > 1 for v in list(by_name.values()) + list(by_disc.values())):
             return []
         return list(dict.fromkeys(seen))
+
+    def _disc_level(self, template, names, comps, f):
+        """MED-22c: the naming's last folder is its disc folder - the file named as another disc
+        of the set gets another folder there, the folders above it the same ("Piano Man - Disc 1"
+        and "... - Disc 2"; never an album folder titled "CD 1" of a script making no disc
+        folder). None when it cannot be told (no rendering at hand)."""
+        if not comps or len(comps) < 2:
+            return None
+        n = _disc_no((_vals(names.get("discnumber")) or ["1"])[0]) or 1
+        try:
+            other = naming.render(template, {**names, "discnumber": [str(n + 1)]}, self._picard(),
+                                  self.profile["filenames"].get("compat", "windows"), own=f.stem)
+        except Exception:
+            return None
+        if len(other) != len(comps):
+            return None                 # (another shape: a script making a disc folder from disc 2 on)
+        return fnm.fold(str(other[-2])) != fnm.fold(str(comps[-2]))
 
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release

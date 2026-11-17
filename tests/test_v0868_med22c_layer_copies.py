@@ -137,6 +137,10 @@ class MED22c_Layers(Base):
                     self.assertEqual(Path(fe["dst"]).parent.name, "Disc 01 (SACD Stereo)", pl.preview(plan))
                 dirs.setdefault(Path(fe["dst"]).parent, set()).add(src)
         self.assertTrue(all(len(v) == 1 for v in dirs.values()), dirs)
+        held = [a for a in plan["albums"] if any(Path(fe["src"]).parent.name == "Disc 03" for fe in a["files"])]
+        said = "which SACD layer this disc is cannot be told"
+        self.assertTrue(held and all(said in a["identification"].get("reason", "")
+                                     for a in held), [a["identification"] for a in held])
 
     def test_MED22c_cd_layer_rip_unchanged(self):
         top = self.lib / "Billy Joel" / "1973 - Piano Man [2024 SACD]"
@@ -224,7 +228,9 @@ class MED22c_Filed(Base):
         # each SACD layer goes into its own layer folder, the CD layer and bonus CD are discs 1, 2)
         self.dest = self.tmp / "library"
         top = self.dest / "Billy Joel" / "1973 - Piano Man"
-        self.layer(top / "Disc 01", 2, None, disc=1, hires=False)
+        for i in range(3):
+            self.track(top / "Disc 01" / f"{i + 1:02d}. Track {i + 1}.flac", i, 2, LENS[i] / 1000, hires=False,
+                       DISCNUMBER="1", MEDIA=CDL)
         self.layer(top / "Disc 02", 2, "Stereo", disc=2)
         self.layer(top / "Disc 03", 6, "Multichannel", disc=3)
         for i in range(4):
@@ -315,7 +321,7 @@ class MED22c_Filed(Base):
         a, plan = self.plan_of(self.cd_copy())
         executor.Executor(plan).run()
         album_dir = {Path(fe["dst"]).parent.parent for fe in a["files"]}.pop()
-        with unittest.mock.patch.object(pl, "_layer_dir", lambda dst, label, disc, compat: dst):
+        with unittest.mock.patch.object(pl, "_layer_dir", lambda dst, label, disc, compat, **k: dst):
             b, plan2 = self.plan_of(self.layers_copy(multichannel=False))
         self.assertNotEqual(b["status"], "ready", pl.preview(plan2))
         self.assertTrue(any("another layer of disc 1" in c for c in b["conflicts"]), b["conflicts"])
@@ -365,6 +371,71 @@ class MED22c_Single(Base):
                 if fe["op"] in ("move", "copy"):
                     dirs.setdefault(Path(fe["dst"]).parent, set()).add(Path(fe["src"]).parent.name)
             self.assertTrue(x["status"] != "ready" or all(len(v) == 1 for v in dirs.values()), pl.preview(plan))
+
+
+class MED22c_Minor(Base):
+    cd_copy, layers_copy = MED22c_Filed.cd_copy, MED22c_Filed.layers_copy
+
+    def test_MED22c_an_album_refiled_in_its_own_folder_keeps_its_cover(self):
+        import executor
+        rel = release(RID, [medium(1, CDL, ALBUM, LENS), medium(2, SA2, ALBUM, LENS), medium(3, SAM, ALBUM, LENS)])
+        rel["title"] = "Piano Man"
+        self.dest = self.tmp / "library"
+        top = self.dest / "Billy Joel" / "1973 - Piano Man [2024 SACD]"
+        self.layer(top, 2, "Stereo")
+        (top / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"X" * 100)
+        plan = self.moving(SetHttp(mb=[rel])).plan(top)
+        [a] = plan["albums"]
+        self.assertEqual({Path(fe["dst"]).parent.name for fe in a["files"]}, {"Disc 01 (SACD Stereo)"},
+                         pl.preview(plan))
+        executor.Executor(plan).run()
+        album = {Path(fe["dst"]).parent.parent for fe in a["files"]}.pop()
+        self.assertTrue((album / "cover.jpg").exists(), sorted(map(str, album.rglob("*"))))
+
+    def test_MED22c_a_layer_with_its_bonus_cd_takes_its_cover_into_the_layer_folder(self):
+        import executor
+        cd = self.cd_copy()
+        (cd / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"C" * 100)
+        (cd / "rip.log").write_text("CDL")
+        a, plan = self.plan_of(cd)
+        executor.Executor(plan).run()
+        album = {Path(fe["dst"]).parent.parent for fe in a["files"]}.pop()
+        top = self.lib / "Billy Joel" / "1973 - Piano Man [SACD stereo + bonus]"
+        self.layer(top / "Disc 01", 2, "Stereo", disc=1)
+        for i in range(4):
+            self.track(top / "Disc 02" / f"{i + 1:02d}. Bonus {i + 1}.flac", i, 2, BONUS_LENS[i] / 1000, hires=False,
+                       title=f"Bonus {i + 1}", DISCNUMBER="2", shift=1)
+        (top / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"S" * 100)
+        (top / "rip.log").write_text("SAC")
+        b, plan2 = self.plan_of(top)
+        self.assertEqual(b["status"], "ready", pl.preview(plan2))
+        executor.Executor(plan2).run()
+        names = sorted(str(p.relative_to(album)) for p in album.rglob("*") if p.suffix != ".flac")
+        self.assertFalse([n for n in names if "~" in n], names)
+        self.assertIn(b"S", (album / "Disc 01 (SACD Stereo)" / "cover.jpg").read_bytes()[3:])
+        self.assertEqual((album / "Disc 01 (SACD Stereo)" / "rip.log").read_text(), "SAC")
+        self.assertEqual((album / "rip.log").read_text(), "CDL")
+
+    def test_MED22c_a_cd_and_an_sacd_of_one_album_stay_one_album(self):
+        # (a CD and a plain SACD of the album - two discs of their own, the same titles - are never
+        # read as one disc twice)
+        top = self.lib / "Artist" / "Album (CD + SACD)"
+        for i in range(3):
+            self.track(top / "Disc 01" / f"{i + 1:02d}.flac", i, 2, LENS[i] / 1000, hires=False, DISCNUMBER="1",
+                       MEDIA="CD")
+            self.track(top / "Disc 02" / f"{i + 1:02d}.flac", i, 6, LENS[i] / 1000, "Multichannel", DISCNUMBER="2",
+                       MEDIA="SACD (multichannel)")
+        groups = self.moving(SetHttp(mb=[the_set()])).albums_in(top)
+        self.assertEqual([len(g.files) for g in groups], [6])
+
+    def test_MED22c_an_album_folder_named_cd_1_is_no_disc_folder(self):
+        tpl = {"preset": "", "template": "%albumartist%/%album% CD 1/%tracknumber%. %title%"}
+        self.dest = self.tmp / "library"
+        self.dest.mkdir(exist_ok=True)
+        eng = self.engine(SetHttp(mb=[the_set()]), operation="move", destination=str(self.dest), naming=tpl)
+        plan = eng.plan(self.layers_copy(multichannel=False))
+        got = {str(Path(fe["dst"]).parent.relative_to(self.dest)) for x in plan["albums"] for fe in x["files"]}
+        self.assertEqual(got, {"Billy Joel/Piano Man CD 1/Disc 01 (SACD Stereo)"}, pl.preview(plan))
 
 
 class MED22c_Guard(unittest.TestCase):

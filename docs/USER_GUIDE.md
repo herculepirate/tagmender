@@ -598,6 +598,24 @@ AcoustID user key (Preferences › Setup; [Setup](SETUP.md#your-musicbrainz-acco
 `~/.config/tagmender` and never shown again. Anything sent to MusicBrainz or AcoustID is your
 choice for one album, after a sheet that says exactly what will be sent.
 
+### The preview's panes
+
+Under the list of albums, the preview shows where everything goes in four linked panes:
+
+| Pane | Shows | You can |
+|---|---|---|
+| **Your folders** (left) | The folders and files as they are on disk, each marked with where it goes: *→ Disc 02* for a disc folder of a set, *→ Disc 01 #3* for a file, *needs you* for an album waiting for your choice, *other pressing* when your scans name another pressing, *extra* for a file the release has no track for | Select a folder or a file; drag a folder onto an album in the middle pane to add it to that album (Match Files Manually opens for it) |
+| **Albums as they will be** (middle) | Each album as release → discs → tracks. A disc names the folder it came from (a set joined from folders such as *Disc 1 - …*, *Disc 2 - …*; an SACD layer's copy filed as *Disc 01 (SACD Stereo)*); each track shows the file on it. A track of the release that is not in your folders is greyed (*not in your folders*); files that are not on the release are listed under *Not on the release*. *Why this release* lists what agreed (✓) and what differs (≠) | Select an album, disc or track; **Change Release…** (the same as Album › Change Release) |
+| **Tag changes** (right) | Tag, Original and New for what you selected: a file, a track, a disc, a folder or the whole album, then the *Folder* and *File name* rows. Where the files do not share a value it says *different in N files*. The mark says what happens: **+** added, **→** changed, **−** removed, **=** kept; only the part of a value that changes is tinted (new text blue, the text it replaces orange and struck through) | **Changes only** hides the tags that stay as they are; double-click a New value to edit it (for the selection: the album, a disc's files or one file); **Revert to Original** keeps the files' own value. Edit › Undo Edit (Ctrl+Z) takes an edit back |
+| **Cover art** (bottom) | The new front cover the profile found (Cover Art Archive, Discogs …) first, then your own scans and covers and the picture in the tracks | **Use as Front Cover** (or double-click a picture), **Find Online…** (every cover the sources find), **Choose a File…**, **Generate…** (clean up your scan or make a cover with your own image service: Make Covers) |
+
+Selecting in one pane selects its counterpart in the others and the album's row in the list (a disc
+folder selects its disc; a track selects its file). Each pane folds to a labelled strip with its ‹ or
+⌄ button; which panes are folded, their widths, the split between the list and the panes and
+*Changes only* are remembered. The panes read only the preview: nothing on disk changes until you
+apply, and a preview of thousands of albums opens at once (an album's discs and tracks are made
+when you open it).
+
 ### Profile settings in the app
 
 Preferences › Profiles shows the chosen profile's settings as grouped lists, in the order the work

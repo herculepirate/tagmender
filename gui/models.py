@@ -7,6 +7,22 @@ from .common import album_words, label_for, plural, reasons
 from .i18n import N_, tr
 from .style import status_color, status_icon
 
+# the item roles as plain ints: a comparison with one of Qt's enum members costs microseconds,
+# and a list of thousands of albums asks data() hundreds of thousands of times as it is drawn
+# and fitted
+R_DISPLAY = int(Qt.DisplayRole)
+R_FOREGROUND = int(Qt.ForegroundRole)
+R_DECORATION = int(Qt.DecorationRole)
+R_TOOLTIP = int(Qt.ToolTipRole)
+R_ACCESSIBLETEXT = int(Qt.AccessibleTextRole)
+R_EDIT = int(Qt.EditRole)
+R_FONT = int(Qt.FontRole)
+R_TEXTALIGNMENT = int(Qt.TextAlignmentRole)
+R_BACKGROUND = int(Qt.BackgroundRole)
+R_CHECKSTATE = int(Qt.CheckStateRole)
+R_USER = int(Qt.UserRole)
+
+
 # what a tier word in the status column means (its tooltip; the evidence is in the inspector)
 TIER_TIPS = {"partial": N_("Partial: the release is known, but which pressing is not proven"),
              "album_only": N_("Album only: the album matched, but not every track did"),
@@ -245,10 +261,10 @@ class PlanModel(QAbstractTableModel):
         c = idx.column()
         ident = a["identification"]
         now = self.state_of(a) if self.state_of and c == 0 and role in (
-            Qt.DisplayRole, Qt.ToolTipRole, Qt.AccessibleTextRole) else ""
+            R_DISPLAY, R_TOOLTIP, R_ACCESSIBLETEXT) else ""
         if now:
             return now
-        if role == Qt.DisplayRole:
+        if role == R_DISPLAY:
             if c == 0:
                 return label_for(a)[1]                        # (the icon is the DecorationRole)
             if c == 1:
@@ -273,19 +289,19 @@ class PlanModel(QAbstractTableModel):
                     text = "; ".join(reasons.describe(c) for c in codes if c != "other") or words
                     return text[:1].upper() + text[1:]
                 return "; ".join(ident.get("why") or [])[:120]
-        if role == Qt.ForegroundRole and c == 0 and a["status"] in ("blocked", "failed", "conflict"):
+        if role == R_FOREGROUND and c == 0 and a["status"] in ("blocked", "failed", "conflict"):
             return status_color(a["status"])               # (only what stops Apply in colour; the icon says the rest)
-        if role == Qt.DecorationRole and c == 0:
+        if role == R_DECORATION and c == 0:
             from . import icons
             return icons.icon(status_icon(a["status"]), a["status"], 14)
-        if role == Qt.ToolTipRole and c == 0:
+        if role == R_TOOLTIP and c == 0:
             tier = (ident or {}).get("tier")
             if a["status"] not in ("unresolved", "excluded", "skipped") and tier in TIER_TIPS:
                 return tr(TIER_TIPS[tier])
             return label_for(a)[1]                            # (the whole word when the column cuts it)
-        if role == Qt.ToolTipRole and c == 1:
+        if role == R_TOOLTIP and c == 1:
             return a["source_dir"]
-        if role == Qt.ToolTipRole and c in (2, 4, 5):
+        if role == R_TOOLTIP and c in (2, 4, 5):
             # (the whole text, wrapped, when the column cuts it: Why in full, every conflict)
             if c == 5 and a["status"] not in ("excluded",) and not a["conflicts"] and \
                     ident.get("status") != "unresolved":
@@ -293,38 +309,38 @@ class PlanModel(QAbstractTableModel):
             elif c == 5 and len(a["conflicts"]) > 1:
                 text = "\n".join(a["conflicts"])
             else:
-                text = self.data(idx, Qt.DisplayRole) or ""
+                text = self.data(idx, R_DISPLAY) or ""
             if not text:
                 return ""
             import html as _h
             return "<p style='white-space:pre-wrap'>" + _h.escape(text) + "</p>"
-        if role == Qt.ToolTipRole and c == self.SCANS:
+        if role == R_TOOLTIP and c == self.SCANS:
             return scans_tip(ident.get("scans"))
-        if role == Qt.ForegroundRole and c == self.SCANS:
+        if role == R_FOREGROUND and c == self.SCANS:
             st = (ident.get("scans") or {}).get("state")
             key = {"proven": "done", "differs": "unresolved"}.get(st)
             return status_color(key) if key else (status_color("excluded") if st else None)
-        if role == Qt.AccessibleTextRole and c == self.SCANS:
+        if role == R_ACCESSIBLETEXT and c == self.SCANS:
             return scans_text(ident.get("scans"))
-        if role == Qt.ToolTipRole and c == self.PROFILE and self.profile_of:
+        if role == R_TOOLTIP and c == self.PROFILE and self.profile_of:
             name, own = self.profile_of(a)
             return (tr("Profile {0}, chosen for this album").format(name) if own else
                     tr("Profile {0}, the one chosen above").format(name)) + \
                 (tr(". Click to choose another for it.") if self.flags(idx) & Qt.ItemIsEditable else "")
-        if role == Qt.EditRole and c == self.PROFILE and self.profile_of:
+        if role == R_EDIT and c == self.PROFILE and self.profile_of:
             return self.profile_of(a)[0] if self.profile_of(a)[1] else ""
-        if role == Qt.FontRole and c == self.PROFILE and self.profile_of and not self.profile_of(a)[1]:
+        if role == R_FONT and c == self.PROFILE and self.profile_of and not self.profile_of(a)[1]:
             from PySide6.QtGui import QFont
             f = QFont()
             f.setItalic(True)                             # (the one chosen above: it follows that choice)
             return f
-        if role == Qt.TextAlignmentRole and c == 3:
+        if role == R_TEXTALIGNMENT and c == 3:
             return int(Qt.AlignRight | Qt.AlignVCenter)
-        if c == 3 and role in (Qt.BackgroundRole, Qt.ToolTipRole):
+        if c == 3 and role in (R_BACKGROUND, R_TOOLTIP):
             band = score_band(a)
             if band is None:
                 return None
-            if role == Qt.ToolTipRole:
+            if role == R_TOOLTIP:
                 return tr(SCORE_BANDS[band][1]) + " " + tr("The score is how well the release fits, not a "
                                                            "probability.")
             from PySide6.QtGui import QBrush, QColor
@@ -334,18 +350,18 @@ class PlanModel(QAbstractTableModel):
             calm = band in CALM_BANDS
             r, g, b = SCORE_BANDS[band][0]
             return QBrush(QColor(r, g, b, (45 if is_dark() else 30) if calm else (100 if is_dark() else 70)))
-        if role == Qt.FontRole and c == 3 and score_band(a) in ("check", "investigate"):
+        if role == R_FONT and c == 3 and score_band(a) in ("check", "investigate"):
             from PySide6.QtGui import QFont
             f = QFont()
             f.setBold(True)
             return f
-        if role == Qt.AccessibleTextRole and c == 3 and score_band(a):
+        if role == R_ACCESSIBLETEXT and c == 3 and score_band(a):
             # (the band in words too: its tint alone says nothing to a screen reader)
-            return f"{self.data(idx, Qt.DisplayRole) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"
-        if role == Qt.AccessibleTextRole and c == 0:
+            return f"{self.data(idx, R_DISPLAY) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"
+        if role == R_ACCESSIBLETEXT and c == 0:
             return label_for(a)[1]
-        if role == Qt.CheckStateRole and c == 1 and can_apply(a):
+        if role == R_CHECKSTATE and c == 1 and can_apply(a):
             return Qt.Unchecked if self.left_out(a) else Qt.Checked
-        if role == Qt.UserRole:
+        if role == R_USER:
             return a
         return None

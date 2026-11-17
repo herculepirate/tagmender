@@ -588,5 +588,151 @@ class PerfGui(Base):
         ov.plan = None
 
 
+# ---- the list's own sorting (gui/models.SortedRows) against Qt's QSortFilterProxyModel ---------
+def plan_rows(n, seed=7):
+    """N synthetic albums with many ties in every column (few statuses, scores, folders)."""
+    import random
+    rnd = random.Random(seed)
+    out = []
+    for i in range(n):
+        out.append({"source_dir": f"/m/Band {rnd.randint(0, 4)}/Album {rnd.randint(0, 6)}",
+                    "status": rnd.choice(["ready", "unresolved", "listed", "done", "excluded", "failed"]),
+                    "label": rnd.choice(["", "Ignored"]), "rule": {"name": "r"}, "conflicts": rnd.choice([[], ["c"]]),
+                    "files": [], "notes": [], "key": f"k{i}",
+                    "identification": {"provider": rnd.choice(["", "musicbrainz", "discogs"]),
+                                       "confidence": rnd.choice([0, 80, 95, 100]),
+                                       "tier": rnd.choice(["exact", "partial", None]),
+                                       "why": rnd.choice([[], ["w"], ["x y"]])}})
+    return out
+
+
+@unittest.skipIf(QApplication is None, "PySide6 not installed")
+class ListSorting(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def pair(self, n=150, seed=7):
+        from PySide6.QtCore import QSortFilterProxyModel, Qt
+        from gui.models import PlanModel, SortedRows
+        m = PlanModel()
+        m.profile_of = lambda a: ("A" if len(a["source_dir"]) % 2 else "B", False)
+        qt, mine = QSortFilterProxyModel(), SortedRows()
+        for p in (qt, mine):
+            p.setSourceModel(m)
+            p.setFilterCaseSensitivity(Qt.CaseInsensitive)
+            p.setFilterKeyColumn(-1)
+        m.set_plan({"albums": plan_rows(n, seed)})
+        for p in (qt, mine):                       # (shown, as a view shows it: its rows mapped)
+            self.order(p)
+        return m, qt, mine
+
+    @staticmethod
+    def order(p):
+        return [p.mapToSource(p.index(r, 0)).row() for r in range(p.rowCount())]
+
+    def test_every_column_and_order_sorts_as_qt_did_ties_included(self):
+        from PySide6.QtCore import Qt
+        from gui.models import PlanModel
+        m, qt, mine = self.pair()
+        # (a header clicked again and again: each sort is stable over the order the last one left)
+        clicks = [(c, o) for c in range(len(PlanModel.COLS)) for o in (Qt.AscendingOrder, Qt.DescendingOrder)]
+        clicks += [(3, Qt.AscendingOrder), (0, Qt.DescendingOrder), (5, Qt.AscendingOrder), (0, Qt.AscendingOrder)]
+        for c, o in clicks:
+            qt.sort(c, o)
+            mine.sort(c, o)
+            self.assertEqual(self.order(mine), self.order(qt), (c, o))
+        for c in range(len(PlanModel.COLS)):                     # (each from the plan's order)
+            for o in (Qt.AscendingOrder, Qt.DescendingOrder):
+                m2, qt2, mine2 = self.pair(seed=c)
+                qt2.sort(c, o)
+                mine2.sort(c, o)
+                self.assertEqual(self.order(mine2), self.order(qt2), (c, o))
+
+    def test_the_filter_shows_the_same_rows(self):
+        from PySide6.QtCore import Qt
+        m, qt, mine = self.pair()
+        qt.sort(0, Qt.AscendingOrder)
+        mine.sort(0, Qt.AscendingOrder)
+        for text in ("band 3", "READY", "album 1", "nothing like it", ""):
+            qt.setFilterFixedString(text)
+            mine.setFilterFixedString(text)
+            self.assertEqual(sorted(self.order(mine)), sorted(self.order(qt)), text)
+            self.assertEqual(self.order(mine), self.order(qt), text)
+        self.assertEqual(mine.filterRegularExpression().pattern(), "")
+
+    def test_kept_sorted_as_rows_change_and_come_and_go(self):
+        from PySide6.QtCore import Qt
+        from gui.models import sort_key
+        m, qt, mine = self.pair()
+        mine.sort(0, Qt.AscendingOrder)
+
+        def sorted_now():
+            keys = [sort_key(m.data(m.index(r, 0))) for r in self.order(mine)]
+            return keys == sorted(keys)
+        m.albums[5]["status"] = "failed"
+        m.dataChanged.emit(m.index(5, 0), m.index(5, 7))
+        self.assertTrue(sorted_now())
+        m.replace_rows([3], plan_rows(2, seed=99))                # (a row become two)
+        m.replace_rows([10], [])
+        self.assertTrue(sorted_now())
+        self.assertEqual(sorted(self.order(mine)), list(range(len(m.albums))))
+        for a in m.albums:
+            a["status"] = "done"
+        m.refresh_rows()
+        self.assertTrue(sorted_now())
+
+    def test_switched_off_rows_stay_put_and_new_ones_come_after_their_neighbour(self):
+        from PySide6.QtCore import Qt
+        m, qt, mine = self.pair()
+        for p in (qt, mine):
+            p.sort(0, Qt.AscendingOrder)
+            p.setDynamicSortFilter(False)                          # (work running: APL-1, a look-up)
+        before = self.order(mine)
+        m.albums[before[0]]["status"] = "failed"                   # (would sort elsewhere)
+        m.refresh_rows()
+        self.assertEqual(self.order(mine), before)
+        m.replace_rows([], plan_rows(2, seed=5))                    # (put under the list)
+        m.replace_rows([7], plan_rows(1, seed=6))
+        self.assertEqual(self.order(mine), self.order(qt))
+        for p in (qt, mine):
+            p.setDynamicSortFilter(True)                            # (the work ended: sorted once)
+        self.assertEqual(self.order(mine), self.order(qt))
+
+    def test_the_selection_follows_its_album_through_a_sort(self):
+        from PySide6.QtCore import QItemSelectionModel, Qt
+        from PySide6.QtWidgets import QTableView
+        m, qt, mine = self.pair()
+        v = QTableView()
+        v.setModel(mine)
+        v.setSortingEnabled(True)
+        v.sortByColumn(0, Qt.AscendingOrder)
+        v.selectionModel().select(mine.index(4, 0), QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+        v.selectionModel().setCurrentIndex(mine.index(4, 0), QItemSelectionModel.NoUpdate)
+        album = m.albums[mine.mapToSource(mine.index(4, 0)).row()]
+        for c, o in ((1, Qt.DescendingOrder), (3, Qt.AscendingOrder), (0, Qt.DescendingOrder)):
+            v.sortByColumn(c, o)
+            rows = v.selectionModel().selectedRows()
+            self.assertEqual(len(rows), 1)
+            self.assertIs(m.albums[mine.mapToSource(rows[0]).row()], album)
+            self.assertIs(m.albums[mine.mapToSource(v.currentIndex()).row()], album)
+
+    def test_a_cell_is_drawn_from_one_call_with_every_role(self):
+        from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
+        from PySide6.QtCore import QSortFilterProxyModel
+        m, qt, mine = self.pair(20)
+        d = QStyledItemDelegate()
+        for r in range(mine.rowCount()):
+            for c in range(m.columnCount()):
+                a, b = QStyleOptionViewItem(), QStyleOptionViewItem()
+                d.initStyleOption(a, mine.index(r, c))
+                src = mine.mapToSource(mine.index(r, c))
+                q = QSortFilterProxyModel()
+                d.initStyleOption(b, src)                               # (the model's own data())
+                self.assertEqual((a.text, a.checkState, a.features, a.font.bold(), a.backgroundBrush.color().rgba(),
+                                  a.displayAlignment), (b.text, b.checkState, b.features, b.font.bold(),
+                                                        b.backgroundBrush.color().rgba(), b.displayAlignment))
+
+
 if __name__ == "__main__":
     unittest.main()

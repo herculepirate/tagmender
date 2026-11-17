@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLay
 from . import icons, style
 from .common import _gui_prefs, _set_gui_pref, album_words, label_for, left_header, plural, reasons, say
 from .i18n import N_, tr
-from .models import (R_ACCESSIBLETEXT, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
+from .models import (fill_roles, R_ACCESSIBLETEXT, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
 from .tagnames import display as tag_name
 from .work import start
@@ -446,6 +446,9 @@ class LazyTree(QAbstractItemModel):
     def columnCount(self, parent=QModelIndex()):
         return len(self.COLS)
 
+    def multiData(self, idx, span):                  # (a cell drawn: one call, models.fill_roles)
+        fill_roles(self.data, idx, span)
+
     def headerData(self, s, o, role=R_DISPLAY):
         if o == Qt.Horizontal and role == R_DISPLAY:
             return tr(self.COLS[s])
@@ -730,6 +733,9 @@ class TagModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self.rows, self.editable, self.typed = [], False, None
+
+    def multiData(self, idx, span):                  # (a cell drawn: one call, models.fill_roles)
+        fill_roles(self.data, idx, span)
 
     def set_rows(self, rows, editable):
         self.beginResetModel()

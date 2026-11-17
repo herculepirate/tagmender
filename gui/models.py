@@ -1,7 +1,7 @@
 """gui/models.py - The plan as a table."""
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractItemModel, QAbstractProxyModel, QAbstractTableModel, QModelIndex, Qt, Signal
 
 from .common import album_words, label_for, planmod, plural, reasons
 from .i18n import N_, tr
@@ -21,6 +21,18 @@ R_TEXTALIGNMENT = int(Qt.TextAlignmentRole)
 R_BACKGROUND = int(Qt.BackgroundRole)
 R_CHECKSTATE = int(Qt.CheckStateRole)
 R_USER = int(Qt.UserRole)
+
+
+def fill_roles(data, idx, span):
+    """QAbstractItemModel.multiData by DATA(idx, role) for each role asked: a view drawing a cell
+    asks for ten roles or so in one call, so the cell costs one call into Python, not ten - and,
+    with work on other threads, one wait for Python's lock, not ten."""
+    for rd in span:
+        v = data(idx, rd.role())
+        if v is None:
+            rd.clearData()
+        else:
+            rd.setData(v)
 
 
 # what a tier word in the status column means (its tooltip; the evidence is in the inspector)
@@ -249,6 +261,9 @@ class PlanModel(QAbstractTableModel):
             self.endInsertRows()
         return at
 
+    def multiData(self, idx, span):
+        fill_roles(self.data, idx, span)
+
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.albums)
 
@@ -373,3 +388,347 @@ class PlanModel(QAbstractTableModel):
         if role == R_USER:
             return a
         return None
+
+
+# --------------------------------------------------------------------------
+# the list's rows, sorted and filtered
+# --------------------------------------------------------------------------
+def sort_key(v):
+    """A cell's value as the list sorts it, as Qt's QSortFilterProxyModel compared it: a value
+    before none (none after every value, ascending or descending), numbers by value, text
+    case-sensitively by its characters."""
+    if v is None:
+        return (1,)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return (0, 0, v, "")
+    return (0, 1, 0, str(v))
+
+
+class SortedRows(QAbstractProxyModel):
+    """The plan's rows as the list shows them: sorted by a column and filtered by words, as a
+    QSortFilterProxyModel did it - the same order (stable: rows that tie keep the plan's order),
+    the same rows, the same signals for the view's selection - but sorted here, in one pass over
+    the rows with list.sort, not through a comparison asked of the model twice per step (a list
+    of thousands of albums made tens of thousands of such calls, each into Python, at every sort).
+    The plan's own order (the model's rows) is never changed.
+
+    Sorting is kept as rows change while dynamicSortFilter() (the default); switched off (work
+    running), the rows keep their places and new ones come at the end, as before."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._src = None
+        self._rows = []                  # proxy row -> source row
+        self._pos = {}                   # source row -> proxy row (shown rows only)
+        self._col, self._order = -1, Qt.AscendingOrder
+        self._dynamic = True
+        self._text = ""                  # the filter's words (case-insensitive), "" for none
+        self._cs = Qt.CaseInsensitive
+        self._key_col = -1
+        self._keys = {}                  # source row -> its sort key, as the rows were last sorted
+
+    # ---- the source ---------------------------------------------------------------------------
+    def setSourceModel(self, m):
+        old = self._src
+        if old is not None:
+            for sig, slot in self._links:
+                try:
+                    sig.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+        self.beginResetModel()
+        super().setSourceModel(m)
+        self._src = m
+        self._links = [(m.modelAboutToBeReset, self.beginResetModel), (m.modelReset, self._source_reset),
+                       (m.rowsAboutToBeRemoved, self._source_removing), (m.rowsRemoved, self._source_removed),
+                       (m.rowsInserted, self._source_inserted), (m.dataChanged, self._source_changed),
+                       (m.layoutChanged, self._source_relaid), (m.headerDataChanged, self.headerDataChanged)]
+        for sig, slot in self._links:
+            sig.connect(slot)
+        self._rows = self._wanted()
+        self._index()
+        self.endResetModel()
+
+    def _index(self):
+        self._pos = {s: p for p, s in enumerate(self._rows)}
+
+    def _value(self, row, col, role=R_DISPLAY):
+        m = self._src
+        return m.data(m.index(row, col), role)
+
+    def _accepts(self, row) -> bool:
+        if not self._text:
+            return True
+        cols = range(self._src.columnCount()) if self._key_col < 0 else (self._key_col,)
+        want = self._text if self._cs == Qt.CaseSensitive else self._text.casefold()
+        for c in cols:
+            v = self._value(row, c)
+            if v is None:
+                continue
+            v = str(v)
+            if want in (v if self._cs == Qt.CaseSensitive else v.casefold()):
+                return True
+        return False
+
+    def _key(self, row):
+        k = self._keys[row] = sort_key(self._value(row, self._col))
+        return k
+
+    def _sorted(self, rows) -> list:
+        """ROWS (source rows) in the order the column sorts them; rows that tie keep their order
+        in ROWS (Qt's sort is stable over the rows as they were)."""
+        rows = list(rows)
+        self._keys = {}
+        if self._col < 0 or self._src is None:
+            return rows
+        keys = {r: self._key(r) for r in rows}
+        return sorted(rows, key=keys.__getitem__, reverse=self._order == Qt.DescendingOrder)
+
+    def _wanted(self) -> list:
+        """The rows from scratch (a reset): the plan's order, filtered, then sorted."""
+        n = self._src.rowCount() if self._src is not None else 0
+        return self._sorted(r for r in range(n) if self._accepts(r))
+
+    def _placed(self, rows, new) -> list:
+        """ROWS (shown, in order) with NEW (source rows, in order) put in: where the sort puts
+        each, after the rows it ties with (Qt's upper bound); unsorted, each block after the row
+        of the album before it in the plan."""
+        if not new:
+            return list(rows)
+        out = list(rows)
+        if self._col < 0:
+            for r in sorted(new):
+                pos = {s: p for p, s in enumerate(out)}
+                before = next((pos[s] for s in range(r - 1, -1, -1) if s in pos), -1)
+                out.insert(before + 1, r)
+            return out
+        import bisect
+        rev = self._order == Qt.DescendingOrder
+        # (descending: the keys negated by reversing the list, so one bisect serves both orders)
+        keys = [self._keys[s] if s in self._keys else self._key(s) for s in out]
+        for r in new:
+            k = self._key(r)
+            if rev:
+                i = len(keys) - bisect.bisect_left(keys[::-1], k)
+            else:
+                i = bisect.bisect_right(keys, k)
+            out.insert(i, r)
+            keys.insert(i, k)
+        return out
+
+    def _move_to(self, target):
+        """From the rows shown now to TARGET (source rows, in order), as a view follows it: the
+        rows going removed, the ones staying put in their new order (their persistent indexes -
+        the selection - moved with them), then the new ones inserted where they belong."""
+        keep = set(target)
+        gone = [p for p, s in enumerate(self._rows) if s not in keep]
+        for start, end in reversed(_runs(gone)):
+            self.beginRemoveRows(QModelIndex(), start, end)
+            del self._rows[start:end + 1]
+            self.endRemoveRows()
+        have = set(self._rows)
+        staying = [s for s in target if s in have]
+        if staying != self._rows:
+            self.layoutAboutToBeChanged.emit()
+            old = self._rows
+            new_pos = {s: p for p, s in enumerate(staying)}
+            persistent = self.persistentIndexList()
+            moved = [self.index(new_pos[old[i.row()]], i.column()) if 0 <= i.row() < len(old) else QModelIndex()
+                     for i in persistent]
+            self._rows = staying
+            self.changePersistentIndexList(persistent, moved)
+            self._index()
+            self.layoutChanged.emit()
+        if len(self._rows) != len(target):
+            at = 0
+            while at < len(target):
+                if at < len(self._rows) and self._rows[at] == target[at]:
+                    at += 1
+                    continue
+                end = at
+                while end < len(target) and target[end] not in have:
+                    end += 1
+                self.beginInsertRows(QModelIndex(), at, end - 1)
+                self._rows[at:at] = target[at:end]
+                self.endInsertRows()
+                at = end
+        self._index()
+
+    def _source_reset(self):
+        self._rows = self._wanted()
+        self._index()
+        self.endResetModel()
+
+    def _source_removing(self, parent, first, last):
+        for s in range(first, last + 1):
+            self._keys.pop(s, None)
+        gone = sorted(self._pos[s] for s in range(first, last + 1) if s in self._pos)
+        for start, end in reversed(_runs(gone)):
+            self.beginRemoveRows(QModelIndex(), start, end)
+            del self._rows[start:end + 1]
+            self.endRemoveRows()
+        self._index()
+
+    def _source_removed(self, parent, first, last):
+        n = last - first + 1
+        self._rows = [s - n if s > last else s for s in self._rows]
+        self._keys = {(s - n if s > last else s): k for s, k in self._keys.items() if not first <= s <= last}
+        self._index()
+
+    def _source_inserted(self, parent, first, last):
+        n = last - first + 1
+        self._rows = [s + n if s >= first else s for s in self._rows]
+        self._keys = {(s + n if s >= first else s): k for s, k in self._keys.items()}
+        self._index()
+        new = [r for r in range(first, last + 1) if self._accepts(r)]
+        if not new:
+            return
+        if self._dynamic and self._col >= 0:
+            self._move_to(self._placed(self._rows, new))       # (each where the sort puts it)
+            return
+        # (unsorted, or work running: the new rows - one block of the plan - together after the
+        # row of the album before them, as QSortFilterProxyModel put them: an album put under
+        # the list comes at its end)
+        before = next((self._pos[s] for s in range(first - 1, -1, -1) if s in self._pos), -1)
+        self._move_to(self._rows[:before + 1] + new + self._rows[before + 1:])
+
+    def _source_changed(self, top, bottom, roles=()):
+        changed = range(top.row(), bottom.row() + 1)
+        shown = [self._pos[s] for s in changed if s in self._pos]
+        if shown:
+            self.dataChanged.emit(self.index(min(shown), top.column()), self.index(max(shown), bottom.column()),
+                                  list(roles))
+        if not self._dynamic:
+            return
+        rows = list(self._rows)
+        new = []
+        if self._text:                                        # (filtered again: rows in or out)
+            out = {s for s in changed if s in self._pos and not self._accepts(s)}
+            new = [s for s in changed if s not in self._pos and self._accepts(s)]
+            rows = [s for s in rows if s not in out]
+        if self._col >= 0 and top.column() <= self._col <= bottom.column():
+            # (a row whose value changed is taken out and put back where it now belongs, after
+            # the rows it ties with; the others stay put, as with Qt's own proxy)
+            moved = []
+            for s in rows:
+                if top.row() <= s <= bottom.row():
+                    old = self._keys.get(s)
+                    if old is None or self._key(s) != old:
+                        moved.append(s)
+            if moved:
+                gone = set(moved)
+                rows = [s for s in rows if s not in gone]
+                new = sorted(set(new) | gone)
+            rev = self._order == Qt.DescendingOrder
+            ks = [self._keys[s] if s in self._keys else self._key(s) for s in rows]
+            if ks != sorted(ks, reverse=rev):                 # (not sorted before: sorted now)
+                rows = self._sorted(rows)
+        if new or rows != self._rows:
+            self._move_to(self._placed(rows, new) if new else rows)
+
+    def _source_relaid(self, *_):
+        self._move_to(self._wanted())
+
+    # ---- what the view asks -------------------------------------------------------------------
+    def index(self, row, col, parent=QModelIndex()):
+        if parent.isValid() or not (0 <= row < len(self._rows)) or not (0 <= col < self.columnCount()):
+            return QModelIndex()
+        return self.createIndex(row, col)
+
+    def parent(self, idx=QModelIndex()):
+        return QModelIndex()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() or self._src is None else self._src.columnCount()
+
+    def hasChildren(self, parent=QModelIndex()):
+        return not parent.isValid() and bool(self._rows)
+
+    def mapToSource(self, idx):
+        if not idx.isValid() or not (0 <= idx.row() < len(self._rows)):
+            return QModelIndex()
+        return self._src.index(self._rows[idx.row()], idx.column())
+
+    def mapFromSource(self, idx):
+        if not idx.isValid():
+            return QModelIndex()
+        p = self._pos.get(idx.row())
+        return QModelIndex() if p is None else self.createIndex(p, idx.column())
+
+    def data(self, idx, role=R_DISPLAY):
+        if not idx.isValid() or not (0 <= idx.row() < len(self._rows)):
+            return None
+        return self._src.data(self._src.index(self._rows[idx.row()], idx.column()), role)
+
+    def multiData(self, idx, span):
+        if not idx.isValid() or not (0 <= idx.row() < len(self._rows)):
+            for rd in span:
+                rd.clearData()
+            return
+        fill_roles(self._src.data, self._src.index(self._rows[idx.row()], idx.column()), span)
+
+    def setData(self, idx, value, role=R_EDIT):
+        return self._src.setData(self.mapToSource(idx), value, role)
+
+    def flags(self, idx):
+        return self._src.flags(self.mapToSource(idx)) if idx.isValid() else Qt.NoItemFlags
+
+    def headerData(self, s, o, role=R_DISPLAY):
+        if o == Qt.Vertical:
+            return self._src.headerData(self._rows[s], o, role) if 0 <= s < len(self._rows) else None
+        return self._src.headerData(s, o, role)
+
+    # ---- sorting and the filter, as QSortFilterProxyModel's -----------------------------------
+    def sort(self, column, order=Qt.AscendingOrder):
+        order = Qt.SortOrder(order)
+        if self._dynamic and (column, order) == (self._col, self._order):
+            return                                            # (kept sorted so already)
+        self._col, self._order = column, order
+        # (stable over the rows as shown: ties keep the order the last sort gave them; no
+        # column: the plan's order)
+        self._move_to(self._sorted(self._rows) if column >= 0 else sorted(self._rows))
+
+    def sortColumn(self) -> int:
+        return self._col
+
+    def sortOrder(self):
+        return self._order
+
+    def dynamicSortFilter(self) -> bool:
+        return self._dynamic
+
+    def setDynamicSortFilter(self, on):
+        self._dynamic = bool(on)
+        if self._dynamic and self._col >= 0:                  # (switched on: sorted again)
+            self._move_to(self._sorted(self._rows))
+
+    def setFilterFixedString(self, text):
+        self._text = str(text or "")
+        rows = [r for r in self._rows if self._accepts(r)]
+        have = set(self._rows)
+        n = self._src.rowCount() if self._src is not None else 0
+        self._move_to(self._placed(rows, [r for r in range(n) if r not in have and self._accepts(r)]))
+
+    def setFilterCaseSensitivity(self, cs):
+        self._cs = cs
+
+    def setFilterKeyColumn(self, col):
+        self._key_col = int(col)
+
+    def filterRegularExpression(self):
+        from PySide6.QtCore import QRegularExpression
+        return QRegularExpression(QRegularExpression.escape(self._text) if self._text else "")
+
+
+def _runs(rows) -> list:
+    """[(first, last)] of the sorted ROWS' runs of neighbours."""
+    out = []
+    for r in rows:
+        if out and r == out[-1][1] + 1:
+            out[-1] = (out[-1][0], r)
+        else:
+            out.append((r, r))
+    return out

@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, QSortFilterProxyModel, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QSplitter, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
@@ -18,7 +18,7 @@ from .common import (_gui_prefs, _set_gui_pref, album_words, counts_by_label, co
                      left_header, load_profile, notify, pf, planmod, plural, popup_menu, profile_names)
 from .i18n import N_, tr
 from .work import start
-from .models import PlanModel, can_apply
+from .models import PlanModel, SortedRows, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
 
 FIT_ROWS = 60                                         # the rows a column's width is fitted to (the list's)
@@ -638,7 +638,9 @@ class Overview(QWidget):
         rl.addWidget(self.service_note)
         self._service_checked = 0.0
         self.model = PlanModel()
-        self.proxy = QSortFilterProxyModel()
+        # (sorted and filtered here, in one pass with list.sort: Qt's own proxy compared the rows
+        # through the model, tens of thousands of calls for a list of thousands of albums)
+        self.proxy = SortedRows()
         self.proxy.setSourceModel(self.model)
         self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
         self.proxy.setFilterKeyColumn(-1)
@@ -682,9 +684,14 @@ class Overview(QWidget):
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(0)
-        self._fit_timer.timeout.connect(self.fit_columns)
+        # (a long list a column at a time, each in its own turn; a short one at once)
+        self._fit_timer.timeout.connect(
+            lambda: self.fit_by_steps() if self.model.rowCount() > FIT_QUICK else self.fit_columns())
         for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved):
             sig.connect(lambda *_: self.request_fit())
+        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved, self.model.dataChanged,
+                    self.model.ticked):
+            sig.connect(self.forget_applicable)
         for sig in (self.model.modelReset, self.model.rowsInserted, self.model.dataChanged):
             sig.connect(lambda *_: self.clear_done_btn.setEnabled(any(a.get("status") == "done"
                                                                       for a in self.model.albums)))
@@ -726,7 +733,9 @@ class Overview(QWidget):
         self._split_timer.setSingleShot(True)
         self._split_timer.setInterval(400)
         self._split_timer.timeout.connect(self.save_list_split)
-        self.model.modelReset.connect(lambda: self.panes.set_albums(self.model.albums))
+        # (the panes made again in a turn of their own: a preview of thousands of albums shows
+        # its list first)
+        self.model.modelReset.connect(lambda: self._panes_timer.start())
         self.model.rowsInserted.connect(lambda *_: self._panes_timer.start())
         self.model.rowsRemoved.connect(lambda *_: self._panes_timer.start())
         self.model.dataChanged.connect(self.panes_rows_changed)
@@ -878,18 +887,50 @@ class Overview(QWidget):
             return
         t.start(delay)
 
+    def fit_candidates(self) -> list:
+        """The columns fitted to their text: not sized by you, shown, and not the last (Why)."""
+        last = self.last_visible_column()
+        return [c for c in range(1, len(PlanModel.COLS))
+                if c not in self._sized_by_you and c != last and not self.table.isColumnHidden(c)]
+
+    def column_want(self, c) -> int:
+        h = self.table.horizontalHeader()
+        want = max(self.table.sizeHintForColumn(c), h.sectionSizeHint(c))
+        return min(want, self.COLUMN_MOST.get(c, want))
+
     def fit_columns(self):
         """Each column not sized by you: as wide as its text, up to COLUMN_MOST (Why: the rest)."""
+        self._fit_steps = None                             # (a fit by steps under way: this one does it)
+        self.apply_fit({c: self.column_want(c) for c in self.fit_candidates()})
+        self.fit_status()
+
+    def fit_by_steps(self):
+        """fit_columns, a column at a time, each in its own turn of the event loop (the list's
+        timer): measuring a column asks each of its sampled rows for its text, and all of them at
+        once held the UI thread up for tens of milliseconds. The widths are set together at the end."""
+        self._fit_steps = (self.fit_candidates(), {})
+        QTimer.singleShot(0, self, self._fit_step)
+
+    def _fit_step(self):
+        steps = getattr(self, "_fit_steps", None)
+        if not steps:
+            return
+        todo, wants = steps
+        if todo:
+            c = todo.pop(0)
+            if c not in self._sized_by_you and not self.table.isColumnHidden(c):
+                wants[c] = self.column_want(c)
+            QTimer.singleShot(0, self, self._fit_step)
+            return
+        self._fit_steps = None
+        self.apply_fit({c: w for c, w in wants.items() if c in self.fit_candidates()})
+        QTimer.singleShot(0, self, self.fit_status)
+
+    def apply_fit(self, wants):
         h = self.table.horizontalHeader()
         last = self.last_visible_column()
         self._fitting = True
         try:
-            wants = {}
-            for c in range(1, len(PlanModel.COLS)):
-                if c in self._sized_by_you or c == last or self.table.isColumnHidden(c):
-                    continue
-                want = max(self.table.sizeHintForColumn(c), h.sectionSizeHint(c))
-                wants[c] = min(want, self.COLUMN_MOST.get(c, want))
             # (all in view where they can be: the widest give way before the list scrolls - while
             # the list is shown, so measured; it is fitted again when its room changes)
             room = self.table.viewport().width() if self.table.isVisible() else 0
@@ -908,7 +949,6 @@ class Overview(QWidget):
                     h.resizeSection(c, want)
         finally:
             self._fitting = False
-        self.fit_status()
 
     def fit_status(self):
         if 0 in getattr(self, "_sized_by_you", ()):
@@ -2578,12 +2618,26 @@ class Overview(QWidget):
         head, _, rest = msg.partition("\n")
         sheets.warning(self, tr("Stopped: {head}").format(head=head), rest.strip())
 
+    def applicable(self) -> list:
+        """The plan's albums with changes, not left out - worked out once per turn of the event
+        loop, and again when a row changes (asked a dozen times as a row is chosen)."""
+        memo = getattr(self, "_applicable", None)
+        albums = (self.plan or {}).get("albums", [])
+        if memo is not None and memo[0] is albums and memo[1] == len(albums):
+            return list(memo[2])
+        out = [a for a in albums if can_apply(a) and not PlanModel.left_out(a)]
+        self._applicable = (albums, len(albums), out)
+        QTimer.singleShot(0, self, self.forget_applicable)
+        return list(out)
+
+    def forget_applicable(self, *_):
+        self._applicable = None
+
     def to_apply(self):
         """The albums Apply carries out: those with changes, unless left out (unticked); with
         rows you highlighted, only those of them, even one (the others stay as they are: a row
         highlighted only to show it, show_row, chooses nothing; nor does one just unticked)."""
-        albums = [a for a in (self.plan or {}).get("albums", [])
-                  if can_apply(a) and not PlanModel.left_out(a)]
+        albums = self.applicable()
         chosen = self.selected_albums() if hasattr(self, "table") and getattr(self, "_rows_chosen", False) else []
         if chosen and not all(PlanModel.left_out(a) for a in chosen):
             ids = {id(a) for a in chosen}
@@ -3049,8 +3103,16 @@ class Overview(QWidget):
             self.detail.setPlainText(planmod.preview(one, verbose=False))
             self.win.inspector.show_album(a, self.plan)
         if hasattr(self, "panes"):
-            self.panes.show_album(a)
+            # (the panes follow in a turn of their own: finding the album among thousands in
+            # their trees is the other half of the work of showing a row)
+            if not getattr(self, "_panes_follow", False):
+                self._panes_follow = True
+                QTimer.singleShot(0, self, self.panes_follow)
         self.busy(bool(getattr(self, "running", False)))
+
+    def panes_follow(self):
+        self._panes_follow = False
+        self.panes.show_album(self.selected())
 
     def choose_release(self):
         a = self.selected()

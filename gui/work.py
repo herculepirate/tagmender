@@ -59,17 +59,35 @@ class _Relay(QObject):
 
 
 _gc_timer = None
+SWITCH_INTERVAL = 0.0002            # s: the longest a thread keeps Python's lock while another waits
+FULL_EVERY = 600.0                  # s: the objects kept since are looked through again this often
+_last_full = None
 
 
 def _collect():
     """Python's cycle collection, done here on the UI thread: run on a worker, it may free a
     dropped window's widgets there, and a widget deleted off the UI thread can deadlock Qt
     against the UI thread (seen with the search sheets). The generations are collected as
-    Python itself would, when their counts pass the thresholds."""
+    Python itself would, when their counts pass the thresholds.
+
+    The oldest generation is collected among what was made since its last collection only:
+    what outlived that one is set aside (gc.freeze), and looked through again every FULL_EVERY
+    seconds. Looking through every object each time - a preview of thousands of albums is
+    millions of them - held the UI thread up for 70 ms and more every few seconds."""
+    global _last_full
+    import time
     counts, limits = gc.get_count(), gc.get_threshold()
     for gen in (2, 1, 0):
         if counts[gen] > limits[gen]:
-            gc.collect(gen)
+            if gen == 2:
+                now = time.monotonic()
+                if _last_full is None or now - _last_full > FULL_EVERY:
+                    gc.unfreeze()                     # (everything, now and then)
+                    _last_full = now
+                gc.collect(2)
+                gc.freeze()
+            else:
+                gc.collect(gen)
             break
 
 
@@ -81,6 +99,12 @@ def collect_on_ui_thread():
     if _gc_timer is not None or app is None:
         return
     gc.disable()
+    # (the UI thread waits for Python's lock each time Qt calls into Python - a cell drawn, a
+    # row asked for - and a worker holds it for up to the switch interval, 5 ms by default: a
+    # list drawn while a look-up works took hundreds of ms. A shorter turn hands it over sooner;
+    # the workers' own pace was measured the same)
+    import sys
+    sys.setswitchinterval(min(sys.getswitchinterval(), SWITCH_INTERVAL))
     _gc_timer = QTimer(app)
     _gc_timer.timeout.connect(_collect)
     _gc_timer.start(500)

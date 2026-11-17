@@ -405,6 +405,13 @@ def can_match(album) -> bool:
 # --------------------------------------------------------------------------
 # the main window's drop: add folders and files not in the preview yet
 # --------------------------------------------------------------------------
+_REAL: dict = {}                    # new_paths' folders, resolved, for REAL_FOR seconds (a drop asks
+#                                     for each album's folder; asked of the disk, each wait let the
+#                                     look-up's threads take Python's lock)
+_REAL_AT = 0.0
+REAL_FOR = 30.0
+
+
 def new_paths(page, paths) -> tuple[list, list]:
     """(the dropped paths the preview does not hold yet, the ones it does). A path is held when
     it is a file of an album listed, a folder holding one, or inside the folder previewed;
@@ -413,16 +420,29 @@ def new_paths(page, paths) -> tuple[list, list]:
     resolved every file's path on each drop.)"""
     root = getattr(page, "path", None)
     plan = getattr(page, "plan", None) or {}
-    real_dirs = {}
+    global _REAL_AT
+    import time
+    if time.monotonic() - _REAL_AT > REAL_FOR:          # (a drop asks two or three times: once)
+        _REAL.clear()
+    _REAL_AT = time.monotonic()
+    real_dirs = _REAL                                   # folder -> (resolved, names of its links)
+
+    def links(r) -> set:
+        try:
+            with os.scandir(r) as it:                   # (one read of the folder, not a stat per file)
+                return {e.name for e in it if e.is_symlink()}
+        except OSError:
+            return set()
 
     def real(f):
         d, name = os.path.split(str(f))
-        r = real_dirs.get(d)
-        if r is None:
-            r = real_dirs[d] = os.path.realpath(d or ".")
-        joined = os.path.join(r, name)
+        got = real_dirs.get(d)
+        if got is None:
+            r = os.path.realpath(d or ".")
+            got = real_dirs[d] = (r, links(r))
+        joined = os.path.join(got[0], name)
         # (a file that is itself a link: held as the file it points to, as before)
-        return os.path.realpath(joined) if os.path.islink(joined) else joined
+        return os.path.realpath(joined) if name in got[1] else joined
     held = {real(f) for a in plan.get("albums") or []
             for f in [fe.get("src") for fe in a.get("files") or []] + list(a.get("album_files") or []) if f}
     folders = {os.path.dirname(f) for f in held}

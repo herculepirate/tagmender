@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import logging
 import os
 import queue
 import re
@@ -5144,8 +5145,11 @@ class Engine:
             # (PRF-4: a look-up of some albums reads only the folders holding them)
             groups = _albums_of_keys(self, path, only) if only is not None and self._own_scan() else self.albums_in(path)
         took = time.monotonic() - start
+        # (an engine made without its log - a test's, by __new__ - still plans: the timing lines go
+        # to the module's logger)
+        log = getattr(self, "log", None) or logging.getLogger("tagmender.engine")
         if took >= 0.1:                           # (PRF-1: a scan the look-up waited for; plan_each's later ones are remembered)
-            self.log.info("timing scan %s: %d albums in %.1f s (tags %.1f s)", path, len(groups), took,
+            log.info("timing scan %s: %d albums in %.1f s (tags %.1f s)", path, len(groups), took,
                           secs.get("tags", 0.0))
         per_folder = {}
         for g in groups:
@@ -5184,7 +5188,7 @@ class Engine:
                             p.group_key = getattr(p, "set_key", None) or key
                             out.append(p)
                     finally:
-                        self.log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
+                        log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
             except Exception as exc:                          # one bad album never stops the run
                 self.log.exception("identifying %s failed", g.folder)
                 p = planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],

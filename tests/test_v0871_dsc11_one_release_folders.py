@@ -356,6 +356,29 @@ class DSC11Review(DSC11Base):
                 self.assertTrue(any("DSC-11" in c for c in x["conflicts"]), x["conflicts"])
                 self.assertFalse(x["companions"])
 
+    def test_DSC11_a_layers_copy_in_version_folders_joins(self):
+        for names in (("2.0", "5.1"), ("Stereo", "Multichannel")):
+            with self.subTest(names):
+                self.tmp = Path(__import__("tempfile").mkdtemp())
+                self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+                self.lib = self.tmp / "lib"
+                self.cd_folder(extras=False)
+                top = self.artist() / CD_DIR
+                self.layer(top / names[0], 2, "Stereo")
+                self.layer(top / names[1], 6, "Multichannel")
+                props = self.moving(self.http()).proposals(self.artist())
+                self.assertEqual([(len(p.files), bool(getattr(p, "one_release_folders", None))) for p in props],
+                                 [(13, True)])
+
+    def test_DSC11_a_layer_folder_in_another_letter_case_under_a_flat_naming(self):
+        self.both(extras=False)
+        eng = self.named("%albumartist%/%album%/%discnumber%-%tracknumber%. %title%")
+        (self.dest / "Billy Joel" / "Piano Man" / "disc 01 (sacd stereo)").mkdir(parents=True)
+        plan = eng.plan(self.artist())
+        [x] = plan["albums"]
+        self.assertEqual(x["status"], "ready", pl.preview(plan))
+        self.assertIn("disc 01 (sacd stereo)", {Path(fe["dst"]).parent.name for fe in x["files"]})
+
     def test_DSC11_folders_the_naming_files_apart_are_held(self):
         self.both(extras=False)
         plan = self.named("%albumartist%/%album% [%media%]/%tracknumber%. %title%").plan(self.artist())

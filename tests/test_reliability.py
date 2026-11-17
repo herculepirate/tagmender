@@ -214,7 +214,7 @@ class Credentials(Base):
 class Doctor(Base):
     def test_reports_missing_token_as_failure_with_a_fix(self):
         found = {c.name: c for c in doctor.checks()}
-        self.assertEqual(found["Discogs token"].status, "fail")
+        self.assertEqual(found["Discogs token"].status, "warn")
         self.assertIn("tagmender setup", found["Discogs token"].fix)
         self.assertEqual(found["python"].status, "ok")
         cr.store("discogs", "SECRET-TOKEN")
@@ -257,7 +257,7 @@ class Doctor(Base):
 
     def test_command_json_and_exit_code(self):
         code, out, _ = run("doctor", "--json")
-        self.assertEqual(code, 1)                      # no Discogs token here
+        self.assertEqual(code, 0)                      # no Discogs token is only a warning
         self.assertTrue(any(c["name"] == "python" for c in json.loads(out)))
 
 

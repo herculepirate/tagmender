@@ -64,6 +64,7 @@ def stage(name):
         return
     t.charge(time.monotonic())
     t.stack.append(name)
+    _stage_started(name)
     try:
         yield
     finally:
@@ -102,6 +103,37 @@ def back_off(provider, seconds) -> None:
     for fn in fns:
         try:
             fn(provider, seconds)
+        except Exception:
+            pass
+
+
+# Who is told of each stage as it starts (the command line's progress line): fn(stage_name),
+# from the thread running the album.
+_STAGE = []
+
+
+def on_stage(fn):
+    """Tell fn(stage) whenever a timed stage starts. Returns a function that stops it."""
+    with _BACK_OFF_LOCK:
+        _STAGE.append(fn)
+
+    def off():
+        with _BACK_OFF_LOCK:
+            try:
+                _STAGE.remove(fn)
+            except ValueError:
+                pass
+    return off
+
+
+def _stage_started(name) -> None:
+    if not _STAGE:
+        return
+    with _BACK_OFF_LOCK:
+        fns = list(_STAGE)
+    for fn in fns:
+        try:
+            fn(name)
         except Exception:
             pass
 

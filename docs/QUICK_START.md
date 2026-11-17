@@ -55,7 +55,7 @@ Each album then shows its status:
 
 | Status | Meaning |
 |---|---|
-| **Ready** | Identified. The inspector on the right shows every tag change, the cover and the evidence. |
+| **Ready** | Identified. The panes under the list show every tag change and the cover; the **Inspector** button shows the evidence. |
 | **Ready · Partial** | Some details are certain, the exact pressing is not; only what is certain is written. |
 | **Unresolved** | Not certain enough: nothing is written. *Why* says what is missing. |
 | **Ignored / Skipped** | A rule of yours left it alone. |

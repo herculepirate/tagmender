@@ -37,8 +37,9 @@ tagmender profiles set Try operation=copy destination=/home/you/Music/TagMender-
 
 In the app: **Overview**, drop one album folder (or one artist) on the window, or **Add Folder** in the
 toolbar (Ctrl+O). Its albums are listed as *Not looked up*; pick the profile in the toolbar and the
-**Sources** beside **Look Up**, then press **Look Up** (or **Preview**, Ctrl+P, for every album). The inspector on the right
-(Ctrl+Alt+I) shows the selected album's tags, cover and evidence; every command is also in the menu bar.
+**Sources** beside **Look Up**, then press **Look Up** (or **Preview**, Ctrl+P, for every album). The panes under the list
+show the selected album's folders, tracks, tag changes and cover; the inspector (the toolbar's
+**Inspector** button, Ctrl+Alt+I) adds its evidence and tag editing. Every command is also in the menu bar.
 From the command line:
 
 ```bash

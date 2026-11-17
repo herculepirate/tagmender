@@ -239,7 +239,7 @@ def renames(album) -> bool:
 
 def album_file_count(album) -> int:
     """The audio files the engine lines up with a release's tracks (written or skipped)."""
-    return len({fe["src"] for fe in album.get("files") or []} |
+    return len({fe["src"] for fe in album.get("files") or [] if not fe.get("joined")} |
                {s.get("file") for s in album.get("skipped") or [] if s.get("file")})
 
 
@@ -250,6 +250,8 @@ def file_rows(album) -> list:
     import match_albums as ma
     out = []
     for fe in album.get("files") or []:
+        if fe.get("joined"):            # (DSC-12: the album it joins, already filed: not this album's)
+            continue
         src = fe["src"]
         info = ma.read_file(Path(src))
         ch = fe.get("changes") or {}
@@ -359,7 +361,8 @@ def as_edit(album, files: list, tracks: list, pairs: dict, ref: str, old: dict |
     on the plan's own track needs nothing. What an earlier match set is taken back first (a
     field you edited since stays yours); your other edits of a file's tags stay (they win)."""
     import plan as planmod
-    e = copy.deepcopy(old) if old else {"files": [fe["src"] for fe in album.get("files") or []], "tags": {},
+    e = copy.deepcopy(old) if old else {"files": [fe["src"] for fe in album.get("files") or [] if not fe.get("joined")],
+                                        "tags": {},
                                         "file_tags": {}, "cover": None}
     e.setdefault("tags", {})
     e.setdefault("cover", None)

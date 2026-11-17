@@ -7507,7 +7507,7 @@ _MBID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 def plan_entry_files(a: dict) -> list:
     """The album's own files, from its plan entry (for a release the user chooses for it): a
     copy profile's earlier copy names the file it was copied from."""
-    return sorted({fe.get("copy_of") or fe["src"] for fe in a.get("files") or []} |
+    return sorted({fe.get("copy_of") or fe["src"] for fe in a.get("files") or [] if not fe.get("joined")} |
                   {x.get("file") for x in a.get("skipped") or [] if x.get("file")} |
                   set(a.get("album_files") or []) | set(a.get("excluded_files") or []))
 

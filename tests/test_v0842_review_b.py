@@ -235,7 +235,14 @@ class MOV4(unittest.TestCase):
             self.assertFalse(pl._same_release_there(self.filed, frozenset({"mb:rel"}), set(), {1, 2}))
             planner = pl.Planner(pf.default())
             dst = self.filed / "Disc 01" / "101.flac"
-            self.assertEqual(planner._own_album_dir(dst, self.prop("1", "2"), [], {}), dst)   # (joins: BOX-2)
+            # (DSC-12, decided 2026-11-17: its disc 1 is a second copy - the whole set is kept apart,
+            # tagged where it is and listed for your decision, never a second disc 1 beside the first)
+            with self.assertRaises(pl._DuplicateCopy) as got:
+                planner._own_album_dir(dst, self.prop("1", "2"), [], {})
+            self.assertIn("another copy of an album you have (disc 1 already filed in '2013 - Set')",
+                          got.exception.attention)
+            dst2 = self.filed / "Disc 02" / "201.flac"
+            self.assertEqual(pl.Planner(pf.default())._own_album_dir(dst2, self.prop("2"), [], {}), dst2)  # (joins)
             with self.assertRaises(pl._DuplicateCopy) as got:
                 pl.Planner(pf.default())._own_album_dir(dst, self.prop("01"), [], {})
             self.assertIn("is filed in", str(got.exception))
@@ -252,7 +259,13 @@ class MOV4(unittest.TestCase):
                                status="identified", tier="exact",
                                targets=[{"musicbrainz_albumid": ["rel2"], "discnumber": [d], "album": ["New"]}
                                         for d in ("1", "2")])
-            self.assertEqual(planner._own_album_dir(dst, full, [], {}), dst)     # (brings disc 2: joins)
+            with self.assertRaises(pl._DuplicateCopy) as got:          # (its disc 1 is planned there: apart, whole)
+                planner._own_album_dir(dst, full, [], {})
+            self.assertIn("planned to be filed", got.exception.attention)
+            two = pl.Proposal(source_dir=str(self.root / "inD"), files=[str(self.root / "inD" / "1.flac")],
+                              status="identified", tier="exact",
+                              targets=[{"musicbrainz_albumid": ["rel2"], "discnumber": ["2"], "album": ["New"]}])
+            self.assertEqual(planner._own_album_dir(dst, two, [], {}), dst)      # (brings disc 2 only: joins)
             again = pl.Proposal(source_dir=str(self.root / "inC"), files=[str(self.root / "inC" / "1.flac")],
                                 status="identified", tier="exact",
                                 targets=[{"musicbrainz_albumid": ["rel2"], "discnumber": ["01"], "album": ["New"]}])
@@ -261,7 +274,7 @@ class MOV4(unittest.TestCase):
             self.assertIn("planned to be filed in", str(got.exception))
             # (an album that ends up not placed gives its claims up)
             planner._unclaim_album_dirs(a)
-            planner._unclaim_album_dirs(full)
+            planner._unclaim_album_dirs(two)
             self.assertEqual(planner._own_album_dir(dst, again, [], {}), dst)
 
 

@@ -85,6 +85,7 @@ UNRESOLVED_FAST_EVERY = 10 * 60          # HF-3: every 10 minutes...
 UNRESOLVED_FAST_FOR = 24 * 3600          # HF-3: ...for its first day,
 UNRESOLVED_SLOW_EVERY = 24 * 3600        # HF-3: then daily...
 UNRESOLVED_RETRY_FOR = 7 * 24 * 3600     # HF-3: ...for the rest of the week,
+DISC_WAIT_FOR = 24 * 3600                # DSC-12: a set's disc waited for this long, then filed alone
 ASK_ONLY = -1.0                          # HF-3: then only when you ask (processed.next_try)
 # HF-3: new albums always go before retries; the retries of one pass stop after the watch
 # interval (this at least), so a pass full of retries never keeps the next pass's new drops waiting
@@ -672,6 +673,23 @@ class Watcher:
         db.execute("INSERT OR REPLACE INTO unresolved_since VALUES (?,?,?)", (key, sig, since))
         return since
 
+    def _waited_long(self, db, g, key, files, deep) -> bool:
+        """DSC-12: the album has waited for a disc of its set (DSC-1) for DISC_WAIT_FOR at least,
+        its files unchanged - counted from the first look that found it waiting (its own clock,
+        never an earlier Unresolved record of the folder's)."""
+        try:
+            sig = snapshot(g.folder, files, deep)[0]
+            now = time.time()
+            db.execute("CREATE TABLE IF NOT EXISTS disc_wait (folder TEXT PRIMARY KEY, signature TEXT, since REAL)")
+            row = db.execute("SELECT signature, since FROM disc_wait WHERE folder=?", (key,)).fetchone()
+            if not row or row[0] != sig:
+                db.execute("INSERT OR REPLACE INTO disc_wait VALUES (?,?,?)", (key, sig, now))
+                db.commit()
+                return False
+            return now - row[1] >= DISC_WAIT_FOR
+        except (OSError, sqlite3.Error):
+            return False
+
     def _status_of(self, a, prop, outcome, prof):
         """What the watcher remembers of one album of a plan: excluded, provider_error (an
         outage left it unresolved: tried again soon), blocked (waiting_destination while the
@@ -921,6 +939,14 @@ class Watcher:
                     p.set_looked = True
             prop = props[0]
             wait = "" if recheck else missing_discs(g, props)
+            if wait and planmod.completes_filed_set(props, prof):
+                wait = ""                   # DSC-12: the album you have holds the discs it waits for
+            if wait and self._waited_long(db, g, k, scope, deep):
+                # DSC-12: a disc still not here a day after its set's other discs came (disc 1 of 2
+                # alone, for good) is filed alone, as the release's disc - its album listed with
+                # the disc missing, and that disc joining it whenever it comes
+                self.log.info("%s: %s after a day of waiting; filed alone (DSC-12)", g.folder, wait)
+                wait = ""
             if not wait and not recheck:
                 # DSC-10: a folder whose release holds discs not here yet, its siblings all discs of
                 # it (a set still being copied in): it waits for them
@@ -947,10 +973,17 @@ class Watcher:
             self._n = n_jobs
             plan = planmod.build(props, prof, e.job + f"-{n_jobs}", extra_roots=[root, g.folder] if recheck else [root])
             a = plan["albums"][0]
+            for x in plan["albums"]:
+                if x.get("joins"):            # DSC-12: the one move you approved beforehand, said so
+                    self.log.info("%s: joins the album you have in %s (DSC-12)", x.get("source_dir"), x["joins"])
+                for w in x.get("attention") or ():
+                    self.log.info("%s: %s (DSC-12)", x.get("source_dir"), w)
             res = None
             # "File albums without asking" files only what it is sure of: an album it is not
             # (Unresolved, Partial, a pressing it could not tell) waits for your approval
-            sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
+            # (DSC-12: another copy of an album you have, kept where it is, is yours to decide)
+            sure = all(x["status"] == "ready" and not x.get("attention_decide")
+                       for x in plan["albums"] if planmod.has_work(x))
             has_work = any(planmod.has_work(x) for x in plan["albums"])    # (none: no job to record)
             # (only a proven release: an album-known result never takes the place of a filed one)
             if recheck and not (sure and has_work and all(
@@ -1002,7 +1035,7 @@ class Watcher:
                 # disc, so a disc left Partial is tried again with the set)
                 for x, _o, st in each:
                     dfiles = [Path(fe["src"]) for fe in x.get("files") or []
-                              if Path(fe["src"]).suffix.lower() in ex.AUDIO_EXT]
+                              if Path(fe["src"]).suffix.lower() in ex.AUDIO_EXT and not fe.get("joined")]
                     self.record(db, Path(x["source_dir"]), prof, st, attempts, x.get("label", ""),
                                 key=album_key(Path(x["source_dir"]), dfiles), files=dfiles, deep=True,
                                 match=match_of(x))

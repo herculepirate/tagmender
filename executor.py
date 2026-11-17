@@ -1304,8 +1304,13 @@ class Executor:
         if planmod.held(a):          # WEB-1: planned but held; applied only once you ticked it
             return "skipped", "Held", a.get("held") or "held"
         # rules again, now (they may have changed since the plan was made)
-        files = [Path(fe["src"]) for fe in a["files"]]
+        # (DSC-12: the files of the album it joins, already filed, never cancel it - a rule leaving
+        # one of them out only keeps that file as it is)
+        files = [Path(fe["src"]) for fe in a["files"] if not fe.get("joined")]
         dec = ex.evaluate(files, self.rules, release=a.get("release") or None, overrides=ex.State().overrides())
+        joined = [Path(fe["src"]) for fe in a["files"] if fe.get("joined")]
+        left_out = set(ex.evaluate(joined, self.rules, release=a.get("release") or None,
+                                   overrides=ex.State().overrides()).excluded) if joined else set()
         whole = dec.summary()
         if whole is not None:
             self.journal.write(ev="album_cancelled", album=i, rule=whole.rule.id, label=whole.label)
@@ -1361,7 +1366,8 @@ class Executor:
         done_steps = []
         self.created = []
         try:
-            todo = [j for j, fe in enumerate(a["files"]) if fe["op"] != "none" and Path(fe["src"]) not in dec.excluded]
+            todo = [j for j, fe in enumerate(a["files"]) if fe["op"] != "none" and Path(fe["src"]) not in dec.excluded
+                    and Path(fe["src"]) not in left_out]
             for k, j in enumerate(todo):
                 self.file_progress(i, k, len(todo), a["files"][j]["src"])
                 self.file_step(i, j, a["files"][j], a, done_steps)
@@ -2585,7 +2591,8 @@ def _watcher_forgets(jd: Path):
         db.execute("CREATE TABLE IF NOT EXISTS processed (folder TEXT PRIMARY KEY, profile TEXT, signature TEXT,"
                    " status TEXT, attempts INTEGER, next_try REAL, ts REAL, detail TEXT)")
         for a in plan.get("albums") or []:
-            files = [Path(fe["src"]) for fe in a.get("files") or [] if not fe.get("copy_of")]
+            # (DSC-12: the files of the album it joined, already filed, are no part of its group)
+            files = [Path(fe["src"]) for fe in a.get("files") or [] if not fe.get("copy_of") and not fe.get("joined")]
             if plan.get("plain") and a.get("album_files"):
                 # EDT-2: a plain save wrote only the files you edited - the watcher knows the album
                 # by all of its files (as it groups it), so it is remembered undone by those

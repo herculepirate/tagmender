@@ -593,17 +593,25 @@ class Overview(QWidget):
     @staticmethod
     def needs_you(a) -> bool:
         """The album waits for your decision: held (no release proven, a conflict), its scans name
-        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm). (Asked of
-        every album each time the counts are shown: no import in it - an import statement costs
+        another pressing, a tie-break only suggested its pressing (TIE-1: to confirm), or it is
+        another copy of an album you have, kept where it is (DSC-12: "attention_decide"). (Asked
+        of every album each time the counts are shown: no import in it - an import statement costs
         microseconds under PySide's import hook.)"""
         return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs" \
-            or bool(suggested_pressing(a))                  # (TIE-1: album known, a pressing to confirm)
+            or bool(suggested_pressing(a)) or bool(a.get("attention_decide"))
+
+    @classmethod
+    def listed_for_attention(cls, a) -> bool:
+        """The Needs Attention filter: albums needing your decision, and those whose notes are for
+        your attention only (DSC-12: "disc 2 missing", another pressing kept apart) - counted as
+        ready, applied as any other."""
+        return cls.needs_you(a) or bool(a.get("attention"))
 
     @classmethod
     def ready_now(cls, a) -> bool:
         return can_apply(a) and not cls.needs_you(a)
 
-    SHOW = {"all": None, "ready": "ready_now", "attention": "needs_you"}
+    SHOW = {"all": None, "ready": "ready_now", "attention": "listed_for_attention"}
 
     def set_show(self, kind):
         """Only the albums ready, or only those needing you, or all (the toolbar's segments)."""
@@ -620,19 +628,22 @@ class Overview(QWidget):
         # applicable: a row chosen asks for the counts several times)
         memo = getattr(self, "_counts_memo", None)
         if memo is not None and memo[0] is albums and memo[1] == len(albums):
-            ready, need, files, tip = memo[2]
+            ready, need, listed, files, tip = memo[2]
         else:
-            ready = need = 0
+            ready = need = listed = 0
             for a in albums:                                # (each album asked once)
                 if self.needs_you(a):
                     need += 1
                 elif can_apply(a):
                     ready += 1
-            files = sum(len(a.get("files") or []) for a in albums)
+                if self.listed_for_attention(a):           # (what the Needs Attention filter lists)
+                    listed += 1
+            # (DSC-12: the files of the album an album joins are not its own)
+            files = sum(len([fe for fe in a.get("files") or [] if not fe.get("joined")]) for a in albums)
             tip = counts_by_label(albums) if albums else ""
-            self._counts_memo = (albums, len(albums), (ready, need, files, tip))
+            self._counts_memo = (albums, len(albums), (ready, need, listed, files, tip))
             QTimer.singleShot(0, self, self.forget_applicable)
-        self.counts = {"all": len(albums), "ready": ready, "attention": need}
+        self.counts = {"all": len(albums), "ready": ready, "attention": listed}
         if albums:
             text = " · ".join((tr("1 album ready") if ready == 1 else tr("{0} albums ready").format(ready),
                                tr("1 needs your decision") if need == 1 else tr("{0} need your decision").format(need),

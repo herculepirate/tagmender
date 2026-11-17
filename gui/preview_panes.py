@@ -678,7 +678,7 @@ def album_root(a) -> str:
     from folders side by side) the folder that holds them all."""
     root = str(a.get("source_dir") or "").rstrip(os.sep) or os.sep
     base = root + os.sep
-    srcs = [fe.get("src") or "" for fe in a.get("files") or []]
+    srcs = [fe.get("src") or "" for fe in a.get("files") or [] if not fe.get("joined")]   # (DSC-12)
     if all(s.startswith(base) for s in srcs):
         return root
     try:

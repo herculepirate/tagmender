@@ -4202,14 +4202,14 @@ def apply_edits(entry: dict, edit: dict | None, profile=None, settings=None) -> 
         profile = settings = None                     # no profile's ID3 version, ID3v1 or tags removed
     _snapshot(entry)
     if plain:
-        # (each file as your edit of it first read it: Save Tags writes none changed since - the
-        # executor's "Changed". Kept while that file's edit stays the same, so a change made by
-        # another program after it is never taken for the file your edit was made on)
-        cover = (edit.get("cover") or {}).get("image")
+        # (each file as your edit first read it: Save Tags writes none changed since - the
+        # executor's "Changed". Kept until that file's own values change - never for an edit of the
+        # whole album or its cover, so a change another program made after your first edit is
+        # never taken for the file your edit was made on)
         for fe in entry.get("files") or []:
-            mine = dict(edit.get("tags") or {}, **((edit.get("file_tags") or {}).get(fe["src"]) or
-                                                   (edit.get("file_tags") or {}).get(os.path.realpath(fe["src"])) or {}))
-            stamp = json.dumps([mine, cover], sort_keys=True, default=str)
+            mine = (edit.get("file_tags") or {}).get(fe["src"]) or \
+                (edit.get("file_tags") or {}).get(os.path.realpath(fe["src"])) or {}
+            stamp = json.dumps(mine, sort_keys=True, default=str)
             if fe.get("fingerprint") and fe.get("edit_stamp") == stamp:
                 continue
             fe["edit_stamp"] = stamp

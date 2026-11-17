@@ -665,7 +665,8 @@ nothing. A cover you choose is embedded into the tracks, as a new cover
 is. A file another program changed after you first edited it is left as it is (*Changed*), with the
 rest of its album: your edit is read again against it and kept, to save once more. Your Ignore and
 Skip rules still apply: a file they exclude is left as it was, and the sheet after saving says so
-(its edit is kept). Apply writes only looked-up albums: your edits of albums not looked up stay,
+(its edit is kept), as is a file whose only change was a cover image gone since you chose it. A
+folder dropped while a save runs is added to the list when it ends. Apply writes only looked-up albums: your edits of albums not looked up stay,
 for Save Tags.
 
 Saving never starts a look-up, and the watcher does not look at an album again because you saved

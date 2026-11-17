@@ -972,10 +972,6 @@ class Overview(QWidget):
                 return
             if ans != tr("Don't Save"):
                 return
-        insp = self.win.inspector
-        for a in chosen:                                     # (edits of an album no longer listed: gone)
-            if a.get("status") == planmod.LISTED and insp.edit_of(a) is not None:
-                insp.forget_edits_of(a)
         if self.running:
             # CLR-1: while work runs, only albums it has done with (Done) come out: nothing it
             # still has in hand (Apply follows its albums themselves, the look-up its keys)
@@ -983,6 +979,10 @@ class Overview(QWidget):
                       and not any(a is b for b in self.applied_albums() if self.states.get(id(b)))]
             if not chosen:
                 return
+        insp = self.win.inspector
+        for a in chosen:                                     # (edits of an album taken out: gone)
+            if a.get("status") == planmod.LISTED and insp.edit_of(a) is not None:
+                insp.forget_edits_of(a)
         ids = {id(a) for a in chosen}
         left = [a for a in self.model.albums if id(a) not in ids]
         if self.plan:
@@ -1099,9 +1099,11 @@ class Overview(QWidget):
         new, present = manual_match.new_paths(self, paths)
         held = {os.path.realpath(str(p)) for p in self.later + self._reading}
         new = [p for p in new if os.path.realpath(str(p)) not in held]
-        applying = getattr(self, "_applying", False)
-        side = getattr(self, "apply_worker", None) is not None      # (APL-1: an Apply beside the look-up)
         kind = getattr(self, "_work_kind", None)
+        # (EDT-2: Save Tags writes files in the list's folders - what is dropped meanwhile waits for it
+        # and is added when it ends, never read while it writes)
+        applying = getattr(self, "_applying", False) and kind != "save"
+        side = getattr(self, "apply_worker", None) is not None      # (APL-1: an Apply beside the look-up)
         # (a look-up, an Apply not touching them, or folders being added - not overlapping those:
         # read now, put under the list, queued. A refile waits: its albums take their rows' places
         # when it ends, and a folder of them read meanwhile would be listed twice)
@@ -3024,16 +3026,26 @@ class Overview(QWidget):
                     watcher.remember_saved([every[i] for i in sorted(done)])
                 except Exception:
                     logsetup.setup("apply", job=plan["job"]).exception("the watcher was not told of the saved albums")
-            # (the files each album's job wrote: one your rules exclude now is left as it was)
+            # (the files each album's job wrote: one your rules exclude now is left as it was, as is
+            # one whose only change was a cover image gone since; None: the journal could not be
+            # read - what was written is not known, so no edit is taken for written)
             wrote = set()
             try:
                 for e in executor.Journal(executor.job_dir(plan["job"])).read():
                     if e.get("ev") == "file" and e.get("state") == "committed":
                         wrote.add((e.get("album"), e.get("idx")))
             except Exception:
+                logsetup.setup("apply", job=plan["job"]).exception("the saved job's journal could not be read")
                 wrote = None
-            res["unwritten"] = {i: [fe["src"] for j, fe in enumerate(x["files"]) if (i, j) not in wrote]
-                                for i, x in enumerate(plan["albums"])} if wrote is not None else {}
+            if wrote is None:
+                res["unwritten"] = None
+            else:
+                res["unwritten"] = {}
+                for i, x in enumerate(plan["albums"]):
+                    art = x.get("artwork") or {}
+                    gone = bool(art.get("embed_into")) and executor._embed_image(art) is None
+                    res["unwritten"][i] = [(fe["src"], "cover" if gone and not fe.get("changes") else "rules")
+                                           for j, fe in enumerate(x["files"]) if (i, j) not in wrote]
             return res
         self._saving, self._save_then = list(albums), then
         self.states = {id(a): "waiting" for a in albums}
@@ -3066,13 +3078,25 @@ class Overview(QWidget):
         by = {r["index"]: r for r in res.get("albums") or [] if "index" in r}
         insp = self.win.inspector
         ok, bad, some = [], [], []
+        unknown = res.get("unwritten", {}) is None
         for i, a in enumerate(albums):
             r = by.get(i)
             left = (res.get("unwritten") or {}).get(i) or []
-            if r and r.get("status") == "done" and left:
-                # (some files written; those your rules exclude now not: their edits stay)
-                some.append((a, dict(r, detail=tr("{0} left as they were: your rules exclude them now").format(
-                    plural(len(left), tr("file"), tr("files"))))))
+            if r and r.get("status") == "done" and unknown:
+                # (what was written cannot be told: every edit kept, read again against the files)
+                some.append((a, dict(r, detail=tr("what was written could not be read from the job's record; "
+                                                   "your edits are kept and read again against the files"))))
+            elif r and r.get("status") == "done" and left:
+                # (some files written; the others not - their edits stay)
+                ruled = [f for f, why in left if why == "rules"]
+                parts = []
+                if ruled:
+                    parts.append(tr("{0} left as they were: your rules exclude them now").format(
+                        plural(len(ruled), tr("file"), tr("files"))))
+                if len(ruled) < len(left):
+                    parts.append(tr("{0} left as they were: the cover image you chose is gone; choose it "
+                                    "again").format(plural(len(left) - len(ruled), tr("file"), tr("files"))))
+                some.append((a, dict(r, detail="; ".join(parts))))
             else:
                 (ok if r and r.get("status") == "done" else bad).append((a, r))
         for a, _r in some:                                   # (the files written read again: no change left)

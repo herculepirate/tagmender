@@ -604,7 +604,7 @@ class PlainEdits(te.Base):
         self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
         self.assertTrue(wait(lambda: not any(x is a for x in self.ov.plan["albums"]), self.app))
 
-    def test_a_folder_dropped_during_a_save_joins_the_list_after_it(self):   # m7
+    def test_a_folder_dropped_during_a_save_waits_and_joins_the_list_after_it(self):   # m7
         self.open_list()
         self.edit_title()
         new = self.tmp / "more" / "Band E" / "Epsilon"
@@ -614,11 +614,78 @@ class PlainEdits(te.Base):
             self.win.act("save_tags").trigger()
             self.assertTrue(self.ov.running)
             self.win.dropped([str(new.parent.parent)])
-            self.assertIn("added to the list; not looked up yet", self.win.statusBar().currentMessage())
+            self.assertIn("added to the list when the current work ends", self.win.statusBar().currentMessage())
+            self.assertFalse(any(Path(a["source_dir"]) == new for a in self.ov.plan["albums"]))   # (not read now)
             self.assertTrue(wait(lambda: not self.ov.running and any(
                 Path(a["source_dir"]) == new for a in self.ov.plan["albums"]), self.app))
         self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
         self.assertEqual(next(a for a in self.ov.plan["albums"] if Path(a["source_dir"]) == new)["status"], "listed")
+
+    def test_an_album_wide_edit_after_an_outside_change_is_still_refused(self):   # m2 (residual)
+        self.open_list()
+        f = self.mp3 / "01 Song.mp3"
+        self.edit_title()
+        time.sleep(0.01)
+        tagio.write(f, {"comment": ["another program"]})
+        self.show(self.mp3)
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=True):
+            self.panes._edit("genre", ["Jazz"])                                  # (genre for all, afterwards)
+        self.settle_edits()
+        with mock.patch.object(self.gui.sheets, "warning") as warned:
+            self.save()
+        warned.assert_called_once()
+        self.assertIn("changed", warned.call_args.args[2].lower())
+        self.assertEqual(tagio.read(f)["title"], ["Song 1"])
+        self.assertEqual(tagio.read(f)["genre"], ["Rock"])
+
+    def test_a_journal_that_cannot_be_read_keeps_the_edits(self):            # (1)
+        self.open_list()
+        self.edit_title()
+        real = executor.Journal.read
+
+        def flaky(j):
+            got = real(j)
+            if any(e.get("ev") == "end" for e in got):
+                raise OSError("unreadable")
+            return got
+        with mock.patch.object(executor.Journal, "read", flaky), \
+                mock.patch.object(self.gui.sheets, "warning") as warned:
+            self.save()
+        warned.assert_called_once()
+        self.assertIn("could not be read", warned.call_args.args[2])
+        self.assertTrue(wait(lambda: not self.insp._wanted, self.app))
+        self.assertIn(_os.path.realpath(str(self.mp3)), self.insp.edits)       # (kept)
+
+    def test_a_cover_image_gone_before_saving_is_said_so(self):              # (3)
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (300, 300), (20, 30, 200)).save(buf, "PNG")
+        self.open_list()
+        a = self.show(self.flac)
+        self.insp.show_album(a, self.ov.plan)
+        self.insp.set_cover(self.gui.inspector.stage_cover(buf.getvalue(), "t.png"), a)
+        self.settle_edits()
+        art = a["artwork"]
+        for p in {art.get("front"), art.get("embed")} - {None}:
+            Path(p).unlink()
+        with mock.patch.object(self.gui.sheets, "warning") as warned:
+            self.save()
+        warned.assert_called_once()
+        self.assertIn("cover image you chose is gone", warned.call_args.args[2])
+        self.assertNotIn("rules", warned.call_args.args[2])
+
+    def test_taking_out_while_work_runs_keeps_the_edits_of_albums_left(self):    # (5)
+        self.open_list()
+        self.edit_title()
+        a = self.album_of(self.mp3)
+        self.ov.running = True
+        try:
+            self.ov._take_out([a])
+        finally:
+            self.ov.running = False
+        self.assertIn(a, self.ov.plan["albums"])
+        self.assertIn(_os.path.realpath(str(self.mp3)), self.insp.edits)
 
 
 class PlainPlan(unittest.TestCase):

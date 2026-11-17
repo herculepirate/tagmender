@@ -628,19 +628,22 @@ class Overview(QWidget):
         # applicable: a row chosen asks for the counts several times)
         memo = getattr(self, "_counts_memo", None)
         if memo is not None and memo[0] is albums and memo[1] == len(albums):
-            ready, need, files, tip = memo[2]
+            ready, need, listed, files, tip = memo[2]
         else:
-            ready = need = 0
+            ready = need = listed = 0
             for a in albums:                                # (each album asked once)
                 if self.needs_you(a):
                     need += 1
                 elif can_apply(a):
                     ready += 1
-            files = sum(len(a.get("files") or []) for a in albums)
+                if self.listed_for_attention(a):           # (what the Needs Attention filter lists)
+                    listed += 1
+            # (DSC-12: the files of the album an album joins are not its own)
+            files = sum(len([fe for fe in a.get("files") or [] if not fe.get("joined")]) for a in albums)
             tip = counts_by_label(albums) if albums else ""
-            self._counts_memo = (albums, len(albums), (ready, need, files, tip))
+            self._counts_memo = (albums, len(albums), (ready, need, listed, files, tip))
             QTimer.singleShot(0, self, self.forget_applicable)
-        self.counts = {"all": len(albums), "ready": ready, "attention": need}
+        self.counts = {"all": len(albums), "ready": ready, "attention": listed}
         if albums:
             text = " · ".join((tr("1 album ready") if ready == 1 else tr("{0} albums ready").format(ready),
                                tr("1 needs your decision") if need == 1 else tr("{0} need your decision").format(need),

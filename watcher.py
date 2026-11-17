@@ -675,13 +675,18 @@ class Watcher:
 
     def _waited_long(self, db, g, key, files, deep) -> bool:
         """DSC-12: the album has waited for a disc of its set (DSC-1) for DISC_WAIT_FOR at least,
-        its files unchanged."""
+        its files unchanged - counted from the first look that found it waiting (its own clock,
+        never an earlier Unresolved record of the folder's)."""
         try:
             sig = snapshot(g.folder, files, deep)[0]
-            row = db.execute("SELECT status FROM processed WHERE folder=?", (key,)).fetchone()
-            if not row or row[0] != "unresolved":
+            now = time.time()
+            db.execute("CREATE TABLE IF NOT EXISTS disc_wait (folder TEXT PRIMARY KEY, signature TEXT, since REAL)")
+            row = db.execute("SELECT signature, since FROM disc_wait WHERE folder=?", (key,)).fetchone()
+            if not row or row[0] != sig:
+                db.execute("INSERT OR REPLACE INTO disc_wait VALUES (?,?,?)", (key, sig, now))
+                db.commit()
                 return False
-            return time.time() - self._unresolved_since(db, key, sig, time.time()) >= DISC_WAIT_FOR
+            return now - row[1] >= DISC_WAIT_FOR
         except (OSError, sqlite3.Error):
             return False
 
@@ -976,7 +981,9 @@ class Watcher:
             res = None
             # "File albums without asking" files only what it is sure of: an album it is not
             # (Unresolved, Partial, a pressing it could not tell) waits for your approval
-            sure = all(x["status"] == "ready" for x in plan["albums"] if planmod.has_work(x))
+            # (DSC-12: another copy of an album you have, kept where it is, is yours to decide)
+            sure = all(x["status"] == "ready" and not x.get("attention_decide")
+                       for x in plan["albums"] if planmod.has_work(x))
             has_work = any(planmod.has_work(x) for x in plan["albums"])    # (none: no job to record)
             # (only a proven release: an album-known result never takes the place of a filed one)
             if recheck and not (sure and has_work and all(

@@ -112,7 +112,7 @@ def missing_words(a) -> str:
     gaps = _gaps(a)
     if not gaps:
         return ""
-    gone, here = _count(gaps), len([fe for fe in a.get("files") or []])
+    gone, here = _count(gaps), len([fe for fe in a.get("files") or [] if not fe.get("joined")])
     total = gone + here
     return (f"{gone} track{'s' if gone != 1 else ''} of {total} missing: tagged the {here} present"
             f" (missing: {gaps})")
@@ -227,6 +227,9 @@ def _decide_words(a, applied) -> str:
     # its original date and no pressing's details; that is the answer, not a question)
     if _no_lengths(a) and a.get("status") != "excluded" and tier not in ("exact", "album_only"):
         out.append(NO_LENGTHS)
+    if a.get("attention_decide"):
+        # (DSC-12: another copy of an album you have, kept where it is - yours to decide)
+        out += [str(w) for w in a.get("attention") or ()]
     return "; ".join(dict.fromkeys(out))
 
 
@@ -258,7 +261,8 @@ def _row(section, a, issue, folder, status, done=False) -> dict:
                   "ref": rid if src == "mb" else f"discogs:{rid}", "score": ident.get("confidence") or 0,
                   "title": _name(a), "lengths": None}]
     # (where a release chosen for it is previewed: the album's files where they are now)
-    files = [fe["dst"] if done else fe["src"] for fe in a.get("files") or []] or list(a.get("album_files") or [])
+    files = [fe["dst"] if done else fe["src"] for fe in a.get("files") or [] if not fe.get("joined")] \
+        or list(a.get("album_files") or [])
     return {"section": section, "folder": folder, "uri": file_uri(folder),
             "album": _version_name(a) if a.get("split") else _name(a), "status": status,
             "issue": issue, "candidates": cands if section != "done" else [], "files": files,
@@ -287,8 +291,8 @@ def rows_of(a, res=None, applied=False, undone=False) -> list:
     did = applied and st == "done"
     done = did and not undone                     # (where the album is now)
     out = []
-    if a.get("status") in ("excluded", "skipped") or st in ("excluded", "skipped"):
-        return out
+    if a.get("status") in ("excluded", "skipped") or (st in ("excluded", "skipped") and not a.get("attention_decide")):
+        return out                                # (DSC-12: one held for your decision is still listed)
     import plan as planmod
     tier = (a.get("identification") or {}).get("tier")
     decide = _decide_words(a, applied and st not in FAILED)
@@ -310,7 +314,7 @@ def rows_of(a, res=None, applied=False, undone=False) -> list:
                             st, "Unresolved" if held_done else "Failed" if applied and st
                             else "Blocked" if "blocked" in failed else "Unresolved"), done))
     if tier != "unresolved" and not failed and a.get("status") in ("ready", "done") and planmod.has_work(a) \
-            and (did or not applied):
+            and (did or not applied) and not (a.get("attention_decide") and not did):
         out.append(_row("done", a, _done_words(a, planned=not applied), _where(a, done),
                         "Done" if applied else "Ready"))
     return out

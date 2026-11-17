@@ -7,6 +7,7 @@
 # the album is kept apart and flagged; a second copy of a disc already filed is kept apart (MOV-4);
 # an SACD layer's copy still goes inside (MED-22c). Synthetic audio (ffmpeg), mocked MusicBrainz.
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -109,7 +110,7 @@ class Base(te.Base):
     @staticmethod
     def tags(p):
         t = tagio.read(str(p))
-        return t["discnumber"][0], t["totaldiscs"][0]
+        return (t.get("discnumber") or [""])[0], (t.get("totaldiscs") or [""])[0]
 
 
 class DSC12LoneDisc(Base):
@@ -249,19 +250,41 @@ class DSC12Joins(Base):
         executor.undo(plan["job"])
         self.assertEqual({self.tags(p) for p in mine.rglob("*.flac")}, {("1", "1")})
 
-    def test_DSC12_a_disc_filed_flat_goes_into_its_own_disc_folder(self):
-        album = self.file_disc_one()
-        for p in (album / "Disc 01").glob("*.flac"):
+    def flat_album(self):
+        """The album you have with disc 1 at its folder's top (an older layout), its cover, scans,
+        log, cue sheet, booklet and your own notes there."""
+        album = self.file_disc_one(extras=True)
+        for p in (album / "Disc 01").iterdir():
             p.rename(album / p.name)
         (album / "Disc 01").rmdir()
-        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        (album / "disc1.cue").write_text('FILE "101.A.flac" WAVE\n')
+        (album / "My notes.docx").write_bytes(b"PK..")
+        (album / "Booklet").mkdir()
+        (album / "Booklet" / "p1.pdf").write_bytes(b"%PDF")
+        return album
+
+    def everything(self, album):
+        return sorted(str(p.relative_to(album)) for p in album.rglob("*") if p.is_file())
+
+    def test_DSC12_a_disc_filed_flat_stays_as_it_is(self):
+        # (nothing of the album you have is moved: disc 2 into its own folder, disc 2's own log with
+        # it, its cover and scans beside the album's under another name)
+        album = self.flat_album()
+        before = self.everything(album)
+        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2, extras=True))
         [a] = plan["albums"]
-        self.assertEqual(a["status"], "ready", pl.preview(plan))
+        self.assertEqual((a["status"], a.get("joins")), ("ready", str(album)), pl.preview(plan))
+        self.assertFalse([fe for fe in a["files"] if fe.get("joined") and fe["op"] != "tag"])
         self.apply(plan)
-        self.assertEqual(sorted(str(p.relative_to(album).parent) for p in album.rglob("*.flac")),
-                         ["Disc 01"] * 3 + ["Disc 02"] * 3)
+        after = self.everything(album)
+        self.assertTrue(set(before) <= set(after), (before, after))
+        self.assertEqual((album / "cover.jpg").read_bytes(), b"\xff\xd8\xff" + bytes([1]) * 60)
+        new = sorted(set(after) - set(before))
+        self.assertIn("Disc 02/rip.log", new)
+        self.assertEqual(len([n for n in new if n.startswith("Disc 02/") and n.endswith(".flac")]), 3)
+        self.assertTrue(all(n.startswith(("Disc 02/", "cover", "Scans/")) for n in new), new)
         executor.undo(plan["job"])
-        self.assertEqual(sorted(p.name for p in album.iterdir()), ["101.A.flac", "102.B.flac", "103.C.flac"])
+        self.assertEqual(self.everything(album), before)
 
     def test_DSC12_two_discs_arriving_at_once_both_join(self):
         self.rels = [the_release(discs=3, dvd=False)]
@@ -309,9 +332,16 @@ class DSC12KeptApart(Base):
         self.assertEqual(a["attention"], [f"another copy of an album you have (disc 1 already filed in '{album.name}')"])
         self.assertTrue(a.get("attention_decide"))
         self.assertTrue(any("MOV-4, DSC-12" in n for n in a["notes"]), a["notes"])
-        self.apply(plan)
+        self.assertTrue(pl.held(a))                      # (applied only once you tick it)
+        res = executor.Executor(plan).run()
+        self.assertEqual([r["status"] for r in res["albums"]], ["skipped"])
         self.assertEqual(sorted(p.name for p in album.rglob("*.flac")), ["101.A.flac", "102.B.flac", "103.C.flac"])
         self.assertEqual(len(list(full.rglob("*.flac"))), 6)
+        # (the report lists it for your decision, as the app does)
+        import report
+        for got in (report.rows_of(a), report.rows_of(a, res["albums"][0], applied=True)):
+            self.assertEqual([r["section"] for r in got], ["decide"], got)
+            self.assertIn("another copy of an album you have", got[0]["issue"])
 
     def test_DSC12_discs_two_and_three_where_disc_two_is_filed_are_kept_apart_whole(self):
         # (a renamed album found by its IDs: discs 2 and 3 of 3 arriving where discs 1 and 2 are
@@ -358,6 +388,155 @@ class DSC12KeptApart(Base):
                 self.assertTrue(any("MOV-4" in n and album.name in n for n in a["notes"]), a["notes"])
                 self.apply(plan)
                 self.assertEqual(len(list(album.rglob("*.flac"))), 3)
+
+
+class DSC12Review(Base):
+    """The independent review's cases: what the album you have holds besides this release's files,
+    a pressing told by a conflicting ID, two copies of it, another tagger's tags, a copy kept apart,
+    a join cut short."""
+
+    def renamed(self, **kw):
+        album = self.file_disc_one(**kw)
+        mine = album.with_name("Double (my 2CD)")
+        album.rename(mine)
+        return mine
+
+    def test_DSC12_your_own_audio_in_the_disc_slot_is_never_joined(self):
+        mine = self.renamed()
+        self.disc(mine / "Disc 02", 2, freq=3)            # (your own rip of disc 2: no release IDs)
+        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        [a] = plan["albums"]
+        self.assertNotIn("joins", a)
+        self.assertTrue(all(fe["dst"] == fe["src"] for fe in a["files"]), pl.preview(plan))
+        self.assertTrue(a.get("attention_decide") and pl.held(a), a)
+        self.assertIn("holds other audio where disc 2 would go", a["attention"][0])
+        executor.Executor(plan).run()
+        self.assertEqual(len(list((mine / "Disc 02").glob("*.flac"))), 3)
+
+    def test_DSC12_another_release_in_the_album_you_have_is_never_joined(self):
+        self.rels = [the_release(), the_release(OTHER)]
+        mine = self.renamed()
+        for p in self.disc(mine / "Disc 02", 2, rid=OTHER, freq=3).glob("*.flac"):
+            tagio.write(p, {"musicbrainz_albumid": [OTHER]})
+        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        [a] = plan["albums"]
+        self.assertNotIn("joins", a)
+        self.assertTrue(all(fe["dst"] == fe["src"] for fe in a["files"]), pl.preview(plan))
+        self.assertIn("holds music of another release or pressing", a["attention"][0])
+        self.assertTrue(pl.held(a))
+
+    def test_DSC12_a_shared_id_beside_a_conflicting_one_is_another_pressing(self):
+        # (the filed disc 1: MusicBrainz "other" + Discogs 55; disc 2: MusicBrainz "rel" + Discogs 55)
+        import profiles
+        root = self.library()
+        filed = root / "Artist" / "2013 - Set"
+        (filed / "Disc 01").mkdir(parents=True)
+        (filed / "Disc 01" / "101.flac").write_bytes(b"x")
+        src = self.lib / "in" / "Set CD2"
+        src.mkdir(parents=True)
+        tagged = {"musicbrainz_albumid": ["other"], "discogs_release_id": ["55"], "discnumber": ["1"], "totaldiscs": ["2"]}
+        prop = pl.Proposal(source_dir=str(src), files=[str(src / "x.flac")], status="identified", tier="exact",
+                           targets=[{"musicbrainz_albumid": ["rel"], "discogs_release_id": ["55"], "discnumber": ["2"],
+                                     "totaldiscs": ["2"], "album": ["Set"]}])
+        planner = pl.Planner(profiles.from_dict({"name": "default", "operation": "move", "destination": str(root)}))
+        with mock.patch.object(pl.tagio, "read", lambda p: tagged):
+            got = planner._own_album_dir(filed / "Disc 02" / "201.flac", prop, [], {})
+        self.assertNotEqual(got.parent.parent, filed)                      # (a folder of its own)
+        self.assertEqual(planner._joins[id(prop)].get("other"), filed)     # (flagged: another pressing)
+
+    def test_DSC12_two_folders_found_by_their_files_join_neither(self):
+        album = self.file_disc_one()
+        shutil.copytree(album, album.with_name("Double (a backup)"))
+        album.rename(album.with_name("Double (my 2CD)"))
+        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        [a] = plan["albums"]
+        self.assertNotIn("joins", a)
+        self.assertTrue(any("not joined to either" in n for n in a["notes"]), a["notes"])
+        self.assertEqual({Path(fe["dst"]).parent for fe in a["files"]}, {self.dest / "Billy Joel" / ALBUM / "Disc 02"})
+
+    def test_DSC12_another_taggers_disc_count_is_left_with_a_note(self):
+        self.library()
+        fake = self.dest / "Billy Joel" / ALBUM / "Disc 01"
+        for p in self.disc(fake, 1, freq=2).glob("*.flac"):
+            tagio.write(p, {"musicbrainz_albumid": [RID], "totaldiscs": ["1"]})      # (Picard's, no job of ours)
+        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        [a] = plan["albums"]
+        self.assertEqual(a.get("joins"), str(self.dest / "Billy Joel" / ALBUM))
+        self.assertFalse([fe for fe in a["files"] if fe.get("joined")])
+        self.assertTrue(any("not tagged by TagMender, left as" in n for n in a["notes"]), a["notes"])
+
+    def test_DSC12_a_copy_kept_apart_lists_no_missing_disc(self):
+        self.file_disc_one()
+        plan = self.plan_of(self.disc(self.lib / "Inbox" / "Double CD1 hires", 1, freq=1))
+        [a] = plan["albums"]
+        self.assertNotIn("disc_set", a)
+        self.assertFalse(a.get("attention"))
+        self.assertFalse([n for n in a["notes"] if "missing (DSC-12)" in n])
+
+    def test_DSC12_a_join_cut_short_is_recovered_whole(self):
+        from test_fileops_crash import in_child, die
+        album = self.file_disc_one()
+        for p in album.rglob("*.flac"):
+            tagio.write(p, {"totaldiscs": ["1"]})
+        two = self.disc(self.lib / "Inbox" / "Double CD2", 2)
+        before = {str(p.relative_to(self.tmp)): self.tags(p) for p in self.tmp.rglob("*.flac")}
+        plan = self.plan_of(two)
+        [a] = plan["albums"]
+        self.assertEqual(len([fe for fe in a["files"] if fe.get("joined")]), 3)
+        real, calls = executor.Executor.file_step, []
+
+        def step_then_die(*args, **kw):
+            real(*args, **kw)
+            calls.append(1)
+            if len(calls) == 4:                           # (disc 2 moved, one file of disc 1 written)
+                die()
+
+        def child():
+            with mock.patch.object(executor.Executor, "file_step", step_then_die):
+                executor.Executor(plan).run()
+        self.assertEqual(in_child(child), 9)
+        executor.recover(plan["job"])
+        after = {str(p.relative_to(self.tmp)): self.tags(p) for p in self.tmp.rglob("*.flac")}
+        self.assertEqual(after, before)
+
+    def test_DSC12_a_one_track_disc_counts_its_folder(self):
+        entry = {"files": [{"src": "/in/x/1.flac", "dst": "/lib/A/Double/Disc 01/101.A.flac", "op": "move"}]}
+        prop = pl.Proposal(source_dir="/in/x", files=["/in/x/1.flac"], status="identified", tier="exact",
+                           targets=[{"musicbrainz_albumid": ["r"], "discnumber": ["1"], "totaldiscs": ["2"]}])
+        import profiles
+        pl.Planner(profiles.default())._join_files(entry, prop)
+        self.assertEqual(entry["disc_set"]["folder"], "/lib/A/Double")
+
+
+class DSC12CompletesFiledSet(Base):
+    """The watcher waits for no disc the album you have holds - by the join's own rules."""
+
+    def props(self, top):
+        eng = self.moving()
+        return [p for g in eng.albums_in(top) for p in eng.identify_all(g)]
+
+    def prof(self):
+        import profiles
+        return profiles.from_dict({"name": "default", "operation": "move", "destination": str(self.library())})
+
+    def test_DSC12_the_album_you_have_holds_the_rest(self):
+        self.file_disc_one()
+        props = self.props(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        self.assertTrue(pl.completes_filed_set(props, self.prof()))
+
+    def test_DSC12_not_when_found_twice_or_holding_other_audio_or_the_disc(self):
+        album = self.file_disc_one()
+        props = self.props(self.disc(self.lib / "Inbox" / "Double CD2", 2))
+        shutil.copytree(album, album.with_name("Double (a backup)"))
+        album.rename(album.with_name("Double (my 2CD)"))
+        self.assertFalse(pl.completes_filed_set(props, self.prof()))          # (two folders)
+        shutil.rmtree(album.with_name("Double (a backup)"))
+        mine = album.with_name("Double (my 2CD)")
+        self.assertTrue(pl.completes_filed_set(props, self.prof()))
+        self.disc(mine / "Disc 02", 2, freq=3)                                 # (your own disc 2 there)
+        self.assertFalse(pl.completes_filed_set(props, self.prof()))
+        props1 = self.props(self.disc(self.lib / "Inbox" / "Double CD1 again", 1, freq=1))
+        self.assertFalse(pl.completes_filed_set(props1, self.prof()))         # (disc 1 is there)
 
 
 class DSC12Watched(Base):
@@ -419,6 +598,30 @@ class DSC12Watched(Base):
         self.assertEqual(len(list(two.glob("*.flac"))), 3, "the undone join was done again by the watcher")
         self.assertEqual(len(list(album.rglob("*.flac"))), 3)
 
+    def test_DSC12_a_copy_for_your_decision_waits_for_your_approval(self):
+        w, patched, logs = self.watch()
+        self.disc(self.inbox / "Double CD1", 1)
+        self.age()
+        with patched:
+            w.tick()
+            album = self.dest / "Billy Joel" / ALBUM
+            full = self.inbox / "Double 2CD"
+            self.disc(full / "CD1", 1, freq=1)
+            self.disc(full / "CD2", 2, freq=1)
+            self.age()
+            jobs = len(executor.jobs(50))
+            done = w.tick()
+        # (held for you, WEB-1's way: a plan waiting for your approval, never applied unattended)
+        import watcher
+        self.assertIn(done.get(str(full)), ("planned", "unresolved"), (done, logs))
+        waiting = [watcher.planmod.load(p) for p in watcher.plans_dir().glob("*.json")]
+        self.assertTrue(any(x.get("attention_decide") and x["source_dir"] == str(full)
+                            for p in waiting for x in p["albums"]), waiting)
+        self.assertEqual(len(executor.jobs(50)), jobs, "applied without asking")
+        self.assertEqual(len(list(album.rglob("*.flac"))), 3)
+        self.assertEqual(len(list(full.rglob("*.flac"))), 6)
+        self.assertTrue(any("another copy of an album you have" in m for m in logs), logs)
+
     def test_DSC12_a_lone_disc_waits_a_day_then_is_filed(self):
         import watcher
         w, patched, logs = self.watch()
@@ -429,7 +632,7 @@ class DSC12Watched(Base):
             self.assertTrue(one.exists() and not self.filed(), logs)
             db = sqlite3.connect(watcher.ex.STATE_DIR / "state.db")
             try:                                            # (a day later, unchanged, due again)
-                db.execute("UPDATE unresolved_since SET since=since-?", (watcher.DISC_WAIT_FOR + 60,))
+                db.execute("UPDATE disc_wait SET since=since-?", (watcher.DISC_WAIT_FOR + 60,))
                 db.execute("UPDATE processed SET next_try=0")
                 db.commit()
             finally:
@@ -447,12 +650,6 @@ class DSC12Words(unittest.TestCase):
         self.assertFalse(pl._same_pressing(me, {"musicbrainz:bbb", "discogs:1"}))   # (another pressing, one Discogs entry)
         self.assertFalse(pl._same_pressing(me, {"musicbrainz:bbb"}))
         self.assertFalse(pl._same_pressing(me, set()))
-
-    def test_DSC12_disc_folder_names(self):
-        self.assertEqual(pl._swap_disc_no("Disc 02", 2, 1), "Disc 01")
-        self.assertEqual(pl._swap_disc_no("CD2", 2, 1), "CD1")
-        self.assertEqual(pl._swap_disc_no("Disc 2 - Live", 2, 1), "Disc 1 - Live")
-        self.assertEqual(pl._swap_disc_no("Disc 03", 2, 1), None)
 
     def test_DSC12_found_in_two_folders_joins_neither(self):
         import profiles

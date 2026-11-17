@@ -55,12 +55,13 @@ class V084MatchColumns(tg.Gui):
             self.assertEqual(self.cell(album("/m/x", **kw), 2), text)
 
     def test_overview_shows_scans_after_source_and_hides_it_first(self):
-        from gui.models import PlanModel
+        # (0.8.71: the albums pane's row says them in its tooltip: the source, then the scans)
         ov = self.win.pages["Overview"]
-        h = ov.table.horizontalHeader()
-        self.assertEqual(h.visualIndex(PlanModel.PROFILE), 2)
-        self.assertEqual(h.visualIndex(PlanModel.SCANS), h.visualIndex(2) + 1)
-        self.assertGreater(ov.NARROW[PlanModel.SCANS], ov.NARROW[2])
+        a = album("/m/x", scans={"state": "proven", "found": ["barcode"], "against": []})
+        ov.model.set_plan({"albums": [a]})
+        self.app.processEvents()
+        tip = ov.tree.data(ov.tree.index(0, 0), tg.Qt.ToolTipRole)
+        self.assertLess(tip.index("Source:"), tip.index("Scans: ✓ Barcode"))
 
     def wide(self):
         self.win.resize(1500, 800)

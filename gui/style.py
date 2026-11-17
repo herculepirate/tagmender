@@ -54,9 +54,9 @@ DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1
 # a profile's colour (its rows in Your files and Albums are tinted with it): name -> (words, light
 # tint, dark tint). Washes faint enough that ink, muted and status words keep 4.5:1 on them; a
 # selected row is drawn in the selection colour over it
-PROFILE_TINTS = {"green": (N_("Green"), "#E4F3E8", "#1D3326"), "orange": (N_("Orange"), "#FCEAD8", "#3A2A18"),
-                 "blue": (N_("Blue"), "#E2ECF9", "#1C2B40"), "purple": (N_("Purple"), "#EEE7F7", "#2D2440"),
-                 "red": (N_("Red"), "#FBE4E2", "#3D2121"), "grey": (N_("Grey"), "#ECEEF1", "#2A2F36")}
+PROFILE_TINTS = {"green": (N_("Green"), "#EDF7F0", "#1D3326"), "orange": (N_("Orange"), "#FDF1E5", "#3A2A18"),
+                 "blue": (N_("Blue"), "#EEF3FB", "#1C2B40"), "purple": (N_("Purple"), "#F6F2FB", "#2D2440"),
+                 "red": (N_("Red"), "#FDF1F0", "#3D2121"), "grey": (N_("Grey"), "#F3F4F6", "#2A2F36")}
 
 # status -> (symbol, word, light colour, dark colour, icon)
 STATUS = {
@@ -370,7 +370,7 @@ def stylesheet():
     QTreeView#paneView:focus, QTableView#paneView:focus {{ border: none; }}
     QSplitter#paneSplit::handle {{ background: {line}; }}
     QListWidget#coverStrip {{ background: transparent; border: none; }}
-    QLabel#coverBig {{ background: {t["alt"]}; color: {muted}; border-radius: 4px; }}
+    QLabel#coverBig {{ background: transparent; color: {muted}; }}
     QToolButton#coverChoose {{ background: {base}; color: {ink}; border: 1px solid {field}; border-radius: {CONTROL}px;
                                padding: 4px 12px; }}
     QToolButton#coverChoose:focus {{ border: 2px solid {accent}; padding: 3px 11px; }}

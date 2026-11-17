@@ -28,9 +28,13 @@ class MacLook(tg.Gui):
 
     def test_the_logo_on_every_screen(self):
         from gui.common import TitleLabel
+        # (0.8.71: the Overview has no title - the window's says it, Mac-style; the other pages keep theirs)
         self.win.go("Overview")
         self.app.processEvents()
-        t = self.win.pages["Overview"].findChildren(TitleLabel)[0]
+        self.assertEqual(self.win.pages["Overview"].findChildren(TitleLabel), [])
+        self.win.go("Needs attention")
+        self.app.processEvents()
+        t = self.win.pages["Needs attention"].findChildren(TitleLabel)[0]
         self.assertTrue(t.branded())
         prefs = self.win.preferences()                                   # (0.8.10: Preferences too, with
         for name in ("General", "Profiles", "Setup", "Plugins"):         #  Profiles and Setup in it)

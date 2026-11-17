@@ -549,6 +549,8 @@ class Overview(QWidget):
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(0)
         self._fit_timer.timeout.connect(self.fit_columns)
+        self._sized_by_you, self._fitting = set(), False
+        self.table.header().sectionResized.connect(self.column_resized)
         for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved):
             sig.connect(lambda *_: self.request_fit())
         for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved, self.model.dataChanged,
@@ -684,12 +686,25 @@ class Overview(QWidget):
 
     STATUS_WIDTH = (130, 220)                            # (the Status column's narrowest and widest)
 
+    def column_resized(self, c, old, new):
+        """A column dragged by you keeps the width you gave it (never fitted again)."""
+        if not self._fitting and old and new:
+            self._sized_by_you.add(c)
+
     def fit_columns(self):
+        """The Status column as wide as its words (STATUS_WIDTH), unless you sized it; the name
+        takes what is left, the score its own few digits."""
         from .preview_panes import AlbumsModel
+        if AlbumsModel.STATUS in self._sized_by_you:
+            return
         lo, hi = self.STATUS_WIDTH
         want = max(lo, min(hi, self.table.sizeHintForColumn(AlbumsModel.STATUS) + 8))
         if self.table.columnWidth(AlbumsModel.STATUS) != want:
-            self.table.header().resizeSection(AlbumsModel.STATUS, want)
+            self._fitting = True
+            try:
+                self.table.header().resizeSection(AlbumsModel.STATUS, want)
+            finally:
+                self._fitting = False
 
     def fill_profile_menu(self, menu, chosen):
         """Profile ▸: As Above (the preview's profile), then each profile, the one CHOSEN albums
@@ -697,13 +712,23 @@ class Overview(QWidget):
         menu.clear()
         mine = {self.own_profile(a) for a in chosen}
         names = {self.profile_of(a) for a in chosen}
-        above = menu.addAction(tr("As Above ({0})").format(self.above()))
+        used = set()
+
+        def lettered(words):
+            """WORDS with an underlined letter none before it in this menu has ("&" doubled)."""
+            words = words.replace("&", "&&")
+            for i, ch in enumerate(words):
+                if ch.isalnum() and ch.lower() not in used and words[max(0, i - 1):i] != "&":
+                    used.add(ch.lower())
+                    return words[:i] + "&" + words[i:]
+            return words
+        above = menu.addAction(lettered(tr("As Above ({0})").format(self.above())))
         above.setCheckable(True)
         above.setChecked(bool(chosen) and mine == {""})
         above.triggered.connect(lambda _=False, c=chosen: self.set_album_profile(c, ""))
         menu.addSeparator()
         for name in profile_names():
-            act = menu.addAction(name)
+            act = menu.addAction(lettered(name))
             act.setCheckable(True)
             act.setChecked(bool(chosen) and names == {name} and mine != {""})
             act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
@@ -1583,6 +1608,7 @@ class Overview(QWidget):
                     self.planned_with.get(k) != self.profile_of(a):
                 again.append(a)
         self.model.refresh_rows()
+        self.show_profile_choice()                          # (the pop-up says the profile they have now)
         if again:
             self.look_up(self.sources.currentData() or "profile", again)
         if done and not self.running:

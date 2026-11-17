@@ -151,6 +151,7 @@ class Shell(unittest.TestCase):
                                      "zoom", "main_window", "report", "about", "undo_selected", "show_job_albums",
                                      "setup",                             # (the Setup page itself: Alt+7)
                                      "exclude_again", "file_anyway",
+                                     "choose_library", "clear_done",      # (0.8.71: the bars' controls, now in menus)
                                      "use_suggested_pressing",            # (TIE-1: Album menu, the album's menu)
                                      "check_folder", "change_watch", "process_again", "show_plan", "apply_all_plans",
                                      "dismiss_plan", "edit_rule", "run_in_background", "cover_link",
@@ -205,13 +206,14 @@ class Shell(unittest.TestCase):
         self.assertFalse(self.win.inspector.isVisible())             # (nothing to inspect on History)
         QTest.keyClick(self.win, Qt.Key_1, Qt.AltModifier)
         settle(self.app)
-        was = self.win.inspector.isVisible()
+        panes = self.win.pages["Overview"].panes                     # (0.8.71: the Overview's inspector pane)
+        was = panes.inspector_shown()
         QTest.keyClick(self.win, Qt.Key_I, Qt.ControlModifier | Qt.AltModifier)
         settle(self.app)
-        self.assertNotEqual(self.win.inspector.isVisible(), was)
+        self.assertNotEqual(panes.inspector_shown(), was)
         QTest.keyClick(self.win, Qt.Key_I, Qt.ControlModifier | Qt.AltModifier)
         settle(self.app)
-        self.assertEqual(self.win.inspector.isVisible(), was)
+        self.assertEqual(panes.inspector_shown(), was)
         QTest.keyClick(self.win, Qt.Key_F, Qt.ControlModifier)
         settle(self.app)
         self.assertIs(QApplication.focusWidget(), self.win.search_box)
@@ -414,7 +416,7 @@ class Shell(unittest.TestCase):
         pf.save(pf.from_dict({"name": "Wide"}))
         self.show_plan()
         self.win.resize(960, 600)
-        self.win.inspector.show()
+        self.win.place_inspector()                   # (0.8.71: the Overview's inspector is its pane, shown)
         settle(self.app, 30)
         self.assertEqual((self.win.width(), self.win.height()), (960, 600))
         self.assertLessEqual(self.win.toolbar.sizeHint().width(), 960)
@@ -463,14 +465,20 @@ class Shell(unittest.TestCase):
         # older "inspector": true, written each time the dock was shown, is no choice of the person's)
         from PySide6.QtCore import Qt as _Qt
         common = self.gui.common
+        # (0.8.71: on the Overview the inspector is the pane under the lists - shown at first, the
+        # selection's tags and cover being what a preview is for; Needs attention keeps the dock,
+        # hidden at first)
         common._set_gui_pref("inspector", True)
         common._set_gui_pref("inspector_open", None)          # (nothing chosen yet)
-        self.show_plan()
+        common._set_gui_pref("preview_inspector", None)
+        ov = self.show_plan()
         self.win.restore()
         settle(self.app)
         self.assertFalse(self.win.inspector_wanted)
         self.assertFalse(self.win.inspector.isVisible())
+        self.assertTrue(ov.panes.bottom.isVisible())
         a = self.win.act("show_inspector")
+        self.assertTrue(a.isChecked())
         b = self.win.toolbar.widgetForAction(a)
         self.win.resize(1280, self.win.height())                 # (a usual width: its word shown)
         settle(self.app)
@@ -487,6 +495,19 @@ class Shell(unittest.TestCase):
         settle(self.app)
         b.click()
         settle(self.app)
+        self.assertFalse(ov.panes.bottom.isVisible())
+        self.assertIs(common._gui_prefs().get("preview_inspector"), False)
+        b.click()
+        settle(self.app)
+        self.assertTrue(ov.panes.bottom.isVisible())
+        self.assertIs(common._gui_prefs().get("preview_inspector"), True)
+        self.assertFalse(self.win.inspector.isVisible())                 # (never the dock on the Overview)
+        self.win.go("Needs attention")
+        settle(self.app)
+        self.assertFalse(self.win.inspector.isVisible())
+        self.assertFalse(a.isChecked())
+        b.click()
+        settle(self.app)
         self.assertTrue(self.win.inspector.isVisible())
         self.assertTrue(common._gui_prefs().get("inspector_open"))
         b.click()
@@ -495,17 +516,19 @@ class Shell(unittest.TestCase):
         self.assertFalse(common._gui_prefs().get("inspector_open"))
 
     def test_the_inspector_steps_aside_on_pages_without_albums_and_comes_back(self):
-        self.show_plan()
+        ov = self.show_plan()
+        before = self.gui.common._gui_prefs().get("inspector_open")
         self.win.inspector_wanted = True
         self.win.place_inspector()
         settle(self.app)
-        self.assertTrue(self.win.inspector.isVisible())
+        self.assertFalse(self.win.inspector.isVisible())                # (the Overview's is its pane)
+        self.assertTrue(ov.panes.bottom.isVisible())
         for name in ("History", "Watched folders", "Jobs", "Profiles"):
             self.win.go(name)
             settle(self.app)
             self.assertFalse(self.win.inspector.isVisible(), name)
             self.assertFalse(self.win.act("show_inspector").isEnabled(), name)
-        self.assertTrue(self.gui.common._gui_prefs().get("inspector_open", True))  # (not the person's choice)
+        self.assertEqual(self.gui.common._gui_prefs().get("inspector_open"), before)  # (not the person's choice)
         self.win.go("Needs attention")
         settle(self.app)
         self.assertTrue(self.win.inspector.isVisible())
@@ -572,8 +595,9 @@ class Shell(unittest.TestCase):
 
     def test_the_summary_and_columns_speak_in_words(self):
         ov = self.show_plan()
-        text = ov.summary.text()
+        text = ov.counts_line.toolTip()                                    # (0.8.71: the status bar's counts)
         self.assertTrue(text.startswith("3 Ready"), text)                  # what can be applied first
+        self.assertEqual(ov.summary.text(), "Nothing has been changed yet.")
         for word in ("Up to date", "Changed since preview"):
             self.assertIn(word, text)
         for key in ("unchanged", "conflict"):
@@ -834,10 +858,11 @@ class Shell(unittest.TestCase):
     def test_the_summary_says_what_the_rows_say(self):
         ov = self.show_plan()
         rows = {ov.model.data(ov.model.index(r, 0)).split(" · ")[0] for r in range(ov.model.rowCount())}
-        said = {part.split(" ", 1)[1] for part in ov.summary.text().split(", ")}
+        counts = ov.counts_line.toolTip()                             # (0.8.71: the status bar's counts)
+        said = {part.split(" ", 1)[1] for part in counts.split(", ")}
         self.assertEqual(said, rows)
-        self.assertNotIn("Excluded", ov.summary.text())
-        self.assertIn("1 Ignored", ov.summary.text())
+        self.assertNotIn("Excluded", counts)
+        self.assertIn("1 Ignored", counts)
 
     def test_evidence_speaks_in_words(self):
         ov = self.show_plan()
@@ -1023,11 +1048,13 @@ class Shell(unittest.TestCase):
         self.win.go("Overview")
         settle(self.app)
         ov = self.win.pages["Overview"]
-        self.assertIs(ov.views.currentWidget(), ov.drop)
+        self.assertIs(ov.views.currentWidget(), ov.drop_page)
         self.assertFalse(self.win.inspector.isVisible())
+        self.assertFalse(ov.panes.bottom.isVisible())
         self.assertTrue(self.win.inspector_wanted)                        # (still the person's choice)
         self.show_plan()
-        self.assertTrue(self.win.inspector.isVisible())
+        self.assertTrue(ov.panes.bottom.isVisible())                      # (0.8.71: the Overview's inspector)
+        self.assertFalse(self.win.inspector.isVisible())
 
     def test_widths_squeezed_by_a_small_window_are_not_saved_as_chosen(self):
         prefs = self.gui.common._gui_prefs
@@ -1216,7 +1243,12 @@ class Shell(unittest.TestCase):
                         ("job_details", "Ctrl+Shift+J")):
             self.assertEqual(self.win.act(key).shortcut().toString(), sc, key)
         self.assertEqual(self.win.act("find").shortcut().toString(), "Ctrl+F")     # (Find keeps Ctrl+F)
-        self.assertEqual(self.gui.actions.TOOLBAR, ("add_folder", "preview", "apply", "cancel"))   # (DESIGN.md)
+        # (0.8.71: Add Folder and Look Up; then the window's progress and Cancel (while work runs),
+        # the filter, the profile, search, Inspector, and Apply last - Preview is File › Preview, Ctrl+P)
+        self.assertEqual(self.gui.actions.TOOLBAR, ("add_folder", "look_up"))
+        bar = self.win.toolbar.actions()
+        self.assertIs(bar[-1], self.win.act("apply"))
+        self.assertIs(bar[-2], self.win.act("show_inspector"))
         # the inspector's Change Release: its menu is the Album menu's Change Release, in the same words
         b = self.win.inspector.buttons["release"]
         self.assertEqual([a.objectName() for a in b.menu().actions()],
@@ -1403,9 +1435,9 @@ class Shell(unittest.TestCase):
         self.assertIn(self.win.menus["Rating"].menuAction(), self.win.menus["Tag"].actions())
         ov = self.show_plan()
         a = self.select(ov, "ready", "exact")
-        self.win.inspector.show_tab("Tags")
+        self.win.show_tab("Tags")
         settle(self.app, 20)
-        box = self.win.inspector.tags.rating
+        box = ov.panes.rating                                       # (0.8.71: the inspector pane's stars)
         self.win.update_tag_actions()
         if not self.win.act("rate_4").isEnabled():
             self.skipTest("the album's rating row cannot be edited here")

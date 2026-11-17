@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFram
                                QToolButton, QTreeView, QVBoxLayout, QWidget)
 
 from . import icons, style
-from .common import _gui_prefs, _set_gui_pref, album_words, label_for, left_header, plural, reasons, say
+from .common import _gui_prefs, _set_gui_pref, album_words, label_for, left_header, plural, popup_menu, reasons, say
 from .i18n import N_, tr
 from .models import (fill_roles, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
@@ -1345,7 +1345,7 @@ class PreviewPanes(QWidget):
         # ---- Your files
         p = self.panes["folders"] = Pane("folders", tr("Your files"))
         self.folders = FoldersModel()
-        self.folder_view = self._tree(self.folders, tr("Your files"), (150,))
+        self.folder_view = self._tree(self.folders, tr("Your files"), (110,))
         self.folder_view.setSelectionMode(QAbstractItemView.ExtendedSelection)   # (several: one profile for all)
         self.folder_view.setDragEnabled(True)
         self.folder_view.setDragDropMode(QAbstractItemView.DragOnly)
@@ -1689,10 +1689,11 @@ class PreviewPanes(QWidget):
         self.panes["folders"].subtitle.setText(
             " · ".join(x for x in (plural(roots, tr("folder"), tr("folders")) if roots else "",
                                    plural(n_files, tr("file"), tr("files")) if n_files else "") if x))
+        # (the albums pane is the list: its selection is its own, kept by it - never set again here)
         if keep and any(a is keep[0] for a in self.albums):
-            self.show_scope(*keep)
+            self.show_scope(*keep, source=self.album_view)
         else:
-            self.show_scope(None)
+            self.show_scope(None, source=self.album_view)
 
     def album_changed(self, album):
         """ALBUM's entry changed (your edit, its look-up): its rows made again, when next shown."""
@@ -1719,7 +1720,7 @@ class PreviewPanes(QWidget):
         finally:
             self._quiet = False
         if self.scope and id(self.scope[0]) in ids:
-            self.show_scope(*self.scope)
+            self.show_scope(*self.scope, source=self.album_view)
 
     # ---- selection, kept in step --------------------------------------------------------------
     def show_album(self, album):
@@ -2163,7 +2164,6 @@ class PreviewPanes(QWidget):
         win = getattr(self.owner, "win", None)
         if win is None or "edit_tag" not in getattr(win, "commands", {}):
             return
-        from .common import popup_menu
         from .inspector import TAG_COMMANDS
         win.update_tag_actions()
         self._menu = popup_menu(self, self.tag_view, pos, [win.act(k) if k else None for k in TAG_COMMANDS])

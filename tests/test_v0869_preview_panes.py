@@ -221,30 +221,36 @@ class PanesBuilt(PreviewPanesBase):
         self.assertEqual(kids["Disc 3 - Questions"], "→ Disc 03")
         held_row = next(r for r in range(p.folders.rowCount()) if "Gorguts" in p.folders.data(p.folders.index(r, 0)))
         self.assertEqual(p.folders.data(p.folders.index(held_row, 1)), "other pressing")
-        # Albums as they will be: release → discs, each naming its folder → tracks with files
+        # Albums as they will be (0.8.71: the list itself): an album a row - its name, the release's
+        # facts after it (SUB), its status and score - then its discs, each naming its folder, then
+        # the tracks with their files
+        from gui.preview_panes import SUB
         m = p.album_model
-        ai = m.index(0, 0)
+        row = {m.album_at(r)["source_dir"]: r for r in range(m.rowCount())}
+        ai = m.index(row[ov.model.albums[0]["source_dir"]], 0)
         self.assertEqual(m.data(ai), f"{ARTIST} – Voyage")
-        self.assertIn("Columbia 478091 2", m.data(m.index(0, 1)))
-        self.assertIn("3 discs", m.data(m.index(0, 1)))
-        discs = [(m.data(m.index(r, 0, ai)), m.data(m.index(r, 1, ai)), m.data(m.index(r, 2, ai)))
+        self.assertIn("Columbia 478091 2", m.data(ai, SUB))
+        self.assertIn("3 discs", m.data(ai, SUB))
+        self.assertEqual(m.data(ai.siblingAtColumn(1)), "Ready")
+        self.assertEqual(m.data(ai.siblingAtColumn(2)), "97")
+        discs = [(m.data(m.index(r, 0, ai)), m.data(m.index(r, 0, ai), SUB), m.data(m.index(r, 1, ai)))
                  for r in range(m.rowCount(ai))]
-        self.assertEqual(discs, [("Disc 01", "“Disc 1 - Dreams”", "3/4"), ("Disc 02", "“Disc 2 - Live Tour”", "2/2"),
-                                 ("Disc 03", "“Disc 3 - Questions”", "1/1")])
+        self.assertEqual(discs, [("Disc 01", "← Disc 1 - Dreams", "3 of 4"), ("Disc 02", "← Disc 2 - Live Tour", "2 of 2"),
+                                 ("Disc 03", "← Disc 3 - Questions", "1 of 1")])
         d1 = m.index(0, 0, ai)
-        tracks = [(m.data(m.index(r, 0, d1)), m.data(m.index(r, 1, d1)), m.data(m.index(r, 2, d1)))
+        tracks = [(m.data(m.index(r, 0, d1)), m.data(m.index(r, 0, d1), SUB), m.data(m.index(r, 1, d1)))
                   for r in range(m.rowCount(d1))]
-        self.assertEqual(tracks[2], ("03  Lullabye (Goodnight, My Angel)", "03 Lullabye (Goodnight My Angel).flac",
+        self.assertEqual(tracks[2], ("03  Lullabye (Goodnight, My Angel)", "← 03 Lullabye (Goodnight My Angel).flac",
                                      "title differs"))
         self.assertEqual(tracks[3][0], "04  Track 4")                    # (the release's track not in your folders)
         self.assertEqual(tracks[3][1], "")
         self.assertEqual(m.data(m.index(3, 0, d1), Qt.ForegroundRole).name().lower(),
                          self.gui.style.color("disabled").lower())       # (greyed)
         # the SACD layer's album: its disc is the layer folder's
-        li = m.index(1, 0)
+        li = m.index(row[ov.model.albums[1]["source_dir"]], 0)
         self.assertEqual(m.data(m.index(0, 0, li)), "Disc 01 (SACD Stereo)")
         # the held album: no release, so nothing is called extra or missing
-        hi = m.index(2, 0)
+        hi = m.index(row[ov.model.albums[2]["source_dir"]], 0)
         labels = [m.data(m.index(r, 0, hi)) for r in range(m.rowCount(hi))]
         self.assertEqual(labels, ["Tracks"])
         # Why this release
@@ -260,8 +266,11 @@ class PanesBuilt(PreviewPanesBase):
         words = [p.cover_strip.item(i).text() for i in range(p.cover_strip.count())]
         self.assertTrue(words[0].startswith("New front cover\nCover Art Archive"), words)
         self.assertTrue(any("Your" in w for w in words[1:]), words)
-        for k in ("find", "file", "make"):
+        for k in ("find", "file", "url", "make"):                        # (Choose Cover…'s menu)
             self.assertTrue(p.cover_buttons[k].isEnabled(), k)
+        self.assertTrue(p.cover_btn.isEnabled())
+        self.assertFalse(p.cover_big.pixmap_shown().isNull())            # (the new front, large)
+        self.assertIn("New front cover", p.cover_caption.text())
 
     def test_extra_files_of_an_identified_album_are_flagged(self):
         plan = synthetic_plan(self.tmp)
@@ -269,76 +278,31 @@ class PanesBuilt(PreviewPanesBase):
         joined["album_files"].append(str(Path(joined["source_dir"]) / DISC_DIRS[1] / "hidden track.flac"))
         ov = self.show_plan(plan)
         m = ov.panes.album_model
-        ai = m.index(0, 0)
+        ai = m.index(next(r for r in range(m.rowCount()) if m.album_at(r) is joined), 0)
         last = m.index(m.rowCount(ai) - 1, 0, ai)
         self.assertEqual(m.data(last), "Not on the release")
-        self.assertEqual(m.data(m.index(0, 2, last)), "extra")
+        self.assertEqual(m.data(m.index(0, 1, last)), "extra")
         self.assertEqual(m.data(m.index(0, 0, last)), "hidden track.flac")
 
 
 class Folding(PreviewPanesBase):
-    def test_each_pane_folds_to_a_strip_and_folds_and_widths_are_remembered(self):
-        self.win.inspector.toggle(False)                      # (the panes take the window's width)
+    # (0.8.71: the panes no longer fold: the inspector pane is shown or hidden by the toolbar's
+    # Inspector button - tests/test_v0871_main_window.py - and the splits are remembered)
+    def test_the_splits_are_remembered(self):
         ov = self.show_plan()
         p = ov.panes
-        self.shot(self.win, "wide")
-        total = sum(p.hsplit.sizes())
-        p.hsplit.setSizes([total // 4, total // 3, total - total // 4 - total // 3])
-        p.save_sizes()
-        for key in ("folders", "albums", "tags"):
-            pane = p.panes[key]
-            pane.button.click()
-            settle(self.app)
-            self.assertTrue(pane.collapsed)
-            self.assertTrue(pane.strip.isVisible())
-            self.assertFalse(pane.body.isVisible())
-            self.assertLessEqual(pane.width(), 40, key)
-            self.assertEqual(pane.strip_button.accessibleName(), f"Expand {pane.title}")
-            self.shot(self.win, f"collapsed-{key}")
-            pane.strip_button.click()
-            settle(self.app)
-            self.assertFalse(pane.collapsed)
-        cov = p.panes["covers"]
-        cov.button.click()
-        settle(self.app)
-        self.assertTrue(cov.collapsed)
-        self.assertFalse(cov.body.isVisible())
-        self.shot(self.win, "collapsed-covers")
-        widths = p.hsplit.sizes()
-        p.panes["folders"].button.click()                    # (left folded: remembered so)
+        p.hsplit.setSizes([300, 700])
+        p.vsplit.setSizes([400, 300])
         p.changes_only.setChecked(False)
-        settle(self.app)
+        p.save_sizes()
         saved = self.gui.common._gui_prefs()["preview_panes"]
-        self.assertEqual(saved["collapsed"], {"folders": True, "albums": False, "tags": False, "covers": True})
-        self.assertEqual(saved["sizes"], widths)            # (a folded pane keeps the width it had open)
+        self.assertEqual(saved["sizes"][:2], p.hsplit.sizes())
+        self.assertEqual(saved["vsizes"], p.vsplit.sizes())
         self.assertFalse(saved["changes_only"])
-        # a new window: as you left it
         from gui.preview_panes import PreviewPanes
         again = PreviewPanes(None)
-        self.assertTrue(again.panes["folders"].collapsed)
-        self.assertTrue(again.panes["covers"].collapsed)
-        self.assertFalse(again.panes["tags"].collapsed)
         self.assertFalse(again.changes_only.isChecked())
-        again.resize(1400, 700)
-        again.show()
-        settle(self.app)
-        again.panes["folders"].strip_button.click()
-        settle(self.app)
-        self.assertFalse(again.panes["folders"].collapsed)
-        from gui.preview_panes import SIDE_MIN
-        sizes = again.hsplit.sizes()
-        print(f"\nreopened: {sizes} (it had {widths[0]})", file=sys.stderr)
-        # (opened: the width it had, as far as the others can give way)
-        self.assertEqual(sizes[0], min(max(widths[0], SIDE_MIN), sum(sizes) - 2 * SIDE_MIN))
-        again.close()
         again.deleteLater()
-
-    def test_the_list_and_panes_split_is_remembered(self):
-        ov = self.show_plan()
-        ov.list_split.setSizes([150, 500])
-        ov.save_list_split()
-        saved = self.gui.common._gui_prefs()["preview_panes"]["list"]
-        self.assertEqual(saved, ov.list_split.sizes())
 
     def test_dark_style(self):
         self.gui.style.apply(self.app, "dark")
@@ -733,9 +697,8 @@ class ReviewFixes(PreviewPanesBase):
             w.show()
             settle(self.app, 3)
             panes = w.pages["Overview"].panes
-            self.assertEqual(panes.panes["tags"].collapsed, isinstance(bad, dict) and bad.get("collapsed") ==
-                             {"folders": "yes", "tags": True, "nope": True})
-            self.assertFalse(panes.panes["folders"].collapsed)
+            self.assertEqual(set(panes.panes), {"folders", "albums", "tags", "covers"})
+            self.assertTrue(all(x > 0 for x in panes.hsplit.sizes()))
             w.close()
             w.deleteLater()
         self.assertEqual(clean_prefs({"collapsed": {"folders": "yes", "tags": True}, "sizes": [3, 4, 5],

@@ -220,13 +220,14 @@ class Review3(unittest.TestCase):
 
     # ---- the toolbar's profile pop-up -------------------------------------------
     def test_the_profile_pop_up_is_shown_on_overview_only(self):
-        label, box = self.win.profile_actions
+        label, box, filt = self.win.profile_actions          # (0.8.71: and the All / Ready / Needs Attention filter)
         self.assertIs(self.win.toolbar.widgetForAction(box), self.win.profile_box)
+        self.assertIs(self.win.toolbar.widgetForAction(filt), self.win.filter_seg)
         self.assertEqual(self.win.toolbar.widgetForAction(label).text(), "Profile")
         self.win.go("Overview")
-        self.assertTrue(label.isVisible() and box.isVisible())
+        self.assertTrue(label.isVisible() and box.isVisible() and filt.isVisible())
         self.win.go("Jobs")
-        self.assertFalse(label.isVisible() or box.isVisible())
+        self.assertFalse(label.isVisible() or box.isVisible() or filt.isVisible())
         self.assertNotIn("down-arrow:disabled { image: none", self.gui.style.stylesheet())
 
     # ---- the Needs attention badge ----------------------------------------------
@@ -305,9 +306,10 @@ class Review3(unittest.TestCase):
         self.win.go("Overview")
         settle(self.app, 20)
         empty = self.win.nav.width()
-        self.show_plan()
+        ov = self.show_plan()
         settle(self.app, 30)
-        self.assertTrue(self.win.inspector.isVisible())
+        # (0.8.71: the Overview's inspector is the pane under its lists: the sidebar never gives way)
+        self.assertTrue(ov.panes.bottom.isVisible())
         self.assertEqual(self.win.nav.width(), empty)
         self.assertEqual(self.win.nav.width(), self.gui.style.SIDEBAR[0])
 

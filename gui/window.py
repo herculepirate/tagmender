@@ -635,8 +635,8 @@ class Main(QMainWindow):
         if ov is not None:
             self.profile_box.setEnabled(on_ov and idle)        # (it picks the profile the preview uses)
             shown = [a.isVisible() for a in getattr(self, "profile_actions", ())]
-            for a in getattr(self, "profile_actions", ()):     # (and is not shown where it picks nothing)
-                a.setVisible(on_ov)
+            for i, a in enumerate(getattr(self, "profile_actions", ())):   # (not shown where it picks nothing;
+                a.setVisible(on_ov and not (i == 0 and getattr(self, "_narrowest", False)))   # its word: room)
             if shown and shown != [a.isVisible() for a in self.profile_actions]:
                 self.fit_toolbar()                             # (room taken or given back)
             self.commands["preview"].setEnabled(on_ov and idle and bool(ov.path))
@@ -645,11 +645,8 @@ class Main(QMainWindow):
             self.commands["clear_done"].setEnabled(on_ov and ov.clear_done_btn.isEnabled())
             n = ov.actionable() if ov.plan else 0
             self.commands["apply"].setEnabled(on_ov and ov.may_apply_now() and bool(ov.plan) and n > 0)
-            # (the toolbar's Apply says how many: "Apply 2 Albums"; none, "Apply")
-            words = (tr("Apply 1 Album") if n == 1 else tr("Apply {0} Albums").format(n)) if on_ov and n else \
-                tr("Apply")
-            if self.commands["apply"].iconText() != words:
-                self.commands["apply"].setIconText(words)
+            self._apply_n = n if on_ov else 0
+            if self.show_apply_words():
                 self.fit_toolbar()
             self.commands["exclude_again"].setEnabled(kind == "overview" and idle and bool(ov.overridden(x)))
         w = self.pages.get("Watched folders")
@@ -868,6 +865,26 @@ class Main(QMainWindow):
                 self.dropped([d])
             return
         ov.drop.choose()
+
+    def show_apply_words(self) -> bool:
+        """The toolbar's Apply says how many: "Apply 2 Albums" ("Apply 2" in the narrowest window);
+        none, "Apply". True when its words changed."""
+        n = getattr(self, "_apply_n", 0)
+        if not n:
+            words = tr("Apply")
+        elif getattr(self, "_narrowest", False):
+            words = tr("Apply {0}").format(n)
+        else:
+            words = tr("Apply 1 Album") if n == 1 else tr("Apply {0} Albums").format(n)
+        a = self.commands["apply"]
+        if a.iconText() == words:
+            return False
+        a.setIconText(words)
+        b = self.toolbar.widgetForAction(a) if hasattr(self, "toolbar") else None
+        if b is not None:
+            b.setAccessibleName(tr("Apply 1 album") if n == 1 else tr("Apply {0} albums").format(n) if n
+                                else tr("Apply"))
+        return True
 
     # ---- the toolbar's filter: All / Ready / Needs Attention ---------------------------------
     def show_filter(self, kind):
@@ -1095,12 +1112,17 @@ class Main(QMainWindow):
         b = bar.widgetForAction(self.commands["show_inspector"]) if bar is not None else None
         if b is None:
             return
-        # (inspector's word, search's widest, profile pop-up, progress bar, compact filter, icons alone)
-        steps = ((True, 200, 200, 120, False, False), (False, 160, 180, 120, False, False),
-                 (False, 140, 150, 100, True, False), (False, 110, 130, 80, True, True),
-                 (False, 90, 110, 60, True, True))
-        others = [bar.widgetForAction(self.commands[k]) for k in actmod.TOOLBAR]
-        for n, (word, search, profile, progress, compact, bare) in enumerate(steps):
+        # (inspector's word, search's widest, profile pop-up, progress bar, compact filter, icons alone,
+        # the narrowest: no "Profile" word before the pop-up, Apply's count without "Albums")
+        steps = ((True, 200, 200, 120, False, False, False), (False, 160, 180, 120, False, False, False),
+                 (False, 140, 150, 100, True, False, False), (False, 110, 130, 80, True, True, False),
+                 (False, 90, 110, 60, True, True, False), (False, 80, 100, 40, True, True, True))
+        others = [bar.widgetForAction(self.commands[k]) for k in actmod.TOOLBAR] + [self.cancel_button]
+        for n, (word, search, profile, progress, compact, bare, least) in enumerate(steps):
+            self._narrowest = least
+            if getattr(self, "profile_actions", None):
+                self.profile_actions[0].setVisible(not least and self.showing("Overview"))
+            self.show_apply_words()
             b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if word else Qt.ToolButtonIconOnly)
             self.search_box.setMinimumWidth(min(140, search))
             self.search_box.setMaximumWidth(search)
@@ -1148,7 +1170,7 @@ class Main(QMainWindow):
         self.inspector_wanted = bool(d.get("inspector_open", False))
         # (the Overview's inspector pane, 0.8.71: the selection's tags and cover are what a preview
         # is for, so it is shown until you hide it; remembered apart from the dock's)
-        self.ov_inspector = bool(d.get("preview_inspector", True))
+        self.ov_inspector = d.get("preview_inspector") is not False
         self.place_inspector()
         QTimer.singleShot(0, self, self.fit_docks)
 

@@ -47,7 +47,9 @@ class LibraryFolder(tg.Gui):
         self.preview()
         self.choose(self.other)
         self.assertEqual(self.ov.library_label.text(), "Library folder ↺")
-        self.assertTrue(self.ov.library_keep.isVisibleTo(self.ov))
+        # (0.8.71: no Library folder bar - File › Library Folder for This Preview… chooses it; the
+        # profile's own is set in Preferences › Profiles)
+        self.assertIn(self.win.act("choose_library"), self.win.menus["File"].actions())
         self.assertTrue(tg.wait(lambda: not self.ov.running, self.app))   # (looked up again by itself)
         dsts = self.dsts()
         self.assertTrue(dsts)

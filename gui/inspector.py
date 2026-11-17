@@ -1357,6 +1357,18 @@ class Inspector(QDockWidget):
                 ft.pop(field_, None)
         self.reapply(album)
 
+    def set_tag_files(self, field_, value, files, album=None):
+        """Your value for a tag of several files of the album (a disc, a folder: the preview's
+        Tag changes pane), as set_tag for each file, in one edit (one Undo Edit takes it back)."""
+        album = album or self.album
+        if not self.can_edit(album) or not files:
+            return
+        self.remember()
+        e = self.edit_of(album, create=True)
+        for f in files:
+            e["file_tags"].setdefault(f, {})[field_] = value
+        self.reapply(album)
+
     def clear_tag(self, field_, file=None, album=None):
         """Your edit of a tag dropped: its new value is the one the preview suggested again."""
         album = album or self.album

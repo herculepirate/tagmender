@@ -10,17 +10,19 @@ from pathlib import Path
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
-                               QPushButton, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
+                               QPushButton, QSplitter, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
                                QWidget)
 
 from . import icons, setup, sheets
-from .common import (album_words, counts_by_label, counts_text, ex, heading, left_header, load_profile, notify,
-                     pf, planmod, plural, popup_menu, profile_names)
+from .common import (_gui_prefs, _set_gui_pref, album_words, counts_by_label, counts_text, ex, heading,
+                     left_header, load_profile, notify, pf, planmod, plural, popup_menu, profile_names)
 from .i18n import N_, tr
 from .work import start
 from .models import PlanModel, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
 
+FIT_ROWS = 250                                        # the rows a column's width is fitted to (the list's)
+PANES_PREF = "preview_panes"                          # gui.json: the panes' state (gui/preview_panes.py)
 APPLY_LISTED = 5                                     # albums named in the Apply sheet (then "and N more")
 
 
@@ -275,9 +277,15 @@ class ProfileDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         hint = super().sizeHint(option, index)
         page = self.parent()
-        words = [tr("As Above ({0})").format(page.profile.currentText())] + list(profile_names())
-        widest = max(option.fontMetrics.horizontalAdvance(w) for w in words)
-        hint.setWidth(max(hint.width(), widest + 40) + self.ARROW)
+        # (the same words in every row: measured once a second at most - a list of thousands of
+        # albums read the profiles folder once per row to fit this column)
+        now, above = time.monotonic(), page.profile.currentText()
+        memo = getattr(self, "_widest", None)
+        if memo is None or memo[1] != above or now - memo[0] > 1.0 or memo[3] is not option.fontMetrics:
+            words = [tr("As Above ({0})").format(above)] + list(profile_names())
+            memo = self._widest = (now, above, max(option.fontMetrics.horizontalAdvance(w) for w in words),
+                                   option.fontMetrics)
+        hint.setWidth(max(hint.width(), memo[2] + 40) + self.ARROW)
         return hint
 
     def createEditor(self, parent, option, index):
@@ -529,6 +537,10 @@ class Overview(QWidget):
         h = self.table.horizontalHeader()
         left_header(self.table)
         h.setMinimumSectionSize(48)
+        # (a column is fitted to the text of its first rows and those in view, not of every album:
+        # measuring each of thousands of rows held the list up for seconds)
+        h.setResizeContentsPrecision(FIT_ROWS)
+        self.table.verticalHeader().setResizeContentsPrecision(FIT_ROWS)
         # every column can be dragged wider or narrower; each is fitted to its text until you do
         # (Why, the last, takes what is left); a cut cell shows its whole text when pointed at
         for c in range(len(PlanModel.COLS)):
@@ -565,7 +577,36 @@ class Overview(QWidget):
         # Del too: two shortcuts on one key and Qt runs neither)
         self.table.installEventFilter(self)
         rl.addSpacing(8)                                     # (the controls above, then the list: two groups)
-        rl.addWidget(self.table, 1)
+        # 0.8.69: the list over the preview's linked panes (Your folders | Albums as they will be |
+        # Tag changes, over Cover art: gui/preview_panes.py), the split between them remembered
+        from .preview_panes import PreviewPanes
+        self.panes = PreviewPanes(self)
+        self.panes.album_chosen.connect(self.panes_chose)
+        self.list_split = QSplitter(Qt.Vertical)
+        self.list_split.setObjectName("previewSplit")
+        self.list_split.setChildrenCollapsible(False)
+        self.list_split.addWidget(self.table)
+        self.list_split.addWidget(self.panes)
+        self.list_split.setStretchFactor(0, 1)
+        self.list_split.setStretchFactor(1, 2)
+        split = (_gui_prefs().get(PANES_PREF) or {}).get("list") if isinstance(_gui_prefs().get(PANES_PREF), dict) \
+            else None
+        self.list_split.setSizes(split if isinstance(split, list) and len(split) == 2 and
+                                 all(isinstance(x, int) and x > 0 for x in split) else [190, 470])
+        self.list_split.splitterMoved.connect(lambda *_: self._split_timer.start())
+        self._split_timer = QTimer(self)
+        self._split_timer.setSingleShot(True)
+        self._split_timer.setInterval(400)
+        self._split_timer.timeout.connect(self.save_list_split)
+        self.model.modelReset.connect(lambda: self.panes.set_albums(self.model.albums))
+        self.model.rowsInserted.connect(lambda *_: self._panes_timer.start())
+        self.model.rowsRemoved.connect(lambda *_: self._panes_timer.start())
+        self.model.dataChanged.connect(self.panes_rows_changed)
+        self._panes_timer = QTimer(self)                     # (rows added or taken out: the panes once)
+        self._panes_timer.setSingleShot(True)
+        self._panes_timer.setInterval(0)
+        self._panes_timer.timeout.connect(lambda: self.panes.set_albums(self.model.albums))
+        rl.addWidget(self.list_split, 1)
         foot = QHBoxLayout()                                 # (what is ready, strong; the other counts, quiet)
         foot.setContentsMargins(0, 0, 0, 0)
         foot.setSpacing(16)
@@ -588,6 +629,34 @@ class Overview(QWidget):
 
     def filter(self, text):
         self.proxy.setFilterFixedString(text)
+
+    # ---- the preview's panes (gui/preview_panes.py) -----------------------------------------
+    def save_list_split(self):
+        from .preview_panes import PREF
+        p = _gui_prefs().get(PREF)
+        p = p if isinstance(p, dict) else {}
+        sizes = self.list_split.sizes()
+        if all(x > 0 for x in sizes):
+            p["list"] = sizes
+            _set_gui_pref(PREF, p)
+
+    def panes_rows_changed(self, top, bottom, *_):
+        """Rows of the list changed (a look-up, your edit): their albums in the panes too."""
+        albums = self.model.albums
+        for r in range(max(0, top.row()), min(len(albums) - 1, bottom.row()) + 1):
+            self.panes.album_changed(albums[r])
+
+    def panes_chose(self, album):
+        """An album chosen in the panes: its row in the list, as clicking it does (the inspector
+        and the Album menu follow)."""
+        if album is None or album is self.selected():
+            return
+        for r, a in enumerate(self.model.albums):
+            if a is album:
+                row = self.proxy.mapFromSource(self.model.index(r, 0)).row()
+                if row >= 0:
+                    self.show_row(row)
+                return
 
     # page widths under which lower-priority columns give way (the inspector shows them all), so
     # the others fit their text without scrolling sideways: Why first, then Score, the scans and
@@ -1259,11 +1328,12 @@ class Overview(QWidget):
 
     def profile_of(self, a) -> str:
         """The profile this album is looked up and applied with: its own, or the one above."""
-        return self.album_profiles.get(self.album_key(a)) or self.profile.currentText()
+        return (self.album_profiles and self.album_profiles.get(self.album_key(a))) or self.profile.currentText()
 
     def own_profile(self, a) -> str:
-        """The profile chosen in the album's own row ("": the one chosen above)."""
-        return self.album_profiles.get(self.album_key(a), "")
+        """The profile chosen in the album's own row ("": the one chosen above). (No album has
+        one: not asked - an album's key resolves each of its files' paths.)"""
+        return self.album_profiles.get(self.album_key(a), "") if self.album_profiles else ""
 
     def set_album_profile(self, albums, name):
         """Use profile NAME ("": the one chosen above) for ALBUMS; those already looked up are
@@ -2559,6 +2629,8 @@ class Overview(QWidget):
             one = dict(self.plan_for([a]), summary={a["status"]: 1})
             self.detail.setPlainText(planmod.preview(one, verbose=False))
             self.win.inspector.show_album(a, self.plan)
+        if hasattr(self, "panes"):
+            self.panes.show_album(a)
         self.busy(bool(getattr(self, "running", False)))
 
     def choose_release(self):

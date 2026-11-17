@@ -97,6 +97,12 @@ def measure_file(path, cancel=None, timeout=None) -> dict | None:
     proc = subprocess.Popen(["ffmpeg", "-v", "error", "-nostdin", "-i", str(path), "-t", str(MAX_SECONDS),
                              "-map", "0:a:0", *args, "-f", "f32le", "-acodec", "pcm_f32le", "-"],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    import threading
+    # (a read that blocks - a stalled share, a stuck decoder - is ended by killing ffmpeg at the
+    # deadline: the read then returns, never waits forever)
+    watchdog = threading.Timer(max(0.0, deadline - time.monotonic()), proc.kill)
+    watchdog.daemon = True
+    watchdog.start()
     rms = [[] for _ in range(ch)]
     peaks = [[] for _ in range(ch)]
     tail = [(False, False)] * ch
@@ -120,9 +126,12 @@ def measure_file(path, cancel=None, timeout=None) -> dict | None:
                 n, tail[c] = _run_count(s, tail[c])
                 clipped += n
     finally:
+        watchdog.cancel()
         proc.stdout.close()
         proc.kill()
         proc.wait()
+    if time.monotonic() > deadline:
+        return None
     drs = [d for d in (dr_of_blocks(rms[c], peaks[c]) for c in range(ch)) if d is not None]
     if not drs:
         return None
@@ -305,8 +314,34 @@ def copies(plan, filed=True) -> list:
         # (copies hold the same disc: disc 1 in one folder and disc 2 in another are two parts of
         # one set, never two copies)
         cs = [c for c in cs if any(c is not o and c["discs"] & o["discs"] for o in cs)]
+        cs = _no_transcodes(cs)
         if len(cs) >= 2:
             out.append((rid, cs[:MAX_COPIES]))
+    return out
+
+
+def _lengths(files) -> tuple:
+    """The first tracks' lengths, to the millisecond."""
+    import mutagen
+    out = []
+    for f in sorted(files)[:4]:
+        try:
+            out.append(round(float(mutagen.File(str(f)).info.length), 3))
+        except Exception:
+            return ()
+    return tuple(out)
+
+
+def _no_transcodes(cs) -> list:
+    """VIN-6: copies whose every length is another's to the millisecond are one rip (a transcode
+    to a lower resolution, or the same files twice), never two copies to compare: the first kept."""
+    out, seen = [], set()
+    for c in cs:
+        key = _lengths(c["files"])
+        if key and key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
     return out
 
 

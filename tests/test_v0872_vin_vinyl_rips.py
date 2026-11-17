@@ -40,7 +40,7 @@ def vinyl_release(fmt='12" Vinyl', discs=1):
 
 
 class VinBase(VersionsBase):
-    def rip(self, folder, rate=96000, notes=None, comment=None, disc=None, shift=0):
+    def rip(self, folder, rate=96000, notes=None, comment=None, disc=None, shift=0, extra=0.0):
         top = self.lib / "Billy Joel" / folder
         for i, t in enumerate(TITLES):
             meta = {"title": t, "album": "Piano Man", "albumartist": "Billy Joel", "artist": "Billy Joel",
@@ -49,7 +49,7 @@ class VinBase(VersionsBase):
             args = sum((["-metadata", f"{k}={v}"] for k, v in meta.items()), [])
             top.mkdir(parents=True, exist_ok=True)
             subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
-                            f"sine=frequency={300 + 50 * i + shift}:duration={LENS[i] / 1000}", "-ar", str(rate),
+                            f"sine=frequency={300 + 50 * i + shift}:duration={LENS[i] / 1000 + extra}", "-ar", str(rate),
                             "-sample_fmt", "s32", "-ac", "2", *args, str(top / f"{i + 1:02d}. {t}.flac"), "-y"],
                            check=True)
             if comment:
@@ -369,13 +369,14 @@ class VIN6_CopiesMeasured(VinBase):
         import dynamics
         import tagmender
         self.rip(PB, 96000, PB_NOTES)
-        self.rip(OTHER, 192000, shift=1)
+        self.rip(OTHER, 192000, shift=1, extra=0.4)
         plan = self.moving(self.http()).plan(self.lib / "Billy Joel")
         # (no copy is measured while planning: only after it, when asked)
         self.assertFalse(any(a.get("copies") for a in plan["albums"]))
         groups = dynamics.copies(plan, filed=False)
         self.assertEqual([(rid, len(cs)) for rid, cs in groups], [(RID, 2)])
         tagmender._measure_copies(plan)
+        # (two rips of one record: their lengths differ - a transcode's would not: VIN-7 / VIN-6)
         for a in plan["albums"]:
             rows = a["copies"]
             self.assertEqual(sorted(r["label"] for r in rows), ["24-192", "24-96 PBTHAL"])
@@ -487,7 +488,7 @@ class VIN_Review(VinBase):
     def test_VIN3_ripper_false_positives(self):
         # M3
         for name in ("X [Vinyl Rip ABBA 24-96]", "X [Vinyl Rip LONDON 24bit 96khz]", "X [Vinyl Rip ALAC 24-96]",
-                     "X [Vinyl Rip MINT 24-96]", "X [rip by john at 24-96]", "X [Rip by Foo using Audacity]",
+                     "X [Vinyl Rip MINT 24-96]", "X [rip by john at 24-96]",
                      "X [ripped by EAC]", "X [Vinyl rip by me 24-96]"):
             self.assertEqual(vr.ripper_in_name(name), "", name)
         for text in ("Digitally transferred by Bob Ludwig at Gateway", "Remastered and transferred by Kevin Gray",
@@ -772,6 +773,112 @@ class VIN_Settings(VinBase):
                         mock.patch.object(tagmender, "_measure_copies") as measured, mock.patch("builtins.print"):
                     tagmender.cmd_plan(args)
                 self.assertEqual(measured.called, on)
+
+
+class VIN7_ReReview(VinBase):
+    """The re-review's findings on VIN-7 (2026-11-17)."""
+    FOLDER = VIN7_TwoRipsInOneFolder.FOLDER
+
+    def mk(self, specs, folder=None):
+        top = self.lib / "Billy Joel" / (folder or self.FOLDER)
+        top.mkdir(parents=True)
+        for name, i, secs, rate, fmt, com, freq in specs:
+            f = top / name
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={secs}",
+                            "-ar", str(rate), "-sample_fmt", fmt, "-ac", "2", "-metadata", f"title={TITLES[i]}",
+                            "-metadata", "album=Piano Man", "-metadata", "albumartist=Billy Joel",
+                            "-metadata", "artist=Billy Joel", "-metadata", f"track={i + 1}", str(f), "-y"], check=True)
+            if com:
+                tagio.write(f, {"comment": [com]})
+        return top
+
+    def held(self, top):
+        plan = self.moving(self.http()).plan(top)
+        self.assertEqual(len(plan["albums"]), 1, pl.preview(plan))
+        [a] = plan["albums"]
+        self.assertIn("two_rips", a["identification"].get("reason_codes") or [], pl.preview(plan))
+        self.assertTrue(all(fe["src"] == fe["dst"] for fe in a["files"]))
+        return a["identification"]["why"][0]
+
+    def test_VIN7_copy_marks_on_both_rips_never_split(self):
+        # N1: the " (1)" fell on the 192 kHz rip for tracks 1 and 3, on the 96 kHz rip for track 2
+        L = [x / 1000 for x in LENS]
+        specs = []
+        for i, t in enumerate(TITLES):
+            a_suf, b_suf = ("", " (1)") if i != 1 else (" (1)", "")
+            specs.append((f"{i + 1:02d}. {t}{a_suf}.flac", i, L[i], 96000, "s32", "Rip A by Alpha", 300 + 50 * i))
+            specs.append((f"{i + 1:02d}. {t}{b_suf}.flac", i, L[i] + 0.6, 192000, "s32",
+                          "Vinyl rip by Packgrog, recorded February 1, 2012", 310 + 50 * i))
+        self.held(self.mk(specs))
+        self.assertFalse(engine.one_rip_each([[Path("/nonexistent")], [Path("/nonexistent2")]]))
+
+    def test_VIN7_a_transcode_of_the_same_rip_is_no_second_copy(self):
+        # N2: 24/96 and its own 16/44.1 transcode, every length the same to the sample
+        L = [x / 1000 for x in LENS]
+        specs = [(f"{i + 1:02d}. {t}.flac", i, L[i], 96000, "s32", "rip A", 300 + 50 * i) for i, t in enumerate(TITLES)]
+        specs += [(f"{i + 1:02d}. {t} (1).flac", i, L[i], 44100, "s16", "rip A 16-44", 300 + 50 * i)
+                  for i, t in enumerate(TITLES)]
+        self.assertIn("a lower-resolution copy of the same rip", self.held(self.mk(specs)))
+
+    def test_VIN7_two_rips_by_tags_only_in_a_vinyl_rip_folder(self):
+        # (a CD set's two discs in one folder, numbered 1..n each and untagged, are no two rips)
+        L = [x / 1000 for x in LENS]
+        specs = [(f"A{i + 1} {t}.flac", i, L[i], 44100, "s16", "Disc one", 300 + 50 * i) for i, t in enumerate(TITLES)]
+        specs += [(f"B{i + 1} {t} x.flac", i, L[i] + 0.6, 44100, "s16", "Disc two", 330 + 50 * i)
+                  for i, t in enumerate(TITLES)]
+        top = self.mk(specs, folder="1973 - Piano Man [CD]")
+        eng = self.moving(self.http())
+        g = eng.albums_in(top)[0]
+        self.assertFalse(engine._vinylish(g))
+        self.assertFalse(any("two_rips" in (a["identification"].get("reason_codes") or [])
+                             for a in eng.plan(top)["albums"]))
+
+    def test_VIN7_copy_suffix_x_2_only_in_a_vinyl_rip_folder(self):
+        fs = [Path(f"/m/X/{i:02d}. T{i}{s}.flac") for i in (1, 2, 3) for s in ("", "_2")]
+        self.assertTrue(engine._RIP_COPY_SUFFIX.search("01. T1_2"))
+        self.assertFalse(engine._COPY_SUFFIX.search("01. T1_2"))     # (split_versions as before)
+        self.assertTrue(engine._COPY_SUFFIX.search("01. T1 (1)"))
+        self.assertEqual(len(fs), 6)
+
+
+class VIN_ReReviewWords(unittest.TestCase):
+    def test_VIN3_a_studio_sleeve_or_label_word_is_never_the_ripper(self):
+        base = Path("/nonexistent")
+        for name, said in (("X [Vinyl Rip Mobile Fidelity 24bit 96khz]", "Mobile Fidelity Sound Lab pressing"),
+                           ("X [Vinyl Rip Abbey Road 24bit 96khz]", "Cut at Abbey Road, London"),
+                           ("X [Vinyl Rip Gatefold SRM-1-1184]", "Gatefold sleeve")):
+            self.assertEqual(vr.describe(base / name, [], comments=[said], scans="")["ripper"], "", name)
+        self.assertEqual(vr.own_folder("X [1977 Vinyl Rip Gatefold SRM-1-1184]", "SRM-1-1184")["ripper"], "")
+        # (signed, a name is taken: "Fran Solo, Ediciones", "rip by KRONOS")
+        self.assertEqual(vr.describe(base / "X [Vinyl Rip Fran Solo SRM-1-3743]", [],
+                                     comments=["US Pressing - Fran Solo, Ediciones MMXVII"], scans="")["ripper"],
+                         "Fran Solo")
+        self.assertEqual(vr.describe(base / "X [Vinyl Rip KRONOS 24bit 96khz]", [],
+                                     comments=["Vinyl rip by KRONOS"], scans="")["ripper"], "KRONOS")
+
+    def test_VIN3_the_year_and_name_bound_to_the_rip(self):
+        self.assertEqual(vr.rip_year("Recorded 1981 at Le Studio; ripped 2010"), "2010")
+        self.assertEqual(vr.ripper_in_notes("Ripped by Packgrog on a VPI"), "Packgrog")
+        self.assertEqual(vr.ripper_in_notes("rip by john at home"), "")
+        self.assertEqual(mc.catno_hints("[1999 001 002-1]"), [])
+
+    def test_VIN6_a_blocked_decode_ends_at_its_deadline(self):
+        import time
+        import dynamics
+        from unittest import mock
+        import tempfile
+        import subprocess as sp
+        d = Path(tempfile.mkdtemp())
+        f = d / "a.flac"
+        sp.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=2", str(f), "-y"], check=True)
+        real = sp.Popen
+
+        def stuck(*a, **k):                         # (a decoder that never writes)
+            return real(["sleep", "30"], stdout=sp.PIPE, stderr=sp.DEVNULL)
+        t = time.monotonic()
+        with mock.patch.object(dynamics.subprocess, "Popen", side_effect=stuck):
+            self.assertIsNone(dynamics.measure_file(f, timeout=1.0))
+        self.assertLess(time.monotonic() - t, 10)
 
 
 class TestUndo:

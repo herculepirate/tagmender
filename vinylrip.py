@@ -51,6 +51,11 @@ _NOT_RIPPER = {
     "JAMF", "RL", "HALF", "SPEED", "AAA", "ADD", "NEW", "USED", "NM", "VG", "EX", "POLYGRAM", "PHONOGRAM",
     "ENGLAND", "SWEDEN", "GERMAN", "GERMANY", "JAPAN", "JAPANESE", "HOLLAND", "CANADA", "FRANCE", "ITALY", "SPAIN",
     "RECORDS", "RECORD", "PRESSING", "LABEL",
+    # sleeves, studios, cutting and audiophile words ("[Vinyl Rip Gatefold ...]", "Abbey Road",
+    # "Mobile Fidelity")
+    "GATEFOLD", "SLEEVE", "MOBILE", "FIDELITY", "ABBEY", "ROAD", "STUDIO", "STUDIOS", "SOUND", "LAB", "RECORDING",
+    "PLANT", "CUT", "LACQUER", "MASTERING", "HEAVYWEIGHT", "NUMBERED", "PICTURE", "DISC", "TRANSLUCENT", "MARBLED",
+    "SPLATTER", "INSERT", "POSTER", "SEALED", "AUDIO", "ANALOGUE", "ANALOG", "DIRECT", "FIDELITY", "QUALITY",
 }
 # VIN-3: a ripper's own name for one of his transfers: "Final Master", "Ultimate Master", "Redux", "v2"
 _VERSION_NAME = re.compile(r"\b((?:Final|Ultimate|Definitive|Flat|Raw|Hi-?Res)\s+Master|Redux|v[2-9])\b")
@@ -63,6 +68,7 @@ _NOT_A_NAME = {
     "clickrepair", "vinylstudio", "sox", "ffmpeg", "flac", "wavelab", "soundforge", "sound", "dvd", "usb",
     "admin", "administrator", "moderator", "mod", "staff", "torrentbot", "bot", "anonymous", "unknown", "dr",
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "someone", "somebody", "friend",
+    "mom", "mum", "dad", "brother", "sister", "wife", "husband", "son", "daughter", "uncle", "fan", "fans",
 }
 
 _VINYL_RIP_WORDS = re.compile(r"\bvinyl\s*-?\s*rip\b|\bvinylrip\b|\bLP\s*rip\b|\bneedle\s*-?\s*drop\b", re.I)
@@ -145,12 +151,16 @@ def _signed(m) -> bool:
     ripper - not a word in lower case running on into the sentence ("rip by john at ...",
     "rip by Foo using Audacity"): a name ends at punctuation or the line's end."""
     name = m.group(1)
-    if not _a_name(name):
+    if not _a_name(name) or any(w.upper() in _NOT_RIPPER for w in name.split()):
         return False
     if name.split()[0].casefold() in KNOWN_RIPPERS:
         return True
     after = m.string[m.end():m.end() + 30]
-    return not re.match(r" +[a-z]", after)
+    if not re.match(r" +[a-z]", after):
+        return True                                   # (the name ends at punctuation or the line's end)
+    # (a name in capitals running on into a phrase about the rip: "Ripped by Packgrog on a VPI",
+    # never into words of a noun - "ripped by Rush fan club")
+    return name[:1].isupper() and bool(re.match(r" +(?:on|using|with|at|in|from|for|via|and|to|off)\b", after))
 
 
 def _brackets(text):
@@ -237,6 +247,18 @@ def watermark_ripper(comment_text: str, scan_text: str) -> str:
     return ""
 
 
+def _signs(name: str, text: str) -> bool:
+    """VIN-3: the notes or comment sign NAME as a rip's - "rip by NAME", "Posted by NAME", "NAME's
+    24bit ...", a signature "NAME, Ediciones ..." - not merely mention it ("Cut at Abbey Road",
+    "gatefold sleeve", "Mobile Fidelity Sound Lab pressing")."""
+    n = re.escape(name)
+    text = str(text or "")
+    if ripper_in_notes(text).casefold() == name.casefold():
+        return True
+    return bool(re.search(rf"\b{n}['\u2019]s\s+(?:\d{{2}}\s*-?\s*bit|vinyl|rip|needle)", text, re.I) or
+                re.search(rf"(?:^|[-\u2013:]\s*){n}, [A-Z][a-z]{{3,}}", text, re.M))
+
+
 def scan_images(folder, limit=3) -> list:
     """The first scans (images) below FOLDER's scan folders, at most LIMIT."""
     out = []
@@ -318,9 +340,14 @@ def rip_year(text: str, not_years=()) -> str:
     pressing's, the album's original)."""
     skip = {str(y)[:4] for y in not_years or () if y}
     for line in str(text or "").splitlines():
-        if not _RIP_LINE.search(line):
+        rip = _RIP_LINE.search(line)
+        if not rip:
             continue
         for m in _RIPPED_WHEN.finditer(line):
+            # (bound to the rip: "recorded" dates the rip only after the rip is named on the line -
+            # "Vinyl rip by X, recorded February 1, 2012", never "Recorded 1981 at Le Studio; ripped 2010")
+            if m.group(0).lower().startswith("recorded") and m.start() < rip.start():
+                continue
             if m.group(1) not in skip:
                 return m.group(1)
     return ""
@@ -493,7 +520,7 @@ def describe(folder, files, catno: str = "", notes: str | None = None, comments=
     mine = own_folder(name, catno)
     who = ripper_in_name(name) or mine.get("ripper") or own.get("ripper") or ripper_in_notes(text)
     cap = caps_in_name(name) if not who else ""
-    if cap and re.search(rf"\b{re.escape(cap)}\b", text, re.I):
+    if cap and _signs(cap, text):
         who = cap
     if not who and folder is not None and re.search(r"\b[A-Z][a-z]+ [A-Z][a-z]+, [A-Z][a-z]{3,}", said):
         seen = scan_text(scan_images(folder)) if scans is None else scans

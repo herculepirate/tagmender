@@ -324,7 +324,8 @@ def catno_hints(text, variants=False):
                         re.fullmatch(r"\d{3}-\d{1,2}", nxt2):
                     found.append(f"{w} {nxt} {nxt2}")
                     skip.update((i + 1, i + 2))
-                elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt):
+                elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt) \
+                        and not _YEAR.match(prev):
                     found.append(f"{w} {nxt}")
                     skip.add(i + 1)
                 # "479 7050": a number in two groups (Deutsche Grammophon style)

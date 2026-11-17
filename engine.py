@@ -2926,9 +2926,11 @@ class Engine:
         # never tagged as one release, nor as one album with half its files dropped as copies -
         # unless one release proven exactly holds every file (a 2CD edition ripped into one
         # folder, its second disc's other takes under the same titles): the matcher is asked first
-        mixed = mixed_versions(g.files)
-        # VIN-7: two rips of one record in one folder, told apart by their own tags (not by names)
-        rips = rip_sets(g.files) if not mixed and not stage else []
+        vinylish = _vinylish(g)
+        mixed = mixed_versions(g.files, rips=vinylish)
+        # VIN-7: two rips of one record in one folder, told apart by their own tags (not by names) -
+        # a vinyl rip's folder only (a CD set's discs numbered 1..n each, untagged, are no rips)
+        rips = rip_sets(g.files) if not mixed and not stage and vinylish else []
         where = stage[0] if stage else g.folder         # DSC-1 (a set side by side: its stage)
         # (FLD-2: the folder the album's name belongs to - a disc's or version's folder is read with
         # its set's name, a set side by side through a stage: the folders beside that one tell
@@ -3277,10 +3279,10 @@ class Engine:
             # VIN-7: a vinyl rip's folder holding two copies of each track - two rips, not
             # versions: held and listed so (Needs Attention, "two rips in one folder")
             pairs = [pr for prs in mixed.values() for pr in prs]
-            sides = [sorted({Path(a) for a, b in pairs if not _COPY_SUFFIX.search(Path(a).stem)} |
-                            {Path(b) for a, b in pairs if not _COPY_SUFFIX.search(Path(b).stem)}),
-                     sorted({Path(a) for a, b in pairs if _COPY_SUFFIX.search(Path(a).stem)} |
-                            {Path(b) for a, b in pairs if _COPY_SUFFIX.search(Path(b).stem)})]
+            sides = [sorted({Path(a) for a, b in pairs if not _RIP_COPY_SUFFIX.search(Path(a).stem)} |
+                            {Path(b) for a, b in pairs if not _RIP_COPY_SUFFIX.search(Path(b).stem)}),
+                     sorted({Path(a) for a, b in pairs if _RIP_COPY_SUFFIX.search(Path(a).stem)} |
+                            {Path(b) for a, b in pairs if _RIP_COPY_SUFFIX.search(Path(b).stem)})]
             if all(sides):
                 return self._rips_held(g, sides, why, errors)
         return self._mixed(g, mixed, errors, why)
@@ -3315,7 +3317,8 @@ class Engine:
                 info[f] = ma.read_file(f)
             except Exception as exc:
                 return None, f"{f.name} cannot be read ({exc})"
-        pairs, how = version_sides(pairs, info)
+        vinylish = _vinylish(g)
+        pairs, how = version_sides(pairs, info, _RIP_COPY_SUFFIX if vinylish else None)
         guided = bool(how)
         halves = [[a for a, _b in pairs], [b for _a, b in pairs]]
         props, outs = [], []
@@ -3323,8 +3326,12 @@ class Engine:
             props.append(self._version_alone(g, fs))
             outs.append(getattr(self, "_last_out", None))
         why = _not_own(props)
-        if why.startswith("both halves fit the same release") and not loose and (
-                how == "copy names" or sorted(map(sorted, halves)) == sorted(map(sorted, rip_sets(g.files)))):
+        if why.startswith("both halves fit the same release") and not loose and vinylish and \
+                (how == "copy names" or sorted(map(sorted, halves)) == sorted(map(sorted, rip_sets(g.files)))):
+            if not one_rip_each(halves):
+                # (the copy marks fall on files of both rips: never split on them)
+                return None, ("the copy marks in the names do not divide the files into two rips (each set's "
+                              "files would be of both)")
             # VIN-7: two rips of one record saved into one folder ("01.AFTK.flac", "01.AFTK (1).flac")
             got, why2 = self._rips_split(g, props, halves, errors)
             if got is not None:
@@ -3451,6 +3458,11 @@ class Engine:
         not): the folder is then held, named in Needs Attention ("two rips in one folder")."""
         if self.profile.get("vinyl_rip_folders", True) is False:
             return None, "the profile keeps vinyl rips as any album (vinyl_rip_folders off)"
+        same = same_audio_lengths(groups)
+        if same:
+            # (a half whose every length is the other's to the sample is no other rip: a transcode
+            # of the same rip, or the same rip twice - never split, never two copies)
+            return None, same
         for p in props:
             if p.status != "identified" or (p.tier or "exact") != "exact" or not self._complete(p) \
                     or len(p.targets or []) != len(p.files or []) or not self._sure(p) \
@@ -3461,7 +3473,7 @@ class Engine:
             if not media or not all(mc.media_kind(m) == "vinyl" for m in media):
                 return None, "the files are no record's rips"
         # (the copy without a copy's mark in its names, "x.flac" beside "x (1).flac", is the first)
-        order = sorted(range(len(props)), key=lambda k: sum(bool(_COPY_SUFFIX.search(Path(f).stem))
+        order = sorted(range(len(props)), key=lambda k: sum(bool(_RIP_COPY_SUFFIX.search(Path(f).stem))
                                                           for f in groups[k]))
         props, groups = [props[k] for k in order], [groups[k] for k in order]
         lines = "; ".join(f"{_names(sorted(fs, key=lambda f: ma._natural_key(str(f))))}" for fs in groups)
@@ -6432,6 +6444,72 @@ def _holds_every_file(out, n) -> bool:
                 and best.get("tracks") == n)
 
 
+def _vinylish(g) -> bool:
+    """VIN-7: G's folder is a vinyl rip's - its name says so, or its first file's media tag is vinyl."""
+    if mc.media_hint(Path(str(g.folder)).name) == "vinyl":
+        return True
+    try:
+        import tagio
+        return any(mc.media_kind(m) == "vinyl" for m in tagio.read(g.files[0]).get("media") or ())
+    except Exception:
+        return False
+
+
+def rip_signature(f) -> tuple:
+    """VIN-7: what one rip wrote on its files: (comment, date, encoder, bits, rate)."""
+    import mutagen
+    import tagio
+    t = tagio.read(f)
+    try:
+        info = mutagen.File(str(f)).info
+        res = (getattr(info, "bits_per_sample", 0), getattr(info, "sample_rate", 0))
+    except Exception:
+        res = (0, 0)
+    return (str((t.get("comment") or [""])[0]).strip(), str((t.get("date") or [""])[0]).strip(),
+            str((t.get("encoder") or [""])[0]).strip(), *res)
+
+
+def one_rip_each(halves) -> bool:
+    """VIN-7: each half of a folder's files is one rip throughout (one signature, rip_signature)
+    and the two are not the same: the copy marks fell on one rip's files only."""
+    try:
+        sigs = [{rip_signature(f) for f in h} for h in halves]
+    except Exception:
+        return False
+    return all(len(s) == 1 for s in sigs) and sigs[0] != sigs[1]
+
+
+def same_audio_lengths(groups) -> str:
+    """VIN-7: why two sets are no two rips - every track's length the other's to the sample (a
+    transcode of one rip: "a lower-resolution copy of the same rip"; or the same rip twice) - or ""."""
+    import mutagen
+    def by_num(fs):
+        out = {}
+        for f in fs:
+            try:
+                out[int(str(ma.read_file(Path(f)).get("num") or 0))] = Path(f)
+            except Exception:
+                continue
+        return out
+    a, b = by_num(groups[0]), by_num(groups[1])
+    common = sorted(set(a) & set(b))
+    if not common or len(common) < max(len(a), len(b)):
+        return ""
+    lower = False
+    for n in common:
+        try:
+            ia, ib = mutagen.File(str(a[n])).info, mutagen.File(str(b[n])).info
+        except Exception:
+            return ""
+        if abs(float(ia.length) - float(ib.length)) > 0.0005:
+            return ""
+        if (getattr(ia, "sample_rate", 0), getattr(ia, "bits_per_sample", 0)) != \
+                (getattr(ib, "sample_rate", 0), getattr(ib, "bits_per_sample", 0)):
+            lower = True
+    return ("a lower-resolution copy of the same rip (every length the other's to the sample)" if lower else
+            "the same rip twice (every length the other's to the sample)")
+
+
 RIPS_WORDS = "two rips of one record are mixed in this folder"      # VIN-7 (Needs Attention: "two rips in one folder")
 
 
@@ -6482,7 +6560,7 @@ def rip_sets(files) -> list:
     return [sorted(g, key=lambda f: ma._natural_key(str(f))) for g in groups]
 
 
-def mixed_versions(files, versions=False) -> dict:
+def mixed_versions(files, versions=False, rips=False) -> dict:
     """{disc folder: [[file, file], ...]} when one folder holds two versions of the album:
     at least two titles twice in one format and on one disc as the tags number them (the
     same title, or the same file name apart from its number and a copy's " (1)"), those
@@ -6491,7 +6569,8 @@ def mixed_versions(files, versions=False) -> dict:
     (match_albums drops it). {} otherwise.
     versions: a version's mark in a track title aside ("Twilight" and "Twilight (Remix
     2024)" are one title). An EP or single often holds a track and its remix, or a mono
-    and stereo mix, so that reading is only asked once the folder fits no release."""
+    and stereo mix, so that reading is only asked once the folder fits no release.
+    rips: a vinyl rip's folder (VIN-7) - a copy's "x_2" pairs too, not only its "x (1)"."""
     by_folder = {}
     for f in files:
         by_folder.setdefault((Path(f).parent, Path(f).suffix.lower()), []).append(Path(f))
@@ -6511,7 +6590,7 @@ def mixed_versions(files, versions=False) -> dict:
         for f in fs:
             # (a version's own title, "Twilight (Remix 2024)", is the title of the album's track)
             title = info[f]["title"] or ""
-            k = ma._track_key(Path(re.sub(r"\s*\(\d+\)$|_[2-9]$", "", f.stem) + f.suffix),
+            k = ma._track_key(Path(re.sub(r"\s*\(\d+\)$|_[2-9]$" if rips else r"\s*\(\d+\)$", "", f.stem) + f.suffix),
                               dict(info[f], title=web_album_title(title) if versions and title else title))
             if k:
                 keys.setdefault(k, []).append(f)
@@ -6534,10 +6613,11 @@ def _names(fs) -> str:
     return ", ".join(Path(f).name for f in fs)
 
 
-_COPY_SUFFIX = re.compile(r"(?:\s\(\d+\)|_[2-9])$")          # (a copy's "x (1)", "x_2": VIN-7)
+_COPY_SUFFIX = re.compile(r"\s\(\d+\)$")
+_RIP_COPY_SUFFIX = re.compile(r"(?:\s\(\d+\)|_[2-9])$")      # VIN-7 only: a copy's "x (1)" or "x_2"
 
 
-def version_sides(pairs, info) -> tuple:
+def version_sides(pairs, info, suffix=None) -> tuple:
     """([(file, file)], how): each pair of a folder holding two versions (mixed_versions)
     in the same order - the first of every pair one version, the second the other - as the
     files themselves suggest: a copy's " (1)" on one of each pair, the version marks in
@@ -6558,7 +6638,8 @@ def version_sides(pairs, info) -> tuple:
             else:
                 return None
         return out
-    tests = (("copy names", lambda f: bool(_COPY_SUFFIX.search(Path(f).stem))),
+    suffix = suffix or _COPY_SUFFIX
+    tests = (("copy names", lambda f: bool(suffix.search(Path(f).stem))),
              ("title marks", lambda f: _title_marks(info[f].get("title"))),
              ("album tags", lambda f: mc.fold(info[f].get("album"))),
              ("release IDs", lambda f: (info[f].get("mb_albumid") or "", info[f].get("discogs_releaseid") or "")))

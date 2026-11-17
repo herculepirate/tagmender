@@ -2634,6 +2634,11 @@ class Engine:
                 held.notes = list(held.notes or []) + [
                     "what TagMender's earlier job wrote of that release is taken back (TAG-1)"]
             return held
+        if out and out.get("reading_capped"):
+            # FLD-2: found only under the folder name's "Artist - Album" reading, and the folder
+            # above is no flat layout (it may be the artist's own folder): the release is proposed
+            # for you to confirm - no album-known, Partial or web tags are written on that reading
+            return self._unresolved(out, files, base, errors)
         if out and out.get("album_only") and out.get("best") and self._accepts("album") and \
                 not _provider_failed(errors):
             # the album is certain, only its pressing is not: tag what every pressing shares

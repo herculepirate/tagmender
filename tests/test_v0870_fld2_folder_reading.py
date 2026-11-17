@@ -150,25 +150,50 @@ class ReadAlbum(Base):
         self.assertEqual(a["title"], "OK Computer OKNOTOK")
 
 
+def flat_siblings(lib):
+    for name in ("Portishead - Dummy", "Massive Attack - Mezzanine", "Bjork - Post"):
+        (lib / name).mkdir(parents=True)
+
+
 class Lookup(Base):
-    def test_FLD2_flat_folder_untagged_resolves_under_head_and_rest(self):
-        d = self.root / "lib" / "Radiohead - OK Computer"
+    def test_FLD2_flat_layout_folder_untagged_resolves_under_head_and_rest(self):
+        lib = self.root / "lib"
+        flat_siblings(lib)
+        d = lib / "Radiohead - OK Computer"
         make_album(d)
         db = FakeMB(release("okc", "Radiohead", "OK Computer"))
         out = run(d, db)
         self.assertEqual(out["status"], "auto", out.get("why"))
         self.assertEqual(out["best"]["id"], "okc")
-        self.assertEqual(db.searches[0][0], "lib")                 # the folder above first ...
-        self.assertEqual(db.searches[-1], ("Radiohead", "OK Computer"))  # ... then the folder name's reading
+        self.assertEqual(db.searches[0], ("Radiohead", "OK Computer"))  # the folder name's reading first
         self.assertEqual(out["folder_reading"]["artist"], "Radiohead")
         self.assertEqual(out["tag_artist"], "Radiohead")
         self.assertIn("folder name 'Radiohead - OK Computer'", out["reading_notes"][0])
         self.assertNotIn("_other_reading", out)
+        self.assertNotIn("reading_capped", out)
+
+    def test_FLD2_single_flat_folder_is_proposed_for_review(self):
+        # "Downloads/Radiohead - OK Computer" beside folders named otherwise: nothing says the folder
+        # above is no artist's - the folder name's reading finds the release, proposed, never sure
+        lib = self.root / "Downloads"
+        for name in ("Software", "Photos 2024", "Radiohead"):
+            (lib / name).mkdir(parents=True)
+        d = lib / "Radiohead - OK Computer"
+        make_album(d)
+        db = FakeMB(release("okc", "Radiohead", "OK Computer"))
+        out = run(d, db)
+        self.assertEqual(out["status"], "review", out.get("why"))
+        self.assertEqual(out["best"]["id"], "okc")
+        self.assertTrue(out["reading_capped"])
+        self.assertEqual(db.searches[0][0], "Downloads")           # the folder above first ...
+        self.assertEqual(db.searches[-1], ("Radiohead", "OK Computer"))  # ... then the folder name's reading
+        self.assertTrue(any("the folder above, 'Downloads', names another artist - confirm" in w
+                            for w in out["why"]), out["why"])
+        self.assertTrue(any("folder name 'Radiohead - OK Computer'" in w for w in out["why"]), out["why"])
 
     def test_FLD2_flat_layout_tries_the_folder_reading_first(self):
         lib = self.root / "Downloads"
-        for name in ("Portishead - Dummy", "Massive Attack - Mezzanine", "Bjork - Post"):
-            (lib / name).mkdir(parents=True)
+        flat_siblings(lib)
         d = lib / "Radiohead - OK Computer (1997)"
         make_album(d)
         db = FakeMB(release("okc", "Radiohead", "OK Computer"))
@@ -189,18 +214,19 @@ class Lookup(Base):
         self.assertNotIn("folder_reading", out)
         self.assertEqual({a for a, _t in db.searches}, {"Radiohead"})    # sure at once: no second reading
 
-    def test_FLD2_other_band_proven_by_every_gate_is_told(self):
+    def test_FLD2_other_band_in_an_artist_folder_is_only_proposed(self):
         # the band Live's own "At Wembley" fits every length, title and the folder name's head, and
-        # MusicBrainz has no Radiohead album so named: the folder name's reading passes every gate
-        # (the folder above alone would have held it for its artist), and the plan says where its
-        # artist came from
+        # MusicBrainz has no Radiohead album so named: the folder name's reading passes every gate,
+        # but the folder above may be the artist's own - proposed for review, never sure
         d = self.root / "Radiohead" / "Live - At Wembley"
         make_album(d)
         db = FakeMB(release("band", "Live", "At Wembley"))
         out = run(d, db)
-        self.assertEqual(out["status"], "auto", out.get("why"))
+        self.assertEqual(out["status"], "review", out.get("why"))
+        self.assertEqual(out["best"]["id"], "band")
+        self.assertTrue(out["reading_capped"])
         self.assertEqual(out["folder_reading"]["artist"], "Live")
-        self.assertIn("folder name 'Live - At Wembley'", out["reading_notes"][0])
+        self.assertTrue(any("'Radiohead', names another artist - confirm" in w for w in out["why"]), out["why"])
         # its lengths another album's: nothing is sure under either reading
         db = FakeMB(release("band", "Live", "At Wembley", OTHER_LENGTHS))
         self.assertNotEqual(run(d, db)["status"], "auto")
@@ -230,6 +256,8 @@ class Lookup(Base):
 
 class Tiers(unittest.TestCase):
     """The second reading is taken only when strictly better by tier."""
+    flat = False
+
     def outcome(self, first, second):
         calls = []
 
@@ -241,15 +269,25 @@ class Tiers(unittest.TestCase):
             return res
         row = {"FullPath": "/nowhere/lib/Head - Rest", "AlbumArtistFolder": "lib", "AlbumFolder": "Head - Rest"}
         args = types.SimpleNamespace(ai=object())
-        with mock.patch.object(ma, "_process", fake):
+        with mock.patch.object(ma, "_process", fake), mock.patch.object(ma, "flat_layout", lambda *a: self.flat):
             out = ma.process(row, None, CFG, None, args)
         self.assertIsNotNone(args.ai)                              # (the caller's args untouched)
         return out, calls
 
     def test_FLD2_tiers(self):
         out, calls = self.outcome({"status": "review", "why": []}, {"status": "auto", "why": []})
-        self.assertEqual(out["status"], "auto")
+        # (no flat layout: the folder name's sure reading wins over the review, and is capped to it)
+        self.assertEqual(out["status"], "review")
+        self.assertTrue(out["reading_capped"])
+        self.assertEqual(out["folder_reading"], {"artist": "Head"})
         self.assertTrue(calls[1]["FolderReading"])
+        self.flat = True
+        out, calls = self.outcome({"status": "review", "why": []}, {"status": "auto", "why": []})
+        self.assertEqual(out["status"], "auto")                    # (flat: the parent reading second)
+        self.assertNotIn("reading_capped", out)
+        self.assertTrue(calls[0]["FolderReading"])
+        self.assertFalse(calls[1]["FolderReading"])
+        self.flat = False
         out, _ = self.outcome({"status": "nomatch", "why": []}, {"status": "nomatch", "album_only": {"x": 1}})
         self.assertTrue(out.get("album_only"))
         # equal tiers, or worse: the first reading stays (never a score alone)
@@ -277,7 +315,9 @@ class Engine(unittest.TestCase):
         self.base.setUp()
         self.addCleanup(self.base.tearDown)
 
-    def test_FLD2_engine_plans_the_folder_reading(self):
+    def album(self, flat):
+        if flat:
+            flat_siblings(self.base.lib)
         d = self.base.lib / "Band E - Album L"
         d.mkdir(parents=True)
         for i in range(3):                                         # (no artist or album tag)
@@ -285,6 +325,10 @@ class Engine(unittest.TestCase):
                             f"sine=frequency={300 + 50 * i}:duration={10 * (i + 1)}", "-ar", "8000", "-ac", "1",
                             "-metadata", f"title=T{i}", "-metadata", f"track={i + 1}",
                             str(d / f"{i + 1:02d} T{i}.flac"), "-y"], check=True)
+        return d
+
+    def test_FLD2_engine_plans_the_folder_reading(self):
+        d = self.album(flat=True)
         eng = self.base.engine(self.te.FakeHttp(dg=[self.te.dg_release(931, "Band E", "Album L")]))
         seen = []
         real = ma.with_reading
@@ -298,9 +342,20 @@ class Engine(unittest.TestCase):
             p = eng.identify(eng.albums_in(d)[0])
         self.assertEqual(p.status, "identified", (p.reason, p.why))
         self.assertEqual(str(p.release_id), "931")
-        # (the matcher's second reading, then the engine's own reading of the album it plans)
+        # (the matcher's reading, then the engine's own reading of the album it plans)
         self.assertEqual(seen, [("Band E", "Album L")] * 2)
         self.assertTrue(any("folder name 'Band E - Album L'" in e for e in p.evidence), p.evidence)
+
+    def test_FLD2_engine_proposes_a_capped_reading_and_writes_nothing(self):
+        d = self.album(flat=False)
+        eng = self.base.engine(self.te.FakeHttp(dg=[self.te.dg_release(931, "Band E", "Album L")]))
+        with mock.patch.object(eng, "_partial", side_effect=AssertionError("no Partial on a capped reading")), \
+                mock.patch.object(eng, "_web", side_effect=AssertionError("no web on a capped reading")):
+            p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "unresolved", (p.reason, p.why))
+        self.assertEqual(str(p.release_id), "931")                 # (proposed: you confirm it)
+        self.assertFalse(p.targets)
+        self.assertIn("names another artist - confirm", p.reason)
 
 
 if __name__ == "__main__":

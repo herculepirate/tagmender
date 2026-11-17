@@ -8899,8 +8899,13 @@ def process(row, http, cfg, dm, args):
     # only when the first is not sure, and it is taken only when its result is strictly better
     # by tier (sure, over album known or for review, over no match): never on a score alone.
     # Every gate applies to either reading as to any album (artist, title, lengths, pressings).
+    # Only beside a flat layout may the folder name's reading be sure: elsewhere the folder above
+    # may well be the artist ("Radiohead/Live - At Wembley"), and what that reading finds is
+    # proposed for you to confirm (review), never tagged by itself - also not as album known or
+    # Partial (engine: reading_capped).
     first = dict(row)
-    if folder_reading(row.get("AlbumFolder")) and flat_layout(row["FullPath"], row.get("AlbumArtistFolder")):
+    flat = bool(folder_reading(row.get("AlbumFolder")) and flat_layout(row["FullPath"], row.get("AlbumArtistFolder")))
+    if flat:
         first["FolderReading"] = True
     out = _process(first, http, cfg, dm, args, full_cfg)
     if out.pop("_other_reading", False) and out.get("status") not in ("auto", "error", "moved", "ignored",
@@ -8913,6 +8918,13 @@ def process(row, http, cfg, dm, args):
         again.pop("_other_reading", None)
         if _reading_tier(again) > _reading_tier(out):
             out = again
+    if out.get("folder_reading") and not flat:
+        out["reading_capped"] = True
+        cap = (f"artist read from the folder name; the folder above, '{row.get('AlbumArtistFolder') or ''}', "
+               "names another artist - confirm the release (FLD-2)")
+        if out.get("status") == "auto":
+            out["status"] = "review"
+        out["why"] = list(out.get("why") or []) + [cap]
     if out.get("reading_notes") and out.get("status") != "auto":
         out["why"] = list(out.get("why") or []) + out["reading_notes"]       # (a sure pick: its evidence)
     return out

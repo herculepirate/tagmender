@@ -993,6 +993,10 @@ class Pane(QFrame):
         for b in (self.button, self.strip_button):
             b.setText(glyph)
             b.setToolTip(words)
+            # (square, never narrower than its glyph needs in this style and font: 28 px or more)
+            hint = b.minimumSizeHint()
+            side = max(28, hint.width(), hint.height())
+            b.setFixedSize(side, side)
             b.setAccessibleName(words)
 
     def add(self, w, stretch=0):

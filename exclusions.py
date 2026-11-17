@@ -30,11 +30,13 @@ import contextvars
 import fnmatch
 import hashlib
 import json
+import marshal
 import os
 import re
 import sqlite3
 import threading
 import time
+import zlib
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -246,18 +248,24 @@ _MP4 = {"\xa9alb": "album", "\xa9nam": "title", "\xa9ART": "artist", "aART": "al
 # the app's List first then Look Up): an unchanged file is not opened again on the next pass.
 # A file whose metadata is large (its pictures as text) is only remembered for one inner
 # meta_memo() block (one identification), never in the long-lived store. prune: on leaving
-# the block, what it never asked for (files gone or changed) is dropped from the store.
-# The stamps miss some edits: on FAT/exFAT the ctime does not change when a file is written,
-# and a tool that keeps the mtime and the size leaves every stamp as it was. So an entry of
-# the long-lived store is trusted for META_STORE_AGE only, then the file is read again: a
-# watcher pass comes every few seconds to minutes and an app session lasts hours, so half an
-# hour bounds how long such an edit goes unseen while an unchanged library is still opened at
-# most twice an hour (instead of on every pass). And the store holds META_STORE_CAP files at
-# most (the ones stored longest ago are dropped): a few kB each, tens of MB at the cap.
+# the block (a pass that ended, not one that failed), what it never asked for (files gone or
+# changed) is dropped from the store - every such entry (True), or only those inside the
+# folders the pass read whole (a list of them: PRF-2, a listing of one folder keeps the rest
+# of the library's).
+# PRF-2: an entry is trusted while the file's stamps are the same, pass after pass: a library
+# of 90,000 files on a network share takes over an hour to read, so a store that forgot by
+# the half hour, or held fewer files than the library, had every file opened again on the next
+# pass. The stamps miss some edits: on FAT/exFAT the ctime does not change when a file is
+# written, and a tagger told to keep the modification time (and the size: a padded tag) leaves
+# every stamp as it was. So an entry is still read again after META_STORE_AGE - a working day:
+# the passes of one session read a file once, and such an edit is seen by the next day's.
+# The store holds META_STORE_CAP files at most (the ones stored longest ago are dropped):
+# more than a large library, each kept compressed (well under 1 kB for a typical file's tags:
+# tens of MB for a library, a few hundred at the cap).
 _META_MEMO = contextvars.ContextVar("tagmender_meta_memo", default=None)
 META_STORE_MAX = 64 * 1024              # (characters of one file's metadata kept in a store)
-META_STORE_AGE = 30 * 60.0              # (seconds an entry of a long-lived store is trusted)
-META_STORE_CAP = 50_000                 # (files a long-lived store holds at most)
+META_STORE_AGE = 8 * 3600.0             # (seconds an entry of a long-lived store is trusted)
+META_STORE_CAP = 500_000                # (files a long-lived store holds at most)
 _META_STORE_LOCK = threading.Lock()     # (the app's store is shared by its worker threads)
 
 
@@ -290,15 +298,31 @@ def meta_memo(store=None, prune=False):
     else:
         memo = _Memo(store, None, set())
     token = _META_MEMO.set(memo)
+    _ended = [False]
     try:
         yield
+        _ended[0] = True
     finally:
         _META_MEMO.reset(token)
-        if store is not None and prune:
-            with _META_STORE_LOCK:
-                for k in list(store):
-                    if k not in memo.seen:
-                        store.pop(k, None)
+        if store is not None and prune and _ended[0]:
+            _prune(store, memo.seen, None if prune is True else prune)
+
+
+def _prune(store, seen, roots=None):
+    """Drop the entries of STORE a pass did not ask for (SEEN): all of them, or only those of
+    files inside ROOTS (the folders the pass read whole)."""
+    if roots is not None:
+        roots = [str(r).rstrip(os.sep) for r in roots]
+        roots = [(r, r + os.sep) for r in roots]
+    with _META_STORE_LOCK:
+        for k in list(store):
+            if k in seen:
+                continue
+            if roots is not None:
+                where = str(k[0]) if isinstance(k, tuple) and k else ""
+                if not any(where == r or where.startswith(sub) for r, sub in roots):
+                    continue
+            store.pop(k, None)
 
 
 def read_meta(path):
@@ -316,10 +340,12 @@ def read_meta(path):
         memo.seen.add(key)
     meta = None
     if memo.store is not None:
-        # (stored as (when, meta); one stored longer than META_STORE_AGE is read again)
+        # (stored as (when, meta packed); one stored longer than META_STORE_AGE is read again)
         entry = memo.store.get(key)
         if entry is not None and time.monotonic() - entry[0] <= META_STORE_AGE:
-            meta = entry[1]
+            meta = _unpack(entry[1])
+            if meta is not None:
+                return meta                              # (a fresh dict: callers may change theirs)
     if meta is None and memo.local is not None:
         meta = memo.local.get(key)
     if meta is None:
@@ -331,12 +357,31 @@ def read_meta(path):
     return {k: list(v) for k, v in meta.items()}       # (a copy: callers may change theirs)
 
 
+def _pack(meta):
+    """META as a long-lived store keeps it: compressed (PRF-2: a tenth of its size in memory);
+    as it is when it cannot be packed."""
+    try:
+        return zlib.compress(marshal.dumps(meta), 1)
+    except (ValueError, TypeError):
+        return meta
+
+
+def _unpack(packed):
+    """A fresh {field: [values]} of a stored entry (None when it cannot be read back)."""
+    if isinstance(packed, bytes):
+        try:
+            return marshal.loads(zlib.decompress(packed))
+        except (ValueError, TypeError, EOFError, zlib.error):
+            return None
+    return {k: list(v) for k, v in packed.items()}
+
+
 def _store_meta(store, key, meta):
     """Keep META in a long-lived store, as stored now (last in its order), dropping the
     entries stored longest ago beyond META_STORE_CAP."""
     with _META_STORE_LOCK:
         store.pop(key, None)
-        store[key] = (time.monotonic(), meta)
+        store[key] = (time.monotonic(), _pack(meta))
         while len(store) > META_STORE_CAP:
             store.pop(next(iter(store)))
 

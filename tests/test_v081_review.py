@@ -162,7 +162,8 @@ class MetaStoreBounds(unittest.TestCase):
             with ex.meta_memo(store, True):
                 self.assertEqual(ex.read_meta(f)["album"], ["After"])
                 self.assertEqual(ex.read_meta(f)["album"], ["After"])
-        self.assertLessEqual(ex.META_STORE_AGE, 3600)
+        # (0.8.69, PRF-2: a working day - a pass over a large library takes longer than an hour)
+        self.assertLessEqual(ex.META_STORE_AGE, 24 * 3600)
 
     def test_the_store_holds_at_most_the_cap(self):
         files = []

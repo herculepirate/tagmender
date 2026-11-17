@@ -201,7 +201,7 @@ def measure_scan(roots, eng=None) -> dict:
     for name in ("first", "again"):
         start, albums = time.monotonic(), 0
         for r in roots:
-            with ex.meta_memo(store, True):
+            with ex.meta_memo(store, [os.path.abspath(r)]):     # (as the app: a pass forgets only its own folder's)
                 albums += len(e.albums_in(r))
         out[name] = round(time.monotonic() - start, 3)
         out["albums"] = albums

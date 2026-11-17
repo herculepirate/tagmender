@@ -971,7 +971,9 @@ def evidence_of(out, best):
     and an AcoustID disagreement: clues for whoever reviews the album, kept out of the
     match's own notes so nothing reads them as proof."""
     out = out or {}
-    return (list(best.get("notes") or []) + list(out.get("shop_notes") or []) + list(out.get("gnudb_notes") or [])
+    # (FLD-2: the artist and album read from the folder name, when the lookup used that reading)
+    return (list(best.get("notes") or []) + list(out.get("reading_notes") or [])
+            + list(out.get("shop_notes") or []) + list(out.get("gnudb_notes") or [])
             + list(out.get("acoustid_notes") or []) + list(out.get("ai_notes") or []))
 
 
@@ -2583,6 +2585,9 @@ class Engine:
                                         reason="set search: no one release holds every file")
             return self._split_or_mixed(g, mixed, errors)
         album = ma.read_album(where, artist_folder, album_folder, exclude={str(x) for x in outside})
+        # FLD-2: the reading of the folder name the matcher's answer rests on ("Artist - Album" of a
+        # flat layout): the plan, tags and naming read the album as it did
+        album = ma.with_reading(album, (out or {}).get("folder_reading"))
         if stage:                                        # (the real files, not the stage's links)
             for t in album["tracks"]:
                 if t.get("path"):
@@ -3114,6 +3119,13 @@ class Engine:
             return planmod.Proposal(**base, status="unresolved", reason_codes=["other"],
                                     reason=f"the release you chose was not found: {ref}")
         sc = mc.score_candidate(album, cand, self.cfg)
+        if album.get("folder_reading"):
+            # (FLD-2: the release you chose, scored under the folder name's "Artist - Album" reading
+            # too - a flat layout's folder above is no artist: the reading that agrees better)
+            alt = ma.with_reading(album, album["folder_reading"])
+            s2 = mc.score_candidate(alt, cand, self.cfg)
+            if float(s2.get("confidence") or 0) > float(sc.get("confidence") or 0):
+                album, sc = alt, s2
         if claimed is not None:
             # (DSC-10: a set's title is its folder's, or the title one of its discs is tagged with -
             # "The Stranger" on the disc of the album in "The Stranger Legacy Edition (with BestBuy

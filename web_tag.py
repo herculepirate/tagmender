@@ -1305,6 +1305,7 @@ def main(argv=None):
         # Deadly Lullabyes Live: "barcode differs" was the Massacre CD's barcode in the tags)
         album = ma.read_album(base, o.get("artist_folder") or base.parent.name, o.get("album_folder") or base.name,
                               exclude=pre.excluded, blind=chosen)
+        album = ma.with_reading(album, o.get("folder_reading"))      # FLD-2: as the matcher read it
         if not album["tracks"]:
             continue
         text = album_text(db, base)

@@ -54,7 +54,7 @@ PANES = ("folders", "albums", "tags", "covers")
 STRIP = 34                              # a folded side pane: a strip this wide
 SIDE_MIN = 100                          # an open side pane's narrowest (960 px wide, the inspector open: three fit)
 WHY_MOST = 112                          # "Why this release" at most this tall (it scrolls)
-COVER_ROW = 124                         # the cover strip's height
+COVER_ROW = 140                         # the cover strip's height
 NONE = N_("(none)")
 FOLDER, FILENAME = "~folder", "~filename"          # the path rows of the tag pane (never tag keys)
 MIME = "application/x-tagmender-folders"           # folders dragged from Your folders (one path a line)
@@ -64,6 +64,28 @@ MARK = {"added": "+", "changed": "→", "removed": "−"}
 MARK_WORDS = {"+": N_("Added"), "→": N_("Changed"), "−": N_("Removed"), "=": N_("Kept")}
 _LAYER = re.compile(r"\((SACD(?: Stereo| Multichannel)?)\)\s*$", re.I)
 _DISC_DIR = re.compile(r"^(?:cd|disc|disk|dvd)\s*[-_.]?\s*0*(\d+)\b", re.I)
+
+
+def _ints(v, n):
+    return list(v) if isinstance(v, list) and len(v) == n and \
+        all(isinstance(x, int) and not isinstance(x, bool) and 0 < x < 100000 for x in v) else None
+
+
+def clean_prefs(p) -> dict:
+    """gui.json's preview_panes as far as it can be used: a value of the wrong kind (edited by
+    hand, an older version) is left out, never a reason the window cannot open."""
+    p = p if isinstance(p, dict) else {}
+    out = {}
+    col = p.get("collapsed")
+    if isinstance(col, dict):
+        out["collapsed"] = {k: v for k, v in col.items() if k in PANES and isinstance(v, bool)}
+    for key, n in (("sizes", 3), ("vsizes", 2), ("list", 2)):
+        v = _ints(p.get(key), n)
+        if v is not None:
+            out[key] = v
+    if isinstance(p.get("changes_only"), bool):
+        out["changes_only"] = p["changes_only"]
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -224,9 +246,22 @@ def album_discs(a) -> list:
     return out
 
 
+_RULE_ID = re.compile(r"\s*\((?:[A-Z]{2,4}-\d+[a-z]?)(?:/[A-Z0-9-]+[a-z]?)*\)")
+
+
+def plain(text) -> str:
+    """Planner words for a person: the matching rules' IDs ("(MED-22c)", "(TRK-4/4b)") left out."""
+    return _RULE_ID.sub("", str(text)).strip()
+
+
 def why_lines(a) -> tuple:
     """("Why this release" or another title, [(mark, words)]): ✓ what agreed, ≠ what differs,
-    → what to do."""
+    → what to do (in plain words: no rule IDs)."""
+    title, out = _why_lines(a)
+    return title, [(m, plain(w)) for m, w in out if plain(w)]
+
+
+def _why_lines(a) -> tuple:
     ident = a.get("identification") or {}
     out = [("✓", str(x)) for x in ident.get("evidence") or []]
     out += [("≠", str(x)) for x in ident.get("why") or []]
@@ -717,11 +752,17 @@ class TagModel(QAbstractTableModel):
         return None
 
     def can_edit(self, r) -> bool:
+        """The row may be changed (Edit Value…, Revert, Remove): a tag, not a path."""
         return self.editable and not r.get("path")
+
+    def inline(self, r) -> bool:
+        """Typed in its cell: only a value every file shares, of one value at most (several
+        values, or files that differ: Edit Value…, as in the inspector)."""
+        return self.can_edit(r) and not r["mixed_after"] and len(r["after_vals"] or []) <= 1
 
     def flags(self, idx):
         f = super().flags(idx)
-        if idx.isValid() and idx.column() == 3 and self.can_edit(self.rows[idx.row()]):
+        if idx.isValid() and idx.column() == 3 and self.inline(self.rows[idx.row()]):
             f |= Qt.ItemIsEditable
         return f
 
@@ -757,7 +798,7 @@ class TagModel(QAbstractTableModel):
             f.setItalic(True)
             return f
         if role == self.EDIT_ROLE:
-            return _join(r["after_vals"] or []) if r["after_vals"] is not None else ""
+            return (r["after_vals"] or [""])[0] if self.inline(r) else ""
         if role == self.SEGMENTS and c in (2, 3):
             mixed = r["mixed_before"] if c == 2 else r["mixed_after"]
             if mixed or r["mark"] == "=":
@@ -818,6 +859,32 @@ class DiffDelegate(QStyledItemDelegate):
 # --------------------------------------------------------------------------
 # a pane that folds to a strip
 # --------------------------------------------------------------------------
+class ElidedLabel(QLabel):
+    """One line, cut with "…" where the pane is too narrow; the whole text in its tooltip."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setToolTip(text)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setToolTip(text)
+
+    def minimumSizeHint(self):
+        return QSize(0, super().minimumSizeHint().height())
+
+    def elided(self) -> str:
+        return self.fontMetrics().elidedText(self.text(), Qt.ElideRight, max(0, self.contentsRect().width()))
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        self.style().drawItemText(p, self.contentsRect(), int(Qt.AlignLeft | Qt.AlignVCenter), self.palette(),
+                                  self.isEnabled(), self.elided(), self.foregroundRole())
+        p.end()
+
+
 class VerticalLabel(QWidget):
     """A folded pane's title, read from the bottom up."""
 
@@ -875,10 +942,8 @@ class Pane(QFrame):
         self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # (a narrow pane cuts it)
         self.title_label.setToolTip(title)
         words.addWidget(self.title_label)
-        self.subtitle = QLabel(subtitle)
+        self.subtitle = ElidedLabel(subtitle)
         self.subtitle.setProperty("role", "hint")
-        self.subtitle.setWordWrap(False)
-        self.subtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.subtitle.setVisible(bool(subtitle))
         words.addWidget(self.subtitle)
         hl.addLayout(words, 1)
@@ -980,8 +1045,8 @@ class CoverStrip(QListWidget):
         self.setWrapping(False)
         self.setMovement(QListView.Static)
         self.setResizeMode(QListView.Adjust)
-        self.setIconSize(QSize(64, 64))
-        self.setGridSize(QSize(168, COVER_ROW - 8))
+        self.setIconSize(QSize(56, 56))
+        self.setGridSize(QSize(168, 112))                   # (a picture and two lines of words)
         self.setWordWrap(True)
         self.setSpacing(6)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -1124,7 +1189,22 @@ class PreviewPanes(QWidget):
         self.revert_btn.setAccessibleName(tr("Revert to Original"))
         self.revert_btn.setAutoRaise(True)
         self.revert_btn.clicked.connect(self.revert_selected)
+        self.tag_buttons = {"revert": self.revert_btn}
+        for key, words, icon, fn in (("edit", tr("Edit Value…"), "pencil", self.edit_selected),
+                                     ("remove", tr("Remove Tag"), "minus", self.remove_selected)):
+            b = QToolButton()
+            b.setProperty("role", "tool")
+            b.setIcon(icons.icon(icon, "ink"))
+            b.setText(words)
+            b.setToolTip(words + (" (Return)" if key == "edit" else " (Delete)"))
+            b.setAccessibleName(words.rstrip("…"))
+            b.setAutoRaise(True)
+            b.clicked.connect(lambda _=False, f=fn: f())
+            foot.addWidget(b)
+            self.tag_buttons[key] = b
         foot.addWidget(self.revert_btn)
+        self.tag_view.installEventFilter(self)              # (Return edits, Delete removes: as the inspector)
+        self.tag_view.doubleClicked.connect(self._double_clicked)
         holder = QWidget()
         holder.setLayout(foot)
         p.add(holder)
@@ -1202,13 +1282,16 @@ class PreviewPanes(QWidget):
         self._refresh_timer.setInterval(0)
         self._refresh_timer.timeout.connect(self._refresh_changed)
         self._changed = []
+        # (the reads stop when the panes go: the handler holds the workers' list, not the panes)
+        self._workers = []
+        workers = self._workers
+        self.destroyed.connect(lambda *_: [setattr(w, "cancelled", True) for w in workers])
         self.show_scope()
 
     # ---- settings ---------------------------------------------------------------------------
     @staticmethod
     def _prefs() -> dict:
-        p = _gui_prefs().get(PREF)
-        return p if isinstance(p, dict) else {}
+        return clean_prefs(_gui_prefs().get(PREF))
 
     def _save(self, **kw):
         p = self._prefs()
@@ -1549,7 +1632,7 @@ class PreviewPanes(QWidget):
             self.loaded.emit("tags")
 
         w_ref = [None]
-        w_ref[0] = self.tag_worker = start(self, work, done, failed=lambda _m: None)
+        w_ref[0] = self.tag_worker = self._started(start(self, work, done, failed=lambda _m: None))
 
     def editable(self) -> bool:
         if not self.scope or self.owner is None:
@@ -1577,6 +1660,8 @@ class PreviewPanes(QWidget):
         else:
             note = tr("{0} for {1}.").format(plural(n, tr("change"), tr("changes")),
                                              plural(len(files), tr("file"), tr("files")))
+            if len(files) > READ_MOST and not self.changes_only.isChecked():
+                note += " " + tr("The tags that stay are read from the first {0} files.").format(READ_MOST)
             if self.editable():
                 note += " " + tr("Double-click a new value to edit it; nothing is written until you apply.")
         self.tag_note.setText(note)
@@ -1590,7 +1675,10 @@ class PreviewPanes(QWidget):
 
     def _tag_buttons(self):
         r = self.selected_tag()
-        self.revert_btn.setEnabled(bool(r) and self.tag_model.can_edit(r) and (r["mark"] != "=" or r["mine"]))
+        ok = bool(r) and self.tag_model.can_edit(r)
+        self.revert_btn.setEnabled(ok and (r["mark"] != "=" or r["mine"]))
+        self.tag_buttons["edit"].setEnabled(ok)
+        self.tag_buttons["remove"].setEnabled(ok and (r["mixed_after"] or bool(r["after_vals"])))
 
     def _edit(self, field_, value):
         """Your value for FIELD on the selection, through the inspector's edits."""
@@ -1608,12 +1696,74 @@ class PreviewPanes(QWidget):
         return True
 
     def typed(self, row, text):
+        """A value typed in a New cell: only for a row every file shares with one value at most
+        (TagModel.inline). Left empty, or as it was, nothing changes: a tag is removed only with
+        Remove Tag."""
         text = (text or "").strip()
-        if row.get("path"):
+        if not self.tag_model.inline(row) or not text or text == tr(NONE):
             return
-        if row["after_vals"] is not None and text == _join(row["after_vals"]):
+        if text == _join(row["after_vals"] or []):
             return
-        self._edit(row["field"], [text] if text and text != tr(NONE) else None)
+        self._edit(row["field"], [text])
+
+    def _differ_ok(self, row, what) -> bool:
+        """Files whose values differ get one value only when you say so."""
+        if not row["mixed_after"]:
+            return True
+        from . import sheets
+        return sheets.confirm(self, tr("{what} {tag} on all {n} files?").format(what=what, tag=row["name"], n=row["n"]),
+                              tr("The selected files have different values for {tag}; each would then have the "
+                                 "same.").format(tag=row["name"]),
+                              tr("Nothing is written until you apply; Edit › Undo Edit takes it back."),
+                              what, destructive=True)
+
+    def edit_selected(self):
+        """Edit Value…: the inspector's sheet, one value a line (several values, or files that
+        differ - asked first)."""
+        r = self.selected_tag()
+        if not r or not self.tag_model.can_edit(r):
+            return
+        if not self._differ_ok(r, tr("Set")):
+            return
+        from . import inspector
+        files = self.scope_files()
+        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + \
+            tr(" Nothing is written until you apply the preview.")
+        got = inspector.tag_sheet(self, tr("Edit {0}").format(r["name"]), scope, name=r["field"],
+                                  values=r["after_vals"] or [])
+        if got is not None and got[1]:                     # (an empty sheet removes nothing: Remove Tag does)
+            self._edit(r["field"], got[1])
+
+    def remove_selected(self):
+        r = self.selected_tag()
+        if not r or not self.tag_model.can_edit(r) or not (r["mixed_after"] or r["after_vals"]):
+            return
+        if self._differ_ok(r, tr("Remove")):
+            self._edit(r["field"], None)
+
+    def _double_clicked(self, idx):
+        if idx.isValid() and 0 <= idx.row() < len(self.tag_model.rows):
+            r = self.tag_model.rows[idx.row()]
+            if not (idx.column() == 3 and self.tag_model.inline(r)):
+                self.edit_selected()
+
+    def eventFilter(self, obj, e):
+        from PySide6.QtCore import QEvent
+        if obj is self.tag_view and e.type() == QEvent.KeyPress and \
+                self.tag_view.state() != QAbstractItemView.EditingState and not e.modifiers():
+            if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_F2):
+                r = self.selected_tag()
+                if r is not None and self.tag_model.inline(r):
+                    idx = self.tag_model.index(self.tag_model.rows.index(r), 3)
+                    self.tag_view.setCurrentIndex(idx)
+                    self.tag_view.edit(idx)
+                else:
+                    self.edit_selected()
+                return True
+            if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                self.remove_selected()
+                return True
+        return super().eventFilter(obj, e)
 
     def revert_selected(self):
         import plan as planmod
@@ -1671,7 +1821,7 @@ class PreviewPanes(QWidget):
                 self.cover_note.setText(tr("The pictures could not be read: {0}").format(msg.split("\n\n")[0]))
 
         ref = [None]
-        ref[0] = self.cover_worker = start(self, work, done, failed=failed)
+        ref[0] = self.cover_worker = self._started(start(self, work, done, failed=failed))
 
     def show_covers(self, choices, art):
         import plan as planmod
@@ -1776,8 +1926,13 @@ class PreviewPanes(QWidget):
         manual_match.open_manual_match(self.owner, album)
 
     # ---- shutting down ------------------------------------------------------------------------
+    def _started(self, w):
+        self._workers[:] = [x for x in self._workers if not getattr(x, "cancelled", False)][-8:] + [w]
+        return w
+
     def stop(self):
-        for w in (self.tag_worker, self.cover_worker):
-            if w is not None:
-                w.cancelled = True
+        """Every read of the panes cancelled (the panes are going)."""
+        for w in self._workers:
+            w.cancelled = True
         self.tag_worker = self.cover_worker = None
+

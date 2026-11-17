@@ -589,10 +589,8 @@ class Overview(QWidget):
         self.list_split.addWidget(self.panes)
         self.list_split.setStretchFactor(0, 1)
         self.list_split.setStretchFactor(1, 2)
-        split = (_gui_prefs().get(PANES_PREF) or {}).get("list") if isinstance(_gui_prefs().get(PANES_PREF), dict) \
-            else None
-        self.list_split.setSizes(split if isinstance(split, list) and len(split) == 2 and
-                                 all(isinstance(x, int) and x > 0 for x in split) else [190, 470])
+        from .preview_panes import clean_prefs
+        self.list_split.setSizes(clean_prefs(_gui_prefs().get(PANES_PREF)).get("list") or [190, 470])
         self.list_split.splitterMoved.connect(lambda *_: self._split_timer.start())
         self._split_timer = QTimer(self)
         self._split_timer.setSingleShot(True)
@@ -632,9 +630,8 @@ class Overview(QWidget):
 
     # ---- the preview's panes (gui/preview_panes.py) -----------------------------------------
     def save_list_split(self):
-        from .preview_panes import PREF
-        p = _gui_prefs().get(PREF)
-        p = p if isinstance(p, dict) else {}
+        from .preview_panes import PREF, clean_prefs
+        p = clean_prefs(_gui_prefs().get(PREF))
         sizes = self.list_split.sizes()
         if all(x > 0 for x in sizes):
             p["list"] = sizes
@@ -654,6 +651,12 @@ class Overview(QWidget):
         for r, a in enumerate(self.model.albums):
             if a is album:
                 row = self.proxy.mapFromSource(self.model.index(r, 0)).row()
+                if row < 0 and self.proxy.filterRegularExpression().pattern():
+                    # (hidden by the search: shown again, so the list, the inspector and an edit
+                    # are of the album the panes show)
+                    self.search.clear()
+                    self.filter("")
+                    row = self.proxy.mapFromSource(self.model.index(r, 0)).row()
                 if row >= 0:
                     self.show_row(row)
                 return

@@ -29,7 +29,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "tests"))
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QAbstractItemView, QApplication
 except ImportError:                                           # GUI is optional
     QApplication = None
 
@@ -630,6 +630,160 @@ class Timing(PreviewPanesBase):
         self.app.processEvents()
         print(f"choosing album 1,501: {time.perf_counter() - t1:.3f} s", file=sys.stderr)
         self.assertLess(time.perf_counter() - t1, 1.0)
+
+
+class ReviewFixes(PreviewPanesBase):
+    """The independent review of 0.8.69's panes: each case failed before its fix."""
+
+    def edit(self, insp, album):
+        e = insp.edit_of(album)
+        return (e or {}).get("tags"), (e or {}).get("file_tags")
+
+    def test_a_value_the_files_do_not_share_is_never_typed_over_or_removed_by_an_empty_cell(self):
+        ov = self.show_plan()
+        p, joined, insp = ov.panes, ov.model.albums[0], self.win.inspector
+        p.select("album", None, joined)
+        r = self.rows(p)["tracknumber"]
+        self.assertTrue(r["mixed_after"])
+        i = p.tag_model.rows.index(r)
+        idx = p.tag_model.index(i, 3)
+        self.assertFalse(p.tag_model.flags(idx) & Qt.ItemIsEditable)       # (not typed in its cell)
+        with mock.patch.object(type(insp), "reapply") as reapply:
+            p.tag_model.setData(idx, "")                                    # (an empty commit)
+            p.tag_model.setData(idx, "7")                                   # (one value over all files)
+            p.typed(self.rows(p)["date"], "")                               # (a shared value left empty)
+        reapply.assert_not_called()
+        self.assertIsNone(insp.edit_of(joined))
+        # Return on it: Edit Value…, asked first (offscreen the sheet answers Cancel): nothing written
+        p.tag_view.selectRow(i)
+        from PySide6.QtTest import QTest
+        self.gui.sheets.shown.clear()
+        with mock.patch.object(type(insp), "reapply") as reapply:
+            QTest.keyClick(p.tag_view, Qt.Key_Return)
+            QTest.keyClick(p.tag_view, Qt.Key_Delete)
+        reapply.assert_not_called()
+        kinds = [k for k, _h, _b in self.gui.sheets.shown]
+        self.assertEqual(kinds, ["confirm", "confirm"])
+        self.assertIn("on all 6 files", self.gui.sheets.shown[0][1])
+        # said yes: one value for all, from the sheet
+        from gui import inspector, sheets
+        with mock.patch.object(sheets, "confirm", return_value=True), \
+                mock.patch.object(inspector, "tag_sheet", return_value=("tracknumber", ["1"])), \
+                mock.patch.object(type(insp), "reapply"):
+            p.edit_selected()
+        self.assertEqual(self.edit(insp, joined)[0], {"tracknumber": ["1"]})
+        # an empty sheet removes nothing; Remove Tag does, asked first
+        insp.edits = {}
+        with mock.patch.object(sheets, "confirm", return_value=True), \
+                mock.patch.object(inspector, "tag_sheet", return_value=("tracknumber", [])), \
+                mock.patch.object(type(insp), "reapply"):
+            p.edit_selected()
+            self.assertIsNone(insp.edit_of(joined))
+            p.remove_selected()
+        self.assertEqual(self.edit(insp, joined)[0], {"tracknumber": None})
+
+    def test_several_values_are_edited_in_the_sheet_never_typed_as_one(self):
+        plan = synthetic_plan(self.tmp)
+        for fe in plan["albums"][1]["files"]:
+            fe["diff"].append(ch("artist", [], ["A", "B"]))
+            fe["changes"]["artist"] = ["A", "B"]
+        ov = self.show_plan(plan)
+        p, layer, insp = ov.panes, ov.model.albums[1], self.win.inspector
+        p.select("album", None, layer)
+        r = self.rows(p)["artist"]
+        i = p.tag_model.rows.index(r)
+        idx = p.tag_model.index(i, 3)
+        self.assertFalse(p.tag_model.flags(idx) & Qt.ItemIsEditable)
+        with mock.patch.object(type(insp), "reapply"):
+            p.tag_model.setData(idx, "A; B; C")
+        self.assertIsNone(insp.edit_of(layer))
+        from gui import inspector
+        p.tag_view.selectRow(i)
+        with mock.patch.object(inspector, "tag_sheet", return_value=("artist", ["A", "B", "C"])) as sheet, \
+                mock.patch.object(type(insp), "reapply"):
+            p.tag_view.doubleClicked.emit(idx)
+        self.assertEqual(sheet.call_args.kwargs["values"], ["A", "B"])
+        self.assertEqual(self.edit(insp, layer)[0], {"artist": ["A", "B", "C"]})
+
+    def test_settings_of_the_wrong_kind_never_stop_the_window_opening(self):
+        from gui.common import _set_gui_pref
+        from gui.preview_panes import clean_prefs
+        for bad in ({"collapsed": "x", "sizes": "y", "vsizes": [True, "a"], "list": {"a": 1}, "changes_only": "no"},
+                    {"collapsed": {"folders": "yes", "tags": True, "nope": True}, "sizes": [1, 2]},
+                    "not a dict", [1, 2]):
+            _set_gui_pref("preview_panes", bad)
+            w = self.gui.Main()
+            w.show()
+            settle(self.app, 3)
+            panes = w.pages["Overview"].panes
+            self.assertEqual(panes.panes["tags"].collapsed, isinstance(bad, dict) and bad.get("collapsed") ==
+                             {"folders": "yes", "tags": True, "nope": True})
+            self.assertFalse(panes.panes["folders"].collapsed)
+            w.close()
+            w.deleteLater()
+        self.assertEqual(clean_prefs({"collapsed": {"folders": "yes", "tags": True}, "sizes": [3, 4, 5],
+                                      "list": [0, 4]}), {"collapsed": {"tags": True}, "sizes": [3, 4, 5]})
+
+    def test_why_says_plain_words_without_rule_ids(self):
+        from gui.preview_panes import why_lines
+        a = synthetic_plan(self.tmp, images=False)["albums"][0]
+        a["identification"]["why"] = ["two layers of one disc are never put in one folder; held for review (MED-22c)",
+                                      "a track is missing (TRK-4/4b)"]
+        a["identification"]["evidence"] = ["(MOV-4)"]
+        words = [w for _m, w in why_lines(a)[1]]
+        self.assertIn("two layers of one disc are never put in one folder; held for review", words)
+        self.assertIn("a track is missing", words)
+        self.assertFalse(any("(" in w and "-" in w for w in words), words)
+        self.assertNotIn("", words)
+
+    def test_kept_tags_of_a_big_selection_say_they_come_from_the_first_files(self):
+        from gui import preview_panes as pp
+        ov = self.show_plan()
+        p = ov.panes
+        p.changes_only.setChecked(False)
+        with mock.patch.object(pp, "READ_MOST", 2):
+            p.select("disc", (1, ""), ov.model.albums[0])
+            self.assertIn("first 2 files", p.tag_note.text())
+            p.changes_only.setChecked(True)
+            self.assertNotIn("first 2 files", p.tag_note.text())
+
+    def test_the_reads_stop_when_the_panes_go(self):
+        from gui.preview_panes import PreviewPanes
+        panes = PreviewPanes(None)
+        w = mock.Mock(cancelled=False)
+        panes._started(w)
+        panes.deleteLater()
+        from PySide6.QtCore import QEvent
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        settle(self.app, 2)
+        self.assertTrue(w.cancelled)
+
+    def test_an_album_hidden_by_the_search_is_shown_again_when_chosen_in_the_panes(self):
+        ov = self.show_plan()
+        p, layer = ov.panes, ov.model.albums[1]
+        self.win.search_box.setText("Gorguts")
+        ov.filter("Gorguts")
+        settle(self.app)
+        p.select("album", None, layer)
+        settle(self.app)
+        self.assertIs(ov.selected(), layer)
+        self.assertIs(self.win.inspector.album, layer)
+        self.assertEqual(self.win.search_box.text(), "")
+
+    def test_return_types_in_a_shared_value_and_a_pane_subtitle_is_cut_with_an_ellipsis(self):
+        ov = self.show_plan()
+        p, joined = ov.panes, ov.model.albums[0]
+        p.select("disc", (2, ""), joined)
+        r = self.rows(p)["date"]
+        p.tag_view.selectRow(p.tag_model.rows.index(r))
+        from PySide6.QtTest import QTest
+        QTest.keyClick(p.tag_view, Qt.Key_Return)
+        self.assertEqual(p.tag_view.state(), QAbstractItemView.EditingState)
+        p.tag_view.closePersistentEditor(p.tag_view.currentIndex())
+        sub = p.panes["folders"].subtitle
+        sub.resize(60, sub.height())
+        self.assertTrue(sub.elided().endswith("…"), sub.elided())
+        self.assertEqual(sub.toolTip(), sub.text())
 
 
 class PureFunctions(unittest.TestCase):

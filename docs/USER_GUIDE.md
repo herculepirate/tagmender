@@ -266,8 +266,14 @@ Each album ends in one tier, shown in the plan (after the score) and in the app'
    as disc:track on several discs).
 2. **Album only** (`TAGMENDER=Partial`, `TAGMENDER_REASON` "ambiguous_release: album known,
    pressing not established ..."): the album is certain, its pressings tie; what they all share,
-   no release IDs, catalogue number or barcode. Marked Partial, not Resolved, because no release
-   is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
+   no release IDs, catalogue number or barcode. When only a tie-break chose between the pressings
+   (your country order, the original release, your preferred release types or formats), that
+   pressing is suggested - the status reads "Album known · pressing suggested" and the plan names
+   it - and Album > Use Suggested Pressing (or `tagmender plan PATH --release REF`) tags it in full
+   (TIE-1). So too when only your Sources preference chose between MusicBrainz's and Discogs's
+   pressings. The files' `TAGMENDER_REASON` names the suggested release ("pressing suggested, not
+   confirmed: <release>"), and Needs attention lists such albums as "Pressing suggested — confirm",
+   with Use Suggested Pressing there too. Marked Partial, not Resolved, because no release is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
    again. `web_tag.py --apply` marks its album-only albums the same way.
 3. **Partial** (`TAGMENDER=Partial`, the reason in `TAGMENDER_REASON`): the matcher would not
    pick a release, but the best candidate is the same album - same track count, artist and title
@@ -563,6 +569,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 |---|---|
 | Album > Search for Release… (Ctrl+Shift+F) | Search MusicBrainz releases, recordings and artists, or Discogs releases; Use This Release previews the album again with it |
 | Album > Other Versions… (Ctrl+Shift+L) | Every release of the album's MusicBrainz release group and Discogs master, with how well each fits your files |
+| Album > Use Suggested Pressing | For an Album only album whose pressing a tie-break suggested (your country order, the original release; status "Album known · pressing suggested"): previews it again with that release, tagged in full - its barcode, catalogue number and label (TIE-1). Also in the album's menu and on the Evidence tab |
 | Album > Choose Your Pressing… (Ctrl+Shift+P) | For an album whose pressing is not proven (Album only, Partial): only the pressings that fit equally, with the details that tell them apart highlighted and what to check on your copy |
 | Album > Info… (Ctrl+I) | A file's format, codec, bitrate, length, every tag as stored and its embedded pictures (read only) |
 | Inspector > Tags (Album > Tag) | The selected album's tags, original and new; edit a value (double-click, Return or F2), revert it, add or remove a tag (Delete), for one file or all of them; Edit > Undo Edit (Ctrl+Z) takes back the last edit |

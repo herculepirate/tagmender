@@ -305,14 +305,18 @@ class OWN_Review(te.Base):
         again = pl.build([p2], eng.profile)["albums"][0]
         self.assertEqual([fe["changes"] for fe in again["files"]], [{}] * len(again["files"]))
 
-    def test_OWN_a_fresh_album_tie_keeps_tie1_in_full(self):
+    def test_OWN_a_fresh_album_tie_keeps_tie1(self):
+        # (TIE-1 as decided 2026-11-17: a fresh album's tie is album known with the country order's
+        # pick suggested - no withdrawal note, nothing of TagMender's taken back)
         d = self.album("Band D2", "Album D2")
         eng = self.engine(te.FakeHttp(mb=[te.mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
                                       dg=[te.dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
         eng.cfg["preferred_countries"] = ["US"]
         eng.cfg["prefer_source"] = ""
         p = eng.identify(eng.albums_in(d)[0])
-        self.assertEqual((p.tier, p.release_id), ("exact", "mb-d2"))
+        self.assertEqual((p.tier, p.release_id, p.suggested.get("ref")), ("album_only", "", "mb-d2"))
+        self.assertFalse(p.restore)
+        self.assertFalse([n for n in p.notes or () if "TagMender chose this album's pressing earlier" in n])
 
 
 if __name__ == "__main__":

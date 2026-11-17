@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import time
 import unicodedata
 from dataclasses import asdict, dataclass, field
@@ -135,6 +136,10 @@ class Proposal:
     own_number: bool = False            # FIL-1: your copy's own barcode or catalogue number proves the release
     number_proven: bool = False         # FIL-2: ... on it, every track there, and it lists no lengths
     guessed_pick: bool = False          # FIL-1: the pressing was picked by country order / original date (a guess)
+    # TIE-1: the pressing a tie-break proposed (engine.suggestion_of), the album tagged as album
+    # known: {"source", "id", "url", "ref", "label", "country", "formats", "year", "by", "why",
+    # "others": [...]}; {} when none
+    suggested: dict = field(default_factory=dict)
     # TAG-3: the release ID fields your files hold for another release, which your copy proves
     # this one over (engine._one_release): the plan writes the release at the replace threshold
     release_proven_over: list = field(default_factory=list)
@@ -1730,6 +1735,10 @@ class Planner:
             entry["identification"]["scans"] = dict(prop.scans)
         if getattr(prop, "via", None) is not None:
             entry["identification"]["via"] = prop.via
+        if getattr(prop, "suggested", None):
+            # TIE-1: the pressing a tie-break proposed, for you to confirm (Use Suggested Pressing,
+            # Change Release, `tagmender plan PATH --release REF`)
+            entry["identification"]["suggested"] = dict(prop.suggested)
         partial = prop.status == "identified" and tier_of(prop) == "partial"
         # Album only (the album known, its pressing tied) is, like Partial, a release not proven
         # (levels.ALBUM_TIERS): marked TAGMENDER=Partial too, its reason "ambiguous_release:
@@ -3460,6 +3469,14 @@ TIER_WORDS = {"exact": "exact release", "album_only": "album only (pressing unkn
 def _album_only_reason(prop) -> str:
     """TAGMENDER_REASON of an album-only album: the album is known, its pressing is not."""
     tied = next((w for w in prop.why or [] if str(w).startswith("pressing unknown")), "")
+    ref = str((getattr(prop, "suggested", None) or {}).get("ref") or "")
+    # (TAG-1's withdrawal of TagMender's own pick keeps its reason: a later plan reads it to stay
+    # album only as this one is - engine._withdrawn_before; the suggestion is in the plan then)
+    if ref and "TagMender chose this album's pressing earlier" not in tied:
+        # TIE-1: a tie-break suggested the pressing - which one, so you can confirm it later
+        # (Needs attention, `tagmender plan PATH --release REF`)
+        return reasons.encode(f"album known, pressing not established: {reasons.SUGGESTED_WORDS}{ref}",
+                              ["ambiguous_release"])
     words = "album known, pressing not established" + (f": {tied.split(':', 1)[0]}" if tied else "")
     return reasons.encode(words, ["ambiguous_release"])
 
@@ -3604,6 +3621,16 @@ def preview(plan: dict, verbose=False) -> str:
                 codes, words = reasons.parse(ident.get("reason", ""))
                 head += (f"\n    {'Partial' if tier == 'partial' else 'Album only (marked Partial)'}: "
                          f"{', '.join(codes)} — {words}")
+            sg = ident.get("suggested") or {}
+            if sg.get("id"):
+                # TIE-1: the pressing a tie-break proposed, and how to confirm it
+                facts = ", ".join(str(x) for x in (sg.get("label"), sg.get("country"), sg.get("year")) if x)
+                head += (f"\n    suggested pressing: {sg.get('source')} {sg['id']}" + (f" ({facts})" if facts else "")
+                         + f" — {sg.get('by')}; {len(sg.get('others') or [])} other pressing(s) tie"
+                         + f"\n    to tag it in full: tagmender plan {shlex.quote(a['source_dir'])} "
+                           f"--release {sg.get('ref')}"
+                         + (" (the Discogs release with MusicBrainz's entry of the same pressing)"
+                            if "+" in str(sg.get("ref") or "") else ""))
             if ident.get("evidence"):
                 head += "\n    agreed: " + "; ".join(ident["evidence"][:6])
             if ident.get("why"):

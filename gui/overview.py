@@ -589,10 +589,12 @@ class Overview(QWidget):
     # ---- the toolbar's All / Ready / Needs Attention ------------------------------------------
     @staticmethod
     def needs_you(a) -> bool:
-        """The album waits for your decision: held (no release proven, a pressing to confirm, a
-        conflict), or its scans name another pressing."""
+        """The album waits for your decision: held (no release proven, a conflict), its scans name
+        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm)."""
+        from .common import suggested_pressing
         from .preview_panes import _held
-        return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs"
+        return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs" \
+            or bool(suggested_pressing(a))                  # (TIE-1: album known, a pressing to confirm)
 
     @classmethod
     def ready_now(cls, a) -> bool:
@@ -722,7 +724,7 @@ class Overview(QWidget):
             self._profile_pane = "folders"
             items = []
         else:
-            keys = ("@release", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
+            keys = ("@release", "use_suggested_pressing", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
                     "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
                     "copy_path")
             # (the four ways to choose the release: the Album menu's Change Release submenu, as there)

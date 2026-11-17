@@ -98,6 +98,27 @@ def force_release(page, album, ref) -> bool:
     return True
 
 
+def can_use_suggested(album) -> bool:
+    """TIE-1: the album is album known with a pressing a tie-break proposed (your country order,
+    the original date, your preferred release types or formats) and not chosen yet."""
+    from .common import suggested_pressing
+    ident = (album or {}).get("identification") or {}
+    # (album known, or held Unresolved by a profile that accepts exact releases only)
+    return bool(album) and (ident.get("tier") == "album_only" or ident.get("status") == "unresolved"
+                            or album.get("status") == "unresolved") and bool(suggested_pressing(album))
+
+
+def use_suggested(page, album=None) -> bool:
+    """TIE-1: confirm the pressing a tie-break proposed for the selected album (or `album`): the
+    album is planned again with that release chosen - force_release, as Change Release does - and
+    then tagged in full as your choice. False when there is none, or nothing ran."""
+    from .common import suggested_pressing
+    album = _album(page, album)
+    if not can_use_suggested(album):
+        return False
+    return force_release(page, album, suggested_pressing(album)["ref"])
+
+
 def can_choose_pressing(album) -> bool:
     """For the Album menu: the album's pressing is tied (Album only) or unproven (Partial)."""
     return bool(album) and versions.pressing_tied(album)

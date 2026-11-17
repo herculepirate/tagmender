@@ -8140,6 +8140,22 @@ def release_fields(c):
 TWIN_LENGTHS_MIN_FRAC = 0.55     # (FIL-3: as auto_min_duration_frac_with_code)
 
 
+def legacy_view(o):
+    """TIE-1, for the tools that read saved results (tag_albums.py, web_tag.py, inbox.py): a sure
+    result whose pressing a tie-break only suggested (best "tie_guess") is album known - status
+    "review" with the tied pressings as an album-only answer - never a pressing to tag in full.
+    Any other result as it is."""
+    best = (o or {}).get("best") or {}
+    guess = best.get("tie_guess")
+    if not isinstance(o, dict) or o.get("status") != "auto" or not guess:
+        return o
+    keys = ("source", "id", "label", "country", "formats", "year", "layout")
+    tied = [{k: x.get(k) for k in keys} for x in [guess.get("pick") or {}] + list(guess.get("others") or [])]
+    return dict(o, status="review", album_only={"source": "", "no_lengths": False, "other_kind": False,
+                                                 "tied": tied, "suggested": True},
+                why=list(o.get("why") or []) + [f"pressing suggested ({guess.get('by')}), not proven (TIE-1)"])
+
+
 def summarize(res):
     b = res["best"]
     if not b:
@@ -8173,6 +8189,8 @@ def summarize(res):
             "toc_proven": bool(b.get("toc_proven")),
             # (FIL-1: your copy's own barcode or catalogue number proves it; the pressing a guess)
             "own_number": bool(b.get("own_number")), "guessed_pick": bool(b.get("guessed_pick")),
+            # (TIE-1: chosen by a tie-break alone - the pressing proposed, the album known: engine)
+            **({"tie_guess": b["tie_guess"]} if b.get("tie_guess") else {}),
             # (FIL-2: your copy's own barcode or catalogue number on it, every track there, and the
             # release lists no lengths at all to compare)
             "number_proven": bool((mc.barcode_proves(b) or b.get("code") in ("catalogue number",

@@ -258,6 +258,7 @@ class Main(QMainWindow):
             "tab_artwork": lambda: self.show_tab("Artwork"),
             "tab_evidence": lambda: self.show_tab("Evidence"),
             "use_release": lambda: ov().choose_release(),
+            "use_suggested_pressing": self.use_suggested_pressing,            # TIE-1
             **search.handlers(ov),                               # Search for Release, Other Versions, Pressing
             **manual_match.handlers(ov),                         # Match Files Manually
             "lookup_cd": self.lookup_cd,
@@ -338,6 +339,11 @@ class Main(QMainWindow):
         a = self.commands["toggle_rule"]
         a.triggered.connect(lambda _=False: self.pages["Profiles"].toggle_selected_rule())
         self.inspector.buttons["open"].clicked.connect(lambda: self.album_do("open"))
+        # (TIE-1: the Evidence tab's Use Suggested Pressing button is the Album menu's command)
+        self.inspector.evidence.suggest.clicked.connect(lambda: self.commands["use_suggested_pressing"].trigger())
+        # (and the Overview's Why This Release tab, the evidence's place in its inspector pane)
+        self.pages["Overview"].panes.evidence.suggest.clicked.connect(
+            lambda: self.commands["use_suggested_pressing"].trigger())
         self.inspector.buttons["web"].clicked.connect(lambda: self.album_do("web"))
         live = self.pages["Watched folders"].live
         live.toggled.connect(lambda on: self.prefs_window and self.prefs_window.general.watch.setChecked(on))
@@ -419,6 +425,13 @@ class Main(QMainWindow):
             QApplication.clipboard().setText(text)
             self.statusBar().showMessage(tr("Copied the folder.") if os.path.isabs(text) else tr("Copied the row."),
                                          3000)
+
+    def use_suggested_pressing(self):
+        """TIE-1: Album > Use Suggested Pressing, for the album selected on the page shown."""
+        att = self.pages.get("Needs attention")
+        if att is not None and self.stack.currentWidget() is att:
+            return att.use_suggested()
+        return search.use_suggested(self.pages["Overview"])
 
     def album(self):
         """("overview", album) or ("attention", folder) for the page shown, else (None, None)."""
@@ -682,6 +695,15 @@ class Main(QMainWindow):
             self.commands[k].setEnabled(bool(kind) and idle)
         self.commands["use_release"].setEnabled(kind == "overview" and idle)
         search.update_commands(self.commands, ov, kind == "overview" and idle)
+        # TIE-1: only an album known whose pressing a tie-break proposed (Overview's plan, or the
+        # TAGMENDER_REASON of an album Needs attention lists)
+        att = self.pages.get("Needs attention")
+        # (one album at a time: with several selected in Overview it is off - each has its own
+        # suggestion, confirmed one by one)
+        many = kind == "overview" and ov is not None and len(ov.selected_albums()) > 1
+        sugg = idle and ((kind == "overview" and not many and search.can_use_suggested(x))
+                         or (kind == "attention" and att is not None and bool(att.suggested())))
+        self.commands["use_suggested_pressing"].setEnabled(sugg)
         manual_match.update_commands(self.commands, ov, kind == "overview" and idle)
         self.update_m8_actions(kind, x, idle)
         self.commands["file_info"].setEnabled(self.info_file() is not None)

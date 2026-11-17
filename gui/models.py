@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QAbstractItemModel, QAbstractProxyModel, QAbstractTableModel, QModelIndex, Qt, Signal
 
-from .common import album_words, label_for, planmod, plural, reasons
+from .common import album_words, label_for, planmod, plural, reasons, suggested_pressing
 from .i18n import N_, tr
 from .style import status_color, status_icon
 
@@ -39,6 +39,9 @@ def fill_roles(data, idx, span):
 TIER_TIPS = {"partial": N_("Partial: the release is known, but which pressing is not proven"),
              "album_only": N_("Album only: the album matched, but not every track did"),
              "recording": N_("Recording only: the recordings matched, but not one release")}
+# TIE-1: an album-only album with a pressing a tie-break proposed
+SUGGESTED_TIP = N_("Album known: nothing of your copy tells its pressings apart; one is suggested "
+                   "(Album › Use Suggested Pressing tags it in full)")
 
 
 # what a scan read from the sleeve, in a word (the kinds the plan names)
@@ -320,6 +323,8 @@ class PlanModel(QAbstractTableModel):
         if role == R_TOOLTIP and c == 0:
             tier = (ident or {}).get("tier")
             if a["status"] not in ("unresolved", "excluded", "skipped") and tier in TIER_TIPS:
+                if tier == "album_only" and suggested_pressing(a):
+                    return tr(SUGGESTED_TIP)
                 return tr(TIER_TIPS[tier])
             return label_for(a)[1]                            # (the whole word when the column cuts it)
         if role == R_TOOLTIP and c == 1:

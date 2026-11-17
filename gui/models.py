@@ -346,6 +346,9 @@ class PlanModel(QAbstractTableModel):
                 return tr(TIER_TIPS[tier])
             return label_for(a)[1]                            # (the whole word when the column cuts it)
         if role == R_TOOLTIP and c == 1:
+            if a.get("copies"):                            # VIN-6: the copies of its release, side by side
+                import dynamics
+                return a["source_dir"] + "\n" + dynamics.words(a["copies"])
             return a["source_dir"]
         if role == R_TOOLTIP and c in (2, 4, 5):
             # (the whole text, wrapped, when the column cuts it: Why in full, every conflict)

@@ -1036,6 +1036,15 @@ SETTINGS = [
       show=_saved_only("split_versions"),
       foot=N_("Such as a remaster beside a remix: each goes into a folder of its own, tagged from its own "
               "release.")),
+    S("vinyl_rip_folders", N_("Keep each vinyl rip in its own folder"), "switch", "versions",
+      foot=N_("Each rip's folder names its ripper and the pressing's catalogue number, and two rips found in "
+              "one folder are split into a folder each. Off: named as any album; such a folder waits for you.")),
+    S("vinyl_rip_comment", N_("Write the rip's details in the comment"), "switch", "versions", enable=_unless_basic,
+      foot=N_("One line beside what the comment says: the ripper, the resolution, the year ripped and the "
+              "turntable, as far as they are known.")),
+    S("compare_copies", N_("Compare copies of a release (dynamic range, clipping)"), "switch", "versions",
+      foot=N_("When you have two or more copies of one release, each is measured after the preview and shown "
+              "side by side. Nothing is chosen or changed for it.")),
     S("_discogs_details", N_("Details to write"), "popup", "discogs", get=_details_get, put=_details_put,
       custom="check", known=DETAIL_KEYS, words=DETAIL_WORDS, setlike=True,
       covers=tuple(f"discogs_details.{k}" for k in DETAIL_KEYS), choices=(([], N_("None")),),

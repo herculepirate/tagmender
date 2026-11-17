@@ -30,7 +30,8 @@ SHORT = {"no_candidate": N_("Not found"), "incomplete_album": N_("Track count di
          "low_similarity": N_("Names differ"), "low_confidence": N_("Not sure enough"),
          "missing_collaborator": N_("Credit incomplete"),
          "write_failed": N_("Not written"),
-         "partially_tagged": N_("Partly tagged"), "other": N_("Not identified")}
+         "partially_tagged": N_("Partly tagged"), "two_rips": N_("Two rips in one folder"),
+         "other": N_("Not identified")}
 
 
 # TIE-1: an album known whose pressing a tie-break suggested (its TAGMENDER_REASON names it)

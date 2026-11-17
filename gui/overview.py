@@ -2205,10 +2205,62 @@ class Overview(QWidget):
             return
         if self.run_queue():                               # (the next one says what it does)
             return
+        self.measure_copies()
         notify(self.win, "finished", tr("Preview finished"), counts_by_label((self.plan or {}).get("albums") or []))
         if self.proxy.rowCount() and not self.table.selectionModel().hasSelection():
             self.show_row(0)
         self.win.refresh_attention_badge(self.path)
+
+    def measure_copies(self):
+        """VIN-6: two or more copies of one release among the albums looked up (or one filed
+        before): each measured - dynamic range, clipping - on a worker of its own, after the
+        look-up (never in its way), then shown with each copy's row (its tooltip, Why This
+        Release). Nothing is chosen or changed by it."""
+        plan = self.plan
+        if not plan or (plan.get("profile_data") or {}).get("compare_copies") is False:
+            return                                         # (the profile's compare_copies off)
+        if getattr(self, "_copies_worker", None) is not None:
+            self._copies_again = True                      # (another plan meanwhile: measured after)
+            return
+        albums = list(plan.get("albums") or [])
+        # (what the worker reads, copied here: the albums are the UI thread's)
+        snap = {"albums": [{"identification": dict(a.get("identification") or {}), "status": a.get("status"),
+                            "source_dir": a.get("source_dir"),
+                            "files": [{"src": fe.get("src"), "dst": fe.get("dst"),
+                                       "discnumber": (fe.get("changes") or {}).get("discnumber") or next(
+                                           (r.get("after") for r in fe.get("diff") or ()
+                                            if r.get("field") == "discnumber"), None)}
+                                      for fe in a.get("files") or ()]}
+                           for a in albums]}
+
+        def work(_w):
+            import dynamics
+            if not dynamics.copies(snap, filed="cached"):
+                return {}
+            return dynamics.measure(snap, cancel=lambda: self.plan is not plan, filed="cached")
+
+        def done(found):
+            self._copies_worker = None
+            if self.plan is not plan or getattr(self, "_copies_again", False):
+                self._copies_again = False
+                self.measure_copies()                      # (the plan shown now)
+                return
+            if not found:
+                return
+            for i, rows in found.items():
+                if 0 <= i < len(albums):
+                    albums[i]["copies"] = rows
+            self.model.refresh_rows()
+            shown = getattr(self.panes, "scope", None)
+            if shown and shown[0] is not None and shown[0].get("copies"):
+                self.panes.show_why(shown[0])
+
+        def failed(_msg):
+            self._copies_worker = None                     # (a measure is only shown: nothing to tell)
+            if getattr(self, "_copies_again", False):
+                self._copies_again = False
+                self.measure_copies()
+        self._copies_worker = start(self, work, done, failed=failed)
 
     def lookup_failed(self, msg):
         self._apply_next, self._apply_only = False, None

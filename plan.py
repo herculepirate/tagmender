@@ -1203,6 +1203,123 @@ def _split_companions(vsplit, pairs: dict, profile, op, extra=()):
     return out, "; ".join(notes), how
 
 
+_TAKEN = re.compile(r" ~[0-9a-f]{4}(?=\.[^.]+$)")
+
+
+def _rips_apart(of, group):
+    """VIN-7: the copies of a folder that held two rips of one record. The notes, pictures and
+    other files both rips share go with the first copy only - never copied (one file, one
+    place); the others get a note saying where they went. A copy whose folder name is another
+    copy's (no ripper or year ripped tells them apart) is tagged where it is (MOV-4): it stays in
+    the folder it was found in, its files named there as the naming names them."""
+    group.sort(key=lambda a: int(a["split"].get("index") or 0))
+    first = group[0]
+    owners = _rip_owners(of, group)
+    for k, a in enumerate(group):
+        mine = [c for c in a.get("companions") or () if owners.get(c["src"], 0) == k]
+        theirs = [c for c in a.get("companions") or () if owners.get(c["src"], 0) != k]
+        if owners and theirs:
+            a["companions"] = mine
+            a["notes"].append("the scans of the other rip (" + ", ".join(sorted({str(Path(c["src"]).parent.relative_to(of))
+                                                                                  for c in theirs})) + ") go with it")
+        for c in mine:
+            if c.get("shared") and c["op"] == "copy":
+                c["op"] = "move"
+    took = {c["src"] for c in first.get("companions") or ()}
+    seen = {fnm.fold(first["split"].get("folder") or "")}
+    for a in group[1:]:
+        gone = [c for c in a.get("companions") or () if c["src"] in took or (c.get("shared") and c["src"] not in owners)]
+        if gone:
+            a["companions"] = [c for c in a["companions"] if c not in gone]
+            a["notes"].append("the files both rips shared (" + ", ".join(sorted(Path(c["src"]).name for c in gone))
+                              + ") go with the first copy, " + Path(first["split"].get("folder") or of).name)
+        folder = fnm.fold(a["split"].get("folder") or "")
+        if folder in seen and a["status"] in ("ready", "unchanged"):
+            for fe in a["files"]:
+                fe["dst"] = str(Path(of) / _TAKEN.sub("", Path(fe["dst"]).name))
+            for c in a.get("companions") or ():
+                if c["op"] in ("move", "copy"):
+                    c["op"], c["dst"] = "none", c["src"]
+            a["split"]["folder"] = str(of)
+            a["notes"] = [n for n in a["notes"] if " is taken; using " not in n]
+            a["notes"].append("another copy of this release takes the folder this one would be named into: "
+                              "this one is tagged where it is, in the folder it was found in (MOV-4)")
+        seen.add(fnm.fold(a["split"].get("folder") or ""))
+
+
+_SCAN_IMAGE = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif")
+_COMMON_RIP_WORDS = {"original", "pressing", "vinyl", "rip", "ripped", "first", "press", "edition", "records",
+                     "record", "notes", "posted", "master", "final", "transfer"}
+
+
+def _scan_sets(of, srcs) -> dict:
+    """VIN-7: the scan folders of a folder that held two rips: {set folder: [its files]} - a folder
+    of pictures below OF, and a folder of pictures nested in it ("covers/" and "covers/covers/",
+    its own sub-folders with it: "covers/covers/spectr/") is a set of its own. Files at OF's top
+    belong to no set."""
+    of = Path(of)
+    pics = {Path(x).parent for x in srcs if Path(x).suffix.lower() in _SCAN_IMAGE and Path(x).parent != of}
+    sets = {}
+    for x in srcs:
+        d = Path(x).parent
+        if d == of:
+            continue
+        chain = [p for p in reversed(d.parents) if of in p.parents] + [d]
+        roots = [p for p in chain if p in pics]
+        if not roots:
+            continue
+        root = roots[0]
+        nested = [p for p in roots[1:] if p.parent == root]
+        sets.setdefault(nested[0] if nested else root, []).append(x)
+    return sets
+
+
+def _rip_owners(of, group) -> dict:
+    """VIN-7: {companion file: the rip it goes with} - each of exactly two scan sets (_scan_sets)
+    given to a rip by evidence: a set whose names, notes or scans (OCR: a ripper's watermark,
+    "SOLO Ediciones") carry words only one rip's own comment says ("Fran Solo, Ediciones") is
+    that rip's; the only other set is the other rip's. {} when that is not clear: everything
+    shared stays with the first copy."""
+    if len(group) != 2:
+        return {}
+    srcs = sorted({c["src"] for a in group for c in a.get("companions") or ()})
+    sets = _scan_sets(of, srcs)
+    if len(sets) != 2:
+        return {}
+    words = []
+    for a in group:
+        ws = {w.casefold() for w in re.findall(r"\b(?:[A-Z][a-z]{3,}|[A-Z]{4,})\b", a["split"].get("words") or "")}
+        words.append(ws - _COMMON_RIP_WORDS)
+    only = [words[0] - words[1], words[1] - words[0]]
+    if not any(only):
+        return {}
+    import vinylrip
+    hit = {}
+    for root, files in sets.items():
+        text = " ".join(Path(f).stem for f in files)
+        for f in files:
+            if Path(f).suffix.lower() in (".txt", ".nfo") and os.path.getsize(f) < 20000:
+                try:
+                    text += " " + Path(f).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
+        low = text.casefold()
+        found = {k for k in (0, 1) if any(re.search(rf"\b{re.escape(w)}\b", low) for w in only[k])}
+        if not found:
+            seen = vinylrip.scan_text([f for f in files if Path(f).suffix.lower() in _SCAN_IMAGE][:3]).casefold()
+            found = {k for k in (0, 1) if any(re.search(rf"\b{re.escape(w)}\b", seen) for w in only[k])}
+        hit[root] = found
+    roots = list(sets)
+    told = [r for r in roots if len(hit[r]) == 1]
+    if not told or (len(told) == 2 and hit[told[0]] == hit[told[1]]):
+        return {}
+    k = next(iter(hit[told[0]]))
+    other = next(r for r in roots if r != told[0])
+    if hit[other] and hit[other] != {1 - k}:
+        return {}
+    return {**{f: k for f in sets[told[0]]}, **{f: 1 - k for f in sets[other]}}
+
+
 def _split_together(albums):
     """The versions of one split go together or not at all: when one cannot be planned (a
     conflict, skipped), or two would go to the same folder, none is split."""
@@ -1211,6 +1328,8 @@ def _split_together(albums):
         if a.get("split"):
             by.setdefault(a["split"]["of"], []).append(a)
     for of, group in by.items():
+        if all(a["split"].get("rips") for a in group):
+            _rips_apart(of, group)
         folders = [fnm.fold(a["split"].get("folder") or "") for a in group]
         why = ""
         if len(group) < max(int(a["split"].get("count") or 1) for a in group):
@@ -1229,7 +1348,7 @@ def _split_together(albums):
                 a["split_with"] = list(dict.fromkeys(list(a.get("split_with") or []) + [
                     fe["dst"] for b in group if b is not a for fe in b["files"] if fe.get("dst")]))
             stays = any(os.path.realpath(a["split"].get("folder") or "") == os.path.realpath(of) for a in group)
-            if stays:
+            if stays and not all(a["split"].get("rips") for a in group):
                 # (one version stays in the folder, named as it already is: what the versions
                 # share stays there too, copied to the others - never moved away from it)
                 for a in group:
@@ -1832,6 +1951,9 @@ class Planner:
         flat = False
         if vsplit:
             entry["split"] = {k: vsplit[k] for k in ("of", "index", "count")}
+            if vsplit.get("rips"):
+                entry["split"]["rips"] = True              # VIN-7: two rips of one record
+                entry["split"]["words"] = str(vsplit.get("words") or "")[:2000]
             entry["split_with"] = list(vsplit.get("others") or [])
         if not identified:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
@@ -2022,6 +2144,27 @@ class Planner:
                 rel_tags["~edition_hd"] = ["1"]
             if unproven:
                 rel_tags["~edition_unproven"] = ["1"]
+        # VIN-3 / VIN-4: a vinyl rip's own details - its ripper and the pressing's catalogue number
+        # for the folder name, the comment line (resolution, ripper, year ripped, equipment)
+        rip_line = ""
+        if identified and kept:
+            rip = self._vinyl_rip(prop, kept, targets, rel, unproven)
+            if rip:
+                import vinylrip
+                # (the profile's vinyl_rip_comment / vinyl_rip_folders, both on by default)
+                rip_line = vinylrip.comment_line(rip) if p.get("vinyl_rip_comment", True) is not False else ""
+                if p.get("vinyl_rip_folders", True) is False:
+                    rel_tags["~rip_plain"] = ["1"]         # (the fields stay for a script: no folder edition)
+                for k_, v_ in (("~ripper", rip.get("ripper")), ("~rip_version", rip.get("version")),
+                               ("~rip_catalog", rip.get("catno")),
+                               ("~rip_resolution", vinylrip.resolution_name(rip.get("resolution"))),
+                               ("~rip_year", rip.get("year"))):
+                    if v_:
+                        # (the year ripped whenever it is known: two rips of one pressing are named
+                        # apart by it whichever is planned first, and a folder TagMender named so
+                        # plans the same again)
+                        rel_tags[k_] = [v_]
+                rel_tags["~rip_vinyl"] = ["1"]
         # a Partial album whose files already name a release (Picard's or TagMender's tags):
         # only what they lack is filled; their date, album, titles and mark stay as they are
         held = partial and _names_release(kept)
@@ -2184,6 +2327,9 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
+            if rip_line and not held and self._vinyl_file(targets.get(f) or {}, unproven):
+                self._rip_comment(f, before, changes, rows, p, rip_line,
+                                  "album_only" if album_only or unproven else "partial" if partial else "")
             # (filled by the engine only for: an album only (TAG-3's pressing fields), an album held
             # whose pick TagMender withdrew (TAG-1), TRK-4b's disc numbers TagMender's own job wrote)
             back = (getattr(prop, "restore", None) or {}).get(str(f))
@@ -3252,6 +3398,87 @@ class Planner:
             return None                 # (another shape: a script making a disc folder from disc 2 on)
         return fnm.fold(str(other[-2])) != fnm.fold(str(comps[-2]))
 
+    @staticmethod
+    def _vinyl_file(target, unproven) -> bool:
+        """VIN-4: this file is of a record (its own medium, not the release's first: a CD and LP
+        set's CD files get no rip line); a file of an unproven pressing with no medium: yes."""
+        import match_core as mc
+        media = [str(m) for m in target.get("media") or ()]
+        return any(mc.media_kind(m) == "vinyl" for m in media) if media else bool(unproven)
+
+    @staticmethod
+    def _rip_comment(f, before, changes, rows, p, line, tier=""):
+        """VIN-4: TagMender's own line about a vinyl rip ("Vinyl rip: PBTHAL · 24-bit/96 kHz ...")
+        in the comment: added below the text already there, or put in place of its own earlier
+        line (vinylrip.merged_values: only a line wholly in its form is its own); every other line
+        and value kept exactly. A comment kept by a preserve or fill_missing policy (yours, the
+        profile's default, or Picard's "Preserve these tags") gets the line below its text too
+        (decided 2026-11-17: "add it below your text" - its text is never changed). Never where
+        the comment's policy is lock (no write at all) or remove, nor with cleanup.comments
+        "remove", nor where the level writes no comment (Basic, a dropped field). Nothing when the
+        comment already says it (idempotent). Your edit wins (apply_edits)."""
+        import levels
+        import vinylrip
+        pol = p.policy("comment")
+        if pol in ("lock", "remove") or not tagio.holds(f, "comment"):
+            return
+        if ((p.get("cleanup") or {}).get("comments")) == "remove":
+            return
+        if not levels.restrict({"comment": [line]}, p, tier=tier).get("comment"):
+            return
+        had = _vals(before.get("comment"))
+        # (a kept comment is the file's own text, whatever a script or the release would have put)
+        base = had if pol in ("preserve", "fill_missing") or "comment" not in changes else _vals(changes["comment"])
+        after = vinylrip.merged_values(base, line)
+        if after == had:
+            if "comment" in changes:                   # (the plan would write only what is there)
+                changes.pop("comment")
+                rows[:] = [r for r in rows if r.get("field") != "comment"]
+            return
+        changes["comment"] = after
+        rows[:] = [r for r in rows if r.get("field") != "comment"]
+        rows.append({"field": "comment", "before": had, "after": after, "action": "changed" if had else "added",
+                     "note": "the vinyl rip's own line (ripper, resolution, year ripped, equipment), "
+                             "beside what the comment already says"})
+
+    @staticmethod
+    def _vinyl_rip(prop, kept, targets, rel, unproven) -> dict:
+        """VIN-3: this album's vinyl rip details (vinylrip.describe), or {} when it is no vinyl
+        rip: its release's media is vinyl (the first disc's, as the edition reads it) - or, its
+        pressing unproven, the tags all name vinyl or its folder's name says vinyl rip. The
+        catalogue number only of a proven release (the one written), the year ripped from the
+        folder name (not the pressing's own year) or the rip notes."""
+        import match_core as mc
+        import vinylrip
+        media = [m for f in kept for m in ((targets.get(f) or {}).get("media") or ())]
+        if rel.get("media"):
+            vinyl = naming.edition_parts({"media": rel["media"]})[0] == "Vinyl"
+        elif unproven:
+            vinyl = (bool(media) and all(mc.media_kind(m) == "vinyl" for m in media)) or \
+                mc.media_hint(Path(str(prop.source_dir)).name) == "vinyl"
+        else:
+            vinyl = bool(media) and mc.media_kind(media[0]) == "vinyl"
+        if not vinyl:
+            return {}
+        first = targets.get(kept[0]) or {}
+        catno = "" if unproven else str((first.get("catalognumber") or [""])[0]).strip()
+        # (an album known writes the date its tied pressings share: a year in your folder name that is
+        # theirs - "[2025 Vinyl Rip ...]" of 2025 reissues - is the pressing's, never the year ripped)
+        pressing = str((rel.get("date") or first.get("date") or [""])[0])[:4]
+        original = str((first.get("originalyear") or first.get("originaldate") or [""])[0])[:4]
+        artist = str((first.get("albumartist") or [""])[0])
+        comments = []
+        for f in kept[:3]:
+            try:
+                comments += [str(x) for x in tagio.read(f).get("comment") or ()]
+            except Exception:
+                pass
+        try:
+            return vinylrip.describe(prop.source_dir, kept, catno, comments=comments, pressing_year=pressing,
+                                     original_year=original, artist=artist)
+        except Exception:
+            return {}
+
     def _own_album_dir(self, dst: Path, prop, own_files, cache: dict) -> Path:
         """dst, moved into an album folder of its own when the template gives this release
         the same folder as a different release (in this plan, or already on disk): "Now
@@ -3767,6 +3994,9 @@ def preview(plan: dict, verbose=False) -> str:
                 head += "\n    agreed: " + "; ".join(ident["evidence"][:6])
             if ident.get("why"):
                 head += "\n    doubts: " + "; ".join(ident["why"][:4])
+            if a.get("copies"):
+                import dynamics
+                head += "\n    copies: " + dynamics.words(a["copies"])     # VIN-6
         else:
             codes, words = reasons.parse(ident.get("reason", ""))
             head += f"\n    Unresolved: {', '.join(codes)} — {words}"

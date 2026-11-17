@@ -218,6 +218,41 @@ _CATNO_ONE_TOKEN = re.compile(r"^[A-Za-z]{1,10}-?\d{2,7}(?:[-/]\d{1,3})?(?:CD|LP
                               re.I)                                         # Warpcd92, BRC-67, DiN34, FO40CD
 _CATNO_NUMBER = re.compile(r"^\d{2,7}(?:[-/]\d{1,3})?$")                         # 71063-2, 058, 2357
 _YEAR = re.compile(r"^(19|20)\d\d$")
+# VIN-5: a code in three or four groups of letters and digits ("SRM-1-1184", "25-3P-378", "25·3P-269")
+_VIN_GROUPED = re.compile(r"^[A-Za-z0-9]{1,8}(?:[-\u00b7\u30fb][A-Za-z0-9]{1,8}){2,3}$")
+_VIN_DATE = re.compile(r"^(?:(?:19|20)\d\d[-.\u00b7]\d{1,2}[-.\u00b7]\d{1,2}|\d{1,2}[-.\u00b7]\d{1,2}[-.\u00b7](?:19|20)?\d\d)$")
+# (groups that are an audio or video format, a rate or a resolution, never a catalogue number's)
+_VIN_NOT_GROUP = {"lp", "cd", "ep", "web", "flac", "mp3", "aac", "alac", "wav", "dvd", "rpm", "set", "box", "dr", "hd",
+                  "sd", "bd", "fps", "bpm", "kbps", "vinyl", "rip", "live", "disc", "side", "vol", "pt", "of", "tracks",
+                  "h264", "h265", "x264", "x265", "hevc", "v0", "v2", "320", "4k", "8k"}
+_VIN_RATES = {"44100", "48000", "88200", "96000", "176400", "192000", "352800", "384000", "2822400", "5644800",
+              "480", "576", "720", "1080", "1440", "2160", "4320"}
+
+
+def _vin_code(w: str) -> bool:
+    """VIN-5: W is a record's catalogue number in groups ("SRM-1-1184", "25-3P-378", "832-464-1",
+    "7567-82293-1"): five digits or more; a letter group in capitals or a letter-and-digit chunk
+    ("3P", "B0022371") or a group of three digits or more that is no year; never only groups of
+    one or two digits ("12-02-74", "33-45-78", "01-12-16"), only years ("2019-2020-2021"), a date,
+    a phone or social-security shape, a rate or video resolution ("44100-16-2", "1080-2160-4320"),
+    nor a format word ("24-192-Vinyl", "H264-AAC-1080p", "mp3-v0-2008", "LP-33-12345")."""
+    if not _VIN_GROUPED.match(w) or _VIN_DATE.match(w) or sum(c.isdigit() for c in w) < 5:
+        return False
+    groups = re.split(r"[-\u00b7\u30fb]", w)
+    if re.fullmatch(r"\d{3}-\d{3}-\d{4}|\d{3}-\d{2}-\d{4}", w):
+        return False
+    lettered = False
+    for g in groups:
+        if g.casefold() in _VIN_NOT_GROUP or g in _VIN_RATES or re.fullmatch(r"\d*(?:lp|cd|ep|bit|khz|hz)", g, re.I) or \
+                re.fullmatch(r"\d+[kp]", g):
+            return False
+        if re.search(r"[A-Za-z]", g):
+            if re.search(r"[a-z]", g):                # (a word in lower case: never a number's part)
+                return False
+            lettered = True
+    big = any(g.isdigit() and len(g) >= 3 and not _YEAR.match(g) for g in groups) and \
+        (len(groups[0]) >= 3 or any(g.isdigit() and len(g) >= 4 and not _YEAR.match(g) for g in groups))
+    return lettered or big
 
 
 # CAT-3: disc formats and audio editions spelled like a label code ("[HDCD 1]", "[UHQCD 2]")
@@ -238,6 +273,44 @@ def cat3_hint(text):
     code = m.group(1).casefold()
     return (bool(re.search(r"(?:cd|lp)[a-z]{0,2}$", code)) and code not in _CAT3_NOT_CODE
             and code not in _NUMBER_WORDS)
+
+
+def settle_title_numbers(album, cands):
+    """VIN-2 / TAG-2: the album tag's bracket numbers held aside because the folder name names
+    its own (read_album "catnos_title_held") count again - as the folder's - when no candidate
+    carries the folder's own number: a folder hint that names nothing of the album ("[Unit 731
+    101-1]") never hides a real number in the tags. Once per album (it stays settled)."""
+    settle_suffixed_numbers(album, cands)
+    held = set(album.get("catnos_title_held") or ())
+    if not held or album.get("_title_numbers_settled"):
+        return
+    own = set(album.get("catnos_folder_own") or ())
+    if any(catnos_agree(own, c.get("catnos")) for c in cands or () if c.get("catnos")):
+        album["_title_numbers_settled"] = True
+        return
+    if not any(c.get("catnos") for c in cands or ()):
+        return                                       # (nothing to tell by yet)
+    album["catnos_from_folder"] = set(album.get("catnos_from_folder") or ()) | held
+    album["catnos"] = set(album.get("catnos") or ()) | held
+    album["_title_numbers_settled"] = True
+
+
+def settle_suffixed_numbers(album, cands):
+    """VIN-5: the suffixed form first. A folder's "832-464-1 Q-1" is read with its bare "832-464-1"
+    (a database may list either); when some candidate lists the suffixed form, the bare number is
+    no longer the folder's: an entry carrying only "832 464-1" (the European pressing) gets no
+    "folder catalogue number agrees" - nor is it against the folder (catnos_folder_soft). Only
+    bare entries: they agree. Once per album."""
+    pairs = dict(album.get("catnos_suffix_bare") or {})
+    if not pairs or album.get("_suffix_settled"):
+        return
+    if not any(c.get("catnos") for c in cands or ()):
+        return                                       # (nothing to tell by yet)
+    album["_suffix_settled"] = True
+    if any(catnos_agree(set(pairs), c.get("catnos")) for c in cands or () if c.get("catnos")):
+        bare = set(pairs.values()) - set(pairs)
+        album["catnos_from_folder"] = set(album.get("catnos_from_folder") or ()) - bare
+        album["catnos_folder_soft"] = sorted(bare)
 
 
 def catno_hints(text, variants=False):
@@ -270,6 +343,42 @@ def catno_hints(text, variants=False):
                     skip.add(i + 1)
                 elif re.fullmatch(r"\d{5}-\d{4}-\d", w):
                     found.append(w.replace("-", " "))
+                # VIN-5: a record's catalogue number as vinyl rips' folders write it - in three or
+                # four groups ("SRM-1-1184", "25-3P-378", "25·3P-269", "7567-82293-1", "832-464-1",
+                # "B0022371-01-9"), a prefix with a digit ("R1-83736", "RD1 83736"), a long second
+                # group ("RR 1686-176561"), or numbers in groups with a dashed last one ("818 476-1",
+                # "422 826 098-1"); never a date ("1974-12-02", "02-12-1974")
+                elif _vin_code(w):
+                    # (a US Mercury/PolyGram record's format suffix belongs to it: "832-464-1 Q-1",
+                    # the US pressing; "832 464-1" alone is the European one)
+                    if re.fullmatch(r"[A-Z]-\d", nxt) and re.fullmatch(r"\d{3}-\d{3}-\d", w):
+                        found.append(f"{w} {nxt}")
+                        extra.append(w)                   # (the bare number too: databases list both)
+                        skip.add(i + 1)
+                    else:
+                        found.append(w)
+                elif re.fullmatch(r"[A-Z]{1,3}\d-\d{4,7}", w) and w.split("-")[1] not in _VIN_RATES \
+                        and not _YEAR.match(w.split("-")[1]):
+                    found.append(w)
+                elif re.fullmatch(r"\d{5,6}", w) and w not in _VIN_RATES and re.fullmatch(r"[A-Z]{2,3}\d", prev) and \
+                        not re.fullmatch(r"(?:CD|LP|DVD|BD|DL|HD|TR|MK|EP|PT|SD|MIX|VOL|DSC)\d", prev):
+                    found.append(f"{prev} {w}")
+                elif re.fullmatch(r"\d{3,5}-\d{5,7}", w) and not _YEAR.match(w.split("-")[0]):
+                    found.append(f"{prev} {w}" if re.fullmatch(r"[A-Z]{1,4}", prev) else w)
+                elif re.fullmatch(r"\d{3}", w) and re.fullmatch(r"\d{3}", nxt) and \
+                        re.fullmatch(r"\d{3}-\d{1,2}", nxt2):
+                    nxt3 = words[i + 3] if i + 3 < len(words) else ""
+                    if re.fullmatch(r"[A-Z]-\d", nxt3):              # ("422 826 098-1 M-1")
+                        found.append(f"{w} {nxt} {nxt2} {nxt3}")
+                        extra.append(f"{w} {nxt} {nxt2}")
+                        skip.update((i + 1, i + 2, i + 3))
+                    else:
+                        found.append(f"{w} {nxt} {nxt2}")
+                        skip.update((i + 1, i + 2))
+                elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt) \
+                        and not (_YEAR.match(prev) and w.startswith("0")):
+                    found.append(f"{w} {nxt}")
+                    skip.add(i + 1)
                 # "479 7050": a number in two groups (Deutsche Grammophon style)
                 elif re.fullmatch(r"\d{2,4}", w) and re.fullmatch(r"\d{3,5}", nxt) \
                         and not _YEAR.match(w) and len(w + nxt) >= 6:
@@ -4195,7 +4304,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "has_folder_catno": bool(album.get("catnos_from_folder")),
         "folder_catno_agrees": catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
         "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos")
-                                    and not catnos_agree(album.get("catnos_from_folder"), cand.get("catnos"))),
+                                    and not catnos_agree(set(album.get("catnos_from_folder") or ())
+                                                         | set(album.get("catnos_folder_soft") or ()),
+                                                         cand.get("catnos"))),
         "tagged": tagged_release(album, cand),
         # (TAG-1: what decided it when TagMender's own job chose it; whether the scans were read
         # now - a clue of the scans not read now is missing, not disproved)

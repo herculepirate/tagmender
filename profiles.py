@@ -270,6 +270,14 @@ DEFAULTS = {
     # a disc of each) are planned into a folder each, tagged from its own release, when every
     # file fits one version's track lengths (engine._versions_split); false: left for review
     "split_versions": True,
+    # vinyl rips (decided 2026-11-17, settings of their own): each rip its own folder, named by its
+    # rip ("[1977 Vinyl Rip PBTHAL SRM-1-1184]", VIN-3), and two rips found in one folder split
+    # into a folder each (VIN-7); false: named as any album (ED-2), a folder of two rips held
+    "vinyl_rip_folders": True,
+    # the rip's details in one line of the comment tag (VIN-4)
+    "vinyl_rip_comment": True,
+    # two or more copies of one release measured side by side: dynamic range, clipping (VIN-6)
+    "compare_copies": True,
     # where it goes
     "operation": "in_place",              # in_place | copy | move
     "destination": "",                    # library root for copy/move
@@ -733,6 +741,9 @@ def validate(data: dict) -> list[str]:
         p.append("keep_versions must be true or false")
     if not isinstance(d.get("split_versions", True), bool):
         p.append("split_versions must be true or false")
+    for k in ("vinyl_rip_folders", "vinyl_rip_comment", "compare_copies"):
+        if not isinstance(d.get(k, True), bool):
+            p.append(f"{k} must be true or false")
     import tidy
     p += tidy.problems(d.get("subfolders"))
     if not isinstance(d["unresolved"].get("allow_partial", True), bool):

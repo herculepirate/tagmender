@@ -38,6 +38,7 @@ CODES = {
     "missing_collaborator": "the database credit leaves out an artist your tags name",
     "write_failed": "the tags could not be written or verified",
     "partially_tagged": "some files already carry IDs from another release",
+    "two_rips": "two rips of one record are mixed in one folder; sort them into a folder each",
     "other": "see the words after the codes",
 }
 

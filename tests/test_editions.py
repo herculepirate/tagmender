@@ -51,7 +51,9 @@ class Variable(unittest.TestCase):
                                "1986 - Reign in Blood [Remaster]", "2004 - I"])
 
     def test_off_gives_todays_names(self):
-        self.assertEqual(naming.with_editions(TPL, "off"), TPL)
+        # (VIN-3: only a vinyl rip's own bracket is added, read from %_vinylrip%, which only a
+        # planned vinyl rip sets: every other name is today's)
+        self.assertEqual(naming.with_editions(TPL, "off").replace("$if(%_vinylrip%, [%_vinylrip%])", ""), TPL)
         for args, _ in TABLE:
             self.assertEqual(folder(tags(*args), "off"), f"{args[1]} - {args[0]}")
 
@@ -184,11 +186,13 @@ class Plans(Base):
 
     def test_on(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")], editions="edition_year")
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip]"])
+        # (VIN-3: a vinyl rip's folder names the pressing's catalogue number after ED-2's edition)
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip CAT 1]"])
 
     def test_off(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")])
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I"])
+        # (VIN-3, decided 2026-11-17: a vinyl rip names its rip even with editions off)
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [Vinyl Rip CAT 1]"])
 
     def test_mixed_media_set_stays_in_one_folder(self):
         ts = [self.t(1, "A", media=["CD"], discnumber=["1"], totaldiscs=["2"], date=["2004-07-06"]),
@@ -196,7 +200,8 @@ class Plans(Base):
         p = self.plan(ts, editions="edition_year")
         self.assertEqual(self.folders(p), ["Meshuggah/2004 - I/Disc 01", "Meshuggah/2004 - I/Disc 02"])
         p = self.plan([dict(ts[0], media=['12" Vinyl']), ts[1]], editions="edition")
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [Vinyl Rip]/Disc 01", "Meshuggah/2004 - I [Vinyl Rip]/Disc 02"])
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [Vinyl Rip CAT 1]/Disc 01",
+                                           "Meshuggah/2004 - I [Vinyl Rip CAT 1]/Disc 02"])
 
     def test_mixed_media_with_johns_script(self):
         ts = [self.t(1, "A", media=["CD"], discnumber=["1"], totaldiscs=["2"], date=["2014-10-22"]),
@@ -213,13 +218,14 @@ class Plans(Base):
         ts = [self.t(1, "A", album=["Catch Thirtythree Remastered Edition"]),
               self.t(2, "B", album=["Catch Thirtythree Remastered Edition"])]
         p = pl.build([self.proposal(targets=ts)], prof)
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - Catch Thirtythree"])
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - Catch Thirtythree [Vinyl Rip CAT 1]"])   # (VIN-3)
 
     def test_album_tag(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")], album_editions="edition_year")
         fe = p["albums"][0]["files"][0]
         self.assertEqual(fe["changes"]["album"], ["I [2019 Vinyl Rip]"])
-        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip]"])   # (from the tag; never twice)
+        # (from the tag, with the rip's catalogue number inside its one bracket: VIN-3; never twice)
+        self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip CAT 1]"])
         self.assertEqual(executor.Executor(p).run()["counts"], {"done": 1})
         moved = Path(fe["dst"])
         self.assertEqual(tagio.read(moved)["album"], ["I [2019 Vinyl Rip]"])

@@ -387,6 +387,239 @@ class PlainEdits(te.Base):
         self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Song 1"])
         self.assertEqual(executor.jobs(), [])
 
+    # ---- review of 0.8.72 (M1-M4, m1-m8) ----------------------------------------------------
+    def edit_title(self, folder=None, name="01 Song.mp3", title="Mine"):
+        folder = folder or self.mp3
+        self.show(folder, "file", str(folder / name))
+        self.panes.typed(self.row("title"), title)
+        self.settle_edits()
+
+    def watch_profile(self, path=None):
+        prof = pf.from_dict({"name": "Watch", "sources": [{"path": str(path or self.lib), "watch": True}],
+                             "watch": {"settle_minutes": 0}, "providers": {"web": {"enabled": False}}})
+        pf.save(prof)
+        return pf.load("Watch")
+
+    def due(self, prof, folder, root=None):
+        import engine
+        import watcher
+        w = watcher.Watcher([prof], once=True)
+        g = {Path(g.folder): g for g in engine.Engine(prof).albums_in(root or self.lib)}[folder]
+        db = watcher._db()
+        try:
+            return w.due(g.folder, prof, db, w.key(g), g.files, g.files)
+        finally:
+            db.close()
+
+    def test_apply_leaves_plain_edits_for_save_tags(self):                    # M1
+        self.delta = self.album("Band D", "Delta")
+        self.open_list()
+        self.edit_title()
+        self.look_up_delta()
+        self.win.update_album_actions()
+        self.assertTrue(self.win.act("save_tags").isEnabled())
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=True) as asked:
+            self.ov.apply()
+            self.assertTrue(wait(lambda: not self.ov.running, self.app))
+        self.assertIn("not applied", asked.call_args.args[2])                   # (said in the Apply sheet)
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Song 1"])
+        self.assertEqual([Path(a["source_dir"]) for a in self.ov.plain_albums()], [self.mp3])
+        self.win.update_album_actions()
+        self.assertTrue(self.win.act("save_tags").isEnabled())
+        self.assertEqual(self.win.act("apply").iconText(), "Save Tags")
+        self.save()
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
+
+    def test_listing_the_same_folder_again_keeps_the_edits_shown(self):      # M2
+        self.open_list()
+        self.edit_title()
+        with mock.patch("engine.Engine.proposals", side_effect=AssertionError("looked up")):
+            self.ov.set_path(str(self.lib))
+            self.assertTrue(wait(lambda: self.ov.plan is not None and not self.ov.running, self.app))
+        self.assertTrue(wait(lambda: len(self.ov.plain_albums()) == 1 and not self.insp._wanted, self.app))
+        self.win.update_album_actions()
+        self.assertTrue(self.win.act("save_tags").isEnabled())
+        with mock.patch.object(self.gui.sheets, "ask", return_value="Cancel") as asked:
+            self.win.close()
+        asked.assert_called_once()
+        self.assertTrue(self.win.isVisible())
+
+    def test_undoing_a_save_keeps_the_watcher_off(self):                     # M3
+        prof = self.watch_profile()
+        self.open_list()
+        self.edit_title()
+        self.save()
+        self.assertEqual(self.due(prof, self.mp3), (False, "edited"))
+        time.sleep(1.1)
+        job = executor.jobs()[0]
+        job = job[0] if isinstance(job, (list, tuple)) else job["job"]
+        executor.undo(job)
+        self.assertEqual(self.due(prof, self.mp3), (False, "undone"))
+
+    def test_saved_through_another_spelling_of_the_watched_folder(self):     # M4
+        link = self.tmp / "linklib"
+        _os.symlink(self.lib, link)
+        prof = self.watch_profile(self.lib)
+        with mock.patch("engine.Engine.proposals", side_effect=AssertionError("looked up")):
+            self.assertTrue(self.ov.set_path(str(link)))
+            self.assertTrue(wait(lambda: self.ov.plan is not None and not self.ov.running, self.app))
+        self.edit_title(link / "Band A" / "Alpha")
+        self.save()
+        self.assertEqual(self.due(prof, self.mp3), (False, "edited"))
+        import watcher
+        self.assertEqual(watcher.remember_saved([(str(self.tmp / "elsewhere"), [str(self.tmp / "elsewhere" / "x.mp3")])],
+                                                [prof]), 0)                   # (no watched folder: no row)
+
+    def test_frames_other_taggers_rename_stay_as_the_file_has_them(self):    # m1
+        from mutagen.id3 import ID3, TXXX
+        f = self.mp3 / "01 Song.mp3"
+        t = ID3(str(f))
+        t.add(TXXX(encoding=3, desc="Artists", text=["X"]))
+        t.add(TXXX(encoding=3, desc="ALBUMARTISTSORT", text=["S"]))
+        t.save(str(f), v2_version=3)
+        before = sorted(k for k in ID3(str(f)).keys() if k != "TIT2")
+        self.open_list()
+        self.edit_title()
+        self.save()
+        tags = ID3(str(f))
+        self.assertEqual(sorted(k for k in tags.keys() if k != "TIT2"), before)
+        self.assertEqual(tags["TIT2"].text, ["Mine"])
+
+    def test_a_change_after_the_first_edit_is_caught_though_another_file_is_edited_later(self):   # m2
+        self.open_list()
+        f = self.mp3 / "01 Song.mp3"
+        self.edit_title()
+        time.sleep(0.01)
+        tagio.write(f, {"comment": ["another program"]})
+        self.edit_title(name="02 Song.mp3", title="Other")                      # (the album edited again)
+        with mock.patch.object(self.gui.sheets, "warning") as warned:
+            self.save()
+        warned.assert_called_once()
+        self.assertEqual(tagio.read(f)["title"], ["Song 1"])
+        self.assertEqual(tagio.read(f)["comment"], ["another program"])
+        self.assertEqual(tagio.read(self.mp3 / "02 Song.mp3")["title"], ["Song 2"])   # (its album left alone)
+        self.assertTrue(wait(lambda: not self.insp._wanted, self.app))
+        self.assertEqual(len(self.ov.plain_albums()), 1)
+        self.save()                                                              # (read again: saved now)
+        self.assertEqual(tagio.read(f)["title"], ["Mine"])
+        self.assertEqual(tagio.read(f)["comment"], ["another program"])
+
+    def test_files_your_rules_exclude_are_reported_and_keep_their_edits(self):     # m3
+        self.open_list()
+        self.show(self.mp3)
+        self.panes._edit("genre", ["Jazz"])
+        self.settle_edits()
+        ex._write(ex.rules_file(), {"rules": [{"id": "s2", "name": "skip 2", "action": "skip", "target": "file",
+                                               "when": {"all": [{"field": "filename", "op": "contains",
+                                                                 "value": "02 Song"}]}}]})
+        with mock.patch.object(self.gui.sheets, "warning") as warned:
+            self.save()
+        warned.assert_called_once()
+        self.assertIn("rules exclude", warned.call_args.args[2])
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["genre"], ["Jazz"])
+        self.assertEqual(tagio.read(self.mp3 / "02 Song.mp3")["genre"], ["Pop"])
+        self.assertTrue(wait(lambda: not self.insp._wanted, self.app))
+        self.assertEqual(len(self.ov.plain_albums()), 1)                         # (its edit kept)
+        a = self.album_of(self.mp3)
+        self.assertEqual([Path(fe["src"]).name for fe in a["files"] if fe["op"] != "none"], ["02 Song.mp3"])
+
+    def test_undo_edit_is_off_after_the_save(self):                          # m4
+        self.open_list()
+        self.edit_title()
+        self.save()
+        self.assertFalse(self.insp.can_undo_edit())
+        self.win.update_tag_actions()
+        self.assertFalse(self.win.act("undo_edit").isEnabled())
+
+    def test_one_album_failing_keeps_its_edits_the_others_are_saved(self):   # multi-album, one fails
+        if _os.geteuid() == 0:
+            self.skipTest("root writes into read-only folders")
+        self.open_list()
+        self.edit_title()
+        self.edit_title(self.flac, "01 Song.flac", "FlacMine")
+        _os.chmod(self.flac, 0o555)
+        try:
+            with mock.patch.object(self.gui.sheets, "warning") as warned:
+                self.save()
+        finally:
+            _os.chmod(self.flac, 0o755)
+        warned.assert_called_once()
+        self.assertIn("Beta", warned.call_args.args[2])
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
+        self.assertEqual(tagio.read(self.flac / "01 Song.flac")["title"], ["Song 1"])
+        self.assertEqual([Path(a["source_dir"]) for a in self.ov.plain_albums()], [self.flac])
+        self.save()
+        self.assertEqual(tagio.read(self.flac / "01 Song.flac")["title"], ["FlacMine"])
+
+    def test_closing_during_a_save_closes_once_it_is_done(self):            # m5
+        self.open_list()
+        self.edit_title()
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=True):
+            self.win.act("save_tags").trigger()
+            self.assertTrue(self.ov.running)
+            self.win.close()
+            self.assertTrue(self.win.isVisible())                               # (not while it saves)
+            self.assertTrue(wait(lambda: not self.win.isVisible(), self.app))
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
+
+    def test_closing_during_a_save_that_fails_stays_open(self):             # m5
+        if _os.geteuid() == 0:
+            self.skipTest("root writes into read-only folders")
+        self.open_list()
+        self.edit_title()
+        _os.chmod(self.mp3, 0o555)
+        try:
+            with mock.patch.object(self.gui.sheets, "confirm", return_value=True), \
+                    mock.patch.object(self.gui.sheets, "warning") as warned:
+                self.win.act("save_tags").trigger()
+                self.win.close()
+                self.assertTrue(wait(lambda: not self.ov.running, self.app))
+                self.app.processEvents()
+        finally:
+            _os.chmod(self.mp3, 0o755)
+        warned.assert_called_once()
+        self.assertTrue(self.win.isVisible())
+        self.assertEqual(len(self.ov.plain_albums()), 1)
+
+    def test_taking_an_edited_album_out_of_the_list_asks(self):              # m6
+        self.open_list()
+        self.edit_title()
+        a = self.album_of(self.mp3)
+        with mock.patch.object(self.gui.sheets, "ask", return_value="Cancel"):
+            self.ov._take_out([a])
+        self.assertIn(a, self.ov.plan["albums"])
+        with mock.patch.object(self.gui.sheets, "ask", return_value="Don't Save"):
+            self.ov._take_out([a])
+        self.assertNotIn(a, self.ov.plan["albums"])
+        self.assertEqual(self.insp.edits, {})
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Song 1"])
+
+    def test_taking_out_with_save_saves_first(self):                         # m6
+        self.open_list()
+        self.edit_title()
+        a = self.album_of(self.mp3)
+        with mock.patch.object(self.gui.sheets, "ask", return_value="Save"):
+            self.ov._take_out([a])
+            self.assertTrue(wait(lambda: not self.ov.running, self.app))
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
+        self.assertTrue(wait(lambda: not any(x is a for x in self.ov.plan["albums"]), self.app))
+
+    def test_a_folder_dropped_during_a_save_joins_the_list_after_it(self):   # m7
+        self.open_list()
+        self.edit_title()
+        new = self.tmp / "more" / "Band E" / "Epsilon"
+        make(new / "01 E.flac", {"title": ["E"], "album": ["Epsilon"], "artist": ["Band E"]})
+        with mock.patch.object(self.gui.sheets, "confirm", return_value=True), \
+                mock.patch("engine.Engine.proposals", side_effect=AssertionError("looked up")):
+            self.win.act("save_tags").trigger()
+            self.assertTrue(self.ov.running)
+            self.win.dropped([str(new.parent.parent)])
+            self.assertIn("added to the list; not looked up yet", self.win.statusBar().currentMessage())
+            self.assertTrue(wait(lambda: not self.ov.running and any(
+                Path(a["source_dir"]) == new for a in self.ov.plan["albums"]), self.app))
+        self.assertEqual(tagio.read(self.mp3 / "01 Song.mp3")["title"], ["Mine"])
+        self.assertEqual(next(a for a in self.ov.plan["albums"] if Path(a["source_dir"]) == new)["status"], "listed")
+
 
 class PlainPlan(unittest.TestCase):
     """plan.plain_plan / editable / plain_pending without the app."""

@@ -1332,6 +1332,8 @@ class Inspector(QDockWidget):
         for old in self.history:
             drop(old)
         self.history = [h for i, h in enumerate(self.history) if i == 0 or h != self.history[i - 1]]
+        while self.history and self.history[-1] == self.edits:   # (nothing left for Undo Edit to take back)
+            self.history.pop()
         self._wanted.pop(id(album), None)
         self._actions_changed()
 

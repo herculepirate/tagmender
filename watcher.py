@@ -1125,15 +1125,26 @@ def remember_saved(albums, profiles=None) -> int:
     looked at again only once its files change (a track added, removed, or written by another
     program) or you ask (Process Folder Again). Returns how many records were written."""
     profiles = Watcher._watched_profiles() if profiles is None else profiles
-    roots = [os.path.realpath(os.path.expanduser(str(s["path"]))) for p in profiles for s in p["sources"]
-             if s.get("watch")]
+    # (each watched folder as the watcher spells it - its albums' records are keyed so - and where
+    # it really is: an album saved through a symlink or another spelling is named the watcher's way)
+    roots = sorted({(os.path.realpath(os.path.expanduser(str(s["path"]))),
+                     os.path.abspath(os.path.expanduser(str(s["path"]))))
+                    for p in profiles for s in p["sources"] if s.get("watch")}, key=lambda r: -len(r[0]))
+
+    def spelled(path):
+        real = os.path.realpath(str(path))
+        for r, own in roots:
+            if real == r or real.startswith(r.rstrip(os.sep) + os.sep):
+                return Path(own + real[len(r.rstrip(os.sep)):]) if real != r else Path(own)
+        return None
     n = 0
     db = _db()
     try:
         for folder, files in albums:
-            folder, files = Path(folder), [Path(f) for f in files]
-            if not files:
-                continue
+            folder = spelled(folder)
+            files = [spelled(f) for f in files]
+            if folder is None or not files or any(f is None for f in files):
+                continue                              # (no watched folder holds it: nothing to remember)
             key, now = album_key(folder, files), time.time()
             row = db.execute("SELECT status FROM processed WHERE folder=?", (key,)).fetchone()
             if row and row[0] == "undone":            # (undone: its record is the files' shape)
@@ -1141,9 +1152,6 @@ def remember_saved(albums, profiles=None) -> int:
             elif row:
                 db.execute("UPDATE processed SET signature=? WHERE folder=?", (snapshot(folder, files)[0], key))
             else:
-                real = os.path.realpath(str(folder))
-                if not any(real == r or real.startswith(r.rstrip(os.sep) + os.sep) for r in roots):
-                    continue                          # (no watched folder holds it: nothing to remember)
                 db.execute("INSERT OR REPLACE INTO processed VALUES (?,?,?,?,?,?,?,?)",
                            (key, "", snapshot(folder, files)[0], "edited", 0, 0, now, ""))
             n += 1

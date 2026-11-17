@@ -659,10 +659,14 @@ job is journaled - Edit > Undo Last Job, or Jobs, puts every file back (a file y
 since is protected, as after any job). It writes only what you changed: no look-up, no new file
 name, no move, no cover file, log or other companion, and no TagMender marks (TAGMENDER and its
 reason tags are written only when TagMender identifies an album). Each file keeps its own format:
-its ID3 version, its ID3v1 tag, custom tags and their spelling, multiple values; a value you set
-as it already is writes nothing. A cover you choose is embedded into the tracks, as a new cover
-is. A file another program changed after you edited it is left as it is (*Changed*): your edit is
-read again against it and kept, to save once more. Your Ignore and Skip rules still apply.
+its ID3 version, its ID3v1 tag, custom tags and their spelling (frames other taggers move or
+rename on saving stay as they are), multiple values; a value you set as it already is writes
+nothing. A cover you choose is embedded into the tracks, as a new cover
+is. A file another program changed after you first edited it is left as it is (*Changed*), with the
+rest of its album: your edit is read again against it and kept, to save once more. Your Ignore and
+Skip rules still apply: a file they exclude is left as it was, and the sheet after saving says so
+(its edit is kept). Apply writes only looked-up albums: your edits of albums not looked up stay,
+for Save Tags.
 
 Saving never starts a look-up, and the watcher does not look at an album again because you saved
 it: an album it filed keeps its record, one in a watched folder it never handled is remembered as
@@ -671,10 +675,11 @@ Again. Later, **Look Up** works on the album as on any other: the database's val
 for every tag (your saved values are not kept as edits of yours). Edits you have not saved yet
 when you look an album up are kept by the look-up, as any edit of yours, and written by Apply.
 
-Adding another folder or closing the window with edits not saved asks **Save**, **Don't Save** or
-**Cancel**.
+Adding another folder, taking an edited album out of the list (Delete) or closing the window with
+edits not saved asks **Save**, **Don't Save** or **Cancel**; closing while a save runs closes once
+it is done (or stays open, saying which albums could not be saved). Listing the same folder again
+keeps your edits not saved, shown again.
 
-## Hands-off
 ## Hands-off
 
 ### Watched folders

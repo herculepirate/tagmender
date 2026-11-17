@@ -959,6 +959,23 @@ class Overview(QWidget):
     def _take_out(self, chosen):
         if not chosen:
             return
+        plain = [a for a in chosen if planmod.plain_pending(a)]
+        if plain and not self.running:
+            # (EDT-2: your edits of them not saved - saved, discarded or kept, as on leaving)
+            n = len(plain)
+            ans = sheets.ask(self, tr("Save your edits of {0}?").format(plural(n, tr("album"), tr("albums"))),
+                             tr("They are taken out of the list; your tag edits of them are lost if you don't "
+                                "save them."), buttons=(tr("Cancel"), tr("Don't Save"), tr("Save")),
+                             default=tr("Save"), offscreen=tr("Don't Save"))
+            if ans == tr("Save"):
+                self.save_tags(ask=False, only=plain, then=lambda: self._take_out(chosen))
+                return
+            if ans != tr("Don't Save"):
+                return
+        insp = self.win.inspector
+        for a in chosen:                                     # (edits of an album no longer listed: gone)
+            if a.get("status") == planmod.LISTED and insp.edit_of(a) is not None:
+                insp.forget_edits_of(a)
         if self.running:
             # CLR-1: while work runs, only albums it has done with (Done) come out: nothing it
             # still has in hand (Apply follows its albums themselves, the look-up its keys)
@@ -1382,6 +1399,7 @@ class Overview(QWidget):
             self.summary.setText(tr("No music found in the folders dropped."))
             return
         if list_only:
+            self.keep_plain_edits(fresh)                     # (EDT-2: your edits of them, shown again)
             self.summary.setText(tr("{0} added, not looked up yet. Select them and press Look Up.").format(
                 plural(len(fresh), tr("album"), tr("albums"))))
             self.show_ready()
@@ -1489,6 +1507,21 @@ class Overview(QWidget):
         else:
             self.model.set_plan(plan)
 
+    def keep_plain_edits(self, albums):
+        """EDT-2: albums listed again (the same folder added or listed once more) that your edits not
+        saved are of: the edits applied to them again, so they show, Save Tags writes them and
+        leaving asks - never kept out of sight."""
+        insp = self.win.inspector
+        if not insp.edits:
+            return
+        for a in albums:
+            if a.get("status") != planmod.LISTED or os.path.realpath(a["source_dir"]) not in insp.edits:
+                continue
+            planmod.plain_files(a)
+            if insp.edit_of(a) is not None and insp.can_edit(a):
+                insp.plan = self.plan                       # (the plan the album is of now)
+                insp.reapply(a)
+
     def listed(self, plan, look_up=False):
         self.end_listing_rows()
         self.plan = plan
@@ -1497,6 +1530,8 @@ class Overview(QWidget):
         self.adopt_listing(plan)
         self.request_fit()
         self.busy(False)
+        if not look_up:
+            self.keep_plain_edits(plan["albums"])          # (EDT-2: once nothing runs - they can be edited)
         n = len(plan["albums"])
         if look_up and n:
             self.look_up(self.sources.currentData() or "profile", list(plan["albums"]), queued=True)
@@ -2600,6 +2635,11 @@ class Overview(QWidget):
         if mine:                                      # (values you typed or a cover you chose, not the match's)
             body += tr("<p>Includes your own edits of {0}: tags or a cover you chose, marked with a pencil in the "
                        "inspector.</p>").format(plural(mine, tr("album"), tr("albums")))
+        plain = self.plain_albums()
+        if plain:                                     # (EDT-2: not applied; kept for Save Tags)
+            body += "<p>" + html.escape(tr("Your edits of {0} not looked up are not applied: they stay, to save with "
+                                           "File › Save Tags.").format(plural(len(plain), tr("album"),
+                                                                              tr("albums")))) + "</p>"
         word = tr("Album") if n == 1 else tr("Albums")
         return (tr("Apply the preview to {n} {0}?").format(word.lower(), n=n), body,
                 tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), tr("Apply {n} {0}").format(word, n=n))
@@ -2939,14 +2979,15 @@ class Overview(QWidget):
                 tr("Every change can be undone: Edit > Undo Last Job, or Jobs."),
                 tr("Save Tags") if n == 1 else tr("Save {0} Albums").format(n))
 
-    def save_tags(self, ask=True, then=None) -> bool:
+    def save_tags(self, ask=True, then=None, only=None) -> bool:
         """Save Tags (EDT-2): your edits of the albums not looked up written as one job through the
         executor - staged, the audio verified, the tags read back, journaled, undoable from Jobs -
         and nothing else: no look-up, no rename or move, no companion, no TagMender mark. The
         watcher is told (watcher.remember_saved), so this write never has it look at the album.
         THEN: called once every album is saved (a folder to show next, the window to close).
-        True when the save started."""
-        albums = self.plain_albums()
+        ONLY: these albums alone (else every album with edits not saved). True when the save started."""
+        ids = None if only is None else {id(a) for a in only}
+        albums = [a for a in self.plain_albums() if ids is None or id(a) in ids]
         if not albums:
             return False
         if self.running or getattr(self, "apply_worker", None) is not None:
@@ -2958,7 +2999,7 @@ class Overview(QWidget):
             return False
         if self.running or self.edit_pending():               # (work started while you were asked)
             return False
-        albums = self.plain_albums()
+        albums = [a for a in self.plain_albums() if ids is None or id(a) in ids]
         if not albums:
             return False
         name = self.above() or "default"
@@ -2973,13 +3014,26 @@ class Overview(QWidget):
             import executor
             import logsetup
             import watcher
-            res = executor.Executor(plan, cancel=lambda: w.cancelled,
-                                    progress=lambda i, n, what: w.progress.emit(i, n, what)).run()
-            done = {r["index"] for r in res["albums"] if r.get("status") == "done" and "index" in r}
-            try:                                              # (the watcher's memory: never fails the save)
-                watcher.remember_saved([every[i] for i in sorted(done)])
+            # (held until the watcher is told: "a job is changing files" keeps its pass off these
+            # albums until their records say what the save left - never looked at for it)
+            with executor.changing_files():
+                res = executor.Executor(plan, cancel=lambda: w.cancelled,
+                                        progress=lambda i, n, what: w.progress.emit(i, n, what)).run()
+                done = {r["index"] for r in res["albums"] if r.get("status") == "done" and "index" in r}
+                try:                                          # (the watcher's memory: never fails the save)
+                    watcher.remember_saved([every[i] for i in sorted(done)])
+                except Exception:
+                    logsetup.setup("apply", job=plan["job"]).exception("the watcher was not told of the saved albums")
+            # (the files each album's job wrote: one your rules exclude now is left as it was)
+            wrote = set()
+            try:
+                for e in executor.Journal(executor.job_dir(plan["job"])).read():
+                    if e.get("ev") == "file" and e.get("state") == "committed":
+                        wrote.add((e.get("album"), e.get("idx")))
             except Exception:
-                logsetup.setup("apply", job=plan["job"]).exception("the watcher was not told of the saved albums")
+                wrote = None
+            res["unwritten"] = {i: [fe["src"] for j, fe in enumerate(x["files"]) if (i, j) not in wrote]
+                                for i, x in enumerate(plan["albums"])} if wrote is not None else {}
             return res
         self._saving, self._save_then = list(albums), then
         self.states = {id(a): "waiting" for a in albums}
@@ -3011,10 +3065,21 @@ class Overview(QWidget):
         self._saving, self._save_then = None, None
         by = {r["index"]: r for r in res.get("albums") or [] if "index" in r}
         insp = self.win.inspector
-        ok, bad = [], []
+        ok, bad, some = [], [], []
         for i, a in enumerate(albums):
             r = by.get(i)
-            (ok if r and r.get("status") == "done" else bad).append((a, r))
+            left = (res.get("unwritten") or {}).get(i) or []
+            if r and r.get("status") == "done" and left:
+                # (some files written; those your rules exclude now not: their edits stay)
+                some.append((a, dict(r, detail=tr("{0} left as they were: your rules exclude them now").format(
+                    plural(len(left), tr("file"), tr("files"))))))
+            else:
+                (ok if r and r.get("status") == "done" else bad).append((a, r))
+        for a, _r in some:                                   # (the files written read again: no change left)
+            for fe in a.get("files") or []:
+                fe.pop("fingerprint", None)
+            insp.reapply(a)
+        bad += some
         for a, _r in ok:
             insp.forget_edits_of(a)
             planmod.apply_edits(a, None)                     # (as listed: its edit's values gone)
@@ -3037,10 +3102,12 @@ class Overview(QWidget):
                 why = (r or {}).get("detail") or ((r or {}).get("label") or tr("not reached (cancelled)"))
                 lines.append(f"{album_words(a['source_dir'])}: {why}")
                 if (r or {}).get("status") == "conflict" and planmod.editable(a):
-                    insp.reapply(a)                          # (your edit, against the file as it is now)
+                    for fe in a.get("files") or []:          # (your edit, against the file as it is now)
+                        fe.pop("fingerprint", None)
+                    insp.reapply(a)
             sheets.warning(self, tr("{0} not saved.").format(plural(len(bad), tr("album"), tr("albums"))),
-                           "\n".join(lines) + "\n\n" + tr("Your edits of them are kept; nothing of them was "
-                                                           "written. Save again to try once more."))
+                           "\n".join(lines) + "\n\n" + tr("Your edits of what was not written are kept, to save "
+                                                           "again, change or take back (Edit › Undo Edit)."))
         elif then is not None:
             then()
         self.win.update_album_actions()
@@ -3100,10 +3167,15 @@ class Overview(QWidget):
                               if res.get("job") and set(res["counts"]) - NOTHING_DONE
                               else "."))           # (no job, or nothing changed by it: nothing to undo)
         left = [a for a in self.plan["albums"] if can_apply(a)]
+        plain = [a for a in self.plan["albums"] if planmod.plain_pending(a)]     # (EDT-2: Save Tags writes them)
         if left:                                          # (albums left out stay, to apply later)
             self.summary.setText(self.summary.text() + " " + tr("{0} left to apply.").format(
                 plural(len(left), tr("album"), tr("albums"))))
-        elif not self.queue and not getattr(self, "_joined", False) and not self._reading:
+        if plain:
+            self.summary.setText(self.summary.text() + " " + tr("Your edits of {0} not looked up are not saved yet "
+                                                                "(File › Save Tags).").format(
+                plural(len(plain), tr("album"), tr("albums"))))
+        if not (left or plain) and not self.queue and not getattr(self, "_joined", False) and not self._reading:
             self.plan = None                              # (albums dropped meanwhile: the list stays)
             self.show_ready()
         self._joined = False

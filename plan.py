@@ -3889,6 +3889,7 @@ def plain_plan(albums, job, profile="default") -> dict:
             fe.pop("auto", None)
             fe["op"] = "tag"
             fe["dst"] = fe["src"]
+            fe["plain"] = True                        # (tagio.write: no frame moved or renamed)
         if art:                                       # (no cover file: a plain edit embeds only)
             art["file"] = None
         e.update(status="ready", companions=[], sidecars=[], skipped=[], conflicts=[], notes=[], plain=True)
@@ -4200,8 +4201,18 @@ def apply_edits(entry: dict, edit: dict | None, profile=None, settings=None) -> 
     if plain:                                         # EDT-2: a plain edit keeps each file's own format:
         profile = settings = None                     # no profile's ID3 version, ID3v1 or tags removed
     _snapshot(entry)
-    if plain:                                         # (the files as this edit read them: Save Tags writes
-        for fe in entry.get("files") or []:           # none changed since - executor's "Changed")
+    if plain:
+        # (each file as your edit of it first read it: Save Tags writes none changed since - the
+        # executor's "Changed". Kept while that file's edit stays the same, so a change made by
+        # another program after it is never taken for the file your edit was made on)
+        cover = (edit.get("cover") or {}).get("image")
+        for fe in entry.get("files") or []:
+            mine = dict(edit.get("tags") or {}, **((edit.get("file_tags") or {}).get(fe["src"]) or
+                                                   (edit.get("file_tags") or {}).get(os.path.realpath(fe["src"])) or {}))
+            stamp = json.dumps([mine, cover], sort_keys=True, default=str)
+            if fe.get("fingerprint") and fe.get("edit_stamp") == stamp:
+                continue
+            fe["edit_stamp"] = stamp
             try:
                 fe["fingerprint"] = _fp(fe["src"])
             except OSError:

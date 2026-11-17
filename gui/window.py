@@ -1293,7 +1293,14 @@ class Main(QMainWindow):
             event.ignore()                                     # (Cancel on "Save the keys you typed?")
             return
         ov = self.pages.get("Overview")
-        if not getattr(self, "_closing", False) and ov is not None and getattr(ov, "_work_kind", None) != "save" and \
+        if not getattr(self, "_closing", False) and ov is not None and getattr(ov, "_work_kind", None) == "save":
+            # (EDT-2: closed once the save ends - unless an album could not be saved: then it stays
+            # open with the sheet that says so, and its edits)
+            ov._save_then = self.close
+            event.ignore()
+            self.statusBar().showMessage(tr("Saving your edits; TagMender closes when that is done."))
+            return
+        if not getattr(self, "_closing", False) and ov is not None and \
                 not ov.may_drop_plain(then=self.close):
             event.ignore()                                     # (EDT-2: Cancel, or closed once saved)
             return

@@ -2886,7 +2886,7 @@ class Planner:
         for d, ns in discs.items():
             if d == home:
                 continue
-            if last and not re.match(r"Disc \d+ \(SACD", d.name):
+            if last and not re.match(r"Disc \d+ \(SACD", d.name, re.I):
                 # (the naming's disc folders are the album's own folders, side by side: no album
                 # folder holds them - its scans would land in the artist's folder: held)
                 return None

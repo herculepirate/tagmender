@@ -1216,7 +1216,7 @@ def _album_like(sc, folder: Path) -> bool:
     if not got:
         return False
     dirs, audio, _names = got
-    return bool(audio) or any(is_disc_dir(folder / x) for x in dirs)
+    return bool(audio) or any(_disc_like(folder, x) for x in dirs)
 
 
 def _one_release_units(eng, sc, d: Path, names) -> list:

@@ -141,15 +141,16 @@ class AppKeepsMetadata(te.Base):
         # 0.8.14: a folder dropped during Apply, read at once (0.8.16: both through read_folders, which merges)
         self.assertEqual(src.count("meta=META_STORE"), 4)
 
-    def test_a_file_with_a_large_picture_is_not_kept(self):
+    def test_a_file_with_large_metadata_is_not_kept(self):
+        # (0.8.69, PRF-2: a picture is no longer written out as text - a long text tag is used here)
         d = self.lib / "Pics"
         d.mkdir(parents=True)
         f = d / "01.mp3"
         subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", "-ar", "8000",
                         "-c:a", "libmp3lame", "-metadata", "album=Pics", str(f), "-y"], check=True)
-        from mutagen.id3 import APIC, ID3
+        from mutagen.id3 import ID3, TXXX
         tags = ID3(f)
-        tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="front", data=os.urandom(600_000)))
+        tags.add(TXXX(encoding=3, desc="NOTES", text=["x" * 100_000]))
         tags.save(f)
         small = d / "02.mp3"
         subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", "-ar", "8000",

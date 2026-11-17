@@ -392,6 +392,36 @@ def _read_meta(path):
         return _read_file_meta(path)
 
 
+# PRF-2: a picture or other binary item among the tags is no text: its value is "[binary data
+# (N bytes)]" (as mutagen names an ASF one), never the picture's bytes written out as text - an
+# APEv2 cover, an ID3 APIC, an MP4 covr, a Vorbis METADATA_BLOCK_PICTURE (base64). Nothing reads
+# a picture from here (artwork reads the files itself); written out, one picture made a file's
+# metadata too large to be remembered (META_STORE_MAX), so every such track was opened again on
+# each pass.
+_PICTURE_FIELDS = {"metadata_block_picture", "coverart"}
+
+
+def _binary_text(key, value):
+    """The text a binary tag value stands as ("[binary data (N bytes)]"); None for text."""
+    try:
+        from mutagen.apev2 import APEBinaryValue
+        from mutagen.id3 import APIC
+        from mutagen.mp4 import MP4Cover
+    except ImportError:                              # pragma: no cover
+        return None
+    if isinstance(value, APEBinaryValue):
+        n = len(value.value)
+    elif isinstance(value, MP4Cover):
+        n = len(value)
+    elif isinstance(value, APIC):
+        n = len(value.data)
+    elif isinstance(value, str) and str(key).casefold() in _PICTURE_FIELDS:
+        n = len(value) * 3 // 4                      # (base64: the picture's own size)
+    else:
+        return None
+    return f"[binary data ({n} bytes)]"
+
+
 def _read_file_meta(path):
     p = Path(path)
     meta = {"filename": [p.name], "folder": [p.parent.name], "path": [str(p)],
@@ -415,6 +445,10 @@ def _read_file_meta(path):
         for x in vals:
             x = getattr(x, "text", x)
             for y in (x if isinstance(x, list) else [x]):
+                pic = _binary_text(key, y)
+                if pic is not None:
+                    text.append(pic)
+                    continue
                 if isinstance(y, (bytes, bytearray)):
                     y = y.decode("utf-8", "ignore")
                 if isinstance(y, tuple):

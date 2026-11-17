@@ -199,8 +199,8 @@ def _proven(album) -> bool:
 
 def copies(plan, filed=True) -> list:
     """[(release ID, [copy, ...])] for each release two or more copies of which this plan holds
-    or TagMender filed (its job history, when filed): copy = {"folder", "files", "album": the
-    plan's album index or None (a copy filed before)}. Copies only of a proven release (never an
+    or TagMender filed (its job history, when filed; "cached": as already read): copy = {"folder",
+    "files", "album": the plan's album index or None (a copy filed before)}. Copies only of a proven release (never an
     album known: its pressing is not)."""
     by = {}
     planned = set()
@@ -210,19 +210,23 @@ def copies(plan, filed=True) -> list:
         files = [fe["src"] for fe in a.get("files") or () if fe.get("src")]
         for rid in _ids_of(a):
             by.setdefault(rid, []).append({"folder": a.get("source_dir") or "", "files": files, "album": i})
-        planned |= {os.path.realpath(f) for f in files} | {os.path.realpath(fe.get("dst") or "")
+        # (paths as written, no file system asked: the plan's are absolute already)
+        planned |= {os.path.normpath(f) for f in files} | {os.path.normpath(fe["dst"])
                                                            for fe in a.get("files") or () if fe.get("dst")}
     if filed and by:
         try:
             import match_albums as ma
-            owned = ma._own_index()
+            # ("cached": the job history as the matcher last read it in this process - the app's
+            # look-ups do - never read anew here: rebuilding it held the UI thread's turn for
+            # hundreds of ms)
+            owned = ma._own_index() if filed != "cached" else dict(ma._OWN_INDEX[1] or {})
         except Exception:
             owned = {}
         found = {}
+        wanted = set(by)
         for path, ids in owned.items():
-            names = {str(x).casefold() for part in (ids or ()) for x in (part or ())}
-            hit = names & set(by)
-            if not hit or os.path.realpath(path) in planned or not os.path.exists(path):
+            hit = {str(x).casefold() for part in (ids or ()) for x in (part or ())} & wanted
+            if not hit or os.path.normpath(path) in planned or not os.path.exists(path):
                 continue
             for rid in hit:
                 found.setdefault((rid, str(_album_folder(Path(path)))), []).append(path)

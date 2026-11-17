@@ -2154,9 +2154,9 @@ class Overview(QWidget):
 
         def work(_w):
             import dynamics
-            if not dynamics.copies(snap):
+            if not dynamics.copies(snap, filed="cached"):
                 return {}
-            return dynamics.measure(snap, cancel=lambda: self.plan is not plan)
+            return dynamics.measure(snap, cancel=lambda: self.plan is not plan, filed="cached")
 
         def done(found):
             self._copies_worker = None

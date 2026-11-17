@@ -1,5 +1,7 @@
-"""gui/window.py - The main window: a unified toolbar, the source-list sidebar, the pages, the
-inspector on the right, the player bar under the pages, the menu bar and the status bar; and main().
+"""gui/window.py - The main window: a unified toolbar (Add Folder, Look Up, the All / Ready / Needs
+Attention filter, the profile, search, the Inspector button and Apply), the source-list sidebar, the
+pages (the Overview's inspector is the pane under its lists; Needs attention's is a dock on the
+right), the player bar under the pages, the menu bar and the status bar; and main().
 
 It wires the M8 tools in: File > Look Up CD (gui.browser), Album > Match Files Manually
 (gui.manual_match), Album > Add to Collection and Submit Ratings (gui.account), Album > Submit
@@ -28,7 +30,7 @@ from .player import PlayerBar
 from .common import (APP, HERE, _gui_prefs, _set_gui_pref, music_paths, open_folder, planmod, plural,
                      read_desktop_motion, search_web)
 from .work import _alive
-from .widgets import SourceList
+from .widgets import Segmented, SourceList
 from .inspector import TABS, Inspector
 from .overview import Overview, file_anyway_words
 from .jobs import Jobs
@@ -115,20 +117,36 @@ class Main(QMainWindow):
         self.search_box.setMaximumWidth(200)
         self.search_box.setAcceptDrops(False)                 # (a folder dropped on it is previewed, not typed)
         self.search_box.textChanged.connect(self.search)
-        actmod.toolbar_end(self.toolbar, [self.progress_box, tr("Profile"), self.profile_box, self.search_box],
+        # Cancel: on the toolbar only while work runs, beside its progress (always in File)
+        self.cancel_button = QToolButton()
+        self.cancel_button.setDefaultAction(self.commands["cancel"])
+        self.cancel_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.cancel_button.setAccessibleName(tr("Cancel"))
+        self.cancel_button.setFocusPolicy(Qt.TabFocus)
+        # the Overview's albums: all of them, those ready, or those that need you (with their counts)
+        self.filter_seg = Segmented([("all", tr("All")), ("ready", tr("Ready")),
+                                     ("attention", tr("Needs Attention"))], tr("Show albums"))
+        self.filter_seg.changed.connect(lambda k: self.pages["Overview"].set_show(k) if "Overview" in self.pages
+                                        else None)
+        actmod.toolbar_end(self.toolbar, [self.progress_box, self.cancel_button, actmod.SPRING, self.filter_seg,
+                                          actmod.SPRING, tr("Profile"), self.profile_box, self.search_box],
                            self.commands)
-        self.progress_action = next(a for a in self.toolbar.actions()
-                                    if self.toolbar.widgetForAction(a) is self.progress_box)
+        widget_action = lambda w: next(a for a in self.toolbar.actions()  # noqa: E731
+                                       if self.toolbar.widgetForAction(a) is w)
+        self.progress_action = widget_action(self.progress_box)
         self.progress_action.setVisible(False)
-        # the Profile label and pop-up: shown on Overview only (elsewhere they would pick nothing)
-        at = [a for a in self.toolbar.actions() if self.toolbar.widgetForAction(a) is self.profile_box][0]
+        self.cancel_action = widget_action(self.cancel_button)
+        self.cancel_action.setVisible(False)
+        # the Profile label and pop-up, and the filter: shown on Overview only (elsewhere they
+        # would pick nothing)
+        at = widget_action(self.profile_box)
         i = self.toolbar.actions().index(at)
-        self.profile_actions = (self.toolbar.actions()[i - 1], at)
+        self.profile_actions = (self.toolbar.actions()[i - 1], at, widget_action(self.filter_seg))
         # the inspector, the sidebar and the pages
         self.inspector = Inspector(self)
         self.inspector_extras()                               # (Info…, and the release button's menu)
         self.inspector.tags.addActions([self.commands[k] for k in actmod.SCOPED])   # (their keys: in the Tags)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.inspector)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.inspector)       # (Needs attention's: the Overview has its pane)
         self.inspector.visibilityChanged.connect(self.inspector_shown)
         self.nav = SourceList()
         w, lo, hi = style.SIDEBAR
@@ -155,19 +173,22 @@ class Main(QMainWindow):
         self.player = PlayerBar(central)                     # (hidden until something plays)
         cl.addWidget(self.player)
         self.setCentralWidget(central)
-        bar = QStatusBar()                                   # (shown only while it has a message)
+        bar = QStatusBar()                                   # (the Overview's counts and last action, and messages)
         bar.setSizeGripEnabled(False)
-        bar.messageChanged.connect(lambda msg: bar.setVisible(bool(msg)))
-        bar.hide()
         self.setStatusBar(bar)
-        self.inspector_wanted = True                          # the person's choice (View > Show Inspector)
+        self.inspector_wanted = False                         # the person's choice (View > Show Inspector,
+                                                              #  the toolbar's Inspector button): hidden at first
         self._placing = False
         self._nav_dragged = False                             # (the widths saved are the person's, never
         self._fit_width = None                                #  what fit_docks squeezed them to)
         for name, cls in PAGES:
             page = cls(self)
-            page.layout().setContentsMargins(style.MARGIN, style.MARGIN, style.MARGIN, 16)
-            page.layout().setSpacing(16)
+            if name == "Overview":                            # (its panes meet the window's edges)
+                page.layout().setContentsMargins(0, 0, 0, 0)
+                page.layout().setSpacing(0)
+            else:
+                page.layout().setContentsMargins(style.MARGIN, style.MARGIN, style.MARGIN, 16)
+                page.layout().setSpacing(16)
             self.pages[name] = page
             if name not in IN_PREFERENCES:
                 self.stack.addWidget(page)
@@ -180,6 +201,11 @@ class Main(QMainWindow):
         self.service_badge.setAccessibleName(tr("Online services"))
         self.service_badge.hide()
         self.statusBar().addPermanentWidget(self.service_badge)
+        ov = self.pages["Overview"]
+        self.statusBar().addWidget(ov.counts_line)
+        self.statusBar().addPermanentWidget(ov.summary, 1)
+        ov.panes.bottom.addActions([self.commands[k] for k in actmod.SCOPED if k != "play_pause"])
+        self.ov_inspector = True                              # the Overview's inspector pane: shown at first
         self.connect_actions()
         self.connect_player()
         self.inspector.edited.connect(self.pages["Overview"].edited)    # (its row, counts and Apply)
@@ -201,6 +227,9 @@ class Main(QMainWindow):
         ov = lambda: self.pages["Overview"]  # noqa: E731
         run = {
             "add_folder": self.add_folder,
+            "look_up": lambda: ov().look_up_clicked(),
+            "choose_library": lambda: (self.go("Overview"), ov().choose_library()),
+            "clear_done": lambda: ov().clear_done(),
             "preview": lambda: ov().preview(),
             "apply": lambda: ov().apply(),
             "cancel": self.cancel,
@@ -225,10 +254,11 @@ class Main(QMainWindow):
             "preferences": self.preferences,
             "setup": lambda: setup_mod.open_setup(self),
             "refresh": self.refresh,
-            "tab_tags": lambda: self.inspector.show_tab("Tags"),
-            "tab_artwork": lambda: self.inspector.show_tab("Artwork"),
-            "tab_evidence": lambda: self.inspector.show_tab("Evidence"),
+            "tab_tags": lambda: self.show_tab("Tags"),
+            "tab_artwork": lambda: self.show_tab("Artwork"),
+            "tab_evidence": lambda: self.show_tab("Evidence"),
             "use_release": lambda: ov().choose_release(),
+            "use_suggested_pressing": self.use_suggested_pressing,            # TIE-1
             **search.handlers(ov),                               # Search for Release, Other Versions, Pressing
             **manual_match.handlers(ov),                         # Match Files Manually
             "lookup_cd": self.lookup_cd,
@@ -245,15 +275,15 @@ class Main(QMainWindow):
             "volume_down": lambda: self.player.step_volume(-player_mod.VOLUME_STEP),
             "mute": lambda: self.player.mute(),
             "file_info": self.file_info,
-            "edit_tag": lambda: self.inspector.tags.edit_key(),
-            "revert_tag": lambda: self.inspector.tags.revert_selected(),
-            "use_suggested": lambda: self.inspector.tags.use_suggested(),
-            "remove_tag": lambda: self.inspector.tags.remove_selected(),
-            "add_tag": lambda: (self.inspector.show_tab("Tags"), self.inspector.tags.add_tag()),
+            "edit_tag": lambda: self.tag_pane().edit_key(),
+            "revert_tag": lambda: self.tag_pane().revert_selected(),
+            "use_suggested": lambda: self.tag_pane().use_suggested(),
+            "remove_tag": lambda: self.tag_pane().remove_selected(),
+            "add_tag": lambda: (self.show_tab("Tags"), self.tag_pane().add_tag()),
             **{k: (lambda n=n: self.rate(n)) for k, n in actmod.RATINGS.items()},
-            "find_covers": lambda: (self.inspector.show_tab("Artwork"), self.inspector.art.find_covers()),
-            "choose_cover": lambda: (self.inspector.show_tab("Artwork"), self.inspector.art.choose_file()),
-            "cover_link": lambda: (self.inspector.show_tab("Artwork"), self.inspector.art.ask_url()),
+            "find_covers": lambda: (self.show_tab("Artwork"), self.inspector.art.find_covers()),
+            "choose_cover": lambda: (self.show_tab("Artwork"), self.inspector.art.choose_file()),
+            "cover_link": lambda: (self.show_tab("Artwork"), self.inspector.art.ask_url()),
             "suggested_cover": lambda: self.inspector.art.clear(),
             "tags_from_filenames": self.tags_from_filenames,
             "process_anyway": lambda: ov().process_anyway(),
@@ -309,6 +339,11 @@ class Main(QMainWindow):
         a = self.commands["toggle_rule"]
         a.triggered.connect(lambda _=False: self.pages["Profiles"].toggle_selected_rule())
         self.inspector.buttons["open"].clicked.connect(lambda: self.album_do("open"))
+        # (TIE-1: the Evidence tab's Use Suggested Pressing button is the Album menu's command)
+        self.inspector.evidence.suggest.clicked.connect(lambda: self.commands["use_suggested_pressing"].trigger())
+        # (and the Overview's Why This Release tab, the evidence's place in its inspector pane)
+        self.pages["Overview"].panes.evidence.suggest.clicked.connect(
+            lambda: self.commands["use_suggested_pressing"].trigger())
         self.inspector.buttons["web"].clicked.connect(lambda: self.album_do("web"))
         live = self.pages["Watched folders"].live
         live.toggled.connect(lambda on: self.prefs_window and self.prefs_window.general.watch.setChecked(on))
@@ -318,6 +353,10 @@ class Main(QMainWindow):
             if v.selectionModel() is not None:
                 v.selectionModel().selectionChanged.connect(lambda *_: self.update_edit_actions())
         self.menus["Edit"].aboutToShow.connect(self.update_edit_actions)
+        # Album › Profile: the selected albums' profile (Your files: its rows' albums), to change
+        pm = self.menus["Profile"]
+        pm.aboutToShow.connect(lambda: self.pages["Overview"].fill_profile_menu(pm, self.profile_menu_albums()))
+        self.pages["Overview"].fill_profile_menu(pm, [])
 
     EDIT = {"cut": "cut", "copy": "copy", "paste": "paste", "select_all": "selectAll"}
 
@@ -387,6 +426,13 @@ class Main(QMainWindow):
             self.statusBar().showMessage(tr("Copied the folder.") if os.path.isabs(text) else tr("Copied the row."),
                                          3000)
 
+    def use_suggested_pressing(self):
+        """TIE-1: Album > Use Suggested Pressing, for the album selected on the page shown."""
+        att = self.pages.get("Needs attention")
+        if att is not None and self.stack.currentWidget() is att:
+            return att.use_suggested()
+        return search.use_suggested(self.pages["Overview"])
+
     def album(self):
         """("overview", album) or ("attention", folder) for the page shown, else (None, None)."""
         page = self.stack.currentWidget()
@@ -440,12 +486,32 @@ class Main(QMainWindow):
             "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; "
             f"right: 4px; width: 10px; height: 10px; image: url({down}); }}")
 
+    def profile_menu_albums(self) -> list:
+        """The albums Album › Profile is for: those the toolbar's pop-up follows, else those selected."""
+        ov = self.pages["Overview"]
+        return ov.profile_targets() or (ov.selected_albums() if self.showing("Overview") else [])
+
+    def tag_pane(self):
+        """The Overview's inspector pane, where the Album › Tag commands act."""
+        return self.pages["Overview"].panes
+
+    def show_tab(self, name):
+        """View › Tags, Artwork or Evidence: on the Overview its inspector pane (shown), its Tags,
+        its cover beside them, or Why This Release; elsewhere the inspector dock's tab."""
+        if self.showing("Overview"):
+            if not self.pages["Overview"].panes.inspector_shown():
+                self.commands["show_inspector"].setChecked(True)
+            self.tag_pane().show_tab("why" if name == "Evidence" else "tags")
+        else:
+            self.inspector.show_tab(name)
+
     def info_file(self):
-        """The file File Info reads: the one the inspector's Tags show, else the album's first."""
+        """The file File Info reads: the track the inspector pane shows, else the album's first."""
         kind, a = self.album()
         if kind != "overview":
             return None
-        src = self.inspector.tags.file_src() if self.inspector.album is a else None
+        scope = self.tag_pane().scope
+        src = scope[2] if scope and scope[0] is a and scope[1] in ("track", "file") else None
         files = a.get("files") or []
         return src or (files[0]["src"] if files else None)
 
@@ -465,13 +531,13 @@ class Main(QMainWindow):
         kind, x = self.album()
         insp = self.inspector
         here = kind == "overview" and not ov.album_busy(x) and insp.album is x       # (EDT-1)
-        tv, art = insp.tags, insp.art
-        tags_on = here and tv.editable()
+        tv, art = ov.panes, insp.art
+        tags_on = here and (tv.scope or (None,))[0] is x and tv.editable()
         for k, b in (("edit_tag", "edit"), ("revert_tag", "revert"), ("use_suggested", "suggested"),
                      ("remove_tag", "remove"), ("add_tag", "add")):
-            self.commands[k].setEnabled(tags_on and tv.buttons[b].isEnabled())
+            self.commands[k].setEnabled(bool(tags_on) and tv.tag_buttons[b].isEnabled())
         box = getattr(tv, "rating", None)
-        rate_on = here and box is not None and box.isVisibleTo(insp) and box.stars.isEnabled()
+        rate_on = bool(tags_on) and box is not None and not box.isHidden() and box.stars.isEnabled()
         for k in actmod.RATINGS:
             self.commands[k].setEnabled(rate_on)
         cover_on = here and art.album is x and art.editable()
@@ -483,9 +549,9 @@ class Main(QMainWindow):
 
     def rate(self, n):
         """Album > Tag > Rating: the inspector's stars set to n (None: no rating), as clicking them does."""
-        box = getattr(self.inspector.tags, "rating", None)
-        if box is not None and box.stars.isEnabled():
-            self.inspector.show_tab("Tags")
+        box = getattr(self.tag_pane(), "rating", None)
+        if box is not None and not box.isHidden() and box.stars.isEnabled():
+            self.show_tab("Tags")
             box.stars.set_value(n, emit=True)
 
     def file_info(self):
@@ -540,8 +606,8 @@ class Main(QMainWindow):
         if pr is not None and self.showing("Profiles"):
             name = pr.scope() if pr.list.currentItem() else "global"
             return (name, None) if name and name != "global" else (None, None)
-        if ov is not None and page is ov and self.profile_box.currentText():
-            return self.profile_box.currentText(), ov.selected()
+        if ov is not None and page is ov and ov.above():
+            return ov.above(), ov.selected()
         return None, None
 
     def edit_scripts(self):
@@ -568,10 +634,20 @@ class Main(QMainWindow):
         # something not on screen (Watched folders has its own Apply for waiting plans)
         if ov is not None:
             self.profile_box.setEnabled(on_ov and idle)        # (it picks the profile the preview uses)
-            for a in getattr(self, "profile_actions", ()):     # (and is not shown where it picks nothing)
-                a.setVisible(on_ov)
+            shown = [a.isVisible() for a in getattr(self, "profile_actions", ())]
+            for i, a in enumerate(getattr(self, "profile_actions", ())):   # (not shown where it picks nothing;
+                a.setVisible(on_ov and not (i == 0 and getattr(self, "_narrowest", False)))   # its word: room)
+            if shown and shown != [a.isVisible() for a in self.profile_actions]:
+                self.fit_toolbar()                             # (room taken or given back)
             self.commands["preview"].setEnabled(on_ov and idle and bool(ov.path))
-            self.commands["apply"].setEnabled(on_ov and ov.may_apply_now() and bool(ov.plan) and ov.actionable() > 0)
+            self.commands["look_up"].setEnabled(on_ov and bool(ov.path) and (idle or bool(ov.looking)))
+            self.commands["choose_library"].setEnabled(idle and bool(ov.path) and not ov.in_place())
+            self.commands["clear_done"].setEnabled(on_ov and ov.clear_done_btn.isEnabled())
+            n = ov.actionable() if ov.plan else 0
+            self.commands["apply"].setEnabled(on_ov and ov.may_apply_now() and bool(ov.plan) and n > 0)
+            self._apply_n = n if on_ov else 0
+            if self.show_apply_words():
+                self.fit_toolbar()
             self.commands["exclude_again"].setEnabled(kind == "overview" and idle and bool(ov.overridden(x)))
         w = self.pages.get("Watched folders")
         if w is not None:
@@ -610,10 +686,21 @@ class Main(QMainWindow):
         on_album_page = any(page is self.pages.get(n) for n in ALBUM_PAGES)
         for k in ("show_inspector", "tab_tags", "tab_artwork", "tab_evidence"):
             self.commands[k].setEnabled(on_album_page)
+        for w in (ov.counts_line, ov.summary) if ov is not None else ():
+            w.setVisible(on_ov)
         for k in ("search_web", "open_folder", "copy_path"):
             self.commands[k].setEnabled(bool(kind) and idle)
         self.commands["use_release"].setEnabled(kind == "overview" and idle)
         search.update_commands(self.commands, ov, kind == "overview" and idle)
+        # TIE-1: only an album known whose pressing a tie-break proposed (Overview's plan, or the
+        # TAGMENDER_REASON of an album Needs attention lists)
+        att = self.pages.get("Needs attention")
+        # (one album at a time: with several selected in Overview it is off - each has its own
+        # suggestion, confirmed one by one)
+        many = kind == "overview" and ov is not None and len(ov.selected_albums()) > 1
+        sugg = idle and ((kind == "overview" and not many and search.can_use_suggested(x))
+                         or (kind == "attention" and att is not None and bool(att.suggested())))
+        self.commands["use_suggested_pressing"].setEnabled(sugg)
         manual_match.update_commands(self.commands, ov, kind == "overview" and idle)
         self.update_m8_actions(kind, x, idle)
         self.commands["file_info"].setEnabled(self.info_file() is not None)
@@ -688,7 +775,7 @@ class Main(QMainWindow):
         self.update_player_actions()
 
     def connect_player(self):
-        """Space on the album tables plays or pauses the selected album (and in the player bar);
+        """Space on the album lists plays or pauses the selected album (and in the player bar);
         Controls follows what plays."""
         ov, att = self.pages["Overview"], self.pages["Needs attention"]
         self.player.attach(ov.table, lambda: ov.selected())
@@ -744,9 +831,12 @@ class Main(QMainWindow):
             self.pages["Overview"].cancel()
 
     def show_progress(self, on):
-        """The toolbar's progress bar (a toolbar widget is shown and hidden through its action)."""
+        """The toolbar's progress bar and Cancel beside it, while work runs (a toolbar widget is
+        shown and hidden through its action)."""
         if self.progress_action is not None:
             self.progress_action.setVisible(on)
+            getattr(self, "cancel_action", self.progress_action).setVisible(on)
+            self.fit_toolbar()
         if not on:
             self.show_count("")                          # (the next run says its own count)
 
@@ -775,6 +865,37 @@ class Main(QMainWindow):
                 self.dropped([d])
             return
         ov.drop.choose()
+
+    def show_apply_words(self) -> bool:
+        """The toolbar's Apply says how many: "Apply 2 Albums" ("Apply 2" in the narrowest window);
+        none, "Apply". True when its words changed."""
+        n = getattr(self, "_apply_n", 0)
+        if not n:
+            words = tr("Apply")
+        elif getattr(self, "_narrowest", False):
+            words = tr("Apply {0}").format(n)
+        else:
+            words = tr("Apply 1 Album") if n == 1 else tr("Apply {0} Albums").format(n)
+        a = self.commands["apply"]
+        if a.iconText() == words:
+            return False
+        a.setIconText(words)
+        b = self.toolbar.widgetForAction(a) if hasattr(self, "toolbar") else None
+        if b is not None:
+            b.setAccessibleName(tr("Apply 1 album") if n == 1 else tr("Apply {0} albums").format(n) if n
+                                else tr("Apply"))
+        return True
+
+    # ---- the toolbar's filter: All / Ready / Needs Attention ---------------------------------
+    def show_filter(self, kind):
+        self.filter_seg.set_current(kind)
+
+    def show_filter_counts(self, counts):
+        for key, words in (("all", tr("All")), ("ready", tr("Ready")), ("attention", tr("Needs Attention"))):
+            n = counts.get(key, 0)
+            compact = getattr(self, "_compact_filter", False) and key == "attention"
+            self.filter_seg.set_text(key, f"{tr('Attention') if compact else words} {n}",
+                                     tr("{0}, {1}").format(words, plural(n, tr("album"), tr("albums"))))
 
     def help(self):
         """The quick start: the copy that came with TagMender, else the one on GitHub."""
@@ -897,13 +1018,14 @@ class Main(QMainWindow):
         """The empty Overview (the drop area, no preview yet): nothing can be selected."""
         ov = self.pages.get("Overview")
         page = self.stack.currentWidget() if hasattr(self, "stack") else None
-        return ov is not None and page is ov and ov.views.currentWidget() is ov.drop
+        return ov is not None and page is ov and ov.views.currentWidget() is not ov.results
 
     def place_inspector(self):
-        """On Overview and Needs attention the inspector is as the person left it; on the other
-        pages and the empty Overview (nothing to inspect) it gives the page its room, and comes
-        back on return, or once a preview has rows."""
-        on = self.inspector_wanted and self.album_page() and not self.nothing_to_inspect()
+        """The Overview's inspector is the pane under its lists, as the person left it (shown at
+        first); Needs attention's is the dock on the right, as the person left it (hidden at first);
+        the other pages have none. The Inspector button says which is shown."""
+        on_ov = self.showing("Overview") if hasattr(self, "stack") else False
+        on = self.inspector_wanted and self.album_page() and not on_ov
         if on != self.inspector.isVisible():
             self._placing = True
             try:
@@ -912,19 +1034,26 @@ class Main(QMainWindow):
                 self._placing = False
             if on:
                 QTimer.singleShot(0, self, self.fit_docks)
+        ov = self.pages.get("Overview")
+        if ov is not None:
+            ov.panes.set_inspector(self.ov_inspector)
         a = self.commands["show_inspector"]
-        a.blockSignals(True)                                  # (ticked as it is shown: Ctrl+Alt+I on the
-        a.setChecked(self.inspector.isVisible() if self.nothing_to_inspect() else self.inspector_wanted)
-        a.blockSignals(False)                                 #  empty Overview still opens it)
+        a.blockSignals(True)
+        a.setChecked(self.ov_inspector if on_ov else self.inspector_wanted)
+        a.blockSignals(False)
 
     def toggle_inspector(self, on):
-        if self.album_page():
+        if self.showing("Overview"):
+            self.ov_inspector = bool(on)
+            self.pages["Overview"].panes.set_inspector(on)
+            _set_gui_pref("preview_inspector", bool(on))
+        elif self.album_page():
             self.inspector_wanted = bool(on)
             if on != self.inspector.isVisible():
                 self.inspector.toggle(on)
 
     def inspector_shown(self, on):
-        if self._placing or not self.album_page():
+        if self._placing or not self.album_page() or self.showing("Overview"):
             return                                            # (moved aside for a page: not a choice)
         a = self.commands["show_inspector"]
         if a.isChecked() != on and not self.isMinimized():
@@ -933,7 +1062,7 @@ class Main(QMainWindow):
             a.blockSignals(False)
         if self.isVisible() and not self.isMinimized():
             self.inspector_wanted = bool(on)
-            _set_gui_pref("inspector", bool(on))
+            _set_gui_pref("inspector_open", bool(on))
 
     def fit_docks(self):
         """With the inspector open the content keeps CONTENT_MIN: the inspector gives way first, and
@@ -971,7 +1100,44 @@ class Main(QMainWindow):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        self.fit_toolbar()
         QTimer.singleShot(0, self, self.fit_docks if self.inspector.isVisible() else self.fit_sidebar)
+
+    def fit_toolbar(self):
+        """The toolbar never hides its Inspector or Apply button in its overflow menu: when the window
+        is too narrow for everything (its narrowest width, the progress bar shown during work), the
+        Inspector button loses its word, the search field, the profile pop-up and the progress bar
+        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone."""
+        bar = getattr(self, "toolbar", None)
+        b = bar.widgetForAction(self.commands["show_inspector"]) if bar is not None else None
+        if b is None:
+            return
+        # (inspector's word, search's widest, profile pop-up, progress bar, compact filter, icons alone,
+        # the narrowest: no "Profile" word before the pop-up, Apply's count without "Albums")
+        steps = ((True, 200, 200, 120, False, False, False), (False, 160, 180, 120, False, False, False),
+                 (False, 140, 150, 100, True, False, False), (False, 110, 130, 80, True, True, False),
+                 (False, 90, 110, 60, True, True, False), (False, 80, 100, 40, True, True, True))
+        others = [bar.widgetForAction(self.commands[k]) for k in actmod.TOOLBAR] + [self.cancel_button]
+        for n, (word, search, profile, progress, compact, bare, least) in enumerate(steps):
+            self._narrowest = least
+            if getattr(self, "profile_actions", None):
+                self.profile_actions[0].setVisible(not least and self.showing("Overview"))
+            self.show_apply_words()
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if word else Qt.ToolButtonIconOnly)
+            self.search_box.setMinimumWidth(min(140, search))
+            self.search_box.setMaximumWidth(search)
+            self.profile_box.setFixedWidth(profile)
+            self.progress.setFixedWidth(progress)
+            for w in others:
+                if w is not None:
+                    w.setToolButtonStyle(Qt.ToolButtonIconOnly if bare else Qt.ToolButtonTextBesideIcon)
+            if compact != getattr(self, "_compact_filter", False):
+                self._compact_filter = compact
+                ov = getattr(self, "pages", {}).get("Overview")
+                if ov is not None and hasattr(ov, "counts"):
+                    self.show_filter_counts(ov.counts)
+            if n == len(steps) - 1 or bar.sizeHint().width() <= self.width():
+                break
 
     # ---- Preferences ---------------------------------------------------------
     def preferences(self):
@@ -998,7 +1164,13 @@ class Main(QMainWindow):
         self.go("Overview")                      # (a new session always opens on the Overview)
         tab = d.get("inspector_tab", "Tags")
         self.inspector.tabs.setCurrentIndex(TABS.index(tab) if tab in TABS else 0)
-        self.inspector_wanted = bool(d.get("inspector", True))
+        # (hidden until shown, 0.8.71: the preview's panes show the tag changes and the cover. Saved
+        # under a new name: the old "inspector" was written each time the dock was shown, so it
+        # holds no choice of the person's)
+        self.inspector_wanted = bool(d.get("inspector_open", False))
+        # (the Overview's inspector pane, 0.8.71: the selection's tags and cover are what a preview
+        # is for, so it is shown until you hide it; remembered apart from the dock's)
+        self.ov_inspector = d.get("preview_inspector") is not False
         self.place_inspector()
         QTimer.singleShot(0, self, self.fit_docks)
 
@@ -1076,6 +1248,7 @@ class Main(QMainWindow):
         self.search_box.actions()[0].setIcon(icons.icon("search", "muted"))
         self.nav.viewport().update()
         self.inspector.retint()
+        self.pages["Overview"].panes.retint()
         self.style_release_arrow()
         from .widgets import EmptyState
         for w in self.findChildren(EmptyState):

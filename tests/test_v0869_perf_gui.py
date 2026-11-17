@@ -50,6 +50,11 @@ def entry(folder, key):
             "notes": [], "album_files": [d + "/01.flac"], "key": key}
 
 
+def tg_role(name):
+    from PySide6.QtCore import Qt
+    return int(Qt.UserRole) + 5 if name == "UserRole5" else int(getattr(Qt, name))
+
+
 class StandIn:
     """Engine.listing as the engine gives it, with on_album: each album sent as soon as it is
     "read". A folder in HOLD sends its first album, then waits for its gate before the rest."""
@@ -260,53 +265,47 @@ class PerfGui(Base):
                 for i in range(n)]
 
     def test_columns_are_fitted_when_rows_come_not_on_each_change(self):
-        from gui import overview
+        # (0.8.71: the albums pane's Status column, fitted once per turn when rows come or go)
         ov = self.ov
         ov.views.setCurrentWidget(ov.results)
-        settle(self.app, 200)                                              # (shown: its own fit done)
+        settle(self.app, 200)
         ov.model.set_plan({"albums": self.many(200)})
         t = ov._fit_timer
         self.assertTrue(t.isActive())
-        self.assertGreater(t.remainingTime(), overview.FIT_DELAY // 2)    # (a long list: not at once)
-        settle(self.app, overview.FIT_DELAY + 200)
+        settle(self.app, 50)
         self.assertFalse(t.isActive())
         ov.model.refresh_rows()                                            # (each row's data changed)
         ov.model.dataChanged.emit(ov.model.index(0, 0), ov.model.index(0, 7))
         self.assertFalse(t.isActive())
         ov.model.replace_rows([], self.many(201)[200:])                    # (a row came)
         self.assertTrue(t.isActive())
-        before = t.remainingTime()
-        ov.model.replace_rows([], [dict(self.many(1)[0], key="x", source_dir="/x")])
-        self.assertLessEqual(t.remainingTime(), before)                     # (not put off by the next one)
-        ov.model.set_plan({"albums": self.many(3)})                         # (a short list: at once)
-        self.assertLessEqual(t.remainingTime(), 0)
 
     def test_the_profile_column_reads_the_profiles_once(self):
-        from gui import overview
+        # (0.8.71: the album rows name their profile and are tinted with its colour: neither reads
+        # the profiles' list, and each profile's file is read once for its colour)
+        from gui import common, overview
         ov = self.ov
         ov.views.setCurrentWidget(ov.results)
         ov.model.set_plan({"albums": self.many(150)})
-        with mock.patch.object(overview, "profile_names", wraps=overview.profile_names) as names:
-            ov.profile_delegate.refresh()
-            ov.fit_columns()
-            ov.fit_columns()
-            self.assertEqual(names.call_count, 1)
-            ov.refresh_profiles()                                          # (the profiles changed)
-            ov.fit_columns()
-            self.assertEqual(names.call_count, 3)                          # (refresh_profiles' own, then once)
+        common.forget_profile_colours()
+        with mock.patch.object(overview, "profile_names", wraps=overview.profile_names) as names, \
+                mock.patch.object(common.pf, "raw_file", wraps=common.pf.raw_file) as read:
+            for r in range(ov.tree.rowCount()):
+                for role in (tg_role("UserRole5"), tg_role("BackgroundRole")):
+                    ov.tree.data(ov.tree.index(r, 0), role)
+            self.assertEqual(names.call_count, 0)
+            self.assertLessEqual(read.call_count, 1)
 
     def test_a_column_you_sized_stays(self):
-        from gui import overview
+        from gui.preview_panes import AlbumsModel
         ov = self.ov
         ov.views.setCurrentWidget(ov.results)
         ov.model.set_plan({"albums": self.many(100)})
-        settle(self.app, overview.FIT_DELAY + 200)
-        ov._header_held = True
-        ov.table.horizontalHeader().resizeSection(1, 61)
-        ov._header_held = False
+        settle(self.app, 50)
+        ov.table.header().resizeSection(AlbumsModel.STATUS, 161)
         ov.model.replace_rows([], self.many(120)[100:])
-        settle(self.app, overview.FIT_DELAY + 200)
-        self.assertEqual(ov.table.columnWidth(1), 61)
+        settle(self.app, 50)
+        self.assertEqual(ov.table.columnWidth(AlbumsModel.STATUS), 161)
 
     # ---- a big preview ---------------------------------------------------------------------
     def test_a_preview_of_2000_albums_opens_sorted_once(self):

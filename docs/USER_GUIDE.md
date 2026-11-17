@@ -266,8 +266,14 @@ Each album ends in one tier, shown in the plan (after the score) and in the app'
    as disc:track on several discs).
 2. **Album only** (`TAGMENDER=Partial`, `TAGMENDER_REASON` "ambiguous_release: album known,
    pressing not established ..."): the album is certain, its pressings tie; what they all share,
-   no release IDs, catalogue number or barcode. Marked Partial, not Resolved, because no release
-   is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
+   no release IDs, catalogue number or barcode. When only a tie-break chose between the pressings
+   (your country order, the original release, your preferred release types or formats), that
+   pressing is suggested - the status reads "Album known · pressing suggested" and the plan names
+   it - and Album > Use Suggested Pressing (or `tagmender plan PATH --release REF`) tags it in full
+   (TIE-1). So too when only your Sources preference chose between MusicBrainz's and Discogs's
+   pressings. The files' `TAGMENDER_REASON` names the suggested release ("pressing suggested, not
+   confirmed: <release>"), and Needs attention lists such albums as "Pressing suggested — confirm",
+   with Use Suggested Pressing there too. Marked Partial, not Resolved, because no release is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
    again. `web_tag.py --apply` marks its album-only albums the same way.
 3. **Partial** (`TAGMENDER=Partial`, the reason in `TAGMENDER_REASON`): the matcher would not
    pick a release, but the best candidate is the same album - same track count, artist and title
@@ -536,18 +542,32 @@ was not automatic.
 
 ## The desktop app
 
-`tagmender gui` (or `python3 -m gui`) opens the same engine in a window: a sidebar of pages
-(Overview, Needs attention, History, Watched folders, Jobs), the page, and an
-inspector on the right (Ctrl+Alt+I). Drop a music folder on the window or choose one (Ctrl+O),
-pick a profile, Preview (Ctrl+P), then Apply (Ctrl+Return); Edit > Undo Last Job (Ctrl+Alt+Z) puts
-it back. Every command is in the menu bar, and Ctrl+/ lists the shortcuts.
+`tagmender gui` (or `python3 -m gui`) opens the same engine in a window: a toolbar (Add Folder,
+Look Up, the **All / Ready / Needs Attention** filter with its counts, the profile, search, the
+**Inspector** button and **Apply N Albums**), a sidebar of pages (Overview, Needs attention,
+History, Watched folders, Jobs) and the page. Drop a music folder on the window or choose one
+(Ctrl+O), Look Up (Ctrl+L; File › Preview, Ctrl+P, previews the whole folder), then Apply
+(Ctrl+Return); Edit > Undo Last Job (Ctrl+Alt+Z) puts it back. The status bar says how many albums
+are ready, how many need your decision and how many files they hold, and what was last done. Every
+command is in the menu bar, and Ctrl+/ lists the shortcuts.
 
-Each row has a **Profile** drop-down: *As Above* uses the profile chosen in the toolbar, or
-choose another for that album (several selected: right-click › Profile). Look Up and Preview
-plan each album with its own profile, and Apply runs one job per profile (each undone on its
-own from Jobs). Changing an album's profile after it was looked up looks it up again. After
+The toolbar's **Profile** pop-up is the preview's profile while no row is selected. Select albums
+in *Albums as they will be* (or folders and files in *Your files*: the albums they hold) and it
+shows their profile (*Mixed* when they differ); choosing one gives it to all of them. So do
+right-click › Profile and Album › Profile; *As Above* follows the preview's profile again. Look Up
+and Preview plan each album with its own profile, and Apply runs one job per profile (each undone
+on its own from Jobs). Changing an album's profile after it was looked up looks it up again. After
 Apply, choosing another profile for a *Done* album reads it where Apply put it and looks it up
 with that profile; the next Apply files it that profile's way.
+
+Each album row names its profile, and a profile's **Colour** (Preferences › Profiles › General:
+Automatic, None or a colour) tints its rows in both panes; Automatic is green for a profile whose
+name holds *LossyLess* and orange for *Extreme*, none for the others. The colour is never the only
+sign: the profile's name is on the row.
+
+A look-up uses the profile's **Sources**; right-click › Look Up asks one database alone or the web
+for the albums selected. File › Library Folder for This Preview… files this preview's albums into
+another folder than the profile's.
 
 Drop a folder (or use Add Folder) while a look-up or Apply runs and it waits: when the run ends,
 its albums join the list and are looked up. Select rows as in a folder (click, Shift, Ctrl, or
@@ -563,10 +583,11 @@ file until you apply it, through the same staged, verified and undoable path as 
 |---|---|
 | Album > Search for Release… (Ctrl+Shift+F) | Search MusicBrainz releases, recordings and artists, or Discogs releases; Use This Release previews the album again with it |
 | Album > Other Versions… (Ctrl+Shift+L) | Every release of the album's MusicBrainz release group and Discogs master, with how well each fits your files |
+| Album > Use Suggested Pressing | For an Album only album whose pressing a tie-break suggested (your country order, the original release; status "Album known · pressing suggested"): previews it again with that release, tagged in full - its barcode, catalogue number and label (TIE-1). Also in the album's menu and on the Why This Release tab (the Evidence tab on Needs attention); the toolbar's Needs Attention filter counts these albums |
 | Album > Choose Your Pressing… (Ctrl+Shift+P) | For an album whose pressing is not proven (Album only, Partial): only the pressings that fit equally, with the details that tell them apart highlighted and what to check on your copy |
 | Album > Info… (Ctrl+I) | A file's format, codec, bitrate, length, every tag as stored and its embedded pictures (read only) |
-| Inspector > Tags (Album > Tag) | The selected album's tags, original and new; edit a value (double-click, Return or F2), revert it, add or remove a tag (Delete), for one file or all of them; Edit > Undo Edit (Ctrl+Z) takes back the last edit |
-| Inspector > Artwork | The cover now and the new one; drop an image file or link to use it instead |
+| Inspector > Tags (Album > Tag) | The selection's tags, original and new; edit a value (double-click, Return or F2), revert it, use the suggested value, add or remove a tag (Delete), and rate the tracks, for the album, a disc or a track; Edit > Undo Edit (Ctrl+Z) takes back the last edit |
+| Inspector > Cover (Album > Artwork) | The new cover large, your own pictures under it; Choose Cover… uses one of them, finds covers online, takes a file or a link, or generates one; drop an image file or link on it to use it |
 | Tools > Script Editor… (Ctrl+Shift+E) | The profile's file naming script and tagger scripts, with highlighting, completion, function help, errors marked where they are and a preview on the selected album; the language is in the [Scripting guide](SCRIPTING.md) |
 | Tools > Tags from File Names… (Ctrl+Shift+G) | A pattern such as `%artist% - %album%/%tracknumber% %title%` read from the selected album's file names, with a preview; the tags become your edits |
 | Edit > Job Details… (Ctrl+Shift+J) | What a job did, file by file and tag by tag (on the Jobs page), with Undo |
@@ -587,8 +608,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 | Preferences > Advanced | TagMender's checks and the diagnostics export (folder and file names hidden unless you untick it) |
 | Preferences > Account | Your own MusicBrainz application (client ID and secret), Log In / Log Out, your collections; your AcoustID user key; browser integration (musicbrainz.org's tagger buttons, off by default, 127.0.0.1 only) and its port; the CD drive |
 
-The table's context menu (right-click, or the Menu key) and the inspector's Change Release
-button (its arrow) offer the same album commands. Your edits are kept when the folder is
+The albums' context menu (right-click, or the Menu key) offers the same album commands. Your edits are kept when the folder is
 previewed again, and are shown as yours in the Tags tab. Drop folders or audio files anywhere on
 the window: the first one the preview does not hold yet is previewed, and the status bar says
 what became of the others.
@@ -598,92 +618,24 @@ AcoustID user key (Preferences › Setup; [Setup](SETUP.md#your-musicbrainz-acco
 `~/.config/tagmender` and never shown again. Anything sent to MusicBrainz or AcoustID is your
 choice for one album, after a sheet that says exactly what will be sent.
 
-### The preview's panes
+### The Overview: your files, the albums as they will be, and the inspector
 
-Under the list of albums, the preview shows where everything goes in four linked panes:
+The Overview shows the preview in linked panes, Mac-style: no title or option bars over them.
 
 | Pane | Shows | You can |
 |---|---|---|
-| **Your folders** (left) | The folders and files as they are on disk, each marked with where it goes: *→ Disc 02* for a disc folder of a set, *→ Disc 01 #3* for a file, *needs you* for an album waiting for your choice, *other pressing* when your scans name another pressing, *extra* for a file the release has no track for | Select a folder or a file; drag a folder onto an album in the middle pane to add it to that album (Match Files Manually opens for it) |
-| **Albums as they will be** (middle) | Each album as release → discs → tracks. A disc names the folder it came from (a set joined from folders such as *Disc 1 - …*, *Disc 2 - …*; an SACD layer's copy filed as *Disc 01 (SACD Stereo)*); each track shows the file on it. A track of the release that is not in your folders is greyed (*not in your folders*); files that are not on the release are listed under *Not on the release*. *Why this release* lists what agreed (✓) and what differs (≠) | Select an album, disc or track; **Change Release…** (the same as Album › Change Release) |
-| **Tag changes** (right) | Tag, Original and New for what you selected: a file, a track, a disc, a folder or the whole album, then the *Folder* and *File name* rows. Where the files do not share a value it says *different in N files*. The mark says what happens: **+** added, **→** changed, **−** removed, **=** kept; only the part of a value that changes is tinted (new text blue, the text it replaces orange and struck through) | **Changes only** hides the tags that stay as they are; double-click a New value to edit it (for the selection: the album, a disc's files or one file); **Revert to Original** keeps the files' own value. Edit › Undo Edit (Ctrl+Z) takes an edit back |
-| **Cover art** (bottom) | The new front cover the profile found (Cover Art Archive, Discogs …) first, then your own scans and covers and the picture in the tracks | **Use as Front Cover** (or double-click a picture), **Find Online…** (every cover the sources find), **Choose a File…**, **Generate…** (clean up your scan or make a cover with your own image service: Make Covers) |
+| **Your files** (top left) | The folders and files as they are on disk, each marked with where it goes: *→ Disc 02* for a disc folder of a set, *→ Disc 01 #3* for a file, *needs you* for an album waiting for your choice, *other pressing* when your scans name another pressing, *extra* for a file the release has no track for | Select folders or files (Shift, Ctrl: several); right-click › Profile for the albums they hold; drag a folder onto an album in *Albums as they will be* to add it to that album (Match Files Manually opens for it) |
+| **Albums as they will be** (top right) | The list: an album a row with its release's facts and profile, its **Status** (a symbol and a word) and **Score**; under it its discs, each naming the folder it came from (a set joined from folders such as *Disc 1 - …*; an SACD layer's copy filed as *Disc 01 (SACD Stereo)*), and their tracks, each with its file. A track not in your folders is greyed; files not on the release are under *Not on the release*. Pointing at an album says its source, changes, why and scans | Select albums as in a folder (click, Shift, Ctrl), sort by a column, untick an album to leave it out of Apply, press Delete to take it out of the list, right-click for the album's commands, Space to play it |
+| **Tags** (bottom left) | Tag, Original and New for what you selected: an album, a disc, a track, a folder or a file, then the *Folder* and *File name* rows. Where the files do not share a value it says *different in N files*. The mark says what happens: **+** added, **→** changed, **−** removed, **=** kept; only the part of a value that changes is tinted (new text blue, the text it replaces orange and struck through) | **Changes only** hides the tags that stay; double-click a New value (or F2, Return) to edit it; Revert to Original, Use Suggested Value, Remove Tag (Delete), Add Tag…, the rating stars |
+| **Why This Release** (beside Tags) | What agreed (✓), what differs (≠), what to do (→), then the score in words, the source, what matched, the doubts, where each tag came from and the codes, and the full preview text | **Use Suggested Pressing** for an album whose pressing a tie-break proposed |
+| **Cover** (bottom right) | The new front cover the profile found (Cover Art Archive, Discogs …) large, then your own scans and covers and the picture in the tracks | **Choose Cover…**: Use as Front Cover (or double-click a picture), Find Online…, Choose a File…, Use Image Link…, Generate…, Use Suggested Cover |
 
-Selecting in one pane selects its counterpart in the others and the album's row in the list (a disc
-folder selects its disc; a track selects its file). Each pane folds to a labelled strip with its ‹ or
-⌄ button; which panes are folded, their widths, the split between the list and the panes and
-*Changes only* are remembered. The panes read only the preview: nothing on disk changes until you
-apply, and a preview of thousands of albums opens at once (an album's discs and tracks are made
-when you open it).
-
-### Profile settings in the app
-
-Preferences › Profiles shows the chosen profile's settings as grouped lists, in the order the work
-happens: **Files Read** (the folders it covers, folders to skip, which audio files, a separate folder
-for lossy files), **Identification** (the preferred database, which albums are tagged, the lookups
-used as evidence, preferred releases), **Tags**, **Artwork**, **Target** (what happens to files,
-the library folder, names with a live example of the folder and file name, pictures and logs
-folders, files that go with the album, a file that is already there), **Albums nothing
-identified** and **Automation**. Each row has its label and control, and a line under it saying
-what it does; rarer settings sit under each section's **Advanced**. A few rows merge several saved
-settings into one choice (Sources, including Web only; Find lyrics; What happens to files, including
-renaming in place; Artist photos). A saved combination such a row cannot say exactly shows as "As
-saved" and stays as it is until you choose something else. A row that does nothing in the current
-state (the Basic level, a database that is not asked, covers turned off, a copy) is greyed with the
-reason. Whether albums are filed without asking, how long to wait and how often to look are set on
-the Watched folders page.
-
-- A dot beside a row means it differs from the defaults. **Restore Defaults…** (all settings) and
-  **Restore Section Defaults…** list each change (old → default) before anything changes.
-- **Start From…** offers three presets: **Typical Library** (the defaults), **Collector** (Discogs
-  first, every detail and code, artist photos, editions in folder names, asks before a second
-  copy) and **Keep My Files as They Are** (fixed in place, only missing tags filled in, covers and
-  comments kept). Folders, the description and what happens to files stay as they are. New
-  Profile… starts from one of them; Duplicate Profile… copies the profile shown (without its
-  folders, which belong to one profile).
-- A problem shows in red under its row as you edit (a copy with no library folder, a skip pattern
-  that would skip everything); Save Profile stays off and says how many there are.
-- A row that needs a key or program you have not set up is greyed out and says why, with a link
-  to Setup.
-- The toolbar's search field shows only the settings whose words hold what you type.
-- Only what you changed is written to the profile; a value set by hand in its file stays.
-
-The matching thresholds are not in the app: they can only be raised, with **Extra-careful
-matching** (Identification > Advanced).
-
-On the first start after an upgrade, a sheet says that the built-in settings (used when no
-profile is chosen) have new defaults, and offers to save the old ones as the profile "Built-in
-(previous)". It is asked once.
-
-### Upgrading from an earlier version
-
-Your saved profiles keep their behaviour; new installs get these defaults. A profile file written
-by an earlier version reads every setting it left unset as the earlier default, so the same
-albums get the same tags and names after the upgrade; `tagmender profiles migrate` writes those
-values into the file and keeps the old one beside it. The defaults a new profile and a new
-install get:
-
-- MusicBrainz preferred, Discogs filling the gaps; your other tagger's settings not followed
-  unless you turn that on; AcoustID fingerprints used when an album is unsure (needs fpcalc and
-  a key); web Partial tags off.
-- Names "Artist/1991 - Album/01 - Title" ("1-01 - Title" in a set), the full album title, and
-  a second file of one name gets " (2)".
-- One Artwork and one Extras folder per album when those folders are turned on; no artist
-  photo; your own covers never replaced.
-- Lyrics written into the file as well as the .lrc; MusicBrainz genres (at most 5), Discogs
-  styles in Genre only when nothing else gives one.
-- Only the NAS recycle bins are skipped (not every folder starting with "_"); duplicates go to
-  "_Duplicates".
-- Undo works for 30 days, and older backups are cleaned after each apply; saved lookups are asked
-  again after 30 days, when their album is processed again.
-
-An earlier install keeps its own machine settings (duplicates in "2delete", newest copy kept,
-folders starting with "_" skipped, no automatic backup cleaning, lookups kept for ever, Skip by 5
-seconds, scans read in English, Russian and Japanese, a 100 MB log, names shown in diagnostics);
-Preferences changes them. The built-in
-settings (no profile chosen) are the one exception, see the sheet above. The Lossy example
-profile comes without a library folder: choose one (the profile's **Library folder**, or
-`tagmender profiles set Lossy destination=...`) before using it.
+Selecting in one pane selects its counterpart in the other (a disc folder selects its disc; a track
+selects its file). The toolbar's **Inspector** button (Ctrl+Alt+I) shows or hides the bottom panes;
+they are shown at first, and your choice, the panes' sizes and *Changes only* are remembered. On
+Needs attention the Inspector button shows the inspector on the right instead. The panes read only
+the preview: nothing on disk changes until you apply, and a preview of thousands of albums opens at
+once (an album's discs and tracks are made when you open it).
 
 ## Hands-off
 

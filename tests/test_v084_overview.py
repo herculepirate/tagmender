@@ -131,7 +131,7 @@ class V084Overview(tg.Gui):
         self.assertEqual(self.row("Album H")["status"], "ready")
         self.assertEqual(len(ov.model.albums), 3)
         self.assertTrue(self.win.commands["apply"].isEnabled())
-        self.assertIn("Ready", ov.summary.text())
+        self.assertIn("Ready", ov.counts_line.toolTip())
 
     def test_a_release_chosen_for_one_album_looks_up_that_album_alone(self):
         ov = self.ov

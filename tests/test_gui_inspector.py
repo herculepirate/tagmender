@@ -336,6 +336,15 @@ class InspectorEditing(Base):
         self.fired = []
         self.insp.edited.connect(self.fired.append)
 
+    def pane_select(self, field_):
+        """FIELD's row chosen in the Overview's inspector pane (the album shown whole)."""
+        p = self.ov.panes
+        p.changes_only.setChecked(False)
+        p.select("album", None, self.a)
+        settle(self.app)
+        p.tag_view.selectRow([r["field"] for r in p.tag_model.rows].index(field_))
+        settle(self.app)
+
     def tearDown(self):
         self.idle()
         self.win.close()
@@ -440,7 +449,7 @@ class InspectorEditing(Base):
             self.assertEqual(self.win.act(key).shortcutContext(), _Qt.WidgetWithChildrenShortcut, key)
         self.insp.set_tag("album", ["Mine"])
         self.idle()
-        self.insp.tags.select_field("album")
+        self.pane_select("album")                                  # (0.8.71: the inspector pane's Tags)
         self.ov.table.setFocus()
         settle(self.app)
         self.win.update_tag_actions()
@@ -802,7 +811,15 @@ class InspectorEditing(Base):
             tags.context_menu(tags.table.visualRect(tags.table.currentIndex()).center())
         keys = [x.objectName() if x is not None else None for x in pm.call_args[0][3]]
         self.assertEqual(keys, ["edit_tag", "revert_tag", "use_suggested", "remove_tag", None, "add_tag"])
+        # (0.8.71: the Album › Tag commands act on the Overview's inspector pane, its row chosen there)
+        self.pane_select("album")
+        self.win.update_tag_actions()
         self.assertTrue(self.win.act("edit_tag").isEnabled())
+        with mock.patch.object(self.gui.preview_panes, "popup_menu") as pm:
+            p = self.ov.panes
+            p.tag_menu(p.tag_view.visualRect(p.tag_view.currentIndex()).center())
+        keys = [x.objectName() if x is not None else None for x in pm.call_args[0][3]]
+        self.assertEqual(keys, ["edit_tag", "revert_tag", "use_suggested", "remove_tag", None, "add_tag"])
 
     def test_the_apply_sheet_names_your_edits(self):
         self.insp.set_tag("label", ["Mine"])

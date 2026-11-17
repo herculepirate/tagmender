@@ -269,19 +269,22 @@ class Identify(Base):
         self.assertFalse([k for k in p.targets[0] if k.startswith("musicbrainz_")])
         self.assertEqual(p.targets[0]["catalognumber"], ["CAT-901"])
 
-    def test_providers_disagree_without_evidence_preferred_source_decides_nothing_is_mixed(self):
-        # (Sources: Discogs preferred, the default: Discogs's pick stands, never a guess or a review)
+    def test_providers_disagree_without_evidence_preferred_source_suggests_nothing_is_mixed(self):
+        # (Sources: Discogs preferred, the default: never a review - but with nothing of your copy
+        # behind either pick the preference only suggests Discogs's pressing: album known, TIE-1)
         d = self.album("Band D2", "Album D2")                         # the folder says nothing about the copy
         eng = self.engine(FakeHttp(mb=[mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
                                    dg=[dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
         eng.cfg["preferred_countries"] = ["US"]
         p = eng.identify(eng.albums_in(d)[0])
-        self.assertEqual((p.status, p.provider, p.tier), ("identified", "discogs", "exact"))
+        self.assertEqual((p.status, p.provider, p.tier), ("identified", "discogs", "album_only"))
         self.assertFalse([k for k in p.targets[0] if k.startswith("musicbrainz_")])   # the other pressing stays out
-        self.assertEqual(p.targets[0]["catalognumber"], ["CAT-901"])
+        self.assertNotIn("catalognumber", p.targets[0])
+        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), ("discogs:904", ["mb-d2"]))
+        self.assertIn("Sources prefers Discogs", p.suggested["by"])
         self.assertTrue(any("Discogs decides (Sources: Discogs preferred)" in n for n in p.evidence), p.evidence)
 
-    def test_providers_disagree_without_evidence_country_order_decides_nothing_is_mixed(self):
+    def test_providers_disagree_without_evidence_country_order_suggests_nothing_is_mixed(self):
         # (the matcher's own order, no Sources preference, as validate.py runs it)
         d = self.album("Band D2", "Album D2")                         # the folder says nothing about the copy
         eng = self.engine(FakeHttp(mb=[mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
@@ -291,9 +294,12 @@ class Identify(Base):
         p = eng.identify(eng.albums_in(d)[0])
         self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"), (p.tier, p.why, p.evidence))
         self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])   # the other pressing stays out
-        # TIE-1: the country order picks the pressing, and it is tagged in full
-        self.assertEqual(p.targets[0]["catalognumber"], ["OTHER-100"])
-        self.assertEqual(p.targets[0]["musicbrainz_albumid"], ["mb-d2"])
+        # TIE-1 (2026-11-17): the country order only suggests the pressing: album known, none of
+        # its own fields written until you choose it
+        self.assertEqual(p.tier, "album_only")
+        self.assertNotIn("catalognumber", p.targets[0])
+        self.assertNotIn("musicbrainz_albumid", p.targets[0])
+        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), ("mb-d2", ["discogs:904"]))
         self.assertEqual(p.targets[0]["album"], ["Album D2"])
 
     def test_missing_discogs_token_still_identifies_from_musicbrainz(self):

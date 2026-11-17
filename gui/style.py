@@ -37,7 +37,10 @@ LIGHT = {"window": "#F6F7F9", "base": "#FFFFFF", "alt": "#F2F4F7", "sidebar": "#
          "field": "#858F9B",        # field: a control's own edge (buttons, fields, pop-ups): 3:1 at least
          # the preview's tag changes (gui/preview_panes.py): the part of a value that is new (blue)
          # and the part it replaces (orange, struck through); each ink on its wash 4.5:1 at least
-         "diff_new_bg": "#D6E6FB", "diff_new_ink": "#0B3A75", "diff_old_bg": "#FBDCC6", "diff_old_ink": "#7A2E0E"}
+         "diff_new_bg": "#D6E6FB", "diff_new_ink": "#0B3A75", "diff_old_bg": "#FBDCC6", "diff_old_ink": "#7A2E0E",
+         # the segmented control (the toolbar's filter, the inspector pane's tabs): its track, the
+         # chosen segment raised on it
+         "seg_track": "#E3E6EA", "seg_on": "#FFFFFF"}
 DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1C222A", "ink": "#E6EAF0",
         "muted": "#9AA5B1", "faint": "#4A535E", "separator": "rgba(255,255,255,0.10)", "line": "#323943",
         "accent": "#4CC777", "on_accent": "#0B2014", "identified": "#6CC08E", "attention": "#E3B25C",
@@ -45,7 +48,15 @@ DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1
         "selection": "#1F6B3C", "on_selection": "#FFFFFF", "focus_ring": "#0B2014",
         "brand_green": "rgba(48,209,88,0.70)", "brand_red": "rgba(255,69,58,0.60)",
         "field": "#6E7782",
-        "diff_new_bg": "#1E3A5F", "diff_new_ink": "#D6E6FB", "diff_old_bg": "#4F2A16", "diff_old_ink": "#FBDCC6"}
+        "diff_new_bg": "#1E3A5F", "diff_new_ink": "#D6E6FB", "diff_old_bg": "#4F2A16", "diff_old_ink": "#FBDCC6",
+        "seg_track": "#2A3038", "seg_on": "#4A535E"}
+
+# a profile's colour (its rows in Your files and Albums are tinted with it): name -> (words, light
+# tint, dark tint). Washes faint enough that ink, muted and status words keep 4.5:1 on them; a
+# selected row is drawn in the selection colour over it
+PROFILE_TINTS = {"green": (N_("Green"), "#EDF7F0", "#1D3326"), "orange": (N_("Orange"), "#FDF1E5", "#3A2A18"),
+                 "blue": (N_("Blue"), "#EEF3FB", "#1C2B40"), "purple": (N_("Purple"), "#F6F2FB", "#2D2440"),
+                 "red": (N_("Red"), "#FDF1F0", "#3D2121"), "grey": (N_("Grey"), "#F3F4F6", "#2A2F36")}
 
 # status -> (symbol, word, light colour, dark colour, icon)
 STATUS = {
@@ -63,6 +74,9 @@ STATUS = {
 
 # identification tiers below an exact release (plan.TIERS), as the status column shows them
 TIER_LABELS = {"album_only": N_("Album only"), "recording": N_("Recording only"), "partial": N_("Partial")}
+# TIE-1: an album-only album whose pressing a tie-break proposed (your country order, the original
+# date): the album is known, the pressing only suggested until you confirm it
+SUGGESTED_LABEL = N_("Album known · pressing suggested")
 
 _forced = None                      # True/False when Preferences > Appearance says Dark/Light
 
@@ -94,6 +108,24 @@ def color(role, dark=None) -> str:
 def status_color(key):
     s = STATUS.get(key)
     return QColor((s[3] if is_dark() else s[2]) if s else color("muted"))
+
+
+def profile_tint(name, dark=None):
+    """The wash of a profile colour (PROFILE_TINTS' name, or a #RRGGBB of the person's) for
+    the scheme shown, as a QColor; None for none or one not known."""
+    if not name:
+        return None
+    dark = is_dark() if dark is None else dark
+    if name in PROFILE_TINTS:
+        return QColor(PROFILE_TINTS[name][2 if dark else 1])
+    c = QColor(str(name))
+    if not str(name).startswith("#") or not c.isValid():
+        return None
+    # (a colour of the person's own: a faint wash of it on the base, so the words keep their contrast)
+    base = QColor(tokens(dark)["base"])
+    k = 0.18
+    return QColor(round(base.red() + (c.red() - base.red()) * k), round(base.green() + (c.green() - base.green()) * k),
+                  round(base.blue() + (c.blue() - base.blue()) * k))
 
 
 def status_icon(key) -> str:
@@ -323,6 +355,26 @@ def stylesheet():
     QTabBar::tab:focus {{ color: {ink}; background: {line}; border-top-left-radius: {CONTROL}px;
                           border-top-right-radius: {CONTROL}px; }}
     QStatusBar {{ background: {win}; color: {muted}; border-top: 1px solid {line}; }}
+    QStatusBar QLabel {{ color: {muted}; padding: 0 8px; }}
+    QFrame#segmented {{ background: {t["seg_track"]}; border: none; border-radius: 7px; }}
+    QFrame#segmented QToolButton[role="segment"] {{ background: transparent; border: 1px solid transparent;
+                                                   border-radius: 5px; padding: 2px 12px; color: {ink}; }}
+    QFrame#segmented QToolButton[role="segment"]:checked {{ background: {t["seg_on"]}; border-color: {line};
+                                                           font-weight: 600; }}
+    QFrame#segmented QToolButton[role="segment"]:hover:!checked {{ background: {line}; }}
+    QFrame#segmented QToolButton[role="segment"]:focus {{ border: 2px solid {accent}; padding: 1px 11px; }}
+    QWidget#paneHead {{ background: {base}; border-bottom: 1px solid {line}; }}
+    QWidget#paneFoot {{ background: {base}; border-top: 1px solid {line}; }}
+    QFrame#previewPane, QFrame#coverPane, QWidget#inspectorPane {{ background: {base}; }}
+    QTreeView#paneView, QTableView#paneView {{ border: none; border-radius: 0; }}
+    QTreeView#paneView:focus, QTableView#paneView:focus {{ border: none; }}
+    QSplitter#paneSplit::handle {{ background: {line}; }}
+    QListWidget#coverStrip {{ background: transparent; border: none; }}
+    QLabel#coverBig {{ background: transparent; color: {muted}; }}
+    QToolButton#coverChoose {{ background: {base}; color: {ink}; border: 1px solid {field}; border-radius: {CONTROL}px;
+                               padding: 4px 12px; }}
+    QToolButton#coverChoose:focus {{ border: 2px solid {accent}; padding: 3px 11px; }}
+    QToolButton#coverChoose::menu-indicator {{ image: none; width: 0; }}
     QProgressBar {{ border: none; background: {line}; border-radius: 3px; max-height: 6px; text-align: center; }}
     QProgressBar::chunk {{ background: {accent}; border-radius: 3px; }}
     QScrollArea {{ border: none; background: transparent; }}

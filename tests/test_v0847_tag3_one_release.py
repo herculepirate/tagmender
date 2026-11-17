@@ -123,7 +123,12 @@ class TAG3_Engine(te.Base):
         return self.album("Band T", "Album T", folder=folder, **tags)
 
     def eng(self, http, **prof):
-        return self.engine(http, thresholds={"organize_min_confidence": 95, "replace_min_confidence": 90}, **prof)
+        e = self.engine(http, thresholds={"organize_min_confidence": 95, "replace_min_confidence": 90}, **prof)
+        # (the matcher's own order and no country order, Discogs's sure pick standing: under a
+        # Sources preference or a country order, two pressings nothing of your copy tells apart are
+        # album known with a suggestion - TIE-1 - and TAG-3, what these test, is about an exact pick)
+        e.cfg["prefer_source"], e.cfg["preferred_countries"] = "", []
+        return e
 
     def ident(self, d, http, scans=None, conf=88.0, **prof):
         e = self.eng(http, **prof)

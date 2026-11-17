@@ -38,7 +38,7 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
-SHOTS = ("overview-empty", "overview", "inspector-evidence", "inspector-tags", "inspector-artwork",
+SHOTS = ("overview-empty", "overview", "profile-tints", "inspector-evidence", "inspector-tags", "inspector-artwork",
          "needs-attention", "history", "watched-folders", "jobs", "profiles", "preferences-general",
          "preferences-keys", "preferences-checks", "sheet-apply", "menu-file", "menu-album",
          "search", "other-versions", "choose-pressing", "inspector-tags-edited", "script-editor",
@@ -282,6 +282,10 @@ def profiles(tmp):
                           "destination": str(tmp / "library"),
                           "sources": [{"path": str(tmp / "inbox"), "watch": True}]}))
     pf.save(pf.from_dict({"name": "In place", "description": "Fix tags where they are", "operation": "in_place"}))
+    # (two profiles whose names give their rows a colour: light green, light orange - 0.8.71)
+    for name in ("LossyLess Unraid", "Extreme Unraid"):
+        pf.save(pf.from_dict({"name": name, "description": "Rows tinted by the profile's name",
+                              "operation": "move", "destination": str(tmp / "library")}))
 
 
 def _release(source, rid, title, artist, date, country, label, catno, barcode, fmt, tracks, **extra):
@@ -496,18 +500,32 @@ def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPa
     sh.settle(10)
     sh.take(theme, size, 2, "overview", "Overview", lambda: win.grab)
 
+    def tints():
+        """Some albums with a profile of their own (made-up keys, no look-up): their rows tinted with
+        the profile's colour, its name on each (0.8.71)."""
+        names = ("LossyLess Unraid", "LossyLess Unraid", "Extreme Unraid", "Extreme Unraid", "LossyLess Unraid",
+                 "Extreme Unraid")
+        for a, name in zip(ov.model.albums, names):
+            ov.album_profiles[ov.album_key(a)] = name
+        ov.model.refresh_rows()
+        ov.show_row(next(r for r in range(ov.tree.rowCount()) if not ov.own_profile(ov.tree.album_at(r))))
+        return win.grab
+    sh.take(theme, size, 6, "profile-tints", "Overview", tints)
+    ov.album_profiles.clear()
+    ov.model.refresh_rows()
+    ov.table.selectRow(ready)
+
     def tab(name):
-        win.inspector.show_tab(name)
-        if name == "Artwork":
-            end = time.time() + 5
-            while time.time() < end and any(gui._alive(t) for t, _w in getattr(win.inspector, "_threads", [])):
-                sh.settle(2)
+        win.show_tab(name)                              # (0.8.71: the Overview's inspector pane)
+        end = time.time() + 5
+        while time.time() < end and win.threads():
+            sh.settle(2)
         if name == "Evidence":
-            win.inspector.evidence.more.setChecked(False)
+            ov.panes.evidence.more.setChecked(False)
         return win.grab
     for nn, name in ((3, "Evidence"), (4, "Tags"), (5, "Artwork")):
         sh.take(theme, size, nn, f"inspector-{name.lower()}", f"Inspector {name}", lambda n=name: tab(n))
-    win.inspector.show_tab("Tags")
+    win.show_tab("Tags")
     att = win.pages["Needs attention"]
     att.root.setText(str(Path(attention[0]["folder"]).parent.parent))
     att.show_rows(attention)

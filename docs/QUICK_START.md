@@ -47,15 +47,16 @@ For a first try, keep **What happens to files** on *Fix in place*, or *Copy* int
 
 1. On **Overview**, drop an album folder (or an artist's) on the window, or use **Add Folder**
    (Ctrl+O). The albums are listed as *Not looked up*: nothing is asked yet.
-2. Pick the profile in the toolbar and the **Sources** beside Look Up: the profile's choice, or
-   MusicBrainz or Discogs alone or preferred, or the web.
+2. Pick the profile in the toolbar (with albums selected, it is theirs: choose one to give it to
+   them). Its **Sources** setting says which databases are asked; right-click › Look Up asks one
+   alone for the albums selected.
 3. Select albums (or none, for all) and press **Look Up**.
 
 Each album then shows its status:
 
 | Status | Meaning |
 |---|---|
-| **Ready** | Identified. The inspector on the right shows every tag change, the cover and the evidence. |
+| **Ready** | Identified. The inspector under the lists shows every tag change and the cover, and *Why This Release* the evidence; the **Inspector** button shows or hides it. |
 | **Ready · Partial** | Some details are certain, the exact pressing is not; only what is certain is written. |
 | **Unresolved** | Not certain enough: nothing is written. *Why* says what is missing. |
 | **Ignored / Skipped** | A rule of yours left it alone. |

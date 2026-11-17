@@ -1047,7 +1047,10 @@ def _unresolved_albums(path):
         if mark in UNPROVEN_MARKS:
             codes, words = reasons.parse((t.get("tagmender_reason") or [""])[0])
             out.append({"folder": str(g.folder), "codes": codes, "reason": words, "files": len(g.files),
-                        "mark": mark.capitalize()})
+                        "mark": mark.capitalize(),
+                        # (the album's own files: a release chosen for it - TIE-1's suggested one -
+                        # is for these, never for another album of the same folder)
+                        "paths": [str(f) for f in g.files]})
     marked = {os.path.normpath(r["folder"]) for r in out}
     out += [r for r in watcher.unresolved_records(path) if r["folder"] not in marked]
     return out
@@ -1312,7 +1315,9 @@ def work_parsers(sub):
         a.add_argument("--ocr", action="store_true", help="read barcodes and catalogue numbers from scans, "
                        "whatever the profile's ocr setting (default auto: folders with scans or a PDF)")
         a.add_argument("--release", metavar="LINK", help="use this release for the album at PATH: a MusicBrainz or "
-                                                          "Discogs release link or ID (no search)")
+                                                          "Discogs release link or ID (no search); a Discogs "
+                                                          "release with MusicBrainz's entry of the same pressing: "
+                                                          "discogs:ID+MBID (as a suggested pressing names it)")
         a.add_argument("--json", action="store_true")
         a.add_argument("--file-below-score", action="store_true",
                        help="move or copy identified albums into the profile's layout even when their score is "

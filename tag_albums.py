@@ -951,6 +951,8 @@ def recheck(matches_db, album, allow_old=False):
         return ""
     o = json.loads(row[0])
     b = o.get("best") or {}
+    if b.get("tie_guess"):           # (TIE-1: a pressing a tie-break only suggested: album known)
+        return "the matcher only suggests this pressing (a tie-break chose it, TIE-1)"
     if o.get("status") != "auto":
         return f"the matcher now says {o.get('status')}: " + "; ".join((o.get("why") or [])[:2])
     if (b.get("mb_id") or (b.get("id") if b.get("source") == "mb" else "")) != album["mbid"]:
@@ -971,6 +973,8 @@ def select_albums(matches_db, limit=None, only=None, process_anyway=False, allow
     for path, blob in db.execute("SELECT path, result FROM results ORDER BY path"):
         o = json.loads(blob)
         b = o.get("best") or {}
+        if b.get("tie_guess"):       # (TIE-1: a pressing a tie-break only suggested: web_tag.py's, album known)
+            continue
         # Discogs decides the pressing; Picard tags from the MusicBrainz release of that
         # same pressing ("mb_id"). A Discogs pick with no such release is web_tag.py's.
         mbid = b.get("mb_id") or (b.get("id") if b.get("source") == "mb" else "")

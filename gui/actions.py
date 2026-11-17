@@ -20,11 +20,16 @@ from .i18n import N_, tr
 COMMANDS = {
     # File
     "add_folder": (N_("&Add Folder…"), "Ctrl+O", "folder-plus", N_("Choose a music folder to preview")),
+    "look_up": (N_("Loo&k Up"), "Ctrl+L", "search",
+                N_("Look up the selected albums, or every album when none is selected; nothing is written until "
+                   "you apply")),
     "preview": (N_("&Preview"), "Ctrl+P", "eye", N_("Work out what would change; nothing is written")),
     "apply": (N_("Appl&y"), "Ctrl+Return", "check", N_("Make the previewed changes (they can be undone)")),
     "cancel": (N_("&Cancel"), "Ctrl+.", "x", N_("Stop after the album being worked on")),
     "read_scans": (N_("&Read Scans for This Preview"), None, None,
                    N_("Read barcodes and catalog numbers from every album's cover scans (slower)")),
+    "choose_library": (N_("Library Fol&der for This Preview…"), None, None,
+                       N_("Copy or move this preview's albums into another folder than the profile's library")),
     "watch_folder": (N_("&Watch a Folder…"), "Ctrl+Shift+N", "folder-sync",
                      N_("Have a profile process music dropped into a folder")),
     "new_profile": (N_("&New Profile…"), "Ctrl+N", "plus", N_("Make a profile with the default settings")),
@@ -47,12 +52,15 @@ COMMANDS = {
     "copy": (N_("&Copy"), QKeySequence.StandardKey.Copy, None, N_("Copy the selection")),
     "paste": (N_("&Paste"), QKeySequence.StandardKey.Paste, None, N_("Paste")),
     "select_all": (N_("Select A&ll"), QKeySequence.StandardKey.SelectAll, None, N_("Select all")),
+    "clear_done": (N_("Clear Done Al&bums"), None, None,
+                   N_("Take every album marked Done out of the list; nothing on disk changes")),
     "copy_path": (N_("Copy Album Pat&h"), "Ctrl+Shift+C", None, N_("Copy the selected album's folder")),
     "find": (N_("&Find"), "Ctrl+F", "search", N_("Search the page shown")),
     "preferences": (N_("Pr&eferences…"), "Ctrl+,", "settings-2", N_("Appearance, provider keys and checks")),
     # View: the pages are added by the window (Alt+1 ...)
     "show_sidebar": (N_("Show &Sidebar"), "Ctrl+Alt+S", None, N_("Show or hide the sidebar")),
-    "show_inspector": (N_("Show &Inspector"), "Ctrl+Alt+I", "panel-right", N_("Show or hide the inspector")),
+    "show_inspector": (N_("Show &Inspector"), "Ctrl+Alt+I", "panel-right",
+                       N_("Show or hide the inspector: the selection's tags, why this release, and its cover")),
     "tab_tags": (N_("&Tags"), "Ctrl+Alt+1", "tag", N_("The selected album's tags, original and new")),
     "tab_artwork": (N_("&Artwork"), "Ctrl+Alt+2", "image", N_("The selected album's cover, original and new")),
     "tab_evidence": (N_("&Evidence"), "Ctrl+Alt+3", "info", N_("Why TagMender chose this release, and its doubts")),
@@ -60,6 +68,10 @@ COMMANDS = {
     # Album
     "use_release": (N_("&Paste a Release Link…"), "Ctrl+Shift+R", "disc-3",
                     N_("Tag this album from a MusicBrainz or Discogs release link you paste")),
+    # TIE-1: an album known whose pressing a tie-break proposed: that release chosen, tagged in full
+    "use_suggested_pressing": (N_("&Use Suggested Pressing"), None, "disc-3",
+                               N_("Tag this album with the pressing suggested for it (its barcode, catalog "
+                                  "number and label); nothing of your copy told its pressings apart")),
     # (Search MusicBrainz and Discogs…, Other Versions…, Choose Your Pressing…: gui.search.COMMANDS,
     # below; the four are Album > Change Release, and the inspector's Change Release button)
     "file_info": (N_("&Info…"), "Ctrl+I", "info", N_("The selected file's format, length, every tag and picture")),
@@ -185,14 +197,15 @@ RELEASE_MENU = ("use_release", *_search.MENU)
 # or ticks a box elsewhere); the other commands' keys work in the whole window
 SCOPED = ("edit_tag", "remove_tag", "play_pause")    # (Space: the album tables and the player bar only)
 MENUS = (
-    (N_("&File"), ("add_folder", "lookup_cd", None, "preview", "apply", "cancel", "read_scans", None, "watch_folder",
+    (N_("&File"), ("add_folder", "lookup_cd", None, "look_up", "preview", "apply", "cancel", "read_scans",
+               "choose_library", None, "watch_folder",
                "new_profile", "save_profile", None, "close_window", "quit")),
     (N_("&Edit"),
      ("undo_edit", "undo_job", "undo_selected", "show_job_albums", "job_details", "show_report", None, "cut", "copy",
-      "paste", "select_all", None, "copy_path", "find", None, "preferences")),
+      "paste", "select_all", None, "copy_path", "find", None, "clear_done", None, "preferences")),
     (N_("&View"), ("@pages", None, "show_sidebar", "show_inspector", None, "tab_tags", "tab_artwork", "tab_evidence",
                None, "refresh")),
-    (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), "match_files", None, (N_("&Tag"), TAG_MENU),
+    (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), (N_("Pro&file"), ()), "use_suggested_pressing", "match_files", None, (N_("&Tag"), TAG_MENU),
                 (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "exclude_again", "retry", None,
                 "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
                 "open_folder", "copy_path")),
@@ -207,8 +220,9 @@ MENUS = (
     (N_("&Help"), ("help", "setup", "shortcuts", None, "report", "about")),
 )
 CHECKABLE = ("read_scans", "show_sidebar", "show_inspector", "toggle_rule")
-TOOLBAR = ("add_folder", "preview", "apply", "cancel")
+TOOLBAR = ("add_folder", "look_up")                     # (then the window's: progress, Cancel, the filter ...)
 TOOLBAR_TEXT = {"add_folder": N_(" Add Folder")}           # (its icon fills its box: a space keeps the gap)
+SPRING = "|"                                           # (in toolbar_end's list: the room that is left, shared)
 ICON_ROLE = {"apply": "on_accent"}                      # (the prominent button: its icon as its label)
 # the pages in the View menu, with their letters (the page's name stays the key)
 PAGE_TEXT = {"Overview": N_("&Overview"), "Needs attention": N_("&Needs attention"), "History": N_("&History"),
@@ -359,15 +373,15 @@ def build_toolbar(win, acts):
 
 
 def toolbar_end(bar, widgets, acts):
-    """After the main actions: the progress bar, a spring, then the profile picker, the search
-    field and the inspector toggle."""
-    for w in widgets[:1]:
-        bar.addWidget(w)
-    spring = QWidget()
-    spring.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-    bar.addWidget(spring)
-    for w in widgets[1:]:
-        if isinstance(w, str):
+    """After the main actions: WIDGETS in order (SPRING: room shared out, a str: a quiet label for
+    the control after it), then the inspector toggle and, last, the one prominent button, Apply
+    (its words carry the count: the window sets them)."""
+    for w in widgets:
+        if w == SPRING:
+            spring = QWidget()
+            spring.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            bar.addWidget(spring)
+        elif isinstance(w, str):
             lb = QLabel(w)
             lb.setProperty("role", "hint")
             bar.addWidget(lb)
@@ -375,10 +389,20 @@ def toolbar_end(bar, widgets, acts):
             bar.addWidget(w)
     a = acts["show_inspector"]
     bar.addAction(a)
+    a.setIconText(tr("Inspector"))                    # (its word beside the icon: a button seen, not only a key)
     b = bar.widgetForAction(a)
-    b.setToolButtonStyle(Qt.ToolButtonIconOnly)
+    b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    b.setText(tr("Inspector"))
     b.setAccessibleName(tr("Show Inspector"))
     b.setFocusPolicy(Qt.TabFocus)
+    a = acts["apply"]
+    bar.addAction(a)
+    a.setIconText(plain(a.text()))
+    b = bar.widgetForAction(a)
+    b.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    b.setAccessibleName(accessible(a))
+    b.setFocusPolicy(Qt.TabFocus)
+    b.setProperty("role", "primary")
 
 
 def shortcut_text(acts) -> str:

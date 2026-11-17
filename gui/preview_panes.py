@@ -35,17 +35,18 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractItemModel, QAbstractTableModel, QItemSelectionModel, QMimeData, QModelIndex,
                             QSize, Qt, QTimer, QUrl, Signal)
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QListView,
-                               QListWidget, QListWidgetItem, QScrollArea, QSizePolicy, QSplitter, QStyle,
-                               QStyledItemDelegate, QStyleOptionViewItem, QTableView, QToolButton, QTreeView,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
+                               QListView, QListWidget, QListWidgetItem, QMenu, QSizePolicy, QSplitter,
+                               QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
+                               QToolButton, QTreeView, QVBoxLayout, QWidget)
 
 from . import icons, style
-from .common import _gui_prefs, _set_gui_pref, album_words, label_for, left_header, plural, reasons, say
+from .common import _gui_prefs, _set_gui_pref, album_words, label_for, left_header, plural, popup_menu, reasons, say
 from .i18n import N_, tr
-from .models import (fill_roles, R_ACCESSIBLETEXT, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
+from .models import (fill_roles, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
 from .tagnames import display as tag_name
+from .widgets import Segmented
 from .work import start
 
 PREF = "preview_panes"                  # gui.json: {"collapsed": {pane: bool}, "sizes": [..], "vsizes": [..],
@@ -464,6 +465,12 @@ class LazyTree(QAbstractItemModel):
             node.kids = None
 
 
+def tint_of(name):
+    """The wash of profile NAME's colour (gui.common.profile_colour), or None."""
+    from .common import profile_colour
+    return style.profile_tint(profile_colour(name)) if name else None
+
+
 def _tone(word_kind):
     return {"ok": style.color("identified"), "hold": style.color("attention"), "extra": style.color("attention"),
             "own": style.color("muted"), "missing": style.color("disabled")}.get(word_kind)
@@ -474,6 +481,7 @@ class FoldersModel(LazyTree):
     once), its sub-folders and files, each marked with where it goes."""
     COLS = (N_("Folder or file"), N_("Goes to"))
     OPENS = ("root", "folder")
+    profile_of = None                                # (album -> its profile's name: the rows' tint)
 
     def set_albums(self, albums):
         self.beginResetModel()
@@ -556,6 +564,10 @@ class FoldersModel(LazyTree):
             return f
         if role == R_DECORATION and c == 0:
             return icons.icon("folder-open" if n.kind != "file" else "tag", "muted", 14)
+        if role == R_BACKGROUND and self.profile_of is not None:
+            albums = [n.album] if n.kind == "file" else n.data["albums"]
+            names = {self.profile_of(a) for a in albums if a is not None}
+            return tint_of(next(iter(names))) if len(names) == 1 else None
         if role == R_ACCESSIBLETEXT:
             words = self.badge(n)[0]
             return f"{self.data(idx.siblingAtColumn(0))}, {words}" if words else self.data(idx.siblingAtColumn(0))
@@ -635,75 +647,267 @@ def files_of(a) -> list:
     return out
 
 
+SUB = R_USER + 5                        # the muted words after a row's name ("← Disc 01", the release's facts)
+
+
+def _stamp(a) -> tuple:
+    """What an album row's discs and tracks are made from: when it changes they are made again."""
+    a = a or {}
+    return id(a), id(a.get("files")), len(a.get("files") or []), a.get("status"), id(a.get("identification"))
+
+
 class AlbumsModel(LazyTree):
-    """The albums as they will be: release → discs → tracks, each track with its file."""
-    COLS = (N_("Album, disc or track"), N_("From"), N_("Note"))
+    """The albums as they will be: one top row per album of the Overview's list - ROWS, its sorted
+    and filtered rows (gui.models.SortedRows): its order, its filter, its selection - and under each
+    its discs (each naming the folder it came from) and their tracks (each with its file). The
+    album rows show the list's Status and Score; their check box is the list's (ticked: applied)."""
+    COLS = (N_("Albums as they will be"), N_("Status"), N_("Score"))
+    NAME, STATUS, SCORE = 0, 1, 2
+    SRC = {0: 1, 1: 0, 2: 3}                        # (a column -> the list's column it shows and sorts by)
     OPENS = ("album", "disc")
     join_asked = Signal(object, list)               # (album, folders dropped on it)
 
-    def set_albums(self, albums):
-        self.beginResetModel()
-        self.top.kids = [Node("album", self.top, i, album=a) for i, a in enumerate(albums)]
+    def __init__(self, rows=None):
+        super().__init__()
+        if rows is None:
+            from .models import PlanModel, SortedRows
+            rows = SortedRows(self)
+            rows.setSourceModel(PlanModel())
+        self.rows = rows
+        self._gone = []                              # (nodes taken out: kept until the next reset)
+        self._persist = None
+        rows.modelAboutToBeReset.connect(self.beginResetModel)
+        rows.modelReset.connect(self._reset)
+        rows.rowsAboutToBeInserted.connect(lambda _p, a, b: self.beginInsertRows(QModelIndex(), a, b))
+        rows.rowsInserted.connect(self._inserted)
+        rows.rowsAboutToBeRemoved.connect(lambda _p, a, b: self.beginRemoveRows(QModelIndex(), a, b))
+        rows.rowsRemoved.connect(self._removed)
+        rows.layoutAboutToBeChanged.connect(self._relaying)
+        rows.layoutChanged.connect(self._relaid)
+        rows.dataChanged.connect(self._changed)
+        self.top.kids = self._nodes(0, rows.rowCount() - 1)
+
+    # ---- the list's rows, followed --------------------------------------------------------------
+    def album_at(self, r):
+        src = self.rows.mapToSource(self.rows.index(r, 0))
+        albums = getattr(self.rows.sourceModel(), "albums", None) or []
+        return albums[src.row()] if src.isValid() and 0 <= src.row() < len(albums) else None
+
+    def _nodes(self, a, b) -> list:
+        out = []
+        for r in range(a, b + 1):
+            al = self.album_at(r)
+            out.append(Node("album", self.top, r, album=al, data={"stamp": _stamp(al)}))
+        return out
+
+    def _number(self, start=0):
+        for i in range(start, len(self.top.kids)):
+            self.top.kids[i].row = i
+
+    def _reset(self):
+        self._gone = []
+        self.top.kids = self._nodes(0, self.rows.rowCount() - 1)
         self.endResetModel()
 
+    def _inserted(self, _p, a, b):
+        self.top.kids[a:a] = self._nodes(a, b)
+        self._number(a)
+        self.endInsertRows()
+
+    def _removed(self, _p, a, b):
+        self._gone += self.top.kids[a:b + 1]
+        del self.top.kids[a:b + 1]
+        self._number(a)
+        self.endRemoveRows()
+
+    def _relaying(self):
+        self.layoutAboutToBeChanged.emit()
+        self._persist = list(self.persistentIndexList())
+
+    def _relaid(self):
+        by_id = {id(n.album): n for n in self.top.kids}
+        kids = []
+        for r in range(self.rows.rowCount()):
+            al = self.album_at(r)
+            n = by_id.pop(id(al), None) or Node("album", self.top, r, album=al, data={"stamp": _stamp(al)})
+            kids.append(n)
+        self._gone += list(by_id.values())
+        self.top.kids = kids
+        self._number()
+        tops = {id(n) for n in kids}
+        old, new = [], []
+        for i in self._persist or []:
+            n = i.internalPointer() if i.isValid() else None
+            if n is not None and n.parent is self.top:
+                old.append(i)
+                new.append(self.createIndex(n.row, i.column(), n) if id(n) in tops else QModelIndex())
+        self._persist = None
+        if old:
+            self.changePersistentIndexList(old, new)
+        self.layoutChanged.emit()
+
+    def _changed(self, top, bottom, *_):
+        lo, hi = max(0, top.row()), min(len(self.top.kids) - 1, bottom.row())
+        for r in range(lo, hi + 1):
+            n = self.top.kids[r]
+            al = self.album_at(r)
+            st = _stamp(al)
+            if n.album is not al or n.data.get("stamp") != st:
+                n.album, n.data["stamp"] = al, st
+                self._refresh_kids(n)
+        if lo <= hi:
+            self.dataChanged.emit(self.index(lo, 0), self.index(hi, len(self.COLS) - 1))
+
+    def _refresh_kids(self, n):
+        """Album row N's entry changed (your edit, a look-up): its discs and tracks read again - in
+        place when they are as many as before, so a disc or track selected stays selected; else
+        made again when next opened."""
+        if n.kids is None:
+            return
+        new = album_discs(n.album or {})
+        old = n.kids
+        if len(new) != len(old) or any(d.kids is not None and len(d.kids) != len(nd["tracks"])
+                                       for d, nd in zip(old, new)):
+            self.reset_kids(n)
+            return
+        last = len(self.COLS) - 1
+        for d, nd in zip(old, new):
+            d.album, d.data = n.album, nd
+            if d.kids:
+                for t, nt in zip(d.kids, nd["tracks"]):
+                    t.album, t.data = n.album, nt
+                self.dataChanged.emit(self.index_of(d.kids[0]), self.index_of(d.kids[-1], last))
+        if old:
+            self.dataChanged.emit(self.index_of(old[0]), self.index_of(old[-1], last))
+
+    def node_of(self, album):
+        return next((n for n in self.top.kids if n.album is album), None)
+
+    def sort(self, column, order=Qt.AscendingOrder):
+        self.rows.sort(self.SRC.get(column, 0), order)
+
+    # ---- the rows' children --------------------------------------------------------------------
     def make_kids(self, node):
         if node.kind == "album":
-            return [Node("disc", node, 0, album=node.album, data=d) for d in album_discs(node.album)]
+            return [Node("disc", node, 0, album=node.album, data=d) for d in album_discs(node.album or {})]
         if node.kind == "disc":
             return [Node("track", node, 0, album=node.album, data=t) for t in node.data["tracks"]]
         return []
+
+    def _list(self, n, col, role):
+        """What the list says in its column COL for album row N."""
+        return self.rows.data(self.rows.index(n.row, col), role)
+
+    def album_tip(self, n) -> str:
+        a = n.album or {}
+        lines = [a.get("source_dir") or ""]
+        for col in (2, 4, 5, 7):                    # (Source, Changes, Why, Scans: the old list's columns)
+            v = self._list(n, col, R_DISPLAY)
+            if v:
+                lines.append(f"{tr(self.rows.headerData(col, Qt.Horizontal))}: {v}")
+        prof = self._list(n, 6, R_DISPLAY)
+        if prof:
+            lines.append(tr("Profile: {0}").format(prof))
+        return "<p style='white-space:pre-wrap'>" + html.escape("\n".join(x for x in lines if x)) + "</p>"
 
     def data(self, idx, role=R_DISPLAY):
         if not idx.isValid():
             return None
         n, c = idx.internalPointer(), idx.column()
-        a = n.album
-        if role in (R_DISPLAY, R_ACCESSIBLETEXT):
-            if n.kind == "album":
-                return (album_title(a), album_facts(a), label_for(a)[1])[c]
-            if n.kind == "disc":
-                d = n.data
-                folders = d["folders"]
-                src = ("“" + Path(folders[0]).name + "”" + (tr(" and {0} more").format(len(folders) - 1)
-                                                            if len(folders) > 1 else "")) if folders else ""
-                have = sum(1 for t in d["tracks"] if t["fe"] is not None)
-                return (d["label"], src, (f"{have}/{len(d['tracks'])}" if not d.get("extra") else
-                                          plural(have, tr("file"), tr("files"))))[c]
-            t = n.data
-            num = f"{t['number']:02d}  " if t["number"] else ""
-            return (num + t["title"], Path(t["fe"]["src"]).name if t["fe"] else "", t["note"])[c]
-        if role == R_TOOLTIP:
-            if n.kind == "disc" and c == 1:
-                return "\n".join(n.data["folders"])
-            if n.kind == "track" and n.data["fe"]:
-                return n.data["fe"]["src"]
-            if n.kind == "album":
-                return a.get("source_dir")
-            return None
-        if role == R_FOREGROUND:
-            if n.kind == "track" and n.data["missing"]:
-                return QColor(style.color("disabled"))
-            if c == 2 and n.kind == "track" and n.data["note"]:
-                return QColor(style.color("attention"))
-            if c == 2 and n.kind == "album":
+        a = n.album or {}
+        if role == R_USER:
+            return a
+        if role == R_BACKGROUND:
+            top = n
+            while top.parent is not self.top and top.parent is not None:
+                top = top.parent
+            return tint_of(self._list(top, 6, R_DISPLAY))
+        if n.kind == "album":
+            if c == self.NAME:
+                if role == R_DISPLAY:
+                    return album_title(a)
+                if role == SUB:                         # (the profile in words: never its tint alone)
+                    return " · ".join(x for x in (album_facts(a), self._list(n, 6, R_DISPLAY)) if x)
+                if role == R_ACCESSIBLETEXT:
+                    sub = self.data(idx, SUB)
+                    return f"{album_title(a)}, {sub}" if sub else album_title(a)
+                if role == R_TOOLTIP:
+                    return self.album_tip(n)
+                if role == R_FONT:
+                    f = style.font("body")
+                    f.setWeight(QFont.Weight(600))
+                    return f
+                if role == int(Qt.CheckStateRole):
+                    return self._list(n, 1, role)
+                return None
+            src = self.SRC[c]
+            if c == self.SCORE and role in (R_FONT, R_FOREGROUND):
+                # (plain numbers in the secondary colour, as the mockup: the status carries the
+                # symbol and the word; how far to trust the score is in its tooltip and read out)
+                return QColor(style.color("muted")) if role == R_FOREGROUND else None
+            if c == self.STATUS and role == R_FOREGROUND:
                 from .style import status_color
-                return status_color(a.get("status"))
-            if c == 1:
+                return status_color(a.get("status")) if not self._list(n, 0, R_DISPLAY) != \
+                    label_for(a)[1] else QColor(style.color("muted"))
+            return self._list(n, src, role)
+        if n.kind == "disc":
+            d = n.data
+            if c == self.NAME and role in (R_DISPLAY, R_ACCESSIBLETEXT, SUB):
+                folders = d["folders"]
+                src = ("← " + Path(folders[0]).name + (tr(" and {0} more").format(len(folders) - 1)
+                                                        if len(folders) > 1 else "")) if folders else ""
+                if role == SUB:
+                    return src
+                return d["label"] if role == R_DISPLAY else f"{d['label']}, {src}"
+            if c == self.STATUS and role in (R_DISPLAY, R_ACCESSIBLETEXT):
+                have = sum(1 for t in d["tracks"] if t["fe"] is not None)
+                return tr("{0} of {1}").format(have, len(d["tracks"])) if not d.get("extra") else \
+                    plural(have, tr("file"), tr("files"))
+            if role == R_TOOLTIP and c == self.NAME:
+                return "\n".join(d["folders"]) or None
+            if role == R_FOREGROUND and c == self.STATUS:
                 return QColor(style.color("muted"))
-        if role == R_FONT and n.kind in ("album", "disc") and c == 0:
-            f = style.font("body")
-            f.setWeight(QFont.Weight(600))
-            return f
-        if role == R_DECORATION and c == 0:
-            return icons.icon({"album": "library", "disc": "disc-3"}.get(n.kind, "tag"),
-                              "disabled" if n.kind == "track" and n.data["missing"] else "muted", 14)
+            if role == R_FONT and c == self.NAME:
+                f = style.font("body")
+                f.setWeight(QFont.Weight(600))
+                return f
+            return None
+        t = n.data
+        if c == self.NAME and role in (R_DISPLAY, R_ACCESSIBLETEXT, SUB):
+            num = f"{t['number']:02d}  " if t["number"] else ""
+            src = "← " + Path(t["fe"]["src"]).name if t["fe"] else ""
+            if role == SUB:
+                return src
+            return num + t["title"] if role == R_DISPLAY else ", ".join(x for x in (num + t["title"], src, t["note"]) if x)
+        if c == self.STATUS and role in (R_DISPLAY, R_ACCESSIBLETEXT):
+            return t["note"]
+        if role == R_TOOLTIP and t["fe"]:
+            return t["fe"]["src"]
+        if role == R_FOREGROUND:
+            if t["missing"]:
+                return QColor(style.color("disabled"))
+            if c == self.STATUS and t["note"]:
+                return QColor(style.color("attention"))
         return None
+
+    def headerData(self, s, o, role=R_DISPLAY):
+        if o == Qt.Horizontal and role == R_TEXTALIGNMENT:
+            return int((Qt.AlignRight if s == self.SCORE else Qt.AlignLeft) | Qt.AlignVCenter)
+        return super().headerData(s, o, role)
 
     def flags(self, idx):
         f = super().flags(idx)
         if idx.isValid() and idx.internalPointer().kind == "album":
             f |= Qt.ItemIsDropEnabled
+            if idx.column() == self.NAME:
+                f |= self.rows.flags(self.rows.index(idx.row(), 1)) & Qt.ItemIsUserCheckable
         return f
+
+    def setData(self, idx, value, role=R_EDIT):
+        if idx.isValid() and role == int(Qt.CheckStateRole) and idx.internalPointer().kind == "album" \
+                and idx.column() == self.NAME:
+            return self.rows.setData(self.rows.index(idx.row(), 1), value, role)
+        return False
 
     def mimeTypes(self):
         return [MIME]
@@ -720,6 +924,54 @@ class AlbumsModel(LazyTree):
         paths = [p for p in bytes(md.data(MIME)).decode().splitlines() if p]
         self.join_asked.emit(parent.internalPointer().album, paths)
         return False                                   # (nothing moves here: the sheet does it)
+
+
+class NameDelegate(QStyledItemDelegate):
+    """A row's name, then its muted words (SUB: "← Disc 01", the release's facts), cut at the end."""
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        name, sub = opt.text, index.data(SUB) or ""
+        opt.text = ""
+        w = opt.widget
+        st = w.style() if w else QApplication.style()
+        st.drawControl(QStyle.CE_ItemViewItem, opt, painter, w)
+        r = st.subElementRect(QStyle.SE_ItemViewItemText, opt, w).adjusted(4, 0, -4, 0)
+        sel = bool(option.state & QStyle.State_Selected)
+        fg = index.data(R_FOREGROUND)
+        ink = option.palette.highlightedText().color() if sel else (QColor(fg) if fg is not None else
+                                                                    option.palette.text().color())
+        painter.save()
+        painter.setFont(opt.font)
+        fm = painter.fontMetrics()
+        shown = fm.elidedText(name, Qt.ElideRight, r.width())
+        painter.setPen(ink)
+        painter.drawText(r, int(Qt.AlignLeft | Qt.AlignVCenter), shown)
+        used = fm.horizontalAdvance(shown) + 10
+        if sub and shown == name and used < r.width():
+            f = style.font("body")
+            painter.setFont(f)
+            muted = QColor(style.color("on_selection")) if sel else QColor(style.color("muted"))
+            if sel:
+                muted.setAlpha(200)
+            painter.setPen(muted)
+            rest = r.adjusted(used, 0, 0, 0)
+            painter.drawText(rest, int(Qt.AlignLeft | Qt.AlignVCenter),
+                             painter.fontMetrics().elidedText(sub, Qt.ElideRight, rest.width()))
+        painter.restore()
+
+
+class AlbumsView(QTreeView):
+    """The albums pane's tree, with the calls the Overview's list made (selectRow: an album's row)."""
+
+    def selectRow(self, row):
+        idx = self.model().index(row, 0)
+        if idx.isValid():
+            self.selectionModel().setCurrentIndex(idx, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+
+    def horizontalHeader(self):
+        return self.header()
 
 
 # --------------------------------------------------------------------------
@@ -886,182 +1138,181 @@ class ElidedLabel(QLabel):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        self.style().drawItemText(p, self.contentsRect(), int(Qt.AlignLeft | Qt.AlignVCenter), self.palette(),
+        align = (self.alignment() & Qt.AlignHorizontal_Mask) or Qt.AlignLeft
+        self.style().drawItemText(p, self.contentsRect(), int(align | Qt.AlignVCenter), self.palette(),
                                   self.isEnabled(), self.elided(), self.foregroundRole())
         p.end()
 
 
-class VerticalLabel(QWidget):
-    """A folded pane's title, read from the bottom up."""
+class FitPicture(QLabel):
+    """A picture as large as its room allows (at most MOST px a side), square, centred; its words
+    (no picture) in the middle."""
 
-    def __init__(self, text):
+    def __init__(self, most=180, least=72):
         super().__init__()
-        self.text = text
-        self.setAccessibleName(text)
-        f = style.font("caption")
-        f.setWeight(QFont.Weight(600))
-        self.setFont(f)
+        self.most, self._px = most, QPixmap()
+        self.setMinimumSize(least, least)
+        self.setMaximumHeight(most)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setAlignment(Qt.AlignCenter)
+
+    def setPixmap(self, px):
+        self._px = QPixmap(px)
+        self.setText("")
+        self.update()
+
+    def pixmap_shown(self):
+        return self._px
 
     def sizeHint(self):
-        fm = self.fontMetrics()
-        return QSize(fm.height() + 8, fm.horizontalAdvance(self.text) + 16)
+        return QSize(self.most, self.most)
 
-    def minimumSizeHint(self):
-        return self.sizeHint()
-
-    def paintEvent(self, _e):
+    def paintEvent(self, e):
+        if self._px.isNull():
+            return super().paintEvent(e)
+        side = min(self.width(), self.height(), self.most)
+        x, y = (self.width() - side) // 2, (self.height() - side) // 2
         p = QPainter(self)
-        p.setPen(QColor(style.color("muted")))
-        p.translate(0, self.height())
-        p.rotate(-90)
-        p.drawText(8, 0, self.height() - 8, self.width(), int(Qt.AlignLeft | Qt.AlignVCenter), self.text)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawPixmap(x, y, side, side, self._px.scaled(side * 2, side * 2, Qt.KeepAspectRatio,
+                                                      Qt.SmoothTransformation))
         p.end()
 
 
 class Pane(QFrame):
-    """A titled pane with a fold button; folded, a side pane is a strip with its title read
-    upwards, the bottom pane its title row alone."""
-    folded = Signal(str, bool)
-    folding = Signal(str)                            # (about to fold: its width as it is now kept)
+    """A pane of the window: its title in small capitals and a word or count at the right of the
+    title row (subtitle), its controls (extras) between them, its content below. Panes meet at
+    hairlines, as a Mac window's: no box of their own."""
 
-    def __init__(self, key, title, subtitle="", bottom=False):
+    def __init__(self, key, title, subtitle="", head_height=30):
         super().__init__()
-        self.key, self.title, self.bottom = key, title, bottom
+        self.key, self.title = key, title
         self.setObjectName("previewPane")
-        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShape(QFrame.NoFrame)
         self.setAccessibleName(title)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         self.head = QWidget()
-        hl = QHBoxLayout(self.head)
-        hl.setContentsMargins(12, 8, 6, 6)
-        hl.setSpacing(8)
-        words = QVBoxLayout()
-        words.setSpacing(0)
+        self.head.setObjectName("paneHead")
+        self.head.setFixedHeight(head_height)
+        hl = self.head_lay = QHBoxLayout(self.head)
+        hl.setContentsMargins(12, 0, 12, 0)
+        hl.setSpacing(12)
         self.title_label = QLabel(title)
-        self.title_label.setProperty("role", "caption")
         f = style.font("caption")
+        f.setPixelSize(11)
         f.setWeight(QFont.Weight(600))
         f.setCapitalization(QFont.AllUppercase)
         self.title_label.setFont(f)
-        self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # (a narrow pane cuts it)
-        self.title_label.setToolTip(title)
-        words.addWidget(self.title_label)
-        self.subtitle = ElidedLabel(subtitle)
-        self.subtitle.setProperty("role", "hint")
-        self.subtitle.setVisible(bool(subtitle))
-        words.addWidget(self.subtitle)
-        hl.addLayout(words, 1)
+        self.title_label.setProperty("role", "caption")
+        self.title_label.setAccessibleName(title)
+        hl.addWidget(self.title_label)
         self.extras = QHBoxLayout()
-        self.extras.setSpacing(4)
+        self.extras.setSpacing(8)
         hl.addLayout(self.extras)
-        self.button = self._fold_button()
-        hl.addWidget(self.button, 0, Qt.AlignTop)
+        self.subtitle = ElidedLabel(subtitle)
+        self.subtitle.setProperty("role", "caption")
+        self.subtitle.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        hl.addWidget(self.subtitle, 1)
         lay.addWidget(self.head)
         self.body = QWidget()
         self.body_lay = QVBoxLayout(self.body)
         self.body_lay.setContentsMargins(0, 0, 0, 0)
         self.body_lay.setSpacing(0)
         lay.addWidget(self.body, 1)
-        self.strip = QWidget()                              # (folded side pane: button, then the title)
-        sl = QVBoxLayout(self.strip)
-        sl.setContentsMargins(2, 6, 2, 6)
-        sl.setSpacing(8)
-        self.strip_button = self._fold_button()
-        sl.addWidget(self.strip_button, 0, Qt.AlignHCenter)
-        sl.addWidget(VerticalLabel(title), 0, Qt.AlignHCenter)
-        sl.addStretch(1)
-        self.strip.hide()
-        lay.addWidget(self.strip, 1)
-        self.collapsed = False
-        self._extras = []                                    # (control, words only, its width with words)
-        self._words()
-
-    def _fold_button(self):
-        b = QToolButton()
-        b.setProperty("role", "tool")
-        b.setAutoRaise(True)
-        b.setFocusPolicy(Qt.StrongFocus)
-        b.setFixedSize(28, 28)
-        b.clicked.connect(lambda _=False: self.set_collapsed(not self.collapsed, by_you=True))
-        return b
-
-    def _words(self):
-        words = (tr("Expand {0}") if self.collapsed else tr("Collapse {0}")).format(self.title)
-        glyph = ("⌃" if self.collapsed else "⌄") if self.bottom else ("›" if self.collapsed else "‹")
-        for b in (self.button, self.strip_button):
-            b.setText(glyph)
-            b.setToolTip(words)
-            # (square, never narrower than its glyph needs in this style and font: 28 px or more)
-            hint = b.minimumSizeHint()
-            side = max(28, hint.width(), hint.height())
-            b.setFixedSize(side, side)
-            b.setAccessibleName(words)
 
     def add(self, w, stretch=0):
         self.body_lay.addWidget(w, stretch)
 
     def add_extra(self, w, words=False):
-        """A control in the title row. Where the pane is narrow a button shows its icon alone (its
-        words in its tooltip and accessible name) and WORDS (a label beside a control) give way."""
         self.extras.addWidget(w)
-        self._extras.append((w, words, w.sizeHint().width()))
-        self._fit_extras()
-
-    def _fit_extras(self):
-        if not self._extras:
-            return
-        need = self.title_label.sizeHint().width() + sum(full for _w, _x, full in self._extras) + 60
-        narrow = self.width() < need
-        for w, words, _full in self._extras:
-            if words:
-                w.setVisible(not narrow)
-            elif isinstance(w, QToolButton):
-                w.setToolButtonStyle(Qt.ToolButtonIconOnly if narrow else Qt.ToolButtonTextBesideIcon)
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._fit_extras()
-
-    def set_collapsed(self, on, by_you=False):
-        if by_you and on and not self.collapsed:
-            self.folding.emit(self.key)
-        self.collapsed = bool(on)
-        self.body.setVisible(not on)
-        if self.bottom:
-            self.setMaximumHeight(self.head.sizeHint().height() + 4 if on else 16777215)
-        else:
-            self.head.setVisible(not on)
-            self.strip.setVisible(on)
-            self.setMinimumWidth(STRIP if on else SIDE_MIN)
-            self.setMaximumWidth(STRIP if on else 16777215)
-        self._words()
-        if by_you:
-            (self.strip_button if on and not self.bottom else self.button).setFocus()
-            self.folded.emit(self.key, self.collapsed)
 
 
 # --------------------------------------------------------------------------
 # cover art
 # --------------------------------------------------------------------------
+class ThumbDelegate(QStyledItemDelegate):
+    """A cover's thumbnail alone (its words are the item's tooltip and accessible text), the one
+    shown large ringed in the accent."""
+
+    def paint(self, painter, option, index):
+        r = option.rect.adjusted(3, 3, -3, -3)
+        icon = index.data(R_DECORATION)
+        painter.save()
+        if isinstance(icon, QIcon):
+            icon.paint(painter, r)
+        if option.state & QStyle.State_Selected:
+            from PySide6.QtGui import QPen
+            painter.setPen(QPen(QColor(style.color("accent")), 2))
+            painter.drawRoundedRect(r.adjusted(-1, -1, 1, 1), 3, 3)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        return QSize(40, 40)
+
+
 class CoverStrip(QListWidget):
-    """The covers there are for the album, side by side."""
+    """The covers there are for the album, as thumbnails in a row."""
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("coverStrip")
         self.setViewMode(QListView.IconMode)
         self.setFlow(QListView.LeftToRight)
         self.setWrapping(False)
         self.setMovement(QListView.Static)
-        self.setResizeMode(QListView.Adjust)
-        self.setIconSize(QSize(56, 56))
-        self.setGridSize(QSize(168, 112))                   # (a picture and two lines of words)
-        self.setWordWrap(True)
-        self.setSpacing(6)
+        self.setIconSize(QSize(34, 34))
+        self.setGridSize(QSize(40, 40))
+        self.setSpacing(0)
+        self.setItemDelegate(ThumbDelegate(self))
+        self.setFrameShape(QFrame.NoFrame)
+        self.setFixedHeight(46)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAccessibleName(tr("Covers for the album"))
+
+
+class CoverPanel(QFrame):
+    """The cover side of the inspector pane: an image file or an image link dropped here becomes
+    the album's new cover (the inspector's own path, as its Artwork tab took one); music dropped
+    here is for the window."""
+
+    def __init__(self, panes):
+        super().__init__()
+        self.panes = panes
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, e):
+        from .common import music_paths
+        from .inspector import IMAGE_SUFFIXES, image_link
+        md = e.mimeData()
+        img = any(u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in IMAGE_SUFFIXES
+                  or u.scheme() in ("http", "https") for u in (md.urls() if md.hasUrls() else [])) or \
+            (md.hasText() and bool(image_link(md.text())))
+        if music_paths(md) or (img and self.panes.cover_editable()):
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e):
+        from .common import music_paths
+        music = music_paths(e.mimeData())
+        if music and hasattr(self.window(), "dropped"):
+            e.acceptProposedAction()
+            self.window().dropped(music)
+            return
+        insp = self.panes._insp()
+        if insp is None or not self.panes.cover_editable():
+            return e.ignore()
+        path, url = insp.art._dropped(e.mimeData())
+        if not (path or url):
+            return e.ignore()
+        e.acceptProposedAction()
+        album = self.panes.scope[0]
+        if insp.album is not album:
+            insp.show_album(album, getattr(self.panes.owner, "plan", None))
+        insp.cover_from_file(path) if path else insp.cover_from_url(url)
 
 
 def _placeholder(words) -> QIcon:
@@ -1080,13 +1331,20 @@ def _placeholder(words) -> QIcon:
 # --------------------------------------------------------------------------
 # the panes together
 # --------------------------------------------------------------------------
+INSPECTOR_TABS = (("tags", N_("Tags")), ("why", N_("Why This Release")))
+COVER_SIDE = 180                       # the cover shown large, px a side
+COVER_PANE = 300                       # the cover pane's width (narrower in a narrow window)
+
+
 class PreviewPanes(QWidget):
-    """Your folders | Albums as they will be | Tag changes, over Cover art. owner: the Overview
-    (its window's inspector edits, Change Release and Match Files Manually)."""
-    album_chosen = Signal(object)                    # an album chosen here: the list follows
+    """The Overview's content: Your files | Albums as they will be, over the inspector (Tags or
+    Why This Release, beside the Cover). owner: the Overview (its window's inspector edits, Change
+    Release and Match Files Manually); rows: its list's sorted and filtered rows, which the albums
+    pane shows as a tree (None: an empty list of its own)."""
+    album_chosen = Signal(object)                    # an album chosen here that the list hides
     loaded = Signal(str)                             # a background read finished ("tags", "covers")
 
-    def __init__(self, owner=None):
+    def __init__(self, owner=None, rows=None):
         super().__init__()
         self.owner = owner
         self.albums = []
@@ -1099,24 +1357,62 @@ class PreviewPanes(QWidget):
         self._cover_album = None                     # (the album the cover strip shows)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
         self.vsplit = QSplitter(Qt.Vertical)
+        self.vsplit.setObjectName("paneSplit")
         self.vsplit.setChildrenCollapsible(False)
+        self.vsplit.setHandleWidth(1)
         self.hsplit = QSplitter(Qt.Horizontal)
+        self.hsplit.setObjectName("paneSplit")
         self.hsplit.setChildrenCollapsible(False)
+        self.hsplit.setHandleWidth(1)
         self.panes = {}
-        # ---- Your folders
-        p = self.panes["folders"] = Pane("folders", tr("Your folders"), tr("As they are on disk, marked with where "
-                                                                           "each goes"))
+        # ---- Your files
+        p = self.panes["folders"] = Pane("folders", tr("Your files"))
         self.folders = FoldersModel()
-        self.folder_view = self._tree(self.folders, tr("Your folders"), (110,))
+        self.folder_view = self._tree(self.folders, tr("Your files"), (110,))
+        self.folder_view.setSelectionMode(QAbstractItemView.ExtendedSelection)   # (several: one profile for all)
         self.folder_view.setDragEnabled(True)
         self.folder_view.setDragDropMode(QAbstractItemView.DragOnly)
+        self.folder_view.setHeaderHidden(True)           # (the pane's title says what it is)
         p.add(self.folder_view, 1)
-        # ---- Albums as they will be
-        p = self.panes["albums"] = Pane("albums", tr("Albums as they will be"),
-                                        tr("Release, its discs and the folder each came from, its tracks and the "
-                                           "file on each"))
-        self.release_btn = QToolButton()
+        # ---- Albums as they will be: the Overview's list itself
+        p = self.panes["albums"] = Pane("albums", tr("Albums as they will be"))
+        self.album_model = AlbumsModel(rows)
+        self.album_model.join_asked.connect(self.join)
+        self.album_view = AlbumsView()
+        self.album_view.setObjectName("paneView")
+        self.album_view.setModel(self.album_model)
+        self.album_view.setAccessibleName(tr("Albums as they will be"))
+        self.album_view.setUniformRowHeights(True)
+        self.album_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.album_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.album_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.album_view.setFrameShape(QFrame.NoFrame)
+        self.album_view.setItemDelegateForColumn(AlbumsModel.NAME, NameDelegate(self.album_view))
+        self.album_view.setAcceptDrops(True)
+        self.album_view.setDragDropMode(QAbstractItemView.DropOnly)
+        self.album_view.setDropIndicatorShown(True)
+        h = self.album_view.header()
+        h.setStretchLastSection(False)
+        h.setSectionResizeMode(AlbumsModel.NAME, QHeaderView.Stretch)
+        h.setSectionResizeMode(AlbumsModel.STATUS, QHeaderView.Interactive)
+        h.setSectionResizeMode(AlbumsModel.SCORE, QHeaderView.Fixed)
+        h.resizeSection(AlbumsModel.STATUS, 160)
+        h.resizeSection(AlbumsModel.SCORE, 56)
+        h.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        h.setSortIndicator(AlbumsModel.STATUS, Qt.AscendingOrder)
+        f = style.font("caption")                       # (the column titles as the panes' titles: small capitals)
+        f.setPixelSize(11)
+        f.setWeight(QFont.Weight(600))
+        f.setCapitalization(QFont.AllUppercase)
+        h.setFont(f)
+        self.album_view.setSortingEnabled(True)
+        self.album_view.selectionModel().currentChanged.connect(
+            lambda cur, _prev: self.picked(self.album_view, cur))
+        p.head.hide()                                    # (its title is the tree's own column header)
+        p.add(self.album_view, 1)
+        self.release_btn = QToolButton()                 # (Album › Change Release, for the album shown)
         self.release_btn.setProperty("role", "tool")
         self.release_btn.setText(tr("Change Release…"))
         self.release_btn.setIcon(icons.icon("disc-3", "ink"))
@@ -1125,53 +1421,53 @@ class PreviewPanes(QWidget):
         self.release_btn.setAccessibleName(tr("Change Release"))
         self.release_btn.setToolTip(tr("Use another release for the selected album (Album › Change Release)"))
         self.release_btn.clicked.connect(self.change_release)
-        p.add_extra(self.release_btn)
-        self.album_model = AlbumsModel()
-        self.album_model.join_asked.connect(self.join)
-        self.album_view = self._tree(self.album_model, tr("Albums as they will be"), (150, 90))
-        self.album_view.setAcceptDrops(True)
-        self.album_view.setDragDropMode(QAbstractItemView.DropOnly)
-        self.album_view.setDropIndicatorShown(True)
-        p.add(self.album_view, 1)
-        self.why = QLabel("")
-        self.why.setObjectName("whyBox")
-        self.why.setWordWrap(True)
-        self.why.setTextFormat(Qt.RichText)
-        self.why.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.why.setContentsMargins(12, 8, 12, 8)
-        self.why.setAccessibleName(tr("Why this release"))
-        self.why_box = QScrollArea()
-        self.why_box.setWidgetResizable(True)
-        self.why_box.setFrameShape(QFrame.NoFrame)
-        self.why_box.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.why_box.setWidget(self.why)
-        self.why_box.setMaximumHeight(WHY_MOST)
-        p.add(self.why_box)
-        # ---- Tag changes
-        p = self.panes["tags"] = Pane("tags", tr("Tag changes"), "")
-        from .rows import Switch
-        self.changes_only = Switch(tr("Changes only"))
+        for k in ("folders", "albums"):
+            self.hsplit.addWidget(self.panes[k])
+        self.hsplit.setStretchFactor(0, 2)
+        self.hsplit.setStretchFactor(1, 3)
+        self.vsplit.addWidget(self.hsplit)
+        # ---- the inspector: Tags | Why This Release, beside the Cover
+        self.bottom = QWidget()
+        self.bottom.setObjectName("inspectorPane")
+        self.bottom.setAccessibleName(tr("Inspector"))
+        bl = QHBoxLayout(self.bottom)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(0)
+        p = self.panes["tags"] = Pane("tags", tr("Tags"), "", head_height=40)
+        p.title_label.hide()
+        self.tabs = Segmented([(k, tr(w)) for k, w in INSPECTOR_TABS], tr("Inspector tabs"))
+        self.tabs.changed.connect(self.tab_changed)
+        p.head_lay.insertWidget(0, self.tabs)
+        p.subtitle.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.changes_only = QCheckBox(tr("Changes only"))
         self.changes_only.setAccessibleName(tr("Show only the tags that change"))
         self.changes_only.setChecked(bool(self._prefs().get("changes_only", True)))
         self.changes_only.toggled.connect(lambda on: (self._save(changes_only=bool(on)), self.fill_tags()))
-        only = QLabel(tr("Changes only"))
-        only.setProperty("role", "caption")
-        only.setBuddy(self.changes_only)
-        p.add_extra(only, words=True)
-        p.add_extra(self.changes_only)
+        p.head_lay.addWidget(self.changes_only)
+        self.stack = QStackedWidget()
+        p.add(self.stack, 1)
+        # Tags
+        tags = QWidget()
+        tl = QVBoxLayout(tags)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(0)
         self.tag_model = TagModel()
         self.tag_model.typed = self.typed
         self.tag_view = QTableView()
+        self.tag_view.setObjectName("paneView")
         self.tag_view.setModel(self.tag_model)
         self.tag_view.setAccessibleName(tr("Tag changes: original and new values"))
         self.tag_view.verticalHeader().hide()
         self.tag_view.setShowGrid(False)
         self.tag_view.setAlternatingRowColors(True)
         self.tag_view.setWordWrap(False)
+        self.tag_view.setFrameShape(QFrame.NoFrame)
         self.tag_view.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tag_view.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tag_view.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.tag_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.tag_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tag_view.customContextMenuRequested.connect(self.tag_menu)
         self.diff = DiffDelegate(self.tag_view)
         for c in (2, 3):
             self.tag_view.setItemDelegateForColumn(c, self.diff)
@@ -1181,106 +1477,133 @@ class PreviewPanes(QWidget):
         h.setSectionResizeMode(0, QHeaderView.Fixed)
         h.resizeSection(0, 28)
         h.setSectionResizeMode(1, QHeaderView.Interactive)
-        h.resizeSection(1, 130)
+        h.resizeSection(1, 170)
         h.setSectionResizeMode(2, QHeaderView.Stretch)
         h.setSectionResizeMode(3, QHeaderView.Stretch)
-        p.add(self.tag_view, 1)
-        foot = QHBoxLayout()
-        foot.setContentsMargins(12, 4, 8, 6)
-        self.tag_note = QLabel("")
+        tl.addWidget(self.tag_view, 1)
+        foot = QWidget()
+        foot.setObjectName("paneFoot")
+        fl = QHBoxLayout(foot)
+        fl.setContentsMargins(12, 2, 8, 2)
+        fl.setSpacing(4)
+        self.tag_note = ElidedLabel("")
         self.tag_note.setProperty("role", "caption")
-        self.tag_note.setWordWrap(True)
-        foot.addWidget(self.tag_note, 1)
-        self.revert_btn = QToolButton()
-        self.revert_btn.setProperty("role", "tool")
-        self.revert_btn.setIcon(icons.icon("history", "ink"))
-        self.revert_btn.setText(tr("Revert to Original"))
-        self.revert_btn.setToolTip(tr("Revert to Original: the files' own value for the selected tag"))
-        self.revert_btn.setAccessibleName(tr("Revert to Original"))
-        self.revert_btn.setAutoRaise(True)
-        self.revert_btn.clicked.connect(self.revert_selected)
-        self.tag_buttons = {"revert": self.revert_btn}
-        for key, words, icon, fn in (("edit", tr("Edit Value…"), "pencil", self.edit_selected),
-                                     ("remove", tr("Remove Tag"), "minus", self.remove_selected)):
+        fl.addWidget(self.tag_note, 1)
+        self.rating = None
+        if owner is not None and getattr(getattr(owner, "win", None), "inspector", None) is not None:
+            from .account import RatingBox
+            from .inspector import RATING_TIP
+            self.rating = RatingBox(owner.win.inspector)
+            self.rating.setAccessibleName(tr("Rating"))
+            self.rating.setToolTip(RATING_TIP)
+            self.rating.setVisible(False)
+            fl.addWidget(self.rating)
+        self.tag_buttons = {}
+        from .inspector import BUTTON_KEYS, BUTTON_TIPS, BUTTONS
+        fns = {"edit": self.edit_selected, "revert": self.revert_selected, "suggested": self.use_suggested,
+               "add": self.add_tag, "remove": self.remove_selected}
+        for key, words, icon, _fn in BUTTONS:
+            words = tr(words)
             b = QToolButton()
             b.setProperty("role", "tool")
             b.setIcon(icons.icon(icon, "ink"))
             b.setText(words)
-            b.setToolTip(words + (" (Return)" if key == "edit" else " (Delete)"))
+            tip = f"{words}: {tr(BUTTON_TIPS[key])}" if key in BUTTON_TIPS else words
+            b.setToolTip(f"{tip} ({BUTTON_KEYS[key]})" if key in BUTTON_KEYS else tip)
             b.setAccessibleName(words.rstrip("…"))
+            b.setToolButtonStyle(Qt.ToolButtonIconOnly)
             b.setAutoRaise(True)
-            b.clicked.connect(lambda _=False, f=fn: f())
-            foot.addWidget(b)
+            b.setFocusPolicy(Qt.StrongFocus)
+            b.clicked.connect(lambda _=False, f=fns[key]: f())
+            fl.addWidget(b)
             self.tag_buttons[key] = b
-        foot.addWidget(self.revert_btn)
+        self.revert_btn = self.tag_buttons["revert"]
+        foot.setFixedHeight(32)
+        tl.addWidget(foot)
+        self.stack.addWidget(tags)
+        # Why This Release: the plain words, then the evidence (the inspector's Evidence tab)
+        from .inspector import EvidenceView
+        self.evidence = EvidenceView()
+        why_body = self.evidence.widget()
+        self.why = QLabel("")
+        self.why.setObjectName("whyBox")
+        self.why.setWordWrap(True)
+        self.why.setTextFormat(Qt.RichText)
+        self.why.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.why.setAccessibleName(tr("Why this release"))
+        why_body.layout().insertWidget(0, self.why)
+        why_body.layout().insertSpacing(1, 16)
+        self.why_box = self.evidence
+        self.stack.addWidget(self.evidence)
+        self.tag_view.selectionModel().selectionChanged.connect(lambda *_: self._tag_buttons())
         self.tag_view.installEventFilter(self)              # (Return edits, Delete removes: as the inspector)
         self.tag_view.doubleClicked.connect(self._double_clicked)
-        holder = QWidget()
-        holder.setLayout(foot)
-        p.add(holder)
-        self.tag_view.selectionModel().selectionChanged.connect(lambda *_: self._tag_buttons())
-        for k in ("folders", "albums", "tags"):
-            self.hsplit.addWidget(self.panes[k])
-        self.hsplit.setStretchFactor(0, 1)
-        self.hsplit.setStretchFactor(1, 2)
-        self.hsplit.setStretchFactor(2, 2)
-        # ---- Cover art
-        p = self.panes["covers"] = Pane("covers", tr("Cover art"), tr("The front cover is written into the files; "
-                                                                      "your scans move with the album"), bottom=True)
-        self.cover_buttons = {}
-        for key, words, icon, tip in (
-                ("use", tr("Use as Front Cover"), "check", tr("Use the selected picture as the album's front cover")),
-                ("find", tr("Find Online…"), "search", tr("Every cover the cover sources find (Discogs, Cover Art "
-                                                          "Archive …), to pick one by eye")),
-                ("file", tr("Choose a File…"), "image", tr("Any image you have")),
-                ("make", tr("Generate…"), "sparkles", tr("Clean up your scan or generate a cover with your image "
-                                                          "service (Make Covers)"))):
-            b = QToolButton()
-            b.setProperty("role", "tool")
-            b.setText(words)
-            b.setIcon(icons.icon(icon, "ink"))
-            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            b.setAutoRaise(True)
-            b.setToolTip(tip)
-            b.setAccessibleName(words.rstrip("…"))
-            b.clicked.connect(lambda _=False, k=key: self.cover_action(k))
-            p.add_extra(b)
-            self.cover_buttons[key] = b
+        bl.addWidget(p, 1)
+        # Cover
+        p = self.panes["covers"] = Pane("covers", tr("Cover"), "")
+        self.cover_panel = CoverPanel(self)
+        self.cover_panel.setObjectName("coverPane")
+        cl = QVBoxLayout(self.cover_panel)
+        cl.setContentsMargins(16, 4, 16, 10)
+        cl.setSpacing(8)
+        self.cover_big = FitPicture(COVER_SIDE)
+        self.cover_big.setObjectName("coverBig")
+        self.cover_big.setAccessibleName(tr("Front cover"))
+        cl.addWidget(self.cover_big, 1)
+        self.cover_caption = ElidedLabel("")
+        self.cover_caption.setProperty("role", "caption")
+        self.cover_caption.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        cl.addWidget(self.cover_caption)
         self.cover_strip = CoverStrip()
-        self.cover_strip.setMinimumHeight(56)                # (a short window: the strip gives way first)
-        self.cover_strip.setMaximumHeight(COVER_ROW)
         self.cover_strip.itemDoubleClicked.connect(lambda _it: self.cover_action("use"))
-        self.cover_strip.currentItemChanged.connect(lambda *_: self._cover_buttons())
-        p.add(self.cover_strip)
-        self.cover_note = QLabel("")
+        self.cover_strip.currentItemChanged.connect(lambda *_: (self._cover_buttons(), self.show_big()))
+        cl.addWidget(self.cover_strip)
+        self.cover_btn = QToolButton()
+        self.cover_btn.setObjectName("coverChoose")
+        self.cover_btn.setText(tr("Choose Cover…"))
+        self.cover_btn.setAccessibleName(tr("Choose Cover"))
+        self.cover_btn.setToolTip(tr("Use the picture selected, find covers online, choose a file or a link, or "
+                                     "generate one"))
+        self.cover_btn.setPopupMode(QToolButton.InstantPopup)
+        self.cover_btn.setFocusPolicy(Qt.StrongFocus)
+        menu = QMenu(self.cover_btn)
+        self.cover_buttons = {}
+        for key, words, tip in (
+                ("use", tr("Use as Front Cover"), tr("Use the selected picture as the album's front cover")),
+                ("find", tr("Find Online…"), tr("Every cover the cover sources find (Discogs, Cover Art "
+                                                "Archive …), to pick one by eye")),
+                ("file", tr("Choose a File…"), tr("Any image you have")),
+                ("url", tr("Use Image Link…"), tr("An image from the web as the album's new cover")),
+                ("make", tr("Generate…"), tr("Clean up your scan or generate a cover with your image service "
+                                             "(Make Covers)")),
+                ("clear", tr("Use Suggested Cover"), tr("Forget your cover: use the one the preview found"))):
+            act = menu.addAction(words)
+            act.setStatusTip(tip)
+            act.setToolTip(tip)
+            act.triggered.connect(lambda _=False, k=key: self.cover_action(k))
+            self.cover_buttons[key] = act
+            if key in ("use", "make"):
+                menu.addSeparator()
+        self.cover_btn.setMenu(menu)
+        cl.addWidget(self.cover_btn, 0, Qt.AlignHCenter)
+        self.cover_note = ElidedLabel("")
         self.cover_note.setProperty("role", "caption")
-        self.cover_note.setWordWrap(True)
-        self.cover_note.setContentsMargins(12, 0, 12, 6)
-        p.add(self.cover_note)
-        self.vsplit.addWidget(self.hsplit)
-        self.vsplit.addWidget(p)
-        self.vsplit.setStretchFactor(0, 1)
-        self.vsplit.setStretchFactor(1, 0)
+        self.cover_note.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        cl.addWidget(self.cover_note)
+        p.add(self.cover_panel, 1)
+        p.setFixedWidth(COVER_PANE)
+        bl.addWidget(p)
+        self.cover_pane = p
+        self.vsplit.addWidget(self.bottom)
+        self.vsplit.setStretchFactor(0, 4)
+        self.vsplit.setStretchFactor(1, 3)
         lay.addWidget(self.vsplit)
         # ---- remembered per user
         prefs = self._prefs()
-        self.open_widths = {}
         sizes = prefs.get("sizes")
-        if isinstance(sizes, list) and len(sizes) == 3 and all(isinstance(x, int) and x > 0 for x in sizes):
-            self.open_widths = dict(zip(self.SIDES, sizes))
-        for k, pane in self.panes.items():
-            pane.set_collapsed(bool((prefs.get("collapsed") or {}).get(k)))
-            pane.folded.connect(self.pane_folded)
-            pane.folding.connect(self.keep_open_widths)
-        if self.open_widths:
-            self.hsplit.setSizes(sizes)
-        else:
-            self.hsplit.setSizes([260, 420, 460])
+        self.hsplit.setSizes(sizes[:2] if isinstance(sizes, list) and len(sizes) >= 2 else [430, 650])
         vs = prefs.get("vsizes")
-        if isinstance(vs, list) and len(vs) == 2 and all(isinstance(x, int) and x > 0 for x in vs):
-            self.vsplit.setSizes(vs)
-        else:
-            self.vsplit.setSizes([420, 190])
+        self.vsplit.setSizes(vs if isinstance(vs, list) and len(vs) == 2 else [440, 330])
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(400)
@@ -1308,58 +1631,53 @@ class PreviewPanes(QWidget):
         p.update(kw)
         _set_gui_pref(PREF, p)
 
-    SIDES = ("folders", "albums", "tags")
-
-    def keep_open_widths(self, *_):
-        for k, w in zip(self.SIDES, self.hsplit.sizes()):
-            if not self.panes[k].collapsed and w > 0:
-                self.open_widths[k] = w
-
     def save_sizes(self):
-        """The widths (and the cover row's height) as you left them; a folded pane keeps the
-        width it had open."""
+        """The panes' widths and the inspector's height, as you left them."""
         p = self._prefs()
-        self.keep_open_widths()
-        sizes = [self.open_widths.get(k, s) if self.panes[k].collapsed else s
-                 for k, s in zip(self.SIDES, self.hsplit.sizes())]
-        if all(s > 0 for s in sizes):
-            p["sizes"] = sizes
-        if not self.panes["covers"].collapsed and all(s > 0 for s in self.vsplit.sizes()):
-            p["vsizes"] = self.vsplit.sizes()
-        _set_gui_pref(PREF, p)
-
-    def reopen_width(self, key):
-        if self.panes[key].collapsed or key not in self.open_widths:
-            return
         sizes = self.hsplit.sizes()
-        i = self.SIDES.index(key)
-        others = [j for j in range(3) if j != i and not self.panes[self.SIDES[j]].collapsed]
-        room = sum(sizes) - sum(sizes[j] for j in range(3) if j != i and j not in others)
-        want = max(SIDE_MIN, min(self.open_widths[key], room - SIDE_MIN * len(others)))
-        rest = room - want                                   # (the other open panes share the rest as they were)
-        had = sum(sizes[j] for j in others) or 1
-        for n, j in enumerate(others):
-            sizes[j] = rest - sum(sizes[o] for o in others[:n]) if n == len(others) - 1 else \
-                max(SIDE_MIN, rest * sizes[j] // had)
-        sizes[i] = want
-        self.hsplit.setSizes(sizes)
-        self.save_sizes()
-
-    def pane_folded(self, key, on):
-        if key == "covers" and not on:
-            self.load_covers()                               # (read once the strip is open)
-        p = self._prefs()
-        p.setdefault("collapsed", {})[key] = bool(on)
+        if len(sizes) == 2 and all(s > 0 for s in sizes):
+            p["sizes"] = sizes + [1]                         # (a third, kept for an older version)
+        vs = self.vsplit.sizes()
+        if self.bottom.isVisible() and all(s > 0 for s in vs):
+            p["vsizes"] = vs
         _set_gui_pref(PREF, p)
-        if key != "covers":
-            if not on and key in self.open_widths:          # (opened: the width it had, once it may grow)
-                QTimer.singleShot(0, self, lambda k=key: self.reopen_width(k))
-            else:
-                self.save_sizes()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        want = COVER_PANE if self.width() >= 1000 else 220     # (a narrow window: the tags keep their room)
+        if self.cover_pane.width() != want:
+            self.cover_pane.setFixedWidth(want)
+
+    def set_inspector(self, on):
+        """The inspector pane (the toolbar's Inspector button) shown or hidden."""
+        self.bottom.setVisible(bool(on))
+        if on and self.scope and self.scope[0] is not self._cover_album:
+            self.load_covers()
+
+    def inspector_shown(self) -> bool:
+        return not self.bottom.isHidden()
+
+    def tab_changed(self, key):
+        self.stack.setCurrentIndex(0 if key == "tags" else 1)
+        self.changes_only.setVisible(key == "tags")
+        self._save(tab=key)
+
+    def show_tab(self, key):
+        """Tags, or Why This Release ("why"; the inspector's Evidence); Artwork: the cover, beside."""
+        self.tabs.set_current("why" if key in ("why", "Evidence") else "tags")
+
+    def retint(self):
+        from .inspector import BUTTONS
+        for key, _w, icon, _f in BUTTONS:
+            self.tag_buttons[key].setIcon(icons.icon(icon, "ink"))
+        self.release_btn.setIcon(icons.icon("disc-3", "ink"))
+        self.album_view.viewport().update()
+        self.folder_view.viewport().update()
 
     # ---- the trees --------------------------------------------------------------------------
     def _tree(self, model, name, widths=(120, 120)):
         v = QTreeView()
+        v.setObjectName("paneView")
         v.setModel(model)
         v.setAccessibleName(name)
         v.setUniformRowHeights(True)                    # (thousands of rows laid out without measuring each)
@@ -1379,7 +1697,8 @@ class PreviewPanes(QWidget):
         return v
 
     def set_albums(self, albums):
-        """The plan's albums (the list's own entries, in its order)."""
+        """The plan's albums (the list's own entries, in its order): Your files made again (the
+        albums pane follows the list by itself)."""
         t0 = time.perf_counter()
         self.albums = albums if albums is not None else []
         forget()
@@ -1387,14 +1706,19 @@ class PreviewPanes(QWidget):
         self._quiet = True
         try:
             self.folders.set_albums(self.albums)
-            self.album_model.set_albums(self.albums)
         finally:
             self._quiet = False
         self.opened_at = time.perf_counter() - t0
+        roots = self.folders.rowCount()
+        n_files = sum(len(a.get("files") or []) for a in self.albums)
+        self.panes["folders"].subtitle.setText(
+            " · ".join(x for x in (plural(roots, tr("folder"), tr("folders")) if roots else "",
+                                   plural(n_files, tr("file"), tr("files")) if n_files else "") if x))
+        # (the albums pane is the list: its selection is its own, kept by it - never set again here)
         if keep and any(a is keep[0] for a in self.albums):
-            self.show_scope(*keep)
+            self.show_scope(*keep, source=self.album_view)
         else:
-            self.show_scope(None)
+            self.show_scope(None, source=self.album_view)
 
     def album_changed(self, album):
         """ALBUM's entry changed (your edit, its look-up): its rows made again, when next shown."""
@@ -1410,37 +1734,33 @@ class PreviewPanes(QWidget):
         try:
             for a in changed.values():
                 forget(a)
-            # (each model's changed top rows told in one signal: every row of a list of thousands
-            # changes at once when their states are shown again)
-            for model, last in ((self.album_model, 2), (self.folders, 1)):
-                lo = hi = None
-                for n in model.top.kids:
-                    if id(n.album) in ids if model is self.album_model else \
-                            any(id(a) in ids for a in n.data["albums"]):
-                        model.reset_kids(n)
-                        lo = n.row if lo is None else min(lo, n.row)
-                        hi = n.row if hi is None else max(hi, n.row)
-                if lo is not None:
-                    model.dataChanged.emit(model.index(lo, 0), model.index(hi, last))
+            lo = hi = None
+            for n in self.folders.top.kids:
+                if any(id(a) in ids for a in n.data["albums"]):
+                    self.folders.reset_kids(n)
+                    lo = n.row if lo is None else min(lo, n.row)
+                    hi = n.row if hi is None else max(hi, n.row)
+            if lo is not None:
+                self.folders.dataChanged.emit(self.folders.index(lo, 0), self.folders.index(hi, 1))
         finally:
             self._quiet = False
         if self.scope and id(self.scope[0]) in ids:
-            self.show_scope(*self.scope)
+            self.show_scope(*self.scope, source=self.album_view)
 
     # ---- selection, kept in step --------------------------------------------------------------
     def show_album(self, album):
-        """The list chose ALBUM (None: none, or several): shown here, a disc, track or file of it
-        already chosen kept."""
+        """The list chose ALBUM (None: none): shown here, a disc, track or file of it already
+        chosen kept."""
         if album is None:
             if self.scope is not None:
                 self.show_scope(None)
             return
         if self.scope and self.scope[0] is album:
             return
-        self.show_scope(album, "album", None)
+        self.show_scope(album, "album", None, source=self.album_view)
 
     def picked(self, view, idx):
-        if self._quiet or not idx.isValid():
+        if self._quiet or not idx.isValid() or idx.model() is not view.model():
             return
         n = idx.internalPointer()
         if view is self.folder_view:
@@ -1464,10 +1784,7 @@ class PreviewPanes(QWidget):
             else:
                 fe = n.data["fe"]
                 scope = (n.album, "track", fe["src"]) if fe else (n.album, "missing", n.data["number"])
-        before = self.scope[0] if self.scope else None
         self.show_scope(*scope, source=view)
-        if scope[0] is not before:
-            self.album_chosen.emit(scope[0])
 
     def show_scope(self, album=None, kind="album", key=None, source=None):
         self.scope = (album, kind, key) if album is not None else None
@@ -1475,16 +1792,33 @@ class PreviewPanes(QWidget):
         try:
             if source is not self.folder_view:
                 self._highlight(self.folder_view, self._folder_node(album, kind, key))
-            if source is not self.album_view:
-                self._highlight(self.album_view, self._album_node(album, kind, key))
+            if source is not self.album_view and album is not None:
+                node = self._album_node(album, kind, key)
+                if node is None:                             # (hidden by the search or the filter)
+                    self.album_chosen.emit(album)
+                    node = self._album_node(album, kind, key)
+                if node is not None:
+                    self._show_in_list(node)
         finally:
             self._quiet = False
         self.release_btn.setEnabled(album is not None)
         self.show_why(album)
         self.read_tags()
         self.fill_tags()
+        self.show_rating()
         if album is not self._cover_album or album is None:
             self.load_covers()
+
+    def _show_in_list(self, node):
+        """The albums pane's row for NODE highlighted only to show it (the Overview: show_row)."""
+        owner = self.owner
+        if owner is not None:
+            owner._showing_row = True
+        try:
+            self._highlight(self.album_view, node)
+        finally:
+            if owner is not None:
+                owner._showing_row = False
 
     def _highlight(self, view, node):
         model = view.model()
@@ -1502,7 +1836,7 @@ class PreviewPanes(QWidget):
     def _album_node(self, album, kind, key):
         if album is None:
             return None
-        top = next((n for n in self.album_model.top.kids if n.album is album), None)
+        top = self.album_model.node_of(album)
         if top is None or kind == "album":
             return top
         discs = self.album_model.kids(top)
@@ -1557,26 +1891,34 @@ class PreviewPanes(QWidget):
         """Choose a part of ALBUM (the one shown when None) here, as a click in a pane does."""
         album = album or (self.scope[0] if self.scope else None)
         if album is not None:
-            before = self.scope[0] if self.scope else None
             self.show_scope(album, kind, key)
-            if album is not before:
-                self.album_chosen.emit(album)
+
+    def folder_albums(self) -> list:
+        """The albums the rows selected in Your files hold (a folder: each of its albums; a file:
+        its album), once each, in order."""
+        out, seen = [], set()
+        for idx in self.folder_view.selectionModel().selectedRows():
+            n = idx.internalPointer()
+            for a in ([n.album] if n.kind == "file" else n.data["albums"]):
+                if a is not None and id(a) not in seen:
+                    seen.add(id(a))
+                    out.append(a)
+        return out
 
     # ---- why ----------------------------------------------------------------------------------
     def show_why(self, album):
         if album is None:
             self.why.setText("")
-            self.why_box.hide()
+            self.evidence.setVisible(self.stack.currentWidget() is self.evidence)
             return
         title, lines = why_lines(album)
         colour = {"✓": style.color("identified"), "≠": style.color("attention"), "→": style.color("muted")}
         body = "".join(f"<tr><td style='color:{colour[m]};font-weight:600;padding-right:8px'>{m}</td>"
-                       f"<td>{html.escape(w)}</td></tr>" for m, w in lines[:8])
+                       f"<td>{html.escape(w)}</td></tr>" for m, w in lines)
         self.why.setText(f"<b>{html.escape(title)}</b><table cellspacing='0'>{body}</table>" if lines else
                          f"<b>{html.escape(title)}</b><br>{html.escape(tr('Nothing recorded for this album.'))}")
         self.why.setAccessibleName(title)
-        self.why_box.show()
-        self.why_box.setMaximumHeight(min(WHY_MOST, self.why.heightForWidth(max(200, self.why_box.width())) + 4))
+        self.evidence.show_album(album, getattr(self.owner, "plan", None))
 
     # ---- tag changes --------------------------------------------------------------------------
     def scope_files(self) -> list:
@@ -1651,14 +1993,13 @@ class PreviewPanes(QWidget):
     def editable(self) -> bool:
         if not self.scope or self.owner is None:
             return False
-        insp = getattr(getattr(self.owner, "win", None), "inspector", None)
+        insp = self._insp()
         return bool(insp is not None and self.scope_files() and insp.can_edit(self.scope[0]))
 
     def fill_tags(self):
         title, sub = self.scope_words()
         p = self.panes["tags"]
         say(p.subtitle, tr("Selection"), f"{title} · {sub}" if sub else title)
-        p.subtitle.setVisible(True)
         files = self.scope_files()
         rows = tag_rows(files, self.current) if files else []
         if self.changes_only.isChecked():
@@ -1672,14 +2013,25 @@ class PreviewPanes(QWidget):
         elif not rows:
             note = tr("No tag changes for this selection.")
         else:
-            note = tr("{0} for {1}.").format(plural(n, tr("change"), tr("changes")),
-                                             plural(len(files), tr("file"), tr("files")))
+            note = tr("{0} in {1}.").format(plural(n, tr("change"), tr("changes")),
+                                            plural(len(files), tr("file"), tr("files")))
             if len(files) > READ_MOST and not self.changes_only.isChecked():
                 note += " " + tr("The tags that stay are read from the first {0} files.").format(READ_MOST)
             if self.editable():
                 note += " " + tr("Double-click a new value to edit it; nothing is written until you apply.")
         self.tag_note.setText(note)
         self._tag_buttons()
+
+    def show_rating(self):
+        """The rating stars: for the file shown (a track), or every file of the album."""
+        if self.rating is None:
+            return
+        album, kind, key = self.scope if self.scope else (None, None, None)
+        files = (album or {}).get("files") or []
+        on = bool(files) and kind in ("album", "track", "file")
+        self.rating.setVisible(on)
+        if on:
+            self.rating.show_album(album, key if kind in ("track", "file") else None)
 
     def selected_tag(self):
         idx = self.tag_view.currentIndex()
@@ -1689,14 +2041,20 @@ class PreviewPanes(QWidget):
 
     def _tag_buttons(self):
         r = self.selected_tag()
+        on = self.editable()
         ok = bool(r) and self.tag_model.can_edit(r)
-        self.revert_btn.setEnabled(ok and (r["mark"] != "=" or r["mine"]))
+        self.tag_buttons["revert"].setEnabled(ok and (r["mark"] != "=" or r["mine"]))
         self.tag_buttons["edit"].setEnabled(ok)
         self.tag_buttons["remove"].setEnabled(ok and (r["mixed_after"] or bool(r["after_vals"])))
+        self.tag_buttons["suggested"].setEnabled(ok and r["mine"])
+        self.tag_buttons["add"].setEnabled(on)
+        win = getattr(self.owner, "win", None)
+        if win is not None and hasattr(win, "update_tag_actions"):
+            win.update_tag_actions()                         # (the Album > Tag commands follow)
 
     def _edit(self, field_, value):
         """Your value for FIELD on the selection, through the inspector's edits."""
-        insp = getattr(getattr(self.owner, "win", None), "inspector", None)
+        insp = self._insp()
         if insp is None or not self.editable():
             return False
         album, kind, _key = self.scope
@@ -1731,6 +2089,20 @@ class PreviewPanes(QWidget):
                               tr("Nothing is written until you apply; Edit › Undo Edit takes it back."),
                               what, destructive=True)
 
+    def edit_key(self):
+        """F2 or Return on a row: its New value typed in place when it is one value, else Edit
+        Value… (several values, or files that differ)."""
+        r = self.selected_tag()
+        if r is None or not self.tag_model.can_edit(r):
+            return
+        if self.tag_model.inline(r):
+            idx = self.tag_model.index(self.tag_model.rows.index(r), 3)
+            self.tag_view.setFocus()
+            self.tag_view.setCurrentIndex(idx)
+            self.tag_view.edit(idx)
+        else:
+            self.edit_selected()
+
     def edit_selected(self):
         """Edit Value…: the inspector's sheet, one value a line (several values, or files that
         differ - asked first)."""
@@ -1750,12 +2122,43 @@ class PreviewPanes(QWidget):
         if got is not None and got[1] and list(got[1]) != list(r["after_vals"] or []):
             self._edit(r["field"], got[1])
 
+    def add_tag(self):
+        """Add Tag…: a tag's name and values for the selection (the inspector's sheet)."""
+        if not self.editable():
+            return
+        from . import inspector, sheets
+        files = self.scope_files()
+        scope = tr("For {0}.").format(plural(len(files), tr("file"), tr("files"))) + \
+            tr(" Nothing is written until you apply the preview.")
+        got = inspector.tag_sheet(self, tr("Add a Tag"), scope, ask_name=True, action=tr("Add Tag"))
+        if got is None:
+            return
+        name = inspector.internal_name(got[0])
+        why = inspector.bad_name(name) or ("" if got[1] else tr("Type at least one value."))
+        if why:
+            sheets.warning(self, tr("This tag cannot be added."), why)
+            return
+        self._edit(name, got[1])
+
     def remove_selected(self):
         r = self.selected_tag()
         if not r or not self.tag_model.can_edit(r) or not (r["mixed_after"] or r["after_vals"]):
             return
         if self._differ_ok(r, tr("Remove")):
             self._edit(r["field"], None)
+
+    def use_suggested(self):
+        """Use Suggested Value: your edit of the selected tag forgotten for the selection."""
+        r = self.selected_tag()
+        insp = self._insp()
+        if not r or not r["mine"] or insp is None or not self.editable():
+            return
+        album, kind, _key = self.scope
+        files = [fe["src"] for fe in self.scope_files()]
+        if kind == "album":
+            insp.clear_tag(r["field"], None, album=album)
+        else:
+            insp.clear_tag_files(r["field"], files, album=album)
 
     def _double_clicked(self, idx):
         if idx.isValid() and 0 <= idx.row() < len(self.tag_model.rows):
@@ -1768,13 +2171,7 @@ class PreviewPanes(QWidget):
         if obj is self.tag_view and e.type() == QEvent.KeyPress and \
                 self.tag_view.state() != QAbstractItemView.EditingState and not e.modifiers():
             if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_F2):
-                r = self.selected_tag()
-                if r is not None and self.tag_model.inline(r):
-                    idx = self.tag_model.index(self.tag_model.rows.index(r), 3)
-                    self.tag_view.setCurrentIndex(idx)
-                    self.tag_view.edit(idx)
-                else:
-                    self.edit_selected()
+                self.edit_key()
                 return True
             if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
                 self.remove_selected()
@@ -1787,6 +2184,15 @@ class PreviewPanes(QWidget):
         if r and self.tag_model.can_edit(r):
             self._edit(r["field"], dict(planmod.KEEP))
 
+    def tag_menu(self, pos):
+        """The Album > Tag commands (with their keys) on the table's row."""
+        win = getattr(self.owner, "win", None)
+        if win is None or "edit_tag" not in getattr(win, "commands", {}):
+            return
+        from .inspector import TAG_COMMANDS
+        win.update_tag_actions()
+        self._menu = popup_menu(self, self.tag_view, pos, [win.act(k) if k else None for k in TAG_COMMANDS])
+
     # ---- covers -------------------------------------------------------------------------------
     def load_covers(self):
         """The album's own pictures and its new front, read on a worker (a newer album cancels it)."""
@@ -1797,10 +2203,11 @@ class PreviewPanes(QWidget):
         self.covers = []
         album = self.scope[0] if self.scope else None
         self._cover_album = album
-        self.panes["covers"].subtitle.setText(album_title(album) if album else tr("Select an album"))
+        self.panes["covers"].subtitle.setText("")
+        self.show_big()
         self._cover_buttons()
-        if album is None or self.panes["covers"].collapsed or self.owner is None:
-            self.cover_note.setText("")
+        if album is None or self.owner is None:
+            self.cover_note.setText("" if album is None else "")
             return
         folder = album.get("source_dir") or ""
         files = [fe["src"] for fe in album.get("files") or []]
@@ -1862,17 +2269,41 @@ class PreviewPanes(QWidget):
             else:
                 it.setIcon(_placeholder("?"))
             it.setData(R_USER, i)
-            it.setToolTip(c.extra.get("path") or c.extra.get("file") or c.source)
+            it.setToolTip(words.replace("\n", " · "))
             it.setData(R_ACCESSIBLETEXT, words.replace("\n", ", ") + (f", {size}" if size else ""))
             self.cover_strip.addItem(it)
         n_own = sum(1 for c in self.covers if c.kind == "own")
         has_new = any(c.kind == "new" for c in self.covers)
+        self.panes["covers"].subtitle.setText(tr("new cover") if has_new else
+                                              tr("from your scans") if n_own else "")
         self.cover_note.setText(
             (tr("The new front cover first, then your own pictures.") if has_new else
              tr("No new cover: the album keeps its own.")) + " " +
-            (tr("{0} of your own.").format(n_own) if n_own else tr("No pictures of your own.")) + " " +
-            tr("Find Online looks for more."))
+            (tr("{0} of your own.").format(n_own) if n_own else tr("No pictures of your own.")))
+        if self.cover_strip.count():
+            self.cover_strip.setCurrentRow(0)
+        self.show_big()
         self._cover_buttons()
+
+    def show_big(self):
+        """The picture selected in the strip (the new front first), large, with its words."""
+        c = self.chosen_cover()
+        if c is None or not c.thumb:
+            self.cover_big.setPixmap(QPixmap())
+            self.cover_big.setText(tr("No cover") if self.scope and not self.cover_worker else "")
+            self.cover_caption.setText("")
+            self.cover_big.setAccessibleName(tr("No cover"))
+            return
+        px = QPixmap()
+        px.loadFromData(c.thumb)
+        self.cover_big.setPixmap(px)
+        it = self.cover_strip.currentItem()
+        words = (it.text() if it is not None else "").replace("\n", " · ")
+        size = f"{c.width} × {c.height}" if c.width else ""
+        caption = " · ".join(x for x in (words.split(" · ")[0], size,
+                                         Path(str(c.extra.get("path") or c.source or "")).name) if x)
+        self.cover_caption.setText(caption)
+        self.cover_big.setAccessibleName(caption)
 
     def chosen_cover(self):
         it = self.cover_strip.currentItem()
@@ -1882,19 +2313,26 @@ class PreviewPanes(QWidget):
     def _insp(self):
         return getattr(getattr(self.owner, "win", None), "inspector", None)
 
-    def _cover_buttons(self):
+    def cover_editable(self) -> bool:
         insp = self._insp()
         album = self.scope[0] if self.scope else None
-        on = bool(insp is not None and album is not None and insp.can_edit(album))
+        return bool(insp is not None and album is not None and insp.can_edit(album))
+
+    def _cover_buttons(self):
+        import plan as planmod
+        on = self.cover_editable()
         c = self.chosen_cover()
+        album = self.scope[0] if self.scope else None
         self.cover_buttons["use"].setEnabled(on and c is not None and c.kind != "new")
-        for k in ("find", "file", "make"):
+        for k in ("find", "file", "url", "make"):
             self.cover_buttons[k].setEnabled(on)
+        self.cover_buttons["clear"].setEnabled(on and ((album or {}).get("artwork") or {}).get("by") == planmod.BY_YOU)
+        self.cover_btn.setEnabled(on)
 
     def cover_action(self, key):
-        """The cover strip's commands: each the inspector's own (its Artwork's Find Covers…,
-        Choose Image…, the Find Covers sheet's Make Covers…, and a picture used as Choose Image
-        uses one)."""
+        """The cover's commands: each the inspector's own (its Artwork's Find Covers…, Choose
+        Image…, Use Image Link…, Use Suggested Cover, the Find Covers sheet's Make Covers…, and a
+        picture used as Choose Image uses one)."""
         insp = self._insp()
         album = self.scope[0] if self.scope else None
         if insp is None or album is None or not insp.can_edit(album):
@@ -1910,6 +2348,10 @@ class PreviewPanes(QWidget):
             insp.art.find_covers()
         elif key == "file":
             insp.art.choose_file()
+        elif key == "url":
+            insp.art.ask_url()
+        elif key == "clear":
+            insp.clear_cover(album)
         elif key == "make":
             from . import sheets
             from .cover_chooser import CoverChooser
@@ -1923,7 +2365,6 @@ class PreviewPanes(QWidget):
         album = self.scope[0] if self.scope else None
         if album is None or self.owner is None:
             return
-        self.album_chosen.emit(album)                    # (the list's selection first: its command)
         if hasattr(self.owner, "choose_release"):
             self.owner.choose_release()
 
@@ -1951,4 +2392,3 @@ class PreviewPanes(QWidget):
         for w in self._workers:
             w.cancelled = True
         self.tag_worker = self.cover_worker = None
-

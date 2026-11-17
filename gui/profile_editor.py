@@ -221,6 +221,21 @@ def _changed_from(full, key, value):
     return bool(dig(full, key)) != bool(value)
 
 
+def colour_swatch(name):
+    """A small square of profile colour NAME (an empty one for none or Automatic)."""
+    from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+    from . import style
+    px = QPixmap(14, 14)
+    px.fill(QColor(0, 0, 0, 0))
+    p = QPainter(px)
+    p.setPen(QColor(style.color("field")))
+    tint = style.profile_tint(name) if name not in ("", "none") else None
+    p.setBrush(tint if tint is not None else QColor(0, 0, 0, 0))
+    p.drawRoundedRect(0, 0, 13, 13, 3, 3)
+    p.end()
+    return QIcon(px)
+
+
 @dataclass
 class S:
     """One setting. get(data) -> value; put(data, value, values) writes it; show(values) and
@@ -801,9 +816,41 @@ def _accept_note(v):
     return ""
 
 
+def _colour_get(d):
+    """A profile's colour: its own ("none" for none), or "" - the one its name gives (Automatic)."""
+    v = d.get("colour")
+    return v if isinstance(v, str) else ""
+
+
+def _colour_put(d, v, _vals):
+    """Written into the profile only when you choose one: Automatic leaves the file without it."""
+    if v:
+        d["colour"] = v
+    else:
+        d.pop("colour", None)
+
+
+def _colour_note(v):
+    from .common import default_colour
+    from .style import PROFILE_TINTS
+    if v.get("colour"):
+        return ""
+    auto = default_colour(v.get("name") or "")
+    return tr("Automatic: {0}, from the profile's name.").format(tr(PROFILE_TINTS[auto][0])) if auto else \
+        tr("Automatic: none.")
+
+
+COLOUR_CHOICES = (("", N_("Automatic")), ("none", N_("None")), ("green", N_("Green")), ("orange", N_("Orange")),
+                  ("blue", N_("Blue")), ("purple", N_("Purple")), ("red", N_("Red")), ("grey", N_("Grey")))
+
+
 SETTINGS = [
     # General
     S("description", N_("Description"), "text", "general", personal=True, attr="desc"),
+    S("colour", N_("Colour"), "popup", "general", personal=True, choices=COLOUR_CHOICES, get=_colour_get,
+      put=_colour_put, note=_colour_note, words={k: w for k, w in COLOUR_CHOICES},
+      foot=N_("The album and folder rows filed with this profile are tinted with it in the preview, beside "
+              "its name. Automatic: green for a profile named LossyLess, orange for Extreme, else none.")),
     # Source
     S("formats", N_("Audio files"), "popup", "audio", attr="formats", custom="check",
       choices=(([], N_("All formats")), (["lossless"], N_("Lossless only")), (["lossy"], N_("Lossy only"))),
@@ -1285,7 +1332,7 @@ def _index_of(box, value) -> int:
 
 
 # settings Apply to All Profiles… is not offered for (what tells one profile from another)
-NOT_FOR_ALL = {"description"}
+NOT_FOR_ALL = {"description", "colour"}
 
 
 def _word(spec, x) -> str:
@@ -1503,6 +1550,9 @@ class ProfileEditor(QScrollArea):
             c = Popup() if spec.kind == "popup" else Segmented(label)
             for v, w in spec.choices:
                 c.addItem(tr(w), v)
+            if spec.key == "colour":                            # (each colour shown beside its name)
+                for i, (v, _w) in enumerate(spec.choices):
+                    c.setItemIcon(i, colour_swatch(v))
             if spec.custom:
                 c.addItem(tr("Custom…") if spec.custom == "text" else tr("Choose…"), CHOOSE)
             if spec.kind == "popup":

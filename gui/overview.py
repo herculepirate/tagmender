@@ -7,26 +7,19 @@ import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
-                               QPushButton, QSplitter, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
-from . import icons, setup, sheets
-from .common import (_gui_prefs, _set_gui_pref, album_words, counts_by_label, counts_text, ex, heading,
-                     left_header, load_profile, notify, pf, planmod, plural, popup_menu, profile_names)
+from . import icons, setup, sheets, style
+from .common import (album_words, counts_by_label, counts_text, ex, load_profile, notify, pf, planmod, plural,
+                     popup_menu, profile_names)
 from .i18n import N_, tr
 from .work import start
 from .models import PlanModel, SortedRows, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
 
-FIT_ROWS = 60                                         # the rows a column's width is fitted to (the list's)
-FIT_DELAY = 500                                       # ms: the columns are fitted at most this often ...
-FIT_QUICK = 60                                        # ... when the list has more rows than this (else at once)
-FIT_SOON = 60                                         # ms: the list's room changed (a resize, a column shown)
 STREAM_MS = 100                                       # ms: albums read meanwhile are put in the list this often
-PANES_PREF = "preview_panes"                          # gui.json: the panes' state (gui/preview_panes.py)
 APPLY_LISTED = 5                                     # albums named in the Apply sheet (then "and N more")
 
 
@@ -321,71 +314,6 @@ def library_for(prof, folder):
     return pf.from_dict(d)
 
 
-class ProfileDelegate(QStyledItemDelegate):
-    """An album's profile in its row: drawn as a drop-down, and one when clicked (the first
-    choice, As Above, is the profile chosen above the list)."""
-
-    ARROW = 22                                             # (room for the drop-down's arrow)
-
-    def paint(self, painter, option, index):
-        super().paint(painter, option, index)
-        if not index.flags() & Qt.ItemIsEditable:
-            return
-        from PySide6.QtWidgets import QStyle
-        painter.save()
-        selected = bool(option.state & QStyle.State_Selected)
-        painter.setPen(option.palette.highlightedText().color() if selected else option.palette.placeholderText().color())
-        r = option.rect.adjusted(option.rect.width() - self.ARROW, 0, -6, 0)
-        painter.drawText(r, int(Qt.AlignRight | Qt.AlignVCenter), "▾")
-        painter.restore()
-
-    def names(self) -> list:
-        """The profiles' names, read once and kept until refresh() (the Overview calls it when
-        the profiles change): a list of thousands of albums asked for them once per row."""
-        if getattr(self, "_names", None) is None:
-            self._names = list(profile_names())
-        return self._names
-
-    def refresh(self):
-        self._names, self._widest = None, None
-
-    def sizeHint(self, option, index):
-        page = self.parent()
-        # (the same words in every row: measured once per profile chosen above and font, the
-        # cell's own size with them; each row's text is one of those words)
-        above, font = page.profile.currentText(), option.font.key()
-        memo = getattr(self, "_widest", None)
-        if memo is None or memo[0] != above or memo[1] != font:
-            hint = super().sizeHint(option, index)
-            words = [tr("As Above ({0})").format(above)] + self.names()
-            widest = max(option.fontMetrics.horizontalAdvance(w) for w in words)
-            memo = self._widest = (above, font, QSize(max(hint.width(), widest + 40) + self.ARROW, hint.height()))
-        return QSize(memo[2])
-
-    def createEditor(self, parent, option, index):
-        from .rows import Popup
-        box = Popup(parent)
-        box.setAccessibleName(tr("Profile for this album"))
-        page = self.parent()
-        box.addItem(tr("As Above ({0})").format(page.profile.currentText()), "")
-        self.refresh()                                     # (opened: the profiles as they are now)
-        for name in self.names():
-            box.addItem(name, name)
-        box.activated.connect(lambda _i, b=box: (self.commitData.emit(b), self.closeEditor.emit(b)))
-        return box
-
-    def setEditorData(self, editor, index):
-        i = editor.findData(index.data(Qt.EditRole) or "")
-        editor.setCurrentIndex(max(0, i))
-        QTimer.singleShot(0, editor.showPopup)
-
-    def setModelData(self, editor, model, index):
-        model.setData(index, editor.currentData() or "", Qt.EditRole)
-
-    def updateEditorGeometry(self, editor, option, index):
-        editor.setGeometry(option.rect)
-
-
 # the providers a look-up waits for after a refusal (HTTP 429 or 503, or no answer), as named on screen
 WAIT_TITLES = {"musicbrainz": "MusicBrainz", "mb": "MusicBrainz", "discogs": "Discogs", "web": N_("the web")}
 
@@ -492,134 +420,76 @@ class Overview(QWidget):
         self._lookup_order, self._applying = [], False
         self._lookup_i, self._lookup_name = 0, ""
         lay = QVBoxLayout(self)
-        lay.addLayout(heading(tr("Overview")))              # (what to do is the list and Apply: no subtitle)
         self.profile = win.profile_box
         self.search = win.search_box
         self.bar = win.progress
         self.btn_preview, self.btn_apply, self.btn_cancel = (win.act(k) for k in ("preview", "apply", "cancel"))
         self.btn_anyway, self.btn_web, self.btn_open, self.btn_release = (
             win.act(k) for k in ("process_anyway", "search_web", "open_folder", "use_release"))
+        self._above = ""                                    # the profile the preview uses (the one "above")
+        self._profile_follows = False                       # (the toolbar pop-up shows the selection's profile)
+        self._profile_pane = "albums"                       # (the pane whose selection it follows)
         self.views = QStackedWidget()
         lay.addWidget(self.views, 1)
+        self.drop_page = QWidget()                          # the empty state fills the page
+        dl = QVBoxLayout(self.drop_page)
+        dl.setContentsMargins(style.MARGIN, style.MARGIN, style.MARGIN, style.MARGIN)
         self.drop = SleeveDrop()
         self.drop.dropped.connect(self.set_path)
-        self.views.addWidget(self.drop)                     # the empty state fills the page
+        dl.addWidget(self.drop)
+        self.views.addWidget(self.drop_page)
         self.results = QWidget()
         rl = QVBoxLayout(self.results)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(8)
-        strip = QFrame()
-        strip.setObjectName("strip")
-        sl = QHBoxLayout(strip)
-        sl.setContentsMargins(0, 0, 0, 0)              # (no box: the table below is the one frame)
-        self.folder_icon = QLabel()
+        rl.setSpacing(0)
+        # 0.8.71: no page title, Sources bar or Library folder bar - the sources and the library are
+        # the profile's (Preferences › Profiles); a choice for one look-up is the albums' menu's Look
+        # Up ▸, and File › Library Folder for This Preview… The controls stay, out of sight, for the
+        # code that reads them (the sources chosen: the profile's own)
+        self._held = QWidget(self)
+        self._held.hide()
+        self.folder_icon = QLabel(self._held)
         self.folder_icon.setPixmap(icons.icon("folder-open", "muted").pixmap(16, 16))
-        sl.addWidget(self.folder_icon)
         self.where = _Elided(tr("No folder chosen"))
-        sl.addWidget(self.where, 1)
-        self.ocr = QCheckBox(tr("Read scans"))
+        self.where.setParent(self._held)
+        self.ocr = QCheckBox(tr("Read scans"), self._held)
         self.ocr.setAccessibleName(tr("Read scans for this preview"))
-        self.ocr.setToolTip(tr("Read barcodes and catalog numbers from cover scans of every album (slower). "
-                               "Unticked, the profile's OCR setting decides (default: albums with scans or a PDF)"))
-        sl.addWidget(self.ocr)
-        self.choose_btn = ch = QPushButton(tr("Choose…"))
-        ch.setAccessibleName(tr("Choose another folder"))
-        ch.setToolTip(tr("Choose another folder (Ctrl+O)"))
-        ch.clicked.connect(lambda: self.drop.choose())
-        sl.addWidget(ch)
-        # (0.8.6: neither is shown - the profile's "Read scans and booklets" decides which albums'
-        # scans are read, and Add Folder (Ctrl+O) or a drop chooses the folder)
-        self.ocr.setVisible(False)
-        ch.setVisible(False)
-        rl.addWidget(strip)
-        # which databases to ask, and the button that asks them (nothing is looked up on a drop)
-        look = QHBoxLayout()
-        look.setContentsMargins(0, 0, 0, 0)
-        self.sources_label = QLabel(tr("Sources"))
-        self.sources_label.setProperty("role", "hint")       # (a label for the control beside it: quiet)
-        look.addWidget(self.sources_label)
+        self.choose_btn = QPushButton(tr("Choose…"), self._held)
+        self.choose_btn.clicked.connect(lambda: self.drop.choose())
+        self.sources_label = QLabel(tr("Sources"), self._held)
         from .rows import Popup
-        from PySide6.QtWidgets import QComboBox
-
-        class _Sources(Popup):
-            """Its whole words when there is room; in a narrow window it gives way to 10 letters."""
-            def minimumSizeHint(self):
-                hint = super().minimumSizeHint()
-                hint.setWidth(min(hint.width(), self.fontMetrics().averageCharWidth() * 10 + 48))
-                return hint
-        self.sources = _Sources()
-        self.sources.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.sources = Popup(self._held)
         self.sources.setAccessibleName(tr("Sources to look up with"))
-        self.sources.setToolTip(tr("Which databases Look Up and Preview ask: the profile's own choice, or "
-                                   "MusicBrainz, Discogs or the web (store and encyclopaedia pages) alone"))
         for mode, words in LOOK_UP:
             self.sources.addItem(tr(words), mode)
-        look.addWidget(self.sources)
-        self.look_btn = QPushButton(tr("Look Up"))
-        self.look_btn.setAccessibleName(tr("Look up the selected albums, or all of them"))
-        self.look_btn.setToolTip(tr("Looks up the selected albums, or every album when none is selected, with "
-                                    "the sources chosen beside it. Nothing is written until you apply."))
+        self.look_btn = QPushButton(tr("Look Up"), self._held)       # (the toolbar's Look Up: win "look_up")
         self.look_btn.clicked.connect(self.look_up_clicked)
-        self.look_btn.setFlat(True)                          # (secondary: Apply, in the toolbar, is the action)
-        look.addWidget(self.look_btn)
-        # (Refresh: the selected albums - none selected: all - looked up again with the profile as
-        # it is now, after you changed a setting; what was found before is replaced)
-        self.refresh_btn = QPushButton(tr("Refresh"))
-        self.refresh_btn.setAccessibleName(tr("Look up the selected albums again with the current settings"))
-        self.refresh_btn.setToolTip(tr("Looks up the selected albums again (every album when none is selected) "
-                                       "with the profile as it is now, after you changed a setting (Ctrl+R). "
-                                       "Nothing is written until you apply."))
+        self.refresh_btn = QPushButton(tr("Refresh"), self._held)    # (View › Refresh, Ctrl+R)
         self.refresh_btn.clicked.connect(self.reload)
-        self.refresh_btn.setFlat(True)
-        look.addWidget(self.refresh_btn)
-        self.clear_done_btn = QPushButton(tr("Clear Done"))
-        self.clear_done_btn.setAccessibleName(tr("Take every Done album out of the list"))
-        self.clear_done_btn.setToolTip(tr("Takes every album marked Done out of this list. "
-                                          "Their folders and files are not touched."))
+        self.clear_done_btn = QPushButton(tr("Clear Done"), self._held)   # (Edit › Clear Done Albums)
         self.clear_done_btn.clicked.connect(self.clear_done)
-        # (a real button, not flat text: flat and greyed out in the corner, nobody saw it)
         self.clear_done_btn.setEnabled(False)
-        # (a choice other than the profile's is for this look-up only; this saves it into the profile)
-        self.keep_link = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
-        self.keep_link.setTextFormat(Qt.RichText)
-        self.keep_link.setAccessibleName(tr("Make this choice of sources the profile's own"))
-        self.keep_link.linkActivated.connect(lambda _h: self.keep_sources())
-        self.keep_link.hide()
-        look.addWidget(self.keep_link)
-        look.addStretch(1)
-        rl.addLayout(look)
+        self.keep_link = QLabel("", self._held)
+        self.library_label = QLabel(tr("Library folder"), self._held)
+        self.library_where = _Elided("")
+        self.library_where.setParent(self._held)
+        self.library_btn = QPushButton(tr("Choose…"), self._held)     # (File › Library Folder for This Preview…)
+        self.library_btn.clicked.connect(lambda: self.choose_library())
+        self.library_keep = QLabel("", self._held)
+        self.profile.currentTextChanged.connect(self.profile_changed)
+        self.profile.activated.connect(self.profile_picked)
+        self.sources.currentIndexChanged.connect(lambda _i: self.show_sources_state())
+        # notes over the panes, shown only when they have something to say
+        notes = QVBoxLayout()
+        notes.setContentsMargins(12, 0, 12, 0)
+        notes.setSpacing(4)
         self.stale_note = QLabel("")                         # (settings changed since the look-up)
         self.stale_note.setProperty("role", "attention")
         self.stale_note.setTextFormat(Qt.RichText)
         self.stale_note.setWordWrap(True)
         self.stale_note.linkActivated.connect(lambda _h: self.refresh_stale())
         self.stale_note.hide()
-        rl.addWidget(self.stale_note)
-        # where copied or moved albums go: the profile's folder, or another for this preview and Apply
-        lib = QHBoxLayout()
-        lib.setContentsMargins(0, 0, 0, 0)
-        self.library_label = QLabel(tr("Library folder"))
-        self.library_label.setProperty("role", "hint")
-        lib.addWidget(self.library_label)
-        self.library_where = _Elided("")
-        lib.addWidget(self.library_where, 1)
-        self.library_btn = QPushButton(tr("Choose…"))
-        self.library_btn.setAccessibleName(tr("Choose another library folder"))
-        self.library_btn.clicked.connect(lambda: self.choose_library())
-        lib.addWidget(self.library_btn)
-        self.library_keep = QLabel(f'<a href="keep">{tr("Make It the Profile’s")}</a>')
-        self.library_keep.setTextFormat(Qt.RichText)
-        self.library_keep.setAccessibleName(tr("Make this library folder the profile's own"))
-        self.library_keep.linkActivated.connect(lambda _h: self.keep_library())
-        self.library_keep.hide()
-        lib.addWidget(self.library_keep)
-        rl.addLayout(lib)
-        self.profile.currentTextChanged.connect(self.remember_profile)
-        self.profile.currentTextChanged.connect(lambda _t: self.reset_sources())
-        self.profile.currentTextChanged.connect(lambda _t: self.reset_library())
-        self.profile.currentTextChanged.connect(lambda _t: self.drop_asks_of_other_profiles())
-        self.profile.currentTextChanged.connect(lambda _t: self.model.refresh_rows() if hasattr(self, "model") else None)
-        self.sources.currentIndexChanged.connect(lambda _i: self.show_sources_state())
+        notes.addWidget(self.stale_note)
         # what the preview did without, because a key, login or program is missing (Open Setup: its row)
         self.setup_note = QLabel("")
         self.setup_note.setProperty("role", "hint")
@@ -628,14 +498,15 @@ class Overview(QWidget):
         self.setup_note.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.setup_note.linkActivated.connect(lambda link: setup.follow(self.win, link))
         self.setup_note.hide()
-        rl.addWidget(self.setup_note)
+        notes.addWidget(self.setup_note)
         # a service busy or not answering while the run asks it (connection.status): a symbol and words
         self.service_note = QLabel("")
         self.service_note.setProperty("role", "attention")
         self.service_note.setWordWrap(True)
         self.service_note.setAccessibleName(tr("Online services"))
         self.service_note.hide()
-        rl.addWidget(self.service_note)
+        notes.addWidget(self.service_note)
+        rl.addLayout(notes)
         self._service_checked = 0.0
         self.model = PlanModel()
         # (sorted and filtered here, in one pass with list.sort: Qt's own proxy compared the rows
@@ -644,60 +515,18 @@ class Overview(QWidget):
         self.proxy.setSourceModel(self.model)
         self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
         self.proxy.setFilterKeyColumn(-1)
-        self.table = QTableView()
-        self.table.setModel(self.proxy)
-        # each album's profile (two or more albums listed): a drop-down in its row
         self.model.profile_of = lambda a: (self.profile_of(a), bool(self.own_profile(a)))
         self.model.choose_profile = self.set_album_profile
         self.model.state_of = self.state_of
-        self.profile_delegate = ProfileDelegate(self)
-        self.table.setItemDelegateForColumn(PlanModel.PROFILE, self.profile_delegate)
-        self.table.setEditTriggers(QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
-        self.table.clicked.connect(self.profile_clicked)
-        self.table.setSortingEnabled(True)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)   # (several: apply, leave out, remove)
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)   # (a column widened past the edge)
-        self.table.setTextElideMode(Qt.ElideRight)        # (the album's name first, its artist after)
-        h = self.table.horizontalHeader()
-        left_header(self.table)
-        h.setMinimumSectionSize(48)
-        # (a column is fitted to the text of its first rows and those in view, not of every album:
-        # measuring each of thousands of rows held the list up for seconds)
-        h.setResizeContentsPrecision(FIT_ROWS)
-        self.table.verticalHeader().setResizeContentsPrecision(FIT_ROWS)
-        # every column can be dragged wider or narrower; each is fitted to its text until you do
-        # (Why, the last, takes what is left); a cut cell shows its whole text when pointed at
-        for c in range(len(PlanModel.COLS)):
-            h.setSectionResizeMode(c, QHeaderView.Interactive)
-        h.setStretchLastSection(True)
-        self._sized_by_you, self._fitting, self._header_held = set(), False, False
-        h.sectionResized.connect(self.column_resized)
-        h.viewport().installEventFilter(self)             # (a drag is yours only when it starts on the header)
-        self.table.viewport().installEventFilter(self)    # (the list narrower or wider: fitted to the room)
-        # (fitted when rows come or go and when a look-up or listing ends - not as each row's
-        # data changes - and at most every FIT_DELAY ms: measuring the columns of a list of
-        # thousands of albums on each change held the UI thread up for seconds)
-        self._fit_timer = QTimer(self)
-        self._fit_timer.setSingleShot(True)
-        self._fit_timer.setInterval(0)
-        # (a long list a column at a time, each in its own turn; a short one at once)
-        self._fit_timer.timeout.connect(
-            lambda: self.fit_by_steps() if self.model.rowCount() > FIT_QUICK else self.fit_columns())
-        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved):
-            sig.connect(lambda *_: self.request_fit())
-        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved, self.model.dataChanged,
-                    self.model.ticked):
-            sig.connect(self.forget_applicable)
-        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.dataChanged):
-            sig.connect(lambda *_: self.clear_done_btn.setEnabled(any(a.get("status") == "done"
-                                                                      for a in self.model.albums)))
-        h.moveSection(PlanModel.PROFILE, 2)               # (an album's profile: next to its name, in view)
-        h.moveSection(h.visualIndex(PlanModel.SCANS), h.visualIndex(2) + 1)   # (what the scans said: after Source)
-        self.table.setAccessibleName(tr("Albums in the preview"))
+        self.shown_kind = "all"                              # the toolbar's All / Ready / Needs Attention
+        # 0.8.71: the list is the albums pane itself (Albums as they will be: an album a row, its
+        # discs and tracks under it), beside Your files, over the inspector pane (gui/preview_panes.py)
+        from .preview_panes import PreviewPanes
+        self.panes = PreviewPanes(self, self.proxy)
+        self.panes.album_chosen.connect(self.panes_chose)
+        self.panes.folders.profile_of = self.profile_of
+        self.table = self.panes.album_view
+        self.tree = self.panes.album_model
         # (while the mouse drags a selection, the inspector waits: reading each album it passes
         # over - tags, covers, on a network share - kept the drag from following the mouse)
         self._detail_timer = QTimer(self)
@@ -707,33 +536,30 @@ class Overview(QWidget):
         self.table.selectionModel().selectionChanged.connect(self.selection_changed)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
+        fv = self.panes.folder_view
+        fv.setContextMenuPolicy(Qt.CustomContextMenu)
+        fv.customContextMenuRequested.connect(lambda pos: self.context_menu(pos, folders=True))
+        fv.selectionModel().selectionChanged.connect(self.folders_chosen)
         self.model.ticked.connect(self.win.update_album_actions)
-        self.show_profile_column()
         # the list's own keys, as in a folder: Delete (or Backspace) takes the selected albums out of
         # the list, Escape lets go of the selection. Taken before the menus' shortcuts (Remove Tag is
         # Del too: two shortcuts on one key and Qt runs neither)
         self.table.installEventFilter(self)
-        rl.addSpacing(8)                                     # (the controls above, then the list: two groups)
-        # 0.8.69: the list over the preview's linked panes (Your folders | Albums as they will be |
-        # Tag changes, over Cover art: gui/preview_panes.py), the split between them remembered
-        from .preview_panes import PreviewPanes
-        self.panes = PreviewPanes(self)
-        self.panes.album_chosen.connect(self.panes_chose)
-        self.list_split = QSplitter(Qt.Vertical)
-        self.list_split.setObjectName("previewSplit")
-        self.list_split.setChildrenCollapsible(False)
-        self.list_split.addWidget(self.table)
-        self.list_split.addWidget(self.panes)
-        self.list_split.setStretchFactor(0, 1)
-        self.list_split.setStretchFactor(1, 2)
-        from .preview_panes import clean_prefs
-        self.list_split.setSizes(clean_prefs(_gui_prefs().get(PANES_PREF)).get("list") or [190, 470])
-        self.list_split.splitterMoved.connect(lambda *_: self._split_timer.start())
-        self._split_timer = QTimer(self)
-        self._split_timer.setSingleShot(True)
-        self._split_timer.setInterval(400)
-        self._split_timer.timeout.connect(self.save_list_split)
-        # (the panes made again in a turn of their own: a preview of thousands of albums shows
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(0)
+        self._fit_timer.timeout.connect(self.fit_columns)
+        self._sized_by_you, self._fitting = set(), False
+        self.table.header().sectionResized.connect(self.column_resized)
+        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved):
+            sig.connect(lambda *_: self.request_fit())
+        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved, self.model.dataChanged,
+                    self.model.ticked):
+            sig.connect(self.forget_applicable)
+        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.dataChanged):
+            sig.connect(lambda *_: self.clear_done_btn.setEnabled(any(a.get("status") == "done"
+                                                                      for a in self.model.albums)))
+        # (Your files made again in a turn of their own: a preview of thousands of albums shows
         # its list first)
         self.model.modelReset.connect(lambda: self._panes_timer.start())
         self.model.rowsInserted.connect(lambda *_: self._panes_timer.start())
@@ -742,24 +568,19 @@ class Overview(QWidget):
         self._panes_timer = QTimer(self)                     # (rows added or taken out: the panes once)
         self._panes_timer.setSingleShot(True)
         self._panes_timer.setInterval(0)
-        self._panes_timer.timeout.connect(lambda: self.panes.set_albums(self.model.albums))
-        rl.addWidget(self.list_split, 1)
-        foot = QHBoxLayout()                                 # (what is ready, strong; the other counts, quiet)
-        foot.setContentsMargins(0, 0, 0, 0)
-        foot.setSpacing(16)
-        self.ready_line = QLabel("")
-        self.ready_line.setProperty("role", "headline")
-        self.ready_line.hide()
-        foot.addWidget(self.ready_line, 0, Qt.AlignTop)
-        self.summary = QLabel("")
-        self.summary.setWordWrap(True)
-        self.summary.setProperty("role", "hint")
-        self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the counts are what is read)
-        foot.addWidget(self.summary, 1)
-        foot.addWidget(self.clear_done_btn, 0, Qt.AlignTop)   # (down here: the row above fills a 960 px window)
-        rl.addLayout(foot)
+        self._panes_timer.timeout.connect(lambda: (self.panes.set_albums(self.model.albums), self.show_ready()))
+        rl.addWidget(self.panes, 1)
+        # the status bar's two ends (the window puts them there): what the list holds, and what
+        # was last done (the work's progress while it runs)
+        self.counts_line = QLabel("")
+        self.counts_line.setAccessibleName(tr("Albums in the preview"))
+        from .preview_panes import ElidedLabel
+        self.summary = ElidedLabel("")
+        self.summary.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the words are what is read)
+        self.ready_line = self.counts_line
         self.views.addWidget(self.results)
-        self.detail = win.inspector.full                  # (the inspector's Evidence > Full preview)
+        self.detail = self.panes.evidence.full            # (Why This Release > Full preview text)
         self.refresh_profiles()
         self.show_library_state()
         self.busy(False)
@@ -767,62 +588,67 @@ class Overview(QWidget):
     def filter(self, text):
         self.proxy.setFilterFixedString(text)
 
-    # ---- the preview's panes (gui/preview_panes.py) -----------------------------------------
-    def save_list_split(self):
-        from .preview_panes import PREF, clean_prefs
-        p = clean_prefs(_gui_prefs().get(PREF))
-        sizes = self.list_split.sizes()
-        if all(x > 0 for x in sizes):
-            p["list"] = sizes
-            _set_gui_pref(PREF, p)
+    # ---- the toolbar's All / Ready / Needs Attention ------------------------------------------
+    @staticmethod
+    def needs_you(a) -> bool:
+        """The album waits for your decision: held (no release proven, a conflict), its scans name
+        another pressing, or a tie-break only suggested its pressing (TIE-1: to confirm)."""
+        from .common import suggested_pressing
+        from .preview_panes import _held
+        return _held(a) or ((a.get("identification") or {}).get("scans") or {}).get("state") == "differs" \
+            or bool(suggested_pressing(a))                  # (TIE-1: album known, a pressing to confirm)
 
+    @classmethod
+    def ready_now(cls, a) -> bool:
+        return can_apply(a) and not cls.needs_you(a)
+
+    SHOW = {"all": None, "ready": "ready_now", "attention": "needs_you"}
+
+    def set_show(self, kind):
+        """Only the albums ready, or only those needing you, or all (the toolbar's segments)."""
+        kind = kind if kind in self.SHOW else "all"
+        self.shown_kind = kind
+        fn = self.SHOW[kind]
+        self.proxy.set_only(getattr(self, fn) if fn else None)
+        self.win.show_filter(kind)
+
+    def show_counts_line(self):
+        """The status bar's left end, and the toolbar's segment counts."""
+        albums = self.model.albums
+        ready = sum(1 for a in albums if self.ready_now(a))
+        need = sum(1 for a in albums if self.needs_you(a))
+        files = sum(len(a.get("files") or []) for a in albums)
+        self.counts = {"all": len(albums), "ready": ready, "attention": need}
+        if albums:
+            text = " · ".join((tr("1 album ready") if ready == 1 else tr("{0} albums ready").format(ready),
+                               tr("1 needs your decision") if need == 1 else tr("{0} need your decision").format(need),
+                               plural(files, tr("file"), tr("files"))))
+        else:
+            text = ""
+        self.counts_line.setText(text)
+        self.counts_line.setToolTip(counts_by_label(albums) if albums else "")
+        self.win.show_filter_counts(self.counts)
+
+    # ---- the preview's panes (gui/preview_panes.py) -----------------------------------------
     def panes_rows_changed(self, top, bottom, *_):
-        """Rows of the list changed (a look-up, your edit): their albums in the panes too."""
+        """Rows of the list changed (a look-up, your edit): their albums in Your files too."""
         albums = self.model.albums
         for r in range(max(0, top.row()), min(len(albums) - 1, bottom.row()) + 1):
             self.panes.album_changed(albums[r])
 
     def panes_chose(self, album):
-        """An album chosen in the panes: its row in the list, as clicking it does (the inspector
-        and the Album menu follow)."""
-        if album is None or album is self.selected():
+        """An album chosen in Your files that the list hides (the search, the toolbar's filter):
+        shown again, so the list, the inspector and an edit are of the album the panes show."""
+        if album is None:
             return
-        for r, a in enumerate(self.model.albums):
-            if a is album:
-                row = self.proxy.mapFromSource(self.model.index(r, 0)).row()
-                if row < 0 and self.proxy.filterRegularExpression().pattern():
-                    # (hidden by the search: shown again, so the list, the inspector and an edit
-                    # are of the album the panes show)
-                    self.search.clear()
-                    self.filter("")
-                    row = self.proxy.mapFromSource(self.model.index(r, 0)).row()
-                if row >= 0:
-                    self.show_row(row)
-                return
-
-    # page widths under which lower-priority columns give way (the inspector shows them all), so
-    # the others fit their text without scrolling sideways: Why first, then Score, the scans and
-    # Source (which database said it stays longest)
-    NARROW = {5: 1040, 3: 895, 7: 815, 2: 735}            # (each: the narrowest the rest fit in)
-    STATUS_MOST = 150                                 # under 600 px the Status column is cut ("Changed sin…",
-                                                      # the whole word in its tooltip): the artist stays in view
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        for c, w in self.NARROW.items():
-            hide = self.width() < w
-            if self.table.isColumnHidden(c) != hide:
-                self.table.setColumnHidden(c, hide)
-        if hasattr(self, "_fit_timer"):
-            # (a column shown again fitted to its text, the Status column to the room: soon, once
-            # - not measured again on each step of a resize, or a status bar message)
-            self.request_fit(FIT_SOON)
-
-    COLUMN_MOST = {1: 340, 4: 260, 2: 300, 7: 300}       # (fitted, at most: drag for more)
-    # when the fitted columns are wider than the list: these give way first, down to this much
-    # (the album folder and the changes are cut and shown whole when pointed at)
-    COLUMN_LEAST = ((1, 180), (4, 140), (6, 110), (2, 110), (7, 90))
-    LAST_LEAST = 120                                     # (the last column - Why - keeps this much)
+        r = next((i for i, a in enumerate(self.model.albums) if a is album), None)
+        if r is None or self.proxy.mapFromSource(self.model.index(r, 0)).isValid():
+            return
+        if self.proxy.filterRegularExpression().pattern():
+            self.search.clear()
+            self.filter("")
+        if not self.proxy.mapFromSource(self.model.index(r, 0)).isValid() and self.shown_kind != "all":
+            self.set_show("all")
 
     # the list's own keys, as in a folder: Delete or Backspace takes the selected albums out of the
     # list, Escape lets go of the selection
@@ -851,160 +677,112 @@ class Overview(QWidget):
         if hasattr(self, "table") and obj is self.table and e.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
             if self.list_key(e):
                 return True
-        if hasattr(self, "_fit_timer") and obj is self.table.viewport() and e.type() == QEvent.Resize:
-            self.request_fit(FIT_SOON)
-        elif hasattr(self, "table") and obj is self.table.horizontalHeader().viewport():
-            if e.type() == QEvent.MouseButtonPress and e.button() == Qt.LeftButton:
-                self._header_held = True
-            elif e.type() == QEvent.MouseButtonRelease and e.button() == Qt.LeftButton:
-                self._header_held = False
         return super().eventFilter(obj, e)
 
-    def last_visible_column(self) -> int:
-        h = self.table.horizontalHeader()
-        for v in range(h.count() - 1, -1, -1):
-            c = h.logicalIndex(v)
-            if not self.table.isColumnHidden(c):
-                return c
-        return -1
+    def request_fit(self, delay=None):
+        """The Status column fitted to its words, soon (once per turn of the event loop)."""
+        if not self._fit_timer.isActive():
+            self._fit_timer.start(0 if delay is None else delay)
+
+    STATUS_WIDTH = (130, 220)                            # (the Status column's narrowest and widest)
 
     def column_resized(self, c, old, new):
-        # (dragged by you, the mouse pressed on the header: left as you made it. Qt's own sizing
-        # is not yours - the last column taking what is left, a column hidden or shown while you
-        # drag the inspector's edge)
-        if self._fitting or not self._header_held or not old or not new or c == self.last_visible_column():
-            return
-        self._sized_by_you.add(c)
-
-    def request_fit(self, delay=None):
-        """fit_columns, soon: DELAY ms from now (None: FIT_DELAY, or at once for a short list,
-        whose columns cost little to measure). A fit already due sooner is left as it is: a
-        stream of rows is fitted every FIT_DELAY ms, not put off until it stops."""
-        if delay is None:
-            delay = FIT_DELAY if self.model.rowCount() > FIT_QUICK else 0
-        t = self._fit_timer
-        if t.isActive() and t.remainingTime() <= delay:
-            return
-        t.start(delay)
-
-    def fit_candidates(self) -> list:
-        """The columns fitted to their text: not sized by you, shown, and not the last (Why)."""
-        last = self.last_visible_column()
-        return [c for c in range(1, len(PlanModel.COLS))
-                if c not in self._sized_by_you and c != last and not self.table.isColumnHidden(c)]
-
-    def column_want(self, c) -> int:
-        h = self.table.horizontalHeader()
-        want = max(self.table.sizeHintForColumn(c), h.sectionSizeHint(c))
-        return min(want, self.COLUMN_MOST.get(c, want))
+        """A column dragged by you keeps the width you gave it (never fitted again)."""
+        if not self._fitting and old and new:
+            self._sized_by_you.add(c)
 
     def fit_columns(self):
-        """Each column not sized by you: as wide as its text, up to COLUMN_MOST (Why: the rest)."""
-        self._fit_steps = None                             # (a fit by steps under way: this one does it)
-        self.apply_fit({c: self.column_want(c) for c in self.fit_candidates()})
-        self.fit_status()
-
-    def fit_by_steps(self):
-        """fit_columns, a column at a time, each in its own turn of the event loop (the list's
-        timer): measuring a column asks each of its sampled rows for its text, and all of them at
-        once held the UI thread up for tens of milliseconds. The widths are set together at the end."""
-        self._fit_steps = (self.fit_candidates(), {})
-        QTimer.singleShot(0, self, self._fit_step)
-
-    def _fit_step(self):
-        steps = getattr(self, "_fit_steps", None)
-        if not steps:
+        """The Status column as wide as its words (STATUS_WIDTH), unless you sized it; the name
+        takes what is left, the score its own few digits."""
+        from .preview_panes import AlbumsModel
+        if AlbumsModel.STATUS in self._sized_by_you:
             return
-        todo, wants = steps
-        if todo:
-            c = todo.pop(0)
-            if c not in self._sized_by_you and not self.table.isColumnHidden(c):
-                wants[c] = self.column_want(c)
-            QTimer.singleShot(0, self, self._fit_step)
-            return
-        self._fit_steps = None
-        self.apply_fit({c: w for c, w in wants.items() if c in self.fit_candidates()})
-        QTimer.singleShot(0, self, self.fit_status)
-
-    def apply_fit(self, wants):
-        h = self.table.horizontalHeader()
-        last = self.last_visible_column()
-        self._fitting = True
-        try:
-            # (all in view where they can be: the widest give way before the list scrolls - while
-            # the list is shown, so measured; it is fitted again when its room changes)
-            room = self.table.viewport().width() if self.table.isVisible() else 0
-            used = sum(wants.get(c, self.table.columnWidth(c)) for c in range(len(PlanModel.COLS))
-                       if c != last and not self.table.isColumnHidden(c))
-            over = used + self.LAST_LEAST - room if room else 0
-            for c, least in self.COLUMN_LEAST:
-                if over <= 0:
-                    break
-                if c in wants and wants[c] > least:
-                    give = min(over, wants[c] - least)
-                    wants[c] -= give
-                    over -= give
-            for c, want in wants.items():
-                if self.table.columnWidth(c) != want:
-                    h.resizeSection(c, want)
-        finally:
-            self._fitting = False
-
-    def fit_status(self):
-        if 0 in getattr(self, "_sized_by_you", ()):
-            return
-        want = max(self.table.sizeHintForColumn(0), self.table.horizontalHeader().sectionSizeHint(0))
-        if self.width() < 600:
-            want = min(want, self.STATUS_MOST)
-        if self.table.columnWidth(0) != want:
+        lo, hi = self.STATUS_WIDTH
+        want = max(lo, min(hi, self.table.sizeHintForColumn(AlbumsModel.STATUS) + 8))
+        if self.table.columnWidth(AlbumsModel.STATUS) != want:
             self._fitting = True
             try:
-                self.table.horizontalHeader().resizeSection(0, want)
+                self.table.header().resizeSection(AlbumsModel.STATUS, want)
             finally:
                 self._fitting = False
 
-    def context_menu(self, pos):
-        keys = ("@release", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
-                "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder", "copy_path")
-        # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
-        release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
-            self.win, "menus", {}) else None
-        items = [release if k == "@release" else self.win.act(k) if k else None
-                 for k in keys if k != "@release" or release is not None]
-        chosen = self.selected_albums()
+    def fill_profile_menu(self, menu, chosen):
+        """Profile ▸: As Above (the preview's profile), then each profile, the one CHOSEN albums
+        have ticked (none for a mixed selection); choosing one gives it to all of them."""
+        menu.clear()
+        mine = {self.own_profile(a) for a in chosen}
+        names = {self.profile_of(a) for a in chosen}
+        used = set()
+
+        def lettered(words):
+            """WORDS with an underlined letter none before it in this menu has ("&" doubled)."""
+            words = words.replace("&", "&&")
+            for i, ch in enumerate(words):
+                if ch.isalnum() and ch.lower() not in used and words[max(0, i - 1):i] != "&":
+                    used.add(ch.lower())
+                    return words[:i] + "&" + words[i:]
+            return words
+        above = menu.addAction(lettered(tr("As Above ({0})").format(self.above())))
+        above.setCheckable(True)
+        above.setChecked(bool(chosen) and mine == {""})
+        above.triggered.connect(lambda _=False, c=chosen: self.set_album_profile(c, ""))
+        menu.addSeparator()
+        for name in profile_names():
+            act = menu.addAction(lettered(name))
+            act.setCheckable(True)
+            act.setChecked(bool(chosen) and names == {name} and mine != {""})
+            act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
+        on = bool(chosen) and (not self.running or (bool(self.looking) and   # (applied: filed again, after)
+                                                    any(a.get("status") != "done" for a in chosen)))
+        for a in menu.actions():
+            a.setEnabled(on)
+        menu.setProperty("checks", True)
+        return menu
+
+    def context_menu(self, pos, folders=False):
+        """The albums' menu (Your files: for the albums its rows selected hold)."""
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+        view = self.panes.folder_view if folders else self.table
+        chosen = self.panes.folder_albums() if folders else self.selected_albums()
+        if folders:
+            self._profile_pane = "folders"
+            items = []
+        else:
+            keys = ("@release", "use_suggested_pressing", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
+                    "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
+                    "copy_path")
+            # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
+            release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
+                self.win, "menus", {}) else None
+            items = [release if k == "@release" else self.win.act(k) if k else None
+                     for k in keys if k != "@release" or release is not None]
         if chosen:                                     # (what Apply does with the selected rows)
-            from PySide6.QtGui import QAction
-            from PySide6.QtWidgets import QMenu
             n = len(chosen)
             look = QMenu(tr("Look Up"), self)
             for mode, words in LOOK_UP:
                 act = look.addAction(tr(words))
-                act.triggered.connect(lambda _=False, m=mode: self.look_up(m))
+                act.triggered.connect(lambda _=False, m=mode, c=chosen: self.look_up(m, c))
             look.setEnabled(not self.running or bool(self.looking))     # (while one runs: queued)
             mine = [look.menuAction()]
             again = QAction(tr("Refresh with Current Settings"), self)   # (the profile as it is now)
-            again.triggered.connect(self.reload)
+            again.triggered.connect(lambda _=False, c=chosen: self.reload(c))
             again.setEnabled(not self.running or bool(self.looking))
             mine.append(again)
             # (the profile of the selected albums: theirs, or the one chosen above)
             if self.model.albums:
-                pm = QMenu(tr("Profile"), self)
-                above = pm.addAction(tr("As Above ({0})").format(self.profile.currentText()))
-                above.triggered.connect(lambda _=False, c=chosen: self.set_album_profile(c, ""))
-                pm.addSeparator()
-                for name in profile_names():
-                    act = pm.addAction(name)
-                    act.triggered.connect(lambda _=False, c=chosen, n=name: self.set_album_profile(c, n))
-                pm.setEnabled(not self.running or (bool(self.looking) and   # (applied: filed again, after)
-                                                   any(a.get("status") != "done" for a in chosen)))
+                pm = self.fill_profile_menu(QMenu(tr("Profile"), self), chosen)
+                pm.setEnabled(any(a.isEnabled() for a in pm.actions()))
+                self._profile_menu = pm
                 mine.append(pm.menuAction())
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
-                                    self.apply_selected, any(can_apply(a) for a in chosen) and self.may_apply_now()),
-                                   (tr("Leave Out of Apply"), lambda: self.leave_out(True),
+                                    lambda c=chosen: self.apply_selected(c),
+                                    any(can_apply(a) for a in chosen) and self.may_apply_now()),
+                                   (tr("Leave Out of Apply"), lambda c=chosen: self.model.set_left_out(c, True),
                                     any(can_apply(a) and not PlanModel.left_out(a) for a in chosen)),
-                                   (tr("Include in Apply"), lambda: self.leave_out(False),
+                                   (tr("Include in Apply"), lambda c=chosen: self.model.set_left_out(c, False),
                                     any(PlanModel.left_out(a) for a in chosen)),
-                                   (tr("Remove from List"), self.remove_selected, not self.running)):
+                                   (tr("Remove from List"), lambda c=chosen: self._take_out(c), not self.running)):
                 act = QAction(text, self)
                 act.setEnabled(on)
                 act.triggered.connect(lambda _=False, s=slot: s())
@@ -1016,22 +794,108 @@ class Overview(QWidget):
                     act = QAction(words, self)
                     act.triggered.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
                     mine.append(act)
-            items = items + [None] + mine
-        popup_menu(self, self.table, pos, items)
+            items = items + ([None] if items else []) + mine
+        if items:
+            self._menu_items = items
+            popup_menu(self, view, pos, items)
 
     def selected_albums(self) -> list:
-        """The plan's own entries of the selected rows, in the list's order."""
+        """The plan's own entries of the selected rows (a disc or track: its album), once each, in
+        the list's order."""
         if not hasattr(self, "table"):
             return []
-        rows = sorted({self.proxy.mapToSource(i).row() for i in self.table.selectionModel().selectedRows()})
-        return [self.model.albums[r] for r in rows if 0 <= r < len(self.model.albums)]
+        tops = self.tree.top
+        found = {}
+        for idx in self.table.selectionModel().selectedRows():
+            n = idx.internalPointer()
+            while n is not None and n.parent is not tops:
+                n = n.parent
+            if n is not None and n.album is not None:
+                found.setdefault(id(n.album), (n.row, n.album))
+        return [a for _r, a in sorted(found.values(), key=lambda x: x[0])]
+
+    # ---- the profile pop-up follows the selection ----------------------------------------------
+    MIXED = "\x00mixed"                                 # (the pop-up's "Mixed" item: never a profile)
+
+    def above(self) -> str:
+        """The profile the preview uses: the one chosen above the list (not a selection's)."""
+        return self._above or (self.profile.currentText() if not self._profile_follows else "")
+
+    def profile_targets(self) -> list:
+        """The albums the toolbar's Profile pop-up is for: the rows you selected in the pane you
+        chose them in (Your files: the albums its folders and files hold); none - the preview."""
+        if self._profile_pane == "folders" and self.panes.folder_view.selectionModel().hasSelection():
+            return self.panes.folder_albums()
+        if getattr(self, "_rows_chosen", False):
+            return self.selected_albums()
+        return []
+
+    def show_profile_choice(self):
+        """The Profile pop-up shows the selected albums' profile ("Mixed" when they differ), or with
+        none selected the preview's."""
+        box = self.profile
+        targets = self.profile_targets() if self.model.albums else []
+        box.blockSignals(True)
+        try:
+            i = box.findData(self.MIXED)
+            names = {self.profile_of(a) for a in targets}
+            if targets and len(names) > 1:
+                if i < 0:
+                    box.insertItem(0, tr("Mixed"), self.MIXED)
+                    item = box.model().item(0) if hasattr(box.model(), "item") else None
+                    if item is not None:
+                        item.setEnabled(False)
+                box.setCurrentIndex(0)
+            else:
+                if i >= 0:
+                    box.removeItem(i)
+                want = next(iter(names)) if targets else self._above
+                if want and box.findText(want) >= 0:
+                    box.setCurrentText(want)
+        finally:
+            box.blockSignals(False)
+        self._profile_follows = bool(targets)
+        n = len(targets)
+        box.setToolTip(tr("The profile of the {0} selected: choose one to use it for them").format(
+            plural(n, tr("album"), tr("albums"))) if n else tr("The profile the preview uses"))
+        box.setAccessibleName(tr("Profile of the selected albums") if n else tr("Profile"))
+
+    def profile_changed(self, text):
+        """The pop-up's choice changed: the preview's profile, unless it shows a selection's."""
+        if getattr(self, "_filling", False) or self._profile_follows or not text or \
+                self.profile.currentData() == self.MIXED or text == self._above:
+            return
+        self._above = text
+        self.remember_profile(text)
+        self.reset_sources()
+        self.reset_library()
+        self.drop_asks_of_other_profiles()
+        self.model.refresh_rows()
+
+    def profile_picked(self, i):
+        """A profile chosen in the pop-up while it shows the selection's: for every selected album
+        (looked up again with it); the preview's own is As Above."""
+        if not self._profile_follows or self.profile.itemData(i) == self.MIXED:
+            return
+        targets = self.profile_targets()
+        name = self.profile.itemText(i)
+        if targets and name:
+            self.set_album_profile(targets, "" if name == self._above else name)
+        self.show_profile_choice()
+
+    def folders_chosen(self, *_):
+        if self.panes._quiet:
+            return
+        self._profile_pane = "folders"
+        self.show_profile_choice()
+        self.win.update_album_actions()
 
     def leave_out(self, out):
         self.model.set_left_out(self.selected_albums(), out)
 
-    def apply_selected(self):
+    def apply_selected(self, chosen=None):
         """Apply only the selected albums: the others are left out of this Apply (not of the list)."""
-        chosen = [a for a in self.selected_albums() if can_apply(a)]
+        chosen = [a for a in (self.selected_albums() if chosen is None else chosen) if can_apply(a)]
         if not chosen:
             return
         ids = {id(a) for a in chosen}
@@ -1073,9 +937,9 @@ class Overview(QWidget):
         self.win.update_album_actions()
 
     def refresh_profiles(self):
-        if hasattr(self, "profile_delegate"):
-            self.profile_delegate.refresh()                # (its column: the profiles' names now)
-        cur = self.profile.currentText() or self.starting_profile()
+        from .common import forget_profile_colours
+        forget_profile_colours()                      # (a profile's colour may have changed)
+        cur = self._above or self.starting_profile()
         self._filling = True                          # (filling the list is no choice of yours)
         try:
             self.profile.clear()
@@ -1084,6 +948,14 @@ class Overview(QWidget):
                 self.profile.setCurrentText(cur)
         finally:
             self._filling = False
+        was, self._above = self._above, self.above()
+        self.show_profile_choice()
+        if was and was != self._above:                # (the profile above was removed or renamed)
+            self.reset_sources()
+            self.reset_library()
+            self.model.refresh_rows()
+        elif hasattr(self, "model"):
+            self.model.refresh_rows()                 # (their colours, as the profiles say now)
 
     @staticmethod
     def starting_profile() -> str:
@@ -1237,7 +1109,7 @@ class Overview(QWidget):
             self.added([(f, a) for f, a in early if f in mine], folders, list_only)
             return
         try:
-            prof = load_profile(self.profile.currentText())
+            prof = load_profile(self.above())
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
@@ -1267,7 +1139,7 @@ class Overview(QWidget):
         again, and are looked up as any folder dropped then. Nothing of them is in the work that
         runs. False when they cannot be read now (the profile cannot be loaded)."""
         try:
-            prof = load_profile(self.profile.currentText())
+            prof = load_profile(self.above())
         except pf.ProfileError:
             return False
         folders = [f for f in dropped_folders(paths) if f not in self._early]
@@ -1373,7 +1245,7 @@ class Overview(QWidget):
         if not self.plan or not self.path:
             return False
         try:
-            prof = load_profile(self.profile.currentText())
+            prof = load_profile(self.above())
         except pf.ProfileError:
             return False
         folders = dropped_folders(paths)
@@ -1453,7 +1325,6 @@ class Overview(QWidget):
         if fresh:
             self.model.replace_rows([], fresh)               # (fitted as rows come: request_fit)
             self.plan["listed"] = True
-            self.show_profile_column()
         return fresh
 
     def added(self, got, folders, list_only, streamed=()):
@@ -1519,7 +1390,7 @@ class Overview(QWidget):
         """The folder's albums, not looked up yet: nothing is asked of any database. LOOK_UP:
         then looked up, an album at a time, in their rows."""
         try:
-            prof = load_profile(self.profile.currentText())
+            prof = load_profile(self.above())
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
@@ -1580,7 +1451,6 @@ class Overview(QWidget):
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
         self.adopt_listing(plan)
-        self.show_profile_column()
         self.request_fit()
         self.busy(False)
         n = len(plan["albums"])
@@ -1625,12 +1495,12 @@ class Overview(QWidget):
             tr("The profile's own sources. Choose another for one look-up; it goes back for the next folder.")
         self.sources_label.setToolTip(tip)
         self.sources.setToolTip(tip)
-        self.keep_link.setVisible(other and mode in pf.SOURCES and self.profile.currentText() not in ("", "default"))
+        self.keep_link.setVisible(other and mode in pf.SOURCES and self.above() not in ("", "default"))
 
     def keep_sources(self):
         """Save the chosen sources as the profile's own (after asking)."""
         mode = self.sources.currentData()
-        name = self.profile.currentText()
+        name = self.above()
         if mode not in pf.SOURCES or not name or name == "default":
             return
         if not sheets.question(self, tr("Make {0} the sources of “{1}”?").format(self.sources_words(mode), name),
@@ -1667,7 +1537,7 @@ class Overview(QWidget):
         """Where the profile files the folder previewed: the destination of the profile's folder
         holding it, if that has its own, else the profile's."""
         try:
-            data = load_profile(self.profile.currentText()).data
+            data = load_profile(self.above()).data
         except Exception:
             return ""
         src = self.covering_source(data)
@@ -1675,7 +1545,7 @@ class Overview(QWidget):
 
     def in_place(self, name=None) -> bool:
         try:
-            return load_profile(name or self.profile.currentText()).data.get("operation") == "in_place"
+            return load_profile(name or self.above()).data.get("operation") == "in_place"
         except Exception:
             return False
 
@@ -1683,7 +1553,7 @@ class Overview(QWidget):
         """The profile Preview, Look Up and (through the plan) Apply use: the Sources choice and
         the library folder chosen here applied to the profile as saved (NAME: an album's own
         profile; none: the one chosen above)."""
-        name = name or self.profile.currentText()
+        name = name or self.above()
         prof = load_profile(name)
         if self.library and not self.in_place(name):
             prof = library_for(prof, self.library)
@@ -1700,7 +1570,7 @@ class Overview(QWidget):
 
     def profile_of(self, a) -> str:
         """The profile this album is looked up and applied with: its own, or the one above."""
-        return (self.album_profiles and self.album_profiles.get(self.album_key(a))) or self.profile.currentText()
+        return (self.album_profiles and self.album_profiles.get(self.album_key(a))) or self.above()
 
     def own_profile(self, a) -> str:
         """The profile chosen in the album's own row ("": the one chosen above). (No album has
@@ -1736,7 +1606,7 @@ class Overview(QWidget):
                     self.planned_with.get(k) != self.profile_of(a):
                 again.append(a)
         self.model.refresh_rows()
-        self.show_profile_column()
+        self.show_profile_choice()                          # (the pop-up says the profile they have now)
         if again:
             self.look_up(self.sources.currentData() or "profile", again)
         if done and not self.running:
@@ -1759,7 +1629,7 @@ class Overview(QWidget):
             self.win.statusBar().showMessage(tr("The applied files are no longer where Apply put them."), 6000)
             return
         try:
-            prof = load_profile(name or self.profile.currentText())
+            prof = load_profile(name or self.above())
         except pf.ProfileError as exc:
             sheets.warning(self, tr("This profile cannot be used."), str(exc))
             return
@@ -1785,7 +1655,7 @@ class Overview(QWidget):
         if not self.plan:                                   # (all applied: the rows shown are the list)
             if not self.model.albums:
                 return
-            self.plan = {"job": "", "profile": self.profile.currentText(), "operation": "",
+            self.plan = {"job": "", "profile": self.above(), "operation": "",
                          "albums": self.model.albums, "listed": True, "provider_notes": {}}
         if self.plan.get("albums") is not self.model.albums:
             self.model.set_plan(self.plan)
@@ -1814,22 +1684,9 @@ class Overview(QWidget):
             self.win.statusBar().showMessage(tr("{0} not found where Apply put them.").format(
                 plural(missing, tr("album"), tr("albums"))), 6000)
         self.plan["listed"] = any(a.get("status") == "listed" for a in self.model.albums)
-        self.show_profile_column()
         self.request_fit()
         if fresh:
             self.look_up(self.sources.currentData() or "profile", fresh, again=True, queued=True)
-
-    def profile_clicked(self, idx):
-        """A click on an album's profile opens its drop-down."""
-        if idx.isValid() and idx.column() == PlanModel.PROFILE and \
-                self.model.flags(self.proxy.mapToSource(idx)) & Qt.ItemIsEditable:
-            self.table.edit(idx)
-
-    def show_profile_column(self):
-        """The Profile column: always shown, so the list looks the same for one album or many, and
-        each album says which profile it is filed with (one album too: chosen in its row or above)."""
-        if hasattr(self, "table"):
-            self.table.setColumnHidden(PlanModel.PROFILE, False)
 
     def with_versions(self, albums) -> list:
         """ALBUMS and the other versions of a folder split per version (looked up together)."""
@@ -1842,7 +1699,7 @@ class Overview(QWidget):
         name = self.planned_with.get(self.album_key(albums[0])) if albums else None
         head = self.headers.get(name) or self.plan or {}
         # (a list made here - albums applied and filed again - has no job of its own yet)
-        out = {"job": "", "profile": self.profile.currentText(), "operation": ""}
+        out = {"job": "", "profile": self.above(), "operation": ""}
         out.update(head)
         out["albums"] = list(albums)
         return out
@@ -1859,7 +1716,7 @@ class Overview(QWidget):
     def show_library_state(self):
         if not hasattr(self, "library_label"):
             return
-        name = self.profile.currentText()
+        name = self.above()
         mine = self.profile_destination()
         other = bool(self.library) and self.library != mine
         stays = self.in_place()
@@ -1911,7 +1768,7 @@ class Overview(QWidget):
 
     def keep_library(self):
         """Save the chosen library folder as the profile's destination (after asking)."""
-        name = self.profile.currentText()
+        name = self.above()
         if not self.library or not name or name == "default":
             return
         if not sheets.question(self, tr("Make {0} the library folder of “{1}”?").format(self.library, name),
@@ -1946,7 +1803,7 @@ class Overview(QWidget):
         if mode == "profile":
             from .profile_editor import SOURCE_WORDS
             try:
-                src = load_profile(self.profile.currentText())["source"]
+                src = load_profile(self.above())["source"]
             except Exception:
                 src = ""
             return tr("{0} (profile)").format(tr(SOURCE_WORDS.get(src, src)) or "?")
@@ -1963,8 +1820,10 @@ class Overview(QWidget):
         # (the profile's settings themselves: a changed setting is a new look-up)
         import companions
         settings = prof.to_dict() if hasattr(prof, "to_dict") else prof
+        if isinstance(settings, dict) and "colour" in settings:     # (its rows' tint: not a look-up's)
+            settings = {k: v for k, v in settings.items() if k != "colour"}
         # (and the built-in plugins' switches: Discogs or CoverUp switched on or off is a new look-up)
-        return json.dumps([name or self.profile.currentText(), mode, self.ocr.isChecked(), settings,
+        return json.dumps([name or self.above(), mode, self.ocr.isChecked(), settings,
                            companions.discogs_on(), companions.coverup_on()], sort_keys=True, default=str)
 
     def stale_albums(self) -> list:
@@ -2005,12 +1864,13 @@ class Overview(QWidget):
         if stale:
             self.look_up(self.sources.currentData() or "profile", stale, again=True)
 
-    def reload(self):
+    def reload(self, chosen=None):
         """Refresh (Ctrl+R): look the selected albums (none selected: all of them) up again, even
         those already looked up the same way (while a look-up runs: queued)."""
         if (self.running and not self.looking) or not self.plan:
             return
-        chosen = self.selected_albums() if self.table.selectionModel().hasSelection() else None
+        if chosen is None:
+            chosen = self.selected_albums() if self.table.selectionModel().hasSelection() else None
         self.look_up(self.sources.currentData() or "profile", chosen or list(self.plan["albums"]), again=True)
 
     def look_up(self, mode="profile", albums=None, again=False, queued=False):
@@ -2212,7 +2072,7 @@ class Overview(QWidget):
         self.remember_looked(found, stamp)
         if self.plan is None:
             self.plan = dict(self.headers[name], albums=self.model.albums)
-        head = self.headers.get(self.profile.currentText()) or self.headers[name]
+        head = self.headers.get(self.above()) or self.headers[name]
         self.plan.update(head, albums=self.model.albums)
         was = self.selected()
         rows = [r for r, a in enumerate(self.model.albums) if self.album_key(a) in keys]
@@ -2243,7 +2103,6 @@ class Overview(QWidget):
                 was = self.queue.pop(k, None)
                 self.queue[k] = (mode, ag or bool(was and was[1]))
         self.looking = {}
-        self.show_profile_column()
         self.request_fit()                                 # (the rows' words now: fitted once)
         self.check_stale()
         if getattr(self, "apply_worker", None) is None:
@@ -2500,7 +2359,7 @@ class Overview(QWidget):
             return
         self.looked_with = self.sources_words(mode)
         path, ocr, forced = self.path, self.ocr.isChecked(), dict(self.forced)
-        file_anyway = {f for f, n in self.file_anyway.items() if n == self.profile.currentText()}
+        file_anyway = {f for f, n in self.file_anyway.items() if n == self.above()}
         edits = self.win.inspector.edits_for_preview()     # (your edits from the inspector: kept)
 
         def work(w):
@@ -2517,7 +2376,7 @@ class Overview(QWidget):
         stamp = None if forced else self.lookup_stamp(prof, mode)    # (a release you chose: not the same)
 
         library = self.library
-        name = self.profile.currentText()
+        name = self.above()
 
         def done(plan):
             self.looked = {}
@@ -2534,7 +2393,6 @@ class Overview(QWidget):
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
         self.set_sorted_plan(plan)
-        self.show_profile_column()
         self.show_counts()
         self.refresh_overrides()
         self.busy(False)
@@ -2552,7 +2410,7 @@ class Overview(QWidget):
         if p.sortColumn() != 0 or p.sortOrder() != Qt.AscendingOrder or not p.dynamicSortFilter():
             self.model.set_plan(None)                      # (sorted with no rows: costs nothing)
             p.setDynamicSortFilter(True)
-            self.table.sortByColumn(0, Qt.AscendingOrder)
+            self.table.sortByColumn(self.tree.STATUS, Qt.AscendingOrder)
         self.model.set_plan(plan)
 
     def sort_by_status(self):
@@ -2562,7 +2420,7 @@ class Overview(QWidget):
         if not p.dynamicSortFilter():
             p.setDynamicSortFilter(True)                    # (sorts by the column it had)
         if p.sortColumn() != 0 or p.sortOrder() != Qt.AscendingOrder:
-            self.table.sortByColumn(0, Qt.AscendingOrder)
+            self.table.sortByColumn(self.tree.STATUS, Qt.AscendingOrder)
 
     def show_first_soon(self, plan):
         """The first row shown in the inspector once the list is on screen (its own turn of the
@@ -2582,23 +2440,17 @@ class Overview(QWidget):
         self.setup_note.setVisible(bool(said))
         # (counted as the rows name them: an album shown "Ignored" is not "Excluded" here)
         said_with = getattr(self, "looked_with", "")
-        self.summary.setText(counts_by_label(plan["albums"]) + (f"   ({notes})" if notes else "") +
+        self.summary.setText(tr("Nothing has been changed yet.") + (f" ({notes})" if notes else "") +
                              (tr(" Looked up with {0}.").format(said_with) if said_with else ""))
         self.show_ready()
 
     def show_ready(self):
-        """The bold line under the list: how many albums Apply would carry out now (the ticked
-        ones, or of the rows you highlighted those), nothing while work runs or no list shows."""
-        if not hasattr(self, "ready_line"):
+        """The counts (the status bar's left end, the toolbar's segments) and how many albums Apply
+        would carry out now (the toolbar's Apply button: the ticked ones, or of the rows you
+        highlighted those)."""
+        if not hasattr(self, "counts_line"):
             return
-        albums = (self.plan or {}).get("albums") or []
-        if not albums or self.running:
-            self.ready_line.hide()
-            return
-        n = len(self.to_apply())
-        self.ready_line.setText(tr("1 album ready to apply") if n == 1 else
-                                tr("{0} albums ready to apply").format(n) if n else tr("Nothing to apply yet"))
-        self.ready_line.show()
+        self.show_counts_line()
 
     def edited(self, album):
         """Your edit in the inspector changed an album of the preview: its row, the counts and Apply."""
@@ -3062,10 +2914,11 @@ class Overview(QWidget):
             else None
         if not idx or not idx.isValid():
             return None
-        # the plan's own entry, not proxy.data(UserRole): Qt hands a dict back as a copy, and an
-        # edit (the inspector, Tags from File Names) must change the album the plan applies
-        row = self.proxy.mapToSource(self.proxy.index(idx.row(), 0)).row()
-        return self.model.albums[row] if 0 <= row < len(self.model.albums) else None
+        # the plan's own entry (a disc's or track's: its album's), not data(UserRole): Qt hands a
+        # dict back as a copy, and an edit (the inspector, Tags from File Names) must change the
+        # album the plan applies
+        n = idx.internalPointer()
+        return n.album if n is not None else None
 
     def show_row(self, row):
         """Highlight ROW only to show it in the inspector: nobody chose it for Apply."""
@@ -3078,6 +2931,9 @@ class Overview(QWidget):
     def selection_changed(self, *_):
         from PySide6.QtWidgets import QApplication
         self._rows_chosen = not getattr(self, "_showing_row", False) and self.table.selectionModel().hasSelection()
+        if self._rows_chosen:
+            self._profile_pane = "albums"
+        self.show_profile_choice()
         self.show_ready()                                 # (what Apply would carry out has changed)
         self.win.update_album_actions()
         if QApplication.mouseButtons() & Qt.LeftButton:
@@ -3160,7 +3016,7 @@ class Overview(QWidget):
         (a move asked for is no copy asked for). An album with a profile of its own keeps its."""
         own = set(self.album_profiles.values())
         self.file_anyway = {f: n for f, n in self.file_anyway.items()
-                            if n == self.profile.currentText() or n in own}
+                            if n == self.above() or n in own}
 
     def file_anyway_selected(self):
         """Album > Move into the Library Layout Anyway: the selected albums kept in place for their

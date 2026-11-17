@@ -223,9 +223,12 @@ def planned_ref(album) -> str:
 
 
 def same_ref(a, b) -> bool:
+    """The same release - and, for a Discogs release paired with MusicBrainz's entry of its pressing
+    ("discogs:ID+MBID", TIE-1's suggestion), the same pair: a pair is never taken for the Discogs
+    release alone, so choosing it forces both (as Use Suggested Pressing does)."""
     import engine
     ka, kb = engine.parse_release_ref(a), engine.parse_release_ref(b)
-    return ka[0] is not None and ka == kb
+    return ka[0] is not None and ka == kb and engine.release_twin(a) == engine.release_twin(b)
 
 
 def renames(album) -> bool:

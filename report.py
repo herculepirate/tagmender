@@ -426,14 +426,19 @@ def for_attention(rows, look_up=True) -> dict:
     rep = {"job": "", "profile": "", "applied": True, "status": "attention", "rows": [], "note": "",
            "title": ATTENTION_TITLE}
     for r in rows:
-        if "album known, pressing not established" in (r.get("reason") or ""):
+        ref = reasons.suggested_ref(r.get("reason") or "")
+        if "album known, pressing not established" in (r.get("reason") or "") and not ref:
             continue                                 # (every clue tried: tagged as the album, nothing to decide)
         partial = str(r.get("mark", "")).lower() == "partial"
         codes = [c for c in r.get("codes") or [] if c != "other"]
         lead = "; ".join(ISSUE_WORDS.get(c, reasons.describe(c)) for c in codes)
         words = r.get("reason") or ""
         issue = f"{lead} ({words})" if lead and words else (lead or words or "not identified")
-        if MIXED in words:
+        if ref:
+            # TIE-1: a tie-break suggested the pressing: yours to confirm (Use Suggested Pressing)
+            issue, section = (f"pressing suggested, confirm it: {ref} (Album > Use Suggested Pressing, or "
+                              f"tagmender plan PATH --release {ref})"), "decide"
+        elif MIXED in words:
             issue, section = "two versions mixed in one folder: " + words, "decide"
         elif partial:
             issue, section = "tagged Partial, the release is not proven: " + issue, "decide"

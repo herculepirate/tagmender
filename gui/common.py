@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHeaderView, QLabel, Q
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 from .i18n import tr
-from .style import STATUS, TIER_LABELS
+from .style import STATUS, SUGGESTED_LABEL, TIER_LABELS
 
 
 HERE = Path(__file__).resolve().parent.parent       # the repo root (the engine modules)
@@ -66,8 +66,17 @@ def label_for(album):
     # proven says so ("Ready · Partial")
     tier = (album.get("identification") or {}).get("tier")
     if st not in ("unresolved", "excluded", "skipped") and tier in TIER_LABELS:
-        word = f"{word} · {tr(TIER_LABELS[tier])}"
+        # (TIE-1: a pressing a tie-break proposed says so: "Ready · Album known · pressing suggested")
+        known = tier == "album_only" and suggested_pressing(album)
+        word = f"{word} · {tr(SUGGESTED_LABEL if known else TIER_LABELS[tier])}"
     return sym, word
+
+
+def suggested_pressing(album) -> dict:
+    """TIE-1: the pressing a tie-break proposed for the album (the plan's identification
+    "suggested": its "ref", "id", "url", "by", "others" ...), or {} when there is none."""
+    sg = ((album or {}).get("identification") or {}).get("suggested") or {}
+    return sg if isinstance(sg, dict) and sg.get("ref") else {}
 
 
 # the order a summary lists statuses in: what can be applied first, then what needs a look
@@ -222,6 +231,36 @@ def profile_names():
 
 def load_profile(name):
     return pf.default() if name == "default" else pf.load(name)
+
+
+_COLOURS: dict = {}                     # profile name -> its colour (PROFILE_TINTS' name, "#RRGGBB" or "")
+# a profile with no colour of its own: one by its name (the person's choice, 2026-11-17), never
+# written into the profile; Preferences › Profiles › Colour sets one (or None)
+NAME_COLOURS = (("lossyless", "green"), ("extreme", "orange"))
+
+
+def default_colour(name) -> str:
+    low = str(name or "").lower()
+    return next((c for word, c in NAME_COLOURS if word in low), "")
+
+
+def profile_colour(name) -> str:
+    """The colour profile NAME's rows are tinted with: its own ("colour"; "none" for none), else
+    the one its name gives (default_colour). Read once per name until forget_profile_colours()."""
+    if not name:
+        return ""
+    if name not in _COLOURS:
+        try:
+            own = (pf.raw_file(name) if name != "default" else {}).get("colour")
+        except Exception:
+            own = None
+        own = str(own).strip() if isinstance(own, str) else ""
+        _COLOURS[name] = "" if own == "none" else own or default_colour(name)
+    return _COLOURS[name]
+
+
+def forget_profile_colours():
+    _COLOURS.clear()
 
 
 def open_folder(path):

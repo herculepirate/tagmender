@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QCompleter, QDialog
 
 from . import icons, sheets, style
 from .common import (album_words, label_for, left_header, music_paths, plural, planmod, popup_menu, reasons,
-                     reduced_motion, say)
+                     reduced_motion, say, suggested_pressing)
 from .i18n import N_, tr
 from .tagnames import NAMES
 from .tagnames import display as tag_name
@@ -980,7 +980,17 @@ class EvidenceView(QScrollArea):
             sec.addWidget(v)
             lay.addLayout(sec)
             self.fields[key], self.heads[key] = v, h
-        lay.addSpacing(16)
+        # TIE-1: an album known whose pressing a tie-break proposed: confirm it here (the window
+        # connects it to Album > Use Suggested Pressing); shown only for such an album
+        lay.addSpacing(8)
+        self.suggest = QToolButton()
+        self.suggest.setProperty("role", "tool")
+        self.suggest.setText(tr("Use Suggested Pressing"))
+        self.suggest.setAccessibleName(tr("Use Suggested Pressing"))
+        self.suggest.setFocusPolicy(Qt.StrongFocus)
+        self.suggest.hide()
+        lay.addWidget(self.suggest)
+        lay.addSpacing(8)
         self.more = QToolButton()
         self.more.setProperty("role", "tool")
         self.more.setText(tr("Full preview text"))
@@ -1049,6 +1059,12 @@ class EvidenceView(QScrollArea):
             doubts.insert(0, tr("{0} by the rule “{1}”.").format(a.get('label') or tr('Ignored'),
                                                                  a['rule'].get('name', '')))
         self.set("Doubts", "\n".join(f"• {x}" for x in doubts) or tr("None"))
+        from .search import can_use_suggested
+        sg = suggested_pressing(a) if can_use_suggested(a) else {}
+        self.suggest.setVisible(bool(sg))
+        if sg:
+            self.suggest.setToolTip(tr("Tag this album with the suggested pressing, {ref} ({by})")
+                                    .format(ref=sg.get("ref"), by=sg.get("by") or ""))
         pv = ident.get("provenance") or {}
         by = {}
         for fld, src in pv.items():
@@ -1063,6 +1079,10 @@ class EvidenceView(QScrollArea):
             (tr("Reason codes: ") + ", ".join(codes)) if codes else ""])) or tr("None"))
 
     def show_row(self, row):
+        ref = reasons.suggested_ref(row.get("reason"))         # (TIE-1: its TAGMENDER_REASON names one)
+        self.suggest.setVisible(bool(ref))
+        if ref:
+            self.suggest.setToolTip(tr("Tag this album with the suggested pressing, {ref}").format(ref=ref))
         self.set("Score", tr("Not identified: marked Unresolved by an earlier run"))
         self.set("Source", "")
         self.set("What matched", "")
@@ -1382,6 +1402,22 @@ class Inspector(QDockWidget):
             e["tags"].pop(field_, None)
             for ft in e["file_tags"].values():
                 ft.pop(field_, None)
+        e["file_tags"] = {k: v for k, v in e["file_tags"].items() if v}
+        self._drop_if_empty(album)
+        self.reapply(album)
+
+    def clear_tag_files(self, field_, files, album=None):
+        """Your edit of a tag dropped for several files of the album (a disc, a folder: the preview's
+        Tags pane), in one step (one Undo Edit puts it back)."""
+        album = album or self.album
+        e = self.edit_of(album) if self.can_edit(album) else None
+        if e is None or not files:
+            return
+        self.remember()
+        for f in files:
+            (e["file_tags"].get(f) or {}).pop(field_, None)
+        if len(files) == len(e.get("files") or []) or set(files) >= set(e.get("files") or []):
+            e["tags"].pop(field_, None)
         e["file_tags"] = {k: v for k, v in e["file_tags"].items() if v}
         self._drop_if_empty(album)
         self.reapply(album)

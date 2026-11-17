@@ -72,6 +72,19 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys, settin
       from the files on disk; undo is resumable and leaves files edited after the job alone.
 11. **beets not used at runtime**: it would be a second library database writing the same files.
     Its documentation informed the template and plugin-free design only.
+12. **A library is read in pieces, and read again rather than remembered** (0.8.69). On a network
+    share reading a file's tags costs tens of milliseconds, so:
+    - PRF-2: the files' tags are remembered for the app's session (`exclusions.meta_memo`) while
+      their size, times and inode are unchanged, for a working day at most (an edit that keeps
+      every stamp, on FAT/exFAT or by a tagger told to keep the modification time, is seen the
+      next day); a pass forgets only what is gone from the folders it read whole.
+    - PRF-3: `albums_in` reads a folder tree unit by unit (`engine._scan_units`): a folder whose
+      grouping cannot reach its siblings or its parent is split, each sub-folder grouped as soon
+      as it is read, exactly as the whole tree is (`_albums_whole`, compared in the tests).
+      List first shows each album as it comes (`Engine.listing(on_album=...)`), and folders
+      dropped together are read alone, not their common parent (`within`).
+    - PRF-4: a look-up reads again only the folders holding its albums (`_albums_of_keys`), never
+      a listing's copy, so a folder changed since is read as it now is.
 
 ## Research consulted (2026-10-24)
 

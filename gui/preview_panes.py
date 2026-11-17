@@ -588,7 +588,7 @@ def album_root(a) -> str:
     if all(s.startswith(base) for s in srcs):
         return root
     try:
-        return os.path.commonpath([root] + [str(Path(s).parent) for s in srcs])
+        return os.path.commonpath([root] + [os.path.dirname(s) or "." for s in srcs])
     except ValueError:
         return root
 
@@ -1281,7 +1281,7 @@ class PreviewPanes(QWidget):
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(0)
         self._refresh_timer.timeout.connect(self._refresh_changed)
-        self._changed = []
+        self._changed = {}                               # id(album) -> album, refreshed together
         # (the reads stop when the panes go: the handler holds the workers' list, not the panes)
         self._workers = []
         workers = self._workers
@@ -1388,26 +1388,30 @@ class PreviewPanes(QWidget):
 
     def album_changed(self, album):
         """ALBUM's entry changed (your edit, its look-up): its rows made again, when next shown."""
-        self._changed.append(album)
+        self._changed[id(album)] = album
         self._refresh_timer.start()
 
     def _refresh_changed(self):
-        changed, self._changed = self._changed, []
+        changed, self._changed = self._changed, {}
         if not changed:
             return
-        ids = {id(a) for a in changed}
+        ids = set(changed)
         self._quiet = True
         try:
-            for a in changed:
+            for a in changed.values():
                 forget(a)
-            for n in self.album_model.top.kids:
-                if id(n.album) in ids:
-                    self.album_model.reset_kids(n)
-                    self.album_model.dataChanged.emit(self.album_model.index_of(n, 0), self.album_model.index_of(n, 2))
-            for n in self.folders.top.kids:
-                if any(id(a) in ids for a in n.data["albums"]):
-                    self.folders.reset_kids(n)
-                    self.folders.dataChanged.emit(self.folders.index_of(n, 0), self.folders.index_of(n, 1))
+            # (each model's changed top rows told in one signal: every row of a list of thousands
+            # changes at once when their states are shown again)
+            for model, last in ((self.album_model, 2), (self.folders, 1)):
+                lo = hi = None
+                for n in model.top.kids:
+                    if id(n.album) in ids if model is self.album_model else \
+                            any(id(a) in ids for a in n.data["albums"]):
+                        model.reset_kids(n)
+                        lo = n.row if lo is None else min(lo, n.row)
+                        hi = n.row if hi is None else max(hi, n.row)
+                if lo is not None:
+                    model.dataChanged.emit(model.index(lo, 0), model.index(hi, last))
         finally:
             self._quiet = False
         if self.scope and id(self.scope[0]) in ids:

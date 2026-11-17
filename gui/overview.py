@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer, QUrl
+from PySide6.QtCore import QSize, QSortFilterProxyModel, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QSplitter, QStackedWidget, QStyledItemDelegate, QTableView, QVBoxLayout,
@@ -21,7 +21,11 @@ from .work import start
 from .models import PlanModel, can_apply
 from .widgets import ElidedPath as _Elided, SleeveDrop
 
-FIT_ROWS = 250                                        # the rows a column's width is fitted to (the list's)
+FIT_ROWS = 100                                        # the rows a column's width is fitted to (the list's)
+FIT_DELAY = 500                                       # ms: the columns are fitted at most this often ...
+FIT_QUICK = 60                                        # ... when the list has more rows than this (else at once)
+FIT_SOON = 60                                         # ms: the list's room changed (a resize, a column shown)
+STREAM_MS = 100                                       # ms: albums read meanwhile are put in the list this often
 PANES_PREF = "preview_panes"                          # gui.json: the panes' state (gui/preview_panes.py)
 APPLY_LISTED = 5                                     # albums named in the Apply sheet (then "and N more")
 
@@ -274,19 +278,28 @@ class ProfileDelegate(QStyledItemDelegate):
         painter.drawText(r, int(Qt.AlignRight | Qt.AlignVCenter), "▾")
         painter.restore()
 
+    def names(self) -> list:
+        """The profiles' names, read once and kept until refresh() (the Overview calls it when
+        the profiles change): a list of thousands of albums asked for them once per row."""
+        if getattr(self, "_names", None) is None:
+            self._names = list(profile_names())
+        return self._names
+
+    def refresh(self):
+        self._names, self._widest = None, None
+
     def sizeHint(self, option, index):
-        hint = super().sizeHint(option, index)
         page = self.parent()
-        # (the same words in every row: measured once a second at most - a list of thousands of
-        # albums read the profiles folder once per row to fit this column)
-        now, above = time.monotonic(), page.profile.currentText()
+        # (the same words in every row: measured once per profile chosen above and font, the
+        # cell's own size with them; each row's text is one of those words)
+        above, font = page.profile.currentText(), option.font.key()
         memo = getattr(self, "_widest", None)
-        if memo is None or memo[1] != above or now - memo[0] > 1.0 or memo[3] is not option.fontMetrics:
-            words = [tr("As Above ({0})").format(above)] + list(profile_names())
-            memo = self._widest = (now, above, max(option.fontMetrics.horizontalAdvance(w) for w in words),
-                                   option.fontMetrics)
-        hint.setWidth(max(hint.width(), memo[2] + 40) + self.ARROW)
-        return hint
+        if memo is None or memo[0] != above or memo[1] != font:
+            hint = super().sizeHint(option, index)
+            words = [tr("As Above ({0})").format(above)] + self.names()
+            widest = max(option.fontMetrics.horizontalAdvance(w) for w in words)
+            memo = self._widest = (above, font, QSize(max(hint.width(), widest + 40) + self.ARROW, hint.height()))
+        return QSize(memo[2])
 
     def createEditor(self, parent, option, index):
         from .rows import Popup
@@ -294,7 +307,8 @@ class ProfileDelegate(QStyledItemDelegate):
         box.setAccessibleName(tr("Profile for this album"))
         page = self.parent()
         box.addItem(tr("As Above ({0})").format(page.profile.currentText()), "")
-        for name in profile_names():
+        self.refresh()                                     # (opened: the profiles as they are now)
+        for name in self.names():
             box.addItem(name, name)
         box.activated.connect(lambda _i, b=box: (self.commitData.emit(b), self.closeEditor.emit(b)))
         return box
@@ -523,7 +537,8 @@ class Overview(QWidget):
         self.model.profile_of = lambda a: (self.profile_of(a), bool(self.own_profile(a)))
         self.model.choose_profile = self.set_album_profile
         self.model.state_of = self.state_of
-        self.table.setItemDelegateForColumn(PlanModel.PROFILE, ProfileDelegate(self))
+        self.profile_delegate = ProfileDelegate(self)
+        self.table.setItemDelegateForColumn(PlanModel.PROFILE, self.profile_delegate)
         self.table.setEditTriggers(QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
         self.table.clicked.connect(self.profile_clicked)
         self.table.setSortingEnabled(True)
@@ -550,12 +565,16 @@ class Overview(QWidget):
         h.sectionResized.connect(self.column_resized)
         h.viewport().installEventFilter(self)             # (a drag is yours only when it starts on the header)
         self.table.viewport().installEventFilter(self)    # (the list narrower or wider: fitted to the room)
+        # (fitted when rows come or go and when a look-up or listing ends - not as each row's
+        # data changes - and at most every FIT_DELAY ms: measuring the columns of a list of
+        # thousands of albums on each change held the UI thread up for seconds)
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(0)
         self._fit_timer.timeout.connect(self.fit_columns)
+        for sig in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved):
+            sig.connect(lambda *_: self.request_fit())
         for sig in (self.model.modelReset, self.model.rowsInserted, self.model.dataChanged):
-            sig.connect(lambda *_: self._fit_timer.start())
             sig.connect(lambda *_: self.clear_done_btn.setEnabled(any(a.get("status") == "done"
                                                                       for a in self.model.albums)))
         h.moveSection(PlanModel.PROFILE, 2)               # (an album's profile: next to its name, in view)
@@ -675,7 +694,7 @@ class Overview(QWidget):
             if self.table.isColumnHidden(c) != hide:
                 self.table.setColumnHidden(c, hide)
                 if not hide and hasattr(self, "_fit_timer"):
-                    self._fit_timer.start()           # (shown again: fitted to its text)
+                    self.request_fit(FIT_SOON)        # (shown again: fitted to its text)
         self.fit_status()
 
     COLUMN_MOST = {1: 340, 4: 260, 2: 300, 7: 300}       # (fitted, at most: drag for more)
@@ -712,7 +731,7 @@ class Overview(QWidget):
             if self.list_key(e):
                 return True
         if hasattr(self, "_fit_timer") and obj is self.table.viewport() and e.type() == QEvent.Resize:
-            self._fit_timer.start()
+            self.request_fit(FIT_SOON)
         elif hasattr(self, "table") and obj is self.table.horizontalHeader().viewport():
             if e.type() == QEvent.MouseButtonPress and e.button() == Qt.LeftButton:
                 self._header_held = True
@@ -735,6 +754,17 @@ class Overview(QWidget):
         if self._fitting or not self._header_held or not old or not new or c == self.last_visible_column():
             return
         self._sized_by_you.add(c)
+
+    def request_fit(self, delay=None):
+        """fit_columns, soon: DELAY ms from now (None: FIT_DELAY, or at once for a short list,
+        whose columns cost little to measure). A fit already due sooner is left as it is: a
+        stream of rows is fitted every FIT_DELAY ms, not put off until it stops."""
+        if delay is None:
+            delay = FIT_DELAY if self.model.rowCount() > FIT_QUICK else 0
+        t = self._fit_timer
+        if t.isActive() and t.remainingTime() <= delay:
+            return
+        t.start(delay)
 
     def fit_columns(self):
         """Each column not sized by you: as wide as its text, up to COLUMN_MOST (Why: the rest)."""
@@ -891,6 +921,8 @@ class Overview(QWidget):
         self.win.update_album_actions()
 
     def refresh_profiles(self):
+        if hasattr(self, "profile_delegate"):
+            self.profile_delegate.refresh()                # (its column: the profiles' names now)
         cur = self.profile.currentText() or self.starting_profile()
         self._filling = True                          # (filling the list is no choice of yours)
         try:
@@ -949,8 +981,10 @@ class Overview(QWidget):
             if self.states:                                   # (done: each row says what it is)
                 self.states = {}
                 self.model.refresh_rows()
-        if hasattr(self, "proxy"):
-            # (while work runs the rows keep their places: a row is not moved as its state changes)
+        if hasattr(self, "proxy") and self.proxy.dynamicSortFilter() != (not on):
+            # (while work runs the rows keep their places: a row is not moved as its state changes.
+            # Only when it changes: switched on, the proxy sorts every row again, and this is
+            # called on each selection)
             self.proxy.setDynamicSortFilter(not on)
         self.choose_btn.setEnabled(not on)
         self.drop.setEnabled(not on)
@@ -1326,8 +1360,11 @@ class Overview(QWidget):
     # ---- a profile per album ----------------------------------------------------------------
     @staticmethod
     def album_key(a) -> str:
+        k = a.get("key")
+        if k:                                               # (no import asked first: called per row, often)
+            return k
         import engine
-        return a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])
+        return engine.group_key(a["source_dir"], a.get("album_files") or [])
 
     def profile_of(self, a) -> str:
         """The profile this album is looked up and applied with: its own, or the one above."""
@@ -1867,7 +1904,7 @@ class Overview(QWidget):
                 self.queue[k] = (mode, ag or bool(was and was[1]))
         self.looking = {}
         self.show_profile_column()
-        self.fit_status()
+        self.request_fit()                                 # (the rows' words now: fitted once)
         self.check_stale()
         self.table.sortByColumn(0, Qt.AscendingOrder)
         self.show_counts()
@@ -2121,18 +2158,36 @@ class Overview(QWidget):
         self.plan = plan
         self.views.setCurrentWidget(self.results)
         self.win.place_inspector()
-        self.model.set_plan(plan)
+        self.set_sorted_plan(plan)
         self.show_profile_column()
-        self.fit_status()
-        self.table.sortByColumn(0, Qt.AscendingOrder)
         self.show_counts()
         self.refresh_overrides()
         self.busy(False)
         self.service_status(force=True)
         notify(self.win, "finished", tr("Preview finished"), counts_by_label(plan["albums"]))
-        if self.proxy.rowCount():
-            self.show_row(0)
+        self.request_fit()                                 # (fitted once it is shown, not before)
+        self.show_first_soon(plan)
         self.win.refresh_attention_badge(self.path)
+
+    def set_sorted_plan(self, plan):
+        """PLAN in the list, sorted by Status, and the rows' order kept up to date from now on
+        (as busy(False) would): sorted once. (The proxy sorts every row each time its sorting is
+        asked for or switched on: a preview of thousands of albums was sorted three times.)"""
+        p = self.proxy
+        if p.sortColumn() != 0 or p.sortOrder() != Qt.AscendingOrder or not p.dynamicSortFilter():
+            self.model.set_plan(None)                      # (sorted with no rows: costs nothing)
+            p.setDynamicSortFilter(True)
+            self.table.sortByColumn(0, Qt.AscendingOrder)
+        self.model.set_plan(plan)
+
+    def show_first_soon(self, plan):
+        """The first row shown in the inspector once the list is on screen (its own turn of the
+        event loop: the list of a big preview appears first), unless a row was chosen meanwhile
+        or the list changed."""
+        def first():
+            if self.plan is plan and self.proxy.rowCount() and not self.table.selectionModel().hasSelection():
+                self.show_row(0)
+        QTimer.singleShot(0, self, first)
 
     def show_counts(self):
         plan = self.plan or {"albums": []}
@@ -2169,6 +2224,7 @@ class Overview(QWidget):
             if a is album:
                 self.model.dataChanged.emit(self.model.index(r, 0),
                                             self.model.index(r, self.model.columnCount() - 1))
+        self.request_fit()
         self.show_counts()
         self.win.update_album_actions()
 

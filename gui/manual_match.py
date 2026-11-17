@@ -405,22 +405,30 @@ def can_match(album) -> bool:
 # --------------------------------------------------------------------------
 # the main window's drop: add folders and files not in the preview yet
 # --------------------------------------------------------------------------
-def _inside(path, root) -> bool:
-    p, r = os.path.realpath(str(path)), os.path.realpath(str(root))
-    return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
-
-
 def new_paths(page, paths) -> tuple[list, list]:
     """(the dropped paths the preview does not hold yet, the ones it does). A path is held when
     it is a file of an album listed, a folder holding one, or inside the folder previewed;
     but not the folder of an album taken out of the list (Remove from List): dropped again, it is
-    listed again."""
+    listed again. (Each folder is resolved once, not each file: a list of thousands of albums
+    resolved every file's path on each drop.)"""
     root = getattr(page, "path", None)
-    removed = set(getattr(page, "removed", None) or ())
     plan = getattr(page, "plan", None) or {}
-    held = {os.path.realpath(f) for a in plan.get("albums") or []
+    real_dirs = {}
+
+    def real(f):
+        d, name = os.path.split(str(f))
+        r = real_dirs.get(d)
+        if r is None:
+            r = real_dirs[d] = os.path.realpath(d or ".")
+        return os.path.join(r, name)
+    held = {real(f) for a in plan.get("albums") or []
             for f in [fe.get("src") for fe in a.get("files") or []] + list(a.get("album_files") or []) if f}
     folders = {os.path.dirname(f) for f in held}
+    removed = {os.path.realpath(str(d)) for d in getattr(page, "removed", None) or ()}
+    top = os.path.realpath(str(root)) if root else ""
+
+    def within(p, r):                                   # (both resolved already)
+        return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
     new, present, seen = [], [], set()
     for p in paths or []:
         rp = os.path.realpath(str(p))
@@ -428,8 +436,8 @@ def new_paths(page, paths) -> tuple[list, list]:
             continue
         seen.add(rp)
         # (inside the folder previewed: held, unless an album of it was taken out of the list)
-        inside = rp in held or any(_inside(d, rp) for d in folders) or (
-            bool(root) and _inside(rp, root) and not any(_inside(d, rp) or _inside(rp, d) for d in removed))
+        inside = rp in held or any(within(d, rp) for d in folders) or (
+            bool(top) and within(rp, top) and not any(within(d, rp) or within(rp, d) for d in removed))
         (present if inside else new).append(str(p))
     return new, present
 

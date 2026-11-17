@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 
-from .common import album_words, label_for, plural, reasons
+from .common import album_words, label_for, planmod, plural, reasons
 from .i18n import N_, tr
 from .style import status_color, status_icon
 
@@ -152,8 +152,9 @@ def score_band(a):
 
 
 def can_apply(a) -> bool:
-    """The album has changes Apply would make (ready, or Unresolved with its notes)."""
-    import plan as planmod
+    """The album has changes Apply would make (ready, or Unresolved with its notes). (plan is
+    imported once, above: an import here, asked of every row many times a second, went through
+    the Qt bindings' import hook each time)"""
     return a["status"] in ("ready", "unresolved") and planmod.has_work(a)
 
 
@@ -201,7 +202,6 @@ class PlanModel(QAbstractTableModel):
     @classmethod
     def left_out(cls, a) -> bool:
         """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it)."""
-        import plan as planmod
         return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
 
     def set_left_out(self, albums, out):
@@ -259,6 +259,8 @@ class PlanModel(QAbstractTableModel):
     def data(self, idx, role=Qt.DisplayRole):
         a = self.albums[idx.row()]
         c = idx.column()
+        if c == 0 and role == R_DISPLAY:                   # (first: what the list is sorted by)
+            return (self.state_of(a) if self.state_of else "") or label_for(a)[1]
         ident = a["identification"]
         now = self.state_of(a) if self.state_of and c == 0 and role in (
             R_DISPLAY, R_TOOLTIP, R_ACCESSIBLETEXT) else ""

@@ -34,14 +34,18 @@ LIGHT = {"window": "#F6F7F9", "base": "#FFFFFF", "alt": "#F2F4F7", "sidebar": "#
          "ignored": "#5D6B7A", "error": "#B3261E", "raised": "#FFFFFF", "disabled": "#9AA4AF",
          "selection": "#1D7F3F", "on_selection": "#FFFFFF", "focus_ring": "#FFFFFF",
          "brand_green": "rgba(48,209,88,0.55)", "brand_red": "rgba(255,59,48,0.45)",
-         "field": "#858F9B"}        # field: a control's own edge (buttons, fields, pop-ups): 3:1 at least
+         "field": "#858F9B",        # field: a control's own edge (buttons, fields, pop-ups): 3:1 at least
+         # the preview's tag changes (gui/preview_panes.py): the part of a value that is new (blue)
+         # and the part it replaces (orange, struck through); each ink on its wash 4.5:1 at least
+         "diff_new_bg": "#D6E6FB", "diff_new_ink": "#0B3A75", "diff_old_bg": "#FBDCC6", "diff_old_ink": "#7A2E0E"}
 DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1C222A", "ink": "#E6EAF0",
         "muted": "#9AA5B1", "faint": "#4A535E", "separator": "rgba(255,255,255,0.10)", "line": "#323943",
         "accent": "#4CC777", "on_accent": "#0B2014", "identified": "#6CC08E", "attention": "#E3B25C",
         "ignored": "#9AA5B1", "error": "#F08A80", "raised": "#262B32", "disabled": "#6B7480",
         "selection": "#1F6B3C", "on_selection": "#FFFFFF", "focus_ring": "#0B2014",
         "brand_green": "rgba(48,209,88,0.70)", "brand_red": "rgba(255,69,58,0.60)",
-        "field": "#6E7782"}
+        "field": "#6E7782",
+        "diff_new_bg": "#1E3A5F", "diff_new_ink": "#D6E6FB", "diff_old_bg": "#4F2A16", "diff_old_ink": "#FBDCC6"}
 
 # status -> (symbol, word, light colour, dark colour, icon)
 STATUS = {

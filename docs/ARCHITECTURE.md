@@ -79,11 +79,21 @@ State lives in XDG folders: `~/.config/tagmender` (profiles, rules, keys, settin
       every stamp, on FAT/exFAT or by a tagger told to keep the modification time, is seen the
       next day); a pass forgets only what is gone from the folders it read whole. Each entry is
       kept compressed, about 1 KB a file: ~90 MB for 90,000 files, ~500 MB at the 500,000 cap.
-    - PRF-3: `albums_in` reads a folder tree unit by unit (`engine._scan_units`): a folder whose
-      grouping cannot reach its siblings or its parent is split, each sub-folder grouped as soon
-      as it is read, exactly as the whole tree is (`_albums_whole`, compared in the tests).
-      List first shows each album as it comes (`Engine.listing(on_album=...)`), and folders
-      dropped together are read alone, not their common parent (`within`).
+      A picture among the tags (an APEv2 cover, an ID3 APIC, an MP4 covr, a Vorbis
+      METADATA_BLOCK_PICTURE) is read as "[binary data (N bytes)]", never written out as text:
+      written out, it made the file too large to remember, and such tracks were opened again on
+      every pass.
+    - PRF-3: `albums_in` reads a folder tree piece by piece (`engine._scan_from`). For each folder
+      only what can reach past one of its sub-folders is read together: its own tracks and the
+      sub-folders that may be its discs or versions (its core), discs of one set filed side by
+      side, an album and its deluxe folder. A folder is one piece with everything below it only
+      when its name says box, volumes, twofer or disc range, when its core is one tagged album
+      (an album below tagged alike would join it), or when it has no tracks and two or more
+      numbered sub-folders (a set by its release, DSC-10, not bounded). Each album comes out as
+      soon as nothing read later can come before it, exactly as the whole tree is grouped
+      (`_albums_whole`, compared in the tests). List first shows each album as it comes
+      (`Engine.listing(on_album=...)`); folders dropped together are read with only what can
+      change their albums (`within`: the folders on the way down are listed and their cores read).
     - PRF-4: a look-up reads again only the folders holding its albums (`_albums_of_keys`), never
       a listing's copy, so a folder changed since is read as it now is.
 

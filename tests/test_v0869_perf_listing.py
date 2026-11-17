@@ -2,7 +2,7 @@
 # - PRF-2: the remembered tags (exclusions.meta_memo's long-lived store) hold a whole library,
 #   are trusted while a file's stamps are unchanged (a long age bound only), are dropped per
 #   pass of their own folders, and are kept compressed;
-# - PRF-3: a scan is read unit by unit (engine._scan_units): albums_in's albums are exactly the
+# - PRF-3: a scan is read piece by piece (engine._scan_from): albums_in's albums are exactly the
 #   whole scan's, in its order, on layouts whose grouping reaches siblings and parents (disc
 #   folders, version folders, SACD layer copies, boxes, twofers, volume sets, disc ranges,
 #   sets filed side by side, numbered sets, deluxe folders, nested bonus folders, loose tracks);
@@ -224,18 +224,106 @@ class UnitsAreTheWholeScan(Base):
                 whole = [sig(g) for g in engine._albums_whole(self.e, self.tmp / "turk")]
                 self.assertEqual([sig(g) for g in self.e.albums_in(self.tmp / "turk")], whole)
                 self.assertEqual([len(g[1]) for g in whole], [3])
-                self.assertFalse(engine._splits(top.parent, [main, deluxe], [], [main, deluxe]))
+                got = engine._Scan(self.e).listed(top.parent)
+                plan = engine._plan_folder(self.e, top.parent, engine._Scan(self.e), top.parent, got)
+                self.assertEqual(plan[2], [(main, [main, deluxe])] if main < deluxe else [(deluxe, [deluxe, main])])
                 shutil.rmtree(top.parent)
 
-    def test_split_rules(self):
-        S = engine._splits
-        p = self.lib
-        self.assertTrue(S(p / "Artist", ["1977 - One", "1983 - Two"], [], ["1977 - One", "1983 - Two"]))
-        self.assertFalse(S(p / "Artist", ["One"], [p / "Artist" / "x.flac"], ["One", "x.flac"]))   # own tracks
-        for name in ("Box (3CD)", "Vol. 1-2", "One & Two", "CD02-03 Outtakes"):
-            self.assertFalse(S(p / name, ["a"], [], ["a"]), name)
-        for kids in (["CD1"], ["5.1"], ["01. A", "02. B"], ["Set CD1", "Set CD2"], ["X", "X (Deluxe Edition)"]):
-            self.assertFalse(S(p / "Artist", kids, [], kids), kids)
+    def test_folder_plans(self):
+        sc, p = engine._Scan(self.e), self.lib
+
+        def plan(d):
+            return engine._plan_folder(self.e, p, sc, d, sc.listed(d))
+        self.assertEqual([ms for _f, ms in plan(p / "A Band")[2]],
+                         [["1977 - The Stranger"], ["1983 - An Innocent Man"], ["1992 - The Stranger & An Innocent Man"]])
+        self.assertIsNone(plan(p / "C Band" / "Big Box (3CD)"))                      # (its name: a box)
+        self.assertIsNone(plan(p / "D Band" / "Some Set"))                           # (numbered: DSC-10)
+        self.assertIsNone(plan(p / "D Band" / "Live"))                               # (a bonus tagged as it)
+        self.assertIsNone(plan(p / "B Band"))                    # (Loose.flac, one album: may take one below)
+        e = plan(p / "E Band")
+        self.assertEqual(e[1], set())
+        d = plan(p / "D Band")
+        self.assertIn(["The Heretics", "The Heretics (Deluxe Edition)"], [ms for _f, ms in d[2]])
+
+
+# ---- PRF-3: a folder in the shape of an inbox ------------------------------------------------
+def build_inbox(top: Path):
+    """Loose tracks at the top, numbered category folders full of albums, sets that really are
+    one (DSC-10), deluxe and DSC-1 pairs inside a numbered folder, a disc folder at the top."""
+    track(top / "loose a.flac", album="Stray One", albumartist="S1", title="a", tracknumber=1)
+    track(top / "loose b.flac", album="Stray Two", albumartist="S2", title="b", tracknumber=1)
+    track(top / "loose c.mp3.flac")
+    for cat in ("1.lossless", "3.ambient", "4.new music"):
+        for i in range(4):
+            album(top / cat / f"{cat[2:]} Band {i} - Album {i}", f"{cat} Band {i}", f"Album {i}")
+    new = top / "4.new music"
+    album(new / "Twin CD1", "Twin Band", "Twin", n=1, discnumber=1)                # DSC-1 pair
+    album(new / "Twin CD2", "Twin Band", "Twin", n=1, discnumber=2)
+    album(new / "Heretics", "H Band", "Heretics", n=2, tracktotal=3)               # deluxe pair
+    album(new / "Heretics (Deluxe)", "H Band", "Heretics", n=1, start=3, tracktotal=3)
+    sset = new / "Opus Collection"                                                 # DSC-10, a set
+    album(sset / "01. First Part", "Opus Band", "First Part")
+    album(sset / "02. Second Part", "Opus Band", "Second Part")
+    album(top / "5.sets" / "Grand (2CD)" / "01. One", "Grand Band", "Grand One", n=1, discnumber=1, totaldiscs=2)
+    album(top / "5.sets" / "Grand (2CD)" / "02. Two", "Grand Band", "Grand Two", n=1, discnumber=2, totaldiscs=2)
+    album(top / "6.numbered" / "01. Left", "N Band", "Left")                      # (numbered, no tracks of its own)
+    album(top / "6.numbered" / "02. Right", "N Band", "Right")
+    album(top / "Plain Album", "P Band", "Plain")
+    album(top / "Plain Album (Deluxe)", "P Band", "Plain", n=1, start=3)
+    album(top / "CD2", "Q Band", "Q", n=1, discnumber=2)                           # (a disc folder of the top)
+    track(top / "Tagged As Top" / "x.flac", album="Stray One", albumartist="S1", title="x", tracknumber=2)
+
+
+class InboxShape(Base):
+    def setUp(self):
+        super().setUp()
+        self.inbox = self.tmp / "inbox"
+        build_inbox(self.inbox)
+
+    def test_albums_in_is_the_whole_scan(self):
+        for top in (self.inbox, self.inbox / "4.new music", self.inbox / "5.sets", self.inbox / "6.numbered"):
+            with self.subTest(top=top.name):
+                self.assertEqual([sig(g) for g in self.e.albums_in(top)],
+                                 [sig(g) for g in engine._albums_whole(self.e, top)])
+        sets = [g for g in engine._albums_whole(self.e, self.inbox) if g.set_shape]
+        self.assertTrue(sets)                                                       # (a DSC-10 set formed)
+
+    def test_a_top_whose_tracks_are_one_album_is_one_piece_and_the_same(self):
+        for f in self.inbox.glob("loose*.flac"):
+            f.unlink()
+        shutil.rmtree(self.inbox / "CD2")
+        track(self.inbox / "only.flac", album="Stray One", albumartist="S1", title="o", tracknumber=3)
+        self.assertEqual([sig(g) for g in self.e.albums_in(self.inbox)],
+                         [sig(g) for g in engine._albums_whole(self.e, self.inbox)])
+        self.assertEqual(len(next(g for g in self.e.albums_in(self.inbox) if g.folder == self.inbox).files), 2)
+
+    def test_within_every_folder(self):
+        full = self.e.listing(self.inbox)["albums"]
+        self.assertEqual(full, old_listing(self.e, self.inbox))
+        for w in self.folders(self.inbox):
+            with self.subTest(within=str(w.relative_to(self.inbox))):
+                self.assertEqual(self.e.listing(self.inbox, within=[w])["albums"], old_listing(self.e, self.inbox, [w]))
+        ws = [self.inbox / "1.lossless", self.inbox / "4.new music" / "Twin CD2", self.inbox / "Plain Album"]
+        self.assertEqual(self.e.listing(self.inbox, within=ws)["albums"], old_listing(self.e, self.inbox, ws))
+
+    def test_a_dropped_album_reads_only_what_can_change_it(self):
+        w = self.inbox / "3.ambient" / "ambient Band 2 - Album 2"
+        r = Reads()
+        with r.patch():
+            got = self.e.listing(self.inbox, within=[w])["albums"]
+        self.assertEqual([a["source_dir"] for a in got], [str(w)])
+        loose = {str(f) for f in self.inbox.iterdir() if f.is_file()}
+        disc = {str(f) for f in (self.inbox / "CD2").iterdir()}
+        self.assertEqual(set(r.calls), loose | disc | {str(f) for f in w.iterdir()})   # (the top's core, and it)
+
+    def test_the_first_album_comes_before_the_inbox_is_read(self):
+        log = []
+        with Reads(log).patch():
+            got = self.e.listing(self.inbox, on_album=lambda a: log.append(("album", a["source_dir"])))["albums"]
+        self.assertEqual(got, old_listing(self.e, self.inbox))
+        reads = [i for i, x in enumerate(log) if x[0] == "read"]
+        first = next(i for i, x in enumerate(log) if x[0] == "album")
+        self.assertLess(first, len(reads) // 2, log)
 
 
 # ---- PRF-3: listing streams; within reads only within --------------------------------------------
@@ -488,6 +576,27 @@ class RememberedTags(Base):
         with ex.meta_memo(store, [other]):
             self.e.albums_in(other)
         self.assertEqual(len(store), n + 1)
+
+    def test_a_picture_is_no_text_and_its_track_is_remembered(self):
+        import base64
+        from mutagen.flac import Picture
+        f = track(self.tmp / "pics" / "01.flac", album="Pics", albumartist="P", title="t", tracknumber=1)
+        pic = Picture()
+        pic.type, pic.mime, pic.data = 3, "image/jpeg", os.urandom(200_000)
+        tags = FLAC(f)
+        tags["metadata_block_picture"] = [base64.b64encode(pic.write()).decode()]
+        tags["COVERART"] = [base64.b64encode(os.urandom(90_000)).decode()]
+        tags.save()
+        meta = ex._read_file_meta(f)
+        self.assertRegex(meta["metadata_block_picture"][0], r"^\[binary data \(2000\d\d bytes\)\]$")
+        self.assertEqual(meta["coverart"], ["[binary data (90000 bytes)]"])
+        self.assertEqual(meta["album"], ["Pics"])
+        store, r = {}, Reads()
+        with r.patch():
+            for _ in range(2):
+                with ex.meta_memo(store, True):
+                    self.assertEqual(ex.read_meta(f), meta)
+        self.assertEqual(r.calls, [str(f)])                                           # (opened once)
 
     def test_a_pass_that_failed_drops_nothing(self):
         store = {}

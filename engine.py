@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import heapq
 import logging
 import os
 import queue
@@ -1030,17 +1031,6 @@ def _may_read(profile, folder, path, skip) -> bool:
     return not profile.excluded_path(folder, named=[path])
 
 
-# ---- PRF-3: a scan read unit by unit --------------------------------------------------------
-# albums_in groups the audio folders below a path by what their names and tags say of each
-# other: a disc folder belongs to its parent, a box to the folder naming its CD count, sibling
-# folders may be one set (DSC-1, DSC-10) or an album and its deluxe folder. A folder whose
-# grouping can reach none of its siblings or its parent - _splits: no audio of its own, a name
-# no box, twofer, volume set or range of discs has, and no sub-folder that is a disc or version
-# of it, a disc-range part, one of two numbered siblings, two discs of one set filed apart or an
-# album beside its deluxe folder - is split: each of its sub-folders is a unit of its own,
-# grouped as soon as it has been read, and exactly as the whole scan groups it (_group_unit).
-# Any other folder is one unit with everything below it. A unit's albums are albums_in's, in
-# its order: a unit is one sub-tree, read in order, and its albums' folders lie inside it.
 class _Scan:
     """How albums_in reads one folder tree: the folders it never looks into (skip: real paths,
     the profile's skip_paths too; skips: the profile's Skip These Folders, hidden folders,
@@ -1084,85 +1074,194 @@ class _Scan:
         return None
 
 
-def _splits(d: Path, dirs, audio, names) -> bool:
-    """PRF-3: folder d (its sub-folders looked into DIRS, its audio files AUDIO, every name in it
-    NAMES) groups no album with a sibling or with itself: each sub-folder is a unit of its own."""
-    if audio or box_cd_count(d.name) or ma.named_volume_count(d.name) or _DISC_RANGE.match(d.name) \
-            or _TITLE_JOIN.search(_bare_name(d.name)):
-        return False                                 # (its own tracks; a box, a twofer, volumes: DSC-3/5/6/9)
-    if sum(1 for c in dirs if _LEAD_NUMBER.match(c)) >= 2:
-        return False                                 # (numbered folders: a set by its release, DSC-10)
-    stems = set()
-    for c in dirs:
-        sub = d / c
-        if mc.version_layout(c) or _DISC_RANGE.match(c) or is_disc_dir(sub) or box_part_disc(sub) is not None:
-            return False                             # (a disc or a version of d: d is their album)
-        sd = sibling_disc(sub)
-        if sd is not None:
-            if mc.fold(sd[0]) in stems:
-                return False                         # (two discs of one set filed side by side: DSC-1)
-            stems.add(mc.fold(sd[0]))
-    for n in names:                                  # (an album and its "(Deluxe Edition)" folder)
-        # (the cheap word first; then deluxe_sibling's own match - re.I, never casefold: "İSTANBUL")
-        if "deluxe" in n.casefold() and any(c != n and ma.deluxe_named(c, n) for c in dirs):
-            return False
-    return True
+# ---- PRF-3: a scan read piece by piece ----------------------------------------------------------
+# albums_in groups the audio folders below a path by what their names and tags say of each
+# other (_group_unit). What can reach past one sub-folder of a folder P (with everything above P
+# read the same way):
+#   - P's name: a box naming its CD count (DSC-5), a volume set (DSC-9), a twofer (DSC-6), a disc
+#     range (DSC-3) - P is then one piece with everything below it;
+#   - P's own tracks, and its sub-folders that may be its discs or versions (disc, version, disc-
+#     range, range-part names): they may be P's album - "P's core", read first; and any album
+#     below P whose tags are P's one album is P's too (the folder above an album tagged alike) -
+#     so when P's core is one tagged album (own_key), P is one piece;
+#   - sub-folders named as discs of one set side by side (DSC-1, sibling_disc stems) and an
+#     album beside its "(Deluxe Edition)" folder (match_albums.deluxe_named): read together;
+#   - two or more sub-folders whose names begin with a number, with no tracks in P (DSC-10: a
+#     set by its release needs every audio folder of P - not bounded: P is one piece).
+# Every other sub-folder is a piece of its own, read the same way in turn; its albums are the
+# whole scan's, and come out as soon as no piece read later can hold an album before them.
+_CORE = "\0core"
 
 
-def _scan_units(eng, path: Path, top: Path, sc: _Scan):
-    """PRF-3: the albums below TOP (PATH itself, or a folder of it whose every folder above it,
-    up to PATH, is split), unit by unit, in albums_in's order."""
-    unit, found = None, {}
+def _name_blocks(d: Path) -> bool:
+    """P's name makes P one album of its sub-folders: a box, volumes, a twofer, a disc range."""
+    return bool(box_cd_count(d.name) or ma.named_volume_count(d.name) or _DISC_RANGE.match(d.name)
+                or _TITLE_JOIN.search(_bare_name(d.name)))
+
+
+def _disc_like(d: Path, c: str) -> bool:
+    """Sub-folder C of D may be one of D's discs or versions (its owner D)."""
+    sub = d / c
+    return bool(mc.version_layout(c) or _DISC_RANGE.match(c) or is_disc_dir(sub) or box_part_disc(sub) is not None)
+
+
+def _walk_into(found: dict, top: Path, sc: _Scan) -> None:
     for dirpath, dirs, names in os.walk(top):
-        every = list(dirs) + list(names)
         audio = sc.read(dirpath, dirs, names)
-        if unit is not None:
-            if dirpath.startswith(unit):
-                if audio:
-                    found[Path(dirpath)] = audio
-                continue
-            if found:
-                yield from _group_unit(eng, path, found, sc)
-            unit, found = None, {}
-        d = Path(dirpath)
-        if _splits(d, dirs, audio, every):
+        if audio:
+            found[Path(dirpath)] = audio
+
+
+def _unit_of(eng, path, sc, own, roots) -> list[Group]:
+    """The albums of OWN's tracks (folder, its audio files) and every folder below ROOTS, together."""
+    found = {}
+    if own is not None and own[1]:
+        found[own[0]] = own[1]
+    for r in sorted(roots):
+        _walk_into(found, r, sc)
+    return _group_unit(eng, path, found, sc) if found else []
+
+
+def _plan_folder(eng, path, sc, d: Path, got):
+    """PRF-3: how folder D (its listing GOT) is read. None: as one piece with everything below
+    it. Else (its core's albums, its core sub-folders, [(first sub-folder, [the sub-folders read
+    together])] in order - one alone is planned in turn)."""
+    dirs, audio, _names = got
+    kids = [c for c in dirs if not os.path.islink(os.path.join(d, c))]   # (a linked folder: never walked)
+    if not kids or _name_blocks(d):
+        return None
+    if not audio and sum(1 for c in kids if _LEAD_NUMBER.match(c)) >= 2:
+        return None                                  # (DSC-10 may join them: not bounded)
+    up = {c: c for c in kids}
+    up[_CORE] = _CORE
+
+    def top(c):
+        while up[c] != c:
+            up[c] = up[up[c]]
+            c = up[c]
+        return c
+
+    def join(a, b):
+        a, b = top(a), top(b)
+        if a != b:
+            if b == _CORE:
+                a, b = b, a
+            up[b] = a
+    stems = {}
+    for c in kids:
+        if _disc_like(d, c):
+            join(_CORE, c)
             continue
-        unit, found = os.path.join(dirpath, ""), ({d: audio} if audio else {})
-    if found:
-        yield from _group_unit(eng, path, found, sc)
+        sd = sibling_disc(d / c)
+        if sd is not None:
+            s = mc.fold(sd[0])
+            if s in stems:
+                join(stems[s], c)                    # (DSC-1)
+            else:
+                stems[s] = c
+    for n in kids:                                   # (deluxe_sibling's own match: re.I)
+        if "deluxe" in n.casefold():
+            for c in kids:
+                if c != n and ma.deluxe_named(c, n):
+                    join(c, n)
+    members = {}
+    for c in kids:
+        members.setdefault(top(c), []).append(c)
+    core = members.pop(_CORE, [])
+    core_groups = []
+    if audio or core:
+        keys = {}
+        found = {d: audio} if audio else {}
+        for c in core:
+            _walk_into(found, d / c, sc)
+        core_groups = _group_unit(eng, path, found, sc, keys) if found else []
+        mine = keys.get(d) or set()
+        if len(mine) == 1 and next(iter(mine))[0] == "tags":
+            return None                              # (an album below tagged as D's own is D's)
+    parts = sorted((ms[0], ms) for ms in members.values())
+    return core_groups, set(core), parts
 
 
-def _within_tops(path: Path, within, sc: _Scan) -> list:
-    """PRF-3: the folders to read for the albums inside the folders WITHIN, as a scan of PATH
-    has them: each one itself when every folder above it up to PATH is split, else the unit
-    holding it (the first folder down from PATH that is not split). A folder outside PATH, or
-    one the scan never looks into (skipped, hidden, a linked folder), holds none of its albums."""
+def _scan_from(eng, path, sc, d: Path, got=None):
+    """PRF-3: the albums below D (PATH, or a folder planned on its own), in albums_in's order,
+    each as soon as nothing read later can come before it."""
+    got = got if got is not None else sc.listed(d)
+    if got is None:
+        return
+    with ex.meta_memo():                             # (D's core read once, also when D is one piece)
+        plan = _plan_folder(eng, path, sc, d, got)
+        whole = _unit_of(eng, path, sc, (d, got[1]), [d / c for c in got[0]
+                                                      if not os.path.islink(os.path.join(d, c))]) \
+            if plan is None else None
+    if plan is None:
+        yield from whole
+        return
+    core_groups, _core, parts = plan
+    pending, n = [], 0
+    for g in core_groups:
+        heapq.heappush(pending, (g.folder, n, g))
+        n += 1
+    for first, ms in parts:
+        here = d / first
+        while pending and pending[0][0] < here:
+            yield heapq.heappop(pending)[2]
+        if len(ms) == 1:
+            yield from _scan_from(eng, path, sc, here)
+            continue
+        with ex.meta_memo():
+            gs = _unit_of(eng, path, sc, None, [d / c for c in ms])
+        for g in gs:
+            heapq.heappush(pending, (g.folder, n, g))
+            n += 1
+    while pending:
+        yield heapq.heappop(pending)[2]
+
+
+def _within_pieces(eng, path: Path, within, sc: _Scan):
+    """PRF-3: what to read for the albums inside the folders WITHIN, as a scan of PATH has them:
+    [(kind, folder, sub-folders)] - "all": everything below the folder (one planned on its own,
+    or the piece holding the folder dropped), "core": a folder's core, "unit": sub-folders read
+    together. Only the folders on the way down
+    are listed, and the core of each (its own tracks, its disc folders) read. None: the whole
+    scan (a folder holding PATH). A folder outside PATH or never looked into holds none."""
     rp = os.path.realpath(str(path)).rstrip(os.sep)
-    tops, listed = set(), {}
+    plans, out = {}, []
     for w in within:
         rw = os.path.realpath(str(w))
         if rp == rw.rstrip(os.sep) or rp.startswith(rw.rstrip(os.sep) + os.sep):
-            return [path]                                # (PATH itself, or a folder holding it)
+            return None
         if not rw.startswith(rp + os.sep):
             continue
-        top = path
+        d, piece = path, None
         for part in rw[len(rp) + 1:].split(os.sep):
-            if top not in listed:                        # (each folder listed and judged once)
-                got = sc.listed(top)
-                listed[top] = (got, got is not None and _splits(top, *got))
-            got, split = listed[top]
+            if d not in plans:
+                got = sc.listed(d)
+                with ex.meta_memo():
+                    plans[d] = (got, _plan_folder(eng, path, sc, d, got) if got is not None else None)
+            got, plan = plans[d]
             if got is None:
-                top = None
                 break
-            if not split:
-                break                                    # (the unit holding it)
-            if part not in got[0] or os.path.islink(top / part):
-                top = None                               # (never looked into: no album of it)
+            if plan is None:
+                piece = ("all", d, ())                   # (the piece holding it: all below d)
                 break
-            top = top / part
-        if top is not None:
-            tops.add(top)
-    return [t for t in sorted(tops) if not any(u in tops for u in t.parents)]   # (one inside another: once)
+            core_groups, core, parts = plan
+            if part not in got[0] or os.path.islink(d / part):
+                break                                # (never looked into: no album of it)
+            if part in core:
+                piece = ("core", d, ())
+                break
+            ms = next(ms for _f, ms in parts if part in ms)
+            if len(ms) > 1:
+                piece = ("unit", d, tuple(ms))
+                break
+            d = d / part
+        else:
+            piece = ("all", d, ())
+        if piece is not None and piece not in out:
+            out.append(piece)
+    whole = [p[1] for p in out if p[0] == "all"]
+    keep = [p for p in out if not any(w == p[1] and p[0] != "all" or w in p[1].parents for w in whole)]
+    return keep, plans
 
 
 def _albums_iter(eng, path, skip=(), within=None, walked=None):
@@ -1176,10 +1275,30 @@ def _albums_iter(eng, path, skip=(), within=None, walked=None):
         yield Group(path.parent, [path], [], single=True)
         return
     sc = _Scan(eng, skip)
-    for top in [path] if within is None else _within_tops(path, within, sc):
+    got = None if within is None else _within_pieces(eng, path, within, sc)
+    if got is None:
         if walked is not None:
-            walked.append(top)
-        yield from _scan_units(eng, path, top, sc)
+            walked.append(path)
+        yield from _scan_from(eng, path, sc, path)
+        return
+    pieces, plans = got
+    out = []
+    for kind, d, ms in pieces:
+        if kind == "all":
+            if walked is not None:
+                walked.append(d)
+            out += list(_scan_from(eng, path, sc, d, plans.get(d, (None,))[0]))
+        elif kind == "core":
+            if walked is not None:
+                walked.extend(d / c for c in plans[d][1][1])
+            out += plans[d][1][0]
+        else:
+            if walked is not None:
+                walked.extend(d / c for c in ms)
+            with ex.meta_memo():
+                out += _unit_of(eng, path, sc, None, [d / c for c in ms])
+    out.sort(key=lambda g: g.folder)                 # (albums_in's order: by album folder; stable)
+    yield from out
 
 
 def _albums_whole(eng, path, skip=()) -> list[Group]:
@@ -1211,9 +1330,10 @@ def _albums_of_keys(eng, path, keys, skip=()) -> list[Group]:
     return eng.albums_in(path, skip)
 
 
-def _group_unit(eng, path: Path, found: dict, sc: "_Scan") -> list[Group]:
+def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> list[Group]:
     """The albums of FOUND ({folder: its audio files}, in the order the scan read them): one
-    unit of a scan of PATH (_scan_units), or all its folders at once (_albums_whole)."""
+    piece of a scan of PATH (_scan_from), or all its folders at once (_albums_whole). keys_out:
+    a dict given is told each album folder's album keys (own_key: _plan_folder)."""
     # each audio folder's album folder: a disc folder belongs to its parent; a folder
     # inside an album's folder belongs to that album (a bonus disc filed inside it, as
     # match_albums._owners has it) only when both are tagged as that same album -
@@ -1276,6 +1396,8 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan") -> list[Group]:
     for d in found:
         own_key.setdefault(owner_of[d], []).extend(found[d])
     own_key = {o: set(album_keys(fs, o, metas).values()) for o, fs in own_key.items()}
+    if keys_out is not None:
+        keys_out.update(own_key)
     folders = {}
     for d in sorted(found):
         owner = owner_of[d]
@@ -1628,7 +1750,7 @@ class Engine:
 
     def albums_iter(self, path, skip=(), within=None):
         """albums_in's albums one at a time, in its order, each as soon as the folders it needs
-        are read (PRF-3: _scan_units). within: only the folders these albums need are read -
+        are read (PRF-3: _scan_from). within: only the folders these albums need are read -
         the albums inside these folders come out as albums_in(path) has them, beside the other
         albums of the folders read with them (a disc folder's album folder, a set's siblings)."""
         return _albums_iter(self, path, skip, within)

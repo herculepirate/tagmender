@@ -134,12 +134,12 @@ assistance, and you allowed it on the first-use sheet ("What Is Sent…").
 
 | Task (profile `ai.tasks`) | What is sent | What comes back, and what it counts for |
 |---|---|---|
-| `notes` | artist, album title, folder name, track titles; the text of the folder's notes, NFO, info and log files; the text OCR read off the scans | catalogue numbers, barcodes, labels, countries, editions, source media, each with the words it was read from; a code must be written in the text sent; it counts only when a database release carries it |
-| `vision` | the same names and up to 4 scan images (JPEG, at most 1600 px), only when OCR found no codes | the same clues, with where on which scan |
-| `queries` | the names and the catalogue numbers already known | up to 4 searches (a transliterated or original-language title, another way of writing a known number), run on MusicBrainz and Discogs |
-| `web` | the names, year and known codes | MusicBrainz or Discogs release pages the provider found and cites; each fetched through the database's API and scored like any match |
-| `explain`, `ties` | the names and the evidence or tied releases' details (only when you ask) | words for you; never change the plan |
-| `covers` | artist, title, year, genre; for Faithful your own cover (after the covers sheet) | a generated cover, marked generated |
+| `notes` | artist, album title, folder name, year, track titles, number of discs; the text of the folder's notes, NFO, info and log files; the text OCR read off the scans | catalogue numbers, barcodes, labels, countries, editions, source media, each with the words it was read from; a code must be written whole in the text sent; it may break a true tie only when a database release carries it (AI-1) |
+| `vision` | the same names and up to 4 scan images (JPEG, at most 1600 px), only when OCR found no codes | the same clues; a code without where it is printed is dropped, and counts only when a database release carries it |
+| `queries` | the same names and the catalogue numbers already known | up to 4 searches (a transliterated or original-language title, another way of writing a known number - never a new number), run on MusicBrainz and Discogs; what they find is shown as alternatives only |
+| `web` | the same names and the known catalogue numbers and barcodes | MusicBrainz or Discogs release pages the answer cites; each fetched through the database's API, scored against your files and shown as an alternative only |
+| `explain`, `ties` | the names and the evidence or tied releases' details | words for you; never change the plan (not offered in the app yet, so not on the first-use sheet) |
+| `covers` | artist, title, year, genre; for Faithful your own cover (after the covers sheet) | a generated cover, marked generated; with an AI key only once AI is allowed and a profile turns it on with covers |
 
 Audio is never sent. AI is asked only for an album still unsure once every database step is done;
 an album a barcode or disc ID proves never asks it. Every clue carries `ai:<provider>/<model>`, and
@@ -148,26 +148,28 @@ the plan's Evidence lists what was sent and what came back.
 | Provider | Text | Images read | Web search | Makes images | Requests |
 |---|---|---|---|---|---|
 | OpenAI | yes | yes | yes (Responses API `web_search`) | yes (images API, `gpt-image-1` or the image model you name) | `POST /v1/chat/completions` with a JSON schema; `/v1/responses`; `/v1/images/*`; `GET /v1/models` for Test; `Authorization: Bearer` |
-| Anthropic (Claude) | yes | yes | yes (`web_search` server tool) | **no**: Claude does not make images; real covers and scan clean-up still work | `POST /v1/messages` with `output_config.format` JSON schema; `GET /v1/models`; `x-api-key`, `anthropic-version` |
-| OpenAI-compatible (OpenRouter, Ollama, LM Studio) | yes | when you tick "Its model reads images" | when you tick "It searches the web" (cited links read from the answer) | when you name an image model | Chat Completions at your address (`http://localhost:11434/v1` for Ollama, `http://localhost:1234/v1` for LM Studio); a key only when the service needs one; an endpoint without structured output is asked once more without it |
+| Anthropic (Claude) | yes | yes | yes (`web_search` server tool) | **no**: Claude does not make images; real covers and scan clean-up still work | `POST /v1/messages` with `output_config.format` JSON schema, low effort (dropped for a model that refuses it) and room for the model's thinking; a paused web search turn is continued; only the pages the answer cites count; `GET /v1/models`; `x-api-key`, `anthropic-version`; Sonnet suggested first |
+| OpenAI-compatible (OpenRouter, Ollama, LM Studio) | yes | when you tick "Its model reads images" | when you tick "It searches the web" (cited links read from the answer) | when you name an image model | Chat Completions at your address (`http://localhost:11434/v1` for Ollama, `http://localhost:1234/v1` for LM Studio); a key only when the service needs one; plain `http://` only to this computer (localhost), any other host needs `https://`; an endpoint without structured output is asked once more without it |
 
 With several providers set up, each task uses the first one in your ranking that can do it and
 that you let serve it. The model is picked from the provider's own list after **Test** (a model
 list costs nothing); TagMender only suggests one. Gemini and Perplexity can be added later as
 providers of the same kind.
 
-**Costs and limits.** Each request may cost money at your provider's rates. Every live request is
-counted per provider and month (Preferences shows this month's requests and tokens); none is sent
-past the provider's monthly cap (500 requests unless you set another; covers count too). Answers
-are cached on this computer by a hash of the request (no key in it), so planning the same folder
-again gives the same answer and costs nothing. Preferences estimates what 100 unsure albums may
+**Costs and limits.** Each request may cost money at your provider's rates. Every HTTP request sent -
+retries, fallbacks and covers included - takes one of the provider's monthly cap first (500 unless
+you set another), counted atomically for the app, the watcher and the command line together;
+Preferences shows this month's requests and tokens. Answers that parsed are cached on this
+computer by a hash of the request and the provider's address (no key in it), so planning the same
+folder again gives the same answer and costs nothing; an answer that did not parse is not kept. Preferences estimates what 100 unsure albums may
 take (requests and tokens; money only when you enter your prices in `ai.json`, `"prices"`).
 TagMender never guesses a price. A local model (Ollama, LM Studio) keeps everything on your
 network and costs nothing per request.
 
-**Failures.** A rejected key, a refusal, a rate limit (429, honouring `Retry-After`), an
-overloaded or failing service (5xx, 529, network errors; tried 3 times with back-off, then left
-alone for 30 minutes after 3 failures in a row), the cap, or an answer that does not parse as the
+**Failures.** A rejected key, a refusal, a rate limit (429: asked once more at most, its
+`Retry-After` waited up to 20 s; a quota or credit error never, and the provider is left alone for
+30 minutes), an overloaded or failing service (5xx, 529, network errors; tried 3 times with
+back-off), and 3 such failures in a row (then left alone for 30 minutes), the cap, or an answer that does not parse as the
 task's JSON schema all give nothing: the album is planned as if AI were off, never as "no
 release". Keys are never logged, never in a cache key, and redacted from error messages.
 

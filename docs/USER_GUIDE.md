@@ -740,16 +740,16 @@ Ollama or LM Studio) - one is enough - it can help with what the rules find hard
   scans OCR could not read, for catalogue numbers, barcodes, labels and editions;
 - suggest searches (an original-language title, another way of writing a catalogue number);
 - look for the release's MusicBrainz or Discogs page on the web, with citations;
-- explain a held album or advise on two pressings that tie, when you ask;
-- make covers (Find Covers… › Make AI Covers…): an OpenAI key alone is enough. Claude does not make
-  images; with only an Anthropic key, real covers and scan clean-up still work.
+- make covers (Find Covers… › Make AI Covers…) once a profile turns AI on: an OpenAI key alone is
+  enough. Claude does not make images; with only an Anthropic key, real covers and scan clean-up
+  still work.
 
-What AI finds is a clue, never proof (rule AI-1). A catalogue number it read counts only when a
-release MusicBrainz or Discogs lists carries it: then that release is the one offered for you to
-confirm, never tagged as sure on that alone. A release only AI's searches found is held for you,
-and a watched folder never files it. An album its barcode or disc ID already proves never asks AI.
-AI never writes release IDs, titles or credits from its own knowledge and never fills a field the
-databases leave empty.
+What AI finds is a clue, never proof (rule AI-1). Compared with planning the album without AI,
+nothing is ever more certain because of it: when two pressings tie and only one carries a
+catalogue number AI read in your notes, that one is offered first for you to confirm; releases
+AI's searches find are listed as alternatives for you to choose. An album its barcode or disc ID
+already proves never asks AI. AI never writes release IDs, titles or credits from its own
+knowledge and never fills a field the databases leave empty.
 
 To set it up: Preferences › Keys - enter the key and press Save Keys; under AI assistance press
 Test and pick a model from the list, rank the providers if you have several, choose what each may

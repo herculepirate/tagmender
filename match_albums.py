@@ -8173,6 +8173,8 @@ def summarize(res):
             "toc_proven": bool(b.get("toc_proven")),
             # (FIL-1: your copy's own barcode or catalogue number proves it; the pressing a guess)
             "own_number": bool(b.get("own_number")), "guessed_pick": bool(b.get("guessed_pick")),
+            # (TIE-1: chosen by a tie-break alone - the pressing proposed, the album known: engine)
+            **({"tie_guess": b["tie_guess"]} if b.get("tie_guess") else {}),
             # (FIL-2: your copy's own barcode or catalogue number on it, every track there, and the
             # release lists no lengths at all to compare)
             "number_proven": bool((mc.barcode_proves(b) or b.get("code") in ("catalogue number",

@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import time
 import unicodedata
 from dataclasses import asdict, dataclass, field
@@ -135,6 +136,10 @@ class Proposal:
     own_number: bool = False            # FIL-1: your copy's own barcode or catalogue number proves the release
     number_proven: bool = False         # FIL-2: ... on it, every track there, and it lists no lengths
     guessed_pick: bool = False          # FIL-1: the pressing was picked by country order / original date (a guess)
+    # TIE-1: the pressing a tie-break proposed (engine.suggestion_of), the album tagged as album
+    # known: {"source", "id", "url", "ref", "label", "country", "formats", "year", "by", "why",
+    # "others": [...]}; {} when none
+    suggested: dict = field(default_factory=dict)
     # TAG-3: the release ID fields your files hold for another release, which your copy proves
     # this one over (engine._one_release): the plan writes the release at the replace threshold
     release_proven_over: list = field(default_factory=list)
@@ -1730,6 +1735,10 @@ class Planner:
             entry["identification"]["scans"] = dict(prop.scans)
         if getattr(prop, "via", None) is not None:
             entry["identification"]["via"] = prop.via
+        if getattr(prop, "suggested", None):
+            # TIE-1: the pressing a tie-break proposed, for you to confirm (Use Suggested Pressing,
+            # Change Release, `tagmender plan PATH --release REF`)
+            entry["identification"]["suggested"] = dict(prop.suggested)
         partial = prop.status == "identified" and tier_of(prop) == "partial"
         # Album only (the album known, its pressing tied) is, like Partial, a release not proven
         # (levels.ALBUM_TIERS): marked TAGMENDER=Partial too, its reason "ambiguous_release:
@@ -3604,6 +3613,14 @@ def preview(plan: dict, verbose=False) -> str:
                 codes, words = reasons.parse(ident.get("reason", ""))
                 head += (f"\n    {'Partial' if tier == 'partial' else 'Album only (marked Partial)'}: "
                          f"{', '.join(codes)} — {words}")
+            sg = ident.get("suggested") or {}
+            if sg.get("id"):
+                # TIE-1: the pressing a tie-break proposed, and how to confirm it
+                facts = ", ".join(str(x) for x in (sg.get("label"), sg.get("country"), sg.get("year")) if x)
+                head += (f"\n    suggested pressing: {sg.get('source')} {sg['id']}" + (f" ({facts})" if facts else "")
+                         + f" — {sg.get('by')}; {len(sg.get('others') or [])} other pressing(s) tie"
+                         + f"\n    to tag it in full: tagmender plan {shlex.quote(a['source_dir'])} "
+                           f"--release {sg.get('ref')}")
             if ident.get("evidence"):
                 head += "\n    agreed: " + "; ".join(ident["evidence"][:6])
             if ident.get("why"):

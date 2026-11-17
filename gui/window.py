@@ -229,6 +229,7 @@ class Main(QMainWindow):
             "tab_artwork": lambda: self.inspector.show_tab("Artwork"),
             "tab_evidence": lambda: self.inspector.show_tab("Evidence"),
             "use_release": lambda: ov().choose_release(),
+            "use_suggested_pressing": lambda: search.use_suggested(ov()),     # TIE-1
             **search.handlers(ov),                               # Search for Release, Other Versions, Pressing
             **manual_match.handlers(ov),                         # Match Files Manually
             "lookup_cd": self.lookup_cd,
@@ -309,6 +310,8 @@ class Main(QMainWindow):
         a = self.commands["toggle_rule"]
         a.triggered.connect(lambda _=False: self.pages["Profiles"].toggle_selected_rule())
         self.inspector.buttons["open"].clicked.connect(lambda: self.album_do("open"))
+        # (TIE-1: the Evidence tab's Use Suggested Pressing button is the Album menu's command)
+        self.inspector.evidence.suggest.clicked.connect(lambda: self.commands["use_suggested_pressing"].trigger())
         self.inspector.buttons["web"].clicked.connect(lambda: self.album_do("web"))
         live = self.pages["Watched folders"].live
         live.toggled.connect(lambda on: self.prefs_window and self.prefs_window.general.watch.setChecked(on))
@@ -614,6 +617,9 @@ class Main(QMainWindow):
             self.commands[k].setEnabled(bool(kind) and idle)
         self.commands["use_release"].setEnabled(kind == "overview" and idle)
         search.update_commands(self.commands, ov, kind == "overview" and idle)
+        # TIE-1: only an album known whose pressing a tie-break proposed
+        sugg = kind == "overview" and idle and search.can_use_suggested(x)
+        self.commands["use_suggested_pressing"].setEnabled(sugg)
         manual_match.update_commands(self.commands, ov, kind == "overview" and idle)
         self.update_m8_actions(kind, x, idle)
         self.commands["file_info"].setEnabled(self.info_file() is not None)

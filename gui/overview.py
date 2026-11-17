@@ -964,7 +964,7 @@ class Overview(QWidget):
                 self._fitting = False
 
     def context_menu(self, pos):
-        keys = ("@release", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
+        keys = ("@release", "use_suggested_pressing", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
                 "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder", "copy_path")
         # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
         release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(

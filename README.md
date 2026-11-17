@@ -36,7 +36,10 @@ tells you why.
 - Matches against MusicBrainz and Discogs using tags, file and folder names, track lengths, disc IDs
   from rip logs and cue sheets, barcodes and catalogue numbers read from your scans, and AcoustID
   fingerprints.
-- Picks a release automatically only when the evidence proves it. Otherwise the album goes to review.
+- Picks a release automatically only when the evidence proves it. When nothing of your copy tells
+  an album's pressings apart, the album is tagged as Album only and one pressing is suggested
+  (by your country order, or the original release); its barcode, catalogue number and label are
+  written only once you confirm it. Otherwise the album goes to review.
 - Tells apart versions in one folder (a remaster and a remix, for example) and splits them into
   separate albums.
 
@@ -50,7 +53,7 @@ tells you why.
   | Tier | Marked as | What gets written |
   |---|---|---|
   | Exact release | `TAGMENDER=Resolved` | Everything your level asks for, pressing details included |
-  | Album only | `TAGMENDER=Partial` | What the tied pressings share |
+  | Album only | `TAGMENDER=Partial` | What the tied pressings share; a suggested pressing only once you confirm it |
   | Partial | `TAGMENDER=Partial` | Artist, album, tracks and genres; never a barcode, label or release ID |
   | Unresolved | `TAGMENDER=Unresolved` | Nothing; the reason is kept and the album is retried later |
 

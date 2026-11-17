@@ -60,6 +60,10 @@ COMMANDS = {
     # Album
     "use_release": (N_("&Paste a Release Link…"), "Ctrl+Shift+R", "disc-3",
                     N_("Tag this album from a MusicBrainz or Discogs release link you paste")),
+    # TIE-1: an album known whose pressing a tie-break proposed: that release chosen, tagged in full
+    "use_suggested_pressing": (N_("&Use Suggested Pressing"), None, "disc-3",
+                               N_("Tag this album with the pressing suggested for it (its barcode, catalog "
+                                  "number and label); nothing of your copy told its pressings apart")),
     # (Search MusicBrainz and Discogs…, Other Versions…, Choose Your Pressing…: gui.search.COMMANDS,
     # below; the four are Album > Change Release, and the inspector's Change Release button)
     "file_info": (N_("&Info…"), "Ctrl+I", "info", N_("The selected file's format, length, every tag and picture")),
@@ -192,7 +196,7 @@ MENUS = (
       "paste", "select_all", None, "copy_path", "find", None, "preferences")),
     (N_("&View"), ("@pages", None, "show_sidebar", "show_inspector", None, "tab_tags", "tab_artwork", "tab_evidence",
                None, "refresh")),
-    (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), "match_files", None, (N_("&Tag"), TAG_MENU),
+    (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), "use_suggested_pressing", "match_files", None, (N_("&Tag"), TAG_MENU),
                 (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "exclude_again", "retry", None,
                 "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
                 "open_folder", "copy_path")),

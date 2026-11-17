@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHeaderView, QLabel, Q
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 from .i18n import tr
-from .style import STATUS, TIER_LABELS
+from .style import STATUS, SUGGESTED_LABEL, TIER_LABELS
 
 
 HERE = Path(__file__).resolve().parent.parent       # the repo root (the engine modules)
@@ -66,8 +66,17 @@ def label_for(album):
     # proven says so ("Ready · Partial")
     tier = (album.get("identification") or {}).get("tier")
     if st not in ("unresolved", "excluded", "skipped") and tier in TIER_LABELS:
-        word = f"{word} · {tr(TIER_LABELS[tier])}"
+        # (TIE-1: a pressing a tie-break proposed says so: "Ready · Album known · pressing suggested")
+        known = tier == "album_only" and suggested_pressing(album)
+        word = f"{word} · {tr(SUGGESTED_LABEL if known else TIER_LABELS[tier])}"
     return sym, word
+
+
+def suggested_pressing(album) -> dict:
+    """TIE-1: the pressing a tie-break proposed for the album (the plan's identification
+    "suggested": its "ref", "id", "url", "by", "others" ...), or {} when there is none."""
+    sg = ((album or {}).get("identification") or {}).get("suggested") or {}
+    return sg if isinstance(sg, dict) and sg.get("ref") else {}
 
 
 # the order a summary lists statuses in: what can be applied first, then what needs a look

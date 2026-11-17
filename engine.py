@@ -2607,6 +2607,9 @@ class Engine:
             try:
                 p = self._identified(out, album, files, base)
                 withdrawn = self._own_guess_withdrawn(p, out)
+                if withdrawn is None:
+                    # TIE-1: a pressing only a tie-break chose is proposed; the album is album known
+                    withdrawn = self._tie_suggested(p, out)
                 return withdrawn if withdrawn is not None else self._one_release(p, out, album)
             except ma.ProviderUnavailable as exc:             # fetching the release failed: retry later
                 self.log.warning("tags for %s: %s", g.folder, exc)
@@ -3627,6 +3630,36 @@ class Engine:
         p.notes = list(getattr(p, "notes", None) or []) + [
             doubt + ": only the album's own tags are written"
             + ("; what TagMender's earlier job wrote of that pressing is taken back" if p.restore else "")]
+        return p
+
+    def _tie_suggested(self, p, out):
+        """TIE-1 (decided 2026-11-17): the matcher's pick among pressings of the album was made by
+        a tie-break alone (your country order, the original release date, your preferred release
+        types or formats: match_core.tie_guess), every clue of your copy having been tried. The
+        album is tagged as album known - what every tied pressing shares, never a release ID,
+        catalogue number or barcode - and the pick is proposed (Proposal.suggested): you confirm it
+        by choosing that release (Album > Use Suggested Pressing, Change Release, or `tagmender
+        plan PATH --release REF`), which tags it in full as your choice. A profile that accepts
+        exact releases only leaves the album unresolved, the suggestion named. None when the pick
+        rests on your copy's evidence."""
+        guess = ((out or {}).get("best") or {}).get("tie_guess")
+        if not guess or p.status != "identified" or planmod.tier_of(p) != "exact":
+            return None
+        suggested = suggestion_of(guess, (out or {}).get("best") or {})
+        words = suggested["why"]
+        if not self._accepts("album"):
+            held = planmod.Proposal(source_dir=p.source_dir, files=p.files, provider_errors=p.provider_errors,
+                                    status="unresolved", reason_codes=["ambiguous_release"],
+                                    reason=f"pressing not established: {words}", why=list(p.why) + [words],
+                                    candidates=list(getattr(p, "candidates", None) or []))
+            held.suggested = suggested
+            return held
+        keys = ("source", "id", "label", "country", "formats", "year", "layout")
+        tied = [{k: x.get(k) for k in keys} for x in [guess["pick"]] + list(guess.get("others") or [])]
+        p = self._album_only(p, {"tied": tied})
+        p.suggested = suggested
+        p.why = list(p.why) + [words]
+        p.notes = list(getattr(p, "notes", None) or []) + [words]
         return p
 
     @staticmethod
@@ -6492,6 +6525,31 @@ def release_url(source, rid) -> str:
     """The page of a MusicBrainz or Discogs release."""
     return (f"https://musicbrainz.org/release/{rid}" if source in ("mb", "musicbrainz")
             else f"https://www.discogs.com/release/{rid}")
+
+
+def suggestion_of(guess, best) -> dict:
+    """TIE-1: the plan's account of a pressing a tie-break proposed (match_core.tie_guess):
+    {"source", "id", "url", "ref", "label", "country", "formats", "year", "catnos", "barcodes",
+    "by" (the tie-break, in words), "why" (the sentence the plan and the GUI show), "others"
+    (the tied pressings it was chosen over, each with the same facts)}. "ref" is what forcing the
+    release takes (Change Release, `tagmender plan PATH --release REF`): MusicBrainz's entry of
+    the pressing when the pick is Discogs's and MusicBrainz lists the same pressing (its tags
+    then come from both databases, as the matcher's pick would)."""
+    pick = dict(guess.get("pick") or {})
+    others = [dict(x) for x in guess.get("others") or ()]
+    for x in [pick] + others:
+        x["source"] = "musicbrainz" if x.get("source") == "mb" else x.get("source") or ""
+        x["url"] = x.get("url") or release_url(x["source"], x.get("id"))
+    if pick.get("source") == "discogs" and (best or {}).get("mb_id"):
+        pick["ref"] = str(best["mb_id"])
+    by = re.sub(r";\s*nothing about your copy tells the pressings apart\s*$", "", str(guess.get("by") or ""))
+    n = 1 + len(others)
+    pick["by"] = by
+    pick["why"] = (f"pressing suggested ({by}), not proven: nothing of your copy tells these {n} pressings apart; confirm "
+                   "it to write its barcode, catalogue number and label (Album > Use Suggested Pressing, or "
+                   f"tagmender plan PATH --release {pick.get('ref')}) (TIE-1)")
+    pick["others"] = others
+    return pick
 
 
 def candidates_of(out, limit=5, prefer="") -> list:

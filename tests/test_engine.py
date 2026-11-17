@@ -281,7 +281,7 @@ class Identify(Base):
         self.assertEqual(p.targets[0]["catalognumber"], ["CAT-901"])
         self.assertTrue(any("Discogs decides (Sources: Discogs preferred)" in n for n in p.evidence), p.evidence)
 
-    def test_providers_disagree_without_evidence_country_order_decides_nothing_is_mixed(self):
+    def test_providers_disagree_without_evidence_country_order_suggests_nothing_is_mixed(self):
         # (the matcher's own order, no Sources preference, as validate.py runs it)
         d = self.album("Band D2", "Album D2")                         # the folder says nothing about the copy
         eng = self.engine(FakeHttp(mb=[mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
@@ -291,9 +291,12 @@ class Identify(Base):
         p = eng.identify(eng.albums_in(d)[0])
         self.assertEqual((p.status, p.provider), ("identified", "musicbrainz"), (p.tier, p.why, p.evidence))
         self.assertFalse([k for k in p.targets[0] if k.startswith("discogs_")])   # the other pressing stays out
-        # TIE-1: the country order picks the pressing, and it is tagged in full
-        self.assertEqual(p.targets[0]["catalognumber"], ["OTHER-100"])
-        self.assertEqual(p.targets[0]["musicbrainz_albumid"], ["mb-d2"])
+        # TIE-1 (2026-11-17): the country order only suggests the pressing: album known, none of
+        # its own fields written until you choose it
+        self.assertEqual(p.tier, "album_only")
+        self.assertNotIn("catalognumber", p.targets[0])
+        self.assertNotIn("musicbrainz_albumid", p.targets[0])
+        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), ("mb-d2", ["discogs:904"]))
         self.assertEqual(p.targets[0]["album"], ["Album D2"])
 
     def test_missing_discogs_token_still_identifies_from_musicbrainz(self):

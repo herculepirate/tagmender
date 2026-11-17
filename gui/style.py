@@ -63,6 +63,9 @@ STATUS = {
 
 # identification tiers below an exact release (plan.TIERS), as the status column shows them
 TIER_LABELS = {"album_only": N_("Album only"), "recording": N_("Recording only"), "partial": N_("Partial")}
+# TIE-1: an album-only album whose pressing a tie-break proposed (your country order, the original
+# date): the album is known, the pressing only suggested until you confirm it
+SUGGESTED_LABEL = N_("Album known · pressing suggested")
 
 _forced = None                      # True/False when Preferences > Appearance says Dark/Light
 

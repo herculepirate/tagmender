@@ -434,6 +434,28 @@ class DSC12Review(Base):
         self.assertEqual(len(list((mine / "Disc 03").glob("*.flac"))), 3)
         self.assertFalse([p for p in mine.rglob("*~*")])
 
+    def assert_held_apart(self, plan, folder):
+        [a] = plan["albums"]
+        self.assertNotIn("joins", a)
+        self.assertTrue(all(fe["dst"] == fe["src"] for fe in a["files"]), pl.preview(plan))
+        self.assertTrue(pl.held(a), a)
+        executor.Executor(plan).run()
+        self.assertEqual(len(list(folder.glob("*.flac"))), 3)
+        self.assertFalse([p for p in folder.parent.rglob("*~*")])
+
+    def test_DSC12_this_releases_files_without_a_disc_number_in_the_slot_count(self):
+        # (disc 2 of this very release in "Disc 02", its disc number gone: never a second disc 2 beside it)
+        mine = self.renamed()
+        for p in self.disc(mine / "Disc 02", 2, freq=4).glob("*.flac"):
+            tagio.write(p, {"musicbrainz_albumid": [RID], "discnumber": None})
+        self.assert_held_apart(self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2)), mine / "Disc 02")
+
+    def test_DSC12_another_disc_of_this_release_in_the_slots_folder_counts(self):
+        # (disc 1 of the release in a folder named "Disc 02": disc 2 never lands beside it)
+        album = self.file_disc_one()
+        (album / "Disc 01").rename(album / "Disc 02")
+        self.assert_held_apart(self.plan_of(self.disc(self.lib / "Inbox" / "Double CD2", 2)), album / "Disc 02")
+
     def test_DSC12_another_release_in_the_album_you_have_is_never_joined(self):
         self.rels = [the_release(), the_release(OTHER)]
         mine = self.renamed()

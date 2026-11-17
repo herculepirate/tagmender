@@ -5961,7 +5961,13 @@ def _cache_value(v):
     return json.dumps(BLANK_READING if v == "" else v)
 
 
-def each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
+def each_scan(*args, **kw):
+    """_each_scan, charged to the "ocr" stage of an album being timed (stagetimes): reading the scans."""
+    with stagetimes.stage("ocr"):
+        return _each_scan(*args, **kw)
+
+
+def _each_scan(db, kind, images, read, log=None, budget_s=None, ahead=None):
     """read(path) for each scan, cached per scan (its contents and the OCR version, so a
     scan read once is not read again wherever it is in the list), several at once.
     Returns the readings in the order of IMAGES; a scan not started within budget_s
@@ -6159,7 +6165,13 @@ class _DiscogsAhead:
         self.clone.close_clone()
 
 
-def decoded_barcodes(db, images, log=None):
+def decoded_barcodes(*args, **kw):
+    """_scan_barcodes, charged to the "ocr" stage of an album being timed (stagetimes): reading the scans."""
+    with stagetimes.stage("ocr"):
+        return _scan_barcodes(*args, **kw)
+
+
+def _scan_barcodes(db, images, log=None):
     """ocr_barcodes(images), cached for exactly these scans ("barcodes3"), with the scan
     each code was decoded on noted in log["barcodes"]. A code an older reading ("barcodes2")
     decoded is kept; an older empty reading is read again once (the crops were tried only in
@@ -8862,7 +8874,8 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     use_ocr = ocr_wanted(getattr(args, "ocr", False), base)
     if use_ocr:
         album["scan_inventory"] = inventory = {}           # SCN-1: what the cap left out
-        images, img_key = list_images(base, getattr(args, "max_images", 15), inventory)
+        with stagetimes.stage("ocr"):                   # (finding and ordering the scans)
+            images, img_key = list_images(base, getattr(args, "max_images", 15), inventory)
         if images:
             found = decoded_barcodes(db, images, scan_log)
             album["ocr_barcodes"] = found               # decoded off the scans, whatever the tags say
@@ -8885,7 +8898,8 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             if cover_bytes:
                 # cached per language set, as the scans: a new language pack reads it again
                 kind = page_kind("cover")
-                cover = _cached(db, kind, cover_key, lambda: ocr_cover(cover_bytes))
+                with stagetimes.stage("ocr"):
+                    cover = _cached(db, kind, cover_key, lambda: ocr_cover(cover_bytes))
                 album["cover_text"] = cover.get("text") or ""
                 found = set(cover.get("barcodes") or ())
                 if found and not album["barcodes"]:

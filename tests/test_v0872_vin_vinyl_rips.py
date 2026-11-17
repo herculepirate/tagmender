@@ -317,9 +317,18 @@ class VIN5_RecordCatalogueNumbers(unittest.TestCase):
                 ("1976 - 2112 [2015 Vinyl Rip 32bit 384khz B0022371-01-9]", ["B0022371-01-9"]),
                 ("1987 - Hold Your Fire [Vinyl Rip 24bit 96khz Mercury 832-464-1 Q-1]", ["832-464-1 Q-1"])):
             self.assertEqual(mc.catno_hints(name), want, name)
-        # (the US format suffix makes the US pressing's number: "832 464-1 Q-1", never the EU "832 464-1")
-        self.assertTrue(mc.catno_same("832-464-1 Q-1", "832 464-1 Q-1"))
-        self.assertFalse(mc.catno_same("832-464-1 Q-1", "832 464-1"))
+        # (the US format suffix read with the number, and the bare number too: a database listing
+        # either agrees - catnos_agree both ways; a side or track label "B2" is never glued on)
+        def folder(name):
+            return {mc.norm_code(h) for h in mc.catno_hints(name, variants=True)}
+        for name, bare in (("X [Vinyl Rip 832-464-1 Q-1]", "832 464-1"), ("X [422 826 098-1 M-1]", "422 826 098-1")):
+            self.assertTrue(mc.catnos_agree(folder(name), [bare]), name)
+            self.assertTrue(mc.catnos_agree(folder(name), [bare + (" Q-1" if "Q-1" in name else " M-1")]), name)
+        self.assertEqual(mc.catno_hints("X [Vinyl Rip 832-464-1 B2]"), ["832-464-1"])
+        # (a year before a number in groups: "[1999 818 476-1]" keeps it; "[1999 001 002-1]" none)
+        self.assertEqual(mc.catno_hints("X [1999 818 476-1]"), ["818 476-1"])
+        self.assertEqual(mc.catno_hints("X [Vinyl Rip 1984 818 476-1]"), ["818 476-1"])
+        self.assertEqual(mc.catno_hints("X [1999 001 002-1]"), [])
         for name, want in ():
             self.assertEqual(mc.catno_hints(name), want, name)
 
@@ -933,6 +942,17 @@ class VIN2_FolderNumberOverAnotherTaggersTitle(VinBase):
         uk = release(self.UK, [medium(1, '12" Vinyl', TITLES, LENS)], date="1977-09-01", country="GB",
                      catno="9100 059", label="Mercury", barcode="")
         return [us, uk]
+
+    def test_VIN2_a_folder_number_no_candidate_carries_hides_nothing(self):
+        # (a false folder hint - "[Unit 731 101-1]" - never hides a real number in the album tag)
+        album = {"catnos_from_folder": {"731 1011"}, "catnos": {"731 1011"}, "catnos_title_held": ["srm11184"],
+                 "catnos_folder_own": ["731 1011"]}
+        mc.settle_title_numbers(album, [{"catnos": ["SRM-1-1184"]}])
+        self.assertIn("srm11184", album["catnos_from_folder"])
+        album = {"catnos_from_folder": {"srm13743"}, "catnos": {"srm13743"}, "catnos_title_held": ["9100059"],
+                 "catnos_folder_own": ["srm13743"]}
+        mc.settle_title_numbers(album, [{"catnos": ["9100 059"]}, {"catnos": ["SRM-1-3743"]}])
+        self.assertNotIn("9100059", album["catnos_from_folder"])
 
     def test_VIN2_the_folders_catalogue_number_outranks_the_album_tags(self):
         # (Hemispheres "[Vinyl Rip Fran Solo SRM-1-3743]": its files tagged by another tagger with the

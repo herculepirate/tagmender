@@ -275,6 +275,25 @@ def cat3_hint(text):
             and code not in _NUMBER_WORDS)
 
 
+def settle_title_numbers(album, cands):
+    """VIN-2 / TAG-2: the album tag's bracket numbers held aside because the folder name names
+    its own (read_album "catnos_title_held") count again - as the folder's - when no candidate
+    carries the folder's own number: a folder hint that names nothing of the album ("[Unit 731
+    101-1]") never hides a real number in the tags. Once per album (it stays settled)."""
+    held = set(album.get("catnos_title_held") or ())
+    if not held or album.get("_title_numbers_settled"):
+        return
+    own = set(album.get("catnos_folder_own") or ())
+    if any(catnos_agree(own, c.get("catnos")) for c in cands or () if c.get("catnos")):
+        album["_title_numbers_settled"] = True
+        return
+    if not any(c.get("catnos") for c in cands or ()):
+        return                                       # (nothing to tell by yet)
+    album["catnos_from_folder"] = set(album.get("catnos_from_folder") or ()) | held
+    album["catnos"] = set(album.get("catnos") or ()) | held
+    album["_title_numbers_settled"] = True
+
+
 def catno_hints(text, variants=False):
     """Catalogue numbers written in square or round brackets of a folder name
     or album title. Returns them as written ("DOMO 71063-2"). Conservative:
@@ -313,8 +332,9 @@ def catno_hints(text, variants=False):
                 elif _vin_code(w):
                     # (a US Mercury/PolyGram record's format suffix belongs to it: "832-464-1 Q-1",
                     # the US pressing; "832 464-1" alone is the European one)
-                    if re.fullmatch(r"[A-Z]-?\d", nxt) and re.fullmatch(r"\d{3}-\d{3}-\d", w):
+                    if re.fullmatch(r"[A-Z]-\d", nxt) and re.fullmatch(r"\d{3}-\d{3}-\d", w):
                         found.append(f"{w} {nxt}")
+                        extra.append(w)                   # (the bare number too: databases list both)
                         skip.add(i + 1)
                     else:
                         found.append(w)
@@ -329,14 +349,15 @@ def catno_hints(text, variants=False):
                 elif re.fullmatch(r"\d{3}", w) and re.fullmatch(r"\d{3}", nxt) and \
                         re.fullmatch(r"\d{3}-\d{1,2}", nxt2):
                     nxt3 = words[i + 3] if i + 3 < len(words) else ""
-                    if re.fullmatch(r"[A-Z]-?\d", nxt3):             # ("422 826 098-1 M-1")
+                    if re.fullmatch(r"[A-Z]-\d", nxt3):              # ("422 826 098-1 M-1")
                         found.append(f"{w} {nxt} {nxt2} {nxt3}")
+                        extra.append(f"{w} {nxt} {nxt2}")
                         skip.update((i + 1, i + 2, i + 3))
                     else:
                         found.append(f"{w} {nxt} {nxt2}")
                         skip.update((i + 1, i + 2))
                 elif re.fullmatch(r"\d{3,4}", w) and not _YEAR.match(w) and re.fullmatch(r"\d{3}-\d{1,2}", nxt) \
-                        and not _YEAR.match(prev):
+                        and not (_YEAR.match(prev) and w.startswith("0")):
                     found.append(f"{w} {nxt}")
                     skip.add(i + 1)
                 # "479 7050": a number in two groups (Deutsche Grammophon style)

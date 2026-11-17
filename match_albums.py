@@ -485,6 +485,7 @@ def _rescored(res, extra, name, album, cfg, text=""):
     new = [c for c in extra if str(c["id"]) not in ids]
     if not new:
         return res                                    # nothing new: the result stands as it is
+    mc.settle_title_numbers(album, cands + new)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, text) for c in cands + new], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
@@ -540,6 +541,7 @@ def _scored_again(res, extra, name, album, cfg, text=""):
     cands += [c for c in extra if str(c["id"]) not in ids]
     if not cands:
         return res
+    mc.settle_title_numbers(album, cands)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, text) for c in cands], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
@@ -2295,11 +2297,16 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # tag's brackets only stands in for it where the folder name names none - an album title
     # another tagger (or an earlier name) wrote, "Hemispheres [Vinyl Rip ... 9100 059]", never
     # outvotes the folder's "[Vinyl Rip Fran Solo SRM-1-3743]"
+    # (held aside, not dropped: where no candidate carries the folder's own number - a false
+    # folder hint, "[Unit 731 101-1]" - the album tag's number counts again, mc.settle_title_numbers)
     own_hints = mc.catno_hints(album_folder)
-    title_hints = [] if own_hints else mc.catno_hints(title)
+    own_norm = {mc.norm_code(h) for h in mc.catno_hints(album_folder, variants=True)}
+    title_all = mc.catno_hints(title, variants=True)
+    held_title = {mc.norm_code(h) for h in title_all} - own_norm if own_hints else set()
+    title_hints = [h for h in mc.catno_hints(title) if not own_hints or mc.norm_code(h) in own_norm]
     folder_hints = own_hints + [h for h in title_hints if h not in own_hints]
-    folder_match = set(mc.catno_hints(album_folder, variants=True)) | (
-        set() if own_hints else set(mc.catno_hints(title, variants=True)))
+    folder_match = set(mc.catno_hints(album_folder, variants=True)) | {
+        h for h in title_all if not own_hints or mc.norm_code(h) in own_norm}
     # a Japanese set's numbers as a range with "-" ("SICP 10151-4"): the "~" form MusicBrainz
     # and Discogs list it by is the folder's too, and searched as well (never its single numbers:
     # mc.catno_range)
@@ -2399,6 +2406,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "catnos": ({mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}
                    | {mc.norm_code(h) for h in folder_match} | typed),
         "catnos_from_folder": {mc.norm_code(h) for h in folder_match} | typed,
+        # VIN-2: the album tag's bracket numbers the folder's own number differs from, held aside
+        "catnos_title_held": sorted(held_title),
+        "catnos_folder_own": sorted(own_norm),
         # CAT-3: of which one-digit label codes ("RHEADCDX 1"), not in the tags or notes too
         "catnos_cat3": ({mc.norm_code(h) for h in folder_match if mc.cat3_hint(h)} - typed
                         - {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}),
@@ -8370,6 +8380,7 @@ def release_ids_view(final, results, album):
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
     # (BAR-13: an entry carrying your code, too sparse to compare, scored with its full twin's tracks)
+    mc.settle_title_numbers(album, cands)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands], cfg, ocr_txt)
     res = mc.classify(scored, cfg)
     res["scored"] = scored

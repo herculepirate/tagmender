@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 
 import ai_providers as ap
 
@@ -118,11 +119,12 @@ def fence(label: str, text: str) -> str:
 
 
 def _flat(text: str) -> str:
-    return re.sub(r"[^0-9a-zÀ-￿]+", "", str(text or "").casefold())
+    """Letters and digits only, full-width forms as their plain ones ("ＳＩＣＰ－１０１５": sicp1015)."""
+    return re.sub(r"[^0-9a-zÀ-￿]+", "", unicodedata.normalize("NFKC", str(text or "")).casefold())
 
 
 def _spaced(text: str) -> str:
-    return " ".join(str(text or "").casefold().split())
+    return " ".join(unicodedata.normalize("NFKC", str(text or "")).casefold().split())
 
 
 def album_facts(album: dict) -> dict:

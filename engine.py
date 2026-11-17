@@ -968,7 +968,7 @@ def evidence_of(out, best):
     match's own notes so nothing reads them as proof."""
     out = out or {}
     return (list(best.get("notes") or []) + list(out.get("shop_notes") or []) + list(out.get("gnudb_notes") or [])
-            + list(out.get("acoustid_notes") or []))
+            + list(out.get("acoustid_notes") or []) + list(out.get("ai_notes") or []))
 
 
 def scans_of(prop, out):
@@ -1177,6 +1177,14 @@ class Engine:
                 self.notes["ocr"] = ocr_note(self.ocr, problems)
                 self.ocr = "off"
         self.ocr_images = 15
+        # optional AI (AI-1): None unless this profile turns it on, a provider is set up with
+        # your own key and its first-use sheet was accepted; it only adds clues to unsure albums
+        try:
+            import ai_assist
+            self.ai = ai_assist.for_profile(profile)
+        except Exception as exc:                          # (AI never stops a run)
+            self.log.warning("AI assistance is off for this run: %s", exc)
+            self.ai = None
         if self.ocr != "off":
             self._ocr_settings()
         cfg = profile.matcher_cfg(dict(mc.DEFAULT_CFG))
@@ -2243,6 +2251,7 @@ class Engine:
                                   use_discogs=self.use_discogs, provider_errors=errors, exclude_files=outside,
                                   use_shops=self.profile.provider_on("web", "shops"),
                                   use_gnudb=self.profile.provider_on("web", "gnudb"),
+                                  ai=getattr(self, "ai", None),
                                   acoustid="off" if getattr(self, "_trialling", False) else
                                   ma.acoustid_mode(self.profile.get("acoustid", "unsure")))
         out = None
@@ -2299,6 +2308,10 @@ class Engine:
                 self.log.warning("tags for %s: %s", g.folder, exc)
                 return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
                                         reason=f"matched, but the release's tracks do not line up with the files: {exc}")
+        if out and out.get("ai_held"):
+            # AI-1: the pick is a release only AI's searches found, and nothing of your copy proves
+            # it: held for you (never album-only, Partial or web tags from it, never filed unattended)
+            return self._unresolved(out, files, base, errors)
         if trialling:
             # (DSC-10: the set is one release only when one is proven for it; no album-only,
             # Partial, web, fingerprint or disc-by-disc answer is looked for)

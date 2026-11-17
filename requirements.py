@@ -174,6 +174,22 @@ ENTRIES: list[Entry] = [
     _key("image_model", N_("Image model"),
          N_("Another image model than the built-in default (optional)."), N_("The built-in default model is used."),
          "https://platform.openai.com/docs/models", N_("The built-in default model is used"), secret=False),
+    # optional AI assistance with your own key (ai_providers.py, AI-1): one provider is enough
+    _key("ai_openai_key", N_("OpenAI API key"),
+         N_("Optional AI assistance with your own key: reads notes and scans, suggests searches, researches "
+            "the web, explains holds, and makes covers. Off unless a profile turns it on."),
+         N_("TagMender tags fully without it: no AI assistance from OpenAI."),
+         "https://platform.openai.com/api-keys", N_("AI assistance (OpenAI) is not available")),
+    _key("ai_anthropic_key", N_("Anthropic API key"),
+         N_("Optional AI assistance with your own key (Claude): reads notes and scans, suggests searches, "
+            "researches the web and explains holds. Claude does not make images. Off unless a profile turns it on."),
+         N_("TagMender tags fully without it: no AI assistance from Claude."),
+         "https://platform.claude.com/settings/keys", N_("AI assistance (Claude) is not available")),
+    _key("ai_compatible_key", N_("OpenAI-compatible AI key"),
+         N_("Optional AI assistance through an OpenAI-compatible service such as OpenRouter; a local Ollama or "
+            "LM Studio needs no key."),
+         N_("No key is sent to the OpenAI-compatible service."),
+         "https://openrouter.ai/settings/keys", N_("No key for the OpenAI-compatible AI service")),
     Entry("fpcalc", "program", N_("fpcalc (Chromaprint)"),
           N_("Makes the audio fingerprints AcoustID looks up and receives."),
           N_("No fingerprints: identifying by sound and Submit AcoustIDs do not work."),

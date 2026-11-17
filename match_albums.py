@@ -9257,6 +9257,14 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # R9: an unofficial pick your copy proves (its own number printed, the disc ID, a link) is
     # yours - decided against both databases' candidates, an official one keeps winning
     final = mc.unofficial_settled(final, (mb_res, dg_res), album, cfg, ocr_txt)
+    ai = getattr(args, "ai", None)
+    if ai is not None and final["status"] != "auto":
+        # AI-1 (optional AI, a profile's own choice): clues for an album still unsure, which a
+        # database release must carry; never a sure pick on its own (ai_assist.clue_step)
+        import ai_assist
+        mb_res, dg_res, final = ai_assist.clue_step(
+            http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, docs_txt, images if use_ocr else [],
+            use_mb, use_discogs, out, ai, provider_errors)
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     if (status == "auto" and not album.get("unlisted_barcodes")

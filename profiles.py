@@ -161,6 +161,10 @@ DEFAULTS = {
     # always - every album, noting when the fingerprints disagree with a sure pick; off - never.
     # (Writing each track's AcoustID at Audiophile is "audiophile": {"acoustid": ...}.)
     "acoustid": "unsure",
+    # optional AI assistance with your own key (ai_assist.py, rule AI-1): off unless turned on
+    # here. tasks: the ones this profile allows (AI_TASKS). AI only adds clues a database release
+    # must carry; it never identifies a release, and an album only AI supports is held.
+    "ai": {"enabled": False, "tasks": ["notes", "vision", "queries", "web", "explain", "ties", "covers"]},
     # which database identifies and whose tags win: musicbrainz_only | musicbrainz_preferred |
     # discogs_preferred | discogs_only (see SOURCES). The older "primary" is read into it.
     "source": "musicbrainz_preferred",
@@ -707,6 +711,7 @@ def validate(data: dict) -> list[str]:
             p.append(f"unknown format '{f}'")
     p += _skip_problems(d)
     p += _new_setting_problems(d)
+    p += _ai_problems(d)
     for k in CODE_KEYS:
         if k in (data or {}):
             p.append(f"{k} is not a profile setting: a profile never names code to run "
@@ -856,6 +861,23 @@ def _bool(p, d, dotted):
         v = v.get(k) if isinstance(v, dict) else None
     if not isinstance(v, bool):
         p.append(f"{dotted} must be true or false")
+
+
+AI_TASKS = ("notes", "vision", "queries", "web", "explain", "ties", "covers")
+
+
+def _ai_problems(d: dict) -> list[str]:
+    """The ai settings (AI-1): an object with enabled (true/false) and tasks (a list of AI_TASKS)."""
+    ai = d.get("ai")
+    if not isinstance(ai, dict):
+        return ["ai must be an object"]
+    p = []
+    if not isinstance(ai.get("enabled"), bool):
+        p.append("ai.enabled must be true or false")
+    tasks = ai.get("tasks")
+    if not isinstance(tasks, list) or any(t not in AI_TASKS for t in tasks):
+        p.append(f"ai.tasks must be a list of {', '.join(AI_TASKS)}")
+    return p
 
 
 def _new_setting_problems(d: dict) -> list[str]:
@@ -1263,6 +1285,14 @@ class Profile:
     def version_tags(self) -> bool:
         """versions.extra_tags: ALBUMVERSION and RELEASECOMMENT are written."""
         return (self.data.get("versions") or {}).get("extra_tags", True) is not False
+
+    def ai_settings(self) -> dict:
+        """{"enabled", "tasks"}: optional AI for this profile (off by default; an older profile,
+        which has no "ai", reads as off)."""
+        ai = self.data.get("ai") if isinstance(self.data.get("ai"), dict) else {}
+        tasks = ai.get("tasks")
+        return {"enabled": ai.get("enabled") is True,
+                "tasks": [t for t in tasks if t in AI_TASKS] if isinstance(tasks, list) else list(AI_TASKS)}
 
     def provider_on(self, name: str, role: str = "identify") -> bool:
         p = self.data["providers"].get(name) or {}

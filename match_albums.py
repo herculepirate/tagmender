@@ -5095,7 +5095,9 @@ def discogs_one_track_movements(rel, whole_works=False):
 
 # TRK-3: a position that names its disc with a hyphen ("2-3", "CD2-3"): a disc's track, never a
 # movement's number within its work ("3.1", "2a")
-_HYPHEN_DISC = re.compile(r"^\s*(?:[A-Za-z]{1,4})?\d+\s*-\s*\d+")
+# (TRK-6: also a video medium's name with no number - "DVD-2.1", the DVD's index of a CD + DVD -
+# so the work's parts go with the DVD, not onto the CD before it)
+_HYPHEN_DISC = re.compile(r"^\s*(?:(?:[A-Za-z]{1,4})?\d+|(?:dvd|bd|br|blu-?ray|hd-?dvd|vhs|video))\s*-\s*\d+", re.I)
 
 
 def flatten_tracklist(tracklist, dm, parent_position=None, movements=True):

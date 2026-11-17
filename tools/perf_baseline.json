@@ -1,19 +1,18 @@
 {
  "metrics": {
   "ai_calls_proven": 0,
-  "albums_in_cold_s": 0.168,
+  "albums_in_cold_s": 0.19,
   "albums_in_warm_s": 0.073,
-  "all_looked_up_s": 74.101,
-  "first_looked_up_s": 1.889,
-  "first_row_added_s": 1.247,
-  "first_row_during_lookup_s": 2.397,
-  "first_row_s": 0.698,
+  "all_looked_up_s": 8.493,
+  "first_looked_up_s": 1.091,
+  "first_row_added_s": 0.576,
+  "first_row_during_lookup_s": 0.335,
+  "first_row_s": 0.131,
   "plan_album_median_s": 0.01,
   "plan_album_p95_s": 0.03,
-  "plan_s": 2.58,
-  "preview_2000_open_s": 3.193,
-  "ui_stall_max_ms": 3217.1
+  "plan_s": 2.3,
+  "preview_2000_open_s": 0.061,
+  "ui_stall_max_ms": 412.9
  },
- "note": "the slower of two runs",
- "version": "0.8.68"
+ "version": "0.8.69"
 }

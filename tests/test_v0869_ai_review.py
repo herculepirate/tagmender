@@ -188,7 +188,7 @@ class Addresses(P.Base):
         cfg = ap.load_config()
         for url, ok in (("http://localhost:11434/v1", True), ("http://127.0.0.1:1234/v1", True),
                         ("https://openrouter.ai/api/v1", True), ("http://openrouter.ai/api/v1", False),
-                        ("http://192.168.1.5:11434/v1", False)):
+                        ("http://203.0.113.5:11434/v1", False)):
             cfg["providers"]["compatible"]["url"] = url
             self.assertEqual(not ap.config_problems(cfg), ok, url)
             p = ap.CompatibleProvider(url=url, model="m", key="k")

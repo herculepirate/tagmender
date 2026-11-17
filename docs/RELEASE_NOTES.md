@@ -1,5 +1,53 @@
 # Release notes
 
+## 0.8.69
+
+**Albums show up at once**
+- Each album's row appears as soon as its own folder is read, instead of after every folder you
+  dropped. Dropping a few folders reads only those folders, not the folder that holds them: two
+  albums dropped from a download folder of 1,400 albums are read in well under a second.
+- A folder dropped while a look-up, a Preview or a listing runs gets its row within a second; it
+  is looked up after the work running now. A folder dropped during a refile, or into folders
+  being added, waits for that work as before.
+- Tags read once are remembered for the whole session, for a library of up to 500,000 files
+  (about 1 KB each). Going over an unchanged library again opens no file. Pictures and DJ-program
+  data stored in the tags no longer stop a track from being remembered.
+- A look-up reads only the albums it looks up, not its whole folder again.
+- The list sorts and fits its columns without holding the window: the preview of 2,000 albums
+  opens in a tenth of a second (3 seconds before).
+- When MusicBrainz or Discogs asks TagMender to wait, the status bar says so, with a countdown.
+- If work starts while Apply is asking you to confirm, nothing is applied; press Apply again when
+  it ends.
+
+**A new preview: your folders, the albums as they will be, the tag changes and the cover**
+- Under the album list, four linked panes show your folders and files with where each goes, each
+  album as release → discs → tracks, the tag changes for whatever you select (a file, a disc, a
+  folder or the album), and the cover art. Selecting in one pane selects its counterpart in the
+  others. Each pane folds away; what you folded and the pane sizes are remembered. See the user
+  guide, "The preview's panes".
+
+**Optional AI assistance with your own key**
+- With your own OpenAI, Anthropic (Claude) or OpenAI-compatible key (one is enough), a profile can
+  let AI read rip notes and scans in any language, suggest searches, look for the release's page
+  and make covers. It is off until you turn it on; audio is never sent; each provider has a
+  monthly cap. What AI finds is a clue, never proof: it never makes an album more certain, only
+  suggests one of two equal pressings for you to choose and lists the releases its searches find
+  as alternatives (AI-1). Set it up in Preferences › Keys; see the user guide, "AI assistance".
+
+**Where the time goes**
+- The log has one "timing" line per album: reading files, tags, scans, MusicBrainz, Discogs, the
+  web, waits a database asked for, and AI. `tools/perf_check.py` checks these timings before each
+  release.
+
+**Known limits**
+- While several look-ups run, the window can still pause for up to about half a second when
+  folders are added (the release target is a tenth of a second). Moving look-ups out of the
+  window's process is planned for the next release.
+- AI is turned on per profile in the profile's file (`"ai": {"enabled": true}`); a switch in the
+  profile editor comes later.
+- A folder whose own tracks are one album, or with no tracks and two or more numbered folders, is
+  still read whole when you drop a folder inside it.
+
 ## 0.8.68
 
 **A multi-disc set is one album, whatever its folders are called**

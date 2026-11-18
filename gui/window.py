@@ -1128,14 +1128,16 @@ class Main(QMainWindow):
         """The toolbar never hides its Inspector or Apply button in its overflow menu: when the window
         is too narrow for everything (its narrowest width, the progress bar shown during work), the
         Inspector button loses its word, the search field, the profile pop-up and the progress bar
-        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone."""
+        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone. Clear Done
+        gives up its word first."""
         bar = getattr(self, "toolbar", None)
         b = bar.widgetForAction(self.commands["show_inspector"]) if bar is not None else None
         if b is None:
             return
         # (inspector's word, search's widest, profile pop-up, progress bar, compact filter, icons alone,
         # the narrowest: no "Profile" word before the pop-up, Apply's count without "Albums")
-        steps = ((True, 200, 200, 120, False, False, False), (False, 160, 180, 120, False, False, False),
+        steps = ((True, 200, 200, 120, False, False, False), (True, 200, 200, 120, False, None, False),
+                 (False, 160, 180, 120, False, False, False),
                  (False, 140, 150, 100, True, False, False), (False, 110, 130, 80, True, True, False),
                  (False, 90, 110, 60, True, True, False), (False, 80, 100, 40, True, True, True))
         others = [bar.widgetForAction(self.commands[k]) for k in actmod.TOOLBAR] + [self.cancel_button]
@@ -1149,9 +1151,13 @@ class Main(QMainWindow):
             self.search_box.setMaximumWidth(search)
             self.profile_box.setFixedWidth(profile)
             self.progress.setFixedWidth(progress)
+            clear = bar.widgetForAction(self.commands["clear_done"]) if "clear_done" in self.commands else None
             for w in others:
                 if w is not None:
-                    w.setToolButtonStyle(Qt.ToolButtonIconOnly if bare else Qt.ToolButtonTextBesideIcon)
+                    # (bare None: only Clear Done shows its icon alone - it gives its word up first, from
+                    # the second step on, before the Inspector button gives up its own)
+                    alone = bare or (w is clear and (bare is None or n >= 1))
+                    w.setToolButtonStyle(Qt.ToolButtonIconOnly if alone else Qt.ToolButtonTextBesideIcon)
             if compact != getattr(self, "_compact_filter", False):
                 self._compact_filter = compact
                 ov = getattr(self, "pages", {}).get("Overview")

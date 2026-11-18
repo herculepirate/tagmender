@@ -56,7 +56,7 @@ COMMANDS = {
     "copy": (N_("&Copy"), QKeySequence.StandardKey.Copy, None, N_("Copy the selection")),
     "paste": (N_("&Paste"), QKeySequence.StandardKey.Paste, None, N_("Paste")),
     "select_all": (N_("Select A&ll"), QKeySequence.StandardKey.SelectAll, None, N_("Select all")),
-    "clear_done": (N_("Clear Done Al&bums"), None, None,
+    "clear_done": (N_("Clear Done Al&bums"), None, "circle-check",
                    N_("Take every album marked Done out of the list; nothing on disk changes")),
     "copy_path": (N_("Copy Album Pat&h"), "Ctrl+Shift+C", None, N_("Copy the selected album's folder")),
     "find": (N_("&Find"), "Ctrl+F", "search", N_("Search the page shown")),
@@ -224,8 +224,8 @@ MENUS = (
     (N_("&Help"), ("help", "setup", "shortcuts", None, "report", "about")),
 )
 CHECKABLE = ("read_scans", "show_sidebar", "show_inspector", "toggle_rule")
-TOOLBAR = ("add_folder", "look_up")                     # (then the window's: progress, Cancel, the filter ...)
-TOOLBAR_TEXT = {"add_folder": N_(" Add Folder")}           # (its icon fills its box: a space keeps the gap)
+TOOLBAR = ("add_folder", "look_up", "clear_done")       # (then the window's: progress, Cancel, the filter ...)
+TOOLBAR_TEXT = {"add_folder": N_(" Add Folder"), "clear_done": N_(" Clear Done")}   # (a space keeps the gap after the icon)
 SPRING = "|"                                           # (in toolbar_end's list: the room that is left, shared)
 ICON_ROLE = {"apply": "on_accent"}                      # (the prominent button: its icon as its label)
 # the pages in the View menu, with their letters (the page's name stays the key)

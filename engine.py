@@ -569,6 +569,39 @@ def release_set_shape(folder: Path, dirs, files, keys, metas, found) -> str:
     return "discs" if discs else "numbered"
 
 
+# DSC-14: at most this many sibling folders are looked up as one set by their disc IDs (one
+# disc-ID look-up each, the same each folder's own match makes)
+SET_DISCID_MAX_DISCS = 40
+
+
+def log_toc_of(d: Path) -> str:
+    """DSC-14: the one table of contents the rip logs in folder d give (EAC, XLD), else "" (none,
+    or two different discs' logs)."""
+    tocs = list(ma.log_tocs(d).values())
+    return tocs[0] if len(tocs) == 1 else ""
+
+
+def disc_id_set_shape(folder: Path, dirs, keys, found) -> str:
+    """DSC-14: sibling folders DIRS of FOLDER that may be one set by their discs' IDs alone, past
+    DSC-10's shape and its cap: "discids" when FOLDER has no tracks of its own, every audio folder
+    below it is one of DIRS, a folder of it holding one album, 2 to SET_DISCID_MAX_DISCS of them,
+    each with one rip log TOC, and FOLDER is not named as its one artist's folder; "" otherwise.
+    Nothing is joined here: Engine._disc_id_set looks the disc IDs up and joins them only where
+    one release (or several pressings of one set) holds every disc at its folder's place."""
+    if folder in found or not 2 <= len(dirs) <= SET_DISCID_MAX_DISCS:
+        return ""
+    if any(d.parent != folder or mc.version_layout(d.name) for d in dirs):
+        return ""
+    if any(folder in d.parents and d not in dirs for d in found):
+        return ""                                       # (audio deeper down: not one level of discs)
+    artists = {k[1] for k in keys.values()}
+    if len(artists) == 1 and next(iter(artists)) and _artist_folder(folder, next(iter(artists))):
+        return ""                                       # (an artist's folder of albums)
+    if not all(log_toc_of(d) for d in dirs):
+        return ""
+    return "discids"
+
+
 def _left_out(profile, box: Path, dirs, path) -> bool:
     """Engine._box_part_left_out for a profile: a folder of the set your profile excludes, or
     one the rules' Ignore remembered."""
@@ -609,7 +642,8 @@ def _release_set_groups(eng, groups, found, metas, path) -> list:
         if set(files) != {f for d in found if d.parent == parent for f in found[d]}:
             continue                                 # (a file of the set no album of these holds)
         keys = album_keys(files, parent, metas)
-        shape = release_set_shape(parent, dirs, files, keys, metas, found)
+        shape = release_set_shape(parent, dirs, files, keys, metas, found) or \
+            disc_id_set_shape(parent, dirs, keys, found)                  # DSC-14
         if not shape or _left_out(eng.profile, parent, dirs, path):
             continue
         # (the parts in their folders' order: by the number each name begins with)
@@ -2208,6 +2242,12 @@ class Engine:
         # (DSC-11: a release you chose for the joined row - kept under its first folder - is each
         # covered folder's own choice: each planned alone with it, then joined as usual)
         chosen = set() if albums else self._chosen_join(folder, parts)
+        if not albums and not chosen:
+            # DSC-14: the discs' own IDs first - one release (or several pressings of one set)
+            # holding every folder's disc at its place joins them, before any is planned alone
+            got = self._disc_id_set(folder, parts)
+            if got is not None:
+                return got
         was_force = getattr(self, "force", None)
         if albums:
             self.force = self._albums_chosen(parts)
@@ -2241,6 +2281,8 @@ class Engine:
                 return self._release_folders(folder, parts, per, out)
             if any(self._choice_for(part, alone(part)) for _i, part, _ps in per):
                 return out                               # (a release you chose for one of them)
+            if g.set_shape == "discids":
+                return out                               # (DSC-14: by their disc IDs only - none joined them)
             got = self._claim(folder, parts, per)
             if got is None and g.set_shape == "discs" and len(per) == len(parts):
                 got = self._set_search(folder, parts, per)
@@ -2268,6 +2310,96 @@ class Engine:
         out["members"], out["joined"] = members, [prop]
         self.log.info("%s: %s", folder, "; ".join([note] + left))
         return out
+
+    def _disc_id_releases(self, toc):
+        """DSC-14: {MusicBrainz release: (the medium positions carrying this TOC's exact disc ID,
+        its audio discs)} - the releases MusicBrainz attaches that disc ID to (the same look-up,
+        cached, each album's own match makes: match_albums.toc_releases). None when the look-up
+        fails; {} when the disc ID is attached to none."""
+        did = ma.mb_discid(toc)
+        try:
+            data = self.http.get_json(ma._discid_url(did, toc), "mb")
+        except Exception:                                # (an outage: nothing is joined by it)
+            return None
+        if not data or data.get("id") != did:
+            return {}                                    # (only a fuzzy answer: no proof)
+        out = {}
+        for r in data.get("releases") or ():
+            media = r.get("media") or ()
+            pos = {int(m["position"]) for m in media if m.get("position")
+                   and any(x.get("id") == did for x in m.get("discs") or ())}
+            audio = sum(1 for m in media if str(m.get("format") or "").casefold() not in ma._MB_VIDEO_FORMATS)
+            if r.get("id") and pos:
+                out[str(r["id"])] = (pos, audio)
+        return out
+
+    def _disc_id_set(self, folder: Path, parts):
+        """DSC-14: sibling folders, each one disc with its rip log's TOC, whose exact MusicBrainz
+        disc IDs are all attached to one same release - each folder's disc at the place the
+        folders' order gives it (1, 2, ... N), the release holding N audio discs, no more - are one
+        album: the folders joined and matched as one (the usual match, its tie rules choosing
+        among several pressings that each hold them; never a guess). Accepted when that match is
+        one of those releases or no release at all (held as one album); a match to another
+        release keeps each folder planned alone, as before. Nothing is joined without a release
+        holding them all: separate releases stay separate. At most SET_DISCID_MAX_DISCS
+        look-ups, one per folder. The _release_set result, or None."""
+        if not self.use_mb or not 2 <= len(parts) <= SET_DISCID_MAX_DISCS:
+            return None
+        dirs = []
+        for q in parts:
+            ds = {Path(f).parent for f in q.files}
+            if len(ds) != 1:
+                return None
+            dirs.append(next(iter(ds)))
+        if len(set(dirs)) != len(dirs):
+            return None
+        tocs = {d: log_toc_of(d) for d in dirs}
+        if not all(tocs.values()):
+            return None
+        order = sorted(dirs, key=lambda d: ma._natural_key(d.name))
+        common = None
+        per = {}
+        for d in order:
+            rels = self._disc_id_releases(tocs[d])
+            if not rels:
+                return None                              # (no disc ID proof for this folder)
+            per[d] = rels
+            common = set(rels) if common is None else common & set(rels)
+            if not common:
+                return None                              # (no release holds them all)
+        n = len(order)
+        fits = sorted(r for r in common
+                      if per[order[0]][r][1] == n and all(i in per[d][r][0] for i, d in enumerate(order, 1)))
+        if not fits:
+            return None
+        files = [f for d in order for q in parts for f in q.files if Path(f).parent == d]
+        joined = Group(folder, files, [])
+        was = (getattr(self, "_in_set", False), getattr(self, "_alone", True))
+        self._in_set, self._alone = True, True
+        try:
+            props = self.identify_all(joined)
+        except Exception as exc:                         # (the joined album's failure: each alone)
+            self.log.info("%s: the set its disc IDs prove failed: %s", folder, exc)
+            return None
+        finally:
+            self._in_set, self._alone = was
+        prop = props[0]
+        mbids = {str(x) for t in prop.targets or () for x in t.get("musicbrainz_albumid") or ()}
+        # (TIE-1: pressings tied, one only suggested - album known with the suggestion, never a guess)
+        mbids.add(str((getattr(prop, "suggested", None) or {}).get("id") or ""))
+        if prop.status == "identified" and not (mbids & set(fits)) and str(prop.release_id) not in fits:
+            self.log.info("%s: its disc IDs name %s, the match %s: each folder planned alone", folder,
+                          ", ".join(fits), prop.release_id)
+            return None
+        names = ", ".join(f"'{d.name}' -> disc {i}" for i, d in enumerate(order, 1))
+        how = (f"its {n} disc IDs all on MusicBrainz release {fits[0]}" if len(fits) == 1 else
+               f"its {n} disc IDs all on {len(fits)} pressings of one set")
+        note = f"one release, {n} discs: {names} ({how})"
+        prop.notes = list(prop.notes or []) + [note]
+        self.log.info("%s: %s", folder, note)
+        for p in props:
+            p.set_key, p.set_members = group_key(parts[0].folder, parts[0].files), list(parts)
+        return {"own": {}, "members": set(range(len(parts))), "joined": props}
 
     def _albums_chosen(self, parts):
         """DSC-11: the choices (force) with a release you chose for a joined row of album folders

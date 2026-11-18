@@ -70,6 +70,33 @@ def audio_files(folder):
     return sorted(out)
 
 
+STILL_RUNNING = "tagger still running, not checked"
+DONE = ("tagged", "tagged, no Discogs data")        # (the states of an album saved whole)
+VIDEO_EXT = {".mkv", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".wmv", ".flv", ".vob", ".ts",
+             ".m2ts", ".mts", ".3gp", ".ogv"}
+
+
+def is_video(path):
+    """A video file (a music video, a concert film): never one of the album's tracks, so it
+    never makes an album "saved in part". An .mp4 is a video when it holds a picture track."""
+    ext = Path(path).suffix.lower()
+    if ext in VIDEO_EXT:
+        return True
+    if ext != ".mp4":
+        return False
+    try:
+        with open(path, "rb") as fh:
+            at, n = _moov(fh)
+            if n > 64 << 20:
+                return False
+            fh.seek(at)
+            moov = fh.read(n)
+    except (OSError, ValueError):
+        return False
+    import re
+    return re.search(rb"hdlr.{8}vide", moov, re.DOTALL) is not None
+
+
 def _first(v):
     if isinstance(v, (list, tuple)):
         v = v[0] if v else ""
@@ -1050,19 +1077,36 @@ def is_picard_process(cmdline):
     return any(os.path.basename(w) == "picard" for w in cmdline.split())
 
 
-def picard_running():
-    """The first running Picard process ('pid command'), or '' when Picard is closed."""
+def tagger_processes():
+    """Every running tagger process: [(pid, uid, seconds since it started, command)]."""
+    try:
+        r = subprocess.run(["ps", "-eo", "pid=,uid=,etimes=,args="], capture_output=True, text=True)
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in r.stdout.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4 or not all(x.isdigit() for x in parts[:3]):
+            continue
+        if is_picard_process(parts[3].strip()):
+            out.append((int(parts[0]), int(parts[1]), float(parts[2]), parts[3].strip()))
+    return out
+
+
+def picard_running(since=None, exclude=()):
+    """The first running tagger process ('pid command'), or '' when the tagger is closed.
+    With SINCE (the time this run started the tagger): only a tagger of this user started
+    since then whose PID is not in EXCLUDE (those running before) - the one this run
+    started, never another user's or one that was open already."""
     if os.environ.get("TAGMENDER_SKIP_PICARD_CHECK") == "1":       # tests only
         return ""
-    try:
-        r = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True)
-    except FileNotFoundError:
-        return ""
     mine = os.getpid()
-    for line in r.stdout.splitlines():
-        pid, _, cmd = line.strip().partition(" ")
-        if pid.isdigit() and int(pid) != mine and is_picard_process(cmd.strip()):
-            return f"{pid} {cmd.strip()[:150]}"
+    for pid, uid, age, cmd in tagger_processes():
+        if pid == mine:
+            continue
+        if since is not None and (uid != os.getuid() or pid in exclude or age > time.time() - since + 2):
+            continue
+        return f"{pid} {cmd[:150]}"
     return ""
 
 
@@ -1100,22 +1144,49 @@ def run_picard(picard_cmd, folders, settle, timeout, log):
         return -1
 
 
+def wait_for_tagger_exit(log=None, timeout=None, poll=2.0, since=None, exclude=()):
+    """Wait until the tagger this run started has exited (its command can return while the
+    application still saves: a window already open received the commands, or Flatpak's
+    wrapper ended first). SINCE and EXCLUDE: see picard_running. '' once it is gone; the
+    process found when TIMEOUT seconds (default TAGMENDER_TAGGER_EXIT_WAIT, 600) passed with
+    it still running."""
+    if timeout is None:
+        try:
+            timeout = float(os.environ.get("TAGMENDER_TAGGER_EXIT_WAIT", "600"))
+        except ValueError:
+            timeout = 600.0
+    end = time.monotonic() + timeout
+    while True:
+        running = picard_running(since=since, exclude=exclude)
+        left = end - time.monotonic()
+        if not running or left <= 0:
+            if running and log is not None:
+                log.write(f"The tagger was still running {timeout:.0f} s after its commands: {running}\n")
+            return running
+        time.sleep(min(poll, left))
+
+
 # --------------------------------------------------------------------------
 # Verify: where did each file go, and was it tagged?
 # --------------------------------------------------------------------------
-def changed_dirs(root, since, full=False):
+def changed_dirs(root, since, full=False, deadline=None):
     """Folders under root that changed after `since` (files or folders were added).
     A new album folder changes its artist folder, so only changed folders are descended
     into: a few thousand directory reads instead of walking the whole library. With
-    full=True every folder is checked (used only when a file cannot be found)."""
+    full=True every folder is checked (used only when a file cannot be found). Past DEADLINE
+    (a time.time()) no further folder is read: what was found so far is returned."""
     out = []
 
     def scan(folder, depth):
+        if deadline is not None and time.time() > deadline:
+            return
         try:
             entries = list(os.scandir(folder))
         except OSError:
             return
         for e in entries:
+            if deadline is not None and time.time() > deadline:
+                return
             try:
                 if not e.is_dir(follow_symlinks=False):
                     continue
@@ -1186,10 +1257,12 @@ def tidy_artwork(album_path, new_dir, extras, covers_name="covers"):
 
     # 1. everything Picard left in the old folder
     if old.exists() and old.resolve() != new.resolve():
-        if any(p.suffix.lower() in AUDIO_EXT for p in old.rglob("*") if p.is_file()):
+        if any(p.suffix.lower() in AUDIO_EXT and not is_video(p) for p in old.rglob("*") if p.is_file()):
             return moves                               # music still here: not saved, leave it
         for p in sorted(old.rglob("*")):
-            if p.is_file():
+            if p.is_file() and is_video(p):            # a music video the tagger left: keeps its place
+                move(p, new / p.relative_to(old))
+            elif p.is_file():
                 place(p, p.relative_to(old))
         _remove_empty(old)
     # 2. loose scans and scan folders Picard moved next to the music
@@ -1218,16 +1291,114 @@ def tidy_artwork(album_path, new_dir, extras, covers_name="covers"):
                 move(p, new / p.name)
     return moves
 
-def verify(album, files_rec, candidates):
+def existing_dirs(root, depth=5):
+    """ROOT and every folder down to DEPTH levels below it (5: as deep as changed_dirs looks),
+    as text: taken before the tagger runs, so that a folder it made is told from one that was
+    there (a folder's times say only that something in it changed). A linked folder is listed
+    with the folders in it, and links are not followed further."""
+    root = str(Path(root))
+    out = {root}
+
+    def scan(folder, level):                    # (LEVEL: how deep the folders in FOLDER are)
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            return
+        for e in entries:
+            try:
+                link = e.is_symlink()
+                if not e.is_dir():
+                    continue
+            except OSError:
+                continue
+            out.add(e.path)
+            if link:
+                try:
+                    out.update(c.path for c in os.scandir(e.path) if c.is_dir())
+                except OSError:
+                    pass
+            elif level < depth:
+                scan(e.path, level + 1)
+
+    scan(root, 1)
+    return out
+
+
+def disc_number(folder, files):
+    """Which disc of a set an album folder holds: the disc number its tracks carry, when they
+    all carry the same one; else a "CD2" / "Disc 2" in the folder's name; None when neither
+    says (two copies of a disc or of a release are told from two discs of a set by this)."""
+    import re
+    # (the folder's number: "CD2", "Disc 2", "Disc2of2"; never a year, "CD 2000")
+    m = re.search(r"(?i)\b(?:cd|disc|disk)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", Path(folder).name)
+    in_name = int(m.group(1)) or None if m else None
+    tags = set()
+    for p in files:
+        try:
+            f = mutagen.File(p, easy=True)
+            v = f.tags.get("discnumber") if f is not None and f.tags is not None else None
+        except Exception:
+            v = None
+        m = re.match(r"\s*0*(\d+)\s*(?:/\s*0*(\d+))?", str(v[0])) if v else None
+        tags.add((int(m.group(1)), int(m.group(2)) if m.group(2) else None) if m else None)
+    if len(tags) == 1 and None not in tags:
+        number, total = tags.pop()
+        # (discs ripped one at a time each say "1/1": the folder's "CD2" is the one to go by)
+        if in_name is not None and in_name != number and total in (None, 1):
+            return in_name
+        return number
+    return in_name
+
+
+def clear_tagger_leftovers(folders, album_paths, keep, existed, root):
+    """After albums were put back: what the tagger left in the folders it made for them.
+    A folder counts as made by it when it was not there before the run (EXISTED), is not
+    an album's own folder, inside one or above one, and holds no audio file now. In such a
+    folder a cover image is removed, and the folder once empty (never one that was there
+    before); anything else is listed, never removed. KEEP: the files of every album of the
+    batch, wherever they are now, never touched. Returns the files listed."""
+    albums = [Path(a) for a in album_paths]
+    left = []
+    for d in sorted(folders):
+        d = Path(d)
+        if (not d.is_dir() or str(d) in existed or str(d) == str(Path(root))
+                or any(d == a or a in d.parents or d in a.parents for a in albums)):
+            continue
+        files = [p for p in sorted(d.rglob("*")) if p.is_file()]
+        if any(p.suffix.lower() in AUDIO_EXT for p in files):
+            continue                                   # (music is filed there: not a leftover folder)
+        for p in files:
+            if str(p) in keep:
+                continue
+            if _is_cover_name(p):
+                try:
+                    p.unlink()
+                    continue
+                except OSError:
+                    pass
+            left.append(str(p))
+        _remove_empty(d, keep=existed | {str(Path(root))})
+    return left
+
+
+def verify(album, files_rec, candidates, deadline=None):
     """Find each original file (by its audio) in the folders that changed, and say whether
-    Picard saved it and whether Discogs Enrichment added its fields."""
+    Picard saved it and whether Discogs Enrichment added its fields. Past DEADLINE (a
+    time.time()) no further folder or file is read: a file not reached is not found."""
     by_key = {}
+    late = lambda: deadline is not None and time.time() > deadline
     for d in candidates:
+        if late():
+            break
         for p in audio_files(d) if d.is_dir() else []:
+            if late():
+                break
             ids = read_ids(p)
             if ids["albumid"] == album["mbid"]:
                 by_key.setdefault(audio_key(p), []).append((p, ids))
-    result = {"saved": 0, "with_discogs": 0, "not_saved": [], "new_paths": {}}
+    # saved_paths / discogs_paths: the original paths of the files counted in saved / with_discogs
+    result = {"saved": 0, "with_discogs": 0, "not_saved": [], "new_paths": {}, "saved_paths": [],
+              "discogs_paths": []}
 
     def saved(ids, rec):
         # Picard saved the file when it carries a track ID of this release. On a retag the
@@ -1243,11 +1414,17 @@ def verify(album, files_rec, candidates):
 
     for rec in files_rec:
         old = Path(rec["path"])
+        if old.exists() and late():
+            result["new_paths"][rec["path"]] = rec["path"]     # (there, its tags not read)
+            continue
         if old.exists():
             ids = read_ids(old)
             if saved(ids, rec):                          # saved in place (not moved)
                 result["saved"] += 1
-                result["with_discogs"] += discogs(ids, rec)
+                result["saved_paths"].append(rec["path"])
+                if discogs(ids, rec):
+                    result["with_discogs"] += 1
+                    result["discogs_paths"].append(rec["path"])
                 result["new_paths"][rec["path"]] = rec["path"]
             else:
                 result["not_saved"].append(rec["path"])
@@ -1256,8 +1433,12 @@ def verify(album, files_rec, candidates):
         if found:
             p, ids = found.pop(0)
             result["new_paths"][rec["path"]] = str(p)
-            result["saved"] += 1 if saved(ids, rec) else 0
-            result["with_discogs"] += discogs(ids, rec)
+            if saved(ids, rec):
+                result["saved"] += 1
+                result["saved_paths"].append(rec["path"])
+            if discogs(ids, rec):
+                result["with_discogs"] += 1
+                result["discogs_paths"].append(rec["path"])
         else:
             result["not_saved"].append(rec["path"] + " (moved, new place not found)")
     return result
@@ -1384,6 +1565,10 @@ def main():
     pending = []                     # (the batch being seeded: in the journal even if the run stops)
     results = []
     print(f"Run {run_id}: backups and log in {run_dir}")
+    existed = existing_dirs(root)            # (folders there before the tagger: never removed)
+    run_made = set()                         # (folders this run's earlier batches made)
+    signals = _stop_like_ctrl_c()
+    in_flight = None                         # (a batch the tagger was started on and not yet checked)
     try:
         for start in range(0, len(albums), args.batch):
             batch = []
@@ -1402,32 +1587,64 @@ def main():
                 continue
             for a in batch:                                   # 1+2: back up, then seed
                 a["extras"] = extra_files(a["path"])
+                a["disc"] = disc_number(a["path"], a["files"])
                 a["records"] = []
                 for p in a["files"]:
                     before = read_ids(p)                     # a retag: the old release's IDs are there
                     rec = {"path": p, "key": audio_key(p), "backup": backup_tags(p, blob_dir),
                            "old_trackid": before["trackid"], "old_discogs": before["discogs"],
-                           "old_albumid": before["albumid"]}
+                           "old_albumid": before["albumid"], "video": is_video(p)}
                     a["records"].append(rec)
                 # every album prepared so far in this batch (later ones have no backup yet)
                 pending = [{"album": x["path"], "mbid": x["mbid"], "files": x["records"], "extras": x["extras"]}
                            for x in batch if "records" in x]
-                with open(run_dir / "journal.json", "w") as fh:
-                    json.dump(journal + pending, fh)
+                write_journal(run_dir, journal + pending)
                 for p in a["files"]:
                     write_albumid(Path(p), a["mbid"])
                     # until Picard saves it, the album is not done: a seed left behind by a run
                     # that stopped is never taken for "already tagged with this release"
                     write_tagmender(Path(p), "Seeded", "release ID written; the tagger has not saved yet")
             journal += [{"album": a["path"], "mbid": a["mbid"], "files": a["records"], "extras": a["extras"],
-                         "moves": a.setdefault("moves", [])} for a in batch]
+                         "moves": a.setdefault("moves", []), "kept_dirs": a.setdefault("kept_dirs", [])}
+                        for a in batch]
             pending = []
             started = time.time()
             n0 = start + 1
             print(f"[{n0}-{start + len(batch)}/{len(albums)}] The tagger: tagging {len(batch)} album(s)…", flush=True)
+            before_pids = {pid for pid, *_ in tagger_processes()}
+            launched = time.time()
+            in_flight = (batch, started, launched, before_pids)
             rc = run_picard(args.picard, [a["path"] for a in batch], args.settle,
                             timeout=600 + 120 * len(batch), log=log)
+            # (the tagger may still be saving after its command returned - a window it left
+            # open, a slow share: verified before it is done, files it saves later look unsaved
+            # and are left without the mark, Nile - What Should Not Be Unearthed, 8 of 10)
+            still = wait_for_tagger_exit(log=log, since=launched, exclude=before_pids)
             cands = changed_dirs(root, started) + [Path(a["path"]) for a in batch]
+            if still:
+                # nothing is written to a file the tagger may be writing: no mark, no seed taken
+                # out, nothing put back. Only where the files are now is looked up, for --undo.
+                print(f"    the tagger is still running ({still}). Nothing was written to the {len(batch)} "
+                      f"album(s) of this batch while it may still save them: they are left as the tagger "
+                      f"leaves them. When it has closed, check them and run again, or put them back with "
+                      f"--undo {run_id}. No further batch is started.")
+                for a in batch:
+                    try:
+                        found = verify(a, a["records"], cands).get("new_paths", {})
+                    except Exception:
+                        found = {}
+                    for rec in a["records"]:
+                        rec["new_path"] = found.get(rec["path"], "")
+                    dirs = sorted({str(Path(p).parent) for p in found.values()})
+                    results.append({"album": a["path"], "state": STILL_RUNNING, "saved": "",
+                                    "files": len(a["records"]), "discogs": "", "now_in": "; ".join(dirs),
+                                    "release": a["mbid"], "not_saved": ""})
+                    print(f"    {STILL_RUNNING:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}")
+                write_journal(run_dir, journal)
+                in_flight = None
+                if rc not in (0, None):
+                    print(f"    (the tagger exited with {rc}; see {run_dir / 'tagger.log'})")
+                break
             full = None
             for a in batch:                                   # 4: verify
                 v = verify(a, a["records"], cands)
@@ -1435,33 +1652,130 @@ def main():
                     full = full or changed_dirs(root, started, full=True)
                     v = verify(a, a["records"], full + [Path(a["path"])])
                 a["verify"] = v
-                n = len(a["records"])
-                state = ("tagged" if v["saved"] == n and v["with_discogs"] == n else
-                         "tagged, no Discogs data" if v["saved"] == n else
-                         "partly saved" if v["saved"] else "not saved")
-                new_dirs = sorted({str(Path(p).parent) for p in v["new_paths"].values()})
-                results.append({"album": a["path"], "state": state, "saved": v["saved"], "files": n,
-                                "discogs": v["with_discogs"], "now_in": "; ".join(new_dirs),
-                                "release": a["mbid"], "not_saved": "; ".join(v["not_saved"][:3])})
-                print(f"    {state:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}"
-                      + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
-                for rec in a["records"]:
+                recs = a["records"]
+                # (the album's audio tracks decide: a music video the tagger leaves unsaved never
+                # makes it "saved in part"; an audio track it leaves unsaved does)
+                tracks = [r for r in recs if not r.get("video")] or recs
+                n = len(tracks)
+                if "saved_paths" in v:
+                    sp, dp = set(v["saved_paths"]), set(v["discogs_paths"])
+                    saved = sum(r["path"] in sp for r in tracks)
+                    discogs = sum(r["path"] in dp for r in tracks)
+                else:
+                    saved, discogs = v["saved"], v["with_discogs"]
+                state = ("tagged" if saved == n and discogs == n else
+                         "tagged, no Discogs data" if saved == n else
+                         "partly saved" if saved else "not saved")
+                for rec in recs:
                     rec["new_path"] = v["new_paths"].get(rec["path"], "")
                     if not rec["new_path"] and Path(rec["path"]).exists():
                         try:                          # not saved: take the seeded release ID out again
                             restore_tags(Path(rec["path"]), rec["backup"], blob_dir)
                         except Exception as exc:
                             print(f"    could not take the release ID out of {rec['path']}: {exc}")
-                if v["saved"]:                                # 4b: TAGMENDER=Resolved / Unresolved
-                    status = "Resolved" if state.startswith("tagged") else "Unresolved"
-                    reason = "" if status == "Resolved" else f"The tagger saved {v['saved']} of {n} files"
-                    for rec in a["records"]:
-                        if rec["new_path"]:
+                moved = any(r["new_path"] != r["path"] and (r["new_path"] or not Path(r["path"]).exists())
+                            for r in recs)
+                # all or nothing: an album the tagger did not save whole is put back whole - never
+                # left with some tracks tagged and moved and the rest behind in the old folder
+                # (Boris & Sunn O))) - Altar, 7 of 8 moved; Sepultura - Beneath the Remains), nor
+                # moved unsaved into a folder of the tagger's
+                a["_check"] = {"saved": saved, "discogs": discogs, "n": n, "state": state,
+                               "failed": not state.startswith("tagged") and bool(saved or moved),
+                               "new_dirs": sorted({str(Path(p).parent) for p in v["new_paths"].values()}),
+                               "reason": f"The tagger saved {saved} of {n} files", "with": []}
+                # (the folders the files went to that were there before: never removed, by --undo either)
+                a["kept_dirs"][:] = sorted({str(d) for p in v["new_paths"].values() for d in Path(p).parents
+                                            if str(d) in existed})
+            write_journal(run_dir, journal)    # (where every file went, before anything moves)
+            in_flight = None
+            # ...and so is every part of one set: the discs of one release filed in sibling folders
+            # are put back together when one of them is not saved whole (never one disc tagged,
+            # the other not: Boris & Sunn O))) - Altar). Only discs with different numbers are
+            # parts of a set; two copies of a disc or release (a FLAC and an MP3 rip) never are.
+            groups = {}
+            for a in batch:
+                key = a.get("mbid") or (f"discogs:{a['discogs']}" if a.get("discogs") else "")
+                if key and a.get("disc") is not None:
+                    groups.setdefault(key, []).append(a)
+            for members in groups.values():
+                discs = [m["disc"] for m in members]
+                members = [m for m in members if discs.count(m["disc"]) == 1]
+                if len(members) < 2:
+                    continue
+                bad = [m for m in members if m["_check"]["state"] not in DONE]
+                for m in members if bad else ():  # (a part saved whole: the others not; one not: the rest)
+                    m_bad = any(x is m for x in bad)
+                    m["_check"]["with"] = [Path(x["path"]).name for x in (members if m_bad else bad) if x is not m]
+            # (a part neither saved nor moved needs no putting back: it is only marked)
+            put_back = [a for a in batch if a["_check"]["failed"]
+                        or (a["_check"]["with"] and a["_check"]["state"] in DONE)]
+            for a in batch:
+                c = a["_check"]
+                if c["with"] and not c["failed"] and c["state"] not in DONE:
+                    c["reason"] += f"; the other parts of its set were put back too: {', '.join(c['with'])}"
+            made = set()
+            for a in put_back:
+                c, recs = a["_check"], a["records"]
+                made |= {str(Path(r["new_path"]).parent) for r in recs
+                         if r["new_path"] and r["new_path"] != r["path"]}
+                _r, problems, where = undo_album({"album": a["path"], "files": recs, "extras": a["extras"],
+                                                  "moves": a["moves"], "kept_dirs": a["kept_dirs"]}, blob_dir)
+                for rec in recs:                      # where each file is now, whatever went wrong
+                    rec["new_path"] = where.get(rec["path"], rec["new_path"])
+                    if not rec["new_path"]:
+                        rec["missing"] = True
+                if not problems:
+                    a["moves"].clear()
+                write_journal(run_dir, journal)    # (stopped here: --undo still finds them)
+                c["new_dirs"] = sorted({str(Path(r["new_path"]).parent) for r in recs
+                                        if r["new_path"] and r["new_path"] != r["path"]})
+                missing = [r["path"] for r in recs if r.get("missing")]
+                if not c["failed"]:                   # saved whole, put back with the part that was not
+                    c["state"] = "saved, put back with its set"
+                    c["reason"] += (f"; put back with {', '.join(c['with'])}, a part of the same release "
+                                    "the tagger did not save whole")
+                else:
+                    c["state"] = ("partly saved" if c["saved"] else "not saved") + ", put back"
+                    if c["with"]:
+                        c["reason"] += f"; put back together with {', '.join(c['with'])} (the same release)"
+                if problems:
+                    c["state"] += " in part"
+                    c["reason"] += ("; the album could be put back only in part: "
+                                    + "; ".join(([f"{len(missing)} file(s) missing"] if missing else [])
+                                                + [f"files left in {d}" for d in c["new_dirs"]]))
+                elif c["failed"]:
+                    c["reason"] += "; the album was put back as it was"
+            if put_back:
+                keep = {r["new_path"] for x in batch for r in x["records"] if r.get("new_path")}
+                for p in clear_tagger_leftovers(made, [x["path"] for x in batch], keep, existed | run_made, root):
+                    print(f"      left by the tagger, not removed: {p}")
+                write_journal(run_dir, journal)    # (a later --undo finds every file)
+            for a in batch:
+                c, recs, v = a.pop("_check"), a["records"], a["verify"]
+                state, saved, n, new_dirs = c["state"], c["saved"], c["n"], c["new_dirs"]
+                done = state in DONE
+                results.append({"album": a["path"], "state": state, "saved": saved, "files": n,
+                                "discogs": c["discogs"], "now_in": "; ".join(new_dirs),
+                                "release": a["mbid"], "not_saved": "; ".join(v["not_saved"][:3])})
+                print(f"    {state:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}"
+                      + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
+                if c["with"]:
+                    print(f"      one set with: {', '.join(c['with'])} (put back together)")
+                if "put back in part" in state:
+                    for d in new_dirs:
+                        print(f"      could not be put back, left in: {d}")
+                    for p in (r["path"] for r in recs if r.get("missing")):
+                        print(f"      missing (not found after the tagger): {p}")
+                if saved or state.endswith("in part") or c["with"]:   # 4b: TAGMENDER=Resolved / Unresolved
+                    status = "Resolved" if done else "Unresolved"
+                    for rec in recs:                  # (every file, where it actually is)
+                        at = rec["new_path"] or (rec["path"] if not done and Path(rec["path"]).exists() else "")
+                        if at:
                             try:
-                                write_tagmender(rec["new_path"], status, reason)
+                                write_tagmender(at, status, "" if done else c["reason"])
                             except Exception as exc:
-                                print(f"    could not write {TAGMENDER_TAG} to {rec['new_path']}: {exc}")
-                if state.startswith("tagged") and new_dirs and not args.no_tidy:   # 5: artwork
+                                print(f"    could not write {TAGMENDER_TAG} to {at}: {exc}")
+                if done and new_dirs and not args.no_tidy:   # 5: artwork
                     album_dir = os.path.commonpath(new_dirs) if len(new_dirs) > 1 else new_dirs[0]
                     try:
                         # extend, not replace: the journal holds this same list
@@ -1470,16 +1784,21 @@ def main():
                         print(f"    could not tidy the artwork: {exc}")
                     if a["moves"]:
                         print(f"    moved {len(a['moves'])} scan/artwork file(s) into covers/")
-            with open(run_dir / "journal.json", "w") as fh:
-                json.dump(journal, fh)
+            run_made |= {str(d) for d in changed_dirs(root, started) if d.is_dir() and str(d) not in existed}
+            write_journal(run_dir, journal)
             if rc not in (0, None):
                 print(f"    (the tagger exited with {rc}; see {run_dir / 'tagger.log'})")
     except KeyboardInterrupt:
         print("\nInterrupted. Albums not saved still carry only the seeded release ID; "
               f"--undo {run_id} restores everything in this run.")
     finally:
-        with open(run_dir / "journal.json", "w") as fh:
-            json.dump(journal + pending, fh)
+        if in_flight is not None:
+            locate_interrupted(in_flight[0], root, in_flight[1], run_dir, journal, run_id,
+                               launched=in_flight[2], exclude=in_flight[3])
+        try:
+            write_journal(run_dir, journal + pending)
+        finally:
+            _restore_signals(signals)
         with open(run_dir / "results.csv", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=["album", "state", "saved", "files", "discogs", "now_in",
                                                "release", "not_saved"])
@@ -1541,6 +1860,7 @@ def mark_unresolved(args, out_dir):
     blob_dir = run_dir / "blobs"
     blob_dir.mkdir(parents=True)
     journal, done = [], 0
+    signals = _stop_like_ctrl_c()
     try:
         for path, reason, files in todo:
             recs = []
@@ -1548,14 +1868,15 @@ def mark_unresolved(args, out_dir):
                 rec = {"path": str(p), "new_path": str(p), "key": "", "backup": backup_tags(p, blob_dir)}
                 recs.append(rec)
             journal.append({"album": path, "mbid": None, "files": recs, "extras": [], "moves": []})
-            with open(run_dir / "journal.json", "w") as fh:
-                json.dump(journal, fh)
+            write_journal(run_dir, journal)
             for p in files:
                 write_tagmender(p, "Unresolved", reason)
             done += 1
     finally:
-        with open(run_dir / "journal.json", "w") as fh:
-            json.dump(journal, fh)
+        try:
+            write_journal(run_dir, journal)
+        finally:
+            _restore_signals(signals)
     print(f"Marked {done} album(s). Undo: python3 tag_albums.py --undo {run_id}")
     return 0
 
@@ -1637,9 +1958,103 @@ def tidy_run(out_dir, run_id, root=None, covers_name="covers"):
         album.setdefault("moves", []).extend(moves)
         total += len(moves)
         print(f"  {len(moves):3d} file(s) into covers/  {album_dir}")
-    (run_dir / "journal.json").write_text(json.dumps(journal))
+    write_journal(run_dir, journal)
     print(f"Moved {total} scan/artwork file(s). --undo {run_id} still restores everything.")
     return 0
+
+
+def write_journal(run_dir, journal):
+    """journal.json written whole or not at all: into journal.json.tmp, synced, then put in
+    its place - a run killed while writing it (a closed terminal, a power cut) leaves the
+    one written before, never a half one that --undo cannot read."""
+    path = Path(run_dir) / "journal.json"
+    tmp = path.with_name("journal.json.tmp")
+    with open(tmp, "w") as fh:
+        json.dump(journal, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def locate_interrupted(batch, root, started, run_dir, journal, run_id, budget=120, launched=None,
+                       exclude=()):
+    """A run stopped (Ctrl-C, a closed terminal, a kill) after the tagger was started on BATCH
+    and before its albums were checked: the tagger may have moved files the journal does not
+    know of yet. Where each file is now is looked up, read-only - nothing is written to the
+    files, no mark, nothing put back - and the journal is written after each album, so that
+    --undo finds them. A file found nowhere is new_path "" and missing. Bounded: the quick
+    look at the folders that changed, never the whole library, and no album is started after
+    BUDGET seconds - nor a folder or a file read; a second Ctrl-C stops the lookup with the
+    journal as far as it got. A tagger this run started (since LAUNCHED, not one of EXCLUDE)
+    that is still open may still move files: the user is told to undo once it has closed."""
+    print(f"    The batch was interrupted after the tagger was started on it: looking up where its "
+          f"{len(batch)} album(s) are now (nothing is written to them).", flush=True)
+    deadline = time.time() + budget
+    looked = 0
+    try:
+        cands = changed_dirs(root, started, deadline=deadline)
+        for a in batch:
+            if time.time() > deadline:
+                print("    (the lookup took too long: the rest of the batch is left as the journal had it)")
+                break
+            cands_a = cands + [Path(a["path"])]
+            try:
+                found = verify(a, a["records"], cands_a, deadline=deadline).get("new_paths", {})
+            except Exception:
+                found = {}
+            for rec in a["records"]:
+                rec.pop("missing", None)
+                at = found.get(rec["path"], "")
+                if not at and Path(rec["path"]).exists():
+                    at = rec["path"]                    # (still where it was, its tags as they are)
+                rec["new_path"] = at
+                if not at:
+                    rec["missing"] = True
+            write_journal(run_dir, journal)
+            looked += 1
+    except KeyboardInterrupt:
+        print(f"    (the lookup was stopped after {looked} of {len(batch)} album(s))")
+    try:
+        still = picard_running(since=launched, exclude=exclude) if launched is not None else ""
+    except Exception:
+        still = ""
+    if still:
+        print(f"    The batch was interrupted while the tagger this run started is still running ({still}): "
+              f"it may still save or move files. Once it has closed, run --undo {run_id} to put the "
+              f"batch back.")
+    else:
+        print(f"    The batch was interrupted: its albums are left as the tagger left them. "
+              f"--undo {run_id} puts them back.")
+
+
+def _stop_like_ctrl_c():
+    """A closed terminal (SIGHUP) or a plain kill (SIGTERM) stops a run the way Ctrl-C does,
+    so that it writes its journal before it ends. A signal set to be ignored (a run started
+    with nohup) is left ignored: that run keeps going. The handlers it replaced, to put back."""
+    import signal
+
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+    old = {}
+    for name in ("SIGHUP", "SIGTERM"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                if signal.getsignal(sig) is signal.SIG_IGN:
+                    continue
+                old[sig] = signal.signal(sig, stop)
+            except (ValueError, OSError):          # (not the main thread)
+                pass
+    return old
+
+
+def _restore_signals(old):
+    import signal
+    for sig, handler in old.items():
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass
 
 
 def undo(out_dir, run_id, force=False):
@@ -1648,68 +2063,102 @@ def undo(out_dir, run_id, force=False):
     blob_dir = run_dir / "blobs"
     restored = failed = 0
     for album in journal:
-        for src, dest in reversed(album.get("moves", [])):     # the artwork tidy, backwards
-            if Path(dest).exists() and not Path(src).exists():
-                Path(src).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(dest, src)
-        for d in {str(Path(dest).parent) for _s, dest in album.get("moves", [])}:
-            _remove_empty(Path(d))
-        new_dirs = {str(Path(r["new_path"]).parent) for r in album["files"]
-                    if r.get("new_path") and r["new_path"] != r["path"]}
-        for rec in album["files"]:
-            cur = Path(rec.get("new_path") or rec["path"])
-            if not cur.exists():
-                failed += 1
-                print(f"  not found: {cur}")
-                continue
-            if rec.get("not_written"):          # (a run that could not write this track: nothing to put back)
-                continue
-            try:
-                import executor
-                if rec.get("after_sig") and not force and not executor._sig_is(cur, rec["after_sig"]) and \
-                        not same_as_backup(cur, rec["backup"]):
-                    failed += 1
-                    print(f"  {cur}: its tags were edited after the run; left as they are (--force puts them back)")
-                    continue
-                # (through a staging copy: a crash never leaves a half-written track; a track that
-                # is a link - the run wrote through it - is put back in the file it points to)
-                real = Path(os.path.realpath(cur)) if cur.is_symlink() else cur
-                executor.staged_write(real, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
-                old = Path(rec["path"])
-                if cur != old:
-                    old.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(cur), str(old))
-                restored += 1
-            except Exception as exc:
-                failed += 1
-                print(f"  could not restore {cur}: {exc}")
-        # scans, logs and cue sheets Picard moved along with the music
-        for rel in album.get("extras", []):
-            old = Path(album["album"]) / rel
-            if old.exists():
-                continue
-            for d in new_dirs:
-                for cand in (Path(d) / rel, Path(d) / Path(rel).name):
-                    if cand.exists():
-                        old.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(cand), str(old))
-                        break
-                else:
-                    continue
-                break
-        for d in new_dirs:                               # remove the folders Picard made, if now empty
-            _remove_empty(Path(d))
+        r, f, _where = undo_album(album, blob_dir, force)
+        restored, failed = restored + r, failed + f
     print(f"Restored {restored} file(s); {failed} problem(s).")
     return 0 if not failed else 1
 
 
-def _remove_empty(folder, keep_parent=False):
+def undo_album(album, blob_dir, force=False):
+    """Put one album of a run back as it was: its files' tags, names and folders, the scans
+    and logs the tagger moved along. (restored, problems, where): where maps each file's
+    original path to where it is now - that path when it was put back, the path it was left
+    at when it could not be, '' when it is nowhere to be found."""
+    restored = failed = 0
+    where = {}
+    for src, dest in reversed(album.get("moves", [])):     # the artwork tidy, backwards
+        if Path(dest).exists() and not Path(src).exists():
+            try:
+                Path(src).parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(dest, src)
+            except OSError as exc:
+                failed += 1
+                print(f"  could not move {dest} back: {exc}")
+    kept = album.get("kept_dirs", [])
+    for d in {str(Path(dest).parent) for _s, dest in album.get("moves", [])}:
+        _remove_empty(Path(d), keep=kept)
+    new_dirs = {str(Path(r["new_path"]).parent) for r in album["files"]
+                if r.get("new_path") and r["new_path"] != r["path"]}
+    for rec in album["files"]:
+        cur = Path(rec.get("new_path") or rec["path"])
+        old = Path(rec["path"])
+        where[rec["path"]] = str(cur)
+        if not cur.exists():
+            where[rec["path"]] = ""
+            if rec.get("missing"):          # (the run said so when it lost it: not a problem of this undo)
+                print(f"  still missing (reported by the run): {old}")
+                continue
+            failed += 1
+            print(f"  not found: {cur}")
+            continue
+        if rec.get("not_written"):          # (a run that could not write this track: nothing to put back)
+            continue
+        try:
+            import executor
+            if rec.get("after_sig") and not force and not executor._sig_is(cur, rec["after_sig"]) and \
+                    not same_as_backup(cur, rec["backup"]):
+                failed += 1
+                print(f"  {cur}: its tags were edited after the run; left as they are (--force puts them back)")
+                continue
+            # (through a staging copy: a crash never leaves a half-written track; a track that
+            # is a link - the run wrote through it - is put back in the file it points to)
+            real = Path(os.path.realpath(cur)) if cur.is_symlink() else cur
+            executor.staged_write(real, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
+            if cur != old:
+                old.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(cur), str(old))
+            where[rec["path"]] = str(old)
+            restored += 1
+        except Exception as exc:
+            failed += 1
+            print(f"  could not restore {cur}: {exc}")
+            if not cur.exists():            # (moved, then the move failed part way)
+                where[rec["path"]] = str(old) if old.exists() else ""
+    # scans, logs and cue sheets Picard moved along with the music
+    for rel in album.get("extras", []):
+        old = Path(album["album"]) / rel
+        if old.exists():
+            continue
+        for d in new_dirs:
+            for cand in (Path(d) / rel, Path(d) / Path(rel).name):
+                if cand.exists():
+                    try:
+                        old.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(cand), str(old))
+                    except OSError as exc:
+                        failed += 1
+                        print(f"  could not move {cand} back: {exc}")
+                    break
+            else:
+                continue
+            break
+    for d in new_dirs:                               # remove the folders Picard made, if now empty
+        _remove_empty(Path(d), keep=kept)
+    return restored, failed, where
+
+
+def _remove_empty(folder, keep_parent=False, keep=()):
+    """Remove FOLDER's empty folders, FOLDER itself, then its parent (the artist folder) if
+    now empty. KEEP: folders never removed, empty or not (those there before a run)."""
+    keep = {str(Path(k)) for k in keep}
     for dirpath, _dirs, _names in sorted(os.walk(folder), key=lambda x: -len(x[0])):
+        if str(Path(dirpath)) in keep:
+            continue
         try:
             os.rmdir(dirpath)
         except OSError:
             pass
-    if keep_parent:
+    if keep_parent or str(Path(folder).parent) in keep:
         return
     try:
         os.rmdir(Path(folder).parent)                    # the artist folder, if now empty

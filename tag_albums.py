@@ -1554,6 +1554,7 @@ def main():
     existed = existing_dirs(root)            # (folders there before the tagger: never removed)
     run_made = set()                         # (folders this run's earlier batches made)
     signals = _stop_like_ctrl_c()
+    in_flight = None                         # (a batch the tagger was started on and not yet checked)
     try:
         for start in range(0, len(albums), args.batch):
             batch = []
@@ -1598,6 +1599,7 @@ def main():
             print(f"[{n0}-{start + len(batch)}/{len(albums)}] The tagger: tagging {len(batch)} album(s)…", flush=True)
             before_pids = {pid for pid, *_ in tagger_processes()}
             launched = time.time()
+            in_flight = (batch, started)
             rc = run_picard(args.picard, [a["path"] for a in batch], args.settle,
                             timeout=600 + 120 * len(batch), log=log)
             # (the tagger may still be saving after its command returned - a window it left
@@ -1625,6 +1627,7 @@ def main():
                                     "release": a["mbid"], "not_saved": ""})
                     print(f"    {STILL_RUNNING:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}")
                 write_journal(run_dir, journal)
+                in_flight = None
                 if rc not in (0, None):
                     print(f"    (the tagger exited with {rc}; see {run_dir / 'tagger.log'})")
                 break
@@ -1670,6 +1673,7 @@ def main():
                 a["kept_dirs"][:] = sorted({str(d) for p in v["new_paths"].values() for d in Path(p).parents
                                             if str(d) in existed})
             write_journal(run_dir, journal)    # (where every file went, before anything moves)
+            in_flight = None
             # ...and so is every part of one set: the discs of one release filed in sibling folders
             # are put back together when one of them is not saved whole (never one disc tagged,
             # the other not: Boris & Sunn O))) - Altar). Only discs with different numbers are
@@ -1774,6 +1778,8 @@ def main():
         print("\nInterrupted. Albums not saved still carry only the seeded release ID; "
               f"--undo {run_id} restores everything in this run.")
     finally:
+        if in_flight is not None:
+            locate_interrupted(in_flight[0], root, in_flight[1], run_dir, journal, run_id)
         write_journal(run_dir, journal + pending)
         _restore_signals(signals)
         with open(run_dir / "results.csv", "w", newline="", encoding="utf-8") as fh:
@@ -1949,6 +1955,45 @@ def write_journal(run_dir, journal):
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)
+
+
+def locate_interrupted(batch, root, started, run_dir, journal, run_id, budget=120):
+    """A run stopped (Ctrl-C, a closed terminal, a kill) after the tagger was started on BATCH
+    and before its albums were checked: the tagger may have moved files the journal does not
+    know of yet. Where each file is now is looked up, read-only - nothing is written to the
+    files, no mark, nothing put back - and the journal is written after each album, so that
+    --undo finds them. A file found nowhere is new_path "" and missing. Bounded: the quick
+    look at the folders that changed, never the whole library, and no album is started after
+    BUDGET seconds; a second Ctrl-C stops the lookup with the journal as far as it got."""
+    print(f"    The batch was interrupted after the tagger was started on it: looking up where its "
+          f"{len(batch)} album(s) are now (nothing is written to them).", flush=True)
+    deadline = time.time() + budget
+    looked = 0
+    try:
+        cands = changed_dirs(root, started)
+        for a in batch:
+            if time.time() > deadline:
+                print("    (the lookup took too long: the rest of the batch is left as the journal had it)")
+                break
+            cands_a = cands + [Path(a["path"])]
+            try:
+                found = verify(a, a["records"], cands_a).get("new_paths", {})
+            except Exception:
+                found = {}
+            for rec in a["records"]:
+                rec.pop("missing", None)
+                at = found.get(rec["path"], "")
+                if not at and Path(rec["path"]).exists():
+                    at = rec["path"]                    # (still where it was, its tags as they are)
+                rec["new_path"] = at
+                if not at:
+                    rec["missing"] = True
+            write_journal(run_dir, journal)
+            looked += 1
+    except KeyboardInterrupt:
+        print(f"    (the lookup was stopped after {looked} of {len(batch)} album(s))")
+    print(f"    The batch was interrupted: its albums are left as the tagger left them. "
+          f"--undo {run_id} puts them back.")
 
 
 def _stop_like_ctrl_c():

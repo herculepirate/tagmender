@@ -13,6 +13,7 @@ in one folder; the track names then start with the album's number in the load or
 FAKE_PICARD_ONLY_SKIP_IN: FAKE_PICARD_SKIP_FILES applies only in folders whose name holds it.
 FAKE_PICARD_HANGUP=1: the run that started it gets SIGHUP (its terminal was closed) before
 anything is saved, and the fake ends.
+FAKE_PICARD_HANGUP=after: the same, after it has saved and moved every album.
 FAKE_PICARD_LOCK=1: the old album folder is left read-only (nothing can be moved back into it)."""
 import os, shutil, sys
 from pathlib import Path
@@ -97,3 +98,6 @@ for k, folder in enumerate(loads, 1):
             shutil.move(str(p), str(lost / (p.name + ".gone")))
     if os.environ.get("FAKE_PICARD_LOCK") == "1" and Path(folder).is_dir():
         Path(folder).chmod(0o555)
+if os.environ.get("FAKE_PICARD_HANGUP") == "after":
+    import signal
+    os.kill(os.getppid(), signal.SIGHUP)

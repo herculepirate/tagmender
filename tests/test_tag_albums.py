@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import csv
 import io
@@ -980,6 +981,49 @@ class SetsAndCopies(SharedFolders):
         rc, out = self.run_tool("--undo", self.run_id())
         self.assertEqual(rc, 0, out)
         self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_a_closed_terminal_after_the_tagger_moved_the_files_still_undoes(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--apply", FAKE_PICARD_HANGUP="after")
+        self.assertIn("Interrupted.", out)
+        self.assertIn("--undo", out)
+        self.assertEqual(ta.audio_files(self.album) if self.album.exists() else [], [], out)  # all moved
+        moved = ta.audio_files(self.root / "New Artist" / f"1999 - {self.album.name} (tagged)")
+        self.assertEqual(len(moved), 4)
+        for p in moved:                                             # nothing written: no mark
+            self.assertNotIn("Unresolved", str(all_tags(p)))
+            self.assertNotIn("Resolved", str(all_tags(p)))
+        journal = json.loads((self.out / f"run-{self.run_id()}" / "journal.json").read_text())
+        self.assertEqual(sorted(r["new_path"] for r in journal[0]["files"]), sorted(map(str, moved)))
+        self.assertFalse(any(r.get("missing") for r in journal[0]["files"]))
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_a_second_ctrl_c_during_the_lookup_keeps_what_it_found(self):
+        run_dir = self.out / "run-x"
+        run_dir.mkdir(parents=True)
+        recs_a = [{"path": "/a/1.flac", "new_path": ""}, {"path": "/a/2.flac", "new_path": ""}]
+        recs_b = [{"path": "/b/1.flac", "new_path": ""}]
+        journal = [{"album": "/a", "files": recs_a}, {"album": "/b", "files": recs_b}]
+        batch = [{"path": "/a", "mbid": "m", "records": recs_a}, {"path": "/b", "mbid": "m", "records": recs_b}]
+        calls = []
+
+        def verify_then_ctrl_c(album, recs, cands):
+            calls.append(album["path"])
+            if album["path"] == "/b":
+                raise KeyboardInterrupt                      # the second Ctrl-C
+            return {"new_paths": {r["path"]: "/new" + r["path"] for r in recs}}
+        out = io.StringIO()
+        with mock.patch.object(ta, "verify", verify_then_ctrl_c), mock.patch("sys.stdout", out):
+            ta.locate_interrupted(batch, self.root, 0, run_dir, journal, "x")
+        self.assertEqual(calls, ["/a", "/b"])
+        self.assertIn("stopped after 1 of 2", out.getvalue())
+        self.assertIn("--undo x puts them back", out.getvalue())
+        saved = json.loads((run_dir / "journal.json").read_text())
+        self.assertEqual([r["new_path"] for r in saved[0]["files"]], ["/new/a/1.flac", "/new/a/2.flac"])
+        self.assertEqual(saved[1]["files"][0]["new_path"], "")
 
     def test_a_closed_terminal_stops_the_run_like_ctrl_c(self):
         self.make_album()

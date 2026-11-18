@@ -1678,13 +1678,17 @@ def _folder_key(name: str, windows: bool) -> str:
 
 def _loose_key(name: str, windows: bool = False) -> str:
     """NAM-7: an artist folder's name as its spellings across databases and sleeves share it:
-    one Unicode form, one kind of quote, "and", "&" and "+" alike (in any letter case), commas
+    one Unicode form, accents and other diacritics left out ("Kodō", "Kodo"), one kind of
+    quote, "and", "&" and "+" alike (in any letter case), commas
     left out ("Blood, Sweat And Tears", "Blood Sweat & Tears"), and a full stop closing a word of
     two or more letters (one before a space or at the end: "Mr. Beast" and "Mr Beast") left out;
     every other full stop separates, as a space would - initials stay initials ("M.I.A." and
     "M I A" share, "MIA" and "MIA." are another name; "t.A.T.u." is not "Tatu"); letter case
     only with Windows-compatible names ("Air" and "AIR" are two acts)."""
-    k = unicodedata.normalize("NFC", name).translate(_QUOTES)
+    # (diacritics left out, nothing else of a letter: "Kodō" and "Kodo", "Motörhead" and
+    # "Motorhead" share; "ø", "ß", "æ" - letters of their own, no accent on another - stay)
+    k = "".join(c for c in unicodedata.normalize("NFD", name) if unicodedata.category(c) != "Mn")
+    k = unicodedata.normalize("NFC", k).translate(_QUOTES)
     k = re.sub(r"\s*(?:&|\+|\b[Aa][Nn][Dd]\b)\s*", " & ", k)
     k = re.sub(r"(?<![^\W\d_])([^\W\d_]{2,})\.(?=\s|$)", r"\1", k)   # ("Mr." -> "Mr"; "A." stays)
     k = " ".join(re.sub(r"[,.]", " ", k).split())

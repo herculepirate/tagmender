@@ -73,6 +73,9 @@ class MED22c_LayerMarks(Base):
         rel = {"media": [{"position": 1, "format": "Hybrid SACD"}]}
         tags = engine._area_copy(rel, [{"discnumber": ["1"]} for _ in range(6)], view["version_tracks"], album)
         self.assertEqual([t["~layer"][0] for t in tags], ["SACD Multichannel"] * 3 + ["SACD Stereo"] * 3)
+        # (MED-22: each layer's own media, never the disc's release format)
+        self.assertEqual([t["media"][0] for t in tags], ["Hybrid SACD (SACD layer, multichannel)"] * 3 +
+                         ["Hybrid SACD (SACD layer, 2 channels)"] * 3)
         # (a DVD's mixes are no SACD's areas: unlabelled)
         rel = {"media": [{"position": 1, "format": "DVD-Video"}]}
         self.assertNotIn("~layer", engine._area_copy(rel, [{} for _ in range(6)], view["version_tracks"], album)[0])

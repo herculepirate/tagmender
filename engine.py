@@ -3983,6 +3983,14 @@ class Engine:
                         merged[fld], where[fld] = v, name
                         break
             merged, where = sorts_follow_names(merged, where, src)
+            mb_media = (tags_mb[i].get("media") or [""])[0] if tags_mb else ""
+            if tags_mb and tags_mb[i].get("~layer") and mb_tags._layer_kind(mb_media)[1] not in ("", "cd") \
+                    and "media" not in (self.profile["field_sources"] or {}):
+                # MED-22: an SACD layer's copy is written its own layer's media ("Hybrid SACD (SACD
+                # layer, 2 channels)"), never the release's format the Discogs plugin writes for the
+                # disc ("SACD, Hybrid, Multichannel, Album" on the stereo layer: Kodo - One Earth Tour
+                # Special)
+                merged["media"], where["media"] = tags_mb[i]["media"], "musicbrainz"
             merged = latin_titles(merged, self.profile.picard_tags())
             # HF-5: a partial album's missing tracks are no tag of their own (no TAGMENDER_MISSING):
             # "incomplete" is told in the proposal's notes (the plan's and the job report's) only
@@ -8011,7 +8019,11 @@ def _area_copy(rel, tags, vtracks, album) -> list:
         lay = lays.get(f.get("disc") or 1)
         if mc.medium_type(fmt) != "sacd" or mc.medium_layout(fmt) or lay not in ("stereo", "multichannel"):
             return tags
-        out.append(dict(t, **{"~layer": ["SACD Stereo" if lay == "stereo" else "SACD Multichannel"]}))
+        # (its layer's own media name, as MusicBrainz names a layer listed apart: "Hybrid SACD
+        # (SACD layer, 2 channels)", "SACD (multichannel)")
+        area = "2 channels" if lay == "stereo" else "multichannel"
+        media = f"{fmt} (SACD layer, {area})" if "hybrid" in str(fmt).casefold() else f"{fmt} ({area})"
+        out.append(dict(t, media=[media], **{"~layer": ["SACD Stereo" if lay == "stereo" else "SACD Multichannel"]}))
     return out
 
 

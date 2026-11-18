@@ -263,6 +263,10 @@ class Versions(VersionsBase):
                          ["Disc 01 (SACD Multichannel)", "Disc 01 (SACD Stereo)"])
         self.assertEqual({(fe["changes"].get("discnumber")[0], fe["changes"].get("totaldiscs")[0])
                           for fe in a["files"]}, {("1", "1")})
+        # (each layer its own media: MED-22)
+        self.assertEqual({(Path(fe["dst"]).parent.name, (fe["changes"].get("media") or [""])[0]) for fe in a["files"]},
+                         {("Disc 01 (SACD Multichannel)", "Hybrid SACD (SACD layer, multichannel)"),
+                          ("Disc 01 (SACD Stereo)", "Hybrid SACD (SACD layer, 2 channels)")})
 
     def test_versions_already_filed_as_discs_are_unchanged_on_a_second_run(self):
         """Filed into "Disc 01 (SACD Stereo)/" and "Disc 01 (SACD Multichannel)/" (MED-22c; folders

@@ -607,6 +607,17 @@ def log_toc_of(d: Path) -> str:
     return tocs[0] if len(tocs) == 1 else ""
 
 
+def _numbered_one_to_k(dirs) -> bool:
+    """DSC-16: the folders' names begin with the numbers 1 to k, each once ("CD01", "1 - Title")."""
+    nums = []
+    for d in dirs:
+        m = _LEAD_NUMBER.match(d.name)
+        if not m:
+            return False
+        nums.append(int(m[1]))
+    return sorted(nums) == list(range(1, len(nums) + 1))
+
+
 def disc_id_set_shape(folder: Path, dirs, keys, found) -> str:
     """DSC-14: sibling folders DIRS of FOLDER that may be one set by their discs' IDs alone, past
     DSC-10's shape and its cap: "discids" when FOLDER has no tracks of its own, every audio folder
@@ -620,10 +631,13 @@ def disc_id_set_shape(folder: Path, dirs, keys, found) -> str:
         return ""
     if any(folder in d.parents and d not in dirs for d in found):
         return ""                                       # (audio deeper down: not one level of discs)
-    artists = {k[1] for k in keys.values()}
-    if len(artists) == 1 and next(iter(artists)) and _artist_folder(folder, next(iter(artists))):
-        return ""                                       # (an artist's folder of albums)
     if not all(log_toc_of(d) for d in dirs):
+        return ""
+    artists = {k[1] for k in keys.values()}
+    if len(artists) == 1 and next(iter(artists)) and _artist_folder(folder, next(iter(artists))) and not (
+            re.search(r"(?<!\d)(?:19|20)\d\d(?!\d)", folder.name) and _numbered_one_to_k(dirs)):
+        # (an artist's folder of albums; DSC-16: one with a year in its name whose folders are
+        # numbered 1 to k - "Joy Division - 2011 - Singles (1978-80)/CD01" .. "CD10" - may be a set)
         return ""
     return "discids"
 

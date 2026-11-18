@@ -8,6 +8,9 @@ FAKE_PICARD_SKIP_FILES: file-name texts (comma-separated) of tracks it leaves un
 FAKE_PICARD_MOVE_ONLY=1: moves the files without saving them (no tags written).
 FAKE_PICARD_WRITE: file names (comma-separated) it writes into the new folder (a cover it saved).
 FAKE_PICARD_LOSE: suffix of moved files that then go missing (taken out of the library).
+FAKE_PICARD_DEST: one folder name every album is filed into (discs of a set, or two releases,
+in one folder; the track names then start with the album's number in the load order).
+FAKE_PICARD_ONLY_SKIP_IN: FAKE_PICARD_SKIP_FILES applies only in folders whose name holds it.
 FAKE_PICARD_LOCK=1: the old album folder is left read-only (nothing can be moved back into it)."""
 import os, shutil, sys
 from pathlib import Path
@@ -21,17 +24,20 @@ root = Path(os.environ["FAKE_PICARD_ROOT"])
 skip = os.environ.get("FAKE_PICARD_SKIP", "")
 skip_files = [x for x in os.environ.get("FAKE_PICARD_SKIP_FILES", "").split(",") if x]
 move_only = os.environ.get("FAKE_PICARD_MOVE_ONLY") == "1"
+skip_in = os.environ.get("FAKE_PICARD_ONLY_SKIP_IN", "")
 argv = sys.argv[1:]
 loads = [argv[i + 2] for i, a in enumerate(argv) if a == "-e" and argv[i + 1] == "LOAD"]
-for folder in loads:
+one_dest = os.environ.get("FAKE_PICARD_DEST", "")
+for k, folder in enumerate(loads, 1):
     if skip and skip in folder:
         continue
     files = ta.audio_files(folder)
     mbid = ta.read_ids(files[0])["albumid"]
-    dest = root / "New Artist" / f"1999 - {Path(folder).name} (tagged)"
+    dest = root / "New Artist" / (one_dest or f"1999 - {Path(folder).name} (tagged)")
+    pre = f"{k}-" if one_dest else ""
     dest.mkdir(parents=True, exist_ok=True)
     for n, p in enumerate(files, 1):
-        if any(x in p.name for x in skip_files):
+        if any(x in p.name for x in skip_files) and skip_in in Path(folder).name:
             continue
         f = mutagen.File(p)
         if move_only:
@@ -56,7 +62,7 @@ for folder in loads:
             f.tags["DISCOGS_RELEASE_ID"] = ["123"]
             f.tags["TITLE"] = [f"Song {n}"]
             f.save()
-        shutil.move(str(p), str(dest / f"{n:02d}. Song {n}{p.suffix}"))
+        shutil.move(str(p), str(dest / f"{pre}{n:02d}. Song {n}{p.suffix}"))
     # Like Picard's "move additional files": files next to the music that match the pattern
     # (FAKE_PICARD_LEAVE lists names that do not), and folders whose name matches it
     # (FAKE_PICARD_MOVE_DIRS); other subfolders stay behind.

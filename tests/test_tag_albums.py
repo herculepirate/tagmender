@@ -798,6 +798,100 @@ class AllOrNothing(Base):
         self.assertTrue((self.album / "rip.log").exists())
 
 
+class SharedFolders(Base):
+    """What the tagger left is cleared only in a folder it made this run with no music in it;
+    the parts of one release are put back together."""
+
+    def make_disc(self, name, mbid, cover=True, tracks=2):
+        d = self.root / "Old Artist" / name
+        first = 10 * len(list((self.root / "Old Artist").glob("*")))   # (each disc its own audio)
+        for n in range(1, tracks + 1):
+            audio(d / f"{n:02d}.flac", first + n, title=f"T{n}", artist="Old Artist")
+        if cover:
+            (d / "cover.jpg").write_bytes(b"jpg " + name.encode())
+        self.add_result(d, mbid=mbid)
+        return d
+
+    def test_a_folder_shared_with_an_album_that_stays_is_left_alone(self):
+        # two releases filed into one folder: the one saved whole stays there with its cover;
+        # the other is put back, and nothing of the first is removed or listed as a leftover
+        one = self.make_disc("Album (CD1)", MBID)
+        two = self.make_disc("Album (CD2)", OTHER, cover=False)
+        rc, out = self.run_tool("--apply", skip_files="02.flac", FAKE_PICARD_DEST="1999 - Album",
+                                FAKE_PICARD_ONLY_SKIP_IN="CD2")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'tagged': 1", out)
+        self.assertIn("'partly saved, put back': 1", out)
+        self.assertNotIn("left by the tagger", out)
+        x = self.root / "New Artist" / "1999 - Album"
+        self.assertTrue((x / "cover.jpg").is_file(), out)
+        self.assertEqual(len(list(x.glob("1-*.flac"))), 2, out)
+        self.assertFalse(one.exists())
+        self.assertEqual(len(ta.audio_files(two)), 2)
+
+    def test_the_parts_of_one_release_are_put_back_together(self):
+        one = self.make_disc("Album (CD1)", MBID)
+        two = self.make_disc("Album (CD2)", MBID)
+        before = {p: all_tags(p) for d in (one, two) for p in ta.audio_files(d)}
+        rc, out = self.run_tool("--apply", skip_files="02.flac", FAKE_PICARD_DEST="1999 - Album",
+                                FAKE_PICARD_ONLY_SKIP_IN="CD2")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'saved, put back with its set': 1", out)
+        self.assertIn("'partly saved, put back': 1", out)
+        self.assertFalse((self.root / "New Artist").exists(), out)
+        for p in ta.audio_files(one):
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual(status, "Unresolved", p)
+            self.assertIn("put back with Album (CD2)", reason)
+            self.assertIn("write_failed", reason)
+        for p in ta.audio_files(two):
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual(status, "Unresolved", p)
+            self.assertIn("1 of 2", reason)
+            self.assertIn("Album (CD1)", reason)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p: all_tags(p) for d in (one, two) for p in ta.audio_files(d)}, before)
+
+    def test_an_empty_folder_there_before_the_run_is_kept(self):
+        self.make_album()
+        dest = self.root / "New Artist" / "1999 - 1989 - Old Album (tagged)"
+        dest.mkdir(parents=True)
+        rc, out = self.run_tool("--apply", skip_files="003.X")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'partly saved, put back': 1", out)
+        self.assertTrue(dest.is_dir(), out)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(dest.is_dir(), "--undo keeps it too")
+
+    def test_leftovers_are_never_looked_for_above_an_album_or_where_music_is(self):
+        album = self.root / "Old" / "B"
+        album.mkdir(parents=True)
+        (self.root / "Old" / "folder.jpg").write_bytes(b"f")
+        x = self.root / "X"
+        x.mkdir()
+        (x / "01.flac").write_bytes(b"a")
+        (x / "cover.jpg").write_bytes(b"c")
+        left = ta.clear_tagger_leftovers({str(self.root / "Old"), str(x)}, [str(album)], set(), set(), self.root)
+        self.assertEqual(left, [])
+        self.assertTrue((self.root / "Old" / "folder.jpg").exists())
+        self.assertTrue((x / "cover.jpg").exists())
+        pre = self.root / "Pre" / "Empty"                 # there before the run: kept, even empty
+        pre.mkdir(parents=True)
+        ta.clear_tagger_leftovers({str(pre)}, [str(album)], set(), {str(self.root), str(pre.parent), str(pre)},
+                                  self.root)
+        self.assertTrue(pre.is_dir())
+        made = self.root / "Y"
+        (made / "sub").mkdir(parents=True)
+        (made / "cover.jpg").write_bytes(b"c")
+        (made / "notes.txt").write_text("n")
+        left = ta.clear_tagger_leftovers({str(made)}, [str(album)], set(), {str(self.root)}, self.root)
+        self.assertEqual(left, [str(made / "notes.txt")])
+        self.assertFalse((made / "cover.jpg").exists())
+        self.assertFalse((made / "sub").exists())
+
+
 def video(p):
     p.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=5",

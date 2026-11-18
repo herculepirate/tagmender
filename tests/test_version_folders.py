@@ -244,19 +244,25 @@ class Versions(VersionsBase):
                 dst_dirs.setdefault(Path(fe["dst"]).parent, set()).add(Path(fe["src"]).parent.name)
         self.assertTrue(all(len(v) == 1 for v in dst_dirs.values()), dst_dirs)
 
-    def test_versions_that_each_fit_one_unlayered_release_are_left_with_a_note(self):
+    def test_MED22c_versions_of_an_sacd_listed_as_one_disc_are_its_two_areas(self):
         """The set's own release, listed as a single SACD medium (no layer or channels named):
-        each version fits it exactly alone, but they are not one disc twice - unresolved, said."""
+        held for you before 0.8.73; by MED-22c (2026-11-17, Kodo - One Earth Tour Special) such a
+        disc holds both its areas, so the stereo and multichannel versions (their SACD_AREA tags)
+        are each its tracks: one album, "Disc 01 (SACD Stereo)" and "Disc 01 (SACD Multichannel)",
+        1 of 1 each - never one disc twice in one folder."""
         top = self.make()
         http = SetHttp(mb=[the_set(formats=["Hybrid SACD"])])
         eng = self.moving(http)
         [g] = eng.albums_in(top)
         props = eng.identify_all(g)
-        self.assertEqual([p.status for p in props], ["unresolved"], [(p.release_id, p.why) for p in props])
-        self.assertIn("version folders 2.0, 5.0 each fit", props[0].reason)
+        self.assertEqual([(p.status, p.tier) for p in props], [("identified", "exact")],
+                         [(p.release_id, p.why) for p in props])
         plan = eng.plan(top)
-        self.assertTrue(all(fe["dst"] == fe["src"] or fe["op"] == "none"
-                            for a in plan["albums"] for fe in a["files"]), plan["albums"])
+        [a] = plan["albums"]
+        self.assertEqual(sorted({Path(fe["dst"]).parent.name for fe in a["files"]}),
+                         ["Disc 01 (SACD Multichannel)", "Disc 01 (SACD Stereo)"])
+        self.assertEqual({(fe["changes"].get("discnumber")[0], fe["changes"].get("totaldiscs")[0])
+                          for fe in a["files"]}, {("1", "1")})
 
     def test_versions_already_filed_as_discs_are_unchanged_on_a_second_run(self):
         """Filed into "Disc 01 (SACD Stereo)/" and "Disc 01 (SACD Multichannel)/" (MED-22c; folders

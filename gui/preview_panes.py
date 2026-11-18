@@ -42,10 +42,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLay
                                QToolButton, QTreeView, QVBoxLayout, QWidget)
 
 from . import icons, style
-from .common import (_gui_prefs, _set_gui_pref, album_words, label_for, left_header, planmod, plural, popup_menu,
+from .common import (_gui_prefs, _set_gui_pref, album_words, left_header, planmod, plural, popup_menu,
                      profile_colour, reasons, say)
 from .i18n import N_, tr
-from .models import (PlanModel, can_apply, fill_roles, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
+from .models import (PlanModel, can_apply, fill_roles, status_words, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
 from .tagnames import display as tag_name
 from .widgets import Segmented
@@ -928,7 +928,10 @@ class AlbumsModel(LazyTree):
             if memo is None:
                 memo = top.data["memo"] = {}
             if "tint" not in memo:
-                memo["tint"] = tint_of(self._list(top, 6, R_DISPLAY))
+                # (an album applied: its row, and its discs' and tracks', on the applied wash - the
+                # badge and the word say it too, so the wash is never the only sign)
+                memo["tint"] = QColor(style.color("applied_bg")) if (top.album or {}).get("status") == "done" \
+                    else tint_of(self._list(top, 6, R_DISPLAY))
             return memo["tint"]
         if n.kind != "album":
             return self._data(idx, n, role)
@@ -964,6 +967,9 @@ class AlbumsModel(LazyTree):
                     return f
                 if role == int(Qt.CheckStateRole):
                     return self._list(n, 1, role)
+                if role == R_DECORATION and a.get("status") == "done":
+                    # (applied: a filled check badge where its include box was - not a box to tick)
+                    return icons.badge("circle-check", "applied", "on_applied", 16)
                 return None
             src = self.SRC[c]
             if c == self.SCORE and role in (R_FONT, R_FOREGROUND):
@@ -971,8 +977,10 @@ class AlbumsModel(LazyTree):
                 # symbol and the word; how far to trust the score is in its tooltip and read out)
                 return QColor(style.color("muted")) if role == R_FOREGROUND else None
             if c == self.STATUS and role == R_FOREGROUND:
-                return style.status_color(a.get("status")) if not self._list(n, 0, R_DISPLAY) != \
-                    label_for(a)[1] else QColor(style.color("muted"))
+                if self._list(n, 0, R_DISPLAY) != status_words(a):        # (Waiting…, Applying…)
+                    return QColor(style.color("muted"))
+                return QColor(style.color("applied")) if a.get("status") == "done" else \
+                    style.status_color(a.get("status"))
             return self._list(n, src, role)
         if n.kind == "disc":
             d = n.data

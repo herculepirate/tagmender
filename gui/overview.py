@@ -17,7 +17,7 @@ from .common import (album_words, counts_by_label, counts_text, ex, load_profile
 from .i18n import N_, tr
 from .work import start
 from .models import PlanModel, SortedRows, can_apply
-from .widgets import ElidedPath as _Elided, SleeveDrop
+from .widgets import ApplyProgress, ElidedPath as _Elided, SleeveDrop
 from .preview_panes import _held
 
 STREAM_MS = 100                                       # ms: albums read meanwhile are put in the list this often
@@ -43,6 +43,12 @@ def run_report(plan, res):
 
 # what an album that changed nothing ended as: a job of only these has nothing to undo
 NOTHING_DONE = {"conflict", "failed", "cancelled", "unchanged"}
+
+
+def planned_files(albums) -> list:
+    """Each album's files Apply is to write, move or copy, as planned (the status bar's progress
+    counts them; the executor tells the count it has as each album starts)."""
+    return [sum(1 for fe in a.get("files") or [] if fe.get("op", "none") != "none") for a in albums]
 
 
 def merge_results(plans, run, cancelled=lambda: False) -> dict:
@@ -580,6 +586,7 @@ class Overview(QWidget):
         self.summary.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the words are what is read)
         self.ready_line = self.counts_line
+        self.apply_bar = ApplyProgress()                  # (the status bar's: an Apply's or Save Tags' progress)
         self.views.addWidget(self.results)
         self.detail = self.panes.evidence.full            # (Why This Release > Full preview text)
         self.refresh_profiles()
@@ -2436,6 +2443,7 @@ class Overview(QWidget):
         self.bar.setAccessibleDescription(words)
         if self._applying and self.running:                 # (Apply: which album; file_progress: which file)
             self.applying_row(i)
+            self.apply_bar.album_started(i)
             self._apply_at = (i, n, Path(what).name)
             self.summary.setText(tr("Applying album {0} of {n}: {name}…").format(i + 1, n=n, name=Path(what).name))
         elif getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
@@ -2471,6 +2479,7 @@ class Overview(QWidget):
         if not (self._applying and 0 <= i < len(mine)):
             return
         self.mark_applied(mine[i], r)
+        self.apply_bar.album_done(i)
         self.model.refresh_rows()
 
     def file_progress(self, i, j, n, path):
@@ -2478,6 +2487,7 @@ class Overview(QWidget):
         if not (self._applying and self.running):
             return
         self.applying_row(i)
+        self.apply_bar.file(i, j, n)
         _i, total, name = getattr(self, "_apply_at", (i, 0, ""))
         words = tr("Applying album {0} of {n}: {name} — file {1} of {m}: {file}").format(
             i + 1, j + 1, n=total, name=name, m=n, file=Path(path).name)
@@ -2862,6 +2872,7 @@ class Overview(QWidget):
         for a in order:
             self.states[id(a)] = "waiting"
         self.model.refresh_rows()
+        self.apply_bar.start(planned_files(order))
         self.apply_worker = start(self, work, self.applied_alongside, None, self.apply_alongside_failed,
                                   partial=self.alongside_news)
         self.win.update_album_actions()
@@ -2880,15 +2891,18 @@ class Overview(QWidget):
                     self.states.pop(id(b))               # (the one before: finished, said by "album")
             self.states[id(a)] = "applying"
             self.model.refresh_rows()
+            self.apply_bar.album_started(i)
             self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name}")
                                              .format(i + 1, n=news[2], name=Path(news[3]).name))
         elif kind == "file":
             _k, _i, j, n, f = news
+            self.apply_bar.file(i, j, n)
             self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name} — "
                                                 "file {1} of {m}").format(i + 1, j + 1, n=len(side),
                                                                           name=Path(a["source_dir"]).name, m=n))
         elif kind == "album":
             self.mark_applied(a, news[2])
+            self.apply_bar.album_done(i)
             self.model.refresh_rows()
 
     def mark_applied(self, a, r):
@@ -2922,6 +2936,7 @@ class Overview(QWidget):
         for i, a in enumerate(side):
             if i in by_index:
                 self.mark_applied(a, by_index[i])
+        self.end_bar(res)
         names = [n for n in dict.fromkeys(self.planned_with.get(Overview.album_key(x)) for x in side)
                  if isinstance(n, str) and n]
         rep = run_report(dict(self.plan or {}, albums=side, **({"profile": ", ".join(names)} if names else {})),
@@ -2936,7 +2951,14 @@ class Overview(QWidget):
         if rep is not None:
             self.win.show_run_report(rep)
 
+    def end_bar(self, res):
+        """The status bar's progress ends: as many albums applied, failed, or stopped (cancelled)."""
+        counts = res.get("counts") or {}
+        self.apply_bar.finish(counts.get("done", 0), sum(counts.get(k, 0) for k in ("failed", "conflict")),
+                              stopped=bool(counts.get("cancelled")))
+
     def apply_alongside_failed(self, msg):
+        self.apply_bar.finish(0, stopped=True)
         self.alongside_ended()
         sheets.warning(self, tr("That did not work."), msg)
 
@@ -3005,6 +3027,7 @@ class Overview(QWidget):
         self.busy(True)
         self._work_kind = "apply"
         self._applying, self._apply_at = True, (0, total, "")
+        self.apply_bar.start(planned_files(order))
         self.summary.setText(tr("Applying…"))
         self.worker = start(self, work, self.applied, self.progress, self.apply_failed,
                             partial=self.apply_news)
@@ -3013,6 +3036,7 @@ class Overview(QWidget):
         """Apply stopped with an error: said as any failure; the albums a look-up was
         interrupted for (Apply during a look-up) are looked up still."""
         self._joined = False
+        self.apply_bar.finish(0, stopped=True)
         self.oops(msg)
         if self.queue and not self.running:
             self.run_queue()
@@ -3141,6 +3165,7 @@ class Overview(QWidget):
         self.busy(True)
         self._work_kind = "save"
         self._applying = True                                 # (EDT-1: no edit of any album while it runs)
+        self.apply_bar.start([None] * len(albums), kind="save")
         self.summary.setText(tr("Saving your edits…"))
         self.worker = start(self, work, self.saved, self.saving_progress, self.save_failed)
         return True
@@ -3151,6 +3176,7 @@ class Overview(QWidget):
             self.states = {k: v for k, v in self.states.items() if v != "applying"}
             self.states[id(mine[i])] = "applying"
             self.model.refresh_rows()
+            self.apply_bar.album_started(i)
         self.bar.setMaximum(max(n, 1))
         self.bar.setValue(i + 1)
         self.win.show_count(tr("{0} of {n}").format(i + 1, n=n))
@@ -3198,6 +3224,7 @@ class Overview(QWidget):
             a["files"] = []                                  # (its files read again when shown)
             for k in ("fingerprint", "renames"):
                 a.pop(k, None)
+        self.apply_bar.finish(len(ok), len(bad))
         self.busy(False)
         for a, _r in ok + bad:
             self.panes.album_changed(a)
@@ -3226,6 +3253,7 @@ class Overview(QWidget):
 
     def save_failed(self, msg):
         self._saving, self._save_then = None, None
+        self.apply_bar.finish(0, stopped=True)
         self.oops(msg)
 
     def may_drop_plain(self, then=None) -> bool:
@@ -3272,6 +3300,7 @@ class Overview(QWidget):
                 if r.get("label") in ("Ignored", "Skipped"):
                     a["label"] = r["label"]
         self.model.set_plan(self.plan)
+        self.end_bar(res)
         many = ", " in (res.get("job") or "")
         self.summary.setText((tr("Jobs {0}: ").format(res["job"]) if many else f"Job {res['job']}: " if res.get("job")
                               else "") + (counts_text(res["counts"]) or tr("Nothing was changed")) +

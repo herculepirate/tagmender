@@ -44,13 +44,17 @@ def _source(name):
     return _svg[name]
 
 
-def pixmap(name, colour, size=16, ratio=1.0, stroke=None) -> QPixmap:
+def pixmap(name, colour, size=16, ratio=1.0, stroke=None, fill=None) -> QPixmap:
+    """FILL: a circle icon's disc filled with that colour, its mark drawn on it in COLOUR (the
+    applied album's badge: a filled circle-check)."""
     from PySide6.QtSvg import QSvgRenderer
     text = _source(name) if name else None               # (no name: a transparent square)
     px = QPixmap(int(size * ratio), int(size * ratio))
     px.fill(Qt.transparent)
     if not text:
         return px
+    if fill:
+        text = text.replace("<circle ", f'<circle fill="{fill}" stroke="{fill}" ', 1)
     text = text.replace("currentColor", colour)
     if stroke:
         text = text.replace('stroke-width="2"', f'stroke-width="{stroke}"')
@@ -75,6 +79,24 @@ def icon(name, role="ink", size=16) -> QIcon:
         ic.addPixmap(pixmap(name, style.color(role), size, ratio), QIcon.Normal)
         ic.addPixmap(pixmap(name, style.color("faint"), size, ratio), QIcon.Disabled)
         ic.addPixmap(pixmap(name, style.color("on_selection"), size, ratio), QIcon.Selected)
+    _cache[key] = ic
+    return ic
+
+
+def badge(name="circle-check", role="applied", on="on_applied", size=16) -> QIcon:
+    """A filled badge: the circle icon NAME's disc in ROLE's colour, its mark in ON's, bold - one
+    that reads by its shape, a solid disc, not by its colour alone. The same when selected."""
+    key = ("badge", name, role, on, size, style.is_dark())
+    if key in _cache:
+        return _cache[key]
+    if not _source(name):
+        _cache[key] = QIcon()
+        return _cache[key]
+    ic = QIcon()
+    for ratio in (1.0, 2.0):
+        px = pixmap(name, style.color(on), size, ratio, 3, fill=style.color(role))
+        for mode in (QIcon.Normal, QIcon.Selected, QIcon.Disabled):
+            ic.addPixmap(px, mode)
     _cache[key] = ic
     return ic
 

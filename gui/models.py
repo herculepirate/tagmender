@@ -1,6 +1,8 @@
 """gui/models.py - The plan as a table."""
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import QAbstractItemModel, QAbstractProxyModel, QAbstractTableModel, QModelIndex, Qt, Signal
 
 from .common import album_words, label_for, planmod, plural, reasons, suggested_pressing
@@ -110,6 +112,52 @@ def changes_text(files) -> str:
     if not parts:
         parts.append(tr("stay in their folder") if n > 1 else tr("stays in its folder"))
     return tr("{0}, {1}").format(head, ", ".join(parts))
+
+
+# an album applied (its status "done"): its row's words, by where its files went
+APPLIED = N_("Applied")
+APPLIED_MOVED = N_("Applied · moved")
+APPLYING = N_("Applying…")                 # (the page's row state while its files are written: overview.ROW_STATES)
+
+
+def applied_moved(a) -> bool:
+    """The album's files were moved or copied to another folder by Apply (a file's dst in a
+    folder other than its src's); False when it was tagged (or renamed) in place."""
+    for fe in (a or {}).get("files") or []:
+        if fe.get("op") in ("move", "copy") and fe.get("dst") and fe.get("src") and \
+                os.path.dirname(os.path.normpath(fe["dst"])) != os.path.dirname(os.path.normpath(fe["src"])):
+            return True
+    return False
+
+
+def applied_folder(a) -> str:
+    """The folder album A lives in once applied: where its files went (a set's Disc 01, Disc 02
+    folders: the album's folder that holds them), or its own folder when tagged in place."""
+    if not applied_moved(a):
+        return (a or {}).get("source_dir") or ""
+    from .jobs import DISC_DIR
+    dsts = [os.path.dirname(fe["dst"]) for fe in a.get("files") or []
+            if fe.get("op") in ("move", "copy") and fe.get("dst")]
+    try:
+        dest = os.path.commonpath(dsts)
+    except ValueError:
+        dest = dsts[0]
+    while DISC_DIR.match(os.path.basename(dest)):
+        dest = os.path.dirname(dest)
+    return dest
+
+
+def status_words(a) -> str:
+    """The Status column's words for album A: "Applied · moved" / "Applied" once it is applied,
+    else its status as label_for says it."""
+    if a.get("status") == "done":
+        return tr(APPLIED_MOVED) if applied_moved(a) else tr(APPLIED)
+    return label_for(a)[1]
+
+
+def applied_tip(a) -> str:
+    folder = applied_folder(a)
+    return (tr("Applied: moved to {0}") if applied_moved(a) else tr("Applied: tagged in place, in {0}")).format(folder)
 
 
 def below_floor_text(a) -> str:
@@ -302,7 +350,7 @@ class PlanModel(QAbstractTableModel):
         a = self.albums[idx.row()]
         c = idx.column()
         if c == 0 and role == R_DISPLAY:                   # (first: what the list is sorted by)
-            return (self.state_of(a) if self.state_of else "") or label_for(a)[1]
+            return (self.state_of(a) if self.state_of else "") or status_words(a)
         ident = a["identification"]
         now = self.state_of(a) if self.state_of and c == 0 and role in (
             R_DISPLAY, R_TOOLTIP, R_ACCESSIBLETEXT) else ""
@@ -310,7 +358,7 @@ class PlanModel(QAbstractTableModel):
             return now
         if role == R_DISPLAY:
             if c == 0:
-                return label_for(a)[1]                        # (the icon is the DecorationRole)
+                return status_words(a)                        # (the icon is the DecorationRole)
             if c == 1:
                 return album_words(a["source_dir"])
             if c == 2:
@@ -335,9 +383,19 @@ class PlanModel(QAbstractTableModel):
                 return "; ".join(ident.get("why") or [])[:120]
         if role == R_FOREGROUND and c == 0 and a["status"] in ("blocked", "failed", "conflict"):
             return status_color(a["status"])               # (only what stops Apply in colour; the icon says the rest)
+        if role == R_FOREGROUND and c == 0 and a["status"] == "done":
+            from PySide6.QtGui import QColor
+            from .style import color
+            return QColor(color("applied"))
         if role == R_DECORATION and c == 0:
             from . import icons
+            if self.state_of and self.state_of(a) == tr(APPLYING):
+                return icons.icon("loader-circle", "accent", 14)     # (its files being written now)
+            if a["status"] == "done":
+                return icons.icon("circle-check", "applied", 14)
             return icons.icon(status_icon(a["status"]), a["status"], 14)
+        if role == R_TOOLTIP and c == 0 and a["status"] == "done":
+            return applied_tip(a)
         if role == R_TOOLTIP and c == 0:
             tier = (ident or {}).get("tier")
             if a["status"] not in ("unresolved", "excluded", "skipped") and tier in TIER_TIPS:
@@ -408,7 +466,7 @@ class PlanModel(QAbstractTableModel):
             # (the band in words too: its tint alone says nothing to a screen reader)
             return f"{self.data(idx, R_DISPLAY) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"
         if role == R_ACCESSIBLETEXT and c == 0:
-            return label_for(a)[1]
+            return status_words(a)
         if role == R_CHECKSTATE and c == 1 and can_apply(a):
             return Qt.Unchecked if self.left_out(a) else Qt.Checked
         if role == R_USER:

@@ -203,6 +203,7 @@ class Main(QMainWindow):
         self.statusBar().addPermanentWidget(self.service_badge)
         ov = self.pages["Overview"]
         self.statusBar().addWidget(ov.counts_line)
+        self.statusBar().addPermanentWidget(ov.apply_bar)   # (an Apply's progress: shown while it runs)
         self.statusBar().addPermanentWidget(ov.summary, 1)
         ov.panes.bottom.addActions([self.commands[k] for k in actmod.SCOPED if k != "play_pause"])
         self.ov_inspector = True                              # the Overview's inspector pane: shown at first

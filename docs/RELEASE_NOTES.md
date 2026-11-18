@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.75
+
+**Look-ups that stopped with "maximum recursion depth exceeded"**
+- Looking up again an album that was applied (moved away) or changed since it was listed - Refresh with done albums still in the list - no longer stops the whole look-up. An album changed since it was listed is looked up as it is now; one moved away stays as it was, with the note "changed since it was listed: add its folder again". A row never takes another album's files.
+- An error while looking up one album now stays that album's: it is shown as "could not be looked up" with nothing to apply, and the look-up goes on with the others.
+- The error window shows where the error happened, and the full details go to the log.
+
 ## 0.8.74
 
 **Albums the external tagger saves only in part**

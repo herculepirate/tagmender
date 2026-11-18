@@ -1169,19 +1169,24 @@ def wait_for_tagger_exit(log=None, timeout=None, poll=2.0, since=None, exclude=(
 # --------------------------------------------------------------------------
 # Verify: where did each file go, and was it tagged?
 # --------------------------------------------------------------------------
-def changed_dirs(root, since, full=False):
+def changed_dirs(root, since, full=False, deadline=None):
     """Folders under root that changed after `since` (files or folders were added).
     A new album folder changes its artist folder, so only changed folders are descended
     into: a few thousand directory reads instead of walking the whole library. With
-    full=True every folder is checked (used only when a file cannot be found)."""
+    full=True every folder is checked (used only when a file cannot be found). Past DEADLINE
+    (a time.time()) no further folder is read: what was found so far is returned."""
     out = []
 
     def scan(folder, depth):
+        if deadline is not None and time.time() > deadline:
+            return
         try:
             entries = list(os.scandir(folder))
         except OSError:
             return
         for e in entries:
+            if deadline is not None and time.time() > deadline:
+                return
             try:
                 if not e.is_dir(follow_symlinks=False):
                     continue
@@ -1376,12 +1381,18 @@ def clear_tagger_leftovers(folders, album_paths, keep, existed, root):
     return left
 
 
-def verify(album, files_rec, candidates):
+def verify(album, files_rec, candidates, deadline=None):
     """Find each original file (by its audio) in the folders that changed, and say whether
-    Picard saved it and whether Discogs Enrichment added its fields."""
+    Picard saved it and whether Discogs Enrichment added its fields. Past DEADLINE (a
+    time.time()) no further folder or file is read: a file not reached is not found."""
     by_key = {}
+    late = lambda: deadline is not None and time.time() > deadline
     for d in candidates:
+        if late():
+            break
         for p in audio_files(d) if d.is_dir() else []:
+            if late():
+                break
             ids = read_ids(p)
             if ids["albumid"] == album["mbid"]:
                 by_key.setdefault(audio_key(p), []).append((p, ids))
@@ -1403,6 +1414,9 @@ def verify(album, files_rec, candidates):
 
     for rec in files_rec:
         old = Path(rec["path"])
+        if old.exists() and late():
+            result["new_paths"][rec["path"]] = rec["path"]     # (there, its tags not read)
+            continue
         if old.exists():
             ids = read_ids(old)
             if saved(ids, rec):                          # saved in place (not moved)
@@ -1599,7 +1613,7 @@ def main():
             print(f"[{n0}-{start + len(batch)}/{len(albums)}] The tagger: tagging {len(batch)} album(s)…", flush=True)
             before_pids = {pid for pid, *_ in tagger_processes()}
             launched = time.time()
-            in_flight = (batch, started)
+            in_flight = (batch, started, launched, before_pids)
             rc = run_picard(args.picard, [a["path"] for a in batch], args.settle,
                             timeout=600 + 120 * len(batch), log=log)
             # (the tagger may still be saving after its command returned - a window it left
@@ -1779,9 +1793,12 @@ def main():
               f"--undo {run_id} restores everything in this run.")
     finally:
         if in_flight is not None:
-            locate_interrupted(in_flight[0], root, in_flight[1], run_dir, journal, run_id)
-        write_journal(run_dir, journal + pending)
-        _restore_signals(signals)
+            locate_interrupted(in_flight[0], root, in_flight[1], run_dir, journal, run_id,
+                               launched=in_flight[2], exclude=in_flight[3])
+        try:
+            write_journal(run_dir, journal + pending)
+        finally:
+            _restore_signals(signals)
         with open(run_dir / "results.csv", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=["album", "state", "saved", "files", "discogs", "now_in",
                                                "release", "not_saved"])
@@ -1856,8 +1873,10 @@ def mark_unresolved(args, out_dir):
                 write_tagmender(p, "Unresolved", reason)
             done += 1
     finally:
-        write_journal(run_dir, journal)
-        _restore_signals(signals)
+        try:
+            write_journal(run_dir, journal)
+        finally:
+            _restore_signals(signals)
     print(f"Marked {done} album(s). Undo: python3 tag_albums.py --undo {run_id}")
     return 0
 
@@ -1957,27 +1976,30 @@ def write_journal(run_dir, journal):
     os.replace(tmp, path)
 
 
-def locate_interrupted(batch, root, started, run_dir, journal, run_id, budget=120):
+def locate_interrupted(batch, root, started, run_dir, journal, run_id, budget=120, launched=None,
+                       exclude=()):
     """A run stopped (Ctrl-C, a closed terminal, a kill) after the tagger was started on BATCH
     and before its albums were checked: the tagger may have moved files the journal does not
     know of yet. Where each file is now is looked up, read-only - nothing is written to the
     files, no mark, nothing put back - and the journal is written after each album, so that
     --undo finds them. A file found nowhere is new_path "" and missing. Bounded: the quick
     look at the folders that changed, never the whole library, and no album is started after
-    BUDGET seconds; a second Ctrl-C stops the lookup with the journal as far as it got."""
+    BUDGET seconds - nor a folder or a file read; a second Ctrl-C stops the lookup with the
+    journal as far as it got. A tagger this run started (since LAUNCHED, not one of EXCLUDE)
+    that is still open may still move files: the user is told to undo once it has closed."""
     print(f"    The batch was interrupted after the tagger was started on it: looking up where its "
           f"{len(batch)} album(s) are now (nothing is written to them).", flush=True)
     deadline = time.time() + budget
     looked = 0
     try:
-        cands = changed_dirs(root, started)
+        cands = changed_dirs(root, started, deadline=deadline)
         for a in batch:
             if time.time() > deadline:
                 print("    (the lookup took too long: the rest of the batch is left as the journal had it)")
                 break
             cands_a = cands + [Path(a["path"])]
             try:
-                found = verify(a, a["records"], cands_a).get("new_paths", {})
+                found = verify(a, a["records"], cands_a, deadline=deadline).get("new_paths", {})
             except Exception:
                 found = {}
             for rec in a["records"]:
@@ -1992,13 +2014,23 @@ def locate_interrupted(batch, root, started, run_dir, journal, run_id, budget=12
             looked += 1
     except KeyboardInterrupt:
         print(f"    (the lookup was stopped after {looked} of {len(batch)} album(s))")
-    print(f"    The batch was interrupted: its albums are left as the tagger left them. "
-          f"--undo {run_id} puts them back.")
+    try:
+        still = picard_running(since=launched, exclude=exclude) if launched is not None else ""
+    except Exception:
+        still = ""
+    if still:
+        print(f"    The batch was interrupted while the tagger this run started is still running ({still}): "
+              f"it may still save or move files. Once it has closed, run --undo {run_id} to put the "
+              f"batch back.")
+    else:
+        print(f"    The batch was interrupted: its albums are left as the tagger left them. "
+              f"--undo {run_id} puts them back.")
 
 
 def _stop_like_ctrl_c():
     """A closed terminal (SIGHUP) or a plain kill (SIGTERM) stops a run the way Ctrl-C does,
-    so that it writes its journal before it ends. The handlers it replaced, to put back."""
+    so that it writes its journal before it ends. A signal set to be ignored (a run started
+    with nohup) is left ignored: that run keeps going. The handlers it replaced, to put back."""
     import signal
 
     def stop(_signum, _frame):
@@ -2008,6 +2040,8 @@ def _stop_like_ctrl_c():
         sig = getattr(signal, name, None)
         if sig is not None:
             try:
+                if signal.getsignal(sig) is signal.SIG_IGN:
+                    continue
                 old[sig] = signal.signal(sig, stop)
             except (ValueError, OSError):          # (not the main thread)
                 pass

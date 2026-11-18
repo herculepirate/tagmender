@@ -1010,7 +1010,7 @@ class SetsAndCopies(SharedFolders):
         batch = [{"path": "/a", "mbid": "m", "records": recs_a}, {"path": "/b", "mbid": "m", "records": recs_b}]
         calls = []
 
-        def verify_then_ctrl_c(album, recs, cands):
+        def verify_then_ctrl_c(album, recs, cands, **_k):
             calls.append(album["path"])
             if album["path"] == "/b":
                 raise KeyboardInterrupt                      # the second Ctrl-C
@@ -1024,6 +1024,58 @@ class SetsAndCopies(SharedFolders):
         saved = json.loads((run_dir / "journal.json").read_text())
         self.assertEqual([r["new_path"] for r in saved[0]["files"]], ["/new/a/1.flac", "/new/a/2.flac"])
         self.assertEqual(saved[1]["files"][0]["new_path"], "")
+
+    def test_a_run_started_with_nohup_keeps_ignoring_a_closed_terminal(self):
+        import signal
+        old_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        old_term = signal.getsignal(signal.SIGTERM)
+        try:
+            saved = ta._stop_like_ctrl_c()
+            self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)   # nohup: left alone
+            self.assertNotIn(signal.SIGHUP, saved)
+            self.assertIsNot(signal.getsignal(signal.SIGTERM), old_term)     # a kill still stops it
+            ta._restore_signals(saved)
+            self.assertIs(signal.getsignal(signal.SIGTERM), old_term)
+            self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
+        finally:
+            signal.signal(signal.SIGHUP, old_hup)
+            signal.signal(signal.SIGTERM, old_term)
+
+    def test_an_interrupted_batch_says_when_its_tagger_is_still_open(self):
+        run_dir = self.out / "run-y"
+        run_dir.mkdir(parents=True)
+        recs = [{"path": "/a/1.flac", "new_path": ""}]
+        batch = [{"path": "/a", "mbid": "m", "records": recs}]
+        seen = {}
+
+        def running(since=None, exclude=()):
+            seen.update(since=since, exclude=exclude)
+            return "4242 picard"
+        out = io.StringIO()
+        with mock.patch.object(ta, "verify", lambda *a, **k: {"new_paths": {}}), \
+                mock.patch.object(ta, "picard_running", running), mock.patch("sys.stdout", out):
+            ta.locate_interrupted(batch, self.root, 0, run_dir, [{"album": "/a", "files": recs}], "y",
+                                  launched=100.0, exclude={7})
+        self.assertEqual(seen, {"since": 100.0, "exclude": {7}})
+        self.assertIn("still running (4242 picard)", out.getvalue())
+        self.assertIn("Once it has closed, run --undo y", out.getvalue())
+        out = io.StringIO()                                  # closed: the plain message
+        with mock.patch.object(ta, "verify", lambda *a, **k: {"new_paths": {}}), \
+                mock.patch.object(ta, "picard_running", lambda **k: ""), mock.patch("sys.stdout", out):
+            ta.locate_interrupted(batch, self.root, 0, run_dir, [{"album": "/a", "files": recs}], "y",
+                                  launched=100.0)
+        self.assertNotIn("still running", out.getvalue())
+        self.assertIn("--undo y puts them back", out.getvalue())
+
+    def test_the_lookup_reads_no_folder_or_file_past_its_deadline(self):
+        d = self.root / "A" / "Album"
+        audio(d / "01.flac", 1)
+        self.assertEqual(ta.changed_dirs(self.root, 0, deadline=time.time() - 1), [])
+        self.assertTrue(ta.changed_dirs(self.root, 0, deadline=time.time() + 60))
+        with mock.patch.object(ta, "read_ids", side_effect=AssertionError("read past the deadline")):
+            v = ta.verify({"mbid": "m"}, [{"path": str(d / "01.flac"), "key": "k"},
+                                          {"path": "/gone.flac", "key": "k2"}], [d], deadline=time.time() - 1)
+        self.assertEqual(v["new_paths"], {str(d / "01.flac"): str(d / "01.flac")})
 
     def test_a_closed_terminal_stops_the_run_like_ctrl_c(self):
         self.make_album()

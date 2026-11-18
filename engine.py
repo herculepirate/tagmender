@@ -4724,6 +4724,11 @@ class Engine:
         the album of a recording on one release group only (_single_group), and Picard's
         standalone recordings name (nat_name) for a recording on no release at all, as Picard
         files such a recording - when the file has no album of its own (_own_album)."""
+        if _cue_tracks_of(path) > 1:
+            # REC-1: a disc image whose cue sheet splits it into tracks is no one recording - its
+            # fingerprint names the first track's (Dr. Jeffrey Thompson - Delta Sleep System, one
+            # 60:40 file of 2 tracks): never that recording's ID and title on the whole image
+            return None
         fp = ma.fingerprint(str(path), self.http.db)
         if not fp:
             return None
@@ -4737,6 +4742,11 @@ class Engine:
         top, rec = results[0], results[0]["recordings"][0]
         if len(results) > 1 and results[1].get("score", 0) > top["score"] - 0.05 and \
                 (results[1].get("recordings") or [{}])[0].get("id") != rec.get("id"):
+            return None
+        secs = float(fp.get("duration") or 0)
+        if rec.get("duration") and secs and abs(float(rec["duration"]) - secs) > max(10.0, 0.1 * secs):
+            # REC-1: the recording is not as long as your file (a disc image, a medley, a file
+            # holding more than it): the fingerprint matched its start only
             return None
         names = [a.get("name", "") for a in rec.get("artists") or []]
         phrase = "".join(a.get("name", "") + (a.get("joinphrase") or "") for a in rec.get("artists") or [])
@@ -8005,6 +8015,38 @@ def _without_box_vinyl(rel, ps):
         return None
     drop = {int(p) for p, k in kinds.items() if p and k in ("vinyl", "cassette")}
     return mb_tags.release_tags(rel, ps, without=drop)
+
+
+def _cue_tracks_of(path) -> int:
+    """REC-1: how many tracks a cue sheet in the file's folder gives this one file (its FILE line
+    naming the file, or a cue named as the file is naming none of the folder's other files); 0
+    when no cue sheet speaks of it."""
+    path = Path(path)
+    most = 0
+    try:
+        cues = [c for c in path.parent.iterdir() if c.suffix.casefold() == ".cue" and c.is_file()]
+    except OSError:
+        return 0
+    for cue in cues:
+        try:
+            text = ma._read_log(cue)
+        except OSError:
+            continue
+        counts, current = {}, None
+        for line in text.splitlines():
+            m = re.match(r'\s*FILE\s+"?(.+?)"?\s+(?:WAVE|FLAC|MP3|AIFF|BINARY|MOTOROLA)?\s*$', line, re.I)
+            if m:
+                current = Path(m.group(1).replace("\\", "/")).name.casefold()
+                counts.setdefault(current, 0)
+                continue
+            if current is not None and re.match(r"\s*TRACK\s+\d+\s+AUDIO", line, re.I):
+                counts[current] += 1
+        mine = counts.get(path.name.casefold())
+        if mine is None and cue.stem.casefold() == path.stem.casefold() and len(counts) == 1:
+            # (the image converted since - "x.wav" named, "x.flac" here - the cue named as it is)
+            mine = next(iter(counts.values()))
+        most = max(most, mine or 0)
+    return most
 
 
 def _without_box_extra(rel, ps):

@@ -566,8 +566,7 @@ def release_set_shape(folder: Path, dirs, files, keys, metas, found) -> str:
     if len(artists) != 1 or next(iter(artists)) in ("various artists", "various", "va"):
         return ""
     artist = next(iter(artists))
-    if _artist_folder(folder, artist):
-        return ""
+    named_artist = _artist_folder(folder, artist)
     numbers = {}
     for d in dirs:
         fs = [f for f in files if Path(f).parent == d]
@@ -578,6 +577,14 @@ def release_set_shape(folder: Path, dirs, files, keys, metas, found) -> str:
             return ""
         numbers[d] = int(m[1])
     if len(set(numbers.values())) != len(dirs):
+        return ""
+    dated = bool(re.search(r"(?<!\d)(?:19|20)\d\d(?!\d)", folder.name))
+    if named_artist and not (dated and sorted(numbers.values()) == list(range(1, len(dirs) + 1))
+                             and all(log_toc_of(d) for d in dirs)):
+        # (DSC-16: a folder named as its artist's with a year in its name - "Joy Division - 1977-1980 -
+        # 1991 - FLAC" - whose folders are numbered 1 to k, each a ripped disc with its log, may still
+        # be one set: only
+        # a release proven for one of them claims the others; any other artist's folder: no set)
         return ""
     discs = all(is_disc_dir(d) for d in dirs) and sorted(numbers.values()) == list(range(1, len(dirs) + 1))
     if discs:
@@ -2355,6 +2362,16 @@ class Engine:
                 out[str(r["id"])] = (pos, audio)
         return out
 
+    def _disc_id_on(self, d: Path, key) -> set:
+        """DSC-16: the media of MusicBrainz release KEY that carry the exact disc ID of folder d's
+        rip log TOC (the look-up is cached: the same one d's own match made); empty for a Discogs
+        release, no log, or a disc ID not attached to it."""
+        if not key or key[0] != "mb" or not self.use_mb:
+            return set()
+        toc = log_toc_of(d)
+        rels = self._disc_id_releases(toc) if toc else None
+        return set((rels or {}).get(str(key[1]), (set(), 0))[0])
+
     def _disc_id_set(self, folder: Path, parts):
         """DSC-14: sibling folders, each one disc with its rip log's TOC, whose exact MusicBrainz
         disc IDs are all attached to one same release - each folder's disc at the place the
@@ -2786,6 +2803,14 @@ class Engine:
                 proof = [q for q in ops if self._own_proof(q, key[0]) and not self._same_release(key, q, cand)]
                 if any(q.own_number or q.number_proven for q in proof):
                     continue                             # (its own barcode or catalogue number: another release)
+                # DSC-16: its rip log's exact disc ID on this release's medium is that disc, whatever
+                # another release sharing the disc ID its own match found (a two-track single
+                # pressed from the box's same disc: Joy Division - 1977-1980, disc 5 "Atmosphere")
+                on = [n for n in sorted(self._disc_id_on(d, key)) if n not in mapping.values()]
+                if on:
+                    if len(on) == 1:
+                        fits[d] = on[0]
+                    continue
                 if proof and len(self._fits_discs(d, other.files, cand, tight=True)) != 1:
                     continue                             # (its disc ID proves another release, and its
                                                          # lengths are not this one's to the second)

@@ -27,6 +27,7 @@ def prof(**fields):
 def run(p, before=BEFORE, target=TARGET, conf=88.8):
     changes, rows = plan.diff_tags(dict(before), dict(target), p, conf)
     plan._numbered_with_ids(before, target, p, changes, rows)
+    plan._total_with_number(before, target, p, changes, rows)
     return changes, rows
 
 
@@ -57,8 +58,25 @@ class TAG5NumberedWithIds(unittest.TestCase):
         self.assertNotIn("musicbrainz_albumid", changes)
         self.assertNotIn("tracknumber", changes)
 
+    def test_TAG5_a_preserved_total_goes_with_the_numbers_written(self):
+        # (the user's decision, 2026-11-17: Picard's preserved tags hold totaltracks - fill_missing -
+        # yet numbers TagMender writes take the release's total: 1-12 of 12, never "1 of 17")
+        for pol in ("fill_missing", "preserve"):
+            changes, _rows = run(prof(totaltracks=pol))
+            self.assertEqual((changes["tracknumber"], changes["totaltracks"]), (["1"], ["12"]), pol)
+        # (at the replace threshold too: Gojira - The Flesh Alive, 31 of 46 -> 1 of 13)
+        before = dict(BEFORE, musicbrainz_albumid=["0ede8b3f"], musicbrainz_trackid=["bc2f"])
+        changes, _rows = run(prof(totaltracks="fill_missing"), before=before, conf=100.0)
+        self.assertEqual((changes["tracknumber"], changes["totaltracks"]), (["1"], ["12"]))
+
+    def test_TAG5_numbers_not_written_keep_the_preserved_total(self):
+        before = dict(BEFORE, tracknumber=["1"], musicbrainz_albumid=["0ede8b3f"], musicbrainz_trackid=["bc2f"])
+        changes, _rows = run(prof(totaltracks="fill_missing"), before=before, conf=100.0)
+        self.assertNotIn("tracknumber", changes)
+        self.assertNotIn("totaltracks", changes)
+
     def test_TAG5_your_policy_keeps_its_field(self):
-        changes, _rows = run(prof(totaltracks="fill_missing"))
+        changes, _rows = run(prof(totaltracks="lock"))
         self.assertEqual(changes["tracknumber"], ["1"])
         self.assertNotIn("totaltracks", changes)
         changes, _rows = run(prof(tracknumber="lock"))

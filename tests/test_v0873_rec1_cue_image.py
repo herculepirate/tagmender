@@ -60,7 +60,7 @@ class REC1CueImage(Base):
                 mock.patch.object(ma, "acoustid_key", return_value="k"):
             return self.engine(http)._single(f, dict(source_dir=str(d), files=[str(f)], provider_errors={}))
 
-    def test_REC1_a_cue_image_of_two_tracks_is_no_recording(self):
+    def test_REC1_a_cue_image_of_two_tracks_with_no_length_is_held(self):
         d, f = self._file(cue_name="Delta Sleep System (CD3).flac")
         self.assertEqual(engine._cue_tracks_of(f), 2)
         self.assertIsNone(self._single(d, f))
@@ -91,6 +91,15 @@ class REC1CueImage(Base):
         tagged.save()
         self.assertEqual(engine._cue_tracks_of(f), 2)
         self.assertIsNone(self._single(d, f))
+
+    def test_REC1_a_cue_split_file_as_long_as_the_recording_is_that_recording(self):
+        # (re-validation 0.8.72: MusicBrainz's Delta Sync Sleep System, Part 1 is one 60-min track,
+        # 3642.9 s, the file 3640.3 s; the box disc's cue only indexes it at 30:20 - the
+        # recording tier stands. The recording far shorter than the file: held)
+        d, f = self._file(cue_name="Delta Sleep System (CD3).flac")
+        self.assertEqual(self._single(d, f, rec_secs=6).tier, "recording")
+        self.assertIsNone(self._single(d, f, rec_secs=40))     # (past 10 s and a tenth of the file)
+        self.assertIsNone(self._single(d, f))                   # (no length to compare: held)
 
     def test_REC1_one_track_cue_or_none_stays_a_recording(self):
         d, f = self._file()

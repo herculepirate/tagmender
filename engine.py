@@ -4085,6 +4085,11 @@ class Engine:
         # its tracks lined up with yours (CRD-1) and the release listing its credits; what the
         # profile drops (Discogs performers off, protected tags) is named so a plan leaves it
         prop.credits_read = credits_read(tags_mb, ps, dparts, det if dparts else None, es)
+        # DSC-12 / MED-17: the release's video discs (MusicBrainz's medium positions) - never a
+        # disc "missing" from an audio rip (Gojira - The Flesh Alive: the Blu-ray before the CD)
+        whole_rel = locals().get("full_rel") or rel if tags_mb else None
+        prop.video_discs = sorted({int(m.get("position") or k) for k, m in enumerate((whole_rel or {}).get("media") or [], 1)
+                                   if str(m.get("format") or "").casefold() in mb_tags.VIDEO_FORMATS})
         # what each database was sure of (follow_source: only a sure pick of another release
         # says your files' own ID of it is not this pressing's)
         prop.sure_picks = dict(out.get("sure_picks") or {})
@@ -4778,11 +4783,6 @@ class Engine:
         the album of a recording on one release group only (_single_group), and Picard's
         standalone recordings name (nat_name) for a recording on no release at all, as Picard
         files such a recording - when the file has no album of its own (_own_album)."""
-        if _cue_tracks_of(path) > 1:
-            # REC-1: a disc image whose cue sheet splits it into tracks is no one recording - its
-            # fingerprint names the first track's (Dr. Jeffrey Thompson - Delta Sleep System, one
-            # 60:40 file of 2 tracks): never that recording's ID and title on the whole image
-            return None
         fp = ma.fingerprint(str(path), self.http.db)
         if not fp:
             return None
@@ -4801,6 +4801,12 @@ class Engine:
         if rec.get("duration") and secs and abs(float(rec["duration"]) - secs) > max(10.0, 0.1 * secs):
             # REC-1: the recording is not as long as your file (a disc image, a medley, a file
             # holding more than it): the fingerprint matched its start only
+            return None
+        if _cue_tracks_of(path) > 1 and not (rec.get("duration") and secs):
+            # REC-1: a file its cue sheet splits into tracks is one recording only where the
+            # recording is as long as the whole file (Dr. Jeffrey Thompson - Delta Sync Sleep
+            # System, Part 1: one 60-min track, 3642.9 s, the file 3640.3 s, a box disc's cue
+            # indexing it at 30:20); with no length to compare it is held
             return None
         names = [a.get("name", "") for a in rec.get("artists") or []]
         phrase = "".join(a.get("name", "") + (a.get("joinphrase") or "") for a in rec.get("artists") or [])

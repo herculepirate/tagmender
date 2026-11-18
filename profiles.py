@@ -338,8 +338,9 @@ EXAMPLES = {
         "description": "A classical library: every album is read as western classical music (CLS-2) with "
                        "its recordings' and works' credits, so Composer, Work, Movement, Conductor and "
                        "performers are written; Artist is who performs. Names are written as the release "
-                       "credits them, and albums are filed under the release's whole credit: Album Artist/Year - Album/Disc NN/NN Title. Choose its "
-                       "library folder first.",
+                       "credits them, and albums are filed under the release's whole credit as written, its "
+                       "\"; \" and \", \" kept (\"Schumann; Musica Viva, Alexander Rudin/2026 - Symphony No. 4/01 ...\"): "
+                       "Album Artist/Year - Album/Disc NN/NN Title. Choose its library folder first.",
         "tradition": "western_classical",
         # (names as the release credits them: "Schumann; Musica Viva, Alexander Rudin", as the
         # album artists and folders of a classical library hold them)

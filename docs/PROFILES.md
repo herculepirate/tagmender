@@ -277,7 +277,7 @@ recording IDs stay (the same performance).
 | `standard` | `Album Artist/Album/03 Title.flac` |
 | `artist-album-track` | `Album Artist/1992 - Album/1-03 - Title.flac` |
 | `classical` | `Composer/1992 - Album/03 - Title.flac` (each track's composer: an album of several composers is split) |
-| `classical-performer` | `Johann Sebastian Bach; Glenn Gould/1982 - Goldberg Variations/01 Aria.flac`, multi-disc `.../Disc 02/...` (the release's whole credit; the `Classical` example's) |
+| `classical-performer` | `Johann Sebastian Bach; Glenn Gould/1982 - Goldberg Variations/01 Aria.flac`, multi-disc `.../Disc 02/...` (the album artist; several artists sorted A to Z and joined by " & " so "A & B" and "B & A" share a folder - except a classical album, CLS-2: its credit as written, "Schumann; Musica Viva, Alexander Rudin"; the `Classical` example's) |
 | `singleton` | `Artist/Singles/Artist - Title.flac` |
 
 ## Template language

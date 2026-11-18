@@ -19,40 +19,51 @@ import re
 import unicodedata
 
 # ---- CLS-2: recognition --------------------------------------------------------------
-# a genre (MusicBrainz's, Discogs's genres and styles, a file's) naming western classical music
+# a genre (MusicBrainz's, Discogs's genres and styles, a file's) that names western classical
+# music: the whole genre one of these (an allow-list - "Peking Opera", "Space Opera", "Baroque
+# Pop", "Turkish Classical Music", "Symphonic Metal" are none)
 _STRONG_GENRE = re.compile(
-    r"\b(?:classical|baroque|renaissance|medieval|opera|operas|operetta|symphony|symphonies|concerto|"
-    r"concertos|concerti|sonata|sonatas|oratorio|oratorios|cantata|cantatas|chamber music|art song|lied|"
-    r"lieder|string quartet|requiem)\b")
-# a genre that is classical-like but not proof alone: counts with a weak signal (below)
-_AMBIGUOUS_GENRE = re.compile(r"\b(?:contemporary|modern|post|minimal|new) classical\b|\bchoral\b|\bminimalism\b")
-# words that make a genre something else ("neo-classical", "classical crossover", "symphonic
-# metal", "rock opera", "medieval folk", "hindustani classical"): never a classical signal
-_NOT_CLASSICAL = re.compile(
-    r"\bneo|\bcrossover\b|\brock\b|\bmetal\b|\bpop\b|\bfolk\b|\bjazz\b|\belectronic\b|\bambient\b|"
-    r"\bdarkwave\b|\bhip hop\b|\bindian\b|\bhindustani\b|\bcarnatic\b|\bpersian\b|\barabic\b|\bchinese\b|"
-    r"\bjapanese\b|\bstage and screen\b|\bsoundtrack\b")
+    r"^(?:(?:early|late|high|middle|western) )?(?:classical|classical music|western classical music|"
+    r"classical period|baroque|baroque music|renaissance|renaissance music|medieval|medieval music|early music|"
+    r"romantic classical|opera|operas|operetta|grand opera|opera buffa|opera seria|opera comique|symphony|"
+    r"symphonies|symphonic|symphonic poem|tone poem|concerto|concertos|concerti|sonata|sonatas|oratorio|"
+    r"oratorios|cantata|cantatas|chamber music|art song|lied|lieder|string quartet|requiem|mass|motet|"
+    r"madrigal|gregorian chant|plainchant|plainsong|polyphony|choral music)$")
+# classical-like, not proof alone: counts only beside a weak signal
+_AMBIGUOUS_GENRE = re.compile(
+    r"^(?:contemporary|modern|post|minimal|new|20th century|21st century) classical(?: music)?$|"
+    r"^(?:choral|minimalism|impressionism|impressionist|romantic|romanticism|modern|contemporary)$")
+# a genre beside which a classical one is no proof (a film score on a classical label, a
+# crossover tenor, ambient piano): MusicBrainz's genres; for Discogs any genre but Classical
+_OTHER_GENRE = re.compile(
+    r"\bneo|\bcrossover\b|\brock\b|\bmetal\b|\bpop\b|\bfolk\b|\bjazz\b|\belectronic|\bambient\b|"
+    r"\bsoundtrack|\bscore\b|\bfilm\b|\bstage and screen\b|\bnew age\b|\beasy listening\b|\bhip hop\b|"
+    r"\bworld\b|\bsinger songwriter\b|\bvocal\b|\bschlager\b|\bchanson\b|\bvideo game\b")
 
 # labels that publish (almost) only classical music: a weak signal
 CLASSICAL_LABELS = {
     "deutsche grammophon", "archiv produktion", "decca classics", "philips classics", "harmonia mundi",
     "harmonia mundi france", "harmonia mundi usa", "deutsche harmonia mundi", "hyperion", "naxos",
-    "naxos historical", "bis", "chandos", "ecm new series", "ondine", "alpha", "alpha classics", "glossa",
+    "naxos historical", "bis", "chandos", "ecm new series", "ondine", "alpha classics", "glossa",
     "oehmsclassics", "oehms classics", "brilliant classics", "pentatone", "pentatone classics", "2l",
     "sony classical", "warner classics", "emi classics", "erato", "virgin classics", "virgin veritas",
-    "teldec classics", "channel classics", "cpo", "capriccio", "hanssler classic", "carus", "coro",
-    "signum classics", "delphian", "ricercar", "accent", "arcana", "challenge classics", "profil",
-    "supraphon", "analekta", "atma classique", "orfeo", "tudor", "berlin classics", "rca red seal",
+    "teldec classics", "channel classics", "cpo", "capriccio", "hanssler classic", "carus", 
+    "signum classics", "delphian", "ricercar", "challenge classics", 
+    "supraphon", "analekta", "atma classique", "orfeo", "berlin classics", "rca red seal",
     "melodiya", "мелодия", "fuga libera", "outhere", "linn classics", "bis records", "dacapo", "cedille",
-    "avie", "lso live", "lpo", "onyx classics", "evil penguin classic", "naive classique", "mirare",
+    "avie", "lso live", "onyx classics", "evil penguin classic", "naive classique", "mirare",
     "aparte", "la dolce volta", "cypres", "ramee", "passacaille", "et'cetera", "nimbus records",
-    "toccata classics", "grand piano", "marco polo", "dynamic", "tactus", "stradivarius", "arts music",
+    "toccata classics", "grand piano", "marco polo", "tactus", "stradivarius", "arts music",
     "da vinci classics", "br klassik", "br-klassik", "hyperion records", "resonus", "rubicon classics", "querstand", "genuin", "audite", "musikproduktion dabringhaus und grimm", "mdg",
 }
 _LABEL_TAIL = re.compile(r"\s+(?:records|recordings|label|music|gmbh|ltd\.?|inc\.?)$")
 # catalogue numbers of works printed in titles (Bach's BWV, Mozart's K., opus numbers ...): weak
-_CATALOGUE = re.compile(r"(?<![\w.])(?:BWV|HWV|RV|TWV|BuxWV|SWV|WoO|Hob\.|KV|K\.|D\.|[Oo]p\.|Sz\.)"
-                        r"\s?(?:[IVXL]+[a-z]?\s?:\s?)?\d+[a-z]?")
+# (K., KV and D. with two digits at least: "D.1", "K. 9" are too plain to count)
+_CATALOGUE = re.compile(r"(?<![\w.])(?:(?:BWV|HWV|RV|TWV|BuxWV|SWV|WoO|Hob\.|[Oo]p\.|Sz\.)\s?(?:[IVXL]+[a-z]?\s?:\s?)?\d+"
+                        r"|(?:KV|K\.|D\.)\s?\d{2,})[a-z]?")
+# Classical Extras' own marks: its stamp ("Version 2.0.14 of Classical Extras") or its options
+# block in a comment ("{'Classical Extras': {...")
+_CE_MARK = re.compile(r"Version [\d.]+ of Classical Extras|\{'Classical Extras': \{")
 _PERFORMER_RELS = {"instrument", "vocal", "performer", "performing orchestra", "conductor", "chorus master",
                    "concertmaster"}
 
@@ -63,16 +74,37 @@ def fold(s) -> str:
 
 
 def genre_kind(genre) -> str:
-    """CLS-2: "strong" (a classical genre: "Classical", "Baroque", "Opera"), "ambiguous"
-    ("Contemporary Classical", "Modern Classical", "Choral": counted only beside a weak signal)
-    or "" (anything else - "Neo-Classical", "Classical Crossover", "Symphonic Metal", "Rock
-    Opera", "Hindustani Classical")."""
+    """CLS-2: "strong" (a western classical genre, the whole genre: "Classical", "Baroque",
+    "Opera", "Chamber Music"), "ambiguous" ("Contemporary Classical", "Modern Classical",
+    "Choral": counted only beside a weak signal) or "" (anything else - "Neo-Classical",
+    "Classical Crossover", "Symphonic Metal", "Rock Opera", "Peking Opera", "Hindustani
+    Classical", "Baroque Pop")."""
     g = fold(genre)
-    if not g or _NOT_CLASSICAL.search(g):
+    if not g:
         return ""
-    if _AMBIGUOUS_GENRE.search(g):
-        return "ambiguous"
-    return "strong" if _STRONG_GENRE.search(g) else ""
+    if _STRONG_GENRE.match(g):
+        return "strong"
+    return "ambiguous" if _AMBIGUOUS_GENRE.match(g) else ""
+
+
+class Verdict(tuple):
+    """is_classical's (classical, reasons), with kinds: the strong signals' kinds ("tradition",
+    "genre", "composer"), and composer_performs: an artist of the release's credit composed
+    works of it and performs them (a film composer conducting, a singer-songwriter)."""
+    kinds = frozenset()
+    composer_performs = False
+
+    def __new__(cls, ok, reasons, kinds=(), composer_performs=False):
+        v = super().__new__(cls, (ok, reasons))
+        v.kinds, v.composer_performs = frozenset(kinds), bool(composer_performs)
+        return v
+
+    @property
+    def keep_artist(self) -> bool:
+        """CLS-4: the track artist stays as credited - the album is classical by its genres
+        alone and its credited artist composed and performs it (D1 never names a score's
+        orchestra instead of its composer)."""
+        return bool(self[0]) and self.composer_performs and self.kinds <= {"genre"}
 
 
 def _names(items) -> list:
@@ -151,43 +183,56 @@ def is_classical(profile=None, rel=None, det=None, album=None) -> tuple:
     kinds do, or one beside an ambiguous signal (a "Contemporary Classical" or "Choral" genre,
     a "; " credit whose composer the lookup does not name). "Neo-Classical", "Classical
     Crossover", "Symphonic Metal" and the like are no signal."""
-    strong, ambiguous, weak = [], [], {}
+    strong, ambiguous, weak, kinds = [], [], {}, set()
     tradition = profile.get("tradition") if hasattr(profile, "get") else ""
     if str(tradition or "") == "western_classical":
         strong.append("the profile's tradition is western classical")
-    # Discogs: its genres and styles
-    for g in _names((det or {}).get("genres")) + _names((det or {}).get("styles")):
+        kinds.add("tradition")
+    # Discogs: its genres and styles - a classical one beside another genre (Stage & Screen,
+    # Electronic, Pop ...) is no proof: a film score, a crossover album
+    dg_genres = _names((det or {}).get("genres"))
+    dg_other = [g for g in dg_genres if fold(g) != "classical"]
+    for g in dg_genres + _names((det or {}).get("styles")):
         kind = genre_kind(g)
-        if kind == "strong" and fold(g) == "classical" and g in _names((det or {}).get("genres")):
-            strong.append("Discogs's genre is Classical")
-        elif kind == "strong":
-            strong.append(f"Discogs's genre or style {g!r}")
-        elif kind == "ambiguous":
-            ambiguous.append(f"Discogs's style {g!r}")
+        if kind == "strong" and not dg_other:
+            strong.append("Discogs's genre is Classical" if fold(g) == "classical" and g in dg_genres
+                          else f"Discogs's style {g!r}")
+            kinds.add("genre")
+        elif kind:
+            ambiguous.append(f"Discogs's genre or style {g!r}" + (f" (beside {dg_other[0]!r})" if kind == "strong" else ""))
     # MusicBrainz: the release's and its group's genres (when the lookup asked for them)
     rg = (rel or {}).get("release-group") or {}
-    for g in _names((rel or {}).get("genres")) + _names(rg.get("genres")):
+    mb_genres = _names((rel or {}).get("genres")) + _names(rg.get("genres"))
+    mb_other = [g for g in mb_genres if _OTHER_GENRE.search(fold(g))]
+    for g in mb_genres:
         kind = genre_kind(g)
-        if kind == "strong":
+        if kind == "strong" and not mb_other:
             strong.append(f"MusicBrainz's genre {g!r}")
-        elif kind == "ambiguous":
-            ambiguous.append(f"MusicBrainz's genre {g!r}")
+            kinds.add("genre")
+        elif kind:
+            ambiguous.append(f"MusicBrainz's genre {g!r}" + (f" (beside {mb_other[0]!r})" if kind == "strong" else ""))
     # MusicBrainz: who composed and who performs
+    composer_performs = False
     ac = [c for c in (rel or {}).get("artist-credit") or () if isinstance(c, dict) and isinstance(c.get("artist"), dict)]
     if ac:
         composers, performers = mb_people(rel)
         keys = [c["artist"].get("id") or fold(c["artist"].get("name")) for c in ac]
         names = [c.get("name") or c["artist"].get("name") or "" for c in ac]
+        composer_performs = any(k in composers and k in performers for k in keys)
         # ("Composer, Composer; performers": the "; " after the composers, wherever it comes)
         semi = any(";" in str(c.get("joinphrase") or "") for c in ac[:-1])
-        for k, n in zip(keys, names):
-            if k in composers and k not in performers:
-                strong.append(f"{n} composed the works and performs on none of them")
-                break
         if semi and keys[0] in composers:
             strong.append(f"the release's credit is led by its composer {names[0]} (\"Composer; performers\")")
+            kinds.add("composer")
         elif semi and not composers:
             ambiguous.append("the release's credit is MusicBrainz's \"Composer; performers\" form")
+        for k, n in zip(keys, names):
+            if k in composers and k not in performers:
+                # (alone, a songwriter's compilation sung by others: corroborated only)
+                (strong if semi else ambiguous).append(f"{n} composed the works and performs on none of them")
+                if semi:
+                    kinds.add("composer")
+                break
     # weak: labels, catalogue numbers, Classical Extras' tags
     labels = [((li or {}).get("label") or {}).get("name") for li in (rel or {}).get("label-info") or ()] + \
         [(lb or {}).get("name") for lb in (det or {}).get("labels") or () if isinstance(lb, dict)]
@@ -199,14 +244,11 @@ def is_classical(profile=None, rel=None, det=None, album=None) -> tuple:
     cat = next((m.group(0) for m in (_CATALOGUE.search(t) for t in titles) if m), "")
     if cat:
         weak["catalogue"] = f"works' catalogue numbers in the titles ({cat.strip()} ...)"
-    if any("classical extras" in str(t.get("clue_text") or "").casefold() for t in tracks):
+    if any(_CE_MARK.search(str(t.get("clue_text") or "")) for t in tracks):
         weak["classical_extras"] = "your files carry Classical Extras' tags"
     reasons = strong + ambiguous + list(weak.values())
-    if strong:
-        return True, reasons
-    if (ambiguous and weak) or len(weak) >= 2:
-        return True, reasons
-    return False, reasons
+    ok = bool(strong) or bool(ambiguous and weak) or len(weak) >= 2
+    return Verdict(ok, reasons, kinds, composer_performs)
 
 
 def composer_first_form(rel) -> bool:
@@ -247,7 +289,8 @@ def recorded_works(rel) -> list:
 
 
 def work_lookups(http, rel, log=None, cap=MAX_WORK_LOOKUPS) -> tuple:
-    """CLS-3: ({work ID: the work with its artist and work relationships}, lookups asked) for
+    """CLS-3: ({work ID: the work with its artist and work relationships}, lookups asked,
+    works left unread past CAP) for
     the parent works of the release's recorded works, up to MAX_DEPTH levels, each work once.
     MusicBrainz being unreachable is raised (match_albums.ProviderUnavailable): the album is
     tried again later, never tagged with half its works."""
@@ -275,8 +318,8 @@ def work_lookups(http, rel, log=None, cap=MAX_WORK_LOOKUPS) -> tuple:
             depth[up["work"]["id"]] = depth[wid] + 1
             todo.append(up["work"]["id"])
     if capped and log is not None:
-        log.info("classical: %d parent work(s) not looked up (at most %d per album)", capped, cap)
-    return works, asked
+        log.info("classical: %d parent work(s) not looked up (at most %d per album): no work fields", capped, cap)
+    return works, asked, capped
 
 
 # ---- CLS-4: Discogs --------------------------------------------------------------------
@@ -305,18 +348,27 @@ def discogs_roles(fields: dict) -> dict:
 
 
 # ---- Classical Extras' tags in your files ---------------------------------------------
-# the fields Classical Extras curated: kept on a file that carries its stamp (filled only
-# where empty, CLS-5)
+# the fields Classical Extras curated: kept on a file it tagged (CLS-5)
 CE_FIELDS = ("work", "movement", "movementnumber", "movementtotal", "showmovement")
+# tags only Classical Extras writes: they mark its file even once its stamp or its comment is
+# gone (cleanup.comments "remove" takes a comment off)
+CE_OWN_TAGS = ("top_work", "is_classical", "work_year", "groupheading", "show work movement", "part",
+               "soloists", "band", "period")
 
 
 def classical_extras_file(before: dict) -> bool:
-    """CLS-5: the file's tags carry Classical Extras' stamp (its STAMP tag, or its options in
-    a comment)."""
+    """CLS-5: the file was tagged by Classical Extras: its STAMP tag ("Version 2.0.14 of
+    Classical Extras"), its options block in a comment ("{'Classical Extras': {..."), or two
+    tags of its own at least (TOP_WORK, IS_CLASSICAL, WORK_YEAR, GROUPHEADING ...) - never a
+    comment that merely names it."""
+    own = 0
     for k, v in (before or {}).items():
         key = str(k).casefold()
-        if key == "stamp" or key.endswith(":stamp") or "comment" in key or key.startswith("comm"):
-            vals = v if isinstance(v, (list, tuple)) else [v]
-            if any("classical extras" in str(x).casefold() for x in vals):
-                return True
-    return False
+        base = key.split(":")[-1] if key.startswith(("txxx:", "----:")) else key
+        vals = v if isinstance(v, (list, tuple)) else [v]
+        if (base == "stamp" or "comment" in key or key.startswith("comm")) and \
+                any(_CE_MARK.search(str(x)) for x in vals):
+            return True
+        if base in CE_OWN_TAGS and any(str(x).strip() for x in vals):
+            own += 1
+    return own >= 2

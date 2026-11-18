@@ -8,6 +8,8 @@ import os as _os, tempfile as _tempfile  # noqa: E401
 _os.environ["XDG_CONFIG_HOME"] = _tempfile.mkdtemp(prefix="tm-config-")
 _os.environ["XDG_STATE_HOME"] = _tempfile.mkdtemp(prefix="tm-state-")
 _os.environ.setdefault("TAGMENDER_TAGGER_INI", "/nonexistent")
+_os.environ.setdefault("TAGMENDER_DISCOGS_PLUGIN", str(__import__("pathlib").Path(__file__).resolve().parent.parent
+                                                       / "plugins_builtin" / "discogs"))
 
 import copy  # noqa: E402
 import sys  # noqa: E402
@@ -240,7 +242,7 @@ class CLS5ClassicalExtras(unittest.TestCase):
                   "movementtotal": ["4"], "title": ["new"]}
         changes, rows = pl.diff_tags(before, target, prof, 99.0)
         self.assertNotIn("work", changes)
-        self.assertEqual(changes["movementtotal"], ["4"])                    # (filled where empty)
+        self.assertNotIn("movementtotal", changes)                           # (its set: nothing added to it)
         self.assertEqual(changes["title"], ["new"])
         self.assertIn({"field": "work", "before": before["work"], "after": before["work"],
                        "action": "preserved (Classical Extras)"}, rows)

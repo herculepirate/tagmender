@@ -3,10 +3,13 @@
 # MusicBrainz album is read with its recordings' and works' relationships and its works'
 # parents; an album that is not classical asks nothing more. Synthetic data, mocked providers.
 import copy
+import os
 import sys
 import unittest
 from pathlib import Path
 
+# (the built-in Discogs plugin wherever the tests are run from: test_engine's Base skips without it)
+os.environ.setdefault("TAGMENDER_DISCOGS_PLUGIN", str(Path(__file__).resolve().parent.parent / "plugins_builtin" / "discogs"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_engine import Base, FakeHttp, mb_release, dg_release  # noqa: E402  (isolated settings and state)
 import classical  # noqa: E402
@@ -212,10 +215,10 @@ class CLS3Fetching(Base):
             {"target-type": "work", "type": "performance", "work": {"id": "w0", "title": "W0", "relations": [
                 {"target-type": "work", "type": "parts", "direction": "backward", "ordering-key": 1,
                  "work": {"id": "w1", "title": "W1"}}]}}]}}]}]}
-        works, asked = classical.work_lookups(H(), rel)
-        self.assertEqual((sorted(works), asked), (["w1", "w2", "w3"], 3))      # (MAX_DEPTH levels up)
-        works, asked = classical.work_lookups(H(), rel, cap=1)
-        self.assertEqual((sorted(works), asked), (["w1"], 1))
+        works, asked, capped = classical.work_lookups(H(), rel)
+        self.assertEqual((sorted(works), asked, capped), (["w1", "w2", "w3"], 3, 0))      # (MAX_DEPTH levels up)
+        works, asked, capped = classical.work_lookups(H(), rel, cap=1)
+        self.assertEqual((sorted(works), asked, capped), (["w1"], 1, 1))
 
     def test_CLS3_an_album_that_is_not_classical_asks_nothing_more(self):
         d = self.album("Band A", "Album A")

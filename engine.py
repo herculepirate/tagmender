@@ -3874,6 +3874,8 @@ class Engine:
             # relationships (whatever the profile's Credits setting) and its works' parents,
             # tagged again as CLS-4 writes it (an album that is not classical asks nothing more)
             full_rel, rel, ps = self._classical_release(mbid, full_rel, ps, album, best)
+            if getattr(cls, "keep_artist", False):
+                ps["classical_keep_artist"] = True
             tags_mb = mb_tags.release_tags(rel, ps)
             tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files), ps)
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)
@@ -4023,12 +4025,17 @@ class Engine:
                     album_i = with_track_credits(album_f, track_i)     # CRD-1: its own credits
                     dg_i = _as_tags({**album_i, **(track_i or {})})
                     merged = enrich(merged, album_f, track_i, es, dcount, self.dm)   # (it adds them)
-                    if cls[0]:
+                    if cls[0] and any(tags_mb[i].get(k) for k in classical.CE_FIELDS):
                         # CLS-4: Discogs's work (an index entry's title) only where MusicBrainz's
-                        # works give none - never over its top work
+                        # works give none: MusicBrainz's work fields as a set, never mixed with
+                        # Discogs's - unless your field sources name Discogs for the field
                         for k in classical.CE_FIELDS:
+                            if "discogs" in (self.profile["field_sources"] or {}).get(k, ()):
+                                continue
                             if tags_mb[i].get(k):
                                 merged[k] = tags_mb[i][k]
+                            else:
+                                merged.pop(k, None)
                     where = {k: ("discogs" if dg_i.get(k) == v else "musicbrainz") for k, v in merged.items()}
             else:
                 dg_i = tags_dg[i]
@@ -4150,25 +4157,33 @@ class Engine:
 
     def _classical(self, album, files, rel, det) -> tuple:
         """CLS-2: classical.is_classical of this album, asked once per album and release."""
-        memo = self.__dict__.setdefault("_classical_memo", {})
-        key = (tuple(str(f) for f in files or ()), (rel or {}).get("id") or "", str((det or {}).get("id") or ""))
+        memo = self._classical_cache()
+        key = (_files_key(files), (rel or {}).get("id") or "", str((det or {}).get("id") or ""))
         if key not in memo:
             memo[key] = classical.is_classical(self.profile, rel, det, album)
         return memo[key]
 
     def _classical_probe(self, album, files, mbid, rel, det, ps) -> tuple:
         """CLS-2: is_classical again with the release's recordings' and works' relationships."""
-        memo = self.__dict__.setdefault("_classical_memo", {})
-        key = (tuple(str(f) for f in files or ()), "probe:" + str(mbid), str((det or {}).get("id") or ""))
+        memo = self._classical_cache()
+        key = (_files_key(files), "probe:" + str(mbid), str((det or {}).get("id") or ""))
         if key not in memo:
-            try:
-                got = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}"
-                                         f"?inc={mb_tags.inc_for(dict(ps, track_ars=True))}&fmt=json", "mb")
-            except ma.ProviderUnavailable:
-                got = None                      # (no answer: the album is read as not classical)
+            # (MusicBrainz unreachable: raised - the album is tried again later, never planned
+            # as not classical for an answer not had; nothing remembered)
+            got = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}"
+                                     f"?inc={mb_tags.inc_for(dict(ps, track_ars=True))}&fmt=json", "mb")
             memo[key] = classical.is_classical(self.profile, got, det, album) \
                 if isinstance(got, dict) and got.get("media") else self._classical(album, files, rel, det)
         return memo[key]
+
+    CLASSICAL_MEMO_MAX = 512
+
+    def _classical_cache(self) -> dict:
+        """CLS-2's answers this planning run (Engine.plan clears it; bounded for a watcher)."""
+        memo = self.__dict__.setdefault("_classical_memo", {})
+        if len(memo) > self.CLASSICAL_MEMO_MAX:
+            memo.clear()
+        return memo
 
     def _classical_release(self, mbid, full_rel, ps, album, best):
         """CLS-3: (whole release, release as tagged, settings) of a classical album: the release
@@ -4183,9 +4198,13 @@ class Engine:
             got = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}?inc={mb_tags.inc_for(ps)}"
                                      "&fmt=json", "mb")
             rel = got if isinstance(got, dict) and got.get("media") else full_rel
-        works, asked = classical.work_lookups(self.http, rel, self.log)
+        works, asked, capped = classical.work_lookups(self.http, rel, self.log)
         self.log.info("classical: %s - %d parent work(s) read in %d lookup(s)", mbid, len(works), asked)
         ps["~works"] = works
+        if capped:
+            # (more parent works than one album may ask for: no album holds work fields some of
+            # its tracks would have from a parent read and others from one not read)
+            ps["~works_capped"] = True
         full = rel
         if not best.get("version_tracks"):
             rel = mb_tags.one_layer(rel, _layer_prefer(album, rel, best.get("box_disc")))
@@ -6126,6 +6145,7 @@ class Engine:
         """meta: a dict kept by the caller (see listing): files whose metadata it remembers, unchanged,
         are not opened again to find the albums (a plan of every album drops what it did not read)."""
         whole = [Path(os.path.abspath(Path(path).expanduser()))] if only is None else False
+        self.__dict__.pop("_classical_memo", None)          # (CLS-2: asked anew each planning run)
         with ex.meta_memo(meta, whole) if meta is not None else contextlib.nullcontext():
             props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
@@ -8327,6 +8347,19 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None
             if m:
                 t["media"] = m
     return album, tracks, total_discs
+
+
+def _files_key(files) -> tuple:
+    """The files as CLS-2's memo knows them: path, size and change time (a file retagged since is
+    read anew)."""
+    out = []
+    for f in files or ():
+        try:
+            st = os.stat(f)
+            out.append((str(f), st.st_size, st.st_mtime_ns))
+        except OSError:
+            out.append((str(f), -1, -1))
+    return tuple(out)
 
 
 def _index_work(t, work, at, count):

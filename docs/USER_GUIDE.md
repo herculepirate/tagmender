@@ -749,7 +749,8 @@ who performs, Album Artist the release's whole credit, names in Latin script (CL
 Classical Extras curated in your files are kept (CLS-5). For a classical library, the example
 profile `Classical` (`tagmender profiles examples`) reads every album as classical, asks for the
 credits always, writes names as the release credits them ("Schumann; Musica Viva, Alexander Rudin")
-and files `Album Artist/Year - Album/Disc NN/NN Title` (the `classical-performer`
+and files `Album Artist/Year - Album/Disc NN/NN Title`, the album artist the release's credit as
+written (the `classical-performer`
 preset); see [docs/PROFILES.md](PROFILES.md).
 
 Genres: `~/.config/tagmender/genres.json` maps what MusicBrainz and Discogs say

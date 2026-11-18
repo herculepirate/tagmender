@@ -167,11 +167,13 @@ def skip_translation(text, s) -> bool:
     return False
 
 
-def _translate_artist(artist: dict, s) -> tuple[str, str]:
+def _translate_artist(artist: dict, s, credited=None) -> tuple[str, str]:
     """(name, sort name) of the artist, translated when that is asked for. CLS-4: on a
-    classical release (settings classical=True) a name in another script than Latin is written
-    in Latin script - its alias in the translation locales (English when none is set), else
-    its Latin sort name turned round ("Шнитке, Альфред" has the sort name "Schnittke, Alfred":
+    classical release (settings classical=True) an artist whose name is in another script than
+    Latin is written in Latin script: as the release credits it when that credit (CREDITED) is
+    Latin ("Mstislav Rostropovich" - never his sort name turned round); a credit in that
+    script too, by its alias in the translation locales (English when none is set), else its
+    Latin sort name turned round ("Шнитке, Альфред" has the sort name "Schnittke, Alfred":
     "Alfred Schnittke") - unless your script exceptions keep that script."""
     name, sort = artist.get("name") or "", artist.get("sort-name") or ""
     if s["translate_artist_names"] and not skip_translation(name, s):
@@ -181,6 +183,8 @@ def _translate_artist(artist: dict, s) -> tuple[str, str]:
         if s["translate_from_sortname"]:
             return translate_from_sortname(name, sort), sort
     if s.get("classical") and not_latin(name) and not skip_translation(name, s):
+        if credited and not not_latin(credited):
+            return credited, _sort_from_aliases(artist, credited, s)
         alias = _localized_alias(artist.get("aliases"), s["translation_locales"] or ["en"])
         if alias and alias[0] and not not_latin(alias[0]):
             return alias
@@ -259,7 +263,7 @@ def credit_info(ac, settings=None) -> dict:
         credited = c.get("name") or a.get("name") or ""
         use_credited = not should_standardize(s["standardize_artist_names"], credited, a) if a.get("name") \
             else True
-        tname, tsort = _translate_artist(a, s) if a.get("name") else (credited, a.get("sort-name") or credited)
+        tname, tsort = _translate_artist(a, s, credited) if a.get("name") else (credited, a.get("sort-name") or credited)
         translated = bool(a.get("name")) and tname != a.get("name")
         if not translated and use_credited and c.get("name"):
             name, sname = credited, _sort_from_aliases(a, credited, s) if a.get("name") else credited
@@ -343,7 +347,7 @@ def _rel_artist(rel, m, s, instrumental, per_medium):
     artist = rel.get("artist") or {}
     if not artist.get("name"):
         return
-    name, sort = _translate_artist(artist, s)
+    name, sort = _translate_artist(artist, s, rel.get("target-credit"))
     if name == artist.get("name") and rel.get("target-credit"):
         credited = rel["target-credit"]
         if credited != artist["name"] and not should_standardize(s["standardize_artist_names"], credited, artist):
@@ -485,6 +489,8 @@ def _classical_work(work, m, s, instrumental, per_medium):
     front, its numeral kept ("I. Andante con moto - Allegro di molto"), Movement its place
     among the parent's parts (the ordering-key), Movement Total the parent's parts, Show
     Movement 1."""
+    if s.get("~works_capped"):
+        return                  # (CLS-3: the album's works not all read - no work fields at all)
     chain = _work_chain(work, s)
     top = chain[-1][0] if chain else work
     title = str(top.get("title") or "").strip()
@@ -569,10 +575,17 @@ def _work_credits_from_parents(work, m, s, instrumental, per_medium):
 _PERFORMS = {"instrument": 0, "vocal": 0, "performer": 0, "performing orchestra": 1, "conductor": 2}
 
 
+_GROUP_TYPES = {"group", "orchestra", "choir"}
+
+
 def _performers(rels, s) -> list:
     """CLS-4: (name, sort name, artist ID) of who performs, from relationships: the soloists
-    (instrument, vocal, performer), then orchestras and choirs, then conductors."""
-    found = []
+    (instrument, vocal, performer), then orchestras, choirs and ensembles, then conductors.
+    An ensemble credited as a performer (a "performer" relationship naming no instrument, or
+    an artist MusicBrainz types as a group or choir) beside players credited by their
+    instruments stands for them: they are its members (the Emerson String Quartet and its
+    violinists). A performing orchestra's soloists (a concerto's) stay."""
+    found, ensemble = [], False
     for r in rels or ():
         a = r.get("artist") if isinstance(r, dict) and r.get("target-type") == "artist" else None
         if not isinstance(a, dict) or not a.get("name") or r.get("type") not in _PERFORMS:
@@ -580,13 +593,18 @@ def _performers(rels, s) -> list:
         rank = _PERFORMS[r["type"]]
         if r["type"] == "vocal" and any("choir" in str(x) or "chorus" in str(x) for x in r.get("attributes") or ()):
             rank = 1
-        name, sort = _translate_artist(a, s)
+        if rank == 0 and (str(a.get("type") or "").casefold() in _GROUP_TYPES or
+                          (r["type"] == "performer" and not r.get("attributes"))):
+            rank, ensemble = 1, True              # (an ensemble credited as a performer)
+        name, sort = _translate_artist(a, s, r.get("target-credit"))
         if name == a.get("name") and r.get("target-credit") and r["target-credit"] != a["name"] and \
                 not should_standardize(s["standardize_artist_names"], r["target-credit"], a):
             name, sort = r["target-credit"], _sort_from_aliases(a, r["target-credit"], s)
         if any((a.get("id") and a.get("id") == f[3]) or _fold_name(name) == _fold_name(f[1]) for f in found):
             continue
         found.append((rank, name, sort, a.get("id") or ""))
+    if ensemble:
+        found = [f for f in found if f[0] != 0]
     return [(n, so, i) for _r, n, so, i in sorted(found, key=lambda f: f[0])]
 
 
@@ -608,7 +626,19 @@ def _classical_artist(d, rec, r_ac, rel, s):
         return all(_fold_name(n) in composers for n in names)
     if not composers_only(d.get("musicbrainz_artistid") or [], d.get("artists") or []):
         return
+    if s.get("classical_keep_artist"):
+        return                               # (Verdict.keep_artist: a score's composer stays)
     if r_ac:
+        # (a recording credited "Composer; performers" too: its performers - the composers
+        # leading it left out, "Johann Sebastian Bach; Glenn Gould" -> "Glenn Gould")
+        lead = 0
+        for c in r_ac:
+            a = c.get("artist") if isinstance(c, dict) else None
+            if not isinstance(a, dict) or not (a.get("id") in composers or _fold_name(c.get("name") or a.get("name")) in composers):
+                break
+            lead += 1
+        if 0 < lead < len(r_ac) and ";" in str(r_ac[lead - 1].get("joinphrase") or ""):
+            r_ac = r_ac[lead:]
         rc = _credit_tags(r_ac, s, release=False)
         if rc.get("artists") and not composers_only(rc.get("musicbrainz_artistid") or [], rc["artists"]):
             for k in ("artist", "artistsort", "artists", "musicbrainz_artistid", "~artists_sort",
@@ -1147,8 +1177,8 @@ def release_tags(rel, settings=None, pregap=False, media=None, without=None, unc
                 g = genres(rec, rel, s, who)
                 if g:
                     d["genre"] = g
-            if s.get("classical") and not va:
-                _classical_artist(d, rec, r_ac, rel, s)          # CLS-4: the performers
+            if s.get("classical"):
+                _classical_artist(d, rec, r_ac, rel, s)          # CLS-4: the performers (a compilation's too)
             if s.get("classical"):
                 _named_movement(d)
             if d["musicbrainz_artistid"] == [VARIOUS_ARTISTS_ID]:

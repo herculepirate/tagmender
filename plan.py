@@ -335,6 +335,8 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     # CLS-5: the work and movement fields Classical Extras curated in a file carrying its stamp
     # are kept - written only where the file has none
     curated = any(f in classical.CE_FIELDS for f in fields) and classical.classical_extras_file(before)
+    # (a file holding any of them keeps them as a set: none of the others added beside them)
+    curated_set = curated and any(_vals(before.get(x)) for x in classical.CE_FIELDS)
     for f in fields:
         if f.startswith("~"):
             continue
@@ -343,9 +345,11 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
         if curated and f in classical.CE_FIELDS and pol == "replace":
             if b and a != b:
                 rows.append({"field": f, "before": b, "after": b, "action": "preserved (Classical Extras)"})
-            elif a and not b:
+            elif a and not b and not curated_set:
                 changes[f] = a
                 rows.append({"field": f, "before": b, "after": a, "action": "added"})
+            elif a and not b:
+                rows.append({"field": f, "before": b, "after": b, "action": "preserved (Classical Extras)"})
             continue
         if f in extra_removals and f not in target:
             if not (replace_ok or f.startswith("tagmender") or pol == "remove"):

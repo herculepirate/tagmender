@@ -977,6 +977,11 @@ def _without_version_marks(title) -> str:
         m = re.search(r"\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]\s*$", t)
         words = re.findall(r"[a-z0-9.-]+", m.group(1).casefold()) if m else []
         marks = [w for w in words if _MARK_WORD.fullmatch(w.strip(".-"))]
+        if marks:
+            # (MED-22c: "Stereo" / "Mono" beside a mark word is the rip's layer, not the album's
+            # name: "Kodo One Earth Tour Special [Stereo DSD Rip]" beside "... [Multichannel 5.1]";
+            # alone, "(Mono)", it stays the title's)
+            marks += [w for w in words if w in ("stereo", "mono")]
         # (beside those words, only a catalogue number's parts: "[SACD AFZ5 198 2ch DSD64]")
         if not marks or not all(w in marks or re.search(r"\d", w) for w in words):
             return mc.fold(t)

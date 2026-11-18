@@ -3934,6 +3934,154 @@ def order_view(album, cand):
     return dict(cand, tracks=[tracks[i] for i in slots], slots=slots, missing={}, full_tracks=n, reordered=True)
 
 
+# --- TRK-8: release-wide file-to-track assignment -------------------------------------------
+# Adapted from picard/album.py (Album._match_files) and picard/metadata.py (Metadata.compare and
+# its weights) of the MusicBrainz tagger, licensed GPL-2.0-or-later:
+#
+# picard/album.py:
+# Copyright (C) 2004 Robert Kaye
+# Copyright (C) 2006-2009, 2011-2012, 2014 Lukáš Lalinský
+# Copyright (C) 2008 Gary van der Merwe
+# Copyright (C) 2008 Hendrik van Antwerpen
+# Copyright (C) 2008 ojnkpjg
+# Copyright (C) 2008-2011, 2014, 2018-2026 Philipp Wolfer
+# Copyright (C) 2009 Nikolai Prokoschenko
+# Copyright (C) 2011-2012 Chad Wilson
+# Copyright (C) 2011-2013, 2019 Michael Wiencek
+# Copyright (C) 2012-2013, 2016-2017 Wieland Hoffmann
+# Copyright (C) 2013, 2018 Calvin Walton
+# Copyright (C) 2013-2015, 2017 Sophist-UK
+# Copyright (C) 2013-2015, 2017-2026 Laurent Monin
+# Copyright (C) 2016 Suhas
+# Copyright (C) 2016-2018 Sambhav Kothari
+# Copyright (C) 2017 Antonio Larrosa
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2019 Joel Lintunen
+# Copyright (C) 2020-2021 Gabriel Ferreira
+# Copyright (C) 2021 Petit Minion
+# Copyright (C) 2022 skelly37
+# Copyright (C) 2024 Giorgio Fontanive
+# Copyright (C) 2024 Rakim Middya
+# Copyright (C) 2025 Khoa Nguyen
+# Copyright (C) 2025-2026 Bob Swift
+# Copyright (C) 2026 pranavsource1
+#
+# picard/metadata.py:
+# Copyright (C) 2006-2008, 2011 Lukáš Lalinský
+# Copyright (C) 2009, 2015, 2018-2023, 2025-2026 Philipp Wolfer
+# Copyright (C) 2011-2014 Michael Wiencek
+# Copyright (C) 2012 Chad Wilson
+# Copyright (C) 2012 Johannes Weißl
+# Copyright (C) 2012-2014, 2018, 2020 Wieland Hoffmann
+# Copyright (C) 2013-2014, 2016, 2018-2026 Laurent Monin
+# Copyright (C) 2013-2014, 2017 Sophist-UK
+# Copyright (C) 2016 Rahul Raturi
+# Copyright (C) 2016-2017 Sambhav Kothari
+# Copyright (C) 2017-2018 Antonio Larrosa
+# Copyright (C) 2018 Vishal Choudhary
+# Copyright (C) 2018 Xincognito10
+# Copyright (C) 2020 Gabriel Ferreira
+# Copyright (C) 2020 Ray Bouchard
+# Copyright (C) 2021 Petit Minion
+# Copyright (C) 2022 skelly37
+# Copyright (C) 2022, 2025 Bob Swift
+# Copyright (C) 2024 x11x
+#
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see <https://www.gnu.org/licenses/>.
+
+# (TagMender's own: the release already chosen, every file must land on a different track, each
+# sure - a file by its recording or track ID whose length agrees, else by the weighted similarity
+# of title, length, track number, disc number and artist above the threshold, its title agreeing
+# and no other track as close; one file unsure or two on one track and nothing is reassigned)
+_RV_WEIGHTS = {"title": 22, "artist": 6, "tracknumber": 6, "discnumber": 5, "length": 8}
+_RV_THRESHOLD = 0.4                 # (the tagger's default "similarity for matching files to tracks")
+_RV_LENGTH_MS = 30000               # (its length score: falling to nothing over 30 s)
+_RV_MARGIN = 0.1                    # (TagMender: the best track this much ahead of the next, or no pick)
+
+
+def _rv_length_score(a, b):
+    if not a or not b:
+        return None
+    return 1.0 - min(abs(a - b) * 1000.0, _RV_LENGTH_MS) / float(_RV_LENGTH_MS)
+
+
+def _rv_similarity(f, t):
+    """TRK-8: how alike file f and release track t are, 0..1 - a weighted mean over the fields
+    both have (a field one side lacks is not counted)."""
+    parts = []
+    if f.get("title") and t.get("title"):
+        a, b = fold(f["title"]), fold(t["title"])
+        parts.append((1.0 if a == b else difflib.SequenceMatcher(None, a, b).ratio(), _RV_WEIGHTS["title"]))
+    if f.get("artist") and t.get("artist"):
+        a, b = fold(f["artist"]), fold(t["artist"])
+        parts.append((1.0 if a == b else difflib.SequenceMatcher(None, a, b).ratio(), _RV_WEIGHTS["artist"]))
+    if f.get("num") and t.get("num"):
+        parts.append((1.0 if int(f["num"]) == int(t["num"]) else 0.0, _RV_WEIGHTS["tracknumber"]))
+    if f.get("disc") and t.get("disc"):
+        parts.append((1.0 if int(f["disc"]) == int(t["disc"]) else 0.0, _RV_WEIGHTS["discnumber"]))
+    ls = _rv_length_score(f.get("secs"), t.get("secs"))
+    if ls is not None:
+        parts.append((ls, _RV_WEIGHTS["length"]))
+    total = sum(w for _v, w in parts)
+    return sum(v * w for v, w in parts) / total if total else 0.0
+
+
+def release_view(album, cand, cfg=None):
+    """TRK-8: the files are the release's tracks, each anywhere on it (discs in another order, a
+    disc labelled as another, bonus tracks placed elsewhere): the release seen in the files' order,
+    each file at its own track - by its recording or track ID (that track's length agreeing),
+    else by similarity (_rv_similarity) at least _RV_THRESHOLD with its title agreeing and the
+    next track _RV_MARGIN behind. "slots" as order_view's; "missing" empty. None unless as many
+    files as tracks (2 or more, no video), every file placed on a different track, and the
+    placement other than the files' own order (that order is decided as before)."""
+    files, tracks = album.get("tracks") or [], cand.get("tracks") or []
+    n = len(files)
+    if n < 2 or n != len(tracks) or any(t.get("video") for t in tracks):
+        return None
+    ids = {}
+    for j, t in enumerate(tracks):
+        for x in (t.get("rec_id"), t.get("track_id")):
+            if x:
+                ids.setdefault(x, set()).add(j)
+    nums = [dict(t, num=t.get("num") or (sum(1 for u in tracks[:j] if (u.get("disc") or 1) == (t.get("disc") or 1)) + 1))
+            for j, t in enumerate(tracks)]
+    slots = []
+    for f in files:
+        pick = None
+        by_id = set()
+        for x in f.get("ids") or ():
+            by_id |= ids.get(x, set())
+        by_id = {j for j in by_id if not (f.get("secs") and tracks[j].get("secs"))
+                 or abs(f["secs"] - tracks[j]["secs"]) <= 3}
+        if len(by_id) == 1:
+            pick = next(iter(by_id))
+        else:
+            scored = sorted(((_rv_similarity(f, t), j) for j, t in enumerate(nums)), reverse=True)
+            best, j = scored[0]
+            second = scored[1][0] if len(scored) > 1 else 0.0
+            if best >= _RV_THRESHOLD and best - second >= _RV_MARGIN and f.get("title") and \
+                    track_titles_agree(f["title"], tracks[j].get("title") or ""):
+                pick = j
+        if pick is None:
+            return None
+        slots.append(pick)
+    if len(set(slots)) != n or slots == list(range(n)):
+        return None
+    return dict(cand, tracks=[tracks[i] for i in slots], slots=slots, missing={}, full_tracks=n, reordered=True)
+
+
 def _slots_why_not(album, s):
     """Why the files cannot be tagged as their own tracks of this release with the rest
     missing, or "": the release must be proven by more than its name (a disc ID or TOC,
@@ -4529,6 +4677,15 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             if (s.get("dur_frac") or 0) > (dur_frac or 0) or (s.get("titles_agree") or 0) > (titles_agree or 0):
                 s["notes"] = s["notes"] + ["your files are this release's tracks in another order: each is "
                                            "tagged as its own track, numbered as the release numbers it (TRK-2)"]
+                return s
+        # TRK-8: or each file its own track anywhere on the release (discs in another order, a disc
+        # labelled as another): only where TRK-2 does not decide, and only when it fits better
+        view = None if album.get("tracks") and len({t.get("disc") or 1 for t in cand["tracks"]}) < 2             else release_view(album, cand, cfg)
+        if view:
+            s = score_candidate(album, view, cfg, ocr_text)
+            if ((s.get("dur_frac") or 0) >= (dur_frac or 0) and (s.get("titles_agree") or 0) >= (titles_agree or 0))                     and ((s.get("dur_frac") or 0) > (dur_frac or 0) or (s.get("titles_agree") or 0) > (titles_agree or 0)):
+                s["notes"] = s["notes"] + ["your files are this release's tracks on other discs or places: each "
+                                           "is tagged as its own track, numbered as the release numbers it (TRK-8)"]
                 return s
     return _with_missing_tracks(album, cand, cfg, ocr_text, res) if not tracks_ok and not box_note else res
 

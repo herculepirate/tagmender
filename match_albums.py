@@ -1156,6 +1156,22 @@ def _same_values(current, written):
     return False
 
 
+def _track_ids(path):
+    """TRK-8: the MusicBrainz recording and track IDs a file's tags give (MUSICBRAINZ_TRACKID is
+    the recording's, MUSICBRAINZ_RELEASETRACKID the track's), lower-case."""
+    try:
+        meta = exclusions.read_meta(path)
+    except Exception:
+        return []
+    out = []
+    for k in ("musicbrainz_trackid", "musicbrainz_recordingid", "musicbrainz_releasetrackid"):
+        for v in meta.get(k) or ():
+            v = str(v or "").strip().lower()
+            if re.fullmatch(r"[0-9a-f-]{36}", v) and v not in out:
+                out.append(v)
+    return out
+
+
 def tag_release_ids(infos):
     """(MusicBrainz ids, Discogs ids) the files' tags and comments name as their release."""
     mb, dg = set(), set()
@@ -2397,7 +2413,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "year": year or None, "discs": n_discs,
         "dropped_formats": dropped_formats, "dropped_tracks": dropped_tracks,
         "tracks": [{"disc": i["disc_eff"], "disc_tag": i["disc"] or 0, "num": i["num"], "title": i["title"],
-                    "secs": i["secs"], "path": str(_p),
+                    "secs": i["secs"], "path": str(_p), "artist": i.get("artist") or "",
+                    # TRK-8: the recording and track IDs the file is tagged with (never when blind)
+                    "ids": [] if blind else _track_ids(_p),
                     # (MED-22: which layer of a hybrid SACD each disc is, engine._layer_prefer)
                     "audio": {"rate": i.get("rate") or 0, "bits": i.get("bits") or 0,
                               "channels": i.get("channels") or 0, "sacd_area": i.get("sacd_area") or ""}}
@@ -4917,7 +4935,9 @@ def mb_candidate(rel):
             if (t.get("recording") or {}).get("video"):
                 continue                               # an enhanced CD's video, never an audio file
             tracks.append({"disc": mi, "title": t.get("title", ""),
-                           "secs": (t.get("length") or 0) / 1000.0})
+                           "secs": (t.get("length") or 0) / 1000.0,
+                           # TRK-8: the IDs a file tagged before may name it by
+                           "rec_id": str((t.get("recording") or {}).get("id") or ""), "track_id": str(t.get("id") or "")})
             if box_vinyl:
                 tracks[-1]["box_vinyl"] = True         # a 7" in a CD box (Kreator - Dying Alive)
             if mi in box_extra:

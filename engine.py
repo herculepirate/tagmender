@@ -79,9 +79,17 @@ def _first(meta, k):
     return ((meta.get(k) or [""])[0] or "").strip()
 
 
+# DSC-15: a disc marker in brackets followed by that disc's own span of years ("My Lives (Disc 3)
+# 1989-1999" beside "My Lives [Disc 1]"): the years are the disc's subtitle, not the album's
+_DISC_YEARS = re.compile(r"\s*[\(\[\{]\s*(?:disc|disk|cd)\s*" + _DISC_WORD + r"\s*[\)\]\}]\s*[-:\u2013]?\s*"
+                         r"(?:19|20)\d\d(?:\s*[-\u2013/]\s*(?:(?:19|20)\d\d|\d\d))?\s*$", re.I)
+
+
 def _album_title(meta) -> str:
+    """The album title a file is grouped by: without its disc marker (DSC-15: "(Disc 1)", "[Disk
+    4]", "- CD2", "(Disc 3) 1989-1999" with the disc's own years)."""
     album = _first(meta, "album").casefold()
-    return re.sub(r"\s+", " ", _DISC_SUFFIX.sub("", album)).strip() or album
+    return re.sub(r"\s+", " ", _DISC_SUFFIX.sub("", _DISC_YEARS.sub("", album))).strip() or album
 
 
 def _one_compilation(files, metas, title, folder) -> bool:

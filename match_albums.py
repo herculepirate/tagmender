@@ -2159,6 +2159,13 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # version's files say disc 1)
     versions = version_folders(infos, folders)
     kinds = {d: version_kind(v[2], [(p, i) for p, i in infos if p.parent == d]) for d, v in versions.items()}
+    if len(versions) > 1 and any(k == ("video", "audio") for k in kinds.values()) and \
+            not mc._VIDEO_FOLDER.search(str(album_folder or "")) and sacd_marks(album_dir, album_folder):
+        # MED-13 / MED-22c: an SACD rip by its folder's name or its SACD ripper's log, its areas
+        # converted to 24/96 PCM (Kodo - One Earth Tour Special, sacd_log.txt, "Stereo/" and
+        # "Multichannel/"): the rate alone made them a DVD's; nothing names a video disc (a folder
+        # "[SACD + DVD-A]" may hold the DVD's mixes: as before)
+        kinds = {d: (("sacd", "sacd mark") if k == ("video", "audio") else k) for d, k in kinds.items()}
     if len(versions) == 1 and next(iter(kinds.values()))[1] == "audio":
         # one layout-named folder alone ("Stereo 24-96/" of a download): a version of a disc only
         # when its name's disc word, an SACD_AREA tag, DSD or its media tag says which disc
@@ -4782,6 +4789,9 @@ def mb_linked_discogs_id(rel):
 
 
 _MB_VIDEO_FORMATS = ("dvd-video", "blu-ray", "dvd", "vhs", "hd-dvd", "vcd", "svcd")
+# (an audio disc of hi-res a CD rip never holds: MusicBrainz's "DVD-Audio", "Blu-ray Audio";
+# SACDs are MED-22's)
+_DVD_AUDIO = re.compile(r"^\s*(?:dvd-?audio|blu-?ray[- ]audio)\b", re.I)
 
 
 def mb_sort_names(rel):
@@ -4820,6 +4830,21 @@ def mb_candidate(rel):
     kinds = {mc.media_kind(m.get("format")) for m in audio_media} - {""}
     mixed_vinyl = bool(kinds & {"vinyl", "cassette"}) and bool(kinds & {"cd", "digital"})
     disc_titles, pregaps = {}, []
+    # MED-23: a CD box's DVD-Audio or Blu-ray Audio (hi-res audio a CD rip does not hold) and its
+    # downloads after the last physical disc (MED-20) - the media a rip of its CDs leaves out
+    # (King Crimson - Larks' Tongues In Aspic: The Complete Recordings, 13 CDs, a DVD-Audio, a
+    # Blu-ray and 2 downloads): compared without them only for a CD rip (match_core.score_candidate)
+    cd_media = [mi for mi, m in enumerate(audio_media, 1) if mc.media_kind(m.get("format")) == "cd"
+                and not mc.hires_media([m.get("format")])]
+    physical = [mi for mi, m in enumerate(audio_media, 1) if mc.media_kind(m.get("format")) != "digital"]
+    box_extra = {}
+    if cd_media:
+        for mi, m in enumerate(audio_media, 1):
+            fmt = str(m.get("format") or "")
+            if mc.media_kind(fmt) == "digital" and physical and mi > max(physical):
+                box_extra[mi] = "download"
+            elif mc.media_kind(fmt) != "cd" and _DVD_AUDIO.search(fmt):
+                box_extra[mi] = "hires"
     for mi, media in enumerate(audio_media, 1):
         if media.get("title"):
             disc_titles[mi] = media["title"]       # a box set's discs: "The Legacy", "The New Order"
@@ -4837,6 +4862,8 @@ def mb_candidate(rel):
                            "secs": (t.get("length") or 0) / 1000.0})
             if box_vinyl:
                 tracks[-1]["box_vinyl"] = True         # a 7" in a CD box (Kreator - Dying Alive)
+            if mi in box_extra:
+                tracks[-1]["box_extra"] = box_extra[mi]
     infos = rel.get("label-info") or []
     group = rel.get("release-group") or {}
     # each medium's format name as Picard compares it with your preferred formats ("CD",

@@ -1029,6 +1029,11 @@ def _version_options(n, lay, media):
         t, tracks, fmt = medium_type(m.get("format")), m.get("tracks") or [], m.get("format")
         if t == "sacd" and medium_layout(fmt) == lay and len(tracks) == n:
             out.append(("sacd", m, tracks, "format"))
+        elif t == "sacd" and not medium_layout(fmt) and len(tracks) == n and lay in ("stereo", "multichannel") \
+                and not any(medium_type(o.get("format")) == "sacd" and medium_layout(o.get("format")) for o in media):
+            # MED-22c: an SACD listed as one disc, naming no layer ("Hybrid SACD": Kodo - One Earth
+            # Tour Special, SICL-10001) holds both its areas: each version folder is its tracks
+            out.append(("sacd", m, tracks, "single"))
         elif t == "video" and n and len(tracks) == n:
             out.append(("video", m, tracks, "single"))
         elif t == "video" and n and len(tracks) > n and len(tracks) % n == 0:
@@ -3686,11 +3691,35 @@ def _box_disc(album, cand):
     scans = {barcode_key(b) for b in album.get("ocr_barcodes") or ()} - {""}
     if not shared or len(files) < 3 or tagger_barcode(album, shared) or (scans and not scans & shared):
         return None
-    fit = [d for d, tr in sorted(discs.items()) if len(tr) == len(files)
-           and all(title_sim(a.get("title") or "", t.get("title") or "") >= 0.85 for a, t in zip(files, tr))
+
+    def titled(tr):
+        return len(tr) == len(files) and \
+            all(title_sim(a.get("title") or "", t.get("title") or "") >= 0.85 for a, t in zip(files, tr))
+    # BOX-2: discs of one set listing the same titles (Nektar - Journey To The Centre Of The Eye,
+    # BELLE 132133-4: the original album and a live CD of it, track for track): the lengths tell
+    # them apart - your copy's own barcode on the release, and exactly one disc of your files'
+    # track count with every length listed and within 3 s of yours (and your titles, where both
+    # have titles) is your disc, its disc title whatever it is - every other disc of your titles
+    # listing its lengths too
+    timed = [d for d, tr in sorted(discs.items()) if len(tr) == len(files) and all(t.get("secs") for t in tr)
+             and all(a.get("secs") for a in files)
+             and max(abs(a["secs"] - t["secs"]) for a, t in zip(files, tr)) <= 3
+             and (titled(tr) or not all(a.get("title") for a in files))]
+    alike = [tr for tr in discs.values()
+             if titled(tr) or (len(tr) == len(files) and not all(a.get("title") for a in files))]
+    if len(timed) == 1 and all(t.get("secs") for tr in alike for t in tr):
+        # (another disc of your titles listing no lengths may be yours as well: none chosen)
+        tr = discs[timed[0]]
+        return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
+                    box_disc=timed[0], box_title=cand.get("title") or "", box_proof="barcode and lengths")
+    fit = [d for d, tr in sorted(discs.items()) if titled(tr)
            and all(abs(a["secs"] - t["secs"]) <= 3 for a, t in zip(files, tr) if a.get("secs") and t.get("secs"))]
     if len(fit) != 1 or all(t.get("secs") for t in discs[fit[0]]):
         return None                       # (a disc with every length was for the routes above)
+    if sum(1 for tr in discs.values() if titled(tr)) > 1:
+        # (another disc lists the same titles - its lengths off yours: the titles do not tell
+        # which disc yours is, and a disc listing none is no likelier yours: Nektar's live CD)
+        return None
     tr = discs[fit[0]]
     return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
                 box_disc=fit[0], box_title=cand.get("title") or "", box_proof="barcode and titles")
@@ -3996,6 +4025,21 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             n_cand = n_file
             notes.append("the CD in the set is not in your files" if vinyl_copy else
                          "the vinyl single in the box is not in your files")
+    box_cut_from = None
+    if n_file and n_file != n_cand and any(t.get("box_extra") for t in cand["tracks"]) \
+            and copy_kind(album) not in ("vinyl", "cassette") and not (album.get("audio") or {}).get("hires"):
+        # MED-23: a CD box's DVD-Audio or Blu-ray Audio and its downloads after the last disc
+        # (King Crimson - Larks' Tongues In Aspic: The Complete Recordings): CD-quality files hold
+        # none of the hi-res discs - its CDs alone are compared, each keeping its disc number
+        cds = [t for t in cand["tracks"] if not t.get("box_extra")]
+        if len(cds) == n_file:
+            kinds = {t["box_extra"] for t in cand["tracks"] if t.get("box_extra")}
+            box_cut_from = cand
+            cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
+            n_cand = n_file
+            notes.append("the box's " + " and ".join(w for k, w in (("hires", "DVD-Audio / Blu-ray Audio"),
+                                                                    ("download", "download")) if k in kinds)
+                         + " is not in your CD rip")
     if n_file and n_file != n_cand and cand.get("works_view") and not box_note and not cand.get("version_media") \
             and not cand.get("pregap_used") and not any(t.get("box_vinyl") for t in cand["tracks"]):
         # TRK-5: works the release lists without lengths, their parts lettered as one track's
@@ -4333,6 +4377,21 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                                  & set(cand.get("file_codecs") or ())
                                  and set(cand.get("formats") or ()) == {"digital"}),
     }
+    if box_cut_from is not None:
+        # MED-23: the box's CDs alone are compared only where something proves the box - your
+        # barcode or catalogue number on it, your disc ID attached to it - or it holds two CDs or
+        # more and they alone fit your files exactly; otherwise it is compared whole, as before (a
+        # plain CD rip never ties the CD + DVD-Audio edition at no cost)
+        uncut = dict(box_cut_from, tracks=[{k: v for k, v in t.items() if k != "box_extra"}
+                                           for t in box_cut_from["tracks"]])
+        proven = barcode_proves(res) or _exact_toc(res) or \
+            (str(res.get("code") or "").startswith("catalogue number") and res["code"] not in WEAK_BARCODES)
+        fit = len({t.get("disc") for t in cand["tracks"]}) >= 2 and dur_frac == 1.0 and dur_cov == 1.0
+        if not proven and not fit:
+            return score_candidate(album, uncut, cfg, ocr_text)
+        res["box_cut"] = "proof" if proven else "fit"
+        if not proven:
+            res["whole_view"] = score_candidate(album, uncut, cfg, ocr_text)   # (TIE-7: _full_fit_first)
     if tracks_ok and not box_note and cand.get("slots") is None and (
             (dur_frac is not None and dur_frac < 1.0) or (titles_agree is not None and titles_agree < n_cand)):
         # TRK-2: the release's own tracks in another running order: compared, and tagged, track
@@ -4378,11 +4437,14 @@ def _full_fit_first(scored, cfg):
     back by a longer one (its deluxe edition, a 2CD whose disc 1 is these files) scored
     against the files' own slots of it (_with_missing_tracks): those are then scored as
     whole releases again, as any release whose track count differs."""
-    full = any(s.get("tracks_ok") and not s.get("missing") and s.get("dur_frac") is not None
+    full = any(s.get("tracks_ok") and not s.get("missing") and not s.get("box_cut") and s.get("dur_frac") is not None
                and s["dur_frac"] >= cfg["auto_min_duration_frac"] for s in scored)
     if not full:
         return scored
-    return [s["whole_view"] if s.get("missing") and s.get("whole_view") else s for s in scored]
+    # TIE-7: likewise a box compared by its CDs alone on their fit only (MED-23, nothing of your
+    # copy proving the box) never ties a release that is exactly your files: it is compared whole
+    return [s["whole_view"] if (s.get("missing") or s.get("box_cut") == "fit") and s.get("whole_view") else s
+            for s in scored]
 
 
 # BAR-13: the codes your copy itself names a pressing by - your barcode (files as ripped, scans),

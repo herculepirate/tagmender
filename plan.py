@@ -271,6 +271,39 @@ def _files_on_evidence(prop, profile, conf) -> str:
     return ""
 
 
+# TAG-5: the fields that place a file on its release - written with the release's track ID
+_POSITION_FIELDS = ("tracknumber", "totaltracks", "discnumber", "totaldiscs")
+_TRACK_IDS = ("musicbrainz_trackid", "musicbrainz_releasetrackid", "musicbrainz_albumid", "discogs_release_id")
+
+
+def _numbered_with_ids(before: dict, target: dict, profile, changes: dict, rows: list) -> None:
+    """TAG-5 (decided 2026-11-17): a file that gets a release's IDs (added below the replace
+    threshold, where its old values are otherwise kept) gets that release's own numbering too -
+    its track and disc numbers and their totals: never the track ID of the release's track 1 on
+    a file left numbered 2 of 17 (Stevie Wonder - My Cherie Amour, UICY-20348: 12 tracks and 5
+    second copies). A field your policy keeps (preserve, lock, fill_missing: your tagger's
+    "Preserve these tags") stays as it is, as ever. CHANGES and ROWS are diff_tags' own."""
+    if not any(k in changes and changes[k] for k in _TRACK_IDS):
+        return
+    if any(_vals(before.get(k)) and _vals(target.get(k)) and _vals(before.get(k)) != _vals(target.get(k))
+           and k not in changes for k in _TRACK_IDS):
+        # (another release's ID the file keeps below the threshold: never its album ID beside this
+        # release's numbering - the numbering stays with the IDs it has)
+        return
+    for f in _POSITION_FIELDS:
+        a, b = _vals(target.get(f)), _vals(before.get(f))
+        if f in changes or not a or not b or a == b or profile.policy(f) != "replace":
+            continue
+        changes[f] = a
+        for r in rows:
+            if r.get("field") == f:
+                r.update(after=a, action="changed (the release's own numbering, written with its IDs)")
+                break
+        else:
+            rows.append({"field": f, "before": b, "after": a,
+                         "action": "changed (the release's own numbering, written with its IDs)"})
+
+
 def diff_tags(before: dict, target: dict, profile, confidence: float, extra_removals=()):
     """(changes {field: [..] | None}, rows [{field, before, after, action}])."""
     changes, rows = {}, []
@@ -1648,15 +1681,33 @@ def _folder_key(name: str, windows: bool) -> str:
     return key.casefold() if windows else key
 
 
+def _latin_marks_off(name: str) -> str:
+    """NAM-7: the name with the combining marks on Latin letters left out ("Kodō" -> "Kodo",
+    "Ñu" -> "Nu"); a mark on a letter of any other script stays - it is part of the letter there
+    (kana's dakuten: "バンド" is not "ハント"; Cyrillic "й", "ё"; Indic vowel signs; Thai tones)."""
+    out, base = [], ""
+    for c in unicodedata.normalize("NFD", name):
+        if unicodedata.category(c) == "Mn":
+            if unicodedata.name(base, "").startswith("LATIN"):
+                continue
+        else:
+            base = c
+        out.append(c)
+    return "".join(out)
+
+
 def _loose_key(name: str, windows: bool = False) -> str:
     """NAM-7: an artist folder's name as its spellings across databases and sleeves share it:
-    one Unicode form, one kind of quote, "and", "&" and "+" alike (in any letter case), commas
+    one Unicode form, accents and other diacritics left out ("Kodō", "Kodo"), one kind of
+    quote, "and", "&" and "+" alike (in any letter case), commas
     left out ("Blood, Sweat And Tears", "Blood Sweat & Tears"), and a full stop closing a word of
     two or more letters (one before a space or at the end: "Mr. Beast" and "Mr Beast") left out;
     every other full stop separates, as a space would - initials stay initials ("M.I.A." and
     "M I A" share, "MIA" and "MIA." are another name; "t.A.T.u." is not "Tatu"); letter case
     only with Windows-compatible names ("Air" and "AIR" are two acts)."""
-    k = unicodedata.normalize("NFC", name).translate(_QUOTES)
+    # (a Latin letter's diacritics left out, nothing else: "Kodō" and "Kodo", "Motörhead" and
+    # "Motorhead" share; "ø", "ß", "æ" - letters of their own - and any other script's marks stay)
+    k = unicodedata.normalize("NFC", _latin_marks_off(name)).translate(_QUOTES)
     k = re.sub(r"\s*(?:&|\+|\b[Aa][Nn][Dd]\b)\s*", " & ", k)
     k = re.sub(r"(?<![^\W\d_])([^\W\d_]{2,})\.(?=\s|$)", r"\1", k)   # ("Mr." -> "Mr"; "A." stays)
     k = " ".join(re.sub(r"[,.]", " ", k).split())
@@ -2555,6 +2606,8 @@ class Planner:
                 if tot_ in v_inside and before.get(num_) and before.get(tot_):
                     before_d[num_] = [f"{before[num_][0]}/{before[tot_][0]}"]
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
+            if identified:
+                _numbered_with_ids(before_d, target, p, changes, rows)
             if rip_line and not held and self._vinyl_file(targets.get(f) or {}, unproven):
                 self._rip_comment(f, before, changes, rows, p, rip_line,
                                   "album_only" if album_only or unproven else "partial" if partial else "")

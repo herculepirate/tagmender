@@ -970,6 +970,10 @@ _MARK_WORD = re.compile(
     r"surround|\d+-?bit|\d+(?:\.\d+)?-?k?hz|24-\d+|\d+-24|remaster(?:ed)?|rm|(?:19|20)\d\d|rip|disc|layer|vinyl|lp|cd|reissue")
 
 
+# (the disc or format words beside which "Stereo" / "Mono" names a rip's layer: _without_version_marks)
+_LAYER_WORD = re.compile(r"sacd|hybrid|dsd\d*|dst\d*|dxd|mch|iso|rip|\d+ch|[2-9]\.[01]|multi-?channel|surround|layer")
+
+
 def _without_version_marks(title) -> str:
     """The album title without the closing brackets that only mark its version or edition."""
     t = str(title or "")
@@ -977,6 +981,12 @@ def _without_version_marks(title) -> str:
         m = re.search(r"\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]\s*$", t)
         words = re.findall(r"[a-z0-9.-]+", m.group(1).casefold()) if m else []
         marks = [w for w in words if _MARK_WORD.fullmatch(w.strip(".-"))]
+        if any(_LAYER_WORD.fullmatch(w.strip(".-")) for w in marks):
+            # (MED-22c: "Stereo" / "Mono" beside a disc or format word is the rip's layer, not the
+            # album's name: "Kodo One Earth Tour Special [Stereo DSD Rip]" beside "... [Multichannel
+            # 5.1]"; alone, "(Mono)", or beside a year or remaster only - "(Mono 2009 Remaster)"
+            # and "(Stereo 2009 Remaster)" are two albums - it stays the title's)
+            marks += [w for w in words if w in ("stereo", "mono")]
         # (beside those words, only a catalogue number's parts: "[SACD AFZ5 198 2ch DSD64]")
         if not marks or not all(w in marks or re.search(r"\d", w) for w in words):
             return mc.fold(t)
@@ -3902,6 +3912,14 @@ class Engine:
                 cut = _without_box_vinyl(rel, ps)
                 if cut is not None and len(cut) == n:
                     tags_mb = cut
+            if tags_mb and rel and len(tags_mb) != n and cd_copy and not (album.get("audio") or {}).get("hires"):
+                # MED-23: the box's DVD-Audio / Blu-ray Audio and its downloads after the last disc
+                # are not in your CD rip (the matcher compared the CDs alone): each CD keeps its
+                # medium position, the DVD-Audio still counted among the discs (an audio disc,
+                # MED-17), the downloads not (MED-20)
+                cut = _without_box_extra(rel, ps)
+                if cut is not None and len(cut) == n:
+                    tags_mb = cut
             if dparts and dparts[1] is not None and len(dparts[1]) != n and any(dg_vinyl) \
                     and len(dg_vinyl) == len(dparts[1]):
                 kept = [t for t, v in zip(dparts[1], dg_vinyl) if v == vinyl_copy]
@@ -3928,6 +3946,7 @@ class Engine:
             # MED-22c: a copy of a disc's SACD layers (beside its CD layer's copy) numbered by the
             # physical disc and filed in a folder of that layer's own
             tags_mb = _layer_copy(full_rel, tags_mb, vtracks)
+            tags_mb = _area_copy(full_rel, tags_mb, vtracks, album)
         if dparts and (dparts[1] is None or len(dparts[1]) != n):
             dparts = None if not tags_mb else (dparts[0], None, dparts[2])
         if tags_mb and dparts and es["merge_mode"] == "mb_only":
@@ -3969,6 +3988,14 @@ class Engine:
                         merged[fld], where[fld] = v, name
                         break
             merged, where = sorts_follow_names(merged, where, src)
+            mb_media = (tags_mb[i].get("media") or [""])[0] if tags_mb else ""
+            if tags_mb and tags_mb[i].get("~layer") and mb_tags._layer_kind(mb_media)[1] not in ("", "cd") \
+                    and "media" not in (self.profile["field_sources"] or {}):
+                # MED-22: an SACD layer's copy is written its own layer's media ("Hybrid SACD (SACD
+                # layer, 2 channels)"), never the release's format the Discogs plugin writes for the
+                # disc ("SACD, Hybrid, Multichannel, Album" on the stereo layer: Kodo - One Earth Tour
+                # Special)
+                merged["media"], where["media"] = tags_mb[i]["media"], "musicbrainz"
             merged = latin_titles(merged, self.profile.picard_tags())
             # HF-5: a partial album's missing tracks are no tag of their own (no TAGMENDER_MISSING):
             # "incomplete" is told in the proposal's notes (the plan's and the job report's) only
@@ -4716,6 +4743,11 @@ class Engine:
         the album of a recording on one release group only (_single_group), and Picard's
         standalone recordings name (nat_name) for a recording on no release at all, as Picard
         files such a recording - when the file has no album of its own (_own_album)."""
+        if _cue_tracks_of(path) > 1:
+            # REC-1: a disc image whose cue sheet splits it into tracks is no one recording - its
+            # fingerprint names the first track's (Dr. Jeffrey Thompson - Delta Sleep System, one
+            # 60:40 file of 2 tracks): never that recording's ID and title on the whole image
+            return None
         fp = ma.fingerprint(str(path), self.http.db)
         if not fp:
             return None
@@ -4729,6 +4761,11 @@ class Engine:
         top, rec = results[0], results[0]["recordings"][0]
         if len(results) > 1 and results[1].get("score", 0) > top["score"] - 0.05 and \
                 (results[1].get("recordings") or [{}])[0].get("id") != rec.get("id"):
+            return None
+        secs = float(fp.get("duration") or 0)
+        if rec.get("duration") and secs and abs(float(rec["duration"]) - secs) > max(10.0, 0.1 * secs):
+            # REC-1: the recording is not as long as your file (a disc image, a medley, a file
+            # holding more than it): the fingerprint matched its start only
             return None
         names = [a.get("name", "") for a in rec.get("artists") or []]
         phrase = "".join(a.get("name", "") + (a.get("joinphrase") or "") for a in rec.get("artists") or [])
@@ -7967,6 +8004,34 @@ def _layer_copy(rel, tags, vtracks=None) -> list:
     return out
 
 
+def _area_copy(rel, tags, vtracks, album) -> list:
+    """MED-22c: version folders of an SACD the release lists as one disc naming no layer
+    ("Hybrid SACD": Kodo - One Earth Tour Special, SICL-10001, ripped from its ISO to "Stereo/"
+    and "Multichannel/") are that disc's stereo and multichannel areas: each file carries
+    "~layer" ("SACD Stereo", "SACD Multichannel") from its folder's layout, so they are filed as
+    "Disc 01 (SACD Stereo)" and "Disc 01 (SACD Multichannel)" in the one album folder. TAGS
+    unchanged otherwise (a layer _layer_copy labelled, a DVD's mixes, no version folders)."""
+    if not tags or not vtracks or len(vtracks) != len(tags) or any(t.get("~layer") for t in tags):
+        return tags
+    at = {int(m.get("position") or k): m for k, m in enumerate((rel or {}).get("media") or [], 1)}
+    lays = album.get("version_discs") or {}
+    files = album.get("tracks") or []
+    if len(files) != len(tags):
+        return tags
+    out = []
+    for t, (p, _k), f in zip(tags, vtracks, files):
+        fmt = (at.get(int(p)) or {}).get("format")
+        lay = lays.get(f.get("disc") or 1)
+        if mc.medium_type(fmt) != "sacd" or mc.medium_layout(fmt) or lay not in ("stereo", "multichannel"):
+            return tags
+        # (its layer's own media name, as MusicBrainz names a layer listed apart: "Hybrid SACD
+        # (SACD layer, 2 channels)", "SACD (multichannel)")
+        area = "2 channels" if lay == "stereo" else "multichannel"
+        media = f"{fmt} (SACD layer, {area})" if "hybrid" in str(fmt).casefold() else f"{fmt} ({area})"
+        out.append(dict(t, media=[media], **{"~layer": ["SACD Stereo" if lay == "stereo" else "SACD Multichannel"]}))
+    return out
+
+
 def _uniform_layer(prefer) -> str:
     """MED-22: the one layer a {disc: layer} map names for every disc ("cd" when they differ)."""
     kinds = set((prefer or {}).values())
@@ -7997,6 +8062,79 @@ def _without_box_vinyl(rel, ps):
         return None
     drop = {int(p) for p, k in kinds.items() if p and k in ("vinyl", "cassette")}
     return mb_tags.release_tags(rel, ps, without=drop)
+
+
+def _cue_counts(text) -> dict:
+    """{file name named by a FILE line (case-folded): its TRACK ... AUDIO count} of a cue sheet."""
+    counts, current = {}, None
+    for line in str(text or "").splitlines():
+        m = re.match(r'\s*FILE\s+"?(.+?)"?(?:\s+(?:WAVE|FLAC|MP3|AIFF|BINARY|MOTOROLA))?\s*$', line, re.I)
+        if m:
+            current = Path(m.group(1).strip().replace("\\", "/")).name.casefold()
+            counts.setdefault(current, 0)
+            continue
+        if current is not None and re.match(r"\s*TRACK\s+\d+\s+AUDIO", line, re.I):
+            counts[current] += 1
+    return counts
+
+
+def _cue_tracks_of(path) -> int:
+    """REC-1: how many tracks a cue sheet gives this one file: a cue in its folder whose FILE line
+    names it, or one named as the file ("x.cue", "x.flac.cue") naming one file only (the WAV it
+    was ripped to, converted since); or the cue sheet the file carries itself (a FLAC's CUESHEET
+    block or CUESHEET tag). 0 when no cue sheet speaks of it."""
+    path = Path(path)
+    most = 0
+    try:
+        cues = [c for c in path.parent.iterdir() if c.suffix.casefold() == ".cue" and c.is_file()]
+    except OSError:
+        cues = []
+    for cue in cues:
+        try:
+            counts = _cue_counts(ma._read_log(cue))
+        except OSError:
+            continue
+        mine = counts.get(path.name.casefold())
+        stem = cue.stem
+        if Path(stem).suffix.casefold() in ex.AUDIO_EXT:
+            stem = Path(stem).stem                        # ("CDImage.flac.cue": the image's own)
+        if mine is None and stem.casefold() == path.stem.casefold() and len(counts) == 1:
+            # (the image converted since - "x.wav" named, "x.flac" here - the cue named as it is)
+            mine = next(iter(counts.values()))
+        most = max(most, mine or 0)
+    if path.suffix.casefold() == ".flac":
+        try:
+            from mutagen.flac import FLAC
+            f = FLAC(str(path))
+            sheet = getattr(f, "cuesheet", None)
+            if sheet is not None:
+                # (the lead-out is a track of its own there, numbered 170 on a CD)
+                most = max(most, len([t for t in sheet.tracks if 0 < int(t.track_number) < 100
+                                      and getattr(t, "type", 0) == 0]))
+            for text in (f.tags or {}).get("cuesheet", []) if f.tags else []:
+                counts = _cue_counts(text)
+                most = max(most, max(counts.values()) if counts else 0)
+        except Exception:
+            pass
+    return most
+
+
+def _without_box_extra(rel, ps):
+    """MED-23: release_tags of a MusicBrainz CD box without its DVD-Audio / Blu-ray Audio media
+    and its downloads after the last physical disc (those not counted in the total, MED-20);
+    None when it has neither (match_albums.mb_candidate marks the same media)."""
+    audio = mb_tags.audio_media(rel)
+    pos = [int(m.get("position") or d) for d, m in enumerate(audio, 1)]
+    kinds = [mc.media_kind(m.get("format")) for m in audio]
+    if not any(k == "cd" and not mc.hires_media([m.get("format")]) for k, m in zip(kinds, audio)):
+        return None
+    physical = [p for p, k in zip(pos, kinds) if k != "digital"]
+    download = {p for p, k in zip(pos, kinds) if k == "digital" and physical and p > max(physical)}
+    hires = {p for p, k, m in zip(pos, kinds, audio)
+             if k != "cd" and ma._DVD_AUDIO.search(str(m.get("format") or ""))}
+    if not download and not hires:
+        return None
+    return mb_tags.release_tags(rel, ps, without=download | hires, uncounted=download or None)
 
 
 def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None):
@@ -8074,6 +8212,8 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None
 # Discogs formats that are no medium of their own (the box, "All Media")
 _NO_CARRIER = {"box set", "all media"}
 _POSITION_KIND = re.compile(r"^\s*([A-Za-z][A-Za-z\- ]*?)\s*(\d+)\s*[-.:]", re.I)
+# (MED-15: "CD-1", "BD-12": a carrier of the release named with the track's number alone)
+_POSITION_CARRIER = re.compile(r"^\s*([A-Za-z][A-Za-z ]*?)\s*-\s*\d+[a-z]?\s*$", re.I)
 
 
 def discogs_track_media(det, raw, discs):
@@ -8100,9 +8240,15 @@ def discogs_track_media(det, raw, discs):
     for entry, disc in zip(raw, discs):
         m = _POSITION_KIND.match(str((entry or {}).get("position") or ""))
         kind = [v for k, v in by_kind.items() if m and (k == mc.fold(m.group(1)) or k.startswith(mc.fold(m.group(1))))]
+        bare = None if m else _POSITION_CARRIER.match(str((entry or {}).get("position") or ""))
+        alone = [v for k, v in by_kind.items() if bare and k == mc.fold(bare.group(1))]
         if m and kind:
             n = int(m.group(2))
             out.append(kind[0][n - 1] if 1 <= n <= len(kind[0]) else "")
+        elif alone and len(alone[0]) == 1:
+            # (a carrier named with its track alone, "CD-1" beside "BD-1": the release's one CD -
+            # Gojira - The Flesh Alive, Discogs 3663285, never the Blu-ray listed first)
+            out.append(alone[0][0])
         else:
             out.append(entries[disc - 1][1] if disc and 1 <= disc <= len(entries) else "")
     return out

@@ -68,8 +68,9 @@ class Model(Base):
 
     def test_examples_never_overwrite_a_users_profile(self):
         pf.save(pf.from_dict({"name": "Lossy", "operation": "copy", "destination": "/elsewhere"}))
-        self.assertEqual(pf.install_examples(), [])
+        self.assertNotIn("Lossy", pf.install_examples())        # (the other examples are installed)
         self.assertEqual(pf.load("Lossy")["destination"], "/elsewhere")
+        self.assertEqual(pf.install_examples(), [])
 
     def test_problems_are_named(self):
         bad = {"name": "b", "operation": "move", "primary": "spotify",
@@ -155,7 +156,7 @@ class Cli(Base):
         data["destination"] = "/srv/music/Lossy"
         pf.save(pf.from_dict(data))
         code, out, _ = run("profiles", "list", "--json")
-        self.assertEqual(json.loads(out)[0]["operation"], "copy")
+        self.assertEqual(next(x for x in json.loads(out) if x["name"] == "Lossy")["operation"], "copy")
         code, out, _ = run("profiles", "show", "Lossy", "--full")
         self.assertEqual(json.loads(out)["providers"]["discogs"]["enabled"], True)
         self.assertEqual(run("profiles", "check")[0], 0)

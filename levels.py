@@ -52,6 +52,8 @@ from pathlib import Path
 LEVELS = ("basic", "enthusiast", "audiophile")
 BASIC_FIELDS = ("albumartist", "artist", "album", "title", "tracknumber", "totaltracks", "discnumber",
                 "totaldiscs", "date", "genre")
+# CLS-4: what a classical album (classical.is_classical) also writes at Basic
+CLASSICAL_BASIC = ("composer", "composersort")
 # TagMender's own markers (tagmender_source: the web page a Partial album's tags came from)
 ALWAYS = ("tagmender", "tagmender_reason", "tagmender_missing", "tagmender_source")
 NEVER_AT_BASIC = ("comment",)
@@ -147,6 +149,8 @@ def restrict(target: dict, profile, tier: str = "") -> dict:
     drop = {f.lower() for f in lf.get("drop") or []}
     if level(profile) == "basic":
         keep = set(BASIC_FIELDS) | set(ALWAYS) | {f.lower() for f in lf.get("add") or []} | _compilation_fields(profile)
+        if target.get("~classical"):
+            keep |= set(CLASSICAL_BASIC)       # CLS-4: composer is classical music's first browse key
         lyr = bool(items(profile).get("lyrics"))   # (looked up at Basic too when the profile says so)
         out = {k: v for k, v in target.items() if (k.lower() in keep and k.lower() not in NEVER_AT_BASIC)
                or (lyr and _lyrics(k.lower()))

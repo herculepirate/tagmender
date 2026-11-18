@@ -261,6 +261,8 @@ def _source_clues(path, t):
                         for x in vals)
         if "isrc" in key or key.startswith("tsrc"):
             isrc = isrc or text.strip().upper().replace("-", "")
+        elif (key == "stamp" or key.endswith(":stamp")) and "Classical Extras" in text:
+            parts.append(text)                                      # (CLS-2: Classical Extras' stamp)
         elif key in ("plid", "cnid"):                               # iTunes album / track IDs
             parts.append(f"itunes:{key}:{text.strip()}")
         elif any(w in key for w in ("comm", "comment", "description", "url", "wxxx", "woaf", "woas", "wors",

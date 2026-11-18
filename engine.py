@@ -44,6 +44,8 @@ from pathlib import Path
 
 import companions
 import album_artist
+import classical
+import classical as classical_mod          # (discogs_parts's own "classical" is its flag)
 import compilations
 import marks
 import credentials
@@ -3835,6 +3837,7 @@ class Engine:
             dgid = self._discogs_twin(best, rel, dgid)
         es = self.profile.enrichment()
         dparts = None
+        cls = None                        # CLS-2: (classical, reasons), once both releases are read
         if dgid and self.dm is not None and (self.use_discogs or self.token):
             try:
                 det = self.http.get_json(f"https://api.discogs.com/releases/{dgid}", "discogs")
@@ -3842,8 +3845,10 @@ class Engine:
                 if mb_down is None:
                     raise
                 raise mb_down from None         # (Discogs refused too: tried again later)
+            cls = self._classical(album, files, rel, det)
             if det:
-                dparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")))
+                dparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")),
+                                       classical=cls[0])
             if dparts and best.get("tracks_of") and best.get("source") == "discogs" and \
                     (dparts[1] is None or len(dparts[1]) != len(files)):
                 # BAR-13: the pressing your code names lists too few of its tracks (Discogs 16262491,
@@ -3853,9 +3858,32 @@ class Engine:
                 # staying its own
                 full = self.http.get_json(f"https://api.discogs.com/releases/{best['tracks_of']}", "discogs")
                 fparts = discogs_parts(det, self.dm, self.http, es, whole_works=bool(best.get("whole_works")),
-                                       tracks_det=full) if full else None
+                                       tracks_det=full, classical=cls[0]) if full else None
                 if fparts and fparts[1] is not None and len(fparts[1]) == len(files) and fparts[2] == dparts[2]:
                     dparts = fparts
+        if cls is None:
+            cls = self._classical(album, files, rel, None)
+        if not cls[0] and rel and tags_mb is not None and not ps.get("track_ars") and \
+                classical.composer_first_form(rel):
+            # CLS-2: MusicBrainz's "Composer; performers" credit, with nothing else to decide by:
+            # the recordings' relationships say whether its first artist composed the works (the
+            # lookup CLS-3 makes for a classical album: asked once, cached)
+            cls = self._classical_probe(album, files, mbid, rel, det, ps)
+        if cls[0] and rel and tags_mb is not None:
+            # CLS-3: a classical album's MusicBrainz release with its recordings' and works'
+            # relationships (whatever the profile's Credits setting) and its works' parents,
+            # tagged again as CLS-4 writes it (an album that is not classical asks nothing more)
+            full_rel, rel, ps = self._classical_release(mbid, full_rel, ps, album, best)
+            # (the verdict on the release with its recordings' relationships: whether the album
+            # is classical by its genres alone, for CLS-4's credited composer-performers)
+            memo = self._classical_cache()
+            key = (_files_key(files), "full:" + str(full_rel.get("id") or ""), str((det or {}).get("id") or ""))
+            if key not in memo:
+                memo[key] = classical.is_classical(self.profile, full_rel, det, album)
+            if memo[key].genre_only:
+                ps["classical_genre_only"] = True
+            tags_mb = mb_tags.release_tags(rel, ps)
+            tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files), ps)
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)
         dg_vinyl = [bool(t.pop("~box_vinyl", None)) for t in dparts[1]] \
             if dparts and dparts[1] is not None else []
@@ -4003,6 +4031,17 @@ class Engine:
                     album_i = with_track_credits(album_f, track_i)     # CRD-1: its own credits
                     dg_i = _as_tags({**album_i, **(track_i or {})})
                     merged = enrich(merged, album_f, track_i, es, dcount, self.dm)   # (it adds them)
+                    if cls[0] and any(tags_mb[i].get(k) for k in classical.CE_FIELDS):
+                        # CLS-4: Discogs's work (an index entry's title) only where MusicBrainz's
+                        # works give none: MusicBrainz's work fields as a set, never mixed with
+                        # Discogs's - unless your field sources name Discogs for the field
+                        for k in classical.CE_FIELDS:
+                            if "discogs" in (self.profile["field_sources"] or {}).get(k, ()):
+                                continue
+                            if tags_mb[i].get(k):
+                                merged[k] = tags_mb[i][k]
+                            else:
+                                merged.pop(k, None)
                     where = {k: ("discogs" if dg_i.get(k) == v else "musicbrainz") for k, v in merged.items()}
             else:
                 dg_i = tags_dg[i]
@@ -4041,6 +4080,8 @@ class Engine:
                 if dg_ids:
                     hidden["~discogs_albumartist_id"] = dg_ids
                 hidden.update(self._discogs_joint_names(det))
+            if cls[0]:
+                hidden["~classical"] = ["1"]      # CLS-2: for album_artist, levels and the naming script
             remove = list(hidden.pop("~remove", []))
             if remove:
                 merged["~remove"] = list(dict.fromkeys(remove))
@@ -4080,6 +4121,8 @@ class Engine:
             most_lengths=bool(best.get("most_lengths")), toc_proven=bool(best.get("toc_proven")),
             own_number=bool(best.get("own_number")), guessed_pick=bool(best.get("guessed_pick")),
             number_proven=bool(best.get("number_proven")))
+        if cls[0]:
+            prop.why = list(prop.why or []) + [classical.why_line(cls[1])]
         # REP-2: whose credits were read whole and placed track by track - MusicBrainz's with the
         # release's and the tracks' relationships both asked for (Credits "Both"), Discogs's with
         # its tracks lined up with yours (CRD-1) and the release listing its credits; what the
@@ -4117,6 +4160,61 @@ class Engine:
         # (the release's track lengths: which files of a folder holding two versions are its own)
         prop.release_secs = release_secs(rel if tags_mb else None, det if dparts else None)
         return prop
+
+    def _classical(self, album, files, rel, det) -> tuple:
+        """CLS-2: classical.is_classical of this album, asked once per album and release."""
+        memo = self._classical_cache()
+        key = (_files_key(files), (rel or {}).get("id") or "", str((det or {}).get("id") or ""))
+        if key not in memo:
+            memo[key] = classical.is_classical(self.profile, rel, det, album)
+        return memo[key]
+
+    def _classical_probe(self, album, files, mbid, rel, det, ps) -> tuple:
+        """CLS-2: is_classical again with the release's recordings' and works' relationships."""
+        memo = self._classical_cache()
+        key = (_files_key(files), "probe:" + str(mbid), str((det or {}).get("id") or ""))
+        if key not in memo:
+            # (MusicBrainz unreachable: raised - the album is tried again later, never planned
+            # as not classical for an answer not had; nothing remembered)
+            got = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}"
+                                     f"?inc={mb_tags.inc_for(dict(ps, track_ars=True))}&fmt=json", "mb")
+            memo[key] = classical.is_classical(self.profile, got, det, album) \
+                if isinstance(got, dict) and got.get("media") else self._classical(album, files, rel, det)
+        return memo[key]
+
+    CLASSICAL_MEMO_MAX = 512
+
+    def _classical_cache(self) -> dict:
+        """CLS-2's answers this planning run (Engine.plan clears it; bounded for a watcher)."""
+        memo = self.__dict__.setdefault("_classical_memo", {})
+        if len(memo) > self.CLASSICAL_MEMO_MAX:
+            memo.clear()
+        return memo
+
+    def _classical_release(self, mbid, full_rel, ps, album, best):
+        """CLS-3: (whole release, release as tagged, settings) of a classical album: the release
+        looked up with the recordings' and works' relationships when the profile's Credits
+        setting left them out (the lookup a profile with them on makes: one cache entry), and
+        the parent works of its works (classical.work_lookups); the settings write CLS-4's
+        fields (classical=True). MusicBrainz unreachable: raised, the album tried again later."""
+        asked_before = bool(ps.get("track_ars"))
+        ps = dict(ps, track_ars=True, classical=True)
+        rel = full_rel
+        if not asked_before:
+            got = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}?inc={mb_tags.inc_for(ps)}"
+                                     "&fmt=json", "mb")
+            rel = got if isinstance(got, dict) and got.get("media") else full_rel
+        works, asked, capped = classical.work_lookups(self.http, rel, self.log)
+        self.log.info("classical: %s - %d parent work(s) read in %d lookup(s)", mbid, len(works), asked)
+        ps["~works"] = works
+        if capped:
+            # (more parent works than one album may ask for: no album holds work fields some of
+            # its tracks would have from a parent read and others from one not read)
+            ps["~works_capped"] = True
+        full = rel
+        if not best.get("version_tracks"):
+            rel = mb_tags.one_layer(rel, _layer_prefer(album, rel, best.get("box_disc")))
+        return full, rel, ps
 
     def _album_only(self, p, info):
         """An identified album whose pressing is unknown: no release IDs, catalogue number or
@@ -6053,6 +6151,7 @@ class Engine:
         """meta: a dict kept by the caller (see listing): files whose metadata it remembers, unchanged,
         are not opened again to find the albums (a plan of every album drops what it did not read)."""
         whole = [Path(os.path.abspath(Path(path).expanduser()))] if only is None else False
+        self.__dict__.pop("_classical_memo", None)          # (CLS-2: asked anew each planning run)
         with ex.meta_memo(meta, whole) if meta is not None else contextlib.nullcontext():
             props = self.proposals(path, progress, cancel, **({"only": only} if only is not None else {}))
         # (your edits from the app's inspector, kept as you typed them: plan.apply_edits)
@@ -7638,6 +7737,8 @@ def _flatten_raw(tracklist, parent_position=None):
         if kind == "index":
             subs = _flatten_raw(e.get("sub_tracks"), parent_position=e.get("position") or "")
             if subs:
+                for k, sub in enumerate(subs, 1):     # (CLS-4: the work its movements are of)
+                    sub.setdefault("~index_work", (str(e.get("title") or "").strip(), k, len(subs)))
                 out.extend(subs)
                 continue
         d = dict(e)
@@ -8178,7 +8279,7 @@ def _without_box_extra(rel, ps):
     return mb_tags.release_tags(rel, ps, without=download | hires, uncounted=download or None)
 
 
-def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None):
+def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None, classical=False):
     """(album fields, [per-track fields], disc count) of a Discogs release, as the plugin
     builds them: extract_discogs_fields shaped by the settings, then the master's original
     year (and date = original date when prefer_original_date is on). Per-track fields are in
@@ -8197,6 +8298,8 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None
     det = ma.discogs_one_track_movements(det, True) if whole_works else \
         ma.discogs_one_track_movements(det)                  # TRK-1: the plugin writes one track too
     album = shape_fields(dm.extract_discogs_fields(own if tracks_det is not None else det), s, dm)
+    if classical:
+        album = classical_mod.discogs_roles(album)            # CLS-4: librettists are lyricists
     if album.get("barcode"):
         album["barcode"] = barcode_digits(album["barcode"])
     if det.get("master_id") and http is not None:
@@ -8240,7 +8343,9 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None
             t["~box_vinyl"] = True          # MED-19: an LP or 7" of a CD box (engine._identified)
         credits = _track_credits(entry, scope, s, dm, medium, det)
         if credits:
-            t["~credits"] = credits
+            t["~credits"] = classical_mod.discogs_roles(credits) if classical else credits
+        if classical and entry.get("~index_work"):
+            _index_work(t, *entry["~index_work"])
         tracks.append(t)
     if media is not None:
         album.pop("media", None)
@@ -8248,6 +8353,37 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None
             if m:
                 t["media"] = m
     return album, tracks, total_discs
+
+
+def _files_key(files) -> tuple:
+    """The files as CLS-2's memo knows them: path, size and change time (a file retagged since is
+    read anew)."""
+    out = []
+    for f in files or ():
+        try:
+            st = os.stat(f)
+            out.append((str(f), st.st_size, st.st_mtime_ns))
+        except OSError:
+            out.append((str(f), -1, -1))
+    return tuple(out)
+
+
+def _index_work(t, work, at, count):
+    """CLS-4: a classical Discogs movement listed under its work (an "index" entry whose
+    sub-tracks are the movements): Work the index's title, Movement Name the movement's title
+    as listed, Movement its place under the work, Movement Total the work's movements, Show
+    Movement 1 - and the title "Work: Movement" (MusicBrainz's classical style), since
+    Discogs's title names the movement alone ("I. Prelude")."""
+    title = str(t.get("title") or "").strip()
+    if not work:
+        return
+    t["work"] = work
+    if title:
+        t["movement"] = title
+        t["showmovement"] = "1"
+        if not title.casefold().startswith(work.casefold()):
+            t["title"] = f"{work}: {title}"
+    t["movementnumber"], t["movementtotal"] = str(at), str(count)
 
 
 # Discogs formats that are no medium of their own (the box, "All Media")

@@ -167,8 +167,14 @@ def skip_translation(text, s) -> bool:
     return False
 
 
-def _translate_artist(artist: dict, s) -> tuple[str, str]:
-    """(name, sort name) of the artist, translated when that is asked for."""
+def _translate_artist(artist: dict, s, credited=None) -> tuple[str, str]:
+    """(name, sort name) of the artist, translated when that is asked for. CLS-4: on a
+    classical release (settings classical=True) an artist whose name is in another script than
+    Latin is written in Latin script: as the release credits it when that credit (CREDITED) is
+    Latin ("Mstislav Rostropovich" - never his sort name turned round); a credit in that
+    script too, by its alias in the translation locales (English when none is set), else its
+    Latin sort name turned round ("Шнитке, Альфред" has the sort name "Schnittke, Alfred":
+    "Alfred Schnittke") - unless your script exceptions keep that script."""
     name, sort = artist.get("name") or "", artist.get("sort-name") or ""
     if s["translate_artist_names"] and not skip_translation(name, s):
         alias = _localized_alias(artist.get("aliases"), s["translation_locales"])
@@ -176,7 +182,20 @@ def _translate_artist(artist: dict, s) -> tuple[str, str]:
             return alias
         if s["translate_from_sortname"]:
             return translate_from_sortname(name, sort), sort
+    if s.get("classical") and not_latin(name) and not skip_translation(name, s):
+        if credited and not not_latin(credited):
+            return credited, _sort_from_aliases(artist, credited, s)
+        alias = _localized_alias(artist.get("aliases"), s["translation_locales"] or ["en"])
+        if alias and alias[0] and not not_latin(alias[0]):
+            return alias
+        if sort and not not_latin(sort):
+            return translate_from_sortname(name, sort), sort
     return name, sort
+
+
+def not_latin(text) -> bool:
+    """TEXT holds a letter of another script than Latin (Cyrillic, Greek, CJK ...)."""
+    return any(unicodedata.category(c)[0] == "L" and "LATIN" not in unicodedata.name(c, "") for c in str(text or ""))
 
 
 def should_standardize(mode: str, credited: str, artist: dict) -> bool:
@@ -244,7 +263,7 @@ def credit_info(ac, settings=None) -> dict:
         credited = c.get("name") or a.get("name") or ""
         use_credited = not should_standardize(s["standardize_artist_names"], credited, a) if a.get("name") \
             else True
-        tname, tsort = _translate_artist(a, s) if a.get("name") else (credited, a.get("sort-name") or credited)
+        tname, tsort = _translate_artist(a, s, credited) if a.get("name") else (credited, a.get("sort-name") or credited)
         translated = bool(a.get("name")) and tname != a.get("name")
         if not translated and use_credited and c.get("name"):
             name, sname = credited, _sort_from_aliases(a, credited, s) if a.get("name") else credited
@@ -328,7 +347,7 @@ def _rel_artist(rel, m, s, instrumental, per_medium):
     artist = rel.get("artist") or {}
     if not artist.get("name"):
         return
-    name, sort = _translate_artist(artist, s)
+    name, sort = _translate_artist(artist, s, rel.get("target-credit"))
     if name == artist.get("name") and rel.get("target-credit"):
         credited = rel["target-credit"]
         if credited != artist["name"] and not should_standardize(s["standardize_artist_names"], credited, artist):
@@ -373,13 +392,19 @@ def _work(work, m, s, instrumental, per_medium):
             _add(m, "language", lang)
     elif work.get("language"):
         _add(m, "language", work["language"])
-    if work.get("title"):
+    full = s.get("classical") and not s.get("~works_capped")   # (past CLS-3's cap: CLS-1, track by track)
+    if full:
+        _classical_work(work, m, s, instrumental, per_medium)
+    elif work.get("title"):
         _add(m, "work", work["title"])
     if "disambiguation" in work:
         _add(m, "~workcomment", work["disambiguation"])
     if work.get("relations"):
         relations(work["relations"], m, s, instrumental, per_medium, entity="work")
-        _movement(work, m)
+        if s.get("classical"):
+            _work_credits_from_parents(work, m, s, instrumental, per_medium)
+        if not full:
+            _movement(work, m)
     for iswc in work.get("iswcs") or []:
         if iswc:
             m.setdefault("~iswc", []).append(iswc)
@@ -418,6 +443,242 @@ def _movement(work, m):
         if parts:
             m["movementtotal"] = [str(max(len(parts), key))]
         return
+
+
+def _work_chain(work, s) -> list:
+    """CLS-3: the works WORK is a part of, nearest first (a number's act, then the opera), as
+    the release's work lookups give them (settings "~works": classical.work_lookups); a parent
+    not looked up ends the chain with the little the relationship names (its ID and title)."""
+    import classical
+    works, chain, seen, cur = s.get("~works") or {}, [], {work.get("id")}, work
+    while len(chain) < classical.MAX_DEPTH:
+        link = classical.parent_link(cur)
+        if not link or link["work"]["id"] in seen:
+            break
+        pid = link["work"]["id"]
+        node = works.get(pid) or link["work"]
+        chain.append((node, link))
+        seen.add(pid)
+        if pid not in works:
+            break
+        cur = node
+    return chain
+
+
+def _composed(work) -> str:
+    """The year the work was composed, as its composer relationship dates it ("1841"); "" when
+    MusicBrainz gives no date."""
+    for r in work.get("relations") or ():
+        if isinstance(r, dict) and r.get("type") == "composer" and r.get("target-type") == "artist":
+            begin, end = str(r.get("begin") or "")[:4], str(r.get("end") or "")[:4]
+            if begin.isdigit() and end.isdigit() and end != begin:
+                return f"{begin}-{end}"          # ("1717-1723": composed over several years)
+            year = begin if begin.isdigit() else end
+            if year.isdigit():
+                return year
+    return ""
+
+
+def _classical_work(work, m, s, instrumental, per_medium):
+    """CLS-4: a classical recording's work. Work is the top work (the symphony, the opera -
+    never the movement), with the years its composer relationship dates it in ("Symphony no. 4
+    in D minor, op. 120 (1841)", "(1717-1723)"; none when MusicBrainz gives none), and where
+    the movement's own parent is below it, that parent after "::" ("Six Suites for
+    Unaccompanied Cello (1717-1723):: Suite no. 1 ...", "Die Zauberflöte, K. 620 (1791):: Akt
+    I"), as Classical Extras wrote it in your files; a part of a work is its
+    movement: Movement Name the part's title as MusicBrainz has it less its parent's title in
+    front, its numeral kept ("I. Andante con moto - Allegro di molto"), Movement its place
+    among the parent's parts (the ordering-key), Movement Total the parent's parts, Show
+    Movement 1."""
+    chain = _work_chain(work, s)
+    top = chain[-1][0] if chain else work
+    title = str(top.get("title") or "").strip()
+    if title:
+        year = _composed(top)
+        whole = f"{title} ({year})" if year and not title.endswith(f"({year})") else title
+        if len(chain) >= 2:
+            # (the movement's own parent below the top work - Suite no. 1 of the Six Suites, an
+            # opera's act - follows it: the movements numbered together share one Work)
+            mid = str(chain[0][0].get("title") or "").strip()
+            if mid.casefold().startswith(title.casefold()):
+                mid = mid[len(title):].lstrip(" :,-–/.").strip()
+            if mid:
+                whole = f"{whole}:: {mid}"
+        _add(m, "work", whole)
+    if not chain or "movementnumber" in m or "movement" in m:
+        return
+    parent, link = chain[0]
+    name = str(work.get("title") or "").strip()
+    for ptitle in dict.fromkeys([str(parent.get("title") or "").strip(), title]):
+        if ptitle and name.casefold().startswith(ptitle.casefold()):
+            rest = name[len(ptitle):].lstrip()
+            if rest[:1] in (":", ",", "-", "–", "/", "."):
+                name = rest[1:].strip() or name
+                break
+    if name:
+        m["movement"] = [name]
+        m["showmovement"] = ["1"]
+    parts = [r for r in parent.get("relations") or [] if isinstance(r, dict) and r.get("type") == "parts" and
+             r.get("target-type") == "work" and r.get("direction") == "forward"]
+    key = link.get("ordering-key")
+    if not isinstance(key, int) or isinstance(key, bool) or key < 1:
+        key = next((r.get("ordering-key") for r in parts if (r.get("work") or {}).get("id") == work.get("id")), None)
+    if isinstance(key, int) and not isinstance(key, bool) and key >= 1:
+        m["movementnumber"] = [str(key)]
+        if parts:
+            m["movementtotal"] = [str(max(len(parts), key))]
+
+
+_BARE_NUMERAL = re.compile(r"^(?:[IVXLC]+|\d+)\.?$")
+
+
+def _named_movement(d):
+    """CLS-4: a part MusicBrainz names by its numeral alone ("Concerto for Choir: I.") takes its
+    name from the track's title, where that title holds the numeral after a colon and more
+    ("Konzert für Chor: I. О Повелитель сущего всего" -> "I. О Повелитель сущего всего")."""
+    mv = str((d.get("movement") or [""])[0]).strip()
+    if not mv or not _BARE_NUMERAL.match(mv):
+        return
+    num = mv.rstrip(".")
+    title = str((d.get("title") or [""])[0])
+    hit = re.search(r":\s+(" + re.escape(num) + r"[.:)]?\s+\S.*)$", title)
+    if hit:
+        d["movement"] = [hit.group(1).strip()]
+
+
+_WORK_CREDITS = ("composer", "lyricist", "writer")
+
+
+def _work_credits_from_parents(work, m, s, instrumental, per_medium):
+    """CLS-4: a part whose own work names no composer (lyricist, writer) takes its nearest
+    parent work's: MusicBrainz often holds a movement's composer on the whole work only."""
+    for node, _link in _work_chain(work, s):
+        need = [k for k in _WORK_CREDITS if not m.get(k)]
+        if not need:
+            return
+        got = {}
+        for r in node.get("relations") or ():
+            if isinstance(r, dict) and r.get("target-type") == "artist":
+                _rel_artist(r, got, s, instrumental, per_medium)
+        for k in need:
+            if got.get(k):
+                for x in got[k]:
+                    _add(m, k, x)
+                extra = {"composer": ("composersort", "musicbrainz_composerid"), "lyricist": ("~lyricistsort",),
+                         "writer": ("~writersort",)}[k]
+                for e in extra:
+                    for x in got.get(e) or ():
+                        _add(m, e, x)
+
+
+_PERFORMS = {"instrument": 0, "vocal": 0, "performer": 0, "performing orchestra": 1, "conductor": 2}
+
+
+_ENSEMBLE_TYPES = {"group", "orchestra"}
+
+
+def _members(a) -> set:
+    """The member IDs MusicBrainz lists for an ensemble ("member of band", where the lookup
+    carries the ensemble's relationships)."""
+    return {(r.get("artist") or {}).get("id") for r in a.get("relations") or ()
+            if isinstance(r, dict) and r.get("type") == "member of band" and r.get("direction") == "backward"} - {None}
+
+
+def _performers(rels, s) -> list:
+    """CLS-4: (name, sort name, artist ID) of who performs, from relationships: the soloists
+    (instrument, vocal, performer - a person), then orchestras, ensembles (MusicBrainz's
+    group and orchestra types) and choirs (choir vocals, the choir type), then conductors. A
+    player is left out only when the ensemble's node carries its members ("member of band")
+    and names them - a release lookup does not carry them, so players credited beside an
+    ensemble are listed beside it then; nothing more is looked up for this. A soloist beside
+    an orchestra or an ensemble (a concerto's) always stays."""
+    found, members = [], set()
+    for r in rels or ():
+        a = r.get("artist") if isinstance(r, dict) and r.get("target-type") == "artist" else None
+        if not isinstance(a, dict) or not a.get("name") or r.get("type") not in _PERFORMS:
+            continue
+        rank = _PERFORMS[r["type"]]
+        kind = str(a.get("type") or "").casefold()
+        if r["type"] == "vocal" and (kind == "choir" or any("choir" in str(x) or "chorus" in str(x)
+                                                            for x in r.get("attributes") or ())):
+            rank = 1
+        if rank == 0 and kind in _ENSEMBLE_TYPES | {"choir"}:
+            rank = 1
+        if rank == 1:
+            members |= _members(a)
+        name, sort = _translate_artist(a, s, r.get("target-credit"))
+        if name == a.get("name") and r.get("target-credit") and r["target-credit"] != a["name"] and \
+                not should_standardize(s["standardize_artist_names"], r["target-credit"], a):
+            name, sort = r["target-credit"], _sort_from_aliases(a, r["target-credit"], s)
+        if any((a.get("id") and a.get("id") == f[3]) or _fold_name(name) == _fold_name(f[1]) for f in found):
+            continue
+        found.append((rank, name, sort, a.get("id") or ""))
+    found = [f for f in found if not (f[0] == 0 and f[3] and f[3] in members)]
+    return [(n, so, i) for _r, n, so, i in sorted(found, key=lambda f: f[0])]
+
+
+def _composer_performs_it(rec, r_ac, rel, composers) -> bool:
+    """CLS-4: an artist of the release's credit composed this track and performs this recording
+    (its recording credit, or a performer or conductor relationship of it)."""
+    credited = {(c.get("artist") or {}).get("id") for c in (rel or {}).get("artist-credit") or ()
+                if isinstance(c, dict)} - {None, ""}
+    mine = credited & composers
+    if not mine:
+        return False
+    plays = {(c.get("artist") or {}).get("id") for c in r_ac or () if isinstance(c, dict)}
+    plays |= {(r.get("artist") or {}).get("id") for r in rec.get("relations") or ()
+              if isinstance(r, dict) and r.get("target-type") == "artist" and r.get("type") in _PERFORMS}
+    return bool(mine & plays)
+
+
+def _classical_artist(d, rec, r_ac, rel, s):
+    """CLS-4 (D1): a classical track's Artist is who performs it, never its composer alone -
+    MusicBrainz's classical style credits the composer on the track. Where the track's credit
+    names only composers of the track: the recording's credit (MusicBrainz's performers), else
+    the performer, orchestra and conductor relationships (the recording's, else the
+    release's); with none of them the track's credit stays."""
+    composers = set(d.get("musicbrainz_composerid") or []) | {_fold_name(x) for x in d.get("composer") or []}
+    if not composers:
+        return
+
+    def composers_only(ids, names):
+        if not names:
+            return False
+        if len(ids) == len(names):
+            return all(i in composers or _fold_name(n) in composers for i, n in zip(ids, names))
+        return all(_fold_name(n) in composers for n in names)
+    if not composers_only(d.get("musicbrainz_artistid") or [], d.get("artists") or []):
+        return
+    if s.get("classical_genre_only") and _composer_performs_it(rec, r_ac, rel, composers):
+        return                    # (a film score's composer conducting it: his credit stays)
+    if r_ac:
+        # (a recording credited "Composer; performers" too: its performers - the composers
+        # leading it left out, "Johann Sebastian Bach; Glenn Gould" -> "Glenn Gould")
+        lead = 0
+        for c in r_ac:
+            a = c.get("artist") if isinstance(c, dict) else None
+            if not isinstance(a, dict) or not (a.get("id") in composers or _fold_name(c.get("name") or a.get("name")) in composers):
+                break
+            lead += 1
+        if 0 < lead < len(r_ac) and ";" in str(r_ac[lead - 1].get("joinphrase") or ""):
+            r_ac = r_ac[lead:]
+        rc = _credit_tags(r_ac, s, release=False)
+        if rc.get("artists") and not composers_only(rc.get("musicbrainz_artistid") or [], rc["artists"]):
+            for k in ("artist", "artistsort", "artists", "musicbrainz_artistid", "~artists_sort",
+                      "~artists_countries", "~artists_comments", "~artistcomment"):
+                if k in rc:
+                    d[k] = list(rc[k])
+            return
+    people = _performers(rec.get("relations"), s) or _performers((rel or {}).get("relations"), s)
+    if not people:
+        return
+    d["artist"] = [", ".join(n for n, _so, _i in people)]
+    d["artistsort"] = [", ".join(so or n for n, so, _i in people)]
+    d["artists"] = [n for n, _so, _i in people]
+    d["~artists_sort"] = [so or n for n, so, _i in people]
+    d["musicbrainz_artistid"] = [i for _n, _so, i in people if i]
+    for k in ("~artists_countries", "~artists_comments", "~artistcomment"):
+        d.pop(k, None)
 
 
 _AMAZON = re.compile(r"^https?://(?:www.)?(?P<host>.*?)(?::[0-9]+)?/.*/(?P<asin>[0-9B][0-9A-Z]{9})(?:[^0-9A-Z]|$)")
@@ -939,6 +1200,10 @@ def release_tags(rel, settings=None, pregap=False, media=None, without=None, unc
                 g = genres(rec, rel, s, who)
                 if g:
                     d["genre"] = g
+            if s.get("classical"):
+                _classical_artist(d, rec, r_ac, rel, s)          # CLS-4: the performers (a compilation's too)
+            if s.get("classical"):
+                _named_movement(d)
             if d["musicbrainz_artistid"] == [VARIOUS_ARTISTS_ID]:
                 d["artist"] = d["artistsort"] = [s["va_name"]]
             if (d.get("title") or [""])[0] == DATA_TRACK_TITLE:

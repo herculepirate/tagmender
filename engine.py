@@ -4105,12 +4105,15 @@ class Engine:
                 # its country is yours
                 t.pop("label", None)
                 t.pop("releasecountry", None)
-            if info.get("edition") or info.get("doubt"):
+            if info.get("edition") or info.get("doubt") or info.get("media"):
                 # (an "original" date that is only the other pressing's own - a Discogs release
-                # without a master - is no date of yours either)
+                # without a master - is no date of yours either; MED-2: nor the one pressing's
+                # your audio is not)
                 first = t.get("originaldate") or t.get("originalyear")
                 first = (first[0] if isinstance(first, list) and first else first) or ""
-                if info.get("pick_year") and str(first)[:4] == str(info["pick_year"]):
+                pick_year = info.get("pick_year") or (
+                    next(iter(years)) if info.get("media") and len(years) == 1 else None)
+                if pick_year and str(first)[:4] == str(pick_year):
                     for k in ("originaldate", "originalyear"):
                         t.pop(k, None)
             if len(years) == 1 and None not in years and "" not in years and not info.get("scans") \

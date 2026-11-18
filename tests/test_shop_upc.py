@@ -536,6 +536,33 @@ class Pipeline(unittest.TestCase):
                     ma.process(row, http, CFG, self.dm, types.SimpleNamespace(ocr=True, max_images=8))
                 self.assertEqual(any(OTHER_UPC in b for b in seen), not failed, seen)
 
+    def test_BAR4_a_sure_pick_with_a_failed_investigation_search_keeps_its_barcode_unweighed(self):
+        """BAR-4, the sure pick's path: the investigation of an auto pick read a barcode whose
+        Discogs search failed - never asked of anyone as one on no release (a sticker)."""
+        for failed in (True, False):
+            with self.subTest(failed=failed):
+                http = ShopHttp(mb_barcode=UPC)
+                seen, status = [], []
+
+                def investigate(http_, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, notes, *rest):
+                    status.append(final["status"])
+                    if failed:
+                        album["investigation_search_failed"] = True
+                    return mb_res, dg_res, final, ocr_txt
+
+                def unlisted(http_, album, results, args=None):
+                    seen.append(True)
+                    return set()
+                with mock.patch.object(ma, "_needs_investigation", return_value=True), \
+                        mock.patch.object(ma, "investigate", side_effect=investigate), \
+                        mock.patch.object(ma, "scans_barcode_why", return_value="a barcode on the scans"), \
+                        mock.patch.object(ma, "unlisted_scan_barcodes", side_effect=unlisted):
+                    self.https.append(http)
+                    row = make_album(self.root, "First Light", folder=f"2010 - First Light {int(failed)}")
+                    o = ma.process(row, http, CFG, self.dm, types.SimpleNamespace(ocr=True, max_images=8))
+                self.assertEqual(status, ["auto"], o["why"])
+                self.assertEqual(bool(seen), not failed, seen)
+
     def test_shops_asked_once_when_the_investigation_finds_no_new_barcode(self):
         http = ShopHttp()
         with mock.patch.object(ma, "_needs_investigation", return_value=True), \

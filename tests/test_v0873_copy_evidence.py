@@ -134,6 +134,14 @@ class FLD1_AlbumTitleIsNoCountryOnTheScans(unittest.TestCase):
         r = res(a, cands, "DEEP PURPLE\nMADE IN JAPAN\nMade in the EU\n")
         self.assertNotIn(r["best"]["cand"]["id"], ("jp1", "jp2"))
 
+    def test_FLD1_an_unrelated_titles_made_in_is_not_noted(self):
+        a = album(title="Live In Hamburg")
+        mc.note_titles(a, [cand(id="x", title="Made In Germany"), cand(id="y", title="Live In Hamburg")])
+        self.assertEqual(a["cand_titles"], {"Live In Hamburg"})
+        s = mc.score_candidate(a, cand(id="y", title="Live In Hamburg", country="Germany"), CFG,
+                               "LIVE IN HAMBURG\nMade in Germany\n")
+        self.assertIn("country", s["clues"])
+
     def test_FLD1_another_title_keeps_its_made_in(self):
         jp = cand(id="jp", title="Live In Tokyo", country="Japan")
         agree, _ = mc.pressing_clues("LIVE IN TOKYO\nMade in Japan\n", jp)
@@ -293,6 +301,18 @@ class BOX4_ReplicaSleevesNameNoOtherPressing(unittest.TestCase):
         report = {"state": "differs", "found": ["label"], "against": ["country"]}
         self.assertIsNotNone(mc.scans_name_another({"status": "auto", "best": best, "scored": [best, us]}, report))
 
+    def test_BOX4_a_download_entry_or_a_clue_both_carry_does_not_block(self):
+        best = self.pick(clues={"disc TOC": "disc ID (track positions of the CD) matches",
+                                "label": "label Columbia on the scans"})
+        dl = self.pick(cand=cand(id="31041049", source="discogs", title="The Complete Columbia Albums Collection",
+                                 country="Europe", disc_count=5, formats={"digital"}),
+                       clues={"country": "made in the EU on the scans (a European pressing)"}, unproven_media=True)
+        twin_label = self.pick(cand=cand(id="333", source="discogs", title="The Complete Columbia Albums Collection",
+                                         country="US", disc_count=5), clues={"label": "label Columbia on the scans"})
+        report = {"state": "differs", "found": ["label"], "against": ["country"]}
+        self.assertIsNone(mc.scans_name_another({"status": "auto", "best": best, "scored": [best, dl, twin_label]},
+                                                report))
+
     def test_BOX4_a_single_disc_keeps_the_old_way(self):
         best = self.pick(clues={"disc TOC": "disc ID (track positions of the CD) matches"})
         best["cand"] = dict(best["cand"], disc_count=1)
@@ -369,7 +389,8 @@ class TRK7_FeaturedArtistCreditsInTitles(unittest.TestCase):
 
     def test_TRK7_other_brackets_still_differ(self):
         for a, b in (("Song (Live)", "Song"), ("Song (Remix)", "Song"), ("Feat Of Clay", "Clay"),
-                     ("Six Ft. Under", "Six"), ("Ten ft. tall", "Ten"), ("Walking 10 ft. Tall", "Walking 10")):
+                     ("Six Ft. Under", "Six"), ("Ten ft. tall", "Ten"), ("Walking 10 ft. Tall", "Walking 10"),
+                     ("Hang ft. loose", "Hang")):
             self.assertFalse(mc.track_titles_agree(a, b), (a, b))
 
     def test_TRK7_titles_agree_counts_them(self):

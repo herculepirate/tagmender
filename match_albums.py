@@ -9435,6 +9435,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # a barcode on the scans that no release anywhere carries: a shop's sticker, perhaps
     # (match_core._shop_sticker); each candidate is scored again with it known
     if (final["status"] != "auto" and not album.get("unlisted_barcodes")
+            and not album.get("investigation_search_failed")                  # (BAR-4)
             and both_databases_answered(use_mb, use_discogs, provider_errors)):
         unlisted = unlisted_scan_barcodes(http, album, (mb_res, dg_res), args)
         if unlisted:
@@ -9611,6 +9612,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     if (status == "auto" and not album.get("unlisted_barcodes")
+            and not album.get("investigation_search_failed")                  # (BAR-4)
             and scans_barcode_why(final, album, ocr_txt, (mb_res, dg_res))
             and both_databases_answered(use_mb, use_discogs, provider_errors)):
         # BAR-4: a barcode on the scans no candidate carries is searched (databases, shops)

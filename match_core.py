@@ -1349,7 +1349,7 @@ def align_durations(file_secs, cand_secs, cfg):
 # "(featuring X)", or after the title, "Title feat. X" - only these credit forms, never another
 # bracket ("(Live)", "(Remix)", "(Part II)")
 _FEAT_BRACKET = re.compile(r"\s*[(\[]\s*(?:feat\.?|ft\.|featuring)\s+[^)\]]+[)\]]", re.I)
-_FEAT_TAIL = re.compile(r"\s+(?:feat\.|featuring|ft\.(?=\s+[A-Z\u00C0-\u024F]))\s+\S.*$", re.I)
+_FEAT_TAIL = re.compile(r"\s+(?:feat\.|featuring|ft\.(?=\s+(?-i:[A-Z\u00C0-\u00DE])))\s+\S.*$", re.I)
 # ("Six Ft. Under", "10 ft. Tall": feet after a number, no credit)
 _FEET = re.compile(r"(?:\b\d+|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|"
                    r"thirty|forty|fifty|hundred|thousand))\s+(?:ft|feet)\b", re.I)
@@ -1567,9 +1567,14 @@ def _title_made_in_dropped(ocr_text, titles):
 
 
 def note_titles(album, cands):
-    """FLD-1: the titles of every candidate scored for ALBUM (_title_made_in_dropped decides from
-    them all at once)."""
-    album.setdefault("cand_titles", set()).update(str((c.get("cand") or c).get("title") or "") for c in cands or ())
+    """FLD-1: the titles of every candidate scored for ALBUM that are its own title (title_sim 0.85,
+    a " = " part of it too) - _title_made_in_dropped decides from them all at once; an unrelated
+    "Made In Germany" hit never takes a real "Made in Germany" print away."""
+    titled = str(album.get("title") or "")
+    album.setdefault("cand_titles", set()).update(
+        t for t in (str((c.get("cand") or c).get("title") or "") for c in cands or ())
+        if t and (not titled or title_sim(t, titled) >= 0.85 or any(
+            title_sim(part, titled) >= 0.85 for part in t.split(" = "))))
 
 
 def countries_made_in(text):
@@ -6748,11 +6753,15 @@ def scans_name_another(final, report):
     # other pressing of this same album scored agrees with what the scans print (its country, a
     # number, a matrix): then the scans may well be that pressing's, and they decide as before
     n_tracks = len(best["cand"].get("tracks") or ())
+    # (a clue of the scans the pick lacks only - one both carry tells neither; never a version your
+    # copy's media rules out: the box's download entry, filed under Europe as the CD)
+    lacks = {"country", "catalogue number", "barcode", "matrix"} - set(best.get("clues") or {})
     same_album_agrees = any(
-        s is not best and str(s["cand"].get("id")) != str(best["cand"].get("id"))
+        s is not best and str(s["cand"].get("id")) != str(best["cand"].get("id")) and not s.get("unproven_media")
+        and not format_contradictions(s)
         and title_sim(str(s["cand"].get("title") or ""), str(best["cand"].get("title") or "")) >= 0.85
         and len(s["cand"].get("tracks") or ()) == n_tracks
-        and set(s.get("clues") or {}) & {"country", "catalogue number", "barcode", "matrix"}
+        and set(s.get("clues") or {}) & lacks
         for s in final.get("scored") or ())
     if (best.get("clues") or {}).get("disc TOC") and (best["cand"].get("disc_count") or 1) >= 2 \
             and not same_album_agrees and not any(

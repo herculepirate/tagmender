@@ -588,9 +588,10 @@ def _performers(rels, s) -> list:
     """CLS-4: (name, sort name, artist ID) of who performs, from relationships: the soloists
     (instrument, vocal, performer - a person), then orchestras, ensembles (MusicBrainz's
     group and orchestra types) and choirs (choir vocals, the choir type), then conductors. A
-    player is left out only when MusicBrainz lists them as a member of an ensemble credited
-    beside them (a piano trio's three, the trio named too); a soloist beside an orchestra or
-    an ensemble (a concerto's) always stays."""
+    player is left out only when the ensemble's node carries its members ("member of band")
+    and names them - a release lookup does not carry them, so players credited beside an
+    ensemble are listed beside it then; nothing more is looked up for this. A soloist beside
+    an orchestra or an ensemble (a concerto's) always stays."""
     found, members = [], set()
     for r in rels or ():
         a = r.get("artist") if isinstance(r, dict) and r.get("target-type") == "artist" else None

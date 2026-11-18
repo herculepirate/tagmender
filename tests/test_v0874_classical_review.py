@@ -66,7 +66,6 @@ class FalsePositives(unittest.TestCase):
         self.assertTrue(v.genre_only)
         t = mb_tags.release_tags(copy.deepcopy(rel), dict(CLS, classical_genre_only=v.genre_only))[0]
         self.assertEqual(t["artist"], ["Hans Zimmer"])
-        self.assertFalse(classical.Verdict(True, [], ()).genre_only)        # (no kinds: never "genre only")
 
     def test_CLS4_a_conductors_album_names_the_performers_of_another_composers_tracks(self):
         # (Bernstein conducting Copland and his own works, classical by genre alone: his own
@@ -79,6 +78,8 @@ class FalsePositives(unittest.TestCase):
             ("Candide Overture", credit((lb, "")), credit((lb, "")), [perf("w1", "Candide Overture", [comp(lb)]), cond, orch]),
             ("Appalachian Spring", credit((ac_, "")), credit((ac_, "")), [perf("w2", "Appalachian Spring", [comp(ac_)]),
                                                                        cond, orch])])
+        self.assertTrue(classical.Verdict(True, [], ()).genre_only)          # (ambiguous + weak: no kinds)
+        self.assertFalse(classical.Verdict(True, [], ("tradition",)).genre_only)
         t = mb_tags.release_tags(rel, dict(CLS, classical_genre_only=True))
         self.assertEqual(t[0]["artist"], ["Leonard Bernstein"])
         self.assertEqual(t[1]["artist"], ["New York Philharmonic, Leonard Bernstein"])
@@ -106,9 +107,9 @@ class FalsePositives(unittest.TestCase):
                   "Baroque Pop", "Chamber Pop", "Symphonic Metal", "Hindustani Classical", "Neo-Classical"):
             self.assertEqual(classical.genre_kind(g), "", g)
         for g in ("Classical", "Baroque", "Opera", "Symphonic", "Concerti", "Gregorian Chant", "Lieder", "Ballet",
-                  "Orchestral", "Zarzuela", "Singspiel", "Sacred Music", "Serialism", "Twelve-Tone", "Fugue", "Early"):
+                  "Zarzuela", "Singspiel", "Sacred Music", "Serialism", "Twelve-Tone", "Fugue", "Early"):
             self.assertEqual(classical.genre_kind(g), "strong", g)
-        for g in ("Romantic", "Neo-Romantic"):
+        for g in ("Romantic", "Neo-Romantic", "Orchestral"):
             self.assertEqual(classical.genre_kind(g), "ambiguous", g)
         # (a lieder recital's "Vocal", medieval music under "Folk, World, & Country", a brass
         # band's "Brass & Military" beside Classical: still classical)
@@ -116,6 +117,8 @@ class FalsePositives(unittest.TestCase):
                     {"genres": ["Classical", "Folk, World, & Country"], "styles": ["Medieval"]},
                     {"genres": ["Classical", "Brass & Military"], "styles": []}):
             self.assertTrue(classical.is_classical(None, det=det)[0], det)
+        # (a style counts only under Discogs's Classical genre)
+        self.assertFalse(classical.is_classical(None, det={"genres": ["Folk, World, & Country"], "styles": ["Early"]})[0])
         # (NAM-8's classical test reads the same genres: a bare "Symphonic" still counts)
         self.assertTrue(aa.classical([{"genre": ["Symphonic"]}], [], []))
         self.assertFalse(aa.classical([{"genre": ["Symphonic Rock"]}], [], []))
@@ -175,7 +178,12 @@ class Down(Base):
         self.assertEqual(t[0]["work"], [f"{TOP}: {PARTS[0]}"])
         self.assertEqual(t[0]["albumartist"], ["Robert Schumann; Musica Viva, Alexander Rudin"])   # (the rest as ever)
 
-    def test_CLS4_a_film_score_with_track_relationships_off_keeps_its_composer(self):
+    def test_CLS4_a_score_classical_only_by_label_and_ambiguous_genre_keeps_its_composer(self):
+        self.test_CLS4_a_film_score_with_track_relationships_off_keeps_its_composer(
+            genres=["Classical", "Stage & Screen"], label="Sony Classical")
+
+    def test_CLS4_a_film_score_with_track_relationships_off_keeps_its_composer(self, genres=("Classical",),
+                                                                               label="Label MB"):
         # (the verdict that keeps the credit is taken on the release WITH its recordings'
         # relationships, read for the classical album - not on the bare lookup)
         d = self.album("Hans Zimmer", "Gladiator")
@@ -192,7 +200,8 @@ class Down(Base):
         for t in bare["media"][0]["tracks"]:
             t["recording"].pop("relations")
         dg = te.dg_release(950, "Hans Zimmer", "Gladiator")
-        dg["genres"], dg["styles"], dg["labels"] = ["Classical"], ["Score"], [{"name": "Label MB", "catno": "CAT-1"}]
+        dg["genres"], dg["styles"], dg["labels"] = list(genres), ["Score"], [{"name": label, "catno": "CAT-1"}]
+        full["label-info"] = bare["label-info"] = [{"label": {"name": label}, "catalog-number": "CAT-1"}]
         http = ClassicalHttp(bare, full, [], dg=[dg])
         eng = self.engine(http)
         p = eng.identify(eng.albums_in(d)[0])
@@ -219,6 +228,8 @@ class Names(unittest.TestCase):
         self.assertEqual(m["conductor"], ["Mstislav Leopoldovich Rostropovich"])   # (a Cyrillic credit only)
 
     def test_CLS4_an_ensemble_stands_for_its_listed_members(self):
+        # (hand-built: the ensemble's node carrying its members - a release lookup does not, and
+        # nothing more is looked up; without them the players are listed beside it)
         be = A("be", "Ludwig van Beethoven", "Beethoven, Ludwig van")
         players = (("m1", "Daniel Barenboim", "piano"), ("m2", "Pinchas Zukerman", "violin"),
                    ("m3", "Jacqueline du Pré", "cello"))

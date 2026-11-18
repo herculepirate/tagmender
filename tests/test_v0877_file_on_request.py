@@ -404,6 +404,19 @@ class MOV6_App(Dirs, t864.Base):
         self.assertEqual(ov.model.albums[0]["status"], "unresolved")
         self.assertEqual(ov.model.data(ov.model.index(0, 1), Qt.CheckStateRole), Qt.Unchecked)    # (not unasked)
 
+    def test_MOV6_undo_release_choice_finds_a_pasted_link_too(self):
+        # (Change Release from a link for the whole folder is kept as the link alone)
+        prof, plan, ov = self.unresolved_row()
+        a = ov.model.albums[0]
+        ov.forced[os.path.realpath(a["source_dir"])] = "discogs:777"
+        self.assertEqual(ov.chosen_release(a), {"ref": "discogs:777"})
+        seen = []
+        with self.patched(ov, prof, seen):
+            ov.undo_release_choice([a])
+            self.wait_idle(ov)
+        self.assertEqual(ov.forced, {})
+        self.assertIn("History › Undo", self.win.commands["undo_release_choice"].statusTip())
+
     def test_MOV6_an_unresolved_row_without_a_release_says_why(self):
         from PySide6.QtCore import Qt
         prof = self.profile(operation="move", destination=str(self.dest), unresolved={"action": "mark"})

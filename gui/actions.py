@@ -112,7 +112,8 @@ COMMANDS = {
                          "into the profile's layout: it is looked up again with that release, nothing is "
                          "written until you tick it and apply")),
     "undo_release_choice": (N_("&Undo Release Choice"), None, None,
-                            N_("Forget the release you chose for this album; it is looked up again")),
+                            N_("Forget the release you chose for this album in this preview; it is looked up again. Once "
+                               "applied, the album keeps its release until you undo the job (History › Undo)")),
     "exclude_again": (N_("&Exclude Again"), None, None,
                       N_("The rules exclude this album again (undoes Process Anyway)")),
     "retry": (N_("&Retry in Overview"), "Ctrl+Shift+T", "refresh-cw", N_("Preview this album again in Overview")),

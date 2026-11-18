@@ -3474,7 +3474,7 @@ class Overview(QWidget):
         files = engine.plan_entry_files(a)
         key = os.path.realpath(a["source_dir"])
         mine = {os.path.realpath(f) for f in files}
-        kept = [x for x in (self.forced.get(key) or []) if isinstance(x, dict) and
+        kept = [x for x in self.choices_at(key) if x.get("files") and
                 not mine & {os.path.realpath(f) for f in x.get("files") or []}]
         self.forced[key] = kept + [dict({"ref": c["ref"], "files": files},
                                         **({"only": True} if a.get("split") else {}))]
@@ -3486,14 +3486,31 @@ class Overview(QWidget):
         self.win.statusBar().showMessage(tr("Showing {0} for {1}: tick it to apply.").format(
             candidate_words(c), Path(a["source_dir"]).name), 15000)
 
+    def choices_at(self, key) -> list:
+        """The releases you chose in folder KEY, as [{"ref", "files"?, ...}] whatever way they were
+        kept (a plain link for the whole folder, one choice, or a list of them)."""
+        v = self.forced.get(key)
+        if isinstance(v, str):
+            return [{"ref": v}] if v else []
+        if isinstance(v, dict):
+            return [v]
+        return [x for x in v or [] if isinstance(x, dict)]
+
+    @staticmethod
+    def _choice_is_for(x, mine) -> bool:
+        """Choice X is album MINE's (its files): one with no files is the whole folder's."""
+        files = x.get("files")
+        return not files or bool(mine & {os.path.realpath(f) for f in files})
+
     def chosen_release(self, a) -> dict:
-        """The release you chose for album A (Change Release, or Use … and File It…), or {}."""
+        """The release you chose for album A (Change Release, a pasted link, or Use … and File
+        It…), or {}."""
         if not a or not a.get("source_dir"):
             return {}
         import engine
         mine = {os.path.realpath(f) for f in engine.plan_entry_files(a)}
-        return next((x for x in self.forced.get(os.path.realpath(a["source_dir"])) or []
-                     if isinstance(x, dict) and mine & {os.path.realpath(f) for f in x.get("files") or []}), {})
+        return next((x for x in self.choices_at(os.path.realpath(a["source_dir"])) if self._choice_is_for(x, mine)),
+                    {})
 
     def undo_release_choice(self, albums=None):
         """The release you chose for the selected albums forgotten (and your ask to file them):
@@ -3505,8 +3522,7 @@ class Overview(QWidget):
         for a in albums:
             key = os.path.realpath(a["source_dir"])
             mine = {os.path.realpath(f) for f in engine.plan_entry_files(a)}
-            left = [x for x in self.forced.get(key) or []
-                    if isinstance(x, dict) and not mine & {os.path.realpath(f) for f in x.get("files") or []}]
+            left = [x for x in self.choices_at(key) if not self._choice_is_for(x, mine)]
             if left:
                 self.forced[key] = left
             else:

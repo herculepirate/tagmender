@@ -908,7 +908,9 @@ def _own_job_files(job):
         # REP-1 / TAG-1: what decided the pressing in this job ("pressing chosen by catalogue
         # number 636834 on the scans", "... by track lengths closest ..."), or "": a later plan
         # asks whether your copy still shows it (match_core._still_decides)
-        decided = next((str(e) for e in ident.get("evidence") or () if str(e).startswith("pressing chosen by ")), "")
+        # (CHG-1: a release you chose is recorded as yours, whatever other clue the job also had)
+        said = [str(e) for e in ident.get("evidence") or () if str(e).startswith("pressing chosen by ")]
+        decided = "pressing chosen by you" if "pressing chosen by you" in said else (said[0] if said else "")
         albums.append((a.get("source_dir"), exact, files, decided))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)

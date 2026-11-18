@@ -8100,6 +8100,8 @@ def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None
 # Discogs formats that are no medium of their own (the box, "All Media")
 _NO_CARRIER = {"box set", "all media"}
 _POSITION_KIND = re.compile(r"^\s*([A-Za-z][A-Za-z\- ]*?)\s*(\d+)\s*[-.:]", re.I)
+# (MED-15: "CD-1", "BD-12": a carrier of the release named with the track's number alone)
+_POSITION_CARRIER = re.compile(r"^\s*([A-Za-z][A-Za-z ]*?)\s*-\s*\d+[a-z]?\s*$", re.I)
 
 
 def discogs_track_media(det, raw, discs):
@@ -8126,9 +8128,15 @@ def discogs_track_media(det, raw, discs):
     for entry, disc in zip(raw, discs):
         m = _POSITION_KIND.match(str((entry or {}).get("position") or ""))
         kind = [v for k, v in by_kind.items() if m and (k == mc.fold(m.group(1)) or k.startswith(mc.fold(m.group(1))))]
+        bare = None if m else _POSITION_CARRIER.match(str((entry or {}).get("position") or ""))
+        alone = [v for k, v in by_kind.items() if bare and k == mc.fold(bare.group(1))]
         if m and kind:
             n = int(m.group(2))
             out.append(kind[0][n - 1] if 1 <= n <= len(kind[0]) else "")
+        elif alone and len(alone[0]) == 1:
+            # (a carrier named with its track alone, "CD-1" beside "BD-1": the release's one CD -
+            # Gojira - The Flesh Alive, Discogs 3663285, never the Blu-ray listed first)
+            out.append(alone[0][0])
         else:
             out.append(entries[disc - 1][1] if disc and 1 <= disc <= len(entries) else "")
     return out

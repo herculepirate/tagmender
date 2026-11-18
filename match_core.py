@@ -3686,11 +3686,35 @@ def _box_disc(album, cand):
     scans = {barcode_key(b) for b in album.get("ocr_barcodes") or ()} - {""}
     if not shared or len(files) < 3 or tagger_barcode(album, shared) or (scans and not scans & shared):
         return None
-    fit = [d for d, tr in sorted(discs.items()) if len(tr) == len(files)
-           and all(title_sim(a.get("title") or "", t.get("title") or "") >= 0.85 for a, t in zip(files, tr))
+
+    def titled(tr):
+        return len(tr) == len(files) and \
+            all(title_sim(a.get("title") or "", t.get("title") or "") >= 0.85 for a, t in zip(files, tr))
+    # BOX-2: discs of one set listing the same titles (Nektar - Journey To The Centre Of The Eye,
+    # BELLE 132133-4: the original album and a live CD of it, track for track): the lengths tell
+    # them apart - your copy's own barcode on the release, and exactly one disc of your files'
+    # track count with every length listed and within 3 s of yours (and your titles, where both
+    # have titles) is your disc, its disc title whatever it is - every other disc of your titles
+    # listing its lengths too
+    timed = [d for d, tr in sorted(discs.items()) if len(tr) == len(files) and all(t.get("secs") for t in tr)
+             and all(a.get("secs") for a in files)
+             and max(abs(a["secs"] - t["secs"]) for a, t in zip(files, tr)) <= 3
+             and (titled(tr) or not all(a.get("title") for a in files))]
+    alike = [tr for tr in discs.values()
+             if titled(tr) or (len(tr) == len(files) and not all(a.get("title") for a in files))]
+    if len(timed) == 1 and all(t.get("secs") for tr in alike for t in tr):
+        # (another disc of your titles listing no lengths may be yours as well: none chosen)
+        tr = discs[timed[0]]
+        return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
+                    box_disc=timed[0], box_title=cand.get("title") or "", box_proof="barcode and lengths")
+    fit = [d for d, tr in sorted(discs.items()) if titled(tr)
            and all(abs(a["secs"] - t["secs"]) <= 3 for a, t in zip(files, tr) if a.get("secs") and t.get("secs"))]
     if len(fit) != 1 or all(t.get("secs") for t in discs[fit[0]]):
         return None                       # (a disc with every length was for the routes above)
+    if sum(1 for tr in discs.values() if titled(tr)) > 1:
+        # (another disc lists the same titles - its lengths off yours: the titles do not tell
+        # which disc yours is, and a disc listing none is no likelier yours: Nektar's live CD)
+        return None
     tr = discs[fit[0]]
     return dict(cand, tracks=[dict(t, disc=1) for t in tr], title=album["title"], disc_count=1,
                 box_disc=fit[0], box_title=cand.get("title") or "", box_proof="barcode and titles")

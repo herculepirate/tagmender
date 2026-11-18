@@ -4,7 +4,11 @@ files carrying a release ID: tags them (track ID + Discogs), renames, moves them
 scans to <root>/<New Artist>/<Year - Album>/, and removes the emptied folder.
 FAKE_PICARD_ROOT: library root. FAKE_PICARD_SKIP: folder-name text to leave unsaved.
 FAKE_PICARD_SKIP_FILES: file-name texts (comma-separated) of tracks it leaves unsaved and in place
-(a track it could not match: the album is saved in part)."""
+(a track it could not match: the album is saved in part).
+FAKE_PICARD_MOVE_ONLY=1: moves the files without saving them (no tags written).
+FAKE_PICARD_WRITE: file names (comma-separated) it writes into the new folder (a cover it saved).
+FAKE_PICARD_LOSE: suffix of moved files that then go missing (taken out of the library).
+FAKE_PICARD_LOCK=1: the old album folder is left read-only (nothing can be moved back into it)."""
 import os, shutil, sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tag_albums.py is one level up
@@ -16,6 +20,7 @@ import tag_albums as ta
 root = Path(os.environ["FAKE_PICARD_ROOT"])
 skip = os.environ.get("FAKE_PICARD_SKIP", "")
 skip_files = [x for x in os.environ.get("FAKE_PICARD_SKIP_FILES", "").split(",") if x]
+move_only = os.environ.get("FAKE_PICARD_MOVE_ONLY") == "1"
 argv = sys.argv[1:]
 loads = [argv[i + 2] for i, a in enumerate(argv) if a == "-e" and argv[i + 1] == "LOAD"]
 for folder in loads:
@@ -29,7 +34,9 @@ for folder in loads:
         if any(x in p.name for x in skip_files):
             continue
         f = mutagen.File(p)
-        if isinstance(f, MP4):
+        if move_only:
+            pass
+        elif isinstance(f, MP4):
             f.tags.clear()
             f.tags["----:com.apple.iTunes:MusicBrainz Album Id"] = [MP4FreeForm(mbid.encode())]
             f.tags["----:com.apple.iTunes:MusicBrainz Release Track Id"] = [MP4FreeForm(f"{mbid[:8]}-t{n}".encode())]
@@ -62,9 +69,19 @@ for folder in loads:
             shutil.move(str(rest), str(dest / rest.name))
         elif rest.is_dir() and rest.name in move_dirs:
             shutil.move(str(rest), str(dest / rest.name))
+    for name in [x for x in os.environ.get("FAKE_PICARD_WRITE", "").split(",") if x]:
+        (dest / name).write_bytes(b"written by the tagger")
     # Like Picard's "delete empty directories": only if nothing is left
     try:
         Path(folder).rmdir()
         Path(folder).parent.rmdir()
     except OSError:
         pass
+    lose = os.environ.get("FAKE_PICARD_LOSE", "")
+    if lose:
+        lost = root.parent / "lost"
+        lost.mkdir(exist_ok=True)
+        for p in dest.glob(f"*{lose}"):
+            shutil.move(str(p), str(lost / (p.name + ".gone")))
+    if os.environ.get("FAKE_PICARD_LOCK") == "1" and Path(folder).is_dir():
+        Path(folder).chmod(0o555)

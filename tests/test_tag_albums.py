@@ -8,7 +8,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import csv
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 # TagMender settings and state of the tests never touch the real ones
 import os as _os, tempfile as _tempfile  # noqa: E402
@@ -37,6 +41,10 @@ def all_tags(p):
     tags = {str(k): [str(x) for x in (v if isinstance(v, list) else [v])] for k, v in (f.tags or {}).items()}
     pics = [pic.data for pic in f.pictures] if isinstance(f, FLAC) else []
     return tags, pics
+
+
+def results_csv(run_dir):
+    return list(csv.DictReader(io.StringIO((Path(run_dir) / "results.csv").read_text(encoding="utf-8"))))
 
 
 class Base(unittest.TestCase):
@@ -76,9 +84,9 @@ class Base(unittest.TestCase):
         (self.album / "rip.log").write_text("log")
         self.add_result(self.album)
 
-    def run_tool(self, *extra, skip="", skip_files=""):
+    def run_tool(self, *extra, skip="", skip_files="", **more_env):
         env = dict(os.environ, FAKE_PICARD_ROOT=str(self.root), FAKE_PICARD_SKIP=skip,
-                   FAKE_PICARD_SKIP_FILES=skip_files, TAGMENDER_SKIP_PICARD_CHECK="1")
+                   FAKE_PICARD_SKIP_FILES=skip_files, TAGMENDER_SKIP_PICARD_CHECK="1", **more_env)
         cmd = [sys.executable, str(HERE / "tag_albums.py"), "--matches-db", str(self.db), "--out-dir",
                str(self.out), "--library-root", str(self.root),
                "--picard", f"{sys.executable} {Path(__file__).resolve().parent / 'fake_picard.py'}", *extra]
@@ -635,7 +643,7 @@ class AllOrNothing(Base):
     def test_waits_for_the_tagger_to_exit_before_checking(self):
         seen = iter(["123 flatpak run org.musicbrainz.Picard", "123 flatpak run org.musicbrainz.Picard", ""])
         orig = ta.picard_running
-        ta.picard_running = lambda: next(seen)
+        ta.picard_running = lambda **_k: next(seen)
         try:
             self.assertEqual(ta.wait_for_tagger_exit(timeout=5, poll=0.01), "")
         finally:
@@ -643,11 +651,203 @@ class AllOrNothing(Base):
 
     def test_a_tagger_still_running_is_reported(self):
         orig = ta.picard_running
-        ta.picard_running = lambda: "123 picard"
+        ta.picard_running = lambda **_k: "123 picard"
         try:
             self.assertEqual(ta.wait_for_tagger_exit(timeout=0.05, poll=0.01), "123 picard")
         finally:
             ta.picard_running = orig
+
+    def test_the_wait_does_not_follow_the_wall_clock(self):
+        # (the clock set back while waiting: the wait still ends after its timeout)
+        clock = iter(range(10 ** 6, 0, -1000))
+
+        def wall():
+            return next(clock)
+        with mock.patch.object(ta, "picard_running", lambda **_k: "123 picard"), \
+                mock.patch.object(ta.time, "time", wall):
+            self.assertEqual(ta.wait_for_tagger_exit(timeout=0.05, poll=0.01), "123 picard")
+
+    def test_the_wait_counts_only_the_tagger_this_run_started(self):
+        now = ta.time.time()
+        me = os.getuid()
+        procs = [(101, me + 1, 1.0, "/usr/bin/picard"),               # another user's
+                 (102, me, 1.0, "flatpak run org.musicbrainz.Picard"),  # open before this run
+                 (103, me, 3600.0, "/usr/bin/picard")]                 # started long before the launch
+        env = {"TAGMENDER_SKIP_PICARD_CHECK": ""}
+        with mock.patch.dict(os.environ, env), mock.patch.object(ta, "tagger_processes", lambda: procs):
+            self.assertEqual(ta.picard_running(since=now - 10, exclude={102}), "")
+            self.assertTrue(ta.picard_running().startswith("101 "))      # (before a run: any tagger)
+            procs.append((104, me, 5.0, "/app/bin/picard"))              # the one this run started
+            self.assertTrue(ta.picard_running(since=now - 10, exclude={102}).startswith("104 "))
+
+    def _in_process(self, running):
+        """tag_albums --apply run here, with the process check stubbed."""
+        argv = ["tag_albums.py", "--matches-db", str(self.db), "--out-dir", str(self.out), "--library-root",
+                str(self.root), "--picard", f"{sys.executable} {Path(__file__).resolve().parent / 'fake_picard.py'}",
+                "--apply"]
+        env = {"FAKE_PICARD_ROOT": str(self.root), "FAKE_PICARD_SKIP_FILES": "003.X",
+               "TAGMENDER_TAGGER_EXIT_WAIT": "0.05"}
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), mock.patch.dict(os.environ, env), \
+                mock.patch.object(ta, "picard_running", running), \
+                mock.patch.object(ta, "_navidrome"), redirect_stdout(buf):
+            rc = ta.main()
+        return rc, buf.getvalue()
+
+    def test_a_tagger_still_running_writes_nothing_and_is_reported(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        # closed when the run starts; the one it started is still there after the wait
+        rc, out = self._in_process(lambda since=None, exclude=(): "4242 /app/bin/picard" if since else "")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("the tagger is still running (4242 /app/bin/picard)", out)
+        self.assertIn(f"'{ta.STILL_RUNNING}': 1", out)
+        new = sorted((self.root / "New Artist").rglob("*.flac"))
+        self.assertEqual(len(new), 1, out)
+        for p in sorted((self.root / "New Artist").rglob("*")):
+            if p.suffix in ta.AUDIO_EXT:
+                self.assertEqual(ta.read_tagmender(p), ("", ""), p)        # no mark written
+        left = self.album / "003.X.m4a"
+        self.assertEqual(ta.read_ids(left)["albumid"], MBID)               # not touched: seed still there
+        self.assertEqual(ta.read_tagmender(left)[0], "Seeded")
+        rows = results_csv(self.out / f"run-{self.run_id()}")
+        self.assertEqual([r["state"] for r in rows], [ta.STILL_RUNNING])
+        rc, out = self.run_tool("--undo", self.run_id())                    # the journal finds every file
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_a_put_back_that_fails_part_way_keeps_track_of_every_file(self):
+        # one moved track goes missing after the tagger: the rest are put back and marked where
+        # they are, results.csv names no folder that is gone, and a later --undo is clean
+        self.make_album()
+        rc, out = self.run_tool("--apply", skip_files="003.X", FAKE_PICARD_LOSE=".mp3")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'partly saved, put back in part': 1", out)
+        self.assertIn("missing (not found after the tagger)", out)
+        self.assertFalse((self.root / "New Artist").exists(), out)
+        names = sorted(p.name for p in ta.audio_files(self.album))
+        self.assertEqual(names, ["001.TL.flac", "003.X.m4a", "004.Y.opus"])
+        for p in ta.audio_files(self.album):
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual(status, "Unresolved", p)
+            self.assertIn("write_failed", reason)
+            self.assertIn("in part", reason)
+        run_dir = self.out / f"run-{self.run_id()}"
+        rows = results_csv(run_dir)
+        self.assertEqual(rows[0]["now_in"], "")
+        for f in json.loads((run_dir / "journal.json").read_text())[0]["files"]:
+            self.assertTrue(f["new_path"] == "" and f.get("missing") or Path(f["new_path"]).exists(), f)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("still missing", out)
+
+    def test_files_that_cannot_be_moved_back_are_marked_where_they_are(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--apply", skip_files="003.X", FAKE_PICARD_LOCK="1")
+        self.album.chmod(0o755)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'partly saved, put back in part': 1", out)
+        new_dir = next((self.root / "New Artist").iterdir())
+        self.assertIn(f"could not be put back, left in: {new_dir}", out)
+        rows = results_csv(self.out / f"run-{self.run_id()}")
+        self.assertEqual(rows[0]["now_in"], str(new_dir))
+        left = sorted(new_dir.glob("*.*"))
+        self.assertTrue([p for p in left if p.suffix in ta.AUDIO_EXT], out)
+        for p in [p for p in left if p.suffix in ta.AUDIO_EXT]:             # (003, in the locked folder,
+            self.assertEqual(ta.read_tagmender(p)[0], "Unresolved", p)         # cannot be written at all)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+        self.assertFalse((self.root / "New Artist").exists())
+
+    def test_an_unsaved_album_left_in_the_tagger_s_folder_is_marked_there(self):
+        self.make_album()
+        rc, out = self.run_tool("--apply", skip_files="003.X", FAKE_PICARD_MOVE_ONLY="1", FAKE_PICARD_LOCK="1")
+        self.album.chmod(0o755)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'not saved, put back in part': 1", out)
+        new_dir = next((self.root / "New Artist").iterdir())
+        left = [p for p in new_dir.iterdir() if p.suffix in ta.AUDIO_EXT]
+        self.assertTrue(left, out)
+        for p in left:
+            self.assertEqual(ta.read_tagmender(p)[0], "Unresolved", p)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertFalse((self.root / "New Artist").exists())
+
+    def test_the_tagger_s_own_cover_is_removed_after_a_put_back_and_the_rest_listed(self):
+        self.make_album()
+        rc, out = self.run_tool("--apply", skip_files="003.X", FAKE_PICARD_WRITE="folder.jpg,notes.nfo")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'partly saved, put back': 1", out)
+        stray = list((self.root / "New Artist").rglob("*"))
+        self.assertEqual([p.name for p in stray if p.is_file()], ["notes.nfo"], out)
+        self.assertIn("left by the tagger, not removed: ", out)
+        self.assertIn("notes.nfo", out)
+        self.assertTrue((self.album / "cover.jpg").exists())             # the album's own cover is back
+
+    def test_an_album_moved_but_not_saved_is_put_back(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--apply", FAKE_PICARD_MOVE_ONLY="1")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'not saved, put back': 1", out)
+        self.assertFalse((self.root / "New Artist").exists(), out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+        self.assertTrue((self.album / "rip.log").exists())
+
+
+def video(p):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=5",
+                    "-f", "lavfi", "-i", "sine=frequency=500:duration=1", "-shortest", "-pix_fmt", "yuv420p",
+                    str(p), "-y"], check=True)
+
+
+class MusicVideos(Base):
+    """An album's audio tracks decide whether it is saved whole: a music video the tagger leaves
+    unsaved never makes it "saved in part" (the owner's rule); an audio track left unsaved does."""
+
+    def test_a_video_is_told_from_an_audio_mp4(self):
+        video(self.tmp / "clip.mp4")
+        audio(self.tmp / "song.mp4", 1)
+        audio(self.tmp / "song.m4a", 1)
+        self.assertTrue(ta.is_video(self.tmp / "clip.mp4"))
+        self.assertFalse(ta.is_video(self.tmp / "song.mp4"))
+        self.assertFalse(ta.is_video(self.tmp / "song.m4a"))
+        self.assertTrue(ta.is_video(self.tmp / "x.mkv"))
+
+    def test_an_unsaved_music_video_in_a_subfolder_leaves_the_album_tagged(self):
+        self.make_album()
+        video(self.album / "Video" / "clip.mp4")
+        rc, out = self.run_tool("--apply", skip_files="clip")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("{'tagged': 1}", out)
+        self.assertFalse(self.album.exists(), "nothing is left behind in the old folder")
+        new_dir = next((self.root / "New Artist").iterdir())
+        self.assertTrue((new_dir / "Video" / "clip.mp4").is_file(), out)  # it moves along, in its place
+        self.assertEqual(ta.read_ids(new_dir / "Video" / "clip.mp4")["albumid"], "")   # seed taken out
+        tracks = [p for p in ta.audio_files(new_dir) if not ta.is_video(p)]
+        self.assertEqual(len(tracks), 4)
+        for p in tracks:
+            self.assertEqual(ta.read_tagmender(p)[0], "Resolved", p)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertTrue((self.album / "Video" / "clip.mp4").is_file())
+
+    def test_an_unsaved_audio_track_still_puts_the_album_back(self):
+        self.make_album()
+        video(self.album / "Video" / "clip.mp4")
+        rc, out = self.run_tool("--apply", skip_files="clip,003.X")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'partly saved, put back': 1", out)
+        self.assertTrue((self.album / "Video" / "clip.mp4").is_file())
+        self.assertFalse((self.root / "New Artist").exists(), out)
+        for p in [p for p in ta.audio_files(self.album) if not ta.is_video(p)]:
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual(status, "Unresolved", p)
+            self.assertIn("3 of 4", reason)                               # the video is not counted
 
 
 if __name__ == "__main__":

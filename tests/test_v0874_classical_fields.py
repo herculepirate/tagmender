@@ -261,6 +261,13 @@ class CLS4Profile(unittest.TestCase):
         self.assertEqual((p["tradition"], p["tag_level"], p["naming"]["preset"]),
                          ("western_classical", "enthusiast", "classical-performer"))
         self.assertTrue(p["tagger"]["track_ars"])
+        self.assertEqual(p.picard_tags()["standardize_artist_names"], "none")   # (names as credited)
+        rel = classical_release()
+        rel["artist-credit"][1]["name"] = "Moscow Chamber Orchestra"          # (credited otherwise)
+        t = mb_tags.release_tags(rel, dict(p.picard_tags(), classical=True))[0]
+        self.assertEqual(t["albumartist"], ["Robert Schumann; Moscow Chamber Orchestra, Alexander Rudin"])
+        t = mb_tags.release_tags(rel, {"classical": True, "standardize_artist_names": "variations"})[0]
+        self.assertEqual(t["albumartist"], ["Robert Schumann; Musica Viva, Alexander Rudin"])
         self.assertFalse(pf.validate(ex))
         self.assertTrue(classical.is_classical(p)[0])
 

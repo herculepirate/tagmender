@@ -15,7 +15,9 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 
 The `Classical` example is for a classical library: `"tradition": "western_classical"` (every album
 is read as classical: rules CLS-2 to CLS-5), `"tagger": {"track_ars": true, "release_ars": true}`
-(the recordings' and works' credits always), `"naming": {"preset": "classical-performer"}` (the
+(the recordings' and works' credits always) with `"standardize_artist_names": "none"` (names as
+the release credits them - "Schumann; Musica Viva, Alexander Rudin", never MusicBrainz's own
+"Robert Schumann; Moscow Chamber Orchestra, ..." - in the tags and so in the folders), `"naming": {"preset": "classical-performer"}` (the
 release's whole credit as the folder: `Johann Sebastian Bach; Glenn Gould/1982 - Goldberg
 Variations/01 Aria.flac`) and `"tag_level": "enthusiast"`. Any other profile still recognises a
 classical album by itself (Discogs's genre, MusicBrainz's credit and works, labels and catalogue

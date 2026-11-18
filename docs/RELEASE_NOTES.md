@@ -1,5 +1,35 @@
 # Release notes
 
+## 0.8.72
+
+**Edit tags without a look-up**
+- Add a folder and edit its tags straight away in the Tags pane - an album, a disc, some tracks or one file; values that differ show as "different in N files" (or "in 1 of 2 files" when only some files have the tag), and setting a value for all asks first. File › Save Tags (Ctrl+S) writes only your edits, as one job you can undo; nothing is looked up, renamed or moved. A look-up you ask for later follows the usual process (EDT-2).
+- The Tags pane always shows the tags: the album's first, then the tracks'; changes are marked. "Changes only" is gone.
+- Tags from File and Folder Names: one pattern reads the whole path below a folder you choose (`%albumartist%/%date% - %album% [%catalognumber%]/%discnumber%-%tracknumber% - %title%`), with a guessed pattern and a live preview.
+
+**Vinyl rips**
+- Each rip of a record is its own album, never merged with another rip. Its folder names the rip - "[Vinyl Rip PBTHAL SRM-1-1184]", the ripper (and his transfer name, "Ultimate Master") when its notes confirm it, the catalogue number - and its comment gets one line below your own text ("Vinyl rip: PBTHAL · 24-bit/96 kHz · ripped 2012 · equipment"). Two copies of a release are compared side by side (dynamic range, clipping); TagMender never picks or removes one. A folder holding two rips mixed together is split into two copies when the evidence is clear, else listed. Three profile settings turn each part off (VIN-1 to VIN-7).
+- Vinyl catalogue numbers in folder names are now read (SRM-1-1184, 25·3P-378, 832-464-1 Q-1, …), and a number in another tagger's album title no longer counts as yours.
+- **Once:** vinyl albums TagMender filed before are renamed on their next apply ("[1977 Vinyl Rip]" → "[1977 Vinyl Rip SRM-1-1184]"); turn "Keep each vinyl rip in its own folder" off to keep the old names.
+
+**Discs of a set arriving apart**
+- A lone disc of a set is filed as the whole release (disc 1 of 2, in "Disc 01") and listed as "disc 2 missing". The missing disc, arriving later and matched exactly, joins the album you have automatically - found by its release IDs, also after you renamed it - and the album's disc count is fixed in the same job. Another pressing, or a second copy of a disc you have, is kept apart for your decision. In a watched folder a disc waits at most a day for its set (DSC-12).
+
+**Multi-disc accuracy (checked on 35 held-out albums: 22 right → 33 right, 2 held, 0 wrong)**
+- Boxes with DVD-Audio, Blu-ray or download extras are matched by their CDs (King Crimson - Larks' Tongues complete recordings); a plain CD still beats such a box edition.
+- A lone disc is chosen by its track lengths when discs share titles (Nektar); a CD of a CD + Blu-ray set gets the CD's media, not the Blu-ray's (Gojira).
+- An SACD ISO's stereo and multichannel areas are one album, each layer with its own media (Kodo); the catalogue number in an SACD extraction log counts as yours.
+- Your box's barcode on the scans proves it despite the replica sleeves' old numbers (Mahavishnu); a title such as "Made in Japan" is never a country (Deep Purple); a catalogue number inside a longer one agrees (Enigma); a misread barcode beside the release's own printed number is ignored (Alan Parsons).
+- When TagMender writes track numbers it writes the matching total too, even where your Picard settings preserve the total.
+- Sibling folders of one release named differently ("The Album", "The Story") are joined; artist folders differing only by accents are one ("Kodō" files into "Kodo").
+
+**Album artist**
+- A credit of persons only, credited as equals ("Yelena Eckemoff, Arild Andersen, Thomas Strønen"), is filed under the first-credited (NAM-8); bands, duos that are one act, classical credits and split releases ("A / B") keep the whole credit. Such albums move on their next apply.
+
+**Known limits**
+- Hemispheres (Fran Solo, US SRM-1-3743) stays held: its only US entry lists the suite differently; confirm it with Change Release.
+- The window still pauses about 0.4 s while albums are added during look-ups.
+
 ## 0.8.71
 
 **A simpler main window**

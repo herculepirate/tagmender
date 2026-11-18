@@ -107,11 +107,11 @@ COMMANDS = {
                        "moving or copying (Extra-careful matching's raised floor too); it is looked up again, "
                        "nothing is written until you apply")),
     # MOV-6: an Unresolved album's closest release, shown to be filed (its text names the release)
-    "use_candidate": (N_("Use the Closest Release and File It…"), None, None,
+    "use_candidate": (N_("Use the Closest Release &and File It…"), None, None,
                       N_("Show the tags of the closest release found for this Unresolved album, to be filed "
                          "into the profile's layout: it is looked up again with that release, nothing is "
                          "written until you tick it and apply")),
-    "undo_release_choice": (N_("Undo Release Choice"), None, None,
+    "undo_release_choice": (N_("&Undo Release Choice"), None, None,
                             N_("Forget the release you chose for this album; it is looked up again")),
     "exclude_again": (N_("&Exclude Again"), None, None,
                       N_("The rules exclude this album again (undoes Process Anyway)")),
@@ -202,7 +202,7 @@ TAG_MENU = ("edit_tag", "revert_tag", "use_suggested", "remove_tag", None, "add_
             (N_("Ra&ting"), RATING_MENU))
 COVER_MENU = ("find_covers", "choose_cover", "cover_link", "suggested_cover")
 # the Album > Change Release submenu (and the inspector's Change Release button)
-RELEASE_MENU = ("use_release", *_search.MENU)
+RELEASE_MENU = ("use_release", *_search.MENU, None, "undo_release_choice")
 # commands whose keys act only where focus is in the inspector's Tags (Delete and F2 elsewhere stay
 # theirs: a rule's Delete, a cell's F2), or in the album tables (Space still presses a focused button
 # or ticks a box elsewhere); the other commands' keys work in the whole window
@@ -217,7 +217,7 @@ MENUS = (
     (N_("&View"), ("@pages", None, "show_sidebar", "show_inspector", None, "tab_tags", "tab_artwork", "tab_evidence",
                None, "refresh")),
     (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), (N_("Pro&file"), ()), "use_suggested_pressing", "match_files", "tags_from_filenames", None, (N_("&Tag"), TAG_MENU),
-                (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "use_candidate", "undo_release_choice",
+                (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "use_candidate",
                 "exclude_again", "retry", None, "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
                 "open_folder", "copy_path")),
     (N_("&Controls"), ("play_pause", "next_track", "previous_track", "stop_playing", None, "skip_forward",

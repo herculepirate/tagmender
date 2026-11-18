@@ -812,7 +812,7 @@ class Overview(QWidget):
             items = []
         else:
             keys = ("@release", "use_suggested_pressing", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
-                    "file_anyway", "use_candidate", "undo_release_choice", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
+                    "file_anyway", "use_candidate", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
                     "copy_path")
             # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
             release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(

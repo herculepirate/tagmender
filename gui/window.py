@@ -475,7 +475,10 @@ class Main(QMainWindow):
         b = self.inspector.buttons["release"]
         m = QMenu(b)
         for k in actmod.RELEASE_MENU:
-            m.addAction(self.commands[k])
+            if k is None:
+                m.addSeparator()
+            else:
+                m.addAction(self.commands[k])
         actmod.mac_menu(m)
         b.setMenu(m)
         b.setPopupMode(QToolButton.InstantPopup)
@@ -739,7 +742,7 @@ class Main(QMainWindow):
         uc = self.commands["use_candidate"]
         uc.setEnabled(kind == "overview" and idle and bool(ov is not None and ov.may_use_candidate(x)))
         words = use_candidate_words(x) if kind == "overview" else ""
-        actmod.retitle(uc, words.replace("&", "&&") if words else tr("Use the Closest Release and File It…"))
+        actmod.retitle(uc, words or tr("Use the Closest Release &and File It…"))
         self.commands["undo_release_choice"].setEnabled(kind == "overview" and idle and bool(
             ov is not None and ov.chosen_release(x)))
         self.commands["retry"].setEnabled(kind == "attention" and idle)

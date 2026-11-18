@@ -349,7 +349,7 @@ class MOV6_App(Dirs, t864.Base):
         self.win.update_album_actions()
         cmd = self.win.commands["use_candidate"]
         self.assertTrue(cmd.isEnabled())
-        self.assertEqual(cmd.text().replace("&&", "&"),
+        self.assertEqual(self.gui.actions.plain(cmd.text()),
                          "Use Real Artist – Real Album (2001, CD, Germany, CAT-1) and File It…")
         self.assertIn("Use Real Artist – Real Album", ov.panes.offer_btn.text())   # (the bar over its tags)
         self.assertTrue(ov.panes.offer_btn.isEnabled())

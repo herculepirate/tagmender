@@ -1268,8 +1268,9 @@ class Inspector(QDockWidget):
         self.offer_words.setVisible(bool(words))
         self.offer_btn.setVisible(bool(words))
         if words:
-            self.offer_btn.setText(button.replace("&", "&&"))
-            self.offer_btn.setAccessibleName(button)
+            from .actions import plain
+            self.offer_btn.setText(plain(button).replace("&", "&&"))
+            self.offer_btn.setAccessibleName(plain(button))
             self.offer_btn.setEnabled(on)
 
     def file_anyway(self):

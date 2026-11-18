@@ -2589,8 +2589,9 @@ class PreviewPanes(QWidget):
         if not words:
             return
         self.offer_words.setText(words)
-        self.offer_btn.setText(button.replace("&", "&&"))
-        self.offer_btn.setAccessibleName(button)
+        from .actions import plain
+        self.offer_btn.setText(plain(button).replace("&", "&&"))
+        self.offer_btn.setAccessibleName(plain(button))
         self.offer_btn.setEnabled(on)
 
     def file_anyway(self):

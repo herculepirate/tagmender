@@ -212,7 +212,7 @@ def candidate_words(c) -> str:
 def use_candidate_words(a) -> str:
     """The command that shows an Unresolved album's closest release, to file it: "Use … and File It…"."""
     c = best_candidate(a)
-    return tr("Use {0} and File It…").format(candidate_words(c)) if c else ""
+    return tr("Use {0} &and File It…").format(candidate_words(c).replace("&", "&&")) if c else ""
 
 
 UNRESOLVED_ACTION_WORDS = {"mark": N_("Apply marks it Unresolved where it is"),

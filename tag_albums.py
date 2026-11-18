@@ -71,6 +71,7 @@ def audio_files(folder):
 
 
 STILL_RUNNING = "tagger still running, not checked"
+DONE = ("tagged", "tagged, no Discogs data")        # (the states of an album saved whole)
 VIDEO_EXT = {".mkv", ".m4v", ".avi", ".mov", ".webm", ".mpg", ".mpeg", ".wmv", ".flv", ".vob", ".ts",
              ".m2ts", ".mts", ".3gp", ".ogv"}
 
@@ -1285,29 +1286,57 @@ def tidy_artwork(album_path, new_dir, extras, covers_name="covers"):
                 move(p, new / p.name)
     return moves
 
-def existing_dirs(root, depth=4):
-    """Every folder under ROOT down to DEPTH levels, and ROOT itself (as text): taken before
-    the tagger runs, so that a folder it made is told from one that was there (a folder's
-    times say only that something in it changed)."""
-    out = {str(Path(root))}
+def existing_dirs(root, depth=5):
+    """ROOT and every folder down to DEPTH levels below it (5: as deep as changed_dirs looks),
+    as text: taken before the tagger runs, so that a folder it made is told from one that was
+    there (a folder's times say only that something in it changed). A linked folder is listed
+    with the folders in it, and links are not followed further."""
+    root = str(Path(root))
+    out = {root}
 
-    def scan(folder, level):
+    def scan(folder, level):                    # (LEVEL: how deep the folders in FOLDER are)
         try:
             entries = list(os.scandir(folder))
         except OSError:
             return
         for e in entries:
             try:
-                if not e.is_dir(follow_symlinks=False):
+                link = e.is_symlink()
+                if not e.is_dir():
                     continue
             except OSError:
                 continue
             out.add(e.path)
-            if level < depth:
+            if link:
+                try:
+                    out.update(c.path for c in os.scandir(e.path) if c.is_dir())
+                except OSError:
+                    pass
+            elif level < depth:
                 scan(e.path, level + 1)
 
-    scan(root, 0)
+    scan(root, 1)
     return out
+
+
+def disc_number(folder, files):
+    """Which disc of a set an album folder holds: the disc number its tracks carry, when they
+    all carry the same one; else a "CD2" / "Disc 2" in the folder's name; None when neither
+    says (two copies of a disc or of a release are told from two discs of a set by this)."""
+    import re
+    nums = set()
+    for p in files:
+        try:
+            f = mutagen.File(p, easy=True)
+            v = f.tags.get("discnumber") if f is not None and f.tags is not None else None
+        except Exception:
+            v = None
+        m = re.match(r"\s*0*(\d+)", str(v[0])) if v else None
+        nums.add(int(m.group(1)) if m else None)
+    if len(nums) == 1 and None not in nums:
+        return nums.pop()
+    m = re.search(r"(?i)\b(?:cd|disc|disk)\s*[-_.]?\s*0*(\d+)\b", Path(folder).name)
+    return int(m.group(1)) if m else None
 
 
 def clear_tagger_leftovers(folders, album_paths, keep, existed, root):
@@ -1517,6 +1546,7 @@ def main():
     results = []
     print(f"Run {run_id}: backups and log in {run_dir}")
     existed = existing_dirs(root)            # (folders there before the tagger: never removed)
+    run_made = set()                         # (folders this run's earlier batches made)
     try:
         for start in range(0, len(albums), args.batch):
             batch = []
@@ -1535,6 +1565,7 @@ def main():
                 continue
             for a in batch:                                   # 1+2: back up, then seed
                 a["extras"] = extra_files(a["path"])
+                a["disc"] = disc_number(a["path"], a["files"])
                 a["records"] = []
                 for p in a["files"]:
                     before = read_ids(p)                     # a retag: the old release's IDs are there
@@ -1633,20 +1664,33 @@ def main():
                 # (the folders the files went to that were there before: never removed, by --undo either)
                 a["kept_dirs"][:] = sorted({str(d) for p in v["new_paths"].values() for d in Path(p).parents
                                             if str(d) in existed})
-            # ...and so is every part of one release: the discs of a set filed in sibling folders
-            # are put back together when one of them is (never one disc tagged, the other not)
+            with open(run_dir / "journal.json", "w") as fh:    # (where every file went, before anything moves)
+                json.dump(journal, fh)
+            # ...and so is every part of one set: the discs of one release filed in sibling folders
+            # are put back together when one of them is not saved whole (never one disc tagged,
+            # the other not: Boris & Sunn O))) - Altar). Only discs with different numbers are
+            # parts of a set; two copies of a disc or release (a FLAC and an MP3 rip) never are.
             groups = {}
             for a in batch:
                 key = a.get("mbid") or (f"discogs:{a['discogs']}" if a.get("discogs") else "")
-                if key:
+                if key and a.get("disc") is not None:
                     groups.setdefault(key, []).append(a)
             for members in groups.values():
-                bad = [m for m in members if m["_check"]["failed"]]
-                if bad:
-                    for m in members:             # (a part saved whole: the failed ones; a failed one: the rest)
-                        m["_check"]["with"] = [Path(x["path"]).name for x in
-                                               (members if m["_check"]["failed"] else bad) if x is not m]
-            put_back = [a for a in batch if a["_check"]["failed"] or a["_check"]["with"]]
+                discs = [m["disc"] for m in members]
+                members = [m for m in members if discs.count(m["disc"]) == 1]
+                if len(members) < 2:
+                    continue
+                bad = [m for m in members if m["_check"]["state"] not in DONE]
+                for m in members if bad else ():  # (a part saved whole: the others not; one not: the rest)
+                    m_bad = any(x is m for x in bad)
+                    m["_check"]["with"] = [Path(x["path"]).name for x in (members if m_bad else bad) if x is not m]
+            # (a part neither saved nor moved needs no putting back: it is only marked)
+            put_back = [a for a in batch if a["_check"]["failed"]
+                        or (a["_check"]["with"] and a["_check"]["state"] in DONE)]
+            for a in batch:
+                c = a["_check"]
+                if c["with"] and not c["failed"] and c["state"] not in DONE:
+                    c["reason"] += f"; the other parts of its set were put back too: {', '.join(c['with'])}"
             made = set()
             for a in put_back:
                 c, recs = a["_check"], a["records"]
@@ -1660,6 +1704,8 @@ def main():
                         rec["missing"] = True
                 if not problems:
                     a["moves"].clear()
+                with open(run_dir / "journal.json", "w") as fh:    # (stopped here: --undo still finds them)
+                    json.dump(journal, fh)
                 c["new_dirs"] = sorted({str(Path(r["new_path"]).parent) for r in recs
                                         if r["new_path"] and r["new_path"] != r["path"]})
                 missing = [r["path"] for r in recs if r.get("missing")]
@@ -1680,34 +1726,35 @@ def main():
                     c["reason"] += "; the album was put back as it was"
             if put_back:
                 keep = {r["new_path"] for x in batch for r in x["records"] if r.get("new_path")}
-                for p in clear_tagger_leftovers(made, [x["path"] for x in batch], keep, existed, root):
+                for p in clear_tagger_leftovers(made, [x["path"] for x in batch], keep, existed | run_made, root):
                     print(f"      left by the tagger, not removed: {p}")
                 with open(run_dir / "journal.json", "w") as fh:    # (a later --undo finds every file)
                     json.dump(journal, fh)
             for a in batch:
                 c, recs, v = a.pop("_check"), a["records"], a["verify"]
                 state, saved, n, new_dirs = c["state"], c["saved"], c["n"], c["new_dirs"]
-                done = state in ("tagged", "tagged, no Discogs data")
+                done = state in DONE
                 results.append({"album": a["path"], "state": state, "saved": saved, "files": n,
                                 "discogs": c["discogs"], "now_in": "; ".join(new_dirs),
                                 "release": a["mbid"], "not_saved": "; ".join(v["not_saved"][:3])})
                 print(f"    {state:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}"
                       + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
                 if c["with"]:
-                    print(f"      put back with: {', '.join(c['with'])} (the same release)")
+                    print(f"      one set with: {', '.join(c['with'])} (put back together)")
                 if "put back in part" in state:
                     for d in new_dirs:
                         print(f"      could not be put back, left in: {d}")
                     for p in (r["path"] for r in recs if r.get("missing")):
                         print(f"      missing (not found after the tagger): {p}")
-                if saved or state.endswith("in part"):        # 4b: TAGMENDER=Resolved / Unresolved
+                if saved or state.endswith("in part") or c["with"]:   # 4b: TAGMENDER=Resolved / Unresolved
                     status = "Resolved" if done else "Unresolved"
                     for rec in recs:                  # (every file, where it actually is)
-                        if rec["new_path"]:
+                        at = rec["new_path"] or (rec["path"] if not done and Path(rec["path"]).exists() else "")
+                        if at:
                             try:
-                                write_tagmender(rec["new_path"], status, "" if done else c["reason"])
+                                write_tagmender(at, status, "" if done else c["reason"])
                             except Exception as exc:
-                                print(f"    could not write {TAGMENDER_TAG} to {rec['new_path']}: {exc}")
+                                print(f"    could not write {TAGMENDER_TAG} to {at}: {exc}")
                 if done and new_dirs and not args.no_tidy:   # 5: artwork
                     album_dir = os.path.commonpath(new_dirs) if len(new_dirs) > 1 else new_dirs[0]
                     try:
@@ -1717,7 +1764,7 @@ def main():
                         print(f"    could not tidy the artwork: {exc}")
                     if a["moves"]:
                         print(f"    moved {len(a['moves'])} scan/artwork file(s) into covers/")
-            existed |= {str(d) for d in changed_dirs(root, started) if d.is_dir()}
+            run_made |= {str(d) for d in changed_dirs(root, started) if d.is_dir() and str(d) not in existed}
             with open(run_dir / "journal.json", "w") as fh:
                 json.dump(journal, fh)
             if rc not in (0, None):

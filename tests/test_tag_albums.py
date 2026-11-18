@@ -892,6 +892,101 @@ class SharedFolders(Base):
         self.assertFalse((made / "sub").exists())
 
 
+class SetsAndCopies(SharedFolders):
+    """The parts of one set (sibling folders, different disc numbers) go back together, also when
+    one part was not saved at all; two copies of one release are never tied together."""
+
+    def test_a_disc_left_wholly_unsaved_puts_its_saved_sibling_back(self):
+        one = self.make_disc("Album (CD1)", MBID)
+        two = self.make_disc("Album (CD2)", MBID)
+        before = {p: all_tags(p) for d in (one, two) for p in ta.audio_files(d)}
+        rc, out = self.run_tool("--apply", skip="CD2", FAKE_PICARD_DEST="1999 - Album")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'saved, put back with its set': 1", out)
+        self.assertIn("'not saved': 1", out)
+        self.assertFalse((self.root / "New Artist").exists(), out)
+        for p in ta.audio_files(one):
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual((status, "Album (CD2)" in reason), ("Unresolved", True), p)
+        for p in ta.audio_files(two):
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual((status, "Album (CD1)" in reason), ("Unresolved", True), p)
+            self.assertEqual(ta.read_ids(p)["albumid"], "")                # seed taken out
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p: all_tags(p) for d in (one, two) for p in ta.audio_files(d)}, before)
+
+    def test_two_copies_of_one_release_are_never_tied_together(self):
+        flac = self.make_disc("Album (FLAC)", MBID)
+        mp3 = self.make_disc("Album (MP3)", MBID)
+        rc, out = self.run_tool("--apply", skip="FLAC")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'tagged': 1", out)
+        self.assertIn("'not saved': 1", out)
+        self.assertFalse(mp3.exists(), "the copy saved whole stays filed")
+        self.assertEqual(ta.read_tagmender(ta.audio_files(flac)[0])[0], "")
+
+    def test_the_disc_number_comes_from_the_tags_or_the_folder(self):
+        d = self.root / "A" / "Album"
+        audio(d / "01.flac", 1, disc="2/2")
+        audio(d / "02.flac", 2, disc="2/2")
+        self.assertEqual(ta.disc_number(d, ta.audio_files(d)), 2)
+        for name, want in (("Album (CD1)", 1), ("Album - Disc 03", 3), ("CD 2", 2), ("Album (FLAC)", None),
+                           ("Discography", None)):
+            self.assertEqual(ta.disc_number(Path(name), []), want, name)
+
+    def test_folders_made_by_an_earlier_batch_are_removed_by_undo(self):
+        self.make_disc("First", MBID)
+        self.make_disc("Second", OTHER)
+        rc, out = self.run_tool("--apply", "--batch", "1")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("{'tagged': 2}", out)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertFalse((self.root / "New Artist").exists(), "an empty folder of the run is left")
+
+    def test_the_journal_follows_every_step(self):
+        # written after the check and after each album put back: a run killed there leaves a
+        # journal that --undo can follow
+        self.make_album()
+        seen = []
+        real_undo, real_clear = ta.undo_album, ta.clear_tagger_leftovers
+
+        def journal():
+            run = next(self.out.glob("run-*"))
+            return json.loads((run / "journal.json").read_text())[0]["files"]
+
+        def undo_album(*a, **k):
+            seen.append(("before", journal()))
+            return real_undo(*a, **k)
+
+        def clear(*a, **k):
+            seen.append(("after", journal()))
+            return real_clear(*a, **k)
+        with mock.patch.object(ta, "undo_album", undo_album), mock.patch.object(ta, "clear_tagger_leftovers", clear):
+            rc, out = self._in_process(lambda **_k: "")
+        self.assertEqual(rc, 0, out)
+        (_b, first), (_a, after) = seen
+        self.assertTrue(any("New Artist" in f.get("new_path", "") for f in first), first)
+        for f in after:
+            self.assertEqual(f["new_path"], f["path"])
+
+    _in_process = AllOrNothing._in_process
+
+    def test_existing_folders_are_listed_five_levels_deep_and_through_links(self):
+        r = self.tmp / "lib"
+        (r / "a/b/c/d/e/f").mkdir(parents=True)
+        (self.tmp / "elsewhere" / "x" / "y").mkdir(parents=True)
+        os.symlink(self.tmp / "elsewhere", r / "link")
+        got = {os.path.relpath(p, r) for p in ta.existing_dirs(str(r) + "/")}
+        self.assertIn("a/b/c/d/e", got)
+        self.assertNotIn("a/b/c/d/e/f", got)
+        self.assertIn("link", got)
+        self.assertIn("link/x", got)
+        self.assertNotIn("link/x/y", got)
+        self.assertIn(".", got)
+
+
 def video(p):
     p.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=5",

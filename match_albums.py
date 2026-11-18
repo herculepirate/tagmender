@@ -1158,20 +1158,16 @@ def _same_values(current, written):
     return False
 
 
-def _track_ids(path):
-    """TRK-8: the MusicBrainz recording and track IDs a file's tags give (MUSICBRAINZ_TRACKID is
-    the recording's, MUSICBRAINZ_RELEASETRACKID the track's), lower-case."""
-    try:
-        meta = exclusions.read_meta(path)
-    except Exception:
-        return []
-    out = []
-    for k in ("musicbrainz_trackid", "musicbrainz_recordingid", "musicbrainz_releasetrackid"):
-        for v in meta.get(k) or ():
-            v = str(v or "").strip().lower()
-            if re.fullmatch(r"[0-9a-f-]{36}", v) and v not in out:
-                out.append(v)
-    return out
+# TRK-8: the tags naming a file's MusicBrainz recording ("MUSICBRAINZ_TRACKID") or track
+# ("MUSICBRAINZ_RELEASETRACKID") - keys without spaces, dashes or underscores, lower-case
+_TRACK_ID_KEYS = ("musicbrainztrackid", "musicbrainzrecordingid", "musicbrainzreleasetrackid")
+
+
+def _track_id(t, value):
+    """TRK-8: add a MusicBrainz recording or track ID a file's tag gives to t["track_ids"]."""
+    v = str(value or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", v) and v not in t["track_ids"]:
+        t["track_ids"].append(v)
 
 
 def tag_release_ids(infos):
@@ -1213,7 +1209,8 @@ def read_file(path, before=None):
          "tracktotal": 0,               # the album's track count, as the tags have it
          "write_failed_total": 0,       # TagMender's own "write_failed: ... 10 of 12" marker: the 12
          "cdtoc": "",                   # the ripper's CDTOC tag: the whole disc's TOC ("20+96+1937+...")
-         "credit": ""}                  # who the files say performed/wrote it: track artist, copyright, composer
+         "credit": "",                  # who the files say performed/wrote it: track artist, copyright, composer
+         "track_ids": []}               # TRK-8: the MusicBrainz recording and track IDs it is tagged with
     try:
         _source_clues(path, t)
         # PRV-1: ISRCs TagMender's job wrote (from the release it chose) are read as they were
@@ -1250,6 +1247,7 @@ def read_file(path, before=None):
                 elif _plain_key(nk) in _BARCODE_KEYS + _ASIN_KEYS: _code_tag(t, nk, _txt(v))
                 elif nk in _CATNO_KEYS and not t["catno"]: t["catno"] = _txt(v)
                 elif nk in _ID_KEYS: _release_id(t, nk, _txt(v))
+                elif nk in _TRACK_ID_KEYS: _track_id(t, _txt(v))
                 if nk in ("tagmender", "tagmenderreason"): t["tm_mark"] = True
                 if k in ("\xa9ART", "cprt", "\xa9wrt"): t["credit"] += " " + _txt(v)
             return t
@@ -1304,15 +1302,22 @@ def read_file(path, before=None):
                 elif nk in ("musicbrainzalbumreleasecountry", "releasecountry"): t["country"] = _txt(frame.text)
                 elif nk in _CATNO_KEYS and not t["catno"]: t["catno"] = _txt(frame.text)
                 elif nk in _ID_KEYS: _release_id(t, nk, _txt(frame.text))
+                elif nk in _TRACK_ID_KEYS: _track_id(t, _txt(frame.text))
                 elif nk == "tagmenderreason": _write_failed(t, _txt(frame.text))
                 if nk in ("tagmender", "tagmenderreason"): t["tm_mark"] = True
                 elif nk == "cdtoc": t["cdtoc"] = _txt(frame.text)
+            for frame in tags.getall("UFID"):            # (the recording's ID, as MusicBrainz taggers write it)
+                if "musicbrainz" in str(getattr(frame, "owner", "")).lower():
+                    _track_id(t, (frame.data or b"").decode("ascii", "ignore"))
             t["tracktotal"] = _total(fr("TRCK"))
             t["num0"] = _numbered_zero(fr("TRCK"))
             return t
         low = {}
         for k, v in tags.items():
             low.setdefault(re.sub(r"[\s_\-]", "", str(k).lower()), v)
+        for key in _TRACK_ID_KEYS:
+            if key in low:
+                _track_id(t, _txt(low[key] if isinstance(low[key], (list, tuple)) else [low[key]]))
         every = {}                    # (FLAC/Ogg list one value per item: every value of a field)
         for k, v in tags.items() if before else ():
             every.setdefault(re.sub(r"[\s_\-]", "", str(k).lower()), []).extend(
@@ -2417,7 +2422,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "tracks": [{"disc": i["disc_eff"], "disc_tag": i["disc"] or 0, "num": i["num"], "title": i["title"],
                     "secs": i["secs"], "path": str(_p), "artist": i.get("artist") or "",
                     # TRK-8: the recording and track IDs the file is tagged with (never when blind)
-                    "ids": [] if blind else _track_ids(_p),
+                    "ids": [] if blind else list(i.get("track_ids") or ()),
                     # (MED-22: which layer of a hybrid SACD each disc is, engine._layer_prefer)
                     "audio": {"rate": i.get("rate") or 0, "bits": i.get("bits") or 0,
                               "channels": i.get("channels") or 0, "sacd_area": i.get("sacd_area") or ""}}
@@ -5154,7 +5159,12 @@ def mb_search(http, album, cfg):
     # Releases whose disc ID matches the files are fetched whatever their title
     # (a freeDB-style lookup finds an album the folder names differently).
     have = {r["id"] for r in chosen}
-    chosen += [{"id": rid} for rid in sorted(album.get("toc_releases") or ()) if rid not in have][:6]
+    # (DSC-14: those carrying the most of the album's disc IDs first - a box holding every disc
+    # before each disc's own single - then those carrying one exactly, then by ID)
+    on, exact = album.get("exact_toc_on") or {}, album.get("exact_toc_releases") or set()
+    chosen += [{"id": rid} for rid in sorted(album.get("toc_releases") or (),
+                                             key=lambda r: (-len(on.get(r) or ()), r not in exact, r))
+               if rid not in have][:6]
     have = {r["id"] for r in chosen}
     chosen += [{"id": rid} for rid in sorted((album.get("link_releases") or set()) |
                                              (album.get("isrc_releases") or set())) if rid not in have][:6]

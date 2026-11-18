@@ -117,6 +117,24 @@ class DSC16_DiscIdClaim(te.Base):
         self.assertGreater(len(plan["albums"]), 1)
 
 
+    def test_DSC16_a_dated_artists_folder_not_named_as_the_release_stays_apart(self):
+        # ("Band J - Albums 1979-1981": a year in the name, but not the box's title)
+        top = self.make()
+        top = top.rename(top.parent / "Band J - Albums 1979-1981")
+        http = DiscIdHttp(mb=[release("mb-box", "Heart", [1, 2, 3]), release("mb-single", "Single", [3])])
+        plan = self.engine(http).plan(top)
+        self.assertGreater(len(plan["albums"]), 1, [a["identification"].get("release_id") for a in plan["albums"]])
+
+    def test_DSC16_a_disc_whose_own_sure_match_is_another_release_gives_no_confidence_unnamed(self):
+        # (the claim's confidence is the claimer's only when no disc rests on its disc ID alone
+        # against its own sure match - or the folder's name names the release)
+        top = self.make()
+        top = top.rename(top.parent / "Band J - Roxy Nights")
+        http = DiscIdHttp(mb=[release("mb-box", "1977-1980", [1, 2, 3]), release("mb-single", "Single", [3])])
+        plan = self.engine(http).plan(top)
+        self.assertFalse(any(a["status"] == "ready" and a["identification"].get("release_id") == "mb-box"
+                             and len(a["files"]) == 8 for a in plan["albums"]))
+
     def test_DSC16_an_artists_folder_without_rip_logs_is_no_set(self):
         # (an artist's folder of albums numbered 1 to 3: no logs, no set - as before)
         import engine

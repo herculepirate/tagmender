@@ -126,13 +126,14 @@ class DSC13_SaidSets(te.Base):
         self.assertEqual(len(self.groups()), 3)
 
     def test_DSC13_the_name_says_a_set(self):
-        said = engine._BOX_WORDS.search
+        said = engine.says_box
         for name in ("Billy Joel - The Complete Albums Collection (2011)", "X (BoxSet, 5CD)", "X Box Set",
                      "VA - The classical chillout box - 2003", "Joy Division - Complete Studio Recordings",
                      "Band - The Complete Columbia Collection"):
             self.assertTrue(said(name), name)
         for name in ("Billy Joel. My Lives. Part 1", "Arvo Part - The Collection - 2021", "Drops (2001-2004)",
-                     "Madlib - Madlib Medicine Show-The Brick [2012]", "Boxer - Alpha"):
+                     "Madlib - Madlib Medicine Show-The Brick [2012]", "Boxer - Alpha",
+                     "Band Q - Out of the Box Sessions", "Band Q - Box Sets", "Band Q - My Complete Band Q Collection"):
             self.assertFalse(said(name), name)
 
     # ---- the guards -----------------------------------------------------------------------------
@@ -196,6 +197,43 @@ class DSC13_SaidSets(te.Base):
         top = boxset_5cd(self.lib)
         flac(top, "00.flac", 10, title="Intro", album="Intro", albumartist="Band M", artist="Band M", track="1")
         self.assertGreater(len(self.groups()), 1)
+
+    def test_DSC13_a_discography_with_a_cd_count_stays_apart(self):
+        # ("Band Q - Discography 1990-1999 (3CD) [FLAC]/01 - Alpha" ..: an artist's folder of albums)
+        top = self.lib / "Band Q - Discography 1990-1999 (3CD) [FLAC]"
+        for n, t in enumerate(("Alpha", "Beta", "Gamma"), 1):
+            disc(top, f"0{n} - {t}", n, t, "Band Q")
+        self.assertEqual(len(self.groups()), 3)
+
+    def test_DSC13_numbered_albums_none_naming_the_set_stay_apart(self):
+        # ("Band Q - Collected (3CD)/01 - Alpha" ..: each its own album, no disc word, none names it)
+        top = self.lib / "Band Q - Collected (3CD)"
+        for n, t in enumerate(("Alpha", "Beta", "Gamma"), 1):
+            disc(top, f"0{n} - {t}", n, t, "Band Q")
+        self.assertEqual(len(self.groups()), 3)
+
+    def test_DSC13_a_box_and_a_stray_album_numbered_on_stay_apart(self):
+        # ("The Set (3CD)": "CD1" .. "CD3" and "04 - Single": the fourth folder carries no disc word)
+        top = self.lib / "Band Q - The Set (3CD)"
+        for n, t in enumerate(("Alpha", "Beta", "Gamma"), 1):
+            disc(top, f"CD{n} {t}", n, t, "Band Q")
+        disc(top, "04 - Single", 4, "Single", "Band Q")
+        self.assertEqual(len(self.groups()), 4)
+
+    def test_DSC13_a_bonus_disc_with_a_disc_word_beside_the_count_joins(self):
+        top = self.lib / "Band Q - The Set (3CD)"
+        for n, t in enumerate(("Alpha", "Beta", "Gamma", "Bonus"), 1):
+            disc(top, f"CD{n} {t}", n, t, "Band Q")
+        self.assertEqual(self.shape(), [(top.name, 12)])
+
+    def test_DSC13_box_words_inside_a_title_say_no_set(self):
+        for name in ("Band Q - Out of the Box Sessions", "Band Q - Box Sets", "Band Q - My Complete Band Q Collection"):
+            with self.subTest(name=name):
+                top = self.lib / name
+                disc(top, "CD1 Alpha", 1, "Alpha", "Band Q")
+                disc(top, "CD2 Beta", 2, "Beta", "Band Q")
+                self.assertEqual(len(self.groups()), 2)
+                shutil.rmtree(top)
 
     def test_DSC13_DSC7_a_series_volumes_in_a_folder_saying_no_set_stay_apart(self):
         # ("Drops (2001-2004)/Disc 1" tagged "Drops 1", "/Disc 2" "Drops 2": DSC-7's guard stands)

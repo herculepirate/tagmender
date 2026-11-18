@@ -4017,16 +4017,27 @@ def _rv_length_score(a, b):
     return 1.0 - min(abs(a - b) * 1000.0, _RV_LENGTH_MS) / float(_RV_LENGTH_MS)
 
 
-def _rv_similarity(f, t):
+@functools.lru_cache(maxsize=4096)
+def _rv_fold(text):
+    return fold(text)
+
+
+def _rv_ratio(a, b, bound=False):
+    a, b = _rv_fold(a), _rv_fold(b)
+    if a == b:
+        return 1.0
+    m = difflib.SequenceMatcher(None, a, b)
+    return m.real_quick_ratio() if bound else m.ratio()
+
+
+def _rv_similarity(f, t, bound=False):
     """TRK-8: how alike file f and release track t are, 0..1 - a weighted mean over the fields
-    both have (a field one side lacks is not counted)."""
+    both have (a field one side lacks is not counted). bound: a cheap upper bound of it."""
     parts = []
     if f.get("title") and t.get("title"):
-        a, b = fold(f["title"]), fold(t["title"])
-        parts.append((1.0 if a == b else difflib.SequenceMatcher(None, a, b).ratio(), _RV_WEIGHTS["title"]))
+        parts.append((_rv_ratio(f["title"], t["title"], bound), _RV_WEIGHTS["title"]))
     if f.get("artist") and t.get("artist"):
-        a, b = fold(f["artist"]), fold(t["artist"])
-        parts.append((1.0 if a == b else difflib.SequenceMatcher(None, a, b).ratio(), _RV_WEIGHTS["artist"]))
+        parts.append((_rv_ratio(f["artist"], t["artist"]), _RV_WEIGHTS["artist"]))
     if f.get("num") and t.get("num"):
         parts.append((1.0 if int(f["num"]) == int(t["num"]) else 0.0, _RV_WEIGHTS["tracknumber"]))
     if f.get("disc") and t.get("disc"):
@@ -4038,14 +4049,24 @@ def _rv_similarity(f, t):
     return sum(v * w for v, w in parts) / total if total else 0.0
 
 
+# TRK-8: a file whose title is two tracks' or more (a song on the studio disc and the live disc) is
+# placed only by its ID, or by a length within RV_SAME_S of one of them and every other such track
+# more than RV_APART_S away; else nothing is moved
+RV_SAME_S = 2.0
+RV_APART_S = 10.0
+
+
 def release_view(album, cand, cfg=None):
     """TRK-8: the files are the release's tracks, each anywhere on it (discs in another order, a
     disc labelled as another, bonus tracks placed elsewhere): the release seen in the files' order,
     each file at its own track - by its recording or track ID (that track's length agreeing),
     else by similarity (_rv_similarity) at least _RV_THRESHOLD with its title agreeing and the
-    next track _RV_MARGIN behind. "slots" as order_view's; "missing" empty. None unless as many
-    files as tracks (2 or more, no video), every file placed on a different track, and the
-    placement other than the files' own order (that order is decided as before)."""
+    next track _RV_MARGIN behind; a title two tracks share places a file only by its ID or a
+    length that tells them apart (RV_SAME_S, RV_APART_S). "slots" as order_view's; "missing"
+    empty. None unless as many files as tracks (2 or more, no video), every file placed on a
+    different track, and the placement other than the files' own order (that order is decided as
+    before). Only the tracks whose title agrees or whose length is within 30 s are compared, and
+    the first file that cannot be placed ends it."""
     files, tracks = album.get("tracks") or [], cand.get("tracks") or []
     n = len(files)
     if n < 2 or n != len(tracks) or any(t.get("video") for t in tracks):
@@ -4055,8 +4076,16 @@ def release_view(album, cand, cfg=None):
         for x in (t.get("rec_id"), t.get("track_id")):
             if x:
                 ids.setdefault(x, set()).add(j)
-    nums = [dict(t, num=t.get("num") or (sum(1 for u in tracks[:j] if (u.get("disc") or 1) == (t.get("disc") or 1)) + 1))
-            for j, t in enumerate(tracks)]
+    nums, per_disc = [], {}
+    for t in tracks:
+        d = t.get("disc") or 1
+        per_disc[d] = per_disc.get(d, 0) + 1
+        nums.append(dict(t, num=t.get("num") or per_disc[d]))
+    by_title = {}
+    for j, t in enumerate(tracks):
+        by_title.setdefault(_rv_fold(t.get("title") or ""), []).append(j)
+    order = sorted(range(n), key=lambda j: tracks[j].get("secs") or 0)
+    secs_sorted = [tracks[j].get("secs") or 0 for j in order]
     slots = []
     for f in files:
         pick = None
@@ -4066,20 +4095,45 @@ def release_view(album, cand, cfg=None):
         by_id = {j for j in by_id if not (f.get("secs") and tracks[j].get("secs"))
                  or abs(f["secs"] - tracks[j]["secs"]) <= 3}
         if len(by_id) == 1:
-            pick = next(iter(by_id))
-        else:
-            scored = sorted(((_rv_similarity(f, t), j) for j, t in enumerate(nums)), reverse=True)
-            best, j = scored[0]
-            second = scored[1][0] if len(scored) > 1 else 0.0
-            if best >= _RV_THRESHOLD and best - second >= _RV_MARGIN and f.get("title") and \
-                    track_titles_agree(f["title"], tracks[j].get("title") or ""):
-                pick = j
-        if pick is None:
+            slots.append(next(iter(by_id)))
+            continue
+        title = f.get("title") or ""
+        if not title:
             return None
+        agree = list(by_title.get(_rv_fold(title), ()))
+        secs = f.get("secs") or 0
+        near = set()
+        if secs:
+            lo = bisect.bisect_left(secs_sorted, secs - _RV_LENGTH_MS / 1000.0)
+            hi = bisect.bisect_right(secs_sorted, secs + _RV_LENGTH_MS / 1000.0)
+            near = {order[k] for k in range(lo, hi)}
+        if not agree:
+            agree = [j for j in near if track_titles_agree(title, tracks[j].get("title") or "")]
+        if not agree:
+            return None                                  # (no track of its title: nothing is moved)
+        if len(agree) > 1:
+            # (one title on two tracks or more: its length must tell them apart, by far)
+            if not secs:
+                return None
+            gaps = sorted((abs(secs - (tracks[j].get("secs") or 0)), j) for j in agree)
+            if not (gaps[0][0] <= RV_SAME_S and gaps[1][0] > RV_APART_S):
+                return None
+            pick = gaps[0][1]
+        else:
+            j = agree[0]
+            best = _rv_similarity(f, nums[j])
+            if best < _RV_THRESHOLD:
+                return None
+            for k in near - {j}:                         # (no other track as close: a cheap bound first)
+                if _rv_similarity(f, nums[k], bound=True) > best - _RV_MARGIN and \
+                        _rv_similarity(f, nums[k]) > best - _RV_MARGIN:
+                    return None
+            pick = j
         slots.append(pick)
     if len(set(slots)) != n or slots == list(range(n)):
         return None
     return dict(cand, tracks=[tracks[i] for i in slots], slots=slots, missing={}, full_tracks=n, reordered=True)
+# --- end of adapted code
 
 
 def _slots_why_not(album, s):
@@ -4679,11 +4733,16 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                                            "tagged as its own track, numbered as the release numbers it (TRK-2)"]
                 return s
         # TRK-8: or each file its own track anywhere on the release (discs in another order, a disc
-        # labelled as another): only where TRK-2 does not decide, and only when it fits better
-        view = None if album.get("tracks") and len({t.get("disc") or 1 for t in cand["tracks"]}) < 2             else release_view(album, cand, cfg)
+        # labelled as another): only where TRK-2 does not decide, only when it fits better, and only
+        # for a release proven by more than its name (a disc ID or TOC, a barcode, a catalogue number
+        # with the matrix: _slots_why_not) - the view never raises a release nothing else proves
+        view = None if album.get("tracks") and len({t.get("disc") or 1 for t in cand["tracks"]}) < 2 \
+            else release_view(album, cand, cfg)
         if view:
             s = score_candidate(album, view, cfg, ocr_text)
-            if ((s.get("dur_frac") or 0) >= (dur_frac or 0) and (s.get("titles_agree") or 0) >= (titles_agree or 0))                     and ((s.get("dur_frac") or 0) > (dur_frac or 0) or (s.get("titles_agree") or 0) > (titles_agree or 0)):
+            if ((s.get("dur_frac") or 0) >= (dur_frac or 0) and (s.get("titles_agree") or 0) >= (titles_agree or 0)) \
+                    and ((s.get("dur_frac") or 0) > (dur_frac or 0) or (s.get("titles_agree") or 0) > (titles_agree or 0)) \
+                    and not _slots_why_not(album, s):
                 s["notes"] = s["notes"] + ["your files are this release's tracks on other discs or places: each "
                                            "is tagged as its own track, numbered as the release numbers it (TRK-8)"]
                 return s

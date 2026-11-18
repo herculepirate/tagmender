@@ -159,7 +159,7 @@ class IDM1TaggedDiscs(Base):
             return engine.planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
                                            status="unresolved", tier="unresolved")
 
-        def forced(g, ref):
+        def forced(g, ref, **_kw):                  # (0.8.77: chosen_by_you=True from identify)
             seen.append((g.folder.name, ref, "forced"))
             return engine.planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
                                            status="unresolved", tier="unresolved")

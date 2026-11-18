@@ -232,7 +232,7 @@ ROW_STATES = {"waiting": N_("Waiting…"), "looking": N_("Looking up…"), "appl
 
 
 RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "web_unavailable", "rate_limited",
-               "missing_credentials"}
+               "missing_credentials", "lookup_failed"}
 
 
 def release_pages(a) -> list:
@@ -2026,6 +2026,7 @@ class Overview(QWidget):
         roots = dict(getattr(self, "roots", {}))
 
         at = {k: i for i, k in enumerate(k for ks in groups.values() for k in ks)}    # (its row: _lookup_order)
+        every = frozenset(self.album_key(a) for a in self.model.albums)
         unsent = []                                         # (albums an internal error left not looked up)
         self._lookup_unsent = unsent
 
@@ -2044,6 +2045,7 @@ class Overview(QWidget):
                 e.force = forced
                 e.file_anyway = {f for f, n in file_anyway.items() if n == name}
                 e.seed_claims = seed
+                e.listed_keys = every                       # (every row's: a changed album never takes another's)
                 e.offer_file_anyway = True                  # (MOV-5: here you can ask)
                 e.lookup_workers = workers
                 told = set()

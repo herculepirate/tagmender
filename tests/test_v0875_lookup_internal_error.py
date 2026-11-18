@@ -33,6 +33,19 @@ def add_track(folder: Path, n: int, title: str, artist: str):
                     str(folder / f"{n:02d}.flac"), "-y"], check=True)
 
 
+def mixed_folder(mix: Path):
+    """A folder holding two albums of loose tracks, Album X (x1-x3) and Album Y (y1-y3)."""
+    mix.mkdir(parents=True, exist_ok=True)
+    for who, n in (("X", 1), ("X", 2), ("X", 3), ("Y", 1), ("Y", 2), ("Y", 3)):
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                        f"sine=frequency={300 + 70 * n + (0 if who == 'X' else 500)}:duration={4 + n}",
+                        "-ar", "8000", "-ac", "1", "-metadata", f"title={who}{n}",
+                        "-metadata", f"album=Album {who}", "-metadata", f"albumartist=Band {who}",
+                        "-metadata", f"artist=Band {who}", "-metadata", f"track={n}",
+                        str(mix / f"{who.lower()}{n}.flac"), "-y"], check=True)
+    return mix
+
+
 class CloningHttp(te.FakeHttp):
     """FakeHttp that plan_each may clone: several albums looked up at once."""
     def thread_clone(self):
@@ -95,15 +108,7 @@ class TwoAlbumsOfOneFolder(te.Base):
     Y's row (Y is looked up under its own key, X's row gets no album of Y's)."""
     def setUp(self):
         super().setUp()
-        self.mix = self.lib / "Mixed"
-        self.mix.mkdir(parents=True)
-        for who, n in (("X", 1), ("X", 2), ("X", 3), ("Y", 1), ("Y", 2), ("Y", 3)):
-            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
-                            f"sine=frequency={300 + 70 * n + (0 if who == 'X' else 500)}:duration={4 + n}",
-                            "-ar", "8000", "-ac", "1", "-metadata", f"title={who}{n}",
-                            "-metadata", f"album=Album {who}", "-metadata", f"albumartist=Band {who}",
-                            "-metadata", f"artist=Band {who}", "-metadata", f"track={n}",
-                            str(self.mix / f"{who.lower()}{n}.flac"), "-y"], check=True)
+        self.mix = mixed_folder(self.lib / "Mixed")
         self.http = CloningHttp(dg=[te.dg_release(930, "Band X", "Album X"), te.dg_release(931, "Band Y", "Album Y")])
 
     def keys(self, e):
@@ -131,10 +136,66 @@ class TwoAlbumsOfOneFolder(te.Base):
                     finally:
                         for f, b in gone.items():
                             f.write_bytes(b)
-                    self.assertEqual(last[keys["x"]]["albums"], [])  # (X's row: no album of Y's)
+                    self.kept_as_listed(last[keys["x"]]["albums"], keys["x"])   # (X's row: no album of Y's)
                     ys = last[keys["y"]]["albums"]
                     self.assertEqual([a["key"] for a in ys], [keys["y"]])
                     self.assertTrue(all("y1.flac" in " ".join(a["album_files"]) for a in ys))
+
+    def kept_as_listed(self, rows, key):
+        self.assertEqual([(a["key"], a["status"]) for a in rows], [(key, "listed")])
+        self.assertIn(engine.CHANGED_SINCE_LISTED, rows[0]["notes"])
+        self.assertFalse(planmod.has_work(rows[0]))
+        self.assertFalse(any("/y" in f for f in rows[0]["album_files"]))
+
+    def test_refresh_of_x_alone_x_moved_away(self):
+        """Refresh of X's row alone (a selection): Y is another row of the list - never X's."""
+        for workers in (1, 3):
+            with self.subTest(workers=workers):
+                e = self.engine(self.http)
+                keys = self.keys(e)
+                e.listed_keys = set(keys.values())                # (the app: every row of its list)
+                gone = {f: f.read_bytes() for f in self.mix.glob("x*.flac")}
+                for f in gone:
+                    f.unlink()
+                try:
+                    last = self.look_up(e, [keys["x"]], workers)
+                finally:
+                    for f, b in gone.items():
+                        f.write_bytes(b)
+                self.assertEqual(list(last), [keys["x"]])
+                self.kept_as_listed(last[keys["x"]]["albums"], keys["x"])
+
+    def test_refresh_of_x_alone_a_track_of_x_renamed(self):
+        for workers in (1, 3):
+            with self.subTest(workers=workers):
+                e = self.engine(self.http)
+                keys = self.keys(e)
+                e.listed_keys = set(keys.values())
+                old, new = self.mix / "x2.flac", self.mix / "x2 renamed.flac"
+                old.rename(new)
+                try:
+                    last = self.look_up(e, [keys["x"]], workers)
+                finally:
+                    new.rename(old)
+                xs = last[keys["x"]]["albums"]
+                self.assertEqual([a["key"] for a in xs], [keys["x"]])          # (X as it is now, its row)
+                self.assertIn(str(new), xs[0]["album_files"])
+                self.assertFalse(any("/y" in f for f in xs[0]["album_files"]))
+
+    def test_which_album_is_the_rows_cannot_be_told_the_row_stays(self):
+        """X renamed, and Y no row of this look-up (no list told): two albums free - X's row stays
+        as listed, saying so, never dropped."""
+        for workers in (1, 3):
+            with self.subTest(workers=workers):
+                e = self.engine(self.http)
+                keys = self.keys(e)
+                old, new = self.mix / "x2.flac", self.mix / "x2 renamed.flac"
+                old.rename(new)
+                try:
+                    last = self.look_up(e, [keys["x"]], workers)
+                finally:
+                    new.rename(old)
+                self.kept_as_listed(last[keys["x"]]["albums"], keys["x"])
 
     def test_x_changed_is_x_and_y_stays_y(self):
         for workers in (1, 3):
@@ -251,10 +312,26 @@ class OneAlbumsInternalError(te.Base):
                               unresolved={"action": "move", "move_to": str(holding)})
         self.assertEqual(list(holding.iterdir()), [])
 
+    def test_a_long_error_still_reads_unresolved(self):
+        real = engine.Engine.identify_all
+
+        def identify_all(e, g):
+            if "Album G" in str(g.folder):
+                raise RuntimeError("no " * 300)
+            return real(e, g)
+        g = self.run_each(1, mock.patch.object(engine.Engine, "identify_all", identify_all),
+                          why="could not be looked up: no no", logged="RuntimeError")
+        self.assertLessEqual(len(g["identification"]["reason"]), 250)
+        # (told by its code: words cut short at any length still read Unresolved)
+        import reasons
+        cut = {"albums": [{"status": "skipped", "files": [], "identification": {
+            "reason": reasons.encode("could not be looked up: " + "x" * 400, ["lookup_failed"])}}]}
+        self.assertEqual(engine._unresolved_rows(cut)["albums"][0]["status"], "unresolved")
+
     def test_an_album_whose_identification_failed_is_never_applicable_either(self):
         for action in ({"action": "mark"}, {"action": "move", "move_to": str(self.tmp / "u")}):
             with self.subTest(action=action["action"]):
-                self.run_each(1, self.identifying_g_fails(), why="error: the database said no",
+                self.run_each(1, self.identifying_g_fails(), why="could not be looked up: the database said no (see log)",
                               logged="RuntimeError", unresolved=action)
 
 
@@ -428,8 +505,57 @@ class RefreshAfterApply(tg.Gui):
         self.assertEqual(row("Album G")["status"], "done")         # (its row stays as it was)
         self.assertEqual(row("Album K")["status"], k_was)            # (looked up again, as before)
 
+
+@unittest.skipIf(tg.QApplication is None, "PySide6 not installed")
+class RefreshASelection(tg.Gui):
+    """Refresh of some rows only, from two folders (two batches): a changed album never takes
+    another row's album, and a row whose album cannot be told stays, as listed."""
+    def test_refresh_of_some_rows_from_two_folders(self):
+        import app_settings
+        app_settings.set_value("add_folder", "list")
+        mix = mixed_folder(self.tmp / "drop" / "Mixed")
+        ov = self.win.pages["Overview"]
+        ov.refresh_profiles()
+        ov.profile.setCurrentText("Auto")
+        ov.set_path(str(mix))
+        self.assertTrue(wait(lambda: ov.plan is not None and not ov.running, self.app))
+        ov.add_to_list([str(self.d)])
+        self.assertTrue(wait(lambda: len(ov.model.albums) == 3 and not ov.running, self.app, timeout=60))
+        ov.look_up("profile", list(ov.model.albums))
+        self.assertTrue(wait(lambda: not ov.running, self.app, timeout=60), ov.summary.text())
+        row = lambda w: next(a for a in ov.model.albums                       # noqa: E731
+                             if any(f"/{w}1.flac" in f for f in a.get("album_files") or []) or
+                             (w == "g" and "Album G" in a["source_dir"]))
+        kx, ky = ov.album_key(row("x")), ov.album_key(row("y"))
+        y_was = dict(row("y"))
+        failed = []
+        with mock.patch.object(type(ov), "oops", lambda s, msg: failed.append(msg)):
+            old, new = mix / "x2.flac", mix / "x2 renamed.flac"
+            old.rename(new)                                        # (a track of X renamed)
+            ov.look_up("profile", [row("x"), row("g")], again=True)
+            self.assertTrue(wait(lambda: not ov.running, self.app, timeout=60), ov.summary.text())
+            self.assertEqual(len(ov.model.albums), 3)
+            self.assertEqual(ov.album_key(row("x")), kx)
+            self.assertIn(str(new), row("x")["album_files"])
+            self.assertEqual(ov.album_key(row("y")), ky)
+            self.assertEqual(row("y")["album_files"], y_was["album_files"])
+            for f in mix.glob("x*.flac"):
+                f.unlink()                                         # (X moved away)
+            ov.look_up("profile", [row("x"), row("g")], again=True)
+            self.assertTrue(wait(lambda: not ov.running, self.app, timeout=60), ov.summary.text())
+        self.assertEqual(failed, [])
+        self.assertEqual(len(ov.model.albums), 3)
+        x = next(a for a in ov.model.albums if ov.album_key(a) == kx)
+        self.assertEqual(x["status"], "listed")
+        self.assertIn(engine.CHANGED_SINCE_LISTED, x["notes"])
+        from gui.models import can_apply
+        self.assertFalse(can_apply(x))
+        y = next(a for a in ov.model.albums if ov.album_key(a) == ky)
+        self.assertEqual(y["album_files"], y_was["album_files"])
+        self.assertEqual(y["status"], y_was["status"])
+
 # (the window's own tests are test_gui's: not run again here)
-for _cls in (FailureShown, LookUpGoesOn, RefreshAfterApply):
+for _cls in (FailureShown, LookUpGoesOn, RefreshAfterApply, RefreshASelection):
     for _n in dir(tg.Gui):
         if _n.startswith("test_"):
             setattr(_cls, _n, None)

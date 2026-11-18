@@ -41,10 +41,66 @@ class NAM8Persons(unittest.TestCase):
 
     def test_NAM8_two_persons_with_an_ampersand_take_the_first(self):
         two = mb({"a": PERSON(), "b": PERSON()})
-        for credit in ("Paolo Fresu & Omar Sosa", "Paolo Fresu and Omar Sosa", "Paolo Fresu / Omar Sosa",
+        for credit in ("Paolo Fresu & Omar Sosa", "Paolo Fresu and Omar Sosa", "Paolo Fresu, Omar Sosa",
                        "Paolo Fresu x Omar Sosa", "Paolo Fresu vs. Omar Sosa"):
             got = aa.choose(tags(["Paolo Fresu", "Omar Sosa"], ["a", "b"], credit), PROF, two)
             self.assertEqual(got[0], "Paolo Fresu", credit)
+
+    def test_NAM8_a_slash_is_a_split_release_not_partners(self):
+        # (MusicBrainz's " / " joins the acts of a split release: today's behaviour, the whole credit)
+        two = mb({"a": PERSON(), "b": PERSON()})
+        self.assertIsNone(aa.choose(tags(["A Person", "B Person"], ["a", "b"], "A Person / B Person"), PROF, two))
+        self.assertIsNone(aa.choose(tags(["A Person", "B Person", "C Person"], ["a", "b", "c"],
+                                         "A Person & B Person / C Person"), PROF, mb({"a": PERSON(), "b": PERSON(),
+                                                                                     "c": PERSON()})))
+
+    def test_NAM8_a_classical_credit_keeps_todays_behaviour(self):
+        two = mb({"bach": PERSON(), "gg": PERSON(), "lvb": PERSON(), "ma": PERSON()})
+        # (MusicBrainz's "; " puts the composer first: never filed under the composer)
+        t = tags(["Johann Sebastian Bach", "Glenn Gould"], ["bach", "gg"], "Johann Sebastian Bach; Glenn Gould")
+        self.assertIsNone(aa.choose(t, PROF, two))
+        t = tags(["Chopin", "Liszt", "Martha Argerich"], ["bach", "lvb", "ma"], "Chopin; Liszt; Argerich")
+        self.assertIsNone(aa.choose(t, PROF, mb({"bach": PERSON(), "lvb": PERSON(), "ma": PERSON()})))
+        # (an equal join, but the composer of the works is credited and performs on none of them)
+        t = tags(["Ludwig van Beethoven", "Martha Argerich"], ["lvb", "ma"], "Ludwig van Beethoven & Martha Argerich")
+        t.update({"composer": ["Ludwig van Beethoven"], "musicbrainz_composerid": ["lvb"],
+                  "performer:piano": ["Martha Argerich"]})
+        self.assertIsNone(aa.choose(t, PROF, two))
+        self.assertIsNone(aa.apply([t], PROF, two)[0].get("~remove"))
+        # (by the composer's ID alone, a name credited otherwise)
+        t2 = dict(t, composer=["Beethoven"])
+        self.assertIsNone(aa.choose(t2, PROF, two))
+        # (on a later track only: the album decides)
+        first = tags(["Ludwig van Beethoven", "Martha Argerich"], ["lvb", "ma"], "Ludwig van Beethoven & Martha Argerich")
+        self.assertEqual(aa.apply([first, t], PROF, two)[0]["albumartist"], ["Ludwig van Beethoven & Martha Argerich"])
+        # (a classical genre, or the profile's western classical tradition)
+        t = tags(["Glenn Gould", "Yo-Yo Ma"], ["gg", "ma"], "Glenn Gould & Yo-Yo Ma")
+        self.assertIsNone(aa.choose(dict(t, genre=["Baroque"]), PROF, two))
+        self.assertIsNone(aa.choose(t, dict(PROF, tradition="western_classical"), two))
+        self.assertEqual(aa.choose(t, PROF, two)[0], "Glenn Gould")
+        # (a composer who plays the works is a jazz leader, not a classical credit)
+        t = tags(["Yelena Eckemoff", "Arild Andersen"], ["gg", "ma"], "Yelena Eckemoff, Arild Andersen")
+        t.update({"composer": ["Yelena Eckemoff"], "performer:piano": ["Yelena Eckemoff"],
+                  "performer:double bass": ["Arild Andersen"], "genre": ["Jazz"]})
+        self.assertEqual(aa.choose(t, PROF, two)[0], "Yelena Eckemoff")
+
+    def test_NAM8_the_first_artist_unreachable_keeps_the_files_album_artist(self):
+        t = tags(["A Person", "B Person"], ["a", "b"], "A Person & B Person")
+        self.assertEqual(aa.choose(t, PROF, mb({"b": PERSON()}), lambda d: aa.NOT_ASKED), aa.UNKNOWN)
+
+    def test_NAM8_no_new_question_when_the_answer_is_settled(self):
+        asked = []
+
+        def members(i):
+            asked.append(i)
+            return {"a": PERSON(), "b": aa.Members([("M", "", "m")], "group"), "c": aa.Members((), "")}.get(i)
+        # (another act has members, the first artist not in it: separate acts - the first never asked)
+        self.assertIsNone(aa.choose(tags(["A", "B"], ["a", "b"], "A & B"), PROF, members))
+        self.assertNotIn("a", asked)
+        # (another artist of no known type: never all persons - the first never asked)
+        asked.clear()
+        self.assertIsNone(aa.choose(tags(["A", "C"], ["a", "c"], "A & C"), PROF, members))
+        self.assertNotIn("a", asked)
 
     def test_NAM8_a_person_and_a_group_are_separate_acts(self):
         t = tags(["Sam Beam", "Calexico"], ["sb", "cal"], "Sam Beam & Calexico")

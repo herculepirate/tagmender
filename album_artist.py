@@ -97,14 +97,15 @@ def _list(t, key) -> list:
     return [str(x) for x in (v if isinstance(v, list) else [v] if v else [])]
 
 
-def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=None):
+def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=None, album=None):
     """(name, sort name, MusicBrainz ID, Discogs ID) of the album artist for tags t, or None to
     keep the credit. members_of(mbid) -> [(name, sort, id), ...] of a band (None: unknown);
     discogs_members_of(discogs id) -> [(name, "", "", discogs id), ...], asked when MusicBrainz
     names no leader (or the band has no MusicBrainz ID). find_ids(name, mbid) -> (mbid, discogs
     id): the band's IDs when the credit lacks them or its own lead to no leader - the Discogs
     artist its MusicBrainz entry links to, or (no ID at all: a shop's credit) the one MusicBrainz
-    artist of exactly that name - so the rule holds whichever source the album was tagged from."""
+    artist of exactly that name - so the rule holds whichever source the album was tagged from.
+    ALBUM: every track's tags (NAM-8's classical test; T alone when not given)."""
     c = settings(profile)
     if not c.get("lead") or compilations.is_various(t):
         return None
@@ -160,7 +161,8 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         if not mapped(names[0])[0] and guest_after_partners(joined, names):
             return None              # (partners first, a guest after: the whole credit)
         equals = None if mapped(names[0])[0] or lead_credit(joined, names) \
-            else _equals(names, ids, dg, members_of, discogs_members_of)
+            else _equals(names, ids, dg, members_of, discogs_members_of,
+                         persons=persons_as_equals(joined, names) and not classical(album or [t], names, ids, profile))
         if equals is True:
             return None              # ... NAM-8: unless a collaboration of equals - the whole credit
         if equals == "unknown":
@@ -245,6 +247,45 @@ def guest_after_partners(credit, names) -> bool:
     return bool(js) and not _LEAD_JOIN.search(js[0]) and any(_LEAD_JOIN.search(j) for j in js[1:])
 
 
+# NAM-8: joins that never make persons a lead and partners: MusicBrainz's "; " (a classical
+# credit: "Johann Sebastian Bach; Glenn Gould" - the composer first) and " / " (a split release)
+_NOT_PARTNERS = (";", "/")
+# NAM-8: a classical genre or style (the person rule is left out for these releases)
+_CLASSICAL = re.compile(r"\b(?:classical|baroque|opera|operas|symphon\w*|concerto\w*|oratorio|cantata\w*)\b")
+_PERFORMS = ("performer", "conductor")
+
+
+def persons_as_equals(credit, names) -> bool:
+    """NAM-8: the credit's joins as written allow the person rule: all found, none a ";" or "/"
+    (never when the joins cannot be read)."""
+    js = joins(credit, names) if credit and len(names) >= 2 else None
+    return js is not None and not any(c in j for j in js for c in _NOT_PARTNERS)
+
+
+def classical(tracks, names, ids, profile=None) -> bool:
+    """NAM-8: a classical release - the profile's tradition is western classical, a track's genre
+    is a classical one, or a credited artist is the composer of the works and performs on none of
+    them (MusicBrainz's composer and performer relationships: "Ludwig van Beethoven; Martha
+    Argerich"). With no performer credits at all, a credited composer is enough."""
+    tradition = profile.get("tradition") if hasattr(profile, "get") else ""
+    if str(tradition or "") == "western_classical":
+        return True
+    composers, composer_ids, performers = set(), set(), set()
+    for t in tracks or ():
+        if any(_CLASSICAL.search(fold(g)) for g in _list(t, "genre")):
+            return True
+        composers |= {fold(x) for x in _list(t, "composer")}
+        composer_ids |= set(_list(t, "musicbrainz_composerid"))
+        for k in t:
+            if str(k).split(":")[0] in _PERFORMS:
+                performers |= {fold(x) for x in _list(t, k)}
+    for k, n in enumerate(names):
+        mine = fold(n) in composers or (len(ids) == len(names) and str(ids[k]) in composer_ids)
+        if mine and fold(n) not in performers:
+            return True
+    return False
+
+
 class Members(list):
     """A database's answer for one artist: its members, and kind - "person", "group" or ""
     (the database did not say)."""
@@ -287,13 +328,14 @@ def _answer(mbid, dgid, members_of, discogs_members_of):
     return ("down", []) if down else ("none", [])
 
 
-def _equals(names, ids, dg, members_of=None, discogs_members_of=None):
+def _equals(names, ids, dg, members_of=None, discogs_members_of=None, persons=True):
     """NAM-8: a joint credit is a collaboration of equals (True: Calexico and Iron & Wine, two
     bands) unless its first artist is a member of another act it names - a leader credited with
     their own band (False: Thomas Strønen & Time Is A Blind Guide, Strønen in the band) - or a
     person credited with a group no database lists members for (False: the person leads, as
     before NAM-8) - or every artist it names is a person by MusicBrainz's type (False: Paolo
-    Fresu & Omar Sosa is filed under Paolo Fresu). The other acts' members come from
+    Fresu & Omar Sosa is filed under Paolo Fresu; PERSONS False - a ";" or "/" join, a classical
+    release - leaves that last case out). The other acts' members come from
     MusicBrainz (its "member of band" relationships), else from Discogs. None when no database
     answered for any of them (no IDs: the first artist leads, as before); "unknown" when the
     answer depends on an artist no database could be reached for."""
@@ -316,11 +358,17 @@ def _equals(names, ids, dg, members_of=None, discogs_members_of=None):
             return "unknown"
     if any(state == "down" for state, _m in answers):
         return "unknown"
-    if same[0] and all(_mb_person(ids[k], members_of) for k in range(len(names))):
+    if persons and same[0] and members_of and not any(st in ("members", "group") for st, _m in answers) \
+            and all(_mb_person(ids[k], members_of) for k in range(1, len(names))):
         # (NAM-8, decided 2026-11-17: persons alone, joined as equals - "Yelena Eckemoff, Arild
         # Andersen, Thomas Strønen" - are filed under the first-credited; only MusicBrainz's type
-        # "Person" counts, a Discogs artist without members proves nothing)
-        return False
+        # "Person" counts, a Discogs artist without members proves nothing. The others' answers
+        # are already in hand; the first artist is asked only when they are all persons)
+        first = members_of(ids[0]) if ids[0] else NOT_ASKED
+        if first is None:
+            return "unknown"         # (MusicBrainz unreachable: the files' album artist stays)
+        if _kind(first) == "person":
+            return False
     return True if any(state != "none" for state, _m in answers) else None
 
 
@@ -344,7 +392,7 @@ def apply(targets: list, profile, members_of=None, discogs_members_of=None, find
     album artist is the album's)."""
     if not targets or not enabled(profile):
         return targets
-    lead = choose(targets[0], profile, members_of, discogs_members_of, find_ids)
+    lead = choose(targets[0], profile, members_of, discogs_members_of, find_ids, targets)
     if lead == UNKNOWN:
         keys = ("albumartist", "albumartists", "albumartistsort", "musicbrainz_albumartistid",
                 "discogs_albumartist_id", "~albumartists", "~albumartists_sort")

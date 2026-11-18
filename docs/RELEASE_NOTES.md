@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.8.76
+
+**Box sets and other sets of disc folders**
+- A folder that says it is a set - a CD count ("14 CD", "5CD"), "Box Set", "Complete ... Collection" - holding its discs in numbered folders ("CD01 Cold Spring Harbor" ... "CD15 Collected Additional Masters") is now one album, matched as that set, even when each disc is tagged as an album of its own with no disc numbers; a two-disc album inside a box keeps its own disc numbering (DSC-13).
+- Disc folders side by side whose disc IDs (read from their rip logs) are all on one release are that release, also when the folder does not say it is a set and with more than eight discs (DSC-14).
+- Once a set's release is known, every file is placed on its own track anywhere on the release's discs, by its IDs or by title, length and position - discs in another order or mislabelled no longer go wrong (TRK-8).
+- Disc words and years in album titles ("My Lives [Disc 1]", "(Disc 3) 1989-1999", "[Disk 4]") no longer split a set into albums (DSC-15).
+- Example: Billy Joel - The Complete Albums Collection (2011, 15 CDs) is one album with its 15 discs, not 15 albums matched to other releases.
+
 ## 0.8.75
 
 **Look-ups that stopped with "maximum recursion depth exceeded"**

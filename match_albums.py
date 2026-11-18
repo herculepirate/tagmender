@@ -4782,6 +4782,9 @@ def mb_linked_discogs_id(rel):
 
 
 _MB_VIDEO_FORMATS = ("dvd-video", "blu-ray", "dvd", "vhs", "hd-dvd", "vcd", "svcd")
+# (an audio disc of hi-res a CD rip never holds: MusicBrainz's "DVD-Audio", "Blu-ray Audio";
+# SACDs are MED-22's)
+_DVD_AUDIO = re.compile(r"^\s*(?:dvd-?audio|blu-?ray[- ]audio)\b", re.I)
 
 
 def mb_sort_names(rel):
@@ -4820,6 +4823,21 @@ def mb_candidate(rel):
     kinds = {mc.media_kind(m.get("format")) for m in audio_media} - {""}
     mixed_vinyl = bool(kinds & {"vinyl", "cassette"}) and bool(kinds & {"cd", "digital"})
     disc_titles, pregaps = {}, []
+    # MED-23: a CD box's DVD-Audio or Blu-ray Audio (hi-res audio a CD rip does not hold) and its
+    # downloads after the last physical disc (MED-20) - the media a rip of its CDs leaves out
+    # (King Crimson - Larks' Tongues In Aspic: The Complete Recordings, 13 CDs, a DVD-Audio, a
+    # Blu-ray and 2 downloads): compared without them only for a CD rip (match_core.score_candidate)
+    cd_media = [mi for mi, m in enumerate(audio_media, 1) if mc.media_kind(m.get("format")) == "cd"
+                and not mc.hires_media([m.get("format")])]
+    physical = [mi for mi, m in enumerate(audio_media, 1) if mc.media_kind(m.get("format")) != "digital"]
+    box_extra = {}
+    if cd_media:
+        for mi, m in enumerate(audio_media, 1):
+            fmt = str(m.get("format") or "")
+            if mc.media_kind(fmt) == "digital" and physical and mi > max(physical):
+                box_extra[mi] = "download"
+            elif mc.media_kind(fmt) != "cd" and _DVD_AUDIO.search(fmt):
+                box_extra[mi] = "hires"
     for mi, media in enumerate(audio_media, 1):
         if media.get("title"):
             disc_titles[mi] = media["title"]       # a box set's discs: "The Legacy", "The New Order"
@@ -4837,6 +4855,8 @@ def mb_candidate(rel):
                            "secs": (t.get("length") or 0) / 1000.0})
             if box_vinyl:
                 tracks[-1]["box_vinyl"] = True         # a 7" in a CD box (Kreator - Dying Alive)
+            if mi in box_extra:
+                tracks[-1]["box_extra"] = box_extra[mi]
     infos = rel.get("label-info") or []
     group = rel.get("release-group") or {}
     # each medium's format name as Picard compares it with your preferred formats ("CD",

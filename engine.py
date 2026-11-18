@@ -3902,6 +3902,14 @@ class Engine:
                 cut = _without_box_vinyl(rel, ps)
                 if cut is not None and len(cut) == n:
                     tags_mb = cut
+            if tags_mb and rel and len(tags_mb) != n and cd_copy and not (album.get("audio") or {}).get("hires"):
+                # MED-23: the box's DVD-Audio / Blu-ray Audio and its downloads after the last disc
+                # are not in your CD rip (the matcher compared the CDs alone): each CD keeps its
+                # medium position, the DVD-Audio still counted among the discs (an audio disc,
+                # MED-17), the downloads not (MED-20)
+                cut = _without_box_extra(rel, ps)
+                if cut is not None and len(cut) == n:
+                    tags_mb = cut
             if dparts and dparts[1] is not None and len(dparts[1]) != n and any(dg_vinyl) \
                     and len(dg_vinyl) == len(dparts[1]):
                 kept = [t for t, v in zip(dparts[1], dg_vinyl) if v == vinyl_copy]
@@ -7997,6 +8005,24 @@ def _without_box_vinyl(rel, ps):
         return None
     drop = {int(p) for p, k in kinds.items() if p and k in ("vinyl", "cassette")}
     return mb_tags.release_tags(rel, ps, without=drop)
+
+
+def _without_box_extra(rel, ps):
+    """MED-23: release_tags of a MusicBrainz CD box without its DVD-Audio / Blu-ray Audio media
+    and its downloads after the last physical disc (those not counted in the total, MED-20);
+    None when it has neither (match_albums.mb_candidate marks the same media)."""
+    audio = mb_tags.audio_media(rel)
+    pos = [int(m.get("position") or d) for d, m in enumerate(audio, 1)]
+    kinds = [mc.media_kind(m.get("format")) for m in audio]
+    if not any(k == "cd" and not mc.hires_media([m.get("format")]) for k, m in zip(kinds, audio)):
+        return None
+    physical = [p for p, k in zip(pos, kinds) if k != "digital"]
+    download = {p for p, k in zip(pos, kinds) if k == "digital" and physical and p > max(physical)}
+    hires = {p for p, k, m in zip(pos, kinds, audio)
+             if k != "cd" and ma._DVD_AUDIO.search(str(m.get("format") or ""))}
+    if not download and not hires:
+        return None
+    return mb_tags.release_tags(rel, ps, without=download | hires, uncounted=download or None)
 
 
 def discogs_parts(det, dm, http=None, s=None, whole_works=False, tracks_det=None):

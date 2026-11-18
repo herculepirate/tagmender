@@ -3996,6 +3996,19 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             n_cand = n_file
             notes.append("the CD in the set is not in your files" if vinyl_copy else
                          "the vinyl single in the box is not in your files")
+    if n_file and n_file != n_cand and any(t.get("box_extra") for t in cand["tracks"]) \
+            and copy_kind(album) not in ("vinyl", "cassette") and not (album.get("audio") or {}).get("hires"):
+        # MED-23: a CD box's DVD-Audio or Blu-ray Audio and its downloads after the last disc
+        # (King Crimson - Larks' Tongues In Aspic: The Complete Recordings): CD-quality files hold
+        # none of the hi-res discs - its CDs alone are compared, each keeping its disc number
+        cds = [t for t in cand["tracks"] if not t.get("box_extra")]
+        if len(cds) == n_file:
+            kinds = {t["box_extra"] for t in cand["tracks"] if t.get("box_extra")}
+            cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
+            n_cand = n_file
+            notes.append("the box's " + " and ".join(w for k, w in (("hires", "DVD-Audio / Blu-ray Audio"),
+                                                                    ("download", "download")) if k in kinds)
+                         + " is not in your CD rip")
     if n_file and n_file != n_cand and cand.get("works_view") and not box_note and not cand.get("version_media") \
             and not cand.get("pregap_used") and not any(t.get("box_vinyl") for t in cand["tracks"]):
         # TRK-5: works the release lists without lengths, their parts lettered as one track's

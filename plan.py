@@ -2275,6 +2275,12 @@ class Planner:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
             entry["status"] = "unresolved"
             entry["label"] = "Unresolved"
+            if ua == "move" and self.file_anyway is not True and self.asked_to_file(prop):
+                # MOV-6: you asked for it to be filed (its closest release taken), yet no release
+                # could be had for it: it is not sent to the unresolved folder against your ask
+                entry["notes"].append("you asked for it to be filed, but no release could be had for it: "
+                                      "marked where it is, not moved to the unresolved folder")
+                ua = "mark"
             if (ua == "leave" or op == "copy") and not (getattr(prop, "restore", None) and op != "copy"):
                 for f in kept:
                     entry["files"].append({"src": str(f), "dst": str(f), "op": "none", "changes": {}, "diff": [],

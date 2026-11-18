@@ -526,6 +526,7 @@ class Overview(QWidget):
         self.model.choose_profile = self.set_album_profile
         self.model.state_of = self.state_of
         self.model.file_asked.connect(self.file_anyway_for)  # (MOV-6: an offered row ticked)
+        self.model.unresolved_action = self.unresolved_action
         self.shown_kind = "all"                              # the toolbar's All / Ready / Needs Attention
         # 0.8.71: the list is the albums pane itself (Albums as they will be: an album a row, its
         # discs and tracks under it), beside Your files, over the inspector pane (gui/preview_panes.py)
@@ -2446,7 +2447,8 @@ class Overview(QWidget):
             self.applying_row(i)
             self.apply_bar.album_started(i)
             self._apply_at = (i, n, Path(what).name)
-            self.summary.setText(tr("Applying album {0} of {n}: {name}…").format(i + 1, n=n, name=Path(what).name))
+            # (the counts are the status bar's progress's own words: here only which album)
+            self.summary.setText(tr("{name}…").format(name=Path(what).name))
         elif getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
             self._lookup_i, self._lookup_name = i, Path(what).name
             self.summary.setText(self.lookup_words(i, Path(what).name))
@@ -2492,7 +2494,9 @@ class Overview(QWidget):
         _i, total, name = getattr(self, "_apply_at", (i, 0, ""))
         words = tr("Applying album {0} of {n}: {name} — file {1} of {m}: {file}").format(
             i + 1, j + 1, n=total, name=name, m=n, file=Path(path).name)
-        self.summary.setText(words)
+        # (beside the progress, which says "Applying 1 of 2 albums · 4 of 6 files": which file only)
+        self.summary.setText(tr("{name} — file {0} of {m}: {file}").format(j + 1, name=name, m=n,
+                                                                           file=Path(path).name))
         self.bar.setToolTip(words)
         self.bar.setAccessibleDescription(words)
 
@@ -2893,14 +2897,12 @@ class Overview(QWidget):
             self.states[id(a)] = "applying"
             self.model.refresh_rows()
             self.apply_bar.album_started(i)
-            self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name}")
-                                             .format(i + 1, n=news[2], name=Path(news[3]).name))
+            self.win.statusBar().showMessage(tr("Beside the look-up: {name}").format(name=Path(news[3]).name))
         elif kind == "file":
             _k, _i, j, n, f = news
             self.apply_bar.file(i, j, n)
-            self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name} — "
-                                                "file {1} of {m}").format(i + 1, j + 1, n=len(side),
-                                                                          name=Path(a["source_dir"]).name, m=n))
+            self.win.statusBar().showMessage(tr("Beside the look-up: {name} — file {0} of {m}").format(
+                j + 1, name=Path(a["source_dir"]).name, m=n))
         elif kind == "album":
             self.mark_applied(a, news[2])
             self.apply_bar.album_done(i)
@@ -3449,8 +3451,16 @@ class Overview(QWidget):
     def may_file_anyway(self, a) -> bool:
         """The album was tagged where it is (or not copied) only because its score is below the
         profile's floor for filing (plan entry "below_floor"), and is not being worked on."""
-        return bool(a and a.get("below_floor") and a.get("status") not in ("done",)
+        from .models import release_offered
+        return bool(a and (a.get("below_floor") or release_offered(a)) and a.get("status") not in ("done",)
                     and not (getattr(self, "running", False) and not getattr(self, "looking", None)))
+
+    def unresolved_action(self, a) -> str:
+        """What album A's profile does with an Unresolved album ("mark", "move", "leave"; "")."""
+        try:
+            return str(self.planning_profile(name=self.profile_of(a))["unresolved"]["action"])
+        except Exception:
+            return ""
 
     def drop_asks_of_other_profiles(self):
         """MOV-5: the profile chosen above changed: an ask made under another profile is dropped
@@ -3475,9 +3485,19 @@ class Overview(QWidget):
         if not chosen:
             return
         import engine
+        from .models import best_candidate
         for a in chosen:                                     # (the album's own files: not its folder's others)
-            for f in engine.plan_entry_files(a):
+            files = engine.plan_entry_files(a)
+            for f in files:
                 self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
+            c = best_candidate(a)
+            if c:                                            # (MOV-6: Unresolved - its closest release taken)
+                key = os.path.realpath(a["source_dir"])
+                mine = {os.path.realpath(f) for f in files}
+                kept = [x for x in (self.forced.get(key) or []) if isinstance(x, dict) and
+                        not mine & {os.path.realpath(f) for f in x.get("files") or []}]
+                self.forced[key] = kept + [dict({"ref": c["ref"], "files": files},
+                                                **({"only": True} if a.get("split") else {}))]
         self.look_up(self.sources.currentData() or "profile", self.with_versions(chosen), again=True)
         self.win.statusBar().showMessage(
             tr("Looking up {0} again, to be filed into the library as you asked; nothing is written until you "

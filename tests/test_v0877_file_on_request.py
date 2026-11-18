@@ -19,7 +19,14 @@ import tagio  # noqa: E402
 QApplication = t864.QApplication
 
 
-class MOV6_Planner(t864.Base):
+class Dirs:
+    def unresolved_dir(self):
+        d = self.tmp / "unresolved"
+        d.mkdir(exist_ok=True)
+        return d
+
+
+class MOV6_Planner(Dirs, t864.Base):
     def partial(self, **kw):
         return self.proposal(conf=99, tier="partial", provider="web", **kw)
 
@@ -61,6 +68,16 @@ class MOV6_Planner(t864.Base):
         self.assertEqual(self.ops(a), {"copy"})
         self.assertIn("copied because you asked (no release proven)", a["notes"])
 
+    def test_MOV6_asked_but_still_unresolved_is_not_sent_to_the_unresolved_folder(self):
+        prof = self.profile(operation="move", destination=str(self.dest),
+                            unresolved={"action": "move", "move_to": str(self.unresolved_dir())})
+        un = self.proposal(status="unresolved", targets=[], confidence=0, reason="no match")
+        a = pl.build([un], prof)["albums"][0]
+        self.assertEqual(self.ops(a), {"move"})                         # (unasked: as before)
+        a = pl.build([un], prof, file_anyway=self.mine())["albums"][0]
+        self.assertNotIn("move", self.ops(a))
+        self.assertIn("not moved to the unresolved folder", " ".join(a["notes"]))
+
     def test_MOV6_nobody_asks_where_nobody_can(self):
         # (the watcher, unattended and command-line runs make no trial: nothing offered)
         prof = self.profile(operation="move", destination=str(self.dest))
@@ -70,7 +87,7 @@ class MOV6_Planner(t864.Base):
 
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")
-class MOV6_App(t864.Base):
+class MOV6_App(Dirs, t864.Base):
     @classmethod
     def setUpClass(cls):
         import gui
@@ -209,6 +226,71 @@ class MOV6_App(t864.Base):
         plan = pl.build([un], prof)
         ov = self.show(plan)
         self.assertFalse(ov.model.flags(ov.model.index(0, 1)) & Qt.ItemIsUserCheckable)
+
+    CANDIDATE = {"source": "discogs", "id": "777", "ref": "discogs:777", "score": 62.0,
+                 "title": "Real Artist - Real Album (2001)", "url": "https://www.discogs.com/release/777"}
+
+    def unresolved(self):
+        return self.proposal(status="unresolved", tier="unresolved", targets=[], confidence=0, reason="no match",
+                             candidates=[dict(self.CANDIDATE)])
+
+    def test_MOV6_an_unresolved_row_with_a_release_found_ticked_is_tagged_from_it_and_filed(self):
+        import engine
+        from PySide6.QtCore import Qt
+        from gui import overview as govw
+        prof = self.profile(operation="move", destination=str(self.dest),
+                            unresolved={"action": "move", "move_to": str(self.unresolved_dir())})
+        plan = pl.build([self.unresolved()], prof)
+        a = plan["albums"][0]
+        self.assertEqual(a["status"], "unresolved")
+        ov = self.show(plan)
+        box = ov.model.index(0, 1)
+        self.assertTrue(ov.model.flags(box) & Qt.ItemIsUserCheckable)
+        self.assertEqual(ov.model.data(box, Qt.CheckStateRole), Qt.Unchecked)
+        with mock.patch.object(ov, "planning_profile", lambda *a, **k: prof):
+            tip = ov.model.data(ov.model.index(0, 0), Qt.ToolTipRole)
+        self.assertIn("Tick it to tag it from the closest release found (Real Artist - Real Album (2001), score 62)",
+                      tip)
+        self.assertIn("Unticked, Apply moves it to your unresolved folder", tip)
+        self.assertIn(a, ov.to_apply())                     # (unticked: its unresolved action, as before)
+        seen = []
+
+        def fake_plan_each(e, path, keys, emit, **kw):
+            seen.append((set(e.file_anyway), dict(e.force)))
+            # (the release taken: identified from it, its score below the floor - filed as asked)
+            out = pl.build([self.proposal(conf=62)], prof, file_anyway=e.file_anyway, seed_claims=e.seed_claims,
+                           offer_file_anyway=e.offer_file_anyway)
+            out["albums"][0]["key"] = keys[0]
+            emit(keys[0], out)
+            return len(keys)
+        with mock.patch.object(engine, "engine_for_thread", lambda *a, **k: type("E", (), {})()), \
+                mock.patch.object(govw, "plan_each", fake_plan_each), \
+                mock.patch.object(ov, "planning_profile", lambda *a, **k: prof):
+            ov.model.setData(box, Qt.Checked, Qt.CheckStateRole)
+            self.assertIn("Looking up 1 album again", self.win.statusBar().currentMessage())
+            end = time.time() + 30
+            while time.time() < end and (ov.running or not seen):
+                self.app.processEvents()
+                time.sleep(0.02)
+        files, force = seen[0]
+        self.assertEqual(files, {os.path.realpath(str(self.f1)), os.path.realpath(str(self.f2))})
+        self.assertEqual([c["ref"] for c in force[os.path.realpath(str(self.album))]], ["discogs:777"])
+        row = ov.model.albums[0]
+        self.assertEqual(row["status"], "ready")
+        self.assertEqual(self.ops(row), {"move"})
+        self.assertIn("moved because you asked", " ".join(row["notes"]))
+        self.assertIn(row, ov.to_apply())
+        executor.Executor(dict(plan, albums=[row])).run()
+        self.assertEqual(len(list(self.dest.rglob("*.flac"))), 2)
+        self.assertEqual(list((self.tmp / "unresolved").rglob("*.flac")), [])
+
+    def test_MOV6_an_unresolved_row_without_a_release_says_why(self):
+        from PySide6.QtCore import Qt
+        prof = self.profile(operation="move", destination=str(self.dest), unresolved={"action": "mark"})
+        un = self.proposal(status="unresolved", targets=[], confidence=0, reason="no match")
+        ov = self.show(pl.build([un], prof))
+        self.assertIn("no release the sources found fits it", ov.model.data(ov.model.index(0, 0), Qt.ToolTipRole))
+        self.assertEqual(ov.model.data(ov.model.index(0, 1), Qt.CheckStateRole), Qt.Checked)   # (marked, as before)
 
     def test_MOV6_up_to_date_rows_say_so_on_apply(self):
         prof = self.profile(operation="move", destination=str(self.dest))

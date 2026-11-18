@@ -2578,8 +2578,12 @@ class PreviewPanes(QWidget):
     def show_offer(self, album):
         """MOV-5/MOV-6: why ALBUM is not filed (its score, no release proven) and the button that
         asks for it; hidden for any other album."""
-        from .models import not_filed_reason
+        from .models import not_filed_reason, release_offered, unresolved_reason
         words = not_filed_reason(album) if album is not None else ""
+        if not words and album is not None and release_offered(album):      # (MOV-6: Unresolved)
+            ov = self.owner
+            words = unresolved_reason(album, ov.unresolved_action(album) if ov is not None and
+                                      hasattr(ov, "unresolved_action") else "")
         self.offer.setVisible(bool(words))
         if not words:
             return

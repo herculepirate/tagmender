@@ -1261,8 +1261,12 @@ class Inspector(QDockWidget):
 
     def show_offer(self, album):
         """MOV-5/MOV-6: why ALBUM is kept out of the library, and the button that asks for it."""
-        from .models import not_filed_reason
+        from .models import not_filed_reason, release_offered, unresolved_reason
         words = not_filed_reason(album) if album is not None else ""
+        if not words and album is not None and release_offered(album):      # (MOV-6: Unresolved)
+            ov = getattr(self.win, "pages", {}).get("Overview")
+            words = unresolved_reason(album, ov.unresolved_action(album) if ov is not None and
+                                      hasattr(ov, "unresolved_action") else "")
         self.offer_words.setText(words)
         self.offer_words.setVisible(bool(words))
         self.offer_btn.setVisible(bool(words))

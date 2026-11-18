@@ -38,7 +38,9 @@ class V0877AppliedRows(tg.Gui):
         self.ov = self.win.pages["Overview"]
         self.ov.refresh_profiles()
         self.ov.profile.setCurrentText("Auto")
-        self.addCleanup(lambda: self.gui.style.apply(self.app, "light"))
+        p = mock.patch.object(self.ov.apply_bar, "LINGER", 50)    # (the end shown 50 ms, not 4 s)
+        p.start()
+        self.addCleanup(p.stop)
 
     def row(self, name):
         return next(a for a in self.ov.model.albums if name in a["source_dir"])
@@ -149,7 +151,6 @@ class V0877AppliedRows(tg.Gui):
         from gui.preview_panes import AlbumsModel
         self.looked_up()
         ov, bar = self.ov, self.ov.apply_bar
-        bar.LINGER = 300
         self.assertFalse(bar.isVisible())
         gate, step, held = threading.Event(), executor.Executor.file_step, []
         self.addCleanup(gate.set)
@@ -175,15 +176,16 @@ class V0877AppliedRows(tg.Gui):
             self.assertEqual(ov.tree.data(st, Qt.DisplayRole), "Applying…")
             self.assertEqual(ov.tree.data(st, Qt.DecorationRole).cacheKey(),
                              icons.icon("loader-circle", "accent", 14).cacheKey())
-            self.shot("apply_progress_light")
-            self.gui.style.apply(self.app, "dark")
-            self.shot("apply_progress_dark")
-            self.gui.style.apply(self.app, "light")
+            self.assertNotIn("Applying", ov.summary.text())       # (the counts said once: by the bar)
+            if SHOTS:
+                self.shot("apply_progress_light")
+                self.gui.style.apply(self.app, "dark")
+                self.shot("apply_progress_dark")
+                self.gui.style.apply(self.app, "light")
             gate.set()
             self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())
         self.assertEqual(bar.bar.value(), bar.SCALE)
         self.assertEqual(bar.text(), "Applied 2 albums")
-        self.assertTrue(bar.isVisible())
         self.assertTrue(wait(lambda: not bar.isVisible(), self.app, timeout=5))
         self.assertEqual(self.look(second)["word"], "Applied")
 
@@ -208,6 +210,14 @@ class V0877AppliedRows(tg.Gui):
             gate.set()
             self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())
         self.assertEqual(bar.text(), "Stopped after 1 of 2")
+
+
+@unittest.skipIf(tg.QApplication is None, "PySide6 not installed")
+class V0877Bar(unittest.TestCase):
+    """The bar and the tokens alone: no window."""
+    @classmethod
+    def setUpClass(cls):
+        cls.app = tg.QApplication.instance() or tg.QApplication([])
 
     def test_the_bar_alone_counts_albums_and_failures(self):
         from gui import style

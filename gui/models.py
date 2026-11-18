@@ -180,6 +180,43 @@ def offered(a) -> bool:
     return bool((a or {}).get("below_floor")) and (a or {}).get("status") != "done"
 
 
+def best_candidate(a) -> dict:
+    """MOV-6: an Unresolved album's closest release the sources found (its identification's first
+    candidate with a release link: {"ref", "title", "score", ...}); {} when there is none."""
+    if (a or {}).get("status") != "unresolved":
+        return {}
+    for c in ((a.get("identification") or {}).get("candidates") or []):
+        if isinstance(c, dict) and c.get("ref"):
+            return c
+    return {}
+
+
+def release_offered(a) -> bool:
+    """MOV-6: an Unresolved album whose closest release can be taken - its box ticked: tagged
+    from that release and filed into your library; unticked: the profile's unresolved action."""
+    return bool(best_candidate(a))
+
+
+UNRESOLVED_ACTION_WORDS = {"mark": N_("marks it Unresolved where it is"),
+                           "move": N_("moves it to your unresolved folder"),
+                           "leave": N_("leaves it as it is")}
+
+
+def unresolved_reason(a, action="") -> str:
+    """Why an Unresolved album is not tagged from a release, and what ticking it does."""
+    if (a or {}).get("status") != "unresolved":
+        return ""
+    c = best_candidate(a)
+    if not c:
+        return tr("Unresolved: no release the sources found fits it, so there are no tags to file it with. "
+                  "Choose its release with Change Release.")
+    after = tr(UNRESOLVED_ACTION_WORDS[action]) if action in UNRESOLVED_ACTION_WORDS else ""
+    words = tr("Unresolved: no release is proven. Tick it to tag it from the closest release found ({0}, "
+               "score {1:.0f}) and file it into your library.").format(c.get("title") or c["ref"],
+                                                                     float(c.get("score") or 0))
+    return words + (" " + tr("Unticked, Apply {0}.").format(after) if after else "")
+
+
 ASK_WORDS = N_("Tick it, or choose Move into Library Anyway, to have it filed.")
 ASK_WORDS_COPY = N_("Tick it, or choose Copy into Library Anyway, to have it copied.")
 # (an album Apply tags where it is: its box says that already, the command files it)
@@ -208,9 +245,9 @@ def not_filed_reason(a) -> str:
 
 
 def tickable(a) -> bool:
-    """MOV-6: the row's box can be ticked: it has changes Apply would make (can_apply), or its
-    filing is offered (ticking it asks for it)."""
-    return can_apply(a) or offered(a)
+    """MOV-6: the row's box can be ticked: it has changes Apply would make (can_apply), its
+    filing is offered (ticking it asks for it), or it is Unresolved with a release to take."""
+    return can_apply(a) or offered(a) or release_offered(a)
 
 
 def album_changes_text(a) -> str:
@@ -291,6 +328,7 @@ class PlanModel(QAbstractTableModel):
         # set by the page: album -> what is being done with it now ("Waiting…", "Looking up…",
         # "Applying…"; "": nothing), shown in its Status column until it is done (never in the plan)
         self.state_of = None
+        self.unresolved_action = None   # (set by the page: album -> its profile's unresolved action)
 
     def flags(self, idx):
         f = super().flags(idx)
@@ -330,11 +368,30 @@ class PlanModel(QAbstractTableModel):
         album with nothing to apply where it is but its filing offered: until you tick it (MOV-6)."""
         if offered(a) and not can_apply(a):
             return not a.get(cls.ASKED)
+        if release_offered(a):                 # (its box is the ask; unticked, its unresolved action)
+            return bool(a.get(cls.LEAVE_OUT)) and not a.get(cls.ASKED)
         return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
+
+    @classmethod
+    def shows_ticked(cls, a) -> bool:
+        """The row's box shows ticked."""
+        if release_offered(a):
+            return bool(a.get(cls.ASKED))
+        return not cls.left_out(a)
 
     def set_left_out(self, albums, out):
         asked = []
         for a in albums:
+            if release_offered(a):                   # (MOV-6: ticked, take its closest release and file it)
+                if out and a.get(self.ASKED):
+                    a.pop(self.ASKED, None)            # (unticked: its unresolved action, as before)
+                elif out:
+                    a[self.LEAVE_OUT] = True           # (Leave Out of Apply: nothing done with it)
+                elif not a.get(self.ASKED):
+                    a[self.ASKED] = True
+                    a.pop(self.LEAVE_OUT, None)
+                    asked.append(a)
+                continue
             if offered(a) and not can_apply(a):     # (MOV-6: ticked, it is the ask to file it)
                 if out:
                     a.pop(self.ASKED, None)
@@ -457,6 +514,8 @@ class PlanModel(QAbstractTableModel):
             return applied_tip(a)
         if role == R_TOOLTIP and c == 0 and offered(a):
             return not_filed_reason(a)
+        if role == R_TOOLTIP and c == 0 and a["status"] == "unresolved":
+            return unresolved_reason(a, self.unresolved_action(a) if self.unresolved_action else "")
         if role == R_TOOLTIP and c == 0:
             tier = (ident or {}).get("tier")
             if a["status"] not in ("unresolved", "excluded", "skipped") and tier in TIER_TIPS:
@@ -529,7 +588,7 @@ class PlanModel(QAbstractTableModel):
         if role == R_ACCESSIBLETEXT and c == 0:
             return status_words(a)
         if role == R_CHECKSTATE and c == 1 and tickable(a):
-            return Qt.Unchecked if self.left_out(a) else Qt.Checked
+            return Qt.Checked if self.shows_ticked(a) else Qt.Unchecked
         if role == R_USER:
             return a
         return None

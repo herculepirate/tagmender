@@ -61,9 +61,24 @@ class VorbisTotalKept(unittest.TestCase):
         ini = c.write_ini("[application]\nversion=3.0.2.final0\n\n[setting]\npreserved_tags=totaltracks\n")
         os.environ["TAGMENDER_TAGGER_INI"] = str(ini)
         tagger_settings._cache.clear()
+        # (TAG-5, the user's decision 2026-11-17: TagMender renumbers 5 -> 1, 2, so it writes the
+        # release's total with the numbers - 2, not the preserved 9 - under both names)
         for tags in self._keys(".flac", TRACKNUMBER="5", TRACKTOTAL="9"):
-            self.assertEqual(tags.get("TRACKTOTAL"), ["9"])
-            self.assertEqual(tags.get("TOTALTRACKS"), ["9"], "Picard writes the preserved total as TOTALTRACKS too")
+            self.assertEqual(tags.get("TRACKTOTAL"), ["2"])
+            self.assertEqual(tags.get("TOTALTRACKS"), ["2"], "written under both names, as Picard writes a total")
+
+    def test_flac_preserved_total_kept_where_the_numbers_are(self):
+        # (numbers not written - already the release's: the preserved total stays as it is)
+        ini = c.write_ini("[application]\nversion=3.0.2.final0\n\n[setting]\npreserved_tags=totaltracks\n")
+        os.environ["TAGMENDER_TAGGER_INI"] = str(ini)
+        tagger_settings._cache.clear()
+        files = c.album(".flac", 2)
+        for n, f in enumerate(files, 1):
+            pretag(f, TRACKNUMBER=str(n), TRACKTOTAL="9")
+        p, res = c.run(files)
+        self.assertEqual(res.get("counts"), {"done": 1}, c.detail(p, res))
+        for f in files:
+            self.assertEqual(mutagen.File(str(f)).tags.get("TRACKTOTAL"), ["9"])
 
 
 if __name__ == "__main__":

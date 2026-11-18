@@ -304,6 +304,28 @@ def _numbered_with_ids(before: dict, target: dict, profile, changes: dict, rows:
                          "action": "changed (the release's own numbering, written with its IDs)"})
 
 
+def _total_with_number(before: dict, target: dict, profile, changes: dict, rows: list) -> None:
+    """TAG-5 (the user's decision, 2026-11-17): where TagMender writes a file's track or disc
+    number, it writes the release's matching total with it - also when the total is kept by your
+    policy as preserve or fill_missing (your tagger's "Preserve these tags" holding totaltracks):
+    never "1 of 46" on a disc of 13 (Gojira - The Flesh Alive) nor "1 of 17" on a release of 12
+    (Stevie Wonder - My Cherie Amour). A file whose numbers are not written keeps its total as
+    your policy says; a locked total stays locked."""
+    for num, tot in (("tracknumber", "totaltracks"), ("discnumber", "totaldiscs")):
+        a, b = _vals(target.get(tot)), _vals(before.get(tot))
+        if not changes.get(num) or tot in changes or not a or a == b or \
+                profile.policy(tot) not in ("preserve", "fill_missing", "replace"):
+            continue
+        changes[tot] = a
+        action = "changed (the release's total, written with the number TagMender writes)"
+        for r in rows:
+            if r.get("field") == tot:
+                r.update(after=a, action=action)
+                break
+        else:
+            rows.append({"field": tot, "before": b, "after": a, "action": action})
+
+
 def diff_tags(before: dict, target: dict, profile, confidence: float, extra_removals=()):
     """(changes {field: [..] | None}, rows [{field, before, after, action}])."""
     changes, rows = {}, []
@@ -1193,7 +1215,7 @@ def _sets_missing(albums):
                 if b is not a and db_ and b.get("status") in ("ready", "unchanged") and \
                         fnm.fold(db_["folder"]) == fnm.fold(ds["folder"]) and set(db_["ids"]) & set(ds["ids"]):
                     have |= set(db_.get("have") or ())
-            gone = [n for n in range(1, int(ds["total"]) + 1) if n not in have]
+            gone = [n for n in range(1, int(ds["total"]) + 1) if n not in have and n not in set(ds.get("video") or ())]
             if gone:
                 import match_core as _mc
                 words.append(f"disc{'s' if len(gone) > 1 else ''} {_mc.compact_numbers(gone)} missing")
@@ -2608,6 +2630,7 @@ class Planner:
             changes, rows = diff_tags(before_d, target, p, conf if identified else 100.0, removals)
             if identified:
                 _numbered_with_ids(before_d, target, p, changes, rows)
+                _total_with_number(before_d, target, p, changes, rows)
             if rip_line and not held and self._vinyl_file(targets.get(f) or {}, unproven):
                 self._rip_comment(f, before, changes, rows, p, rip_line,
                                   "album_only" if album_only or unproven else "partial" if partial else "")
@@ -4015,7 +4038,9 @@ class Planner:
             else:
                 where = Path(prop.source_dir)
             entry["disc_set"] = {"folder": str(where), "ids": sorted(_release_ids(prop)), "total": total,
-                                 "have": sorted(have)}
+                                 "have": sorted(have),
+                                 # (MED-17: a video disc is never missing from an audio rip)
+                                 "video": sorted(set(getattr(prop, "video_discs", None) or ()) - have)}
         if home is None:
             return
         entry["joins"] = str(home)

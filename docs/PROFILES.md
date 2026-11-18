@@ -4,7 +4,7 @@ A profile lives in `~/.config/tagmender/profiles/NAME.json` and holds only what 
 defaults. `tagmender profiles show NAME --full` prints every setting.
 
 ```bash
-tagmender profiles examples                      # installs Lossy, with no library folder yet
+tagmender profiles examples                      # installs Lossy and Classical, with no library folder yet
 tagmender profiles set Lossy destination=~/Music/Lossy   # yours to choose; check says until then
 tagmender profiles new Inbox --from Lossy --set operation=move --set destination=/mnt/music
 tagmender profiles set Inbox 'sources=[{"path": "~/Music/Inbox", "watch": true}]' unattended=true
@@ -12,6 +12,14 @@ tagmender profiles check
 ```
 
 More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/profiles/`).
+
+The `Classical` example is for a classical library: `"tradition": "western_classical"` (every album
+is read as classical: rules CLS-2 to CLS-5), `"tagger": {"track_ars": true, "release_ars": true}`
+(the recordings' and works' credits always), `"naming": {"preset": "classical-performer"}` (the
+release's whole credit as the folder: `Johann Sebastian Bach; Glenn Gould/1982 - Goldberg
+Variations/01 Aria.flac`) and `"tag_level": "enthusiast"`. Any other profile still recognises a
+classical album by itself (Discogs's genre, MusicBrainz's credit and works, labels and catalogue
+numbers) and tags it the same way; only the folder follows that profile's own naming.
 
 ## Settings
 
@@ -65,6 +73,7 @@ More examples are in `contrib/profiles/` (copy one into `~/.config/tagmender/pro
 | `on_unwritable` | `skip_album` | a folder that cannot be written (a read-only share, no permission): `skip_album` leaves the album as it is, with the reason; `skip_file` leaves only those files out. A copy only reads its source |
 | `companions_rewrite_cues` | `true` | the new file names are written into cue sheets and playlists that go with the album; `false` keeps them exactly as they are |
 | `destination` | — | must exist (never created); required for copy/move; used for every source folder without a destination of its own |
+| `tradition` | `popular` | `western_classical` reads every album as classical (CLS-2: Composer, Work, Movement, performers as Artist, the whole credit as Album Artist); `popular`, `indian_classical`, `folk` leave it to each album's own signals |
 | `naming` | preset `artist-album-track` ("Artist/1991 - Album/01 - Title", "1-01 - Title" for a set) | or `{"template": "..."}`; presets in "Naming presets" below, plus `all-music`, `various-artists` and `classical-performer` |
 | `naming.editions` | `off` | "Separate editions in folder names" (rules ED-1 to ED-5 in MATCHING_RULES.md): `edition_year` adds [1999 SACD] / [1977 Vinyl Rip] / [1984 Tape Rip] always, [2015 Remaster] (or Reissue) for a newer CD or download, HD for hi-res audio ([HD], [2015 Remaster HD]); the original CD or download gets nothing; `edition` the same without the year |
 | `naming.duplicate_suffix` | `number` | a second file of one name: `number` (" (2)", " (3)" ...; the first free one, the same while the folder stays as it is) or `code` (" ~1a2b", the same for one file always) |
@@ -265,7 +274,8 @@ recording IDs stay (the same performance).
 | `tagmender` | `Robert Rich & Steve Roach/1992 - Soma The Twentieth Anniversary Edition/03.TTE.flac`, multi-disc `.../Disc 02/203.TTE.flac` (TagMender's existing scheme) |
 | `standard` | `Album Artist/Album/03 Title.flac` |
 | `artist-album-track` | `Album Artist/1992 - Album/1-03 - Title.flac` |
-| `classical` | `Composer/1992 - Album/03 - Title.flac` |
+| `classical` | `Composer/1992 - Album/03 - Title.flac` (each track's composer: an album of several composers is split) |
+| `classical-performer` | `Johann Sebastian Bach; Glenn Gould/1982 - Goldberg Variations/01 Aria.flac`, multi-disc `.../Disc 02/...` (the release's whole credit; the `Classical` example's) |
 | `singleton` | `Artist/Singles/Artist - Title.flac` |
 
 ## Template language

@@ -591,8 +591,8 @@ def cmd_setup(args):
         return 0
     done = pf.install_examples()
     if done:
-        print(f"Example profile(s) installed: {', '.join(done)}  (choose its library folder first: "
-              "tagmender profiles show Lossy)")
+        print(f"Example profile(s) installed: {', '.join(done)}  (choose a library folder for each first: "
+              f"tagmender profiles show {done[0]})")
     print("CoverUp uses the fanart.tv, TheAudioDB and Last.fm keys above unless your tagger settings "
           "already hold its own.\n")
     return cmd_doctor(argparse.Namespace(json=False, export=None, anonymize=False))

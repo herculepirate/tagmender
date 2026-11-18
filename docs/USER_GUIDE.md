@@ -738,8 +738,18 @@ python3 dupes_fp.py /srv/music /mnt/music
 python3 health_report.py --library main ~/Downloads/audit_music.csv ~/Downloads/matching_music
 ```
 
-Classical music: set `"tagger": {"track_ars": true, "release_ars": true}` in the profile
-(composer, work, conductor, performers); see [docs/PROFILES.md](PROFILES.md).
+Classical music: TagMender recognises a classical album by itself (rule CLS-2: Discogs's genre
+Classical, MusicBrainz's "Composer; performers" credit led by a composer, a composer who performs on
+none of the tracks, a classical label or catalogue numbers such as BWV or Op. together ...; the
+album's Why tab says why). For such an album it reads the recordings' and works' credits and the
+works' parents (CLS-3), and writes Work as the whole work ("Symphony no. 4 in D minor, op. 120
+(1841)"), Movement Name with its numeral ("I. Andante con moto - Allegro di molto"), Movement,
+Movement Total and Show Movement, Composer (at Basic too), Conductor and the performers; Artist is
+who performs, Album Artist the release's whole credit, names in Latin script (CLS-4). Work fields
+Classical Extras curated in your files are kept (CLS-5). For a classical library, the example
+profile `Classical` (`tagmender profiles examples`) reads every album as classical, asks for the
+credits always and files `Album Artist/Year - Album/Disc NN/NN Title` (the `classical-performer`
+preset); see [docs/PROFILES.md](PROFILES.md).
 
 Genres: `~/.config/tagmender/genres.json` maps what MusicBrainz and Discogs say
 to your own list, e.g. `{"map": {"funeral doom metal": "Doom Metal"}, "allowed":

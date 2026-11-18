@@ -39,6 +39,7 @@ import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import classical
 import exclusions as ex
 import filenames as fnm
 import naming
@@ -331,11 +332,21 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     changes, rows = {}, []
     replace_ok = confidence >= _threshold(profile, "replace_min_confidence")
     fields = list(dict.fromkeys(list(target) + list(extra_removals)))
+    # CLS-5: the work and movement fields Classical Extras curated in a file carrying its stamp
+    # are kept - written only where the file has none
+    curated = any(f in classical.CE_FIELDS for f in fields) and classical.classical_extras_file(before)
     for f in fields:
         if f.startswith("~"):
             continue
         b, a = _vals(before.get(f)), _vals(target.get(f))
         pol = profile.policy(f)
+        if curated and f in classical.CE_FIELDS and pol == "replace":
+            if b and a != b:
+                rows.append({"field": f, "before": b, "after": b, "action": "preserved (Classical Extras)"})
+            elif a and not b:
+                changes[f] = a
+                rows.append({"field": f, "before": b, "after": a, "action": "added"})
+            continue
         if f in extra_removals and f not in target:
             if not (replace_ok or f.startswith("tagmender") or pol == "remove"):
                 if b:                             # (a match too uncertain to replace a tag deletes none either)

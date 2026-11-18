@@ -143,6 +143,11 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         return None
     if to:
         return _found(to, ids, members_of)
+    if _first(t, "~classical"):
+        # CLS-4: a classical album's album artist is its release's whole credit ("Johann
+        # Sebastian Bach; Glenn Gould", "Beethoven, Steven Isserlis, Robert Levin") - never cut
+        # to a lead (engine.Engine marks a classical album: classical.is_classical)
+        return None
     # NAM-1: a band credited after its members, Discogs's "Thomas Strønen / Iain Ballamy : Food",
     # is the band ("Food"), not its first member: the " : " puts the members before the act
     band_at = -1
@@ -250,8 +255,6 @@ def guest_after_partners(credit, names) -> bool:
 # NAM-8: joins that never make persons a lead and partners: MusicBrainz's "; " (a classical
 # credit: "Johann Sebastian Bach; Glenn Gould" - the composer first) and " / " (a split release)
 _NOT_PARTNERS = (";", "/")
-# NAM-8: a classical genre or style (the person rule is left out for these releases)
-_CLASSICAL = re.compile(r"\b(?:classical|baroque|opera|operas|symphon\w*|concerto\w*|oratorio|cantata\w*)\b")
 _PERFORMS = ("performer", "conductor")
 
 
@@ -271,9 +274,10 @@ def classical(tracks, names, ids, profile=None) -> bool:
     if str(tradition or "") == "western_classical":
         return True
     composers, composer_ids, performers = set(), set(), set()
+    import classical as _cls
     for t in tracks or ():
-        if any(_CLASSICAL.search(fold(g)) for g in _list(t, "genre")):
-            return True
+        if _first(t, "~classical") or any(_cls.genre_kind(g) == "strong" for g in _list(t, "genre")):
+            return True             # (CLS-2's genres: never "Neo-Classical", "Symphonic Metal")
         composers |= {fold(x) for x in _list(t, "composer")}
         composer_ids |= set(_list(t, "musicbrainz_composerid"))
         for k in t:

@@ -16,7 +16,7 @@ are upgraded in memory; `migrate` writes the upgrade, keeping a backup.
   names()                       the profiles on disk
   next_name() / rename / delete  "Profile N" for a new one (at most MAX_PROFILES); a rename
                                 carries the profile's references along, a delete keeps a copy
-  install_examples()            the shipped examples (Lossy), never overwriting yours
+  install_examples()            the shipped examples (Lossy, Classical), never overwriting yours
 """
 from __future__ import annotations
 
@@ -330,6 +330,20 @@ EXAMPLES = {
         "operation": "copy",
         "destination": "",                # yours to choose: validate says so until it is set
         "unresolved": {"action": "mark", "move_to": "", "allow_partial": False},
+    },
+    # CLS-2..CLS-5: a classical library - every album read as classical, with its recordings'
+    # and works' credits, filed under its whole release credit ("Composer; performers")
+    "Classical": {
+        "name": "Classical",
+        "description": "A classical library: every album is read as western classical music (CLS-2) with "
+                       "its recordings' and works' credits, so Composer, Work, Movement, Conductor and "
+                       "performers are written; Artist is who performs. Albums are filed under the "
+                       "release's whole credit: Album Artist/Year - Album/Disc NN/NN Title. Choose its "
+                       "library folder first.",
+        "tradition": "western_classical",
+        "tagger": {"track_ars": True, "release_ars": True},
+        "naming": {"preset": "classical-performer"},
+        "tag_level": "enthusiast",
     },
 }
 

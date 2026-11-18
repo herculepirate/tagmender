@@ -15,6 +15,7 @@ import test_v0864_file_below_score as t864  # noqa: E402  (its isolated config, 
 import executor  # noqa: E402
 import plan as pl  # noqa: E402
 import tagio  # noqa: E402
+import test_engine as te  # noqa: E402
 
 QApplication = t864.QApplication
 
@@ -24,6 +25,33 @@ class Dirs:
         d = self.tmp / "unresolved"
         d.mkdir(exist_ok=True)
         return d
+
+
+class MOV6_Engine(te.Base):
+    """The real look-up path: an Unresolved album looked up again with its closest release as
+    your choice and your ask to file it - filed from that release, recorded as your choice."""
+    def test_MOV6_a_release_you_chose_is_recorded_as_yours_and_filed(self):
+        d = self.album("Band U", "Zzz Nothing")
+        dest, unres = self.tmp / "filed", self.tmp / "unres"
+        dest.mkdir()
+        unres.mkdir()
+        eng = self.engine(te.FakeHttp(dg=[te.dg_release(950, "Real Band", "Real Album")]), operation="move",
+                          destination=str(dest), unresolved={"action": "move", "move_to": str(unres)})
+        eng.offer_file_anyway = True
+        self.assertEqual(eng.plan(d)["albums"][0]["status"], "unresolved")
+        files = sorted(str(f) for f in d.glob("*.flac"))
+        eng.force = {os.path.realpath(str(d)): [{"ref": "discogs:950", "files": files}]}
+        eng.file_anyway = {os.path.realpath(f) for f in files}
+        p = eng.plan(d)
+        a = p["albums"][0]
+        self.assertEqual(a["status"], "ready")
+        self.assertIn("pressing chosen by you", a["identification"]["evidence"])
+        self.assertTrue(any(n.startswith("release chosen by you (score ") for n in a["notes"]), a["notes"])
+        executor.Executor(p).run()
+        out = sorted(dest.rglob("*.flac"))
+        self.assertEqual(len(out), 3)
+        self.assertEqual(list(unres.rglob("*.flac")), [])
+        self.assertEqual(tagio.read(out[0])["discogs_release_id"], ["950"])
 
 
 class MOV6_Planner(Dirs, t864.Base):
@@ -234,55 +262,147 @@ class MOV6_App(Dirs, t864.Base):
         return self.proposal(status="unresolved", tier="unresolved", targets=[], confidence=0, reason="no match",
                              candidates=[dict(self.CANDIDATE)])
 
-    def test_MOV6_an_unresolved_row_with_a_release_found_ticked_is_tagged_from_it_and_filed(self):
-        import engine
-        from PySide6.QtCore import Qt
-        from gui import overview as govw
+    CANDIDATE["details"] = "CD · Germany · CAT-1"
+    CANDIDATE["title"] = "Real Artist - Real Album (2001)"
+
+    def unresolved_row(self):
         prof = self.profile(operation="move", destination=str(self.dest),
                             unresolved={"action": "move", "move_to": str(self.unresolved_dir())})
         plan = pl.build([self.unresolved()], prof)
-        a = plan["albums"][0]
-        self.assertEqual(a["status"], "unresolved")
-        ov = self.show(plan)
-        box = ov.model.index(0, 1)
-        self.assertTrue(ov.model.flags(box) & Qt.ItemIsUserCheckable)
-        self.assertEqual(ov.model.data(box, Qt.CheckStateRole), Qt.Unchecked)
-        with mock.patch.object(ov, "planning_profile", lambda *a, **k: prof):
-            tip = ov.model.data(ov.model.index(0, 0), Qt.ToolTipRole)
-        self.assertIn("Tick it to tag it from the closest release found (Real Artist - Real Album (2001), score 62)",
-                      tip)
-        self.assertIn("Unticked, Apply moves it to your unresolved folder", tip)
-        self.assertIn(a, ov.to_apply())                     # (unticked: its unresolved action, as before)
-        seen = []
+        self.assertEqual(plan["albums"][0]["status"], "unresolved")
+        return prof, plan, self.show(plan)
 
+    def fake_look_up(self, prof, seen, found=None):
+        """plan_each as the look-up's: what it was given (force, file_anyway), and FOUND (a
+        proposal maker; none: the album Unresolved again) planned with it."""
         def fake_plan_each(e, path, keys, emit, **kw):
-            seen.append((set(e.file_anyway), dict(e.force)))
-            # (the release taken: identified from it, its score below the floor - filed as asked)
-            out = pl.build([self.proposal(conf=62)], prof, file_anyway=e.file_anyway, seed_claims=e.seed_claims,
+            seen.append((dict(e.force), set(e.file_anyway)))
+            props = [found()] if found and e.force else [self.unresolved()]
+            out = pl.build(props, prof, file_anyway=e.file_anyway, seed_claims=e.seed_claims,
                            offer_file_anyway=e.offer_file_anyway)
             out["albums"][0]["key"] = keys[0]
             emit(keys[0], out)
             return len(keys)
-        with mock.patch.object(engine, "engine_for_thread", lambda *a, **k: type("E", (), {})()), \
-                mock.patch.object(govw, "plan_each", fake_plan_each), \
-                mock.patch.object(ov, "planning_profile", lambda *a, **k: prof):
+        return fake_plan_each
+
+    def wait_idle(self, ov):
+        end = time.time() + 30
+        while time.time() < end and (ov.running or getattr(ov, "apply_worker", None) is not None):
+            self.app.processEvents()
+            time.sleep(0.02)
+
+    def patched(self, ov, prof, seen, found=None):
+        import contextlib
+        import engine
+        from gui import overview as govw
+        st = contextlib.ExitStack()
+        st.enter_context(mock.patch.object(engine, "engine_for_thread", lambda *a, **k: type("E", (), {})()))
+        st.enter_context(mock.patch.object(govw, "plan_each", self.fake_look_up(prof, seen, found)))
+        st.enter_context(mock.patch.object(ov, "planning_profile", lambda *a, **k: prof))
+        st.enter_context(mock.patch.object(self.gui.sheets, "confirm", return_value=True))
+        st.enter_context(mock.patch.object(self.win, "show_run_report"))
+        return st
+
+    def test_MOV6_an_unresolved_rows_box_keeps_its_meaning(self):
+        from PySide6.QtCore import Qt
+        prof, plan, ov = self.unresolved_row()
+        a = ov.model.albums[0]
+        box = ov.model.index(0, 1)
+        self.assertEqual(ov.model.data(box, Qt.CheckStateRole), Qt.Checked)      # (its unresolved action)
+        with mock.patch.object(ov, "planning_profile", lambda *a, **k: prof):
+            tip = ov.model.data(ov.model.index(0, 0), Qt.ToolTipRole)
+        self.assertIn("the closest found is Real Artist – Real Album (2001, CD, Germany, CAT-1) (score 62)", tip)
+        self.assertIn("Apply moves it to your unresolved folder", tip)
+        self.assertIn("“Use … and File It…”", tip)
+        seen = []
+        with self.patched(ov, prof, seen):
+            # tick then untick, Include in Apply: no release chosen, no look-up
+            ov.model.setData(box, Qt.Unchecked, Qt.CheckStateRole)
+            self.assertNotIn(a, ov.to_apply())                                    # (unticked: left out)
             ov.model.setData(box, Qt.Checked, Qt.CheckStateRole)
-            self.assertIn("Looking up 1 album again", self.win.statusBar().currentMessage())
-            end = time.time() + 30
-            while time.time() < end and (ov.running or not seen):
-                self.app.processEvents()
-                time.sleep(0.02)
-        files, force = seen[0]
-        self.assertEqual(files, {os.path.realpath(str(self.f1)), os.path.realpath(str(self.f2))})
+            ov.model.set_left_out([a], True)
+            ov.model.set_left_out([a], False)                                     # (Include in Apply)
+            self.assertIn(a, ov.to_apply())
+            self.assertEqual(seen, [])
+            self.assertEqual(ov.forced, {})
+            # Apply Selected: its unresolved action, never a release
+            ov.apply_selected([a])
+            self.wait_idle(ov)
+        self.assertEqual(seen, [])
+        self.assertEqual(list(self.dest.rglob("*.flac")), [])
+        self.assertEqual(len(list((self.tmp / "unresolved").rglob("*.flac"))), 2)
+
+    def test_MOV6_an_unticked_unresolved_row_is_never_applied(self):
+        from PySide6.QtCore import Qt
+        prof, plan, ov = self.unresolved_row()
+        a = ov.model.albums[0]
+        ov.model.setData(ov.model.index(0, 1), Qt.Unchecked, Qt.CheckStateRole)
+        self.assertEqual(ov.to_apply(), [])
+        self.assertFalse(self.win.commands["apply"].isEnabled())
+        self.assertTrue(self.f1.exists())
+        self.assertNotIn(a, ov.applicable())
+
+    def test_MOV6_use_the_closest_release_shows_its_tags_then_a_tick_files_it(self):
+        from PySide6.QtCore import Qt
+        prof, plan, ov = self.unresolved_row()
+        a = ov.model.albums[0]
+        self.win.update_album_actions()
+        cmd = self.win.commands["use_candidate"]
+        self.assertTrue(cmd.isEnabled())
+        self.assertEqual(cmd.text().replace("&&", "&"),
+                         "Use Real Artist – Real Album (2001, CD, Germany, CAT-1) and File It…")
+        self.assertIn("Use Real Artist – Real Album", ov.panes.offer_btn.text())   # (the bar over its tags)
+        self.assertTrue(ov.panes.offer_btn.isEnabled())
+        self.win.inspector.show_album(a)
+        self.assertIn("Use Real Artist – Real Album", self.win.inspector.offer_btn.text())
+        seen = []
+        with self.patched(ov, prof, seen, found=lambda: self.proposal(conf=62)):
+            cmd.trigger()
+            self.assertEqual(self.win.statusBar().currentMessage(),
+                             "Showing Real Artist – Real Album (2001, CD, Germany, CAT-1) for 2001 - Some Album: "
+                             "tick it to apply.")
+            self.wait_idle(ov)
+        force, files = seen[0]
         self.assertEqual([c["ref"] for c in force[os.path.realpath(str(self.album))]], ["discogs:777"])
+        self.assertEqual(files, {os.path.realpath(str(self.f1)), os.path.realpath(str(self.f2))})
         row = ov.model.albums[0]
         self.assertEqual(row["status"], "ready")
         self.assertEqual(self.ops(row), {"move"})
-        self.assertIn("moved because you asked", " ".join(row["notes"]))
-        self.assertIn(row, ov.to_apply())
-        executor.Executor(dict(plan, albums=[row])).run()
+        # (shown, not applied: unticked until you tick it; its tags are the row's)
+        self.assertEqual(ov.model.data(ov.model.index(0, 1), Qt.CheckStateRole), Qt.Unchecked)
+        self.assertEqual(ov.to_apply(), [])
+        self.assertTrue(any(fe.get("changes") for fe in row["files"]))
+        self.assertEqual(self.win.commands["undo_release_choice"].isEnabled() or ov.chosen_release(row) != {}, True)
+        ov.model.setData(ov.model.index(0, 1), Qt.Checked, Qt.CheckStateRole)
+        self.assertEqual(ov.to_apply(), [row])
+        with self.patched(ov, prof, seen):
+            ov.apply()
+            self.wait_idle(ov)
+        self.assertEqual(len(seen), 1)                                  # (the tick chose nothing more)
         self.assertEqual(len(list(self.dest.rglob("*.flac"))), 2)
         self.assertEqual(list((self.tmp / "unresolved").rglob("*.flac")), [])
+
+    def test_MOV6_undo_release_choice_returns_it_to_unresolved(self):
+        from PySide6.QtCore import Qt
+        prof, plan, ov = self.unresolved_row()
+        seen = []
+        with self.patched(ov, prof, seen, found=lambda: self.proposal(conf=62)):
+            ov.use_candidate(ov.model.albums[0])
+            self.wait_idle(ov)
+            row = ov.model.albums[0]
+            self.assertEqual(row["status"], "ready")
+            self.assertTrue(ov.chosen_release(row))
+            ov.table.selectRow(0)
+            self.app.processEvents()
+            self.win.update_album_actions()
+            self.assertTrue(self.win.commands["undo_release_choice"].isEnabled())
+            self.win.commands["undo_release_choice"].trigger()
+            self.wait_idle(ov)
+        self.assertEqual(ov.forced, {})
+        self.assertFalse(any(os.path.realpath(str(self.f1)) == f for f in ov.file_anyway))
+        self.assertEqual(seen[-1], ({}, set()))
+        self.assertEqual(ov.model.albums[0]["status"], "unresolved")
+        self.assertEqual(ov.model.data(ov.model.index(0, 1), Qt.CheckStateRole), Qt.Unchecked)    # (not unasked)
 
     def test_MOV6_an_unresolved_row_without_a_release_says_why(self):
         from PySide6.QtCore import Qt

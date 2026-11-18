@@ -84,7 +84,7 @@ class V0877AppliedRows(tg.Gui):
         self.app.processEvents()
         self.win.grab().save(str(Path(SHOTS) / f"{name}.png"))
 
-    def test_an_album_tagged_in_place_reads_applied_with_its_badge_and_wash(self):
+    def test_applied_albums_read_applied_with_their_badge_and_wash_in_place_or_moved(self):
         from PySide6.QtCore import Qt
         from PySide6.QtGui import QColor
         from gui import icons, style
@@ -101,6 +101,7 @@ class V0877AppliedRows(tg.Gui):
         self.assertFalse(a["badge"].isNull())
         self.assertEqual(a["badge"].cacheKey(), icons.badge("circle-check", "applied", "on_applied", 16).cacheKey())
         self.assertEqual(a["word"], "Applied")                          # (Auto tags in place)
+        self.assertTrue(self.ov.tree.data(self.cell(g, 0), Qt.AccessibleTextRole).endswith(", Applied"))
         self.assertIn(g["source_dir"], a["tip"])
         self.assertIn("in place", a["tip"])
         self.assertEqual(a["bg"], QColor(style.tokens(False)["applied_bg"]))
@@ -125,25 +126,23 @@ class V0877AppliedRows(tg.Gui):
         self.ov.clear_done()
         self.assertTrue(wait(lambda: all(x is not g for x in self.ov.model.albums), self.app))
         self.assertIn(h, self.ov.model.albums)
-
-    def test_an_album_moved_reads_applied_moved_and_names_its_new_folder(self):
-        self.looked_up()
+        # an album moved: "Applied · moved", its tooltip and name cell say where and what
         ov = self.ov
-        g = self.row("Album G")
-        ov.set_album_profile([g], "Mover")
-        self.assertTrue(wait(lambda: not ov.running and self.row("Album G")["status"] == "ready", self.app),
+        ov.set_album_profile([h], "Mover")
+        self.assertTrue(wait(lambda: not ov.running and self.row("Album H")["status"] == "ready", self.app),
                         ov.summary.text())
-        g = self.row("Album G")
-        self.assertTrue(all(f["dst"].startswith(str(self.dest)) for f in g["files"]), g["files"])
-        self.apply_only(g)
-        self.assertEqual(g["status"], "done")
-        a = self.look(g)
-        self.assertEqual(a["word"], "Applied · moved")
-        self.assertIsNone(a["check"])
-        self.assertIn(str(self.dest), a["tip"])
-        self.assertNotIn(g["source_dir"], a["tip"])
+        h = self.row("Album H")
+        self.assertTrue(all(f["dst"].startswith(str(self.dest)) for f in h["files"]), h["files"])
+        self.apply_only(h)
+        self.assertEqual(h["status"], "done")
+        m = self.look(h)
+        self.assertEqual(m["word"], "Applied · moved")
+        self.assertIsNone(m["check"])
+        self.assertIn(str(self.dest), m["tip"])
+        self.assertNotIn(h["source_dir"], m["tip"])
         from gui.models import applied_folder
-        self.assertTrue(os.path.isdir(applied_folder(g)), applied_folder(g))
+        self.assertTrue(os.path.isdir(applied_folder(h)), applied_folder(h))
+        self.assertTrue(ov.tree.data(self.cell(h, 0), Qt.AccessibleTextRole).endswith(", Applied, moved"))
 
     def test_apply_shows_its_progress_and_each_album_applying(self):
         import executor
@@ -231,6 +230,27 @@ class V0877Bar(unittest.TestCase):
         b.finish(2, 1)
         self.assertEqual(b.text(), "Saved 2 albums · 1 failed")
         self.assertIn(style.color("error"), b.words.text())
+        self.assertEqual(b.bar.accessibleName(), "Save progress")
+        # Apply: a failed album is not finished; the job failing ends "Failed after N of M"
+        b.start([2, 2, 2])
+        self.assertEqual(b.bar.accessibleName(), "Apply progress")
+        b.album_started(0)
+        b.album_done(0, ok=False)
+        b.album_started(1)
+        b.album_done(1)
+        self.assertEqual(b.finished, 1)
+        self.assertEqual(b.text(), "Applying 3 of 3 albums · 4 of 6 files")
+        b.finish(0, error=True)
+        self.assertEqual(b.text(), "Failed after 1 of 3")
+        self.assertIn(style.color("error"), b.words.text())
+
+    def test_the_applied_badge_reads_on_a_selected_row(self):
+        from PySide6.QtGui import QIcon
+        from gui import icons, style
+        ic = icons.badge("circle-check", "applied", "on_applied", 16)
+        img = ic.pixmap(16, 16, QIcon.Selected).toImage()
+        disc = img.pixelColor(8, 3)                     # (the disc's top, inside its edge)
+        self.assertGreaterEqual(style.contrast(disc.name(), style.tokens()["selection"]), 3.0)
 
     def test_the_applied_and_progress_tokens_exist_and_read_in_both_schemes(self):
         from gui import style

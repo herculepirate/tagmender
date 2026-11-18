@@ -3964,6 +3964,12 @@ class Engine:
             return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
                                     reason=f"the release you chose does not fit the files: {exc}")
         prop.why = why + [w for w in prop.why if w not in why]
+        if claimed is None:
+            # CHG-1 / MOV-6: your choice, recorded as what decided the pressing (the job's
+            # "pressing chosen by you": match_core._kept_choice keeps it standing whatever its
+            # score), and said in the plan's notes
+            prop.evidence = list(prop.evidence or []) + ["pressing chosen by you"]
+            prop.notes = list(prop.notes or []) + [f"release chosen by you (score {float(sc.get('confidence') or 0):.0f})"]
         return prop
 
     def _is_twin(self, mbid, dg_cand) -> bool:

@@ -5036,6 +5036,9 @@ def _one_length_off(best, cfg):
             and not best.get("conflict") and best["confidence"] >= cfg["auto_min_confidence"] - 5)
 
 
+CHOSEN_BY_YOU = "pressing chosen by you"      # (CHG-1: a release you chose - its job's record)
+
+
 def _kept_choice(best, scored, cfg):
     """TAG-1 / CHG-1: the one candidate your files are tagged with by TagMender (its own
     choice, or yours through Change Release), when it still fits your files and no barcode or
@@ -5043,7 +5046,7 @@ def _kept_choice(best, scored, cfg):
     tagger's release IDs pick nothing (TAG-2)."""
     mine = [s for s in scored if s.get("tagged") and not s.get("tagger_tagged") and s.get("tracks_ok")
             and not s.get("conflict") and not s.get("clues_against") and not s.get("copy_version")
-            and s["confidence"] >= cfg["review_min_confidence"]]
+            and (s["confidence"] >= cfg["review_min_confidence"] or s.get("own_decided") == CHOSEN_BY_YOU)]
     if len(mine) != 1:
         return None
     m = mine[0]

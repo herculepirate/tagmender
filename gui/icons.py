@@ -95,8 +95,12 @@ def badge(name="circle-check", role="applied", on="on_applied", size=16) -> QIco
     ic = QIcon()
     for ratio in (1.0, 2.0):
         px = pixmap(name, style.color(on), size, ratio, 3, fill=style.color(role))
-        for mode in (QIcon.Normal, QIcon.Selected, QIcon.Disabled):
+        for mode in (QIcon.Normal, QIcon.Disabled):
             ic.addPixmap(px, mode)
+        # (on a selected row: a white disc, its tick in the selection's colour - the badge reads
+        # on the selection, which is green too)
+        ic.addPixmap(pixmap(name, style.color("selection"), size, ratio, 3, fill=style.color("on_selection")),
+                     QIcon.Selected)
     _cache[key] = ic
     return ic
 

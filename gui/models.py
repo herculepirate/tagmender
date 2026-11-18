@@ -192,29 +192,46 @@ def best_candidate(a) -> dict:
 
 
 def release_offered(a) -> bool:
-    """MOV-6: an Unresolved album whose closest release can be taken - its box ticked: tagged
-    from that release and filed into your library; unticked: the profile's unresolved action."""
+    """MOV-6: an Unresolved album whose closest release can be shown and filed - only by its
+    own command ("Use … and File It…"), after its tags are shown; never by its box."""
     return bool(best_candidate(a))
 
 
-UNRESOLVED_ACTION_WORDS = {"mark": N_("marks it Unresolved where it is"),
-                           "move": N_("moves it to your unresolved folder"),
-                           "leave": N_("leaves it as it is")}
+def candidate_words(c) -> str:
+    """A candidate release in a few words: "Real Band – Real Album (2005, CD, Germany, CAT-1)"."""
+    import re
+    title = str(c.get("title") or c.get("ref") or "")
+    m = re.match(r"^(.*?)\s*\((\d{4})\)\s*$", title)
+    head, year = (m.group(1), m.group(2)) if m else (title, "")
+    head = head.replace(" - ", " – ", 1)
+    facts = [year] + [x.strip() for x in str(c.get("details") or "").split("·")]
+    facts = [x for x in facts if x]
+    return f"{head} ({', '.join(facts)})" if facts else head
+
+
+def use_candidate_words(a) -> str:
+    """The command that shows an Unresolved album's closest release, to file it: "Use … and File It…"."""
+    c = best_candidate(a)
+    return tr("Use {0} and File It…").format(candidate_words(c)) if c else ""
+
+
+UNRESOLVED_ACTION_WORDS = {"mark": N_("Apply marks it Unresolved where it is"),
+                           "move": N_("Apply moves it to your unresolved folder"),
+                           "leave": N_("Apply leaves it as it is")}
 
 
 def unresolved_reason(a, action="") -> str:
-    """Why an Unresolved album is not tagged from a release, and what ticking it does."""
+    """Why an Unresolved album is not tagged from a release, and how to have it filed."""
     if (a or {}).get("status") != "unresolved":
         return ""
     c = best_candidate(a)
+    did = tr(UNRESOLVED_ACTION_WORDS[action]) + ". " if action in UNRESOLVED_ACTION_WORDS else ""
     if not c:
         return tr("Unresolved: no release the sources found fits it, so there are no tags to file it with. "
-                  "Choose its release with Change Release.")
-    after = tr(UNRESOLVED_ACTION_WORDS[action]) if action in UNRESOLVED_ACTION_WORDS else ""
-    words = tr("Unresolved: no release is proven. Tick it to tag it from the closest release found ({0}, "
-               "score {1:.0f}) and file it into your library.").format(c.get("title") or c["ref"],
-                                                                     float(c.get("score") or 0))
-    return words + (" " + tr("Unticked, Apply {0}.").format(after) if after else "")
+                  "Choose its release with Change Release.") + (" " + did.strip() if did else "")
+    return tr("Unresolved: no release is proven; the closest found is {0} (score {1:.0f}). ").format(
+        candidate_words(c), float(c.get("score") or 0)) + did + \
+        tr("To file it with that release's tags, choose “Use … and File It…”: its tags are shown first.")
 
 
 ASK_WORDS = N_("Tick it, or choose Move into Library Anyway, to have it filed.")
@@ -244,10 +261,29 @@ def not_filed_reason(a) -> str:
     return tr("{0}; {1} because {2}.").format(tagged, where, why) + " " + tr(ask)
 
 
+def offer_of(a, page=None):
+    """What the bar over an album's tags (and the Inspector) offers: (words, button, enabled,
+    kind) - kind "file" (MOV-5/MOV-6: Move/Copy into Library Anyway) or "use" (an Unresolved
+    album's closest release, shown to be filed); ("", "", False, "") for none. PAGE: the Overview."""
+    if a is None:
+        return "", "", False, ""
+    words = not_filed_reason(a)
+    if words:
+        copy = (a.get("below_floor") or {}).get("op") == "copy"
+        return (words, tr("Copy into Library Anyway") if copy else tr("Move into Library Anyway"),
+                bool(page is not None and page.may_file_anyway(a)), "file")
+    if release_offered(a):
+        action = page.unresolved_action(a) if page is not None and hasattr(page, "unresolved_action") else ""
+        return (unresolved_reason(a, action), use_candidate_words(a),
+                bool(page is not None and page.may_use_candidate(a)), "use")
+    return "", "", False, ""
+
+
 def tickable(a) -> bool:
-    """MOV-6: the row's box can be ticked: it has changes Apply would make (can_apply), its
-    filing is offered (ticking it asks for it), or it is Unresolved with a release to take."""
-    return can_apply(a) or offered(a) or release_offered(a)
+    """MOV-6: the row's box can be ticked: it has changes Apply would make (can_apply), or its
+    filing is offered (ticking it asks for it). An Unresolved album's box keeps its meaning
+    (ticked: its unresolved action; unticked: nothing done)."""
+    return can_apply(a) or offered(a)
 
 
 def album_changes_text(a) -> str:
@@ -368,30 +404,16 @@ class PlanModel(QAbstractTableModel):
         album with nothing to apply where it is but its filing offered: until you tick it (MOV-6)."""
         if offered(a) and not can_apply(a):
             return not a.get(cls.ASKED)
-        if release_offered(a):                 # (its box is the ask; unticked, its unresolved action)
-            return bool(a.get(cls.LEAVE_OUT)) and not a.get(cls.ASKED)
         return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
 
     @classmethod
     def shows_ticked(cls, a) -> bool:
         """The row's box shows ticked."""
-        if release_offered(a):
-            return bool(a.get(cls.ASKED))
         return not cls.left_out(a)
 
     def set_left_out(self, albums, out):
         asked = []
         for a in albums:
-            if release_offered(a):                   # (MOV-6: ticked, take its closest release and file it)
-                if out and a.get(self.ASKED):
-                    a.pop(self.ASKED, None)            # (unticked: its unresolved action, as before)
-                elif out:
-                    a[self.LEAVE_OUT] = True           # (Leave Out of Apply: nothing done with it)
-                elif not a.get(self.ASKED):
-                    a[self.ASKED] = True
-                    a.pop(self.LEAVE_OUT, None)
-                    asked.append(a)
-                continue
             if offered(a) and not can_apply(a):     # (MOV-6: ticked, it is the ask to file it)
                 if out:
                     a.pop(self.ASKED, None)

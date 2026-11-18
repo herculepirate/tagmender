@@ -812,7 +812,7 @@ class Overview(QWidget):
             items = []
         else:
             keys = ("@release", "use_suggested_pressing", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
-                    "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
+                    "file_anyway", "use_candidate", "undo_release_choice", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
                     "copy_path")
             # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
             release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
@@ -2482,7 +2482,7 @@ class Overview(QWidget):
         if not (self._applying and 0 <= i < len(mine)):
             return
         self.mark_applied(mine[i], r)
-        self.apply_bar.album_done(i)
+        self.apply_bar.album_done(i, (r or {}).get("status") == "done")
         self.model.refresh_rows()
 
     def file_progress(self, i, j, n, path):
@@ -2905,7 +2905,7 @@ class Overview(QWidget):
                 j + 1, name=Path(a["source_dir"]).name, m=n))
         elif kind == "album":
             self.mark_applied(a, news[2])
-            self.apply_bar.album_done(i)
+            self.apply_bar.album_done(i, (news[2] or {}).get("status") == "done")
             self.model.refresh_rows()
 
     def mark_applied(self, a, r):
@@ -2961,7 +2961,7 @@ class Overview(QWidget):
                               stopped=bool(counts.get("cancelled")))
 
     def apply_alongside_failed(self, msg):
-        self.apply_bar.finish(0, stopped=True)
+        self.apply_bar.finish(0, error=True)
         self.alongside_ended()
         sheets.warning(self, tr("That did not work."), msg)
 
@@ -3039,7 +3039,7 @@ class Overview(QWidget):
         """Apply stopped with an error: said as any failure; the albums a look-up was
         interrupted for (Apply during a look-up) are looked up still."""
         self._joined = False
-        self.apply_bar.finish(0, stopped=True)
+        self.apply_bar.finish(0, error=True)
         self.oops(msg)
         if self.queue and not self.running:
             self.run_queue()
@@ -3256,7 +3256,7 @@ class Overview(QWidget):
 
     def save_failed(self, msg):
         self._saving, self._save_then = None, None
-        self.apply_bar.finish(0, stopped=True)
+        self.apply_bar.finish(0, error=True)
         self.oops(msg)
 
     def may_drop_plain(self, then=None) -> bool:
@@ -3451,9 +3451,72 @@ class Overview(QWidget):
     def may_file_anyway(self, a) -> bool:
         """The album was tagged where it is (or not copied) only because its score is below the
         profile's floor for filing (plan entry "below_floor"), and is not being worked on."""
-        from .models import release_offered
-        return bool(a and (a.get("below_floor") or release_offered(a)) and a.get("status") not in ("done",)
+        return bool(a and a.get("below_floor") and a.get("status") not in ("done",)
                     and not (getattr(self, "running", False) and not getattr(self, "looking", None)))
+
+    # ---- MOV-6: an Unresolved album's closest release, shown first, filed if you tick it -------
+    def may_use_candidate(self, a) -> bool:
+        from .models import release_offered
+        return bool(a and release_offered(a) and not (getattr(self, "running", False)
+                                                      and not getattr(self, "looking", None)))
+
+    def use_candidate(self, a=None):
+        """Album › Use … and File It…: the Unresolved album A (the selected one) looked up again
+        with its closest release as your choice (Change Release's way) and your ask to file it.
+        Its row comes back Ready, its tags shown - and unticked: nothing is written until you
+        tick it and apply."""
+        import engine
+        from .models import best_candidate, candidate_words
+        a = a if a is not None else self.selected()
+        if not self.may_use_candidate(a):
+            return
+        c = best_candidate(a)
+        files = engine.plan_entry_files(a)
+        key = os.path.realpath(a["source_dir"])
+        mine = {os.path.realpath(f) for f in files}
+        kept = [x for x in (self.forced.get(key) or []) if isinstance(x, dict) and
+                not mine & {os.path.realpath(f) for f in x.get("files") or []}]
+        self.forced[key] = kept + [dict({"ref": c["ref"], "files": files},
+                                        **({"only": True} if a.get("split") else {}))]
+        for f in files:
+            self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
+        a[PlanModel.LEAVE_OUT] = True                       # (its new row: unticked until you tick it)
+        self.edited(a)
+        self.look_up(self.sources.currentData() or "profile", self.with_versions([a]), again=True)
+        self.win.statusBar().showMessage(tr("Showing {0} for {1}: tick it to apply.").format(
+            candidate_words(c), Path(a["source_dir"]).name), 15000)
+
+    def chosen_release(self, a) -> dict:
+        """The release you chose for album A (Change Release, or Use … and File It…), or {}."""
+        if not a or not a.get("source_dir"):
+            return {}
+        import engine
+        mine = {os.path.realpath(f) for f in engine.plan_entry_files(a)}
+        return next((x for x in self.forced.get(os.path.realpath(a["source_dir"])) or []
+                     if isinstance(x, dict) and mine & {os.path.realpath(f) for f in x.get("files") or []}), {})
+
+    def undo_release_choice(self, albums=None):
+        """The release you chose for the selected albums forgotten (and your ask to file them):
+        each is looked up again as TagMender finds it - an Unresolved album Unresolved again."""
+        import engine
+        albums = [a for a in (albums if albums is not None else self.selected_albums()) if self.chosen_release(a)]
+        if not albums or (self.running and not self.looking):
+            return
+        for a in albums:
+            key = os.path.realpath(a["source_dir"])
+            mine = {os.path.realpath(f) for f in engine.plan_entry_files(a)}
+            left = [x for x in self.forced.get(key) or []
+                    if isinstance(x, dict) and not mine & {os.path.realpath(f) for f in x.get("files") or []}]
+            if left:
+                self.forced[key] = left
+            else:
+                self.forced.pop(key, None)
+            for f in mine:
+                self.file_anyway.pop(f, None)
+            a[PlanModel.LEAVE_OUT] = True                   # (looked up again: not applied unasked meanwhile)
+        self.look_up(self.sources.currentData() or "profile", self.with_versions(albums), again=True)
+        self.win.statusBar().showMessage(tr("Release choice undone for {0}: looked up again.").format(
+            plural(len(albums), tr("album"), tr("albums"))), 10000)
 
     def unresolved_action(self, a) -> str:
         """What album A's profile does with an Unresolved album ("mark", "move", "leave"; "")."""
@@ -3485,19 +3548,9 @@ class Overview(QWidget):
         if not chosen:
             return
         import engine
-        from .models import best_candidate
         for a in chosen:                                     # (the album's own files: not its folder's others)
-            files = engine.plan_entry_files(a)
-            for f in files:
+            for f in engine.plan_entry_files(a):
                 self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
-            c = best_candidate(a)
-            if c:                                            # (MOV-6: Unresolved - its closest release taken)
-                key = os.path.realpath(a["source_dir"])
-                mine = {os.path.realpath(f) for f in files}
-                kept = [x for x in (self.forced.get(key) or []) if isinstance(x, dict) and
-                        not mine & {os.path.realpath(f) for f in x.get("files") or []}]
-                self.forced[key] = kept + [dict({"ref": c["ref"], "files": files},
-                                                **({"only": True} if a.get("split") else {}))]
         self.look_up(self.sources.currentData() or "profile", self.with_versions(chosen), again=True)
         self.win.statusBar().showMessage(
             tr("Looking up {0} again, to be filed into the library as you asked; nothing is written until you "

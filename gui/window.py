@@ -290,6 +290,8 @@ class Main(QMainWindow):
             "tags_from_filenames": self.tags_from_filenames,
             "process_anyway": lambda: ov().process_anyway(),
             "file_anyway": lambda: ov().file_anyway_selected(),
+            "use_candidate": lambda: ov().use_candidate(),
+            "undo_release_choice": lambda: ov().undo_release_choice(),
             "exclude_again": lambda: ov().exclude_again(),
             "retry": lambda: self.pages["Needs attention"].retry(),
             "search_web": lambda: self.album_do("web"),
@@ -732,6 +734,14 @@ class Main(QMainWindow):
         fa = self.commands["file_anyway"]
         fa.setEnabled(kind == "overview" and idle and bool(ov is not None and ov.may_file_anyway(x)))
         fa.setText(file_anyway_words(x if kind == "overview" else None))
+        # MOV-6: an Unresolved album's closest release, shown to be filed; a release you chose, forgotten
+        from .models import use_candidate_words
+        uc = self.commands["use_candidate"]
+        uc.setEnabled(kind == "overview" and idle and bool(ov is not None and ov.may_use_candidate(x)))
+        words = use_candidate_words(x) if kind == "overview" else ""
+        actmod.retitle(uc, words.replace("&", "&&") if words else tr("Use the Closest Release and File It…"))
+        self.commands["undo_release_choice"].setEnabled(kind == "overview" and idle and bool(
+            ov is not None and ov.chosen_release(x)))
         self.commands["retry"].setEnabled(kind == "attention" and idle)
         self.inspector.buttons["release"].setEnabled(kind == "overview" and idle)
         for k in ("open", "web"):

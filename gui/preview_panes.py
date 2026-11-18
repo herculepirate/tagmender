@@ -958,7 +958,11 @@ class AlbumsModel(LazyTree):
                     return self._list(n, 6, R_DISPLAY) or ""
                 if role == R_ACCESSIBLETEXT:
                     sub = self.data(idx, SUB)
-                    return f"{album_title(a)}, {sub}" if sub else album_title(a)
+                    words = f"{album_title(a)}, {sub}" if sub else album_title(a)
+                    if a.get("status") == "done":           # (the badge in words: "Applied" / "Applied, moved")
+                        from .models import applied_moved
+                        words += ", " + (tr("Applied, moved") if applied_moved(a) else tr("Applied"))
+                    return words
                 if role == R_TOOLTIP:
                     return self.album_tip(n)
                 if role == R_FONT:
@@ -2578,25 +2582,24 @@ class PreviewPanes(QWidget):
     def show_offer(self, album):
         """MOV-5/MOV-6: why ALBUM is not filed (its score, no release proven) and the button that
         asks for it; hidden for any other album."""
-        from .models import not_filed_reason, release_offered, unresolved_reason
-        words = not_filed_reason(album) if album is not None else ""
-        if not words and album is not None and release_offered(album):      # (MOV-6: Unresolved)
-            ov = self.owner
-            words = unresolved_reason(album, ov.unresolved_action(album) if ov is not None and
-                                      hasattr(ov, "unresolved_action") else "")
+        from .models import offer_of
+        owner = self.owner if hasattr(self.owner, "may_file_anyway") else None
+        words, button, on, self._offer_kind = offer_of(album, owner)
         self.offer.setVisible(bool(words))
         if not words:
             return
-        copy = (album.get("below_floor") or {}).get("op") == "copy"
         self.offer_words.setText(words)
-        self.offer_btn.setText(tr("Copy into Library Anyway") if copy else tr("Move into Library Anyway"))
-        self.offer_btn.setAccessibleName(self.offer_btn.text())
-        self.offer_btn.setEnabled(bool(self.owner is not None and hasattr(self.owner, "may_file_anyway")
-                                       and self.owner.may_file_anyway(album)))
+        self.offer_btn.setText(button.replace("&", "&&"))
+        self.offer_btn.setAccessibleName(button)
+        self.offer_btn.setEnabled(on)
 
     def file_anyway(self):
         album = self.scope[0] if self.scope else None
-        if album is not None and self.owner is not None and hasattr(self.owner, "file_anyway_for"):
+        if album is None or self.owner is None or not hasattr(self.owner, "file_anyway_for"):
+            return
+        if getattr(self, "_offer_kind", "") == "use":
+            self.owner.use_candidate(album)
+        else:
             self.owner.file_anyway_for([album])
 
     def change_release(self):

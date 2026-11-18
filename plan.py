@@ -2064,7 +2064,7 @@ class Planner:
                 entry.pop("below_floor")
             if entry.get("filed_on_request") and not _moves_a_file(entry):
                 entry.pop("filed_on_request")
-                entry["notes"] = [n for n in entry["notes"] if not n.endswith("because you asked")]
+                entry["notes"] = [n for n in entry["notes"] if "because you asked" not in n]
             # MOV-4: an album folder is claimed for this album's discs only once its placement
             # is decided - an album blocked, skipped or not moved claims none
             if not (entry.get("status") in ("ready", "unchanged") and

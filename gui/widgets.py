@@ -502,8 +502,9 @@ class ApplyProgress(QFrame):
         or move; None for none known: the words then count albums only)."""
         self.timer.stop()
         self.kind = kind
+        self.bar.setAccessibleName(tr("Save progress") if kind == "save" else tr("Apply progress"))
         self.est = list(files_per_album)
-        self.albums, self.at, self.finished = len(self.est), 0, 0
+        self.albums, self.at, self.finished, self.done_at = len(self.est), 0, 0, 0
         self.files_done, self.current = 0, 0
         self.bar.setValue(0)
         self.show_words()
@@ -524,10 +525,13 @@ class ApplyProgress(QFrame):
         self.current = j
         self.show_words()
 
-    def album_done(self, i):
+    def album_done(self, i, ok=True):
+        """Album I is over: its files counted as done; OK: applied (a failed one is not finished)."""
         if 0 <= i < len(self.est):
             self.files_done += self.est[i] or 0
-        self.finished += 1
+        self.done_at = max(getattr(self, "done_at", 0), i + 1)
+        if ok:
+            self.finished += 1
         self.current = 0
         self.show_words()
 
@@ -542,7 +546,7 @@ class ApplyProgress(QFrame):
         else:
             frac = self.finished / self.albums if self.albums else 0
         self.bar.setValue(round(frac * self.SCALE))
-        n = min(self.albums, max(self.finished, self.at) + 1) if self.albums else 0
+        n = min(self.albums, max(getattr(self, "done_at", 0), self.at) + 1) if self.albums else 0
         head = (tr("Saving {0} of {1} albums") if self.kind == "save" else tr("Applying {0} of {1} albums")).format(
             n, self.albums)
         if total and self.kind != "save":
@@ -552,18 +556,21 @@ class ApplyProgress(QFrame):
     def set_words(self, text, bad=""):
         """TEXT, then BAD (what failed) in the error colour; both read out and in the tooltip."""
         import html
-        self.words.setText(html.escape(text) + (" · <span style='color:{0}'>{1}</span>".format(
-            style.color("error"), html.escape(bad)) if bad else ""))
-        whole = f"{text} · {bad}" if bad else text
+        self.words.setText(html.escape(text) + (" · " if text and bad else "") + (
+            "<span style='color:{0}'>{1}</span>".format(style.color("error"), html.escape(bad)) if bad else ""))
+        whole = " · ".join(x for x in (text, bad) if x)
         self.bar.setAccessibleDescription(whole)
         self.setToolTip(whole)
 
     def text(self) -> str:
         return self.toolTip()
 
-    def finish(self, done, failed=0, stopped=False):
-        """The job ended: DONE albums applied, FAILED not (failed, in conflict), STOPPED: cancelled."""
-        if stopped:
+    def finish(self, done, failed=0, stopped=False, error=False):
+        """The job ended: DONE albums applied, FAILED not (failed, in conflict), STOPPED: cancelled,
+        ERROR: the job itself failed."""
+        if error:
+            self.set_words("", tr("Failed after {0} of {1}").format(self.finished, self.albums))
+        elif stopped:
             self.set_words(tr("Stopped after {0} of {1}").format(self.finished, self.albums))
         else:
             self.bar.setValue(self.SCALE)

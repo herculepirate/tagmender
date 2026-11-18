@@ -1261,25 +1261,24 @@ class Inspector(QDockWidget):
 
     def show_offer(self, album):
         """MOV-5/MOV-6: why ALBUM is kept out of the library, and the button that asks for it."""
-        from .models import not_filed_reason, release_offered, unresolved_reason
-        words = not_filed_reason(album) if album is not None else ""
-        if not words and album is not None and release_offered(album):      # (MOV-6: Unresolved)
-            ov = getattr(self.win, "pages", {}).get("Overview")
-            words = unresolved_reason(album, ov.unresolved_action(album) if ov is not None and
-                                      hasattr(ov, "unresolved_action") else "")
+        from .models import offer_of
+        ov = getattr(self.win, "pages", {}).get("Overview")
+        words, button, on, self._offer_kind = offer_of(album, ov)
         self.offer_words.setText(words)
         self.offer_words.setVisible(bool(words))
         self.offer_btn.setVisible(bool(words))
         if words:
-            copy = (album.get("below_floor") or {}).get("op") == "copy"
-            self.offer_btn.setText(tr("Copy into Library Anyway") if copy else tr("Move into Library Anyway"))
-            self.offer_btn.setAccessibleName(self.offer_btn.text())
-            ov = getattr(self.win, "pages", {}).get("Overview")
-            self.offer_btn.setEnabled(bool(ov is not None and ov.may_file_anyway(album)))
+            self.offer_btn.setText(button.replace("&", "&&"))
+            self.offer_btn.setAccessibleName(button)
+            self.offer_btn.setEnabled(on)
 
     def file_anyway(self):
         ov = getattr(self.win, "pages", {}).get("Overview")
-        if ov is not None and self.album is not None:
+        if ov is None or self.album is None:
+            return
+        if getattr(self, "_offer_kind", "") == "use":
+            ov.use_candidate(self.album)
+        else:
             ov.file_anyway_for([self.album])
 
     def show_row(self, row):

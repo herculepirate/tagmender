@@ -105,6 +105,26 @@ class DSC13_SaidSets(te.Base):
         self.assertEqual([t["tracknumber"][0] for t in p.targets], ["1", "2", "3"] * 4)
         self.assertEqual({t["totaldiscs"][0] for t in p.targets}, {"4"})
 
+    def test_DSC13_a_two_disc_album_inside_the_set_keeps_its_own_numbering(self):
+        # (SBB - Lost Tapes Vol. 2 [9CD]: each disc "1 of 1", but "cd7" and "cd8" one album "CD 7&8",
+        # tagged 1/2 and 2/2)
+        top = self.lib / "Band S" / "2006 - Lost Tapes Vol. 2 [4CD]"
+        disc(top, "cd1 - alpha", 1, "Lost Tapes, Vol. 2, CD1 - Alpha", "Band S", disc_tag="1/1")
+        disc(top, "cd2 - beta", 2, "Lost Tapes, Vol. 2, CD2 - Beta", "Band S", disc_tag="1/1")
+        disc(top, "cd3 - live (i)", 3, "Lost Tapes, Vol. 2, CD 3&4 - Live (I & II)", "Band S", disc_tag="1/2")
+        disc(top, "cd4 - live (ii)", 4, "Lost Tapes, Vol. 2, CD 3&4 - Live (I & II)", "Band S", disc_tag="2/2")
+        self.assertEqual(self.shape(self.lib / "Band S"), [(top.name, 12)])
+        album = ma.read_album(top, "Band S", top.name)
+        self.assertEqual([t["disc"] for t in album["tracks"]], [1] * 3 + [2] * 3 + [3] * 3 + [4] * 3)
+
+    def test_DSC13_a_disc_tag_of_another_album_inside_stays_apart(self):
+        # (a "2/2" on a folder whose neighbour is no disc 1 of the same album: against its number)
+        top = self.lib / "Band S" / "2006 - Lost Tapes [3CD]"
+        disc(top, "cd1 - alpha", 1, "Alpha", "Band S", disc_tag="1/1")
+        disc(top, "cd2 - beta", 2, "Beta", "Band S", disc_tag="1/1")
+        disc(top, "cd3 - gamma", 3, "Gamma", "Band S", disc_tag="2/2")
+        self.assertEqual(len(self.groups()), 3)
+
     def test_DSC13_the_name_says_a_set(self):
         said = engine._BOX_WORDS.search
         for name in ("Billy Joel - The Complete Albums Collection (2011)", "X (BoxSet, 5CD)", "X Box Set",

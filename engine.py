@@ -399,7 +399,8 @@ def said_set(box: Path, found: dict, metas: dict) -> bool:
     agrees: it has no tracks of its own; each of its audio folders is a folder of it (none deeper)
     whose name begins with a disc word or a number ("CD01 Cold Spring Harbor", "01. Title", "Disc
     3 - Title"), numbered 1 to N, each once, N two or more (the CD count N or N - 1); each holds one
-    album by its tags; all by one album artist, or each naming the artist the folder is named after
+    album by its tags (or, folders side by side, one album of their own discs numbered 1 to k of k);
+    all by one album artist, or each naming the artist the folder is named after
     ("John Mayer Trio" in "John Mayer - John Mayer (BoxSet, 5CD)") - Various Artists only where the
     name says box or compilation; no disc tag against its folder's number; and no disc is tagged
     "1 of 1" with a release ID or barcode (a standalone release's own). An artist's folder of
@@ -427,13 +428,23 @@ def said_set(box: Path, found: dict, metas: dict) -> bool:
     keys = album_keys(files, box, metas)
     if any(k[0] != "tags" for k in keys.values()):
         return False                                    # (an untagged disc)
+    # (an album of two discs or more within the set, in folders side by side - "cd7 - Live (I)" and
+    # "cd8 - Live (II)" both tagged as "CD 7&8 - Live (I & II)", discs 1/2 and 2/2: its own numbering)
+    runs = {}
+    for d in sorted(dirs, key=lambda x: numbers[x]):
+        runs.setdefault(next(iter({keys[f] for f in found[d]})), []).append(d)
+    inner = {}
+    for run in runs.values():
+        if len(run) > 1 and [numbers[d] for d in run] == list(range(numbers[run[0]], numbers[run[0]] + len(run))):
+            for i, d in enumerate(run, 1):
+                inner[d] = (str(i), str(len(run)))
     for d in dirs:
         if len({keys[f] for f in found[d]}) != 1:
             return False                                # (a folder of two albums)
         for f in found[d]:
             meta = metas.get(f) or {}
             num, total = _disc_tag(meta)
-            if num not in ("", "1", str(numbers[d])):
+            if num not in ("", "1", str(numbers[d])) and (num, total) != inner.get(d):
                 return False                            # (a disc tag against the folder's number)
             if num == "1" and total == "1" and (
                     _first(meta, "musicbrainz_albumid") or _first(meta, "barcode")):

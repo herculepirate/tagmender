@@ -436,8 +436,8 @@ class InspectorEditing(Base):
         # the inspector's Change Release: one control, the Album menu's four ways to choose the release
         rel = self.insp.buttons["release"]
         self.assertIsInstance(rel, QToolButton)
-        self.assertEqual([a.objectName() for a in rel.menu().actions()],
-                         list(self.gui.actions.RELEASE_MENU))
+        self.assertEqual([a.objectName() for a in rel.menu().actions() if not a.isSeparator()],
+                         [k for k in self.gui.actions.RELEASE_MENU if k])     # (0.8.77: a line before Undo)
 
     def test_tag_keys_work_with_focus_in_the_album_table(self):
         from PySide6.QtCore import Qt as _Qt

@@ -76,9 +76,9 @@ class Base(unittest.TestCase):
         (self.album / "rip.log").write_text("log")
         self.add_result(self.album)
 
-    def run_tool(self, *extra, skip=""):
+    def run_tool(self, *extra, skip="", skip_files=""):
         env = dict(os.environ, FAKE_PICARD_ROOT=str(self.root), FAKE_PICARD_SKIP=skip,
-                   TAGMENDER_SKIP_PICARD_CHECK="1")
+                   FAKE_PICARD_SKIP_FILES=skip_files, TAGMENDER_SKIP_PICARD_CHECK="1")
         cmd = [sys.executable, str(HERE / "tag_albums.py"), "--matches-db", str(self.db), "--out-dir",
                str(self.out), "--library-root", str(self.root),
                "--picard", f"{sys.executable} {Path(__file__).resolve().parent / 'fake_picard.py'}", *extra]
@@ -604,6 +604,50 @@ class Runs(Base):
         joined = " ".join(cmds)
         self.assertLess(joined.index("PAUSE"), joined.index("SAVE_MATCHED"))
         self.assertTrue(joined.endswith("QUIT FORCE"))
+
+
+class AllOrNothing(Base):
+    """An album the tagger saved in part is put back whole: never some tracks tagged and moved
+    and the rest left in the old folder, marked as written (Boris & Sunn O))) - Altar: 7 of 8
+    moved to a new folder, disc 2 left behind; Nile - What Should Not Be Unearthed)."""
+
+    def test_partly_saved_album_is_put_back_whole_and_marked(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        before_files = sorted(p.name for p in self.album.rglob("*") if p.is_file())
+        rc, out = self.run_tool("--apply", skip_files="003.X")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'partly saved, put back': 1", out)
+        self.assertFalse(list((self.root / "New Artist").rglob("*.flac")) if (self.root / "New Artist").exists()
+                         else [], "nothing of the album stays in the tagger's new folder")
+        self.assertEqual(sorted(p.name for p in self.album.rglob("*") if p.is_file()), before_files)
+        for p in ta.audio_files(self.album):
+            status, reason = ta.read_tagmender(p)
+            self.assertEqual(status, "Unresolved", p)
+            self.assertIn("write_failed", reason)
+            self.assertIn("3 of 4", reason)
+            tags, pics = all_tags(p)
+            self.assertFalse(any("musicbrainz" in k.lower() and "trackid" in k.lower().replace(" ", "")
+                                 for k in tags), p)        # no track of it keeps the tagger's save
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_waits_for_the_tagger_to_exit_before_checking(self):
+        seen = iter(["123 flatpak run org.musicbrainz.Picard", "123 flatpak run org.musicbrainz.Picard", ""])
+        orig = ta.picard_running
+        ta.picard_running = lambda: next(seen)
+        try:
+            self.assertEqual(ta.wait_for_tagger_exit(timeout=5, poll=0.01), "")
+        finally:
+            ta.picard_running = orig
+
+    def test_a_tagger_still_running_is_reported(self):
+        orig = ta.picard_running
+        ta.picard_running = lambda: "123 picard"
+        try:
+            self.assertEqual(ta.wait_for_tagger_exit(timeout=0.05, poll=0.01), "123 picard")
+        finally:
+            ta.picard_running = orig
 
 
 if __name__ == "__main__":

@@ -1100,6 +1100,26 @@ def run_picard(picard_cmd, folders, settle, timeout, log):
         return -1
 
 
+def wait_for_tagger_exit(log=None, timeout=None, poll=2.0):
+    """Wait until no tagger process is left (its command can return while the application
+    still saves: a window already open received the commands, or Flatpak's wrapper ended
+    first). '' once it is gone; the process found when TIMEOUT seconds (default
+    TAGMENDER_TAGGER_EXIT_WAIT, 600) passed with it still running."""
+    if timeout is None:
+        try:
+            timeout = float(os.environ.get("TAGMENDER_TAGGER_EXIT_WAIT", "600"))
+        except ValueError:
+            timeout = 600.0
+    end = time.time() + timeout
+    while True:
+        running = picard_running()
+        if not running or time.time() >= end:
+            if running and log is not None:
+                log.write(f"The tagger was still running {timeout:.0f} s after its commands: {running}\n")
+            return running
+        time.sleep(poll)
+
+
 # --------------------------------------------------------------------------
 # Verify: where did each file go, and was it tagged?
 # --------------------------------------------------------------------------
@@ -1427,6 +1447,14 @@ def main():
             print(f"[{n0}-{start + len(batch)}/{len(albums)}] The tagger: tagging {len(batch)} album(s)…", flush=True)
             rc = run_picard(args.picard, [a["path"] for a in batch], args.settle,
                             timeout=600 + 120 * len(batch), log=log)
+            # (the tagger may still be saving after its command returned - a window it left
+            # open, a slow share: verified before it is done, files it saves later look unsaved
+            # and are left without the mark, Nile - What Should Not Be Unearthed, 8 of 10)
+            still = wait_for_tagger_exit(log=log)
+            if still:
+                print(f"    the tagger is still running ({still}); the albums of this batch are checked as "
+                      "they are now and nothing is put back while it may still save them. No further batch "
+                      "is started.")
             cands = changed_dirs(root, started) + [Path(a["path"]) for a in batch]
             full = None
             for a in batch:                                   # 4: verify
@@ -1440,11 +1468,6 @@ def main():
                          "tagged, no Discogs data" if v["saved"] == n else
                          "partly saved" if v["saved"] else "not saved")
                 new_dirs = sorted({str(Path(p).parent) for p in v["new_paths"].values()})
-                results.append({"album": a["path"], "state": state, "saved": v["saved"], "files": n,
-                                "discogs": v["with_discogs"], "now_in": "; ".join(new_dirs),
-                                "release": a["mbid"], "not_saved": "; ".join(v["not_saved"][:3])})
-                print(f"    {state:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}"
-                      + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
                 for rec in a["records"]:
                     rec["new_path"] = v["new_paths"].get(rec["path"], "")
                     if not rec["new_path"] and Path(rec["path"]).exists():
@@ -1452,9 +1475,28 @@ def main():
                             restore_tags(Path(rec["path"]), rec["backup"], blob_dir)
                         except Exception as exc:
                             print(f"    could not take the release ID out of {rec['path']}: {exc}")
-                if v["saved"]:                                # 4b: TAGMENDER=Resolved / Unresolved
+                saved = v["saved"]
+                if state == "partly saved" and not still:
+                    # all or nothing: an album the tagger saved in part is put back whole - never
+                    # left with some tracks tagged and moved and the rest behind in the old folder
+                    # (Boris & Sunn O))) - Altar, 7 of 8 moved; Sepultura - Beneath the Remains)
+                    _r, problems = undo_album({"album": a["path"], "files": a["records"],
+                                               "extras": a["extras"], "moves": a["moves"]}, blob_dir)
+                    if not problems:
+                        for rec in a["records"]:
+                            rec["new_path"] = rec["path"]
+                        a["moves"].clear()
+                        state, new_dirs = "partly saved, put back", []
+                results.append({"album": a["path"], "state": state, "saved": saved, "files": n,
+                                "discogs": v["with_discogs"], "now_in": "; ".join(new_dirs),
+                                "release": a["mbid"], "not_saved": "; ".join(v["not_saved"][:3])})
+                print(f"    {state:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}"
+                      + (f"  ->  {new_dirs[0]}" if new_dirs and new_dirs[0] != a["path"] else ""))
+                if saved:                                     # 4b: TAGMENDER=Resolved / Unresolved
                     status = "Resolved" if state.startswith("tagged") else "Unresolved"
-                    reason = "" if status == "Resolved" else f"The tagger saved {v['saved']} of {n} files"
+                    reason = "" if status == "Resolved" else (
+                        f"The tagger saved {saved} of {n} files; the album was put back as it was"
+                        if state.endswith("put back") else f"The tagger saved {saved} of {n} files")
                     for rec in a["records"]:
                         if rec["new_path"]:
                             try:
@@ -1474,6 +1516,8 @@ def main():
                 json.dump(journal, fh)
             if rc not in (0, None):
                 print(f"    (the tagger exited with {rc}; see {run_dir / 'tagger.log'})")
+            if still:
+                break
     except KeyboardInterrupt:
         print("\nInterrupted. Albums not saved still carry only the seeded release ID; "
               f"--undo {run_id} restores everything in this run.")
@@ -1648,59 +1692,68 @@ def undo(out_dir, run_id, force=False):
     blob_dir = run_dir / "blobs"
     restored = failed = 0
     for album in journal:
-        for src, dest in reversed(album.get("moves", [])):     # the artwork tidy, backwards
-            if Path(dest).exists() and not Path(src).exists():
-                Path(src).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(dest, src)
-        for d in {str(Path(dest).parent) for _s, dest in album.get("moves", [])}:
-            _remove_empty(Path(d))
-        new_dirs = {str(Path(r["new_path"]).parent) for r in album["files"]
-                    if r.get("new_path") and r["new_path"] != r["path"]}
-        for rec in album["files"]:
-            cur = Path(rec.get("new_path") or rec["path"])
-            if not cur.exists():
-                failed += 1
-                print(f"  not found: {cur}")
-                continue
-            if rec.get("not_written"):          # (a run that could not write this track: nothing to put back)
-                continue
-            try:
-                import executor
-                if rec.get("after_sig") and not force and not executor._sig_is(cur, rec["after_sig"]) and \
-                        not same_as_backup(cur, rec["backup"]):
-                    failed += 1
-                    print(f"  {cur}: its tags were edited after the run; left as they are (--force puts them back)")
-                    continue
-                # (through a staging copy: a crash never leaves a half-written track; a track that
-                # is a link - the run wrote through it - is put back in the file it points to)
-                real = Path(os.path.realpath(cur)) if cur.is_symlink() else cur
-                executor.staged_write(real, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
-                old = Path(rec["path"])
-                if cur != old:
-                    old.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(cur), str(old))
-                restored += 1
-            except Exception as exc:
-                failed += 1
-                print(f"  could not restore {cur}: {exc}")
-        # scans, logs and cue sheets Picard moved along with the music
-        for rel in album.get("extras", []):
-            old = Path(album["album"]) / rel
-            if old.exists():
-                continue
-            for d in new_dirs:
-                for cand in (Path(d) / rel, Path(d) / Path(rel).name):
-                    if cand.exists():
-                        old.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(cand), str(old))
-                        break
-                else:
-                    continue
-                break
-        for d in new_dirs:                               # remove the folders Picard made, if now empty
-            _remove_empty(Path(d))
+        r, f = undo_album(album, blob_dir, force)
+        restored, failed = restored + r, failed + f
     print(f"Restored {restored} file(s); {failed} problem(s).")
     return 0 if not failed else 1
+
+
+def undo_album(album, blob_dir, force=False):
+    """Put one album of a run back as it was: its files' tags, names and folders, the scans
+    and logs the tagger moved along. (restored, problems)."""
+    restored = failed = 0
+    for src, dest in reversed(album.get("moves", [])):     # the artwork tidy, backwards
+        if Path(dest).exists() and not Path(src).exists():
+            Path(src).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(dest, src)
+    for d in {str(Path(dest).parent) for _s, dest in album.get("moves", [])}:
+        _remove_empty(Path(d))
+    new_dirs = {str(Path(r["new_path"]).parent) for r in album["files"]
+                if r.get("new_path") and r["new_path"] != r["path"]}
+    for rec in album["files"]:
+        cur = Path(rec.get("new_path") or rec["path"])
+        if not cur.exists():
+            failed += 1
+            print(f"  not found: {cur}")
+            continue
+        if rec.get("not_written"):          # (a run that could not write this track: nothing to put back)
+            continue
+        try:
+            import executor
+            if rec.get("after_sig") and not force and not executor._sig_is(cur, rec["after_sig"]) and \
+                    not same_as_backup(cur, rec["backup"]):
+                failed += 1
+                print(f"  {cur}: its tags were edited after the run; left as they are (--force puts them back)")
+                continue
+            # (through a staging copy: a crash never leaves a half-written track; a track that
+            # is a link - the run wrote through it - is put back in the file it points to)
+            real = Path(os.path.realpath(cur)) if cur.is_symlink() else cur
+            executor.staged_write(real, lambda stage, r=rec: restore_tags(stage, r["backup"], blob_dir))
+            old = Path(rec["path"])
+            if cur != old:
+                old.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(cur), str(old))
+            restored += 1
+        except Exception as exc:
+            failed += 1
+            print(f"  could not restore {cur}: {exc}")
+    # scans, logs and cue sheets Picard moved along with the music
+    for rel in album.get("extras", []):
+        old = Path(album["album"]) / rel
+        if old.exists():
+            continue
+        for d in new_dirs:
+            for cand in (Path(d) / rel, Path(d) / Path(rel).name):
+                if cand.exists():
+                    old.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(cand), str(old))
+                    break
+            else:
+                continue
+            break
+    for d in new_dirs:                               # remove the folders Picard made, if now empty
+        _remove_empty(Path(d))
+    return restored, failed
 
 
 def _remove_empty(folder, keep_parent=False):

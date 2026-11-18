@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.8.74
+
+**Albums the external tagger saves only in part**
+- TagMender now waits for the external tagger to finish saving before it checks an album. An album it saved only in part is put back whole and every file is marked Unresolved where it actually is; the other discs of the same set go back with it, also when a disc was not saved at all. Separate copies of a release are never tied together.
+- Nothing is touched while the tagger is still running. Albums it moved without saving are put back, and a music video it skips no longer counts against an album; the video moves with the album.
+- Cover images the tagger saved into folders it created are cleaned up; folders that were there before are never removed.
+- The undo record is written safely: closing the terminal or a crash mid-run still leaves a run that Undo puts back, even when something could not be moved back. A run started with nohup keeps going when its terminal closes.
+
 ## 0.8.73
 
 **Classical music**

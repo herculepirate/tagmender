@@ -53,11 +53,15 @@ class NAM8(unittest.TestCase):
         self.assertEqual(got[0], "Robin Trower")
 
     def test_NAM8_equal_joins_keep_the_whole_credit(self):
-        two = mb({"a": PERSON(), "b": PERSON()})
+        # (NAM-8 as amended 2026-11-17: equal joins between persons alone file under the first -
+        # test_v0872_nam8_persons; here a person and a separate act, so the credit stays whole)
+        acts = mb({"a": PERSON(), "b": aa.Members([("Member", "", "m")], "group")})
         for credit in ("A & B", "A and B", "A, B", "A / B", "A x B", "A vs. B"):
-            self.assertIsNone(aa.choose(tags(["A", "B"], ["a", "b"], credit), PROF, two), credit)
+            self.assertIsNone(aa.choose(tags(["A", "B"], ["a", "b"], credit), PROF, acts), credit)
         # (a name holding a lead word is no join: "Withers" is not "with")
-        self.assertIsNone(aa.choose(tags(["Bill Withers", "B"], ["a", "b"], "Bill Withers & B"), PROF, two))
+        self.assertIsNone(aa.choose(tags(["Bill Withers", "B"], ["a", "b"], "Bill Withers & B"), PROF, acts))
+        self.assertEqual(aa.choose(tags(["Bill Withers", "B"], ["a", "b"], "Bill Withers with B"), PROF, acts)[0],
+                         "Bill Withers")
 
     def test_NAM8_a_split_credit_keeps_its_featuring_through_the_hidden_credit(self):
         # (Robin Trower - Original Album Series Vol 2: the profile writes the credit one value per
@@ -66,8 +70,13 @@ class NAM8(unittest.TestCase):
              "musicbrainz_albumartistid": ["rt", "jb"], "~albumartist_credit": ["Robin Trower featuring Jack Bruce"]}
         got = aa.choose(t, PROF, mb({"rt": PERSON(), "jb": PERSON()}), lambda d: aa.NOT_ASKED)
         self.assertEqual(got[:3], ("Robin Trower", "", "rt"))
+        # (an equal join of two persons: the first-credited too, NAM-8 as amended 2026-11-17; with
+        # the other a separate act the whole credit stays)
         t["~albumartist_credit"] = ["Robin Trower & Jack Bruce"]
-        self.assertIsNone(aa.choose(t, PROF, mb({"rt": PERSON(), "jb": PERSON()}), lambda d: aa.NOT_ASKED))
+        self.assertEqual(aa.choose(t, PROF, mb({"rt": PERSON(), "jb": PERSON()}), lambda d: aa.NOT_ASKED)[0],
+                         "Robin Trower")
+        acts = mb({"rt": PERSON(), "jb": aa.Members([("M", "", "m")], "group")})
+        self.assertIsNone(aa.choose(t, PROF, acts, lambda d: aa.NOT_ASKED))
 
     def test_NAM8_partners_before_a_guest_keep_the_whole_credit(self):
         # (review C: "Pat Metheny & Lyle Mays with Nana Vasconcelos" never cut to Pat Metheny)
@@ -86,13 +95,14 @@ class NAM8(unittest.TestCase):
         got = aa.choose(t, PROF, mb({"band": GROUP_NO_DATA()}), lambda d: aa.NOT_ASKED)
         self.assertEqual(got, aa.UNKNOWN)
 
-    def test_NAM8_two_groups_with_known_members_and_two_persons_stay_whole(self):
+    def test_NAM8_two_groups_with_known_members_stay_whole_two_persons_take_the_first(self):
         t = tags(["Calexico", "Iron & Wine"], ["c", "iw"], "Calexico and Iron & Wine")
         members = mb({"c": aa.Members([("Joey Burns", "", "jb")], "group"),
                       "iw": aa.Members([("Sam Beam", "", "sb")], "group")})
         self.assertIsNone(aa.choose(t, PROF, members))
         t = tags(["Paolo Fresu", "Omar Sosa"], ["pf", "os"], "Paolo Fresu & Omar Sosa")
-        self.assertIsNone(aa.choose(t, PROF, mb({"pf": PERSON(), "os": PERSON()})))
+        # (NAM-8 as amended 2026-11-17: two persons joined as equals - the first-credited)
+        self.assertEqual(aa.choose(t, PROF, mb({"pf": PERSON(), "os": PERSON()}))[:3], ("Paolo Fresu", "", "pf"))
         # (one group credit named after its equal members: leader_of keeps it whole)
         t = {"albumartist": ["Jimmy Page & Robert Plant"], "musicbrainz_albumartistid": ["pp"]}
         duo = mb({"pp": aa.Members([("Jimmy Page", "", "jp"), ("Robert Plant", "", "rp")], "group")})
@@ -103,7 +113,8 @@ class NAM8(unittest.TestCase):
 
     def test_NAM8_musicbrainz_answer_stands_when_discogs_is_down(self):
         t = tags(["Paolo Fresu", "Omar Sosa"], ["pf", "os"], "Paolo Fresu & Omar Sosa", dg=["1", "2"])
-        self.assertIsNone(aa.choose(t, PROF, mb({"pf": PERSON(), "os": PERSON()}), lambda d: None))
+        # (MusicBrainz's "two persons" decides - NAM-8 as amended 2026-11-17: the first-credited)
+        self.assertEqual(aa.choose(t, PROF, mb({"pf": PERSON(), "os": PERSON()}), lambda d: None)[0], "Paolo Fresu")
         # (no database answered for the other artist: not known)
         self.assertEqual(aa.choose(t, PROF, lambda i: None, lambda d: None), aa.UNKNOWN)
         # (Discogs answers for the other act when MusicBrainz cannot be reached: the lead's band)

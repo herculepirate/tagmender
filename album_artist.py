@@ -289,10 +289,11 @@ def _answer(mbid, dgid, members_of, discogs_members_of):
 
 def _equals(names, ids, dg, members_of=None, discogs_members_of=None):
     """NAM-8: a joint credit is a collaboration of equals (True: Calexico and Iron & Wine, two
-    bands; Paolo Fresu & Omar Sosa, two musicians) unless its first artist is a member of another
-    act it names - a leader credited with their own band (False: Thomas Strønen & Time Is A Blind
-    Guide, Strønen in the band) - or a person credited with a group no database lists members
-    for (False: the person leads, as before NAM-8). The other acts' members come from
+    bands) unless its first artist is a member of another act it names - a leader credited with
+    their own band (False: Thomas Strønen & Time Is A Blind Guide, Strønen in the band) - or a
+    person credited with a group no database lists members for (False: the person leads, as
+    before NAM-8) - or every artist it names is a person by MusicBrainz's type (False: Paolo
+    Fresu & Omar Sosa is filed under Paolo Fresu). The other acts' members come from
     MusicBrainz (its "member of band" relationships), else from Discogs. None when no database
     answered for any of them (no IDs: the first artist leads, as before); "unknown" when the
     answer depends on an artist no database could be reached for."""
@@ -315,7 +316,17 @@ def _equals(names, ids, dg, members_of=None, discogs_members_of=None):
             return "unknown"
     if any(state == "down" for state, _m in answers):
         return "unknown"
+    if same[0] and all(_mb_person(ids[k], members_of) for k in range(len(names))):
+        # (NAM-8, decided 2026-11-17: persons alone, joined as equals - "Yelena Eckemoff, Arild
+        # Andersen, Thomas Strønen" - are filed under the first-credited; only MusicBrainz's type
+        # "Person" counts, a Discogs artist without members proves nothing)
+        return False
     return True if any(state != "none" for state, _m in answers) else None
+
+
+def _mb_person(mbid, members_of) -> bool:
+    """NAM-8: MusicBrainz's type for the artist MBID is Person (never assumed without it)."""
+    return bool(mbid and members_of) and _kind(members_of(mbid)) == "person"
 
 
 def _found(name, ids, members_of):

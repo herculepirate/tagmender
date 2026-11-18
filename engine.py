@@ -3941,6 +3941,7 @@ class Engine:
             # MED-22c: a copy of a disc's SACD layers (beside its CD layer's copy) numbered by the
             # physical disc and filed in a folder of that layer's own
             tags_mb = _layer_copy(full_rel, tags_mb, vtracks)
+            tags_mb = _area_copy(full_rel, tags_mb, vtracks, album)
         if dparts and (dparts[1] is None or len(dparts[1]) != n):
             dparts = None if not tags_mb else (dparts[0], None, dparts[2])
         if tags_mb and dparts and es["merge_mode"] == "mb_only":
@@ -7987,6 +7988,30 @@ def _layer_copy(rel, tags, vtracks=None) -> list:
         label = mb_tags.layer_label(m.get("format")) if id(m) in joined else ""
         if label:
             t["~layer"] = [label]
+    return out
+
+
+def _area_copy(rel, tags, vtracks, album) -> list:
+    """MED-22c: version folders of an SACD the release lists as one disc naming no layer
+    ("Hybrid SACD": Kodo - One Earth Tour Special, SICL-10001, ripped from its ISO to "Stereo/"
+    and "Multichannel/") are that disc's stereo and multichannel areas: each file carries
+    "~layer" ("SACD Stereo", "SACD Multichannel") from its folder's layout, so they are filed as
+    "Disc 01 (SACD Stereo)" and "Disc 01 (SACD Multichannel)" in the one album folder. TAGS
+    unchanged otherwise (a layer _layer_copy labelled, a DVD's mixes, no version folders)."""
+    if not tags or not vtracks or len(vtracks) != len(tags) or any(t.get("~layer") for t in tags):
+        return tags
+    at = {int(m.get("position") or k): m for k, m in enumerate((rel or {}).get("media") or [], 1)}
+    lays = album.get("version_discs") or {}
+    files = album.get("tracks") or []
+    if len(files) != len(tags):
+        return tags
+    out = []
+    for t, (p, _k), f in zip(tags, vtracks, files):
+        fmt = (at.get(int(p)) or {}).get("format")
+        lay = lays.get(f.get("disc") or 1)
+        if mc.medium_type(fmt) != "sacd" or mc.medium_layout(fmt) or lay not in ("stereo", "multichannel"):
+            return tags
+        out.append(dict(t, **{"~layer": ["SACD Stereo" if lay == "stereo" else "SACD Multichannel"]}))
     return out
 
 

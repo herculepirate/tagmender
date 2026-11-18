@@ -2159,6 +2159,12 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # version's files say disc 1)
     versions = version_folders(infos, folders)
     kinds = {d: version_kind(v[2], [(p, i) for p, i in infos if p.parent == d]) for d, v in versions.items()}
+    if len(versions) > 1 and any(k == ("video", "audio") for k in kinds.values()) and \
+            sacd_marks(album_dir, album_folder):
+        # MED-13 / MED-22c: an SACD rip by its folder's name or its SACD ripper's log, its areas
+        # converted to 24/96 PCM (Kodo - One Earth Tour Special, sacd_log.txt, "Stereo/" and
+        # "Multichannel/"): the rate alone made them a DVD's; nothing names a video disc
+        kinds = {d: (("sacd", "sacd mark") if k == ("video", "audio") else k) for d, k in kinds.items()}
     if len(versions) == 1 and next(iter(kinds.values()))[1] == "audio":
         # one layout-named folder alone ("Stereo 24-96/" of a download): a version of a disc only
         # when its name's disc word, an SACD_AREA tag, DSD or its media tag says which disc

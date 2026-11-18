@@ -1029,6 +1029,11 @@ def _version_options(n, lay, media):
         t, tracks, fmt = medium_type(m.get("format")), m.get("tracks") or [], m.get("format")
         if t == "sacd" and medium_layout(fmt) == lay and len(tracks) == n:
             out.append(("sacd", m, tracks, "format"))
+        elif t == "sacd" and not medium_layout(fmt) and len(tracks) == n and lay in ("stereo", "multichannel") \
+                and not any(medium_type(o.get("format")) == "sacd" and medium_layout(o.get("format")) for o in media):
+            # MED-22c: an SACD listed as one disc, naming no layer ("Hybrid SACD": Kodo - One Earth
+            # Tour Special, SICL-10001) holds both its areas: each version folder is its tracks
+            out.append(("sacd", m, tracks, "single"))
         elif t == "video" and n and len(tracks) == n:
             out.append(("video", m, tracks, "single"))
         elif t == "video" and n and len(tracks) > n and len(tracks) % n == 0:

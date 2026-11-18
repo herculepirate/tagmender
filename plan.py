@@ -3679,17 +3679,28 @@ class Planner:
         another album title changes is the file's own ("Billy Joel/Piano Man CD 1/"): the discs'
         folders lie side by side in the artist's folder, with no album folder for the album's own
         files. True too when no folder names the album."""
-        try:
-            album = [str((_vals(names.get("album")) or [""])[0]) + " \u2060other"]
-            other = naming.render(template, {**names, "album": album}, self._picard(),
-                                  self.profile["filenames"].get("compat", "windows"), own=f.stem)
-        except Exception:
-            return True
+        # The title changed at its end and at its start: one added at the end is cut off by a
+        # naming keeping the title's first words only ($words(%album%,5) - Enigma - The Fall Of A
+        # Rebel Angel [Deluxe Edition]), one at the start changes a folder of the title's first
+        # letter too ($left(%album%,1)/): the album's folder is the first one both change - or, where
+        # one changes none, the first the other changes
+        title = str((_vals(names.get("album")) or [""])[0])
         folders = list(comps[:-1])
-        for i, c in enumerate(folders):
-            if i >= len(other) - 1 or fnm.fold(str(other[i])) != fnm.fold(str(c)):
-                return i >= len(folders) - 1
-        return True
+
+        def changed(album):
+            try:
+                other = naming.render(template, {**names, "album": [album]}, self._picard(),
+                                      self.profile["filenames"].get("compat", "windows"), own=f.stem)
+            except Exception:
+                return None
+            return {i for i, c in enumerate(folders)
+                    if i >= len(other) - 1 or fnm.fold(str(other[i])) != fnm.fold(str(c))}
+        tail, head = changed(title + " \u2060other"), changed("Zqx" + title)
+        if tail is None or head is None:
+            return True
+        both = tail & head
+        first = min(both) if both else min(tail or head) if (tail or head) else None
+        return True if first is None else first >= len(folders) - 1
 
     def _disc_level(self, template, names, comps, f):
         """MED-22c: the naming's last folder is its disc folder - the file named as another disc

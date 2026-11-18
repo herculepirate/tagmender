@@ -810,6 +810,32 @@ def catno_same(a, b):
     return False
 
 
+def catno_groups_inside(mine, theirs):
+    """CAT-7: your number written as whole groups of the release's longer one, in order and
+    side by side: "570 934-4" (a folder name) in "0 6025 570 934-4 5" (Discogs, Universal's
+    number with its prefix and check digit: Enigma - The Fall Of A Rebel Angel). Only a number
+    of two groups at least and six digits, all digits, never the release's whole number (that is
+    catno_same's), never a range ("~") - and never a piece of a group ("70 934" is not in it)."""
+    a, b = str(mine or "").strip(), str(theirs or "").strip()
+    if not a or not b or "~" in a or "~" in b:
+        return False
+    ga = [g for g in re.split(r"[\s\-./]+", a.casefold()) if g]
+    gb = [g for g in re.split(r"[\s\-./]+", b.casefold()) if g]
+    if len(ga) < 2 or len(gb) <= len(ga) or not all(g.isdigit() for g in ga + gb):
+        return False
+    if sum(len(g) for g in ga) < 6:
+        return False
+    return any(gb[i:i + len(ga)] == ga for i in range(len(gb) - len(ga) + 1))
+
+
+def distinctive_number(code):
+    """A normalised number no year, phone number or track count makes: ten digits or more, or
+    six characters or more of letters and digits (CAT-7)."""
+    k = str(code or "")
+    digits = len(re.sub(r"\D", "", k))
+    return (k.isdigit() and digits >= 10) or (len(k) >= 6 and bool(re.search(r"[a-z]", k)) and digits >= 3)
+
+
 def catnos_agree(mine, theirs):
     return any(catno_same(x, y) or catno_range_same(x, y) for x in mine or () for y in theirs or ())
 
@@ -1324,10 +1350,34 @@ def align_durations(file_secs, cand_secs, cfg):
     return table[n][m]
 
 
+# TRK-7: a featured artist's credit written into a track title: "(feat. Nanuk)", "[ft. X]",
+# "(featuring X)", or after the title, "Title feat. X" - only these credit forms, never another
+# bracket ("(Live)", "(Remix)", "(Part II)")
+_FEAT_BRACKET = re.compile(r"\s*[(\[]\s*(?:feat\.?|ft\.|featuring)\s+[^)\]]+[)\]]", re.I)
+_FEAT_TAIL = re.compile(r"\s+(?:feat\.|featuring|ft\.(?=\s+(?-i:[A-Z\u00C0-\u00DE])))\s+\S.*$", re.I)
+# ("Six Ft. Under", "10 ft. Tall": feet after a number, no credit)
+_FEET = re.compile(r"(?:\b\d+|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|"
+                   r"thirty|forty|fifty|hundred|thousand))\s+(?:ft|feet)\b", re.I)
+
+
+def strip_featuring(title):
+    """TRK-7: the title without a featured artist's credit ("Mother (feat. Anggun)" -> "Mother")."""
+    t = _FEAT_BRACKET.sub("", str(title or ""))
+    if not _FEET.search(t):
+        t = _FEAT_TAIL.sub("", t)
+    return t.strip() or str(title or "")
+
+
 def track_titles_agree(a, b):
     """Two track titles name the same track (folded, edition words left out: the same test
-    score_candidate's titles_agree uses)."""
-    return _ratio(fold(strip_edition(a or "")), fold(strip_edition(b or ""))) >= 0.9
+    score_candidate's titles_agree uses); TRK-7: a featured artist's credit on either side
+    left out too (Enigma - The Fall Of A Rebel Angel: "Circle Eight (feat. Nanuk)" in the tags,
+    "Circle Eight" on MusicBrainz)."""
+    if _ratio(fold(strip_edition(a or "")), fold(strip_edition(b or ""))) >= 0.9:
+        return True
+    fa, fb = strip_featuring(a), strip_featuring(b)
+    return (fa, fb) != (str(a or ""), str(b or "")) and \
+        _ratio(fold(strip_edition(fa)), fold(strip_edition(fb))) >= 0.9
 
 
 def _title_or_its_start(a, b):
@@ -1405,7 +1455,7 @@ _COUNTRY_NAMES = {
     "worldwide": "XW",
 }
 _MADE_IN = re.compile(r"\b(?:made|printed|manufactured|pressed|produced)\s+in\s+(?:the\s+)?"
-                      r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()]|\.(?:\s|$)|\s{2}|\band\b|\bby\b|\d))", re.I | re.M)
+                      r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()=]|\.(?:\s|$)|\s{2}|\band\b|\bby\b|\d))", re.I | re.M)
 # (re.M: OCR text is many lines; "MADE IN HOLLAND" ends its line, not the text)
 # (\band: "and" ends a name only as a word - "Made in Holland" / "England" / "Finland" were cut
 # to "Holl" / "Engl" / "Finl" and read as no country: Tangerine Dream - Rubycon, Made in Holland)
@@ -1494,6 +1544,44 @@ def countries_on_scans(ocr_text):
     return countries_from_addresses(ocr_text) | countries_made_in(ocr_text)
 
 
+def _made_in_code(match):
+    words = re.sub(r"[^a-z ]", " ", match.group(1).casefold()).split()
+    for n in range(min(3, len(words)), 0, -1):       # longest known name first
+        code = _COUNTRY_NAMES.get(" ".join(words[:n]))
+        if code:
+            return code
+    return ""
+
+
+def _title_made_in_dropped(ocr_text, titles):
+    """FLD-1, TIE-1: the scans' text without "made in <country>" where the album's title says made
+    in that country ("Made in Japan", Deep Purple: printed on every sleeve of every pressing - the
+    1998 EU remaster's back as much as a Japanese one's): a title is never a country clue. TITLES:
+    the album's own title and every candidate's (each part of a "Made In Japan = ライヴ・イン・
+    ジャパン" alike), so one decision for every pressing - a Japanese entry titled only in Japanese
+    gets no clue the others are denied. Every "made in" that country goes (the sleeve's own line
+    cannot be told from the title's); any other country printed stays."""
+    text = str(ocr_text or "")
+    if isinstance(titles, str):
+        titles = [titles]
+    codes = {_made_in_code(m) for t in titles or () for part in str(t or "").split(" = ")
+             for m in _MADE_IN.finditer(part)} - {""}
+    if not codes:
+        return text
+    return _MADE_IN.sub(lambda m: " " if _made_in_code(m) in codes else m.group(0), text)
+
+
+def note_titles(album, cands):
+    """FLD-1: the titles of every candidate scored for ALBUM that are its own title (title_sim 0.85,
+    a " = " part of it too) - _title_made_in_dropped decides from them all at once; an unrelated
+    "Made In Germany" hit never takes a real "Made in Germany" print away."""
+    titled = str(album.get("title") or "")
+    album.setdefault("cand_titles", set()).update(
+        t for t in (str((c.get("cand") or c).get("title") or "") for c in cands or ())
+        if t and (not titled or title_sim(t, titled) >= 0.85 or any(
+            title_sim(part, titled) >= 0.85 for part in t.split(" = "))))
+
+
 def countries_made_in(text):
     """The countries a text says something was made in ("Made in West Germany" -> {"DE"})."""
     out = set()
@@ -1579,17 +1667,23 @@ def _printed_groups(text):
 def digits_printed(text, number) -> bool:
     """A catalogue number of digits only (normalised, norm_code) stands printed as one number:
     whole digit groups of one run, joined, are it (leading zeros aside) - "063 683-4", "063 - 683
-    - 4", "063\n683-4", "063 683–4", "O63 6B3-4" - never a piece of a longer digit group."""
+    - 4", "063\n683-4", "063 683–4", "O63 6B3-4" - never a piece of a longer digit group, and
+    never the start of a longer printed run: where the number ends the run ends, or one group of a
+    digit or two follows it alone (a set's disc after its number: "88697890552-5", disc 5 of the
+    box - catno_same's "8122796510-1"); "88697890552 1234" is another number."""
     key = str(number or "").lstrip("0")
     if not key:
         return False
     for groups in _printed_groups(text):
         for i in range(len(groups)):
             joined = ""
-            for g in groups[i:]:
+            for j, g in enumerate(groups[i:], i):
                 joined += g
                 if joined.lstrip("0") == key:
-                    return True
+                    rest = groups[j + 1:]
+                    if not rest or (len(rest) == 1 and len(rest[0]) <= 2):
+                        return True
+                    break
                 if len(joined.lstrip("0")) >= len(key):
                     break
     return False
@@ -1943,7 +2037,7 @@ def club_mark_missing(album, ocr_text, cand) -> str:
     return f"{CLUB_AGAINST}{marks[0]} is not on your back cover, whose bars decode to its barcode"
 
 
-def pressing_clues(ocr_text, cand, ring_text=""):
+def pressing_clues(ocr_text, cand, ring_text="", titles=()):
     """What the scans say about this particular pressing.
 
     Returns (agree, disagree): agree names the clues printed on the scans that
@@ -2004,7 +2098,7 @@ def pressing_clues(ocr_text, cand, ring_text=""):
         if len(phrase) >= 4 and f" {phrase} " in text_words:
             agree["label"] = f"label {label.strip()} on the scans"
             break
-    printed = countries_on_scans(ocr_text)
+    printed = countries_on_scans(_title_made_in_dropped(ocr_text, [cand.get("title")] + list(titles or ())))
     mine = country_code(cand.get("country"))
     if printed and mine and mine != "XW":
         if mine == "XE" and printed & _EUROPE and mine not in printed:
@@ -3884,6 +3978,12 @@ def _shop_sticker(album, cand, a_codes, c_codes, ocr_text=""):
     agrees = (catnos_agree(set(album.get("catnos") or ()) - folder_only, cand.get("catnos"))
               or any(len(c) >= 5 and re.search(r"[a-z]", c) and re.search(r"\d", c) and c in hay
                      for c in cand.get("catnos") or ())
+              # (BAR-4, BAR-8: a number of digits only, printed whole - its own digit groups, never
+              # a piece of a longer run: The Alan Parsons Project - Complete Albums Collection,
+              # "88697890552-5" on disc 5's ring and sleeve, beside "88007200550 5", OCR's misreading
+              # of it, which passes a UPC's check digit and is on no release)
+              or any(c.isdigit() and len(c) >= 8 and digits_printed(ocr_text or "", c)
+                     for c in cand.get("catnos") or ())
               or (cand.get("source") == "mb" and cand.get("id") in (album.get("toc_releases") or ()))
               or (cand.get("source") == "discogs" and str(cand.get("id")) in (album.get("toc_discogs") or ()))
               or "matrix" in pressing_clues(ocr_text or "", cand, album.get("ring_text") or "")[0])
@@ -4065,13 +4165,31 @@ def score_candidate(album, cand, cfg, ocr_text=""):
 
     # barcode / catalogue number
     code = ""
+    # CAT-7: your folder's number as whole groups inside the release's longer one ("570 934-4" in
+    # "0 6025 570 934-4 5"), compared as written on both sides (not normalised)
+    listed_raw = [x.strip() for x in str(cand.get("catno_shown") or "").split(", ") if x.strip()]
+    own_folder = set(album.get("catnos_from_folder") or ())
+    inside = {norm_code(raw) for raw in album.get("catno_search") or ()
+              if norm_code(raw) in own_folder and norm_code(raw) in (album.get("catnos") or ())
+              and any(catno_groups_inside(raw, x) for x in listed_raw)}
+    # ... and a number of your tags (never the folder's) the release lists among its other
+    # identifiers - the same set scoring and own_catno_absent read
+    other_listed = {c for c in (album.get("catnos") or ()) if c not in own_folder
+                    and distinctive_number(c) and c in (cand.get("other_codes") or ())}
     conflict = typed_note = False
     a_codes = {barcode_key(b) for b in album["barcodes"]} - {""}
     c_codes = {barcode_key(b) for b in cand["barcodes"]} - {""}
     sticker = _shop_sticker(album, cand, a_codes, c_codes, ocr_text)
     if sticker:
         a_codes = set()
-        notes.append(f"barcode {sticker} on the scans is on no release (a shop sticker?): ignored")
+        # (BAR-4: the release's own number of digits printed whole on your copy beside it - the
+        # barcode is OCR's misreading of that print, not a sticker: said so)
+        printed = next((c for c in sorted(cand.get("catnos") or ())
+                        if c.isdigit() and len(c) >= 8 and digits_printed(ocr_text or "", c)), "")
+        notes.append(f"barcode {sticker} read on the scans is on no release, while this release's own number "
+                     f"{printed} is printed whole on your copy (its disc or sleeve): a misreading of that print, "
+                     "ignored (BAR-4)" if printed else
+                     f"barcode {sticker} on the scans is on no release (a shop sticker?): ignored")
     # BAR-5: a barcode decoded off your scans beats a different one in your files' tags: the
     # release carrying the scans' code has it as proof, one carrying only the tags' code has a
     # weak one (as another tagger's), and neither is "another product"
@@ -4096,6 +4214,14 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         shared = album["catnos"] & cand["catnos"]
         # (a set's numbers as a range: "SICP 10151-4" in the folder, "SICP 10151~4" listed)
         shared |= {c for c in album["catnos"] - shared if any(catno_range_same(c, x) for x in cand["catnos"])}
+        shared |= inside              # CAT-7
+        # CAT-7: a number of your tags the release lists among its other identifiers (a set's
+        # disc's own product number, Discogs "Other": the 2CD's disc 2 tagged 0602557093414)
+        others = other_listed - shared
+        if others and not shared:
+            notes.append(f"your number {', '.join(sorted(others)).upper()} is one the release lists among its "
+                         "other identifiers (a disc's own number) (CAT-7)")
+        shared |= others
         if shared and not (code and tagger_catno(album, shared)):
             code = ("catalogue number (folder name)"
                     if shared <= set(album.get("catnos_from_folder") or ()) else
@@ -4279,7 +4405,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     # .info/.txt the ripper left ("ARTIST=Gustavo Dobles", "COPYRIGHT=2020 Gustavo Dobles")
     files_name_artist = bool(credit_words and len(credit_words) >= 2 and album.get("credit_text") and
                              f" {' '.join(credit_words)} " in f" {fold(album['credit_text'])} ")
-    clues, clues_against = pressing_clues(ocr_text, cand, album.get("ring_text") or "")
+    clues, clues_against = pressing_clues(ocr_text, cand, album.get("ring_text") or "",
+                                          [album.get("title")] + sorted(album.get("cand_titles") or ()))
     if "barcode" in clues:
         printed = [b for b in sorted(cand.get("barcodes") or ()) if barcode_printed(ocr_text, b)]
         if printed and all(typed_only_barcode(album, b) for b in printed):
@@ -4303,7 +4430,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     weak = set(album.get("catnos_cat3") or ())
     own = [c for c in own_all if c not in weak]
     # written either way ("RR 7157-2" in the folder, "RR 7157" on the release): catno_same
-    own_absent = bool(own) and not catnos_agree(own, cand.get("catnos") or ())
+    own_absent = bool(own) and not catnos_agree(own, cand.get("catnos") or ()) \
+        and not set(own) & (inside | other_listed)
     len_err = titles_agree = titles_loose = len_diffs = None
     if tracks_ok:
         diffs = [abs(t["secs"] - c["secs"]) for t, c in zip(album["tracks"], cand["tracks"]) if c["secs"] > 0]
@@ -4312,8 +4440,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             len_diffs = [round(d, 3) for d in diffs]        # every track, to the millisecond
         if any(t.get("title") for t in album["tracks"]):
             titles_agree = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
-                               if t.get("title") and _ratio(fold(strip_edition(t["title"])),
-                                                            fold(strip_edition(c.get("title") or ""))) >= 0.9)
+                               if t.get("title") and track_titles_agree(t["title"], c.get("title") or ""))
             titles_loose = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
                                if t.get("title") and _title_or_its_start(t["title"], c.get("title")))
     conf = round(100.0 * pts / avail, 1) if avail else 0.0
@@ -4346,8 +4473,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "files_name_artist": files_name_artist,
         "other_version": other_version(album, cand),
         "has_folder_catno": bool(album.get("catnos_from_folder")),
-        "folder_catno_agrees": catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
-        "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos")
+        "folder_catno_agrees": bool(inside) or catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
+        "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos") and not inside
                                     and not catnos_agree(set(album.get("catnos_from_folder") or ())
                                                          | set(album.get("catnos_folder_soft") or ()),
                                                          cand.get("catnos"))),
@@ -4437,13 +4564,23 @@ def _full_fit_first(scored, cfg):
     back by a longer one (its deluxe edition, a 2CD whose disc 1 is these files) scored
     against the files' own slots of it (_with_missing_tracks): those are then scored as
     whole releases again, as any release whose track count differs."""
-    full = any(s.get("tracks_ok") and not s.get("missing") and not s.get("box_cut") and s.get("dur_frac") is not None
-               and s["dur_frac"] >= cfg["auto_min_duration_frac"] for s in scored)
+    full = [s for s in scored if s.get("tracks_ok") and not s.get("missing") and not s.get("box_cut")
+            and s.get("dur_frac") is not None and s["dur_frac"] >= cfg["auto_min_duration_frac"]]
     if not full:
         return scored
+
+    def own_code(s):
+        code = str(s.get("code") or "")
+        return bool(code) and code not in WEAK_BARCODES and not s.get("conflict") and \
+            not (code == "catalogue number (OCR)" and not s.get("catno_on_copy"))
+    # DSC-12: ... unless your copy's own number is on the longer release and on none of those
+    # (Enigma - The Fall Of A Rebel Angel: "The Album" tagged 0602557093407, disc 1's own number of
+    # the deluxe 2CD, Discogs 9338958, beside the 12-track standard CDs): its slots stand
+    keep = not any(own_code(f) for f in full)
     # TIE-7: likewise a box compared by its CDs alone on their fit only (MED-23, nothing of your
     # copy proving the box) never ties a release that is exactly your files: it is compared whole
-    return [s["whole_view"] if (s.get("missing") or s.get("box_cut") == "fit") and s.get("whole_view") else s
+    return [s["whole_view"] if s.get("whole_view") and (
+        (s.get("missing") and not (keep and own_code(s))) or s.get("box_cut") == "fit") else s
             for s in scored]
 
 
@@ -6539,9 +6676,20 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
     def own_barcode(best):
         return bool(best) and barcode_proves(best) and not best.get("conflict")
 
+    def media_alone(r):
+        # MED-2: the pick held back by your audio against its media and nothing else ("hi-res
+        # audio cannot come from this CD", a pressing tie): its ALBUM is sure (album_only)
+        why = [w for w in r.get("why") or () if not str(w).startswith("investigated")]
+        return any(w in _MEDIA_AGAINST for w in why) and all(w in _MEDIA_AGAINST or _TIE_WHY.match(w) for w in why)
+
     def rank(r):
         other = next((o["best"] for o in options if o is not r), None)
         waived = own_barcode(r["best"]) and (not own_barcode(other) or _more_behind(r["best"], other))
+        # (MED-2: ... over a pick your copy does not back either, whose barcode differs - The
+        # Flower Kings - Stardust We Are, 24/96: MusicBrainz's 2CD at 98 held for the media alone,
+        # over Discogs's CD + vinyl set at 79.8 against the tags' barcode)
+        waived = waived or bool(media_alone(r) and other and other.get("conflict") and not own_barcode(other)
+                                and not has_evidence(other, r["best"]))
         # a pick that holds the files' tracks before one that does not (Feared - Reborn: the
         # 2-CD Discogs entry over MusicBrainz's 12-track CD, whose disc ID is disc 1's alone)
         fits = bool(r["best"].get("tracks_ok") or r["best"].get("aligned"))
@@ -6590,7 +6738,17 @@ def album_only(final, cfg, source=""):
         return None
     why = [w for w in final.get("why") or [] if not w.startswith("investigated")]
     no_lengths = _no_lengths_tie(best, why)
-    if not no_lengths and (not why or not all(_TIE_WHY.match(w) for w in why)):
+    # MED-2: what your audio says against the pick's media ("hi-res audio cannot come from this
+    # CD": a 24/96 download of an album listed only on CD and vinyl - The Flower Kings - Stardust
+    # We Are, 2022 Inside Out) holds the pressing back, never the album: the album is known, one
+    # pressing listed or several. Only where every one of them is a CD or a record (MED-1, MED-4:
+    # a download or a hi-res disc listed is weighed as the pressing instead)
+    media_held = [w for w in why if w in _MEDIA_AGAINST]
+    if media_held and not no_lengths:
+        why = [w for w in why if w not in _MEDIA_AGAINST]
+        if not all(_TIE_WHY.match(w) for w in why):
+            return None
+    elif not no_lengths and (not why or not all(_TIE_WHY.match(w) for w in why)):
         return None
     # (ALB-3: the lengths an automatic pick needs, not every one - Egberto Gismonti - Corações
     # Futuristas: 7 of 8, two EMI CDs whose numbers nothing of your copy shows)
@@ -6606,7 +6764,13 @@ def album_only(final, cfg, source=""):
         return None                                      # (another album as close, or lengths that could disagree)
     if best.get("pressing_year") and best.get("year_ok"):
         tied = [s for s in tied if s.get("year_ok")]   # the edition your folder names, not the others
-    if len(tied) < 2:
+    if media_held and not no_lengths:
+        # (MED-2: CDs and records only - and the pick's own why the media alone; no other album
+        # scored as close)
+        if any(set(s["cand"].get("formats") or ()) - {"cd", "vinyl"} or not s["cand"].get("formats")
+               for s in tied) or len(tied) != len(close):
+            return None
+    elif len(tied) < 2:
         return None
     # what the files are (a CD rip, a download, a vinyl rip) narrows the pressings whose
     # shared fields are written: a CD rip is tagged from the CDs only, so its media is "CD"
@@ -6618,7 +6782,15 @@ def album_only(final, cfg, source=""):
         # cannot be theirs (album_only_tags)
         other_kind = not same_kind and any(s["cand"].get("formats") for s in tied)
         tied = same_kind or tied
-    return {"source": source, "no_lengths": no_lengths, "other_kind": other_kind, "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
+    media = media_held[0] if media_held and not no_lengths else ""
+    if media:
+        # (MED-2: your audio is none of these pressings' media - real 24/96 audio says hi-res
+        # without "not a CD", so copy_source names no kind: neither their media nor their
+        # numbering is yours, whatever they share)
+        other_kind = True
+    return {"source": source, "no_lengths": no_lengths, "other_kind": other_kind,
+            "media": media,                                                            # (MED-2)
+            "tied": [{"source": s["cand"]["source"], "id": str(s["cand"]["id"]), "label": s["cand"].get("label") or "",
                       "country": s["cand"].get("country") or "", "formats": sorted(s["cand"].get("formats") or ()),
                       "year": s["cand"].get("year"), "layout": disc_layout(s["cand"])} for s in tied]}
 
@@ -6633,6 +6805,30 @@ def scans_name_another(final, report):
     if _carries_barcode(best) or (best.get("code") and best["code"] not in WEAK_BARCODES):
         return None
     if (best.get("clues") or {}).get("disc TOC") and best["cand"].get("source") != "discogs":
+        return None
+    # BOX-4, TIE-1: a Discogs pick a MusicBrainz release carrying your exact disc ID links (its
+    # full "disc TOC" clue, TOC-2), no other Discogs entry scored carrying it too (TOC-3): the
+    # disc ID is your copy's evidence there as on MusicBrainz's entry (Mahavishnu Orchestra - The
+    # Complete Columbia Albums Collection: the replica sleeves' "Made in U.S.A." of the original
+    # LPs against the EU box, Discogs 4649350, MusicBrainz 6d0f53f2's twin)
+    # Only for a set (two discs or more, the box the replica sleeves come in), and only where no
+    # other pressing of this same album scored agrees with what the scans print (its country, a
+    # number, a matrix): then the scans may well be that pressing's, and they decide as before
+    n_tracks = len(best["cand"].get("tracks") or ())
+    # (a clue of the scans the pick lacks only - one both carry tells neither; never a version your
+    # copy's media rules out: the box's download entry, filed under Europe as the CD)
+    lacks = {"country", "catalogue number", "barcode", "matrix"} - set(best.get("clues") or {})
+    same_album_agrees = any(
+        s is not best and str(s["cand"].get("id")) != str(best["cand"].get("id")) and not s.get("unproven_media")
+        and not format_contradictions(s)
+        and title_sim(str(s["cand"].get("title") or ""), str(best["cand"].get("title") or "")) >= 0.85
+        and len(s["cand"].get("tracks") or ()) == n_tracks
+        and set(s.get("clues") or {}) & lacks
+        for s in final.get("scored") or ())
+    if (best.get("clues") or {}).get("disc TOC") and (best["cand"].get("disc_count") or 1) >= 2 \
+            and not same_album_agrees and not any(
+            (s.get("clues") or {}).get("disc TOC") and s["cand"].get("source") == "discogs"
+            and str(s["cand"].get("id")) != str(best["cand"].get("id")) for s in final.get("scored") or ()):
         return None
     if (best.get("clues") or {}).get("source link") or (best.get("tagged") and not best.get("tagger_tagged")):
         return None                             # (your files' link, or your own earlier choice)
@@ -6721,7 +6917,7 @@ RECORDING_FIELDS = {"musicbrainz_recordingid", "isrc", "engineer", "mixer", "pro
                     "~recording_firstreleasedate", "~recordingtitle"}
 
 
-def album_only_tags(tags, tied, same_recordings=False, other_kind=False):
+def album_only_tags(tags, tied, same_recordings=False, other_kind=False, media_held=False):
     """One file's tags, kept to what every tied pressing shares: release IDs, catalogue
     numbers, barcode, ASIN and a pressing's own notes and companies are dropped; label,
     release country, media and release date stay only when all the pressings agree on them
@@ -6729,8 +6925,20 @@ def album_only_tags(tags, tied, same_recordings=False, other_kind=False):
     every pressing is of one media and one disc layout; recording IDs, ISRCs and recording
     credits only when the caller has shown every pressing has the same recordings
     (same_recordings). other_kind: your copy is none of these media, so neither their media nor
-    their numbering is written, even when they all agree."""
+    their numbering is written, even when they all agree. media_held (MED-2): your audio is none
+    of the pressings listed (a hi-res copy of an album listed on CD only): nothing of theirs is
+    yours - no label, release country or media even where one pressing alone is listed, and the
+    album's original date for the date."""
     out = {k: v for k, v in tags.items() if k not in PRESSING_FIELDS and not k.startswith("discogs_company_")}
+    if media_held:
+        other_kind = True
+        for k in ("label", "releasecountry", "media"):
+            out.pop(k, None)
+        original = out.get("originaldate") or out.get("originalyear")
+        if original:
+            out["date"] = original
+        else:
+            out.pop("date", None)
     same = lambda vals: len(vals) == 1 and "" not in vals and None not in vals   # noqa: E731
     if other_kind or not (same({",".join(t.get("formats") or ()) for t in tied})
                           and same({",".join(str(n) for n in t.get("layout") or ()) for t in tied})):

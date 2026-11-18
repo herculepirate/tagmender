@@ -542,6 +542,7 @@ def _scored_again(res, extra, name, album, cfg, text=""):
     if not cands:
         return res
     mc.settle_title_numbers(album, cands)
+    mc.note_titles(album, cands)                       # (FLD-1)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, text) for c in cands], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
@@ -2339,6 +2340,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     typed = {mc.norm_code(c) for c in note_catnos + log_codes}
     typed_search = [c for c in note_catnos + log_codes if c not in folder_hints]
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
+    sacd_disc = sacd_disc_catnos(album_dir, album_folder)
     headers = [log["header"] for log in ripped if log.get("header")]
     # DAT-3: the year your files were ripped, from a dated EAC/XLD log that is of these files
     log_year, log_year_from = rip_log_year(album_dir, logs)
@@ -2411,7 +2413,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # catalogue numbers from the tags, plus any written in the folder name
         # or album title ("[20bit RM DOMO 71063-2]")
         "catnos": ({mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}
-                   | {mc.norm_code(h) for h in folder_match} | typed),
+                   | {mc.norm_code(h) for h in folder_match} | typed | {mc.norm_code(c) for c in sacd_disc}),
+        # MED-13: the number an SACD extraction log read off the disc itself: your copy's own
+        "catnos_sacd_disc": sorted({mc.norm_code(c) for c in sacd_disc}),
         "catnos_from_folder": {mc.norm_code(h) for h in folder_match} | typed,
         # VIN-2: the album tag's bracket numbers the folder's own number differs from, held aside
         "catnos_title_held": sorted(held_title),
@@ -2428,7 +2432,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "catnos_typed": typed - {mc.norm_code(h) for h in folder_match},
         "catnos_from_logs": sorted({mc.norm_code(c) for c in log_codes}),
         "catno_search": sorted({c for _p, i in infos for c in mc.split_codes(i["catno"])} | set(folder_hints)
-                               | set(typed_search)),
+                               | set(typed_search) | set(sacd_disc)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title) or _log_year(album_dir, logs),
         "media_hint": hint, "media_hint_from": hint_from,
         # MED-14: a CD count in every disc's album tag - weaker than the folder name and the
@@ -2758,6 +2762,58 @@ def sacd_marks(album_dir, album_folder) -> str:
         if _SACD_TOOL.search(text):
             return f"an SACD rip log ({p.name})"
     return ""
+
+
+# sacd_extract's report of the disc ("sacd_extract -P > sacd_log.txt"): the disc's own master
+# TOC, its catalogue number among it ("Disc Information: ... Catalog Number: SICL-10001")
+_SACD_DISC_INFO = re.compile(r"^\s*Disc Information:\s*$(.*?)^\s*(?:Album Information:|Area count:)", re.M | re.S)
+_SACD_CATALOG = re.compile(r"^\s*Catalog Number:[ \t]*(\S[^\r\n]*?)[ \t]*$", re.M)
+
+
+def sacd_disc_catnos(album_dir, album_folder) -> list:
+    """MED-13, CAT-7: the catalogue number an SACD extraction log (sacd_extract's report, which
+    SACD-Ripper and ISO2DSD print too) reads off the disc's own master TOC - "Disc Information:
+    ... Catalog Number: SICL-10001" (Kodo - One Earth Tour Special): the disc's own number,
+    as a CD's CATALOG in its cue is its barcode. In the album's folder, or for one version
+    folder of the disc ("Stereo/" read with the set's name) in the disc's folder beside it.
+    Only the disc's block (the album's "Catalog Number:" of a set is often empty), only small
+    text files named for the SACD or a log."""
+    album_dir = Path(album_dir)
+    # (a version folder planned alone - "Stereo/", "Multichannel/" - is one area of the disc
+    # whose log sits beside it)
+    version = bool(mc.version_layout(album_dir.name))
+    tops = [album_dir] + ([album_dir.parent] if (album_folder and album_folder != album_dir.name) or version else [])
+    out = []
+    for top in tops:
+        try:
+            found = sorted(p for p in top.iterdir() if p.is_file() and p.suffix.lower() in (".log", ".txt")
+                           and ("sacd" in p.name.lower() or p.suffix.lower() == ".log"))[:20]
+        except OSError:
+            continue
+        for p in found:
+            try:
+                if p.stat().st_size > 512 * 1024:
+                    continue
+                raw = p.read_bytes()[:64 * 1024]
+            except OSError:
+                continue
+            text = raw.decode("utf-16", "ignore") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", "ignore")
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            m = _SACD_DISC_INFO.search(text)
+            if not m or not re.search(r"^\s*Area count:", text, re.M):
+                continue
+            for c in _SACD_CATALOG.findall(m.group(1)):
+                c = c.strip()
+                core = re.sub(r"\W", "", c)
+                # (a TOC field the mastering left filled with one character, "0000000000000000" or
+                # "----", is no number)
+                if len(set(core.casefold())) <= 1 or not re.sub(r"[\W0]", "", c):
+                    continue
+                if len(core) >= 5 and re.search(r"\d", c) and c not in out:
+                    out.append(c)
+        if out:
+            break
+    return out
 
 
 # SACD-Ripper's line naming the disc image it wrote: "Queuing raw: /dev_usb000/Analogue
@@ -5579,6 +5635,11 @@ def discogs_candidate(rel, dm, whole_works=False):
         "catno_shown": ", ".join(dict.fromkeys(l["catno"] for l in labels
                                                if l.get("catno") and str(l["catno"]).casefold() != "none")),
         "barcodes": barcodes, "disc_count": disc_count, "tracks": tracks, "disc_titles": disc_titles,
+        # CAT-7: the numbers it lists among its "Other" identifiers - a set's discs' own product
+        # numbers ("0602557093414": Enigma - The Fall Of A Rebel Angel, disc 2) - distinctive only
+        "other_codes": {k for k in (mc.norm_code(i["value"]) for i in rel.get("identifiers", [])
+                                    if i.get("type") == "Other" and i.get("value"))
+                        if mc.distinctive_number(k)},
         "video_only": video_only,
         "rows": raw_rows,                                   # (TRK-1: the rows before movements are one track)
         # matrix / runout, SID and label codes: compared with what the disc scans read
@@ -8409,6 +8470,7 @@ def release_ids_view(final, results, album):
 
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
+    mc.note_titles(album, cands)                       # (FLD-1: one decision for every pressing)
     # (BAR-13: an entry carrying your code, too sparse to compare, scored with its full twin's tracks)
     mc.settle_title_numbers(album, cands)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands], cfg, ocr_txt)
@@ -8807,13 +8869,19 @@ def _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final, text, 
     probe = dict(album, barcodes=set(new_b), catno_search=new_c, narrow_codes_first=True)
     if new_b or new_c:
         if use_mb:
-            found["mb"] = mb_search(http, probe, cfg)
+            try:
+                found["mb"] = mb_search(http, probe, cfg)
+            except Exception:
+                # (BAR-4: a barcode whose search failed is never "on no release")
+                album["investigation_search_failed"] = True
+                raise
         if use_discogs:
             try:
                 found["discogs"] = discogs_search(http, probe, cfg, dm)
             except AuthError:
                 raise
             except Exception as exc:
+                album["investigation_search_failed"] = True          # (BAR-4)
                 notes.append(f"Discogs search of codes from the investigation failed ({exc})")
     for c in codes["barcodes"] + codes["catnos"]:
         if c not in state["codes"]:
@@ -9394,6 +9462,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     # a barcode on the scans that no release anywhere carries: a shop's sticker, perhaps
     # (match_core._shop_sticker); each candidate is scored again with it known
     if (final["status"] != "auto" and not album.get("unlisted_barcodes")
+            and not album.get("investigation_search_failed")                  # (BAR-4)
             and both_databases_answered(use_mb, use_discogs, provider_errors)):
         unlisted = unlisted_scan_barcodes(http, album, (mb_res, dg_res), args)
         if unlisted:
@@ -9477,6 +9546,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         except AuthError:
             raise
         except Exception as exc:
+            album["investigation_search_failed"] = True               # (BAR-4)
             source_notes.append(f"investigation of the scans failed ({type(exc).__name__}: {exc})")
         _note_found(album, seen_ids, (mb_res, dg_res), "scan_search")
         # a barcode only the deep reading found is asked of the shops too
@@ -9484,6 +9554,23 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         mb_res, dg_res, final = shop_step(http, album, cfg, dm, mb_res, dg_res, final, ocr_txt, args, use_mb,
                                           use_discogs, out, source_notes, shops_asked)
         _note_found(album, seen_ids, (mb_res, dg_res), "barcode_lookup")
+        # BAR-4: ... and, on no release anywhere, weighed as the first reading's are (a sticker,
+        # or OCR's misreading of a printed number - The Alan Parsons Project - Complete Albums
+        # Collection: "88007200550 5" for disc 5's "88697890552-5" - beside the release's own
+        # printed number: _shop_sticker)
+        # (one a shop sold, by the shop step's notes, is not asked again)
+        shop_told = " ".join(out.get("shop_notes") or ())
+        # (... and only when both databases answered the investigation's searches too: a barcode
+        # whose search failed was never looked up, and is never "on no release")
+        if (final["status"] != "auto" and not album.get("unlisted_barcodes")
+                and not album.get("investigation_search_failed")
+                and any(mc.barcode_key(b) not in shop_told for b in album.get("barcodes") or ())
+                and both_databases_answered(use_mb, use_discogs, provider_errors)):
+            unlisted = unlisted_scan_barcodes(http, album, (mb_res, dg_res), args)
+            if unlisted:
+                album["unlisted_barcodes"] = unlisted
+                mb_res, dg_res = (_rescored_all(r, album, cfg, ocr_txt) for r in (mb_res, dg_res))
+                final = _combine(mb_res, dg_res)
 
     # WEB-2: the album's own name on the web, the last search (an engine set up only). Only a
     # database that answered this album is asked for what the web linked; a database that
@@ -9552,6 +9639,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
     status = final["status"]
     why = list(final["why"]) + source_notes + clue_notes
     if (status == "auto" and not album.get("unlisted_barcodes")
+            and not album.get("investigation_search_failed")                  # (BAR-4)
             and scans_barcode_why(final, album, ocr_txt, (mb_res, dg_res))
             and both_databases_answered(use_mb, use_discogs, provider_errors)):
         # BAR-4: a barcode on the scans no candidate carries is searched (databases, shops)
@@ -9738,6 +9826,21 @@ def scan_coverage(album, out):
     return cov
 
 
+def _another_album(c, cand) -> bool:
+    """BOX-4: C is a release of another album than CAND - both titled, the titles apart (a box's
+    disc's own album, "Birds Of Fire", beside "The Complete Columbia Albums Collection")."""
+    a, b = str(c.get("title") or ""), str(cand.get("title") or "")
+    if not (a and b) or mc.title_sim(a, b) >= 0.85:
+        return False
+    # (only for a set, CAND of two discs or more, and only an album that is one of its discs - a
+    # disc's title, or a track's of it: another-language title of this same album still counts)
+    if (cand.get("disc_count") or 1) < 2:
+        return False
+    parts = [str(t) for t in (cand.get("disc_titles") or {}).values()] + \
+        [str(t.get("title") or "") for t in cand.get("tracks") or ()]
+    return any(p and mc.title_sim(a, p) >= 0.85 for p in parts)
+
+
 def scans_report(best, album, ocr_txt, results, had_scans):
     """What the album's scans (and the barcodes decoded off them) showed about BEST, the
     scored pick: {"state", "found", "against"}, or None when the folder has no scans or
@@ -9785,8 +9888,13 @@ def scans_report(best, album, ocr_txt, results, had_scans):
     if "catalogue_number" not in found and ocr_txt:
         mine = [c for c in scan_catnos(mc.codes_from_ocr_text(ocr_txt)["catnos"]) if _distinctive(c)]
         theirs = cand.get("catnos") or ()
+        # BOX-4: only another pressing of this album: a number that only another album's releases
+        # carry - a box's replica sleeve printing its disc's original LP number (Mahavishnu
+        # Orchestra - The Complete Columbia Albums Collection: "KC 31996", Birds Of Fire) - names
+        # no other pressing of the box
         others = [s["cand"].get("catnos") or () for res in results for s in (res or {}).get("scored") or ()
-                  if s.get("cand") is not cand and str(s["cand"].get("id")) != str(cand.get("id"))]
+                  if s.get("cand") is not cand and str(s["cand"].get("id")) != str(cand.get("id"))
+                  and not _another_album(s["cand"], cand)]
         others_number = any(not mc.catnos_agree([c], theirs) and any(mc.catnos_agree([c], o) for o in others)
                             for c in mine)
         if others_number and not unlisted_download:

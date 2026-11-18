@@ -554,6 +554,20 @@ def one_release_names(a, b) -> bool:
     return y[:len(x)] == x and 2 * len(x) >= len(y)
 
 
+_ALBUM_FOLDER_NAME = re.compile(r"^\s*(?:19|20)\d\d\s+-\s+\S")
+
+
+def titled_disc_set(parent_name, names, parent_audio=False) -> bool:
+    """DSC-11: a folder named as an album ("2016 - The Fall Of A Rebel Angel (Deluxe Edition)
+    (... 570 934-4)": a year, " - ", the title), with no music of its own, holding 2 to
+    SET_TRIAL_MAX_DISCS album-like sub-folders named after their discs' own titles ("The Album",
+    "The Story"): those may be one release's discs, whatever their names - read and looked up
+    together, and joined only when each matches one release's different discs for sure (as any
+    of DSC-11's)."""
+    return (not parent_audio and bool(_ALBUM_FOLDER_NAME.match(str(parent_name or "")))
+            and 2 <= len(names) <= SET_TRIAL_MAX_DISCS)
+
+
 def one_release_pairs(names) -> list:
     """DSC-11: the pairs of NAMES (folder names, in one parent) one_release_names takes - found
     by each name's leading words, never by trying every pair (a library's root of thousands of
@@ -594,7 +608,12 @@ def _one_release_groups(eng, groups, path) -> list:
         by_parent.setdefault(d.parent, []).append(g)
     for parent, members in by_parent.items():
         # (most folders' names pair with none: asked first, before each file of them is looked at)
-        if len(members) < 2 or not one_release_pairs([g.folder.name for g in members]):
+        # (DSC-11: or the discs of an album folder named by their own titles, the folder holding
+        # no music of its own and nothing but them - titled_disc_set)
+        titled = not one_release_pairs([g.folder.name for g in members]) and titled_disc_set(
+            parent.name, members, parent_audio=parent in per_folder) and not any(
+            g.folder.parent == parent and g not in members for g in groups)
+        if len(members) < 2 or not (titled or one_release_pairs([g.folder.name for g in members])):
             continue
         members = [g for g in members                # (a deluxe sibling's files joined in: never)
                    if all(Path(f).parent == g.folder or g.folder in Path(f).parents for f in g.files)]
@@ -608,7 +627,8 @@ def _one_release_groups(eng, groups, path) -> list:
                 i = up[i]
             return i
         at = {g.folder.name: i for i, g in enumerate(members)}
-        for a, b in one_release_pairs(list(at)):
+        for a, b in (one_release_pairs(list(at)) if not titled else
+                     [(members[0].folder.name, g.folder.name) for g in members[1:]]):
             up[top(at[b])] = top(at[a])
         clusters = {}
         for i, g in enumerate(members):
@@ -1239,6 +1259,14 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
     "Neil Young & Crazy Horse" are two artists), clusters of SET_TRIAL_MAX_DISCS at most (a
     larger one is read as before, and logged)."""
     pairs = one_release_pairs(names)                 # (first: most folders' names pair with none)
+    if not pairs and _ALBUM_FOLDER_NAME.match(d.name) and 2 <= len(names) <= SET_TRIAL_MAX_DISCS:
+        # (DSC-11: the discs of an album folder named by their own titles - titled_disc_set; its
+        # name and size asked first, so an artist's folder at a library root lists nothing more)
+        got = sc.listed(d)
+        if got and not got[1]:
+            kids = sorted(n for n in names if _album_like(sc, d / n))
+            if titled_disc_set(d.name, kids):
+                pairs = [(kids[0], k) for k in kids[1:]]
     if not pairs:
         return []
     try:
@@ -4094,7 +4122,8 @@ class Engine:
         same_recordings = self._tied_recordings_agree(tied, p.targets)
         targets = []
         for t in p.targets:
-            t = mc.album_only_tags(t, tied, same_recordings, other_kind=bool(info.get("other_kind")))
+            t = mc.album_only_tags(t, tied, same_recordings, other_kind=bool(info.get("other_kind")),
+                                   media_held=bool(info.get("media")))               # (MED-2)
             # the year every tied pressing shares, else the album's first release: never the
             # day of one pressing
             # (and not the year of a pressing your scans contradict)
@@ -4103,16 +4132,19 @@ class Engine:
                 # its country is yours
                 t.pop("label", None)
                 t.pop("releasecountry", None)
-            if info.get("edition") or info.get("doubt"):
+            if info.get("edition") or info.get("doubt") or info.get("media"):
                 # (an "original" date that is only the other pressing's own - a Discogs release
-                # without a master - is no date of yours either)
+                # without a master - is no date of yours either; MED-2: nor the one pressing's
+                # your audio is not)
                 first = t.get("originaldate") or t.get("originalyear")
                 first = (first[0] if isinstance(first, list) and first else first) or ""
-                if info.get("pick_year") and str(first)[:4] == str(info["pick_year"]):
+                pick_year = info.get("pick_year") or (
+                    next(iter(years)) if info.get("media") and len(years) == 1 else None)
+                if pick_year and str(first)[:4] == str(pick_year):
                     for k in ("originaldate", "originalyear"):
                         t.pop(k, None)
             if len(years) == 1 and None not in years and "" not in years and not info.get("scans") \
-                    and not info.get("edition") and not info.get("doubt"):
+                    and not info.get("edition") and not info.get("doubt") and not info.get("media"):
                 t["date"] = [str(next(iter(years)))]
             else:
                 first = t.get("originaldate") or t.get("originalyear")
@@ -4136,6 +4168,9 @@ class Engine:
         doubt = (info["doubt"] if info.get("doubt")
                  else "your scans name another pressing" if info.get("scans")
                  else info["edition"] if info.get("edition")
+                 # (MED-2: your audio is none of the pressings listed - a hi-res download of an
+                 # album listed only on CD and vinyl)
+                 else f"{info['media']}, and no pressing listed is of your audio's kind" if info.get("media") and len(tied) == 1
                  else f"{len(tied)} pressings fit equally")
         p.why = list(p.why) + [f"pressing unknown ({doubt}): album tags only; "
                                "release IDs, catalogue number, barcode and every field of one pressing left empty"] \

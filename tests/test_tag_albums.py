@@ -932,8 +932,65 @@ class SetsAndCopies(SharedFolders):
         audio(d / "02.flac", 2, disc="2/2")
         self.assertEqual(ta.disc_number(d, ta.audio_files(d)), 2)
         for name, want in (("Album (CD1)", 1), ("Album - Disc 03", 3), ("CD 2", 2), ("Album (FLAC)", None),
-                           ("Discography", None)):
+                           ("Discography", None), ("Album Disc2of2", 2), ("Album (CD 2000)", None),
+                           ("Album [Disc_04]", 4), ("CD100", None)):
             self.assertEqual(ta.disc_number(Path(name), []), want, name)
+
+    def test_discs_ripped_one_at_a_time_go_by_the_folder(self):
+        # each disc tagged "1/1" (ripped on its own) in "Album (CD2)": disc 2 of the set
+        d = self.root / "A" / "Album (CD2)"
+        audio(d / "01.flac", 1, disc="1/1")
+        audio(d / "02.flac", 2, disc="1")
+        self.assertEqual(ta.disc_number(d, ta.audio_files(d)), 2)
+        e = self.root / "A" / "Album (CD1)"                  # the tag agrees: no question
+        audio(e / "01.flac", 3, disc="1/1")
+        self.assertEqual(ta.disc_number(e, ta.audio_files(e)), 1)
+        f = self.root / "A" / "Set (CD1)"                    # a set's own numbering wins over the name
+        audio(f / "01.flac", 4, disc="3/4")
+        self.assertEqual(ta.disc_number(f, ta.audio_files(f)), 3)
+
+    def test_a_set_ripped_one_disc_at_a_time_goes_back_together(self):
+        one = self.make_disc("Album (CD1)", MBID)
+        two = self.make_disc("Album (CD2)", MBID)
+        for d in (one, two):
+            for p in ta.audio_files(d):
+                f = FLAC(p)
+                f["DISCNUMBER"], f["DISCTOTAL"] = "1", "1"
+                f.save()
+        rc, out = self.run_tool("--apply", skip="CD2", FAKE_PICARD_DEST="1999 - Album")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("'saved, put back with its set': 1", out)
+        self.assertFalse((self.root / "New Artist").exists(), out)
+
+    def test_a_half_written_journal_never_replaces_the_last_one(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--apply")
+        self.assertEqual(rc, 0, out)
+        run_dir = self.out / f"run-{self.run_id()}"
+        good = (run_dir / "journal.json").read_text()
+
+        def dies_half_way(obj, fh):
+            fh.write(json.dumps(obj)[:40])
+            raise OSError("killed")
+        with mock.patch.object(ta.json, "dump", dies_half_way), self.assertRaises(OSError):
+            ta.write_journal(run_dir, json.loads(good) + [{"album": "x", "files": []}])
+        self.assertEqual((run_dir / "journal.json").read_text(), good)
+        self.assertTrue((run_dir / "journal.json.tmp").exists())          # the half one, beside it
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
+
+    def test_a_closed_terminal_stops_the_run_like_ctrl_c(self):
+        self.make_album()
+        before = {p.name: all_tags(p) for p in ta.audio_files(self.album)}
+        rc, out = self.run_tool("--apply", FAKE_PICARD_HANGUP="1")
+        self.assertIn("Interrupted.", out)
+        journal = json.loads((self.out / f"run-{self.run_id()}" / "journal.json").read_text())
+        self.assertEqual(len(journal[0]["files"]), 4)
+        rc, out = self.run_tool("--undo", self.run_id())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual({p.name: all_tags(p) for p in ta.audio_files(self.album)}, before)
 
     def test_folders_made_by_an_earlier_batch_are_removed_by_undo(self):
         self.make_disc("First", MBID)

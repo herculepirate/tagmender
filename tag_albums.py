@@ -1324,19 +1324,25 @@ def disc_number(folder, files):
     all carry the same one; else a "CD2" / "Disc 2" in the folder's name; None when neither
     says (two copies of a disc or of a release are told from two discs of a set by this)."""
     import re
-    nums = set()
+    # (the folder's number: "CD2", "Disc 2", "Disc2of2"; never a year, "CD 2000")
+    m = re.search(r"(?i)\b(?:cd|disc|disk)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", Path(folder).name)
+    in_name = int(m.group(1)) or None if m else None
+    tags = set()
     for p in files:
         try:
             f = mutagen.File(p, easy=True)
             v = f.tags.get("discnumber") if f is not None and f.tags is not None else None
         except Exception:
             v = None
-        m = re.match(r"\s*0*(\d+)", str(v[0])) if v else None
-        nums.add(int(m.group(1)) if m else None)
-    if len(nums) == 1 and None not in nums:
-        return nums.pop()
-    m = re.search(r"(?i)\b(?:cd|disc|disk)\s*[-_.]?\s*0*(\d+)\b", Path(folder).name)
-    return int(m.group(1)) if m else None
+        m = re.match(r"\s*0*(\d+)\s*(?:/\s*0*(\d+))?", str(v[0])) if v else None
+        tags.add((int(m.group(1)), int(m.group(2)) if m.group(2) else None) if m else None)
+    if len(tags) == 1 and None not in tags:
+        number, total = tags.pop()
+        # (discs ripped one at a time each say "1/1": the folder's "CD2" is the one to go by)
+        if in_name is not None and in_name != number and total in (None, 1):
+            return in_name
+        return number
+    return in_name
 
 
 def clear_tagger_leftovers(folders, album_paths, keep, existed, root):
@@ -1547,6 +1553,7 @@ def main():
     print(f"Run {run_id}: backups and log in {run_dir}")
     existed = existing_dirs(root)            # (folders there before the tagger: never removed)
     run_made = set()                         # (folders this run's earlier batches made)
+    signals = _stop_like_ctrl_c()
     try:
         for start in range(0, len(albums), args.batch):
             batch = []
@@ -1576,8 +1583,7 @@ def main():
                 # every album prepared so far in this batch (later ones have no backup yet)
                 pending = [{"album": x["path"], "mbid": x["mbid"], "files": x["records"], "extras": x["extras"]}
                            for x in batch if "records" in x]
-                with open(run_dir / "journal.json", "w") as fh:
-                    json.dump(journal + pending, fh)
+                write_journal(run_dir, journal + pending)
                 for p in a["files"]:
                     write_albumid(Path(p), a["mbid"])
                     # until Picard saves it, the album is not done: a seed left behind by a run
@@ -1618,8 +1624,7 @@ def main():
                                     "files": len(a["records"]), "discogs": "", "now_in": "; ".join(dirs),
                                     "release": a["mbid"], "not_saved": ""})
                     print(f"    {STILL_RUNNING:24s} {Path(a['path']).parent.name} | {Path(a['path']).name}")
-                with open(run_dir / "journal.json", "w") as fh:
-                    json.dump(journal, fh)
+                write_journal(run_dir, journal)
                 if rc not in (0, None):
                     print(f"    (the tagger exited with {rc}; see {run_dir / 'tagger.log'})")
                 break
@@ -1664,8 +1669,7 @@ def main():
                 # (the folders the files went to that were there before: never removed, by --undo either)
                 a["kept_dirs"][:] = sorted({str(d) for p in v["new_paths"].values() for d in Path(p).parents
                                             if str(d) in existed})
-            with open(run_dir / "journal.json", "w") as fh:    # (where every file went, before anything moves)
-                json.dump(journal, fh)
+            write_journal(run_dir, journal)    # (where every file went, before anything moves)
             # ...and so is every part of one set: the discs of one release filed in sibling folders
             # are put back together when one of them is not saved whole (never one disc tagged,
             # the other not: Boris & Sunn O))) - Altar). Only discs with different numbers are
@@ -1704,8 +1708,7 @@ def main():
                         rec["missing"] = True
                 if not problems:
                     a["moves"].clear()
-                with open(run_dir / "journal.json", "w") as fh:    # (stopped here: --undo still finds them)
-                    json.dump(journal, fh)
+                write_journal(run_dir, journal)    # (stopped here: --undo still finds them)
                 c["new_dirs"] = sorted({str(Path(r["new_path"]).parent) for r in recs
                                         if r["new_path"] and r["new_path"] != r["path"]})
                 missing = [r["path"] for r in recs if r.get("missing")]
@@ -1728,8 +1731,7 @@ def main():
                 keep = {r["new_path"] for x in batch for r in x["records"] if r.get("new_path")}
                 for p in clear_tagger_leftovers(made, [x["path"] for x in batch], keep, existed | run_made, root):
                     print(f"      left by the tagger, not removed: {p}")
-                with open(run_dir / "journal.json", "w") as fh:    # (a later --undo finds every file)
-                    json.dump(journal, fh)
+                write_journal(run_dir, journal)    # (a later --undo finds every file)
             for a in batch:
                 c, recs, v = a.pop("_check"), a["records"], a["verify"]
                 state, saved, n, new_dirs = c["state"], c["saved"], c["n"], c["new_dirs"]
@@ -1765,16 +1767,15 @@ def main():
                     if a["moves"]:
                         print(f"    moved {len(a['moves'])} scan/artwork file(s) into covers/")
             run_made |= {str(d) for d in changed_dirs(root, started) if d.is_dir() and str(d) not in existed}
-            with open(run_dir / "journal.json", "w") as fh:
-                json.dump(journal, fh)
+            write_journal(run_dir, journal)
             if rc not in (0, None):
                 print(f"    (the tagger exited with {rc}; see {run_dir / 'tagger.log'})")
     except KeyboardInterrupt:
         print("\nInterrupted. Albums not saved still carry only the seeded release ID; "
               f"--undo {run_id} restores everything in this run.")
     finally:
-        with open(run_dir / "journal.json", "w") as fh:
-            json.dump(journal + pending, fh)
+        write_journal(run_dir, journal + pending)
+        _restore_signals(signals)
         with open(run_dir / "results.csv", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=["album", "state", "saved", "files", "discogs", "now_in",
                                                "release", "not_saved"])
@@ -1836,6 +1837,7 @@ def mark_unresolved(args, out_dir):
     blob_dir = run_dir / "blobs"
     blob_dir.mkdir(parents=True)
     journal, done = [], 0
+    signals = _stop_like_ctrl_c()
     try:
         for path, reason, files in todo:
             recs = []
@@ -1843,14 +1845,13 @@ def mark_unresolved(args, out_dir):
                 rec = {"path": str(p), "new_path": str(p), "key": "", "backup": backup_tags(p, blob_dir)}
                 recs.append(rec)
             journal.append({"album": path, "mbid": None, "files": recs, "extras": [], "moves": []})
-            with open(run_dir / "journal.json", "w") as fh:
-                json.dump(journal, fh)
+            write_journal(run_dir, journal)
             for p in files:
                 write_tagmender(p, "Unresolved", reason)
             done += 1
     finally:
-        with open(run_dir / "journal.json", "w") as fh:
-            json.dump(journal, fh)
+        write_journal(run_dir, journal)
+        _restore_signals(signals)
     print(f"Marked {done} album(s). Undo: python3 tag_albums.py --undo {run_id}")
     return 0
 
@@ -1932,9 +1933,49 @@ def tidy_run(out_dir, run_id, root=None, covers_name="covers"):
         album.setdefault("moves", []).extend(moves)
         total += len(moves)
         print(f"  {len(moves):3d} file(s) into covers/  {album_dir}")
-    (run_dir / "journal.json").write_text(json.dumps(journal))
+    write_journal(run_dir, journal)
     print(f"Moved {total} scan/artwork file(s). --undo {run_id} still restores everything.")
     return 0
+
+
+def write_journal(run_dir, journal):
+    """journal.json written whole or not at all: into journal.json.tmp, synced, then put in
+    its place - a run killed while writing it (a closed terminal, a power cut) leaves the
+    one written before, never a half one that --undo cannot read."""
+    path = Path(run_dir) / "journal.json"
+    tmp = path.with_name("journal.json.tmp")
+    with open(tmp, "w") as fh:
+        json.dump(journal, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def _stop_like_ctrl_c():
+    """A closed terminal (SIGHUP) or a plain kill (SIGTERM) stops a run the way Ctrl-C does,
+    so that it writes its journal before it ends. The handlers it replaced, to put back."""
+    import signal
+
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+    old = {}
+    for name in ("SIGHUP", "SIGTERM"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                old[sig] = signal.signal(sig, stop)
+            except (ValueError, OSError):          # (not the main thread)
+                pass
+    return old
+
+
+def _restore_signals(old):
+    import signal
+    for sig, handler in old.items():
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass
 
 
 def undo(out_dir, run_id, force=False):

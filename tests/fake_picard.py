@@ -11,6 +11,8 @@ FAKE_PICARD_LOSE: suffix of moved files that then go missing (taken out of the l
 FAKE_PICARD_DEST: one folder name every album is filed into (discs of a set, or two releases,
 in one folder; the track names then start with the album's number in the load order).
 FAKE_PICARD_ONLY_SKIP_IN: FAKE_PICARD_SKIP_FILES applies only in folders whose name holds it.
+FAKE_PICARD_HANGUP=1: the run that started it gets SIGHUP (its terminal was closed) before
+anything is saved, and the fake ends.
 FAKE_PICARD_LOCK=1: the old album folder is left read-only (nothing can be moved back into it)."""
 import os, shutil, sys
 from pathlib import Path
@@ -25,6 +27,10 @@ skip = os.environ.get("FAKE_PICARD_SKIP", "")
 skip_files = [x for x in os.environ.get("FAKE_PICARD_SKIP_FILES", "").split(",") if x]
 move_only = os.environ.get("FAKE_PICARD_MOVE_ONLY") == "1"
 skip_in = os.environ.get("FAKE_PICARD_ONLY_SKIP_IN", "")
+if os.environ.get("FAKE_PICARD_HANGUP") == "1":
+    import signal
+    os.kill(os.getppid(), signal.SIGHUP)
+    sys.exit(0)
 argv = sys.argv[1:]
 loads = [argv[i + 2] for i, a in enumerate(argv) if a == "-e" and argv[i + 1] == "LOAD"]
 one_dest = os.environ.get("FAKE_PICARD_DEST", "")

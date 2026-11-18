@@ -29,9 +29,75 @@ class Worker(QObject):
         try:
             out = self.fn(self)
         except Exception as exc:
-            self.failed.emit(f"{exc}\n\n{traceback.format_exc(limit=3)}")
+            log_failure(exc)
+            self.failed.emit(f"{exc or type(exc).__name__}\n\n{short_traceback(exc)}")
             return
         self.finished.emit(out)
+
+
+SHOWN_FRAMES = 15                   # the frames nearest the error a failure shows (the log has all)
+_CYCLE_MAX = 8                      # the longest run of frames recognised as repeating
+
+
+def _collapse(frames) -> tuple:
+    """FRAMES (traceback.FrameSummary) as lines, a frame or a run of frames repeated one after
+    the other said once, then "[previous line repeated N more times]" (a recursion of one
+    function, or of several calling each other in turn). Returns (lines, where each run said
+    once starts among them)."""
+    keys = [(f.filename, f.lineno, f.name) for f in frames]
+    out, starts, i = [], [], 0
+    while i < len(frames):
+        best = None
+        for n in range(1, _CYCLE_MAX + 1):
+            reps = 1
+            while i + (reps + 1) * n <= len(keys) and keys[i + reps * n:i + (reps + 1) * n] == keys[i:i + n]:
+                reps += 1
+            if reps > 1 and (best is None or reps * n > best[0] * best[1]):
+                best = (reps, n)
+        if best is None:
+            out.append(frames[i])
+            i += 1
+            continue
+        reps, n = best
+        starts.append(len(out))
+        out += frames[i:i + n]
+        what = "previous line" if n == 1 else f"previous {n} lines"
+        out.append(f"  [{what} repeated {reps - 1} more time{'s' if reps - 1 != 1 else ''}]\n")
+        i += reps * n
+    return out, starts
+
+
+def short_traceback(exc, keep=SHOWN_FRAMES) -> str:
+    """The frames nearest where EXC was raised (the last KEEP, repeats collapsed - and the
+    repeating frames themselves, when a recursion ran out of room), then the error: where it
+    went wrong, never only where the work started."""
+    tb = traceback.TracebackException.from_exception(exc, capture_locals=False)
+    lines, starts = _collapse(list(tb.stack))
+    frame_at = [i for i, x in enumerate(lines) if not isinstance(x, str)]
+    first = frame_at[-keep] if len(frame_at) > keep else 0
+    if starts and starts[-1] < first:
+        first = starts[-1]                                  # (the frames that repeat, shown too)
+    shown = lines[first:]
+    head = "Traceback (most recent call last):\n"
+    if first:
+        head += f"  [{first} earlier lines not shown; the log has them all]\n"
+    body = "".join(x if isinstance(x, str) else "".join(traceback.StackSummary.from_list([x]).format())
+                   for x in shown)
+    return head + body + "".join(tb.format_exception_only())
+
+
+def log_failure(exc):
+    """The failure's whole traceback, in the TagMender log."""
+    import logging
+    try:
+        log = logging.getLogger("tagmender")
+        if not log.handlers:
+            import logsetup
+            logsetup.setup("gui")
+        logging.getLogger("tagmender.gui").error("background work failed: %s", exc or type(exc).__name__,
+                                                 exc_info=exc)
+    except Exception:                         # (the log is no reason to lose the message shown)
+        pass
 
 
 def _alive(th) -> bool:

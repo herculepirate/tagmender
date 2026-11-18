@@ -2044,10 +2044,24 @@ class Overview(QWidget):
                 e.seed_claims = seed
                 e.offer_file_anyway = True                  # (MOV-5: here you can ask)
                 e.lookup_workers = workers
+                told = set()
+
+                def emit(k, plan):
+                    told.add(k)
+                    report("partial", (name, k, plan))
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
-                return plan_each(e, where, kr, lambda k, plan: report("partial", (name, k, plan)),
-                                 progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
-                                 cancel=lambda: w.cancelled, meta=META_STORE)
+                try:
+                    return plan_each(e, where, kr, emit,
+                                     progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
+                                     cancel=lambda: w.cancelled, meta=META_STORE)
+                except Exception as exc:
+                    # (an internal error the engine did not keep to one album: the albums it had
+                    # not sent yet are Unresolved, saying so - the look-up goes on with the others)
+                    if w.cancelled:
+                        return len(told)
+                    for i, k in enumerate(k for k in kr if k not in told):
+                        emit(k, engine.failed_plan(e, k, exc, log=i == 0))
+                    return len(kr)
             return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
                                lambda a: w.progress.emit(*a))
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}

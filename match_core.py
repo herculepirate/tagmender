@@ -1345,10 +1345,29 @@ def align_durations(file_secs, cand_secs, cfg):
     return table[n][m]
 
 
+# TRK-7: a featured artist's credit written into a track title: "(feat. Nanuk)", "[ft. X]",
+# "(featuring X)", or after the title, "Title feat. X" - only these credit forms, never another
+# bracket ("(Live)", "(Remix)", "(Part II)")
+_FEAT_BRACKET = re.compile(r"\s*[(\[]\s*(?:feat\.?|ft\.|featuring)\s+[^)\]]+[)\]]", re.I)
+_FEAT_TAIL = re.compile(r"\s+(?:feat\.|ft\.|featuring)\s+\S.*$", re.I)
+
+
+def strip_featuring(title):
+    """TRK-7: the title without a featured artist's credit ("Mother (feat. Anggun)" -> "Mother")."""
+    t = _FEAT_BRACKET.sub("", str(title or ""))
+    return _FEAT_TAIL.sub("", t).strip() or str(title or "")
+
+
 def track_titles_agree(a, b):
     """Two track titles name the same track (folded, edition words left out: the same test
-    score_candidate's titles_agree uses)."""
-    return _ratio(fold(strip_edition(a or "")), fold(strip_edition(b or ""))) >= 0.9
+    score_candidate's titles_agree uses); TRK-7: a featured artist's credit on either side
+    left out too (Enigma - The Fall Of A Rebel Angel: "Circle Eight (feat. Nanuk)" in the tags,
+    "Circle Eight" on MusicBrainz)."""
+    if _ratio(fold(strip_edition(a or "")), fold(strip_edition(b or ""))) >= 0.9:
+        return True
+    fa, fb = strip_featuring(a), strip_featuring(b)
+    return (fa, fb) != (str(a or ""), str(b or "")) and \
+        _ratio(fold(strip_edition(fa)), fold(strip_edition(fb))) >= 0.9
 
 
 def _title_or_its_start(a, b):
@@ -4081,7 +4100,14 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     sticker = _shop_sticker(album, cand, a_codes, c_codes, ocr_text)
     if sticker:
         a_codes = set()
-        notes.append(f"barcode {sticker} on the scans is on no release (a shop sticker?): ignored")
+        # (BAR-4: the release's own number of digits printed whole on your copy beside it - the
+        # barcode is OCR's misreading of that print, not a sticker: said so)
+        printed = next((c for c in sorted(cand.get("catnos") or ())
+                        if c.isdigit() and len(c) >= 8 and digits_printed(ocr_text or "", c)), "")
+        notes.append(f"barcode {sticker} read on the scans is on no release, while this release's own number "
+                     f"{printed} is printed whole on your copy (its disc or sleeve): a misreading of that print, "
+                     "ignored (BAR-4)" if printed else
+                     f"barcode {sticker} on the scans is on no release (a shop sticker?): ignored")
     # BAR-5: a barcode decoded off your scans beats a different one in your files' tags: the
     # release carrying the scans' code has it as proof, one carrying only the tags' code has a
     # weak one (as another tagger's), and neither is "another product"
@@ -4332,8 +4358,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             len_diffs = [round(d, 3) for d in diffs]        # every track, to the millisecond
         if any(t.get("title") for t in album["tracks"]):
             titles_agree = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
-                               if t.get("title") and _ratio(fold(strip_edition(t["title"])),
-                                                            fold(strip_edition(c.get("title") or ""))) >= 0.9)
+                               if t.get("title") and track_titles_agree(t["title"], c.get("title") or ""))
             titles_loose = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
                                if t.get("title") and _title_or_its_start(t["title"], c.get("title")))
     conf = round(100.0 * pts / avail, 1) if avail else 0.0
@@ -4442,11 +4467,21 @@ def _full_fit_first(scored, cfg):
     back by a longer one (its deluxe edition, a 2CD whose disc 1 is these files) scored
     against the files' own slots of it (_with_missing_tracks): those are then scored as
     whole releases again, as any release whose track count differs."""
-    full = any(s.get("tracks_ok") and not s.get("missing") and s.get("dur_frac") is not None
-               and s["dur_frac"] >= cfg["auto_min_duration_frac"] for s in scored)
+    full = [s for s in scored if s.get("tracks_ok") and not s.get("missing") and s.get("dur_frac") is not None
+            and s["dur_frac"] >= cfg["auto_min_duration_frac"]]
     if not full:
         return scored
-    return [s["whole_view"] if s.get("missing") and s.get("whole_view") else s for s in scored]
+
+    def own_code(s):
+        code = str(s.get("code") or "")
+        return bool(code) and code not in WEAK_BARCODES and not s.get("conflict") and \
+            not (code == "catalogue number (OCR)" and not s.get("catno_on_copy"))
+    # DSC-12: ... unless your copy's own number is on the longer release and on none of those
+    # (Enigma - The Fall Of A Rebel Angel: "The Album" tagged 0602557093407, disc 1's own number of
+    # the deluxe 2CD, Discogs 9338958, beside the 12-track standard CDs): its slots stand
+    keep = not any(own_code(f) for f in full)
+    return [s["whole_view"] if s.get("missing") and s.get("whole_view") and not (keep and own_code(s)) else s
+            for s in scored]
 
 
 # BAR-13: the codes your copy itself names a pressing by - your barcode (files as ripped, scans),

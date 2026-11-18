@@ -184,7 +184,8 @@ class BAR4_MisreadOfTheBoxNumberIsNoBarcode(unittest.TestCase):
         a = album(barcodes={self.MISREAD}, unlisted_barcodes={self.MISREAD})
         s = mc.score_candidate(a, self.box(), CFG, self.OCR)
         self.assertFalse(s["conflict"])
-        self.assertTrue(any("on no release" in n for n in s["notes"]), s["notes"])
+        self.assertTrue(any("own number 88697890552 is printed whole on your copy" in n for n in s["notes"]), s["notes"])
+        self.assertFalse(any("shop sticker" in n for n in s["notes"]), s["notes"])
 
     def test_BAR4_without_the_printed_number_it_differs(self):
         a = album(barcodes={self.MISREAD}, unlisted_barcodes={self.MISREAD})
@@ -284,6 +285,57 @@ class MED13_SacdLogNamesTheDiscsNumber(unittest.TestCase):
         r = res(a, [cand(id="sacd", catnos={"sicl10001"}, country="JP"),
                     cand(id="dvdcd", catnos={"82876760029"}, country="XE")])
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "sacd"))
+
+
+class TRK7_FeaturedArtistCreditsInTitles(unittest.TestCase):
+    """TRK-7: "Circle Eight (feat. Nanuk)" in the tags is MusicBrainz's "Circle Eight" (Enigma -
+    The Fall Of A Rebel Angel): a featured artist's credit on either side is left out of the
+    titles' comparison - only those credit forms, never "(Live)" or "(Remix)"."""
+
+    def test_TRK7_credit_forms(self):
+        for a, b in (("Circle Eight (feat. Nanuk)", "Circle Eight"), ("Mother", "Mother (feat. Anggun)"),
+                     ("Amen feat. Aquilo", "Amen"), ("Diving [ft. Someone]", "Diving"),
+                     ("Agnus Dei (featuring A Choir)", "Agnus Dei")):
+            self.assertTrue(mc.track_titles_agree(a, b), (a, b))
+
+    def test_TRK7_other_brackets_still_differ(self):
+        for a, b in (("Song (Live)", "Song"), ("Song (Remix)", "Song"), ("Feat Of Clay", "Clay")):
+            self.assertFalse(mc.track_titles_agree(a, b), (a, b))
+
+    def test_TRK7_titles_agree_counts_them(self):
+        a = album(tracks=[{"disc": 1, "num": i + 1, "title": t, "secs": s} for i, (t, s) in enumerate(
+            (("One (feat. X)", 200.0), ("Two", 305.0), ("Three feat. Y", 410.0)))])
+        c = cand(tracks=[{"disc": 1, "title": t, "secs": s} for t, s in (("One", 200), ("Two", 305), ("Three", 410))])
+        self.assertEqual(mc.score_candidate(a, c, CFG)["titles_agree"], 3)
+
+
+class DSC12_YourNumberOnTheLongerRelease(unittest.TestCase):
+    """DSC-12, _full_fit_first: a release holding just the files' tracks sends a longer one's
+    slots back to a whole-release score - unless your copy's own number is on the longer one and
+    on none of those (Enigma "The Album", tagged with the deluxe 2CD's disc 1 number)."""
+
+    def scored(self, full_code="", slot_code="catalogue number"):
+        full = {"tracks_ok": True, "dur_frac": 1.0, "code": full_code, "cand": {"id": "std"}}
+        whole = {"tracks_ok": False, "code": slot_code, "cand": {"id": "deluxe"}}
+        slots = {"tracks_ok": True, "dur_frac": 1.0, "code": slot_code, "missing": {2: [1, 2]},
+                 "whole_view": whole, "cand": {"id": "deluxe"}}
+        return [full, slots], whole, slots
+
+    def test_DSC12_own_number_keeps_the_slots(self):
+        sc, _whole, slots = self.scored()
+        self.assertIs(mc._full_fit_first(sc, CFG)[1], slots)
+
+    def test_DSC12_without_it_the_whole_release(self):
+        sc, whole, _slots = self.scored(slot_code="")
+        self.assertIs(mc._full_fit_first(sc, CFG)[1], whole)
+
+    def test_DSC12_your_number_on_both_the_whole_release(self):
+        sc, whole, _slots = self.scored(full_code="catalogue number")
+        self.assertIs(mc._full_fit_first(sc, CFG)[1], whole)
+
+    def test_DSC12_another_taggers_number_never_keeps_them(self):
+        sc, whole, _slots = self.scored(slot_code=mc.TAGS_CATNO)
+        self.assertIs(mc._full_fit_first(sc, CFG)[1], whole)
 
 
 if __name__ == "__main__":

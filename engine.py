@@ -554,6 +554,20 @@ def one_release_names(a, b) -> bool:
     return y[:len(x)] == x and 2 * len(x) >= len(y)
 
 
+_ALBUM_FOLDER_NAME = re.compile(r"^\s*(?:19|20)\d\d\s+-\s+\S")
+
+
+def titled_disc_set(parent_name, names, parent_audio=False) -> bool:
+    """DSC-11: a folder named as an album ("2016 - The Fall Of A Rebel Angel (Deluxe Edition)
+    (... 570 934-4)": a year, " - ", the title), with no music of its own, holding 2 to
+    SET_TRIAL_MAX_DISCS album-like sub-folders named after their discs' own titles ("The Album",
+    "The Story"): those may be one release's discs, whatever their names - read and looked up
+    together, and joined only when each matches one release's different discs for sure (as any
+    of DSC-11's)."""
+    return (not parent_audio and bool(_ALBUM_FOLDER_NAME.match(str(parent_name or "")))
+            and 2 <= len(names) <= SET_TRIAL_MAX_DISCS)
+
+
 def one_release_pairs(names) -> list:
     """DSC-11: the pairs of NAMES (folder names, in one parent) one_release_names takes - found
     by each name's leading words, never by trying every pair (a library's root of thousands of
@@ -594,7 +608,12 @@ def _one_release_groups(eng, groups, path) -> list:
         by_parent.setdefault(d.parent, []).append(g)
     for parent, members in by_parent.items():
         # (most folders' names pair with none: asked first, before each file of them is looked at)
-        if len(members) < 2 or not one_release_pairs([g.folder.name for g in members]):
+        # (DSC-11: or the discs of an album folder named by their own titles, the folder holding
+        # no music of its own and nothing but them - titled_disc_set)
+        titled = not one_release_pairs([g.folder.name for g in members]) and titled_disc_set(
+            parent.name, members, parent_audio=parent in per_folder) and not any(
+            g.folder.parent == parent and g not in members for g in groups)
+        if len(members) < 2 or not (titled or one_release_pairs([g.folder.name for g in members])):
             continue
         members = [g for g in members                # (a deluxe sibling's files joined in: never)
                    if all(Path(f).parent == g.folder or g.folder in Path(f).parents for f in g.files)]
@@ -608,7 +627,8 @@ def _one_release_groups(eng, groups, path) -> list:
                 i = up[i]
             return i
         at = {g.folder.name: i for i, g in enumerate(members)}
-        for a, b in one_release_pairs(list(at)):
+        for a, b in (one_release_pairs(list(at)) if not titled else
+                     [(members[0].folder.name, g.folder.name) for g in members[1:]]):
             up[top(at[b])] = top(at[a])
         clusters = {}
         for i, g in enumerate(members):
@@ -1229,6 +1249,12 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
     "Neil Young & Crazy Horse" are two artists), clusters of SET_TRIAL_MAX_DISCS at most (a
     larger one is read as before, and logged)."""
     pairs = one_release_pairs(names)                 # (first: most folders' names pair with none)
+    if not pairs:
+        got = sc.listed(d)
+        # (DSC-11: the discs of an album folder named by their own titles - titled_disc_set)
+        if got and titled_disc_set(d.name, [n for n in names if _album_like(sc, d / n)], bool(got[1])):
+            kids = sorted(n for n in names if _album_like(sc, d / n))
+            pairs = [(kids[0], k) for k in kids[1:]]
     if not pairs:
         return []
     try:

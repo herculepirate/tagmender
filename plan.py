@@ -3627,7 +3627,10 @@ class Planner:
         folders lie side by side in the artist's folder, with no album folder for the album's own
         files. True too when no folder names the album."""
         try:
-            album = [str((_vals(names.get("album")) or [""])[0]) + " \u2060other"]
+            # (the title changed in its FIRST word: one added at its end is cut off by a naming
+            # that keeps the title's first words only, $words(%album%,5) - Enigma - The Fall Of A
+            # Rebel Angel [Deluxe Edition] - and no folder seemed to name the album)
+            album = ["Zqx" + str((_vals(names.get("album")) or [""])[0]) + " \u2060other"]
             other = naming.render(template, {**names, "album": album}, self._picard(),
                                   self.profile["filenames"].get("compat", "windows"), own=f.stem)
         except Exception:

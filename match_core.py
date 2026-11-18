@@ -4025,6 +4025,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             n_cand = n_file
             notes.append("the CD in the set is not in your files" if vinyl_copy else
                          "the vinyl single in the box is not in your files")
+    box_cut_from = None
     if n_file and n_file != n_cand and any(t.get("box_extra") for t in cand["tracks"]) \
             and copy_kind(album) not in ("vinyl", "cassette") and not (album.get("audio") or {}).get("hires"):
         # MED-23: a CD box's DVD-Audio or Blu-ray Audio and its downloads after the last disc
@@ -4033,6 +4034,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         cds = [t for t in cand["tracks"] if not t.get("box_extra")]
         if len(cds) == n_file:
             kinds = {t["box_extra"] for t in cand["tracks"] if t.get("box_extra")}
+            box_cut_from = cand
             cand = dict(cand, tracks=cds, disc_count=len({t.get("disc") for t in cds}) or 1)
             n_cand = n_file
             notes.append("the box's " + " and ".join(w for k, w in (("hires", "DVD-Audio / Blu-ray Audio"),
@@ -4375,6 +4377,21 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                                  & set(cand.get("file_codecs") or ())
                                  and set(cand.get("formats") or ()) == {"digital"}),
     }
+    if box_cut_from is not None:
+        # MED-23: the box's CDs alone are compared only where something proves the box - your
+        # barcode or catalogue number on it, your disc ID attached to it - or it holds two CDs or
+        # more and they alone fit your files exactly; otherwise it is compared whole, as before (a
+        # plain CD rip never ties the CD + DVD-Audio edition at no cost)
+        uncut = dict(box_cut_from, tracks=[{k: v for k, v in t.items() if k != "box_extra"}
+                                           for t in box_cut_from["tracks"]])
+        proven = barcode_proves(res) or _exact_toc(res) or \
+            (str(res.get("code") or "").startswith("catalogue number") and res["code"] not in WEAK_BARCODES)
+        fit = len({t.get("disc") for t in cand["tracks"]}) >= 2 and dur_frac == 1.0 and dur_cov == 1.0
+        if not proven and not fit:
+            return score_candidate(album, uncut, cfg, ocr_text)
+        res["box_cut"] = "proof" if proven else "fit"
+        if not proven:
+            res["whole_view"] = score_candidate(album, uncut, cfg, ocr_text)   # (TIE-7: _full_fit_first)
     if tracks_ok and not box_note and cand.get("slots") is None and (
             (dur_frac is not None and dur_frac < 1.0) or (titles_agree is not None and titles_agree < n_cand)):
         # TRK-2: the release's own tracks in another running order: compared, and tagged, track
@@ -4420,11 +4437,14 @@ def _full_fit_first(scored, cfg):
     back by a longer one (its deluxe edition, a 2CD whose disc 1 is these files) scored
     against the files' own slots of it (_with_missing_tracks): those are then scored as
     whole releases again, as any release whose track count differs."""
-    full = any(s.get("tracks_ok") and not s.get("missing") and s.get("dur_frac") is not None
+    full = any(s.get("tracks_ok") and not s.get("missing") and not s.get("box_cut") and s.get("dur_frac") is not None
                and s["dur_frac"] >= cfg["auto_min_duration_frac"] for s in scored)
     if not full:
         return scored
-    return [s["whole_view"] if s.get("missing") and s.get("whole_view") else s for s in scored]
+    # TIE-7: likewise a box compared by its CDs alone on their fit only (MED-23, nothing of your
+    # copy proving the box) never ties a release that is exactly your files: it is compared whole
+    return [s["whole_view"] if (s.get("missing") or s.get("box_cut") == "fit") and s.get("whole_view") else s
+            for s in scored]
 
 
 # BAR-13: the codes your copy itself names a pressing by - your barcode (files as ripped, scans),

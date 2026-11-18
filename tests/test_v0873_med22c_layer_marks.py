@@ -39,13 +39,18 @@ class MED22c_LayerMarks(Base):
     def test_MED22c_stereo_alone_stays_a_title_word(self):
         self.assertEqual(engine._without_version_marks("Pet Sounds (Stereo)"), "pet sounds stereo")
         self.assertEqual(engine._without_version_marks("Album K [Stereo DSD Rip]"), "album k")
-        self.assertEqual(engine._without_version_marks("Album K [Mono 24bit]"), "album k")
+        self.assertEqual(engine._without_version_marks("Album K [Mono SACD]"), "album k")
+        # (review: beside a year or remaster word only, the mix stays the title's: two albums)
+        self.assertNotEqual(engine._without_version_marks("Abbey Road (Mono 2009 Remaster)"),
+                            engine._without_version_marks("Abbey Road (Stereo 2009 Remaster)"))
+        self.assertEqual(engine._without_version_marks("Album K [Mono 24bit]"), "album k mono 24bit")
 
     def test_MED22c_an_sacd_rip_converted_to_24_96_is_no_dvd(self):
         # (an SACD ISO's areas as 24-bit/96 kHz FLAC: the rate alone made them a DVD's mixes; the
         # folder's SACD mark - its name, an SACD ripper's log - says SACD)
         import match_albums as ma
-        for folder, sacd in (("2004 - Album K [SACD] (ISO)", True), ("2004 - Album K", False)):
+        for folder, sacd in (("2004 - Album K [SACD] (ISO)", True), ("2004 - Album K", False),
+                             ("2004 - Album K [SACD + DVD-A]", False)):     # (a video disc named: as before)
             top = self.lib / "Band E" / folder
             for sub, ch in (("Multichannel", 6), ("Stereo", 2)):
                 d = top / sub

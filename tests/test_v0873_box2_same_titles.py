@@ -39,6 +39,14 @@ class BOX2SameTitles(unittest.TestCase):
         off = [x + 15 for x in STUDIO]
         self.assertIsNone(mc._box_disc(album(), cand(d1=off, d2=[None] * 4, source="discogs")))
 
+    def test_BOX3_an_unlisted_disc_is_never_chosen_because_its_twin_is_off(self):
+        # (intended, review 0.8.73: disc 1 lists no lengths, disc 2 the same titles 20 s off each.
+        # Before, BOX-3 chose disc 1. Lengths off on a listed disc do not prove the other is yours -
+        # Discogs 10554394 lists Nektar's own studio disc with the LP's lengths, off by as much - so
+        # neither is chosen; another database listing the lengths, or the release whole, decides)
+        off = [x + 20 for x in STUDIO]
+        self.assertIsNone(mc._box_disc(album(), cand(d1=[None] * 4, d2=off, source="discogs")))
+
     def test_BOX2_lengths_route_needs_your_barcode(self):
         self.assertIsNone(mc._box_disc(album(barcodes=()), cand()))
         self.assertIsNone(mc._box_disc(album(barcodes=("0000000000000",)), cand()))

@@ -285,6 +285,11 @@ def _numbered_with_ids(before: dict, target: dict, profile, changes: dict, rows:
     "Preserve these tags") stays as it is, as ever. CHANGES and ROWS are diff_tags' own."""
     if not any(k in changes and changes[k] for k in _TRACK_IDS):
         return
+    if any(_vals(before.get(k)) and _vals(target.get(k)) and _vals(before.get(k)) != _vals(target.get(k))
+           and k not in changes for k in _TRACK_IDS):
+        # (another release's ID the file keeps below the threshold: never its album ID beside this
+        # release's numbering - the numbering stays with the IDs it has)
+        return
     for f in _POSITION_FIELDS:
         a, b = _vals(target.get(f)), _vals(before.get(f))
         if f in changes or not a or not b or a == b or profile.policy(f) != "replace":
@@ -1676,6 +1681,21 @@ def _folder_key(name: str, windows: bool) -> str:
     return key.casefold() if windows else key
 
 
+def _latin_marks_off(name: str) -> str:
+    """NAM-7: the name with the combining marks on Latin letters left out ("Kodō" -> "Kodo",
+    "Ñu" -> "Nu"); a mark on a letter of any other script stays - it is part of the letter there
+    (kana's dakuten: "バンド" is not "ハント"; Cyrillic "й", "ё"; Indic vowel signs; Thai tones)."""
+    out, base = [], ""
+    for c in unicodedata.normalize("NFD", name):
+        if unicodedata.category(c) == "Mn":
+            if unicodedata.name(base, "").startswith("LATIN"):
+                continue
+        else:
+            base = c
+        out.append(c)
+    return "".join(out)
+
+
 def _loose_key(name: str, windows: bool = False) -> str:
     """NAM-7: an artist folder's name as its spellings across databases and sleeves share it:
     one Unicode form, accents and other diacritics left out ("Kodō", "Kodo"), one kind of
@@ -1685,10 +1705,9 @@ def _loose_key(name: str, windows: bool = False) -> str:
     every other full stop separates, as a space would - initials stay initials ("M.I.A." and
     "M I A" share, "MIA" and "MIA." are another name; "t.A.T.u." is not "Tatu"); letter case
     only with Windows-compatible names ("Air" and "AIR" are two acts)."""
-    # (diacritics left out, nothing else of a letter: "Kodō" and "Kodo", "Motörhead" and
-    # "Motorhead" share; "ø", "ß", "æ" - letters of their own, no accent on another - stay)
-    k = "".join(c for c in unicodedata.normalize("NFD", name) if unicodedata.category(c) != "Mn")
-    k = unicodedata.normalize("NFC", k).translate(_QUOTES)
+    # (a Latin letter's diacritics left out, nothing else: "Kodō" and "Kodo", "Motörhead" and
+    # "Motorhead" share; "ø", "ß", "æ" - letters of their own - and any other script's marks stay)
+    k = unicodedata.normalize("NFC", _latin_marks_off(name)).translate(_QUOTES)
     k = re.sub(r"\s*(?:&|\+|\b[Aa][Nn][Dd]\b)\s*", " & ", k)
     k = re.sub(r"(?<![^\W\d_])([^\W\d_]{2,})\.(?=\s|$)", r"\1", k)   # ("Mr." -> "Mr"; "A." stays)
     k = " ".join(re.sub(r"[,.]", " ", k).split())

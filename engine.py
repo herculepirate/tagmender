@@ -970,6 +970,10 @@ _MARK_WORD = re.compile(
     r"surround|\d+-?bit|\d+(?:\.\d+)?-?k?hz|24-\d+|\d+-24|remaster(?:ed)?|rm|(?:19|20)\d\d|rip|disc|layer|vinyl|lp|cd|reissue")
 
 
+# (the disc or format words beside which "Stereo" / "Mono" names a rip's layer: _without_version_marks)
+_LAYER_WORD = re.compile(r"sacd|hybrid|dsd\d*|dst\d*|dxd|mch|iso|rip|\d+ch|[2-9]\.[01]|multi-?channel|surround|layer")
+
+
 def _without_version_marks(title) -> str:
     """The album title without the closing brackets that only mark its version or edition."""
     t = str(title or "")
@@ -977,10 +981,11 @@ def _without_version_marks(title) -> str:
         m = re.search(r"\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]\s*$", t)
         words = re.findall(r"[a-z0-9.-]+", m.group(1).casefold()) if m else []
         marks = [w for w in words if _MARK_WORD.fullmatch(w.strip(".-"))]
-        if marks:
-            # (MED-22c: "Stereo" / "Mono" beside a mark word is the rip's layer, not the album's
-            # name: "Kodo One Earth Tour Special [Stereo DSD Rip]" beside "... [Multichannel 5.1]";
-            # alone, "(Mono)", it stays the title's)
+        if any(_LAYER_WORD.fullmatch(w.strip(".-")) for w in marks):
+            # (MED-22c: "Stereo" / "Mono" beside a disc or format word is the rip's layer, not the
+            # album's name: "Kodo One Earth Tour Special [Stereo DSD Rip]" beside "... [Multichannel
+            # 5.1]"; alone, "(Mono)", or beside a year or remaster only - "(Mono 2009 Remaster)"
+            # and "(Stereo 2009 Remaster)" are two albums - it stays the title's)
             marks += [w for w in words if w in ("stereo", "mono")]
         # (beside those words, only a catalogue number's parts: "[SACD AFZ5 198 2ch DSD64]")
         if not marks or not all(w in marks or re.search(r"\d", w) for w in words):
@@ -8059,35 +8064,58 @@ def _without_box_vinyl(rel, ps):
     return mb_tags.release_tags(rel, ps, without=drop)
 
 
+def _cue_counts(text) -> dict:
+    """{file name named by a FILE line (case-folded): its TRACK ... AUDIO count} of a cue sheet."""
+    counts, current = {}, None
+    for line in str(text or "").splitlines():
+        m = re.match(r'\s*FILE\s+"?(.+?)"?(?:\s+(?:WAVE|FLAC|MP3|AIFF|BINARY|MOTOROLA))?\s*$', line, re.I)
+        if m:
+            current = Path(m.group(1).strip().replace("\\", "/")).name.casefold()
+            counts.setdefault(current, 0)
+            continue
+        if current is not None and re.match(r"\s*TRACK\s+\d+\s+AUDIO", line, re.I):
+            counts[current] += 1
+    return counts
+
+
 def _cue_tracks_of(path) -> int:
-    """REC-1: how many tracks a cue sheet in the file's folder gives this one file (its FILE line
-    naming the file, or a cue named as the file is naming none of the folder's other files); 0
-    when no cue sheet speaks of it."""
+    """REC-1: how many tracks a cue sheet gives this one file: a cue in its folder whose FILE line
+    names it, or one named as the file ("x.cue", "x.flac.cue") naming one file only (the WAV it
+    was ripped to, converted since); or the cue sheet the file carries itself (a FLAC's CUESHEET
+    block or CUESHEET tag). 0 when no cue sheet speaks of it."""
     path = Path(path)
     most = 0
     try:
         cues = [c for c in path.parent.iterdir() if c.suffix.casefold() == ".cue" and c.is_file()]
     except OSError:
-        return 0
+        cues = []
     for cue in cues:
         try:
-            text = ma._read_log(cue)
+            counts = _cue_counts(ma._read_log(cue))
         except OSError:
             continue
-        counts, current = {}, None
-        for line in text.splitlines():
-            m = re.match(r'\s*FILE\s+"?(.+?)"?\s+(?:WAVE|FLAC|MP3|AIFF|BINARY|MOTOROLA)?\s*$', line, re.I)
-            if m:
-                current = Path(m.group(1).replace("\\", "/")).name.casefold()
-                counts.setdefault(current, 0)
-                continue
-            if current is not None and re.match(r"\s*TRACK\s+\d+\s+AUDIO", line, re.I):
-                counts[current] += 1
         mine = counts.get(path.name.casefold())
-        if mine is None and cue.stem.casefold() == path.stem.casefold() and len(counts) == 1:
+        stem = cue.stem
+        if Path(stem).suffix.casefold() in ex.AUDIO_EXT:
+            stem = Path(stem).stem                        # ("CDImage.flac.cue": the image's own)
+        if mine is None and stem.casefold() == path.stem.casefold() and len(counts) == 1:
             # (the image converted since - "x.wav" named, "x.flac" here - the cue named as it is)
             mine = next(iter(counts.values()))
         most = max(most, mine or 0)
+    if path.suffix.casefold() == ".flac":
+        try:
+            from mutagen.flac import FLAC
+            f = FLAC(str(path))
+            sheet = getattr(f, "cuesheet", None)
+            if sheet is not None:
+                # (the lead-out is a track of its own there, numbered 170 on a CD)
+                most = max(most, len([t for t in sheet.tracks if 0 < int(t.track_number) < 100
+                                      and getattr(t, "type", 0) == 0]))
+            for text in (f.tags or {}).get("cuesheet", []) if f.tags else []:
+                counts = _cue_counts(text)
+                most = max(most, max(counts.values()) if counts else 0)
+        except Exception:
+            pass
     return most
 
 

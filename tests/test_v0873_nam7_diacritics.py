@@ -45,6 +45,15 @@ class NAM7Diacritics(unittest.TestCase):
         self.assertEqual(pl._loose_key("Kodō"), pl._loose_key("Kodo"))
         self.assertNotEqual(pl._loose_key("Mø"), pl._loose_key("Mo"))
 
+    def test_NAM7_other_scripts_marks_never_fold(self):
+        # (review: a combining mark is part of the letter outside the Latin script - kana's
+        # dakuten, Cyrillic й/ё, Devanagari vowel signs, Thai tone marks: other names)
+        for a, b in (("バンド", "ハント"), ("ガゼット", "カセット"), ("Чайф", "Чаиф"), ("Ёлка", "Елка"),
+                     ("सुर", "सर"), ("บี้", "บี")):
+            self.assertNotEqual(pl._loose_key(a), pl._loose_key(b), (a, b))
+        for a, b in (("Kodō", "Kodo"), ("Motörhead", "Motorhead"), ("Björk", "Bjork"), ("Mỹ Tâm", "My Tam")):
+            self.assertEqual(pl._loose_key(a), pl._loose_key(b), (a, b))
+
     def test_NAM7_album_folders_keep_their_accents(self):
         got = self.spelled("Kodō", "2004 - One Earth Tōur", "01.flac")
         self.assertEqual((got.parent.parent.name, got.parent.name), ("Kodo", "2004 - One Earth Tōur"))

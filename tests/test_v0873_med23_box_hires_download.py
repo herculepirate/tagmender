@@ -47,9 +47,11 @@ def mb_box(cd_first=True):
 
 
 class MED23BoxHiresDownload(Base):
-    def _album(self):
+    def _album(self, barcode=True):
         d = self.album("Band W", "Album W")
         album = ma.read_album(d, d.parent.name, d.name)
+        if barcode:
+            album["barcodes"] = {"0123456789012"}       # (your copy's own barcode: the box's)
         return d, album
 
     def test_MED23_the_cds_alone_are_compared(self):
@@ -61,12 +63,70 @@ class MED23BoxHiresDownload(Base):
         self.assertFalse(s["discs_off"], s["notes"])
         self.assertNotIn("track count differs", " ".join(s["notes"]))
 
+    def test_MED23_nothing_proving_the_box_no_cut(self):
+        # (review: a plain CD rip must not tie the CD + DVD-Audio edition at no cost)
+        _d, album = self._album(barcode=False)
+        s = mc.score_candidate(album, ma.mb_candidate(mb_box()), mc.DEFAULT_CFG)
+        self.assertFalse(s.get("box_cut"))
+        self.assertNotIn("not in your CD rip", " ".join(s["notes"]))
+        self.assertFalse(s.get("box_cut"))
+
+    def test_MED23_TIE7_the_cd_alone_wins_over_the_box(self):
+        _d, album = self._album(barcode=False)
+        lens = [int(t["secs"] * 1000) for t in album["tracks"]]
+        a = mb_release("aaaaaaaa-0000-4000-8000-000000000001", "Band W", "Album W", lens=lens)
+        a["media"], a["barcode"] = a["media"][:1], "111"
+        for extra in ("DVD-Audio", "Digital Media"):
+            b = mb_release("bbbbbbbb-0000-4000-8000-000000000002", "Band W", "Album W", lens=lens)
+            b["media"] = b["media"][:1] + [_medium(b["id"], 2, extra, 3, "A", lens)]
+            b["barcode"] = "222"
+            sc = [mc.score_candidate(album, ma.mb_candidate(r), mc.DEFAULT_CFG) for r in (a, b)]
+            r = mc.classify(sc, mc.DEFAULT_CFG)
+            self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", a["id"]), extra)
+
+    def test_MED23_two_cds_fitting_exactly_are_cut_but_lose_to_the_plain_set(self):
+        # (TIE-7: a 2CD box with a DVD-Audio, its CDs fitting exactly but nothing proving it, is
+        # compared by its CDs - and still never ties the plain 2CD release of your files)
+        d = self.lib / "Band W" / "2005 - Album X"
+        import subprocess
+        for disc in (1, 2):
+            for i in range(2):
+                (d / f"CD{disc}").mkdir(parents=True, exist_ok=True)
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                                f"sine=frequency={300 + 50 * i + 400 * disc}:duration={10 * (i + 1)}", "-ar", "8000",
+                                "-ac", "1", "-metadata", f"title={'TU'[disc - 1]}{i}", "-metadata", "album=Album X", "-metadata",
+                                "albumartist=Band W", "-metadata", f"track={i + 1}", "-metadata", f"disc={disc}",
+                                str(d / f"CD{disc}" / f"{i + 1:02d}.flac"), "-y"], check=True)
+        album = ma.read_album(d, d.parent.name, d.name)
+        lens = [10000, 20000]
+
+        def rel(rid, extra):
+            r = mb_release(rid, "Band W", "Album X", lens=lens)
+            r["media"] = [_medium(rid, 1, "CD", 2, "C", lens), _medium(rid, 2, "CD", 2, "D", lens)] + \
+                ([_medium(rid, 3, "DVD-Audio", 4, "A", lens * 2)] if extra else [])
+            for m, w in zip(r["media"][:2], "TU"):
+                for k, t in enumerate(m["tracks"]):
+                    t["title"] = f"{w}{k}"
+            r["barcode"] = "333" if extra else "444"
+            return r
+        box, plain = rel("bbbbbbbb-0000-4000-8000-000000000003", True), rel("aaaaaaaa-0000-4000-8000-000000000004", False)
+        s_box = mc.score_candidate(album, ma.mb_candidate(box), mc.DEFAULT_CFG)
+        self.assertEqual(s_box.get("box_cut"), "fit", s_box["notes"])
+        sc = [mc.score_candidate(album, ma.mb_candidate(r), mc.DEFAULT_CFG) for r in (plain, box)]
+        r = mc.classify(sc, mc.DEFAULT_CFG)
+        self.assertEqual(r["best"]["cand"]["id"], plain["id"], r.get("why"))
+        # (your barcode on the box: it is the box, by its CDs alone)
+        album["barcodes"] = {"333"}
+        s_box = mc.score_candidate(album, ma.mb_candidate(box), mc.DEFAULT_CFG)
+        self.assertEqual(s_box.get("box_cut"), "proof", s_box["notes"])
+
     def test_MED23_hires_files_are_not_cut(self):
         # (24-bit files may be the DVD-Audio's own mix: the release is compared whole, as before)
         _d, album = self._album()
         album["audio"] = dict(album.get("audio") or {}, hires=True)
         s = mc.score_candidate(album, ma.mb_candidate(mb_box()), mc.DEFAULT_CFG)
-        self.assertFalse(s["tracks_ok"])
+        self.assertFalse(s.get("box_cut"))
+        self.assertNotIn("not in your CD rip", " ".join(s["notes"]))
 
     def test_MED23_a_cd_release_without_them_is_unchanged(self):
         cand = ma.mb_candidate(mb_release(MBID, "Band W", "Album W"))

@@ -71,6 +71,27 @@ class REC1CueImage(Base):
         self.assertEqual(engine._cue_tracks_of(f), 2)
         self.assertIsNone(self._single(d, f))
 
+    def test_REC1_a_cue_named_after_the_image_with_its_suffix(self):
+        # (review: "CDImage.flac.cue" naming the WAV ripped first, "CDImage.wav")
+        d, f = self._file()
+        (d / f"{f.name}.cue").write_text(CUE.format(name="CDImage.wav"))
+        self.assertEqual(engine._cue_tracks_of(f), 2)
+
+    def test_REC1_a_file_line_naming_no_type(self):
+        d, f = self._file()
+        (d / "other.cue").write_text(CUE.format(name=f.name).replace(" WAVE", ""))
+        self.assertEqual(engine._cue_tracks_of(f), 2)
+
+    def test_REC1_the_cue_sheet_the_flac_carries(self):
+        # (an image with its cue embedded as a CUESHEET tag, no .cue file beside it)
+        d, f = self._file()
+        from mutagen.flac import FLAC
+        tagged = FLAC(str(f))
+        tagged["CUESHEET"] = CUE.format(name=f.name)
+        tagged.save()
+        self.assertEqual(engine._cue_tracks_of(f), 2)
+        self.assertIsNone(self._single(d, f))
+
     def test_REC1_one_track_cue_or_none_stays_a_recording(self):
         d, f = self._file()
         self.assertEqual(engine._cue_tracks_of(f), 0)

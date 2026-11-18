@@ -48,6 +48,15 @@ class TAG5NumberedWithIds(unittest.TestCase):
         changes, _rows = run(prof(), before=before)
         self.assertNotIn("tracknumber", changes)
 
+    def test_TAG5_never_beside_another_releases_id_kept(self):
+        # (review: the file keeps release X's album ID below the threshold - adding Y's track ID
+        # must not renumber it as Y)
+        before = dict(BEFORE, musicbrainz_albumid=["other-release"])
+        changes, _rows = run(prof(), before=before)
+        self.assertEqual(changes.get("musicbrainz_trackid"), ["bc2f"])
+        self.assertNotIn("musicbrainz_albumid", changes)
+        self.assertNotIn("tracknumber", changes)
+
     def test_TAG5_your_policy_keeps_its_field(self):
         changes, _rows = run(prof(totaltracks="fill_missing"))
         self.assertEqual(changes["tracknumber"], ["1"])

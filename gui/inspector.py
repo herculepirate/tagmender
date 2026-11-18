@@ -1158,6 +1158,17 @@ class Inspector(QDockWidget):
         hl.addLayout(st)
         self.dest = _label("", "caption")                    # where the files go, at a glance
         hl.addWidget(self.dest)
+        # MOV-5/MOV-6: why an album is not filed (its score, no release proven), and the ask
+        self.offer_words = _label("", "caption", wrap=True)
+        self.offer_btn = QToolButton()
+        self.offer_btn.setObjectName("offerButton")
+        self.offer_btn.setText(tr("Move into Library Anyway"))
+        self.offer_btn.setFocusPolicy(Qt.StrongFocus)
+        self.offer_btn.clicked.connect(self.file_anyway)
+        hl.addWidget(self.offer_words)
+        hl.addWidget(self.offer_btn, 0, Qt.AlignLeft)
+        self.offer_words.hide()
+        self.offer_btn.hide()
         btns = QHBoxLayout()
         self.buttons = {}
         for key, text, icon in (("open", tr("Open Folder"), "folder-open"), ("web", tr("Search the Web"), "globe"),
@@ -1238,6 +1249,7 @@ class Inspector(QDockWidget):
         self._status(album)
         say(self.dest, tr("Where the files go"), where_files_go(album))
         self.dest.setVisible(bool(self.dest.text()))
+        self.show_offer(album)
         self.buttons["release"].setEnabled(True)
         self.tags.show_album(album, keep=same)
         self.art.show_album(album)
@@ -1247,6 +1259,25 @@ class Inspector(QDockWidget):
         if self.tabs.currentIndex() == 1 and self.isVisible():
             self.art.load()
 
+    def show_offer(self, album):
+        """MOV-5/MOV-6: why ALBUM is kept out of the library, and the button that asks for it."""
+        from .models import not_filed_reason
+        words = not_filed_reason(album) if album is not None else ""
+        self.offer_words.setText(words)
+        self.offer_words.setVisible(bool(words))
+        self.offer_btn.setVisible(bool(words))
+        if words:
+            copy = (album.get("below_floor") or {}).get("op") == "copy"
+            self.offer_btn.setText(tr("Copy into Library Anyway") if copy else tr("Move into Library Anyway"))
+            self.offer_btn.setAccessibleName(self.offer_btn.text())
+            ov = getattr(self.win, "pages", {}).get("Overview")
+            self.offer_btn.setEnabled(bool(ov is not None and ov.may_file_anyway(album)))
+
+    def file_anyway(self):
+        ov = getattr(self.win, "pages", {}).get("Overview")
+        if ov is not None and self.album is not None:
+            ov.file_anyway_for([self.album])
+
     def show_row(self, row):
         """A Needs attention row (an album marked Unresolved by an earlier run)."""
         self.album = {"source_dir": row["folder"], "status": "unresolved"}
@@ -1254,6 +1285,7 @@ class Inspector(QDockWidget):
         say(self.name, tr("Album"), album_words(row["folder"]))
         self._status(self.album)
         self.dest.hide()
+        self.show_offer(None)
         say(self.st_word, tr("Status"),
             "Unresolved: " + ", ".join(reasons.describe(c) for c in row.get("codes") or ["other"]))
         self.buttons["release"].setEnabled(False)

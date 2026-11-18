@@ -45,7 +45,7 @@ from . import icons, style
 from .common import (_gui_prefs, _set_gui_pref, album_words, left_header, planmod, plural, popup_menu,
                      profile_colour, reasons, say)
 from .i18n import N_, tr
-from .models import (PlanModel, can_apply, fill_roles, status_words, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
+from .models import (PlanModel, can_apply, fill_roles, status_words, tickable, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
 from .tagnames import display as tag_name
 from .widgets import Segmented
@@ -1042,8 +1042,8 @@ class AlbumsModel(LazyTree):
         f = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled
         if idx.column() == self.NAME:
             if isinstance(self.rows.sourceModel(), PlanModel):
-                if n.album is not None and can_apply(n.album):
-                    f |= Qt.ItemIsUserCheckable                 # (as the list's: ticked, applied)
+                if n.album is not None and tickable(n.album):
+                    f |= Qt.ItemIsUserCheckable                 # (as the list's: ticked, applied or asked)
             else:
                 f |= self.rows.flags(self.rows.index(idx.row(), 1)) & Qt.ItemIsUserCheckable
         memo[key] = f
@@ -1627,6 +1627,24 @@ class PreviewPanes(QWidget):
         self.tabs.changed.connect(self.tab_changed)
         p.head_lay.insertWidget(0, self.tabs)
         p.subtitle.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        # MOV-5/MOV-6: an album kept where it is for want of evidence says why, and offers its
+        # filing (Album › Move into the Library Layout Anyway) over its tags
+        self.offer = QFrame()
+        self.offer.setObjectName("offerBar")
+        ol = QVBoxLayout(self.offer)                     # (the words over the button: a narrow pane cuts neither)
+        ol.setContentsMargins(12, 8, 12, 8)
+        ol.setSpacing(6)
+        self.offer_words = QLabel("")
+        self.offer_words.setWordWrap(True)
+        self.offer_btn = QToolButton()
+        self.offer_btn.setObjectName("offerButton")
+        self.offer_btn.setText(tr("Move into Library Anyway"))
+        self.offer_btn.setFocusPolicy(Qt.StrongFocus)
+        self.offer_btn.clicked.connect(self.file_anyway)
+        ol.addWidget(self.offer_words)
+        ol.addWidget(self.offer_btn, 0, Qt.AlignLeft)
+        self.offer.hide()
+        p.add(self.offer)
         self.stack = QStackedWidget()
         p.add(self.stack, 1)
         # Tags
@@ -1985,6 +2003,7 @@ class PreviewPanes(QWidget):
         finally:
             self._quiet = False
         self.release_btn.setEnabled(album is not None)
+        self.show_offer(album)
         self.show_why(album)
         self.read_tags()
         self.fill_tags()
@@ -2556,6 +2575,26 @@ class PreviewPanes(QWidget):
             sheets.run(dlg, "covers")
 
     # ---- the list's commands ----------------------------------------------------------------
+    def show_offer(self, album):
+        """MOV-5/MOV-6: why ALBUM is not filed (its score, no release proven) and the button that
+        asks for it; hidden for any other album."""
+        from .models import not_filed_reason
+        words = not_filed_reason(album) if album is not None else ""
+        self.offer.setVisible(bool(words))
+        if not words:
+            return
+        copy = (album.get("below_floor") or {}).get("op") == "copy"
+        self.offer_words.setText(words)
+        self.offer_btn.setText(tr("Copy into Library Anyway") if copy else tr("Move into Library Anyway"))
+        self.offer_btn.setAccessibleName(self.offer_btn.text())
+        self.offer_btn.setEnabled(bool(self.owner is not None and hasattr(self.owner, "may_file_anyway")
+                                       and self.owner.may_file_anyway(album)))
+
+    def file_anyway(self):
+        album = self.scope[0] if self.scope else None
+        if album is not None and self.owner is not None and hasattr(self.owner, "file_anyway_for"):
+            self.owner.file_anyway_for([album])
+
     def change_release(self):
         album = self.scope[0] if self.scope else None
         if album is None or self.owner is None:

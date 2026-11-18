@@ -166,9 +166,51 @@ def below_floor_text(a) -> str:
     bf = (a or {}).get("below_floor") or {}
     if not bf or (a or {}).get("status") == "done":
         return ""
+    if bf.get("reason") == "partial":                 # (MOV-6: no release proven)
+        return tr("not copied (no release proven)") if bf.get("op") == "copy" else tr("not moved (no release proven)")
     words = tr("not copied (score {0:.0f} < {1:g})") if bf.get("op") == "copy" else \
         tr("not moved (score {0:.0f} < {1:g})")
     return words.format(float(bf.get("confidence") or 0), float(bf.get("floor") or 0))
+
+
+def offered(a) -> bool:
+    """MOV-5/MOV-6: the album was kept where it is (or not copied) only for want of evidence - its
+    score below the floor, or no release proven - and filing it is yours to ask: its row's box
+    (ticking it is the ask), Move into the Library Layout Anyway."""
+    return bool((a or {}).get("below_floor")) and (a or {}).get("status") != "done"
+
+
+ASK_WORDS = N_("Tick it, or choose Move into Library Anyway, to have it filed.")
+ASK_WORDS_COPY = N_("Tick it, or choose Copy into Library Anyway, to have it copied.")
+# (an album Apply tags where it is: its box says that already, the command files it)
+ASK_WORDS_TAGGED = N_("Choose Move into Library Anyway to have it filed.")
+
+
+def not_filed_reason(a) -> str:
+    """Why an offered album (offered) is not filed unasked, in plain words; "" for any other."""
+    if not offered(a):
+        return ""
+    bf = a["below_floor"]
+    copy = bf.get("op") == "copy"
+    where = tr("not copied into your library") if copy else tr("not moved into your library")
+    tagged = tr("Tagged as far as the sources allow") if a.get("status") != "skipped" else tr("Nothing written")
+    if bf.get("reason") == "partial":
+        prov = str((a.get("identification") or {}).get("provider") or "")
+        why = tr("it isn't on MusicBrainz or Discogs") if ("web" in prov or not prov) else \
+            tr("no single release of it is proven")
+    else:
+        why = tr("its score {0:.0f} is below the {1:g} this profile asks for to file an album").format(
+            float(bf.get("confidence") or 0), float(bf.get("floor") or 0))
+    ask = ASK_WORDS_COPY if copy else ASK_WORDS_TAGGED if can_apply(a) else ASK_WORDS
+    if can_apply(a):                                   # (its tags not written yet: Apply writes them there)
+        tagged = tr("Apply tags it where it is")
+    return tr("{0}; {1} because {2}.").format(tagged, where, why) + " " + tr(ask)
+
+
+def tickable(a) -> bool:
+    """MOV-6: the row's box can be ticked: it has changes Apply would make (can_apply), or its
+    filing is offered (ticking it asks for it)."""
+    return can_apply(a) or offered(a)
 
 
 def album_changes_text(a) -> str:
@@ -232,6 +274,8 @@ class PlanModel(QAbstractTableModel):
     PROFILE = 6                        # (the album's profile: its own, or the one chosen above)
     LEAVE_OUT = "_leave_out"           # (an album's own mark: unticked, so Apply leaves it as it is)
     ticked = Signal()
+    file_asked = Signal(list)          # (MOV-6: offered albums you ticked - to be filed as you ask)
+    ASKED = "_asked_file"              # (ticked, its filing asked for: shown ticked while planned again)
 
     def __init__(self):
         super().__init__()
@@ -250,7 +294,7 @@ class PlanModel(QAbstractTableModel):
 
     def flags(self, idx):
         f = super().flags(idx)
-        if idx.isValid() and idx.column() == 1 and can_apply(self.albums[idx.row()]):
+        if idx.isValid() and idx.column() == 1 and tickable(self.albums[idx.row()]):
             f |= Qt.ItemIsUserCheckable                  # (ticked: applied; unticked: left out)
         if idx.isValid() and idx.column() == self.PROFILE and self.choose_profile and not self.locked:
             f |= Qt.ItemIsEditable                       # (an album applied too: filed again with it)
@@ -282,11 +326,24 @@ class PlanModel(QAbstractTableModel):
 
     @classmethod
     def left_out(cls, a) -> bool:
-        """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it)."""
+        """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it); an
+        album with nothing to apply where it is but its filing offered: until you tick it (MOV-6)."""
+        if offered(a) and not can_apply(a):
+            return not a.get(cls.ASKED)
         return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
 
     def set_left_out(self, albums, out):
+        asked = []
         for a in albums:
+            if offered(a) and not can_apply(a):     # (MOV-6: ticked, it is the ask to file it)
+                if out:
+                    a.pop(self.ASKED, None)
+                    a[self.LEAVE_OUT] = True
+                elif not a.get(self.ASKED):
+                    a[self.ASKED] = True
+                    a.pop(self.LEAVE_OUT, None)
+                    asked.append(a)
+                continue
             if can_apply(a):
                 if out:
                     a[self.LEAVE_OUT] = True
@@ -297,6 +354,8 @@ class PlanModel(QAbstractTableModel):
                         a["held_ok"] = True
         self.dataChanged.emit(self.index(0, 0), self.index(max(0, len(self.albums) - 1), len(self.COLS) - 1))
         self.ticked.emit()
+        if asked:
+            self.file_asked.emit(asked)
 
     def set_plan(self, plan):
         self.beginResetModel()
@@ -396,6 +455,8 @@ class PlanModel(QAbstractTableModel):
             return icons.icon(status_icon(a["status"]), a["status"], 14)
         if role == R_TOOLTIP and c == 0 and a["status"] == "done":
             return applied_tip(a)
+        if role == R_TOOLTIP and c == 0 and offered(a):
+            return not_filed_reason(a)
         if role == R_TOOLTIP and c == 0:
             tier = (ident or {}).get("tier")
             if a["status"] not in ("unresolved", "excluded", "skipped") and tier in TIER_TIPS:
@@ -467,7 +528,7 @@ class PlanModel(QAbstractTableModel):
             return f"{self.data(idx, R_DISPLAY) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"
         if role == R_ACCESSIBLETEXT and c == 0:
             return status_words(a)
-        if role == R_CHECKSTATE and c == 1 and can_apply(a):
+        if role == R_CHECKSTATE and c == 1 and tickable(a):
             return Qt.Unchecked if self.left_out(a) else Qt.Checked
         if role == R_USER:
             return a

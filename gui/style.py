@@ -418,6 +418,12 @@ def stylesheet():
     QToolButton#coverChoose::menu-indicator {{ image: none; width: 0; }}
     QProgressBar {{ border: none; background: {line}; border-radius: 3px; max-height: 6px; text-align: center; }}
     QProgressBar::chunk {{ background: {accent}; border-radius: 3px; }}
+    QFrame#offerBar {{ background: {t["seg_track"]}; border: none; border-bottom: 1px solid {line}; }}
+    QFrame#offerBar QLabel {{ color: {ink}; }}
+    QToolButton#offerButton {{ background: {accent}; color: {on}; border: none; border-radius: {CONTROL}px;
+                               padding: 4px 12px; font-weight: 600; }}
+    QToolButton#offerButton:disabled {{ background: {line}; color: {off}; }}
+    QToolButton#offerButton:focus {{ border: 2px solid {ring}; padding: 2px 10px; }}
     QProgressBar#applyProgress {{ background: {t["progress_track"]}; border: none; border-radius: 7px;
                                   min-height: 14px; max-height: 14px; min-width: 160px; max-width: 220px; }}
     QProgressBar#applyProgress::chunk {{ background: {accent}; border-radius: 7px; }}

@@ -658,6 +658,7 @@ class Main(QMainWindow):
             saves = ov.may_save_tags() if plain else False
             self.commands["apply"].setEnabled(on_ov and bool(ov.plan) and (
                 (ov.may_apply_now() and n > 0) or (n == 0 and saves)))
+            self.apply_tip(ov, on_ov)
             # (Ctrl+S is Save Profile's on Profiles: never both on at once)
             self.commands["save_tags"].setEnabled(on_ov and saves and not self.showing("Profiles"))
             self._apply_n = n if on_ov else 0
@@ -907,6 +908,26 @@ class Main(QMainWindow):
             b.setAccessibleName(words if not n and saves else tr("Apply 1 album") if n == 1 else
                                 tr("Apply {0} albums").format(n) if n else tr("Apply"))
         return True
+
+    def apply_tip(self, ov, on_ov):
+        """Apply's tooltip: when it is off for the albums selected, why (MOV-6: up to date, or kept
+        out of your library for want of evidence - and how to have them filed)."""
+        from .models import can_apply, offered
+        a = self.commands["apply"]
+        if a.property("plain_tip") is None:
+            a.setProperty("plain_tip", a.toolTip())
+        tip = a.property("plain_tip")
+        if on_ov and ov.plan and not a.isEnabled() and not getattr(ov, "running", False):
+            chosen = ov.selected_albums()
+            kept = [x for x in chosen if offered(x) and not can_apply(x)]
+            if kept:
+                copy = all((x.get("below_floor") or {}).get("op") == "copy" for x in kept)
+                tip = (tr("Nothing to apply: not copied into your library: use Copy into Library Anyway") if copy
+                       else tr("Nothing to apply: not moved into your library: use Move into Library Anyway"))
+            elif chosen and all(x.get("status") in ("unchanged", "done") for x in chosen):
+                tip = tr("Nothing to apply: the selected albums are up to date")
+        if a.toolTip() != tip:
+            a.setToolTip(tip)
 
     # ---- the toolbar's filter: All / Ready / Needs Attention ---------------------------------
     def show_filter(self, kind):

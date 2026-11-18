@@ -212,12 +212,14 @@ class MOV5_Planner(Base):
         self.assertEqual(self.ops(a), {"copy"})
         self.assertIn("copied because you asked", " ".join(a["notes"]))
 
-    def test_MOV5_partial_identification_stays_in_place_when_asked(self):
+    def test_MOV5_partial_identification_is_filed_when_asked(self):
+        # (MOV-6, 2026-11-18: what you ask for is done - a Partial album is filed when asked;
+        # until 0.8.77 it stayed in place even then)
         prof = self.profile(operation="move", destination=str(self.dest))
         a = pl.build([self.proposal(conf=91, tier="partial")], prof, file_anyway=True)["albums"][0]
-        self.assertEqual(self.ops(a), {"tag"})
-        self.assertIn("Partial identification", " ".join(a["notes"]))
-        self.assertNotIn("below_floor", a)                          # (not offered: another rule's)
+        self.assertEqual(self.ops(a), {"move"})
+        self.assertIn("moved because you asked (no release proven)", a["notes"])
+        self.assertNotIn("below_floor", a)
 
     def test_MOV5_extra_careful_matching_yields_to_your_ask(self):
         prof = self.profile(operation="move", destination=str(self.dest), matching={"extra_careful": True})

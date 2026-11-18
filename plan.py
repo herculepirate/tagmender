@@ -2287,11 +2287,20 @@ class Planner:
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"
                 return entry
+        elif op in ("copy", "move") and partial and self.asked_to_file(prop):
+            # MOV-6: you asked for this Partial album to be filed: it is, from the tags it has
+            # (its mark stays Partial) - what you ask for is done
+            entry["notes"].append(("copied" if op == "copy" else "moved") + " because you asked (no release proven)")
+            entry["filed_on_request"] = {"confidence": round(conf, 1), "reason": "partial",
+                                         "floor": _threshold(p, "organize_min_confidence"), "op": op}
         elif op in ("copy", "move") and partial:
-            # (a Partial album is not proven enough to file: its name and folder could be another
-            # pressing's)
+            # (a Partial album is not proven enough to file unasked: its name and folder could be
+            # another pressing's)
             entry["notes"].append("Partial identification (no release proven): "
                                   + ("not copied" if op == "copy" else "tagged in place, not moved"))
+            # MOV-6: kept where it is for want of a proven release - you may ask for it to be filed
+            entry["below_floor"] = {"confidence": round(conf, 1), "reason": "partial",
+                                    "floor": _threshold(p, "organize_min_confidence"), "op": op}
             if op == "copy":
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"

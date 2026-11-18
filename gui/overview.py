@@ -525,6 +525,7 @@ class Overview(QWidget):
         self.model.profile_of = lambda a: (self.profile_of(a), bool(self.own_profile(a)))
         self.model.choose_profile = self.set_album_profile
         self.model.state_of = self.state_of
+        self.model.file_asked.connect(self.file_anyway_for)  # (MOV-6: an offered row ticked)
         self.shown_kind = "all"                              # the toolbar's All / Ready / Needs Attention
         # 0.8.71: the list is the albums pane itself (Albums as they will be: an album a row, its
         # discs and tracks under it), beside Your files, over the inspector pane (gui/preview_panes.py)
@@ -3462,7 +3463,15 @@ class Overview(QWidget):
         """Album > Move into the Library Layout Anyway: the selected albums kept in place for their
         score alone are looked up again with the floor lifted for their folders only (the rest of
         the list stays as it is). Nothing is written until Apply."""
-        chosen = [a for a in self.selected_albums() if self.may_file_anyway(a)]
+        self.file_anyway_for(self.selected_albums())
+
+    def file_anyway_for(self, albums):
+        """MOV-5/MOV-6: ALBUMS (those of them offered) looked up again to be filed as you ask - by
+        the command, or by ticking an offered row's box."""
+        chosen = [a for a in albums if self.may_file_anyway(a)]
+        for a in albums:                                     # (not now: its tick taken back)
+            if all(a is not c for c in chosen) and a.pop(PlanModel.ASKED, None):
+                self.edited(a)
         if not chosen:
             return
         import engine

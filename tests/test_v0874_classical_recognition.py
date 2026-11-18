@@ -50,7 +50,7 @@ def classical_release(rid="cls-1", full=True, label="Fuga Libera", titles=None):
 
 def top_work():
     return {"id": "w-top", "title": TOP, "relations": [
-        {"target-type": "artist", "type": "composer", "direction": "backward", "begin": "1841", "end": "1851",
+        {"target-type": "artist", "type": "composer", "direction": "backward", "begin": "1841", "end": "1841",
          "attributes": [], "artist": COMPOSER}] + [
         {"target-type": "work", "type": "parts", "direction": "forward", "ordering-key": k + 1,
          "work": {"id": f"w-part{k + 1}", "title": f"{TOP}: {p}"}} for k, p in enumerate(PARTS)]}
@@ -157,6 +157,34 @@ class CLS3Fetching(Base):
         self.assertEqual(t["conductor"], ["Alexander Rudin"])
         self.assertEqual(p.targets[2]["movement"], [PARTS[2]])
         self.assertTrue(any(w.startswith("classical (CLS-2)") for w in p.why), p.why)
+
+    def test_CLS2_a_composer_first_credit_alone_is_settled_by_the_recordings(self):
+        # (no label, catalogue number or genre: the "; " credit's composer is asked of the
+        # recordings' relationships - the lookup CLS-3 makes anyway, once)
+        d = self.album_cls()
+        bare, full = classical_release(full=False, label="Label MB"), classical_release(full=True, label="Label MB")
+        for t in full["media"][0]["tracks"]:
+            t["recording"]["relations"][0]["work"]["relations"].append(
+                {"target-type": "artist", "type": "composer", "attributes": [], "artist": COMPOSER})
+        http = ClassicalHttp(bare, full, [top_work()])
+        eng = self.engine(http)
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.targets[0].get("~classical"), ["1"], p.why)
+        self.assertTrue(any("composed the works" in w for w in p.why), p.why)
+        urls = [u for h, u in http.calls if "work-level-rels" in u]
+        self.assertEqual(len(urls), 2)                         # (the probe's, then CLS-3's: one address)
+        self.assertEqual(len(set(urls)), 1)
+        self.assertEqual(p.targets[0]["work"], [f"{TOP} (1841)"])
+
+    def test_CLS2_composers_joined_by_commas_before_the_semicolon(self):
+        rel = classical_release(full=False, label="Label MB")
+        other = {"id": "c-b", "name": "Johannes Brahms", "sort-name": "Brahms, Johannes"}
+        rel["artist-credit"] = credit((COMPOSER, ", "), (other, "; "), (ORCH, ""))
+        self.assertTrue(classical.composer_first_form(rel))
+        ok, why = classical.is_classical(None, rel=rel)
+        self.assertFalse(ok)
+        self.assertTrue(any("Composer; performers" in w for w in why), why)
+        self.assertFalse(classical.composer_first_form(mb_release("r", "A; B", "X")))   # (one artist)
 
     def test_CLS3_profile_with_track_ars_asks_the_release_once(self):
         d = self.album_cls()

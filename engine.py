@@ -3863,6 +3863,12 @@ class Engine:
                     dparts = fparts
         if cls is None:
             cls = self._classical(album, files, rel, None)
+        if not cls[0] and rel and tags_mb is not None and not ps.get("track_ars") and \
+                classical.composer_first_form(rel):
+            # CLS-2: MusicBrainz's "Composer; performers" credit, with nothing else to decide by:
+            # the recordings' relationships say whether its first artist composed the works (the
+            # lookup CLS-3 makes for a classical album: asked once, cached)
+            cls = self._classical_probe(album, files, mbid, rel, det, ps)
         if cls[0] and rel and tags_mb is not None:
             # CLS-3: a classical album's MusicBrainz release with its recordings' and works'
             # relationships (whatever the profile's Credits setting) and its works' parents,
@@ -4148,6 +4154,20 @@ class Engine:
         key = (tuple(str(f) for f in files or ()), (rel or {}).get("id") or "", str((det or {}).get("id") or ""))
         if key not in memo:
             memo[key] = classical.is_classical(self.profile, rel, det, album)
+        return memo[key]
+
+    def _classical_probe(self, album, files, mbid, rel, det, ps) -> tuple:
+        """CLS-2: is_classical again with the release's recordings' and works' relationships."""
+        memo = self.__dict__.setdefault("_classical_memo", {})
+        key = (tuple(str(f) for f in files or ()), "probe:" + str(mbid), str((det or {}).get("id") or ""))
+        if key not in memo:
+            try:
+                got = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{mbid}"
+                                         f"?inc={mb_tags.inc_for(dict(ps, track_ars=True))}&fmt=json", "mb")
+            except ma.ProviderUnavailable:
+                got = None                      # (no answer: the album is read as not classical)
+            memo[key] = classical.is_classical(self.profile, got, det, album) \
+                if isinstance(got, dict) and got.get("media") else self._classical(album, files, rel, det)
         return memo[key]
 
     def _classical_release(self, mbid, full_rel, ps, album, best):

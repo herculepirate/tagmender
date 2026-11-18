@@ -49,6 +49,20 @@ class CLS4Works(unittest.TestCase):
                          (["Robert Schumann"], ["Schumann, Robert"], ["c-schumann"]))
         self.assertEqual(t[0]["musicbrainz_workid"], ["w-part1"])            # (the recording's own work)
 
+    def test_CLS4_a_set_of_works_names_its_suite_after_it(self):
+        # (Six Suites -> Suite no. 1 -> its movements: the movements of each suite share a Work)
+        six = {"id": "six", "title": "Six Suites for Unaccompanied Cello", "relations": [
+            {"target-type": "artist", "type": "composer", "begin": "1717", "end": "1723", "attributes": [],
+             "artist": {"id": "c-b", "name": "Johann Sebastian Bach", "sort-name": "Bach, Johann Sebastian"}}]}
+        w = top_work()
+        w.update(title="Suite no. 1 in G major, BWV 1007")
+        w["relations"] = w["relations"][1:] + [{"target-type": "work", "type": "parts", "direction": "backward",
+                                                "ordering-key": 1, "work": {"id": "six", "title": six["title"]}}]
+        t = tags(classical_release(), [w, six])[0]
+        self.assertEqual(t["work"], ["Six Suites for Unaccompanied Cello (1717-1723):: Suite no. 1 in G major, BWV 1007"])
+        self.assertEqual((t["movementnumber"], t["movementtotal"]), (["1"], ["4"]))
+        self.assertEqual(t["composer"], ["Johann Sebastian Bach"])
+
     def test_CLS4_no_year_where_musicbrainz_gives_none(self):
         w = top_work()
         for r in w["relations"]:
@@ -70,10 +84,18 @@ class CLS4Works(unittest.TestCase):
             {"target-type": "work", "type": "parts", "direction": "backward", "ordering-key": 1,
              "work": {"id": "act1", "title": "Die Zauberflöte, K. 620: Akt I"}}])
         t = tags(rel, [top_work(), act, opera])[0]
-        self.assertEqual(t["work"], ["Die Zauberflöte, K. 620 (1791)"])
+        self.assertEqual(t["work"], ["Die Zauberflöte, K. 620 (1791):: Akt I"])
         self.assertEqual(t["movement"], ["Nr. 1 Introduktion „Zu Hilfe!“"])
         self.assertEqual((t["movementnumber"], t["movementtotal"]), (["1"], ["2"]))
         self.assertEqual(t["composer"], ["Wolfgang Amadeus Mozart"])
+
+    def test_CLS4_a_part_named_by_its_numeral_alone_takes_the_tracks_name(self):
+        rel = classical_release(titles=[f"Konzert für Chor: {n}. О Повелитель сущего всего" for n in ("I", "II", "III")])
+        for k, tr in enumerate(rel["media"][0]["tracks"]):
+            tr["recording"]["relations"][0]["work"]["title"] = f"{TOP}: {('I', 'II', 'III')[k]}."
+        t = tags(rel, [top_work()])
+        self.assertEqual(t[1]["movement"], ["II. О Повелитель сущего всего"])
+        self.assertEqual(t[1]["movementnumber"], ["2"])
 
     def test_CLS4_a_whole_work_recorded_as_one_track_has_no_movement(self):
         rel = classical_release()

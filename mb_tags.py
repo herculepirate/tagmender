@@ -465,7 +465,10 @@ def _composed(work) -> str:
     MusicBrainz gives no date."""
     for r in work.get("relations") or ():
         if isinstance(r, dict) and r.get("type") == "composer" and r.get("target-type") == "artist":
-            year = str(r.get("begin") or r.get("end") or "")[:4]
+            begin, end = str(r.get("begin") or "")[:4], str(r.get("end") or "")[:4]
+            if begin.isdigit() and end.isdigit() and end != begin:
+                return f"{begin}-{end}"          # ("1717-1723": composed over several years)
+            year = begin if begin.isdigit() else end
             if year.isdigit():
                 return year
     return ""
@@ -473,8 +476,11 @@ def _composed(work) -> str:
 
 def _classical_work(work, m, s, instrumental, per_medium):
     """CLS-4: a classical recording's work. Work is the top work (the symphony, the opera -
-    never the movement), with the year its composer relationship dates it in ("Symphony no. 4
-    in D minor, op. 120 (1841)"; no year when MusicBrainz gives none); a part of a work is its
+    never the movement), with the years its composer relationship dates it in ("Symphony no. 4
+    in D minor, op. 120 (1841)", "(1717-1723)"; none when MusicBrainz gives none), and where
+    the movement's own parent is below it, that parent after "::" ("Six Suites for
+    Unaccompanied Cello (1717-1723):: Suite no. 1 ...", "Die Zauberflöte, K. 620 (1791):: Akt
+    I"), as Classical Extras wrote it in your files; a part of a work is its
     movement: Movement Name the part's title as MusicBrainz has it less its parent's title in
     front, its numeral kept ("I. Andante con moto - Allegro di molto"), Movement its place
     among the parent's parts (the ordering-key), Movement Total the parent's parts, Show
@@ -484,7 +490,16 @@ def _classical_work(work, m, s, instrumental, per_medium):
     title = str(top.get("title") or "").strip()
     if title:
         year = _composed(top)
-        _add(m, "work", f"{title} ({year})" if year and not title.endswith(f"({year})") else title)
+        whole = f"{title} ({year})" if year and not title.endswith(f"({year})") else title
+        if len(chain) >= 2:
+            # (the movement's own parent below the top work - Suite no. 1 of the Six Suites, an
+            # opera's act - follows it: the movements numbered together share one Work)
+            mid = str(chain[0][0].get("title") or "").strip()
+            if mid.casefold().startswith(title.casefold()):
+                mid = mid[len(title):].lstrip(" :,-–/.").strip()
+            if mid:
+                whole = f"{whole}:: {mid}"
+        _add(m, "work", whole)
     if not chain or "movementnumber" in m or "movement" in m:
         return
     parent, link = chain[0]
@@ -507,6 +522,23 @@ def _classical_work(work, m, s, instrumental, per_medium):
         m["movementnumber"] = [str(key)]
         if parts:
             m["movementtotal"] = [str(max(len(parts), key))]
+
+
+_BARE_NUMERAL = re.compile(r"^(?:[IVXLC]+|\d+)\.?$")
+
+
+def _named_movement(d):
+    """CLS-4: a part MusicBrainz names by its numeral alone ("Concerto for Choir: I.") takes its
+    name from the track's title, where that title holds the numeral after a colon and more
+    ("Konzert für Chor: I. О Повелитель сущего всего" -> "I. О Повелитель сущего всего")."""
+    mv = str((d.get("movement") or [""])[0]).strip()
+    if not mv or not _BARE_NUMERAL.match(mv):
+        return
+    num = mv.rstrip(".")
+    title = str((d.get("title") or [""])[0])
+    hit = re.search(r":\s+(" + re.escape(num) + r"[.:)]?\s+\S.*)$", title)
+    if hit:
+        d["movement"] = [hit.group(1).strip()]
 
 
 _WORK_CREDITS = ("composer", "lyricist", "writer")
@@ -1117,6 +1149,8 @@ def release_tags(rel, settings=None, pregap=False, media=None, without=None, unc
                     d["genre"] = g
             if s.get("classical") and not va:
                 _classical_artist(d, rec, r_ac, rel, s)          # CLS-4: the performers
+            if s.get("classical"):
+                _named_movement(d)
             if d["musicbrainz_artistid"] == [VARIOUS_ARTISTS_ID]:
                 d["artist"] = d["artistsort"] = [s["va_name"]]
             if (d.get("title") or [""])[0] == DATA_TRACK_TITLE:

@@ -47,12 +47,12 @@ CLASSICAL_LABELS = {
     "avie", "lso live", "lpo", "onyx classics", "evil penguin classic", "naive classique", "mirare",
     "aparte", "la dolce volta", "cypres", "ramee", "passacaille", "et'cetera", "nimbus records",
     "toccata classics", "grand piano", "marco polo", "dynamic", "tactus", "stradivarius", "arts music",
-    "da vinci classics", "querstand", "genuin", "audite", "musikproduktion dabringhaus und grimm", "mdg",
+    "da vinci classics", "br klassik", "br-klassik", "hyperion records", "resonus", "rubicon classics", "querstand", "genuin", "audite", "musikproduktion dabringhaus und grimm", "mdg",
 }
 _LABEL_TAIL = re.compile(r"\s+(?:records|recordings|label|music|gmbh|ltd\.?|inc\.?)$")
 # catalogue numbers of works printed in titles (Bach's BWV, Mozart's K., opus numbers ...): weak
 _CATALOGUE = re.compile(r"(?<![\w.])(?:BWV|HWV|RV|TWV|BuxWV|SWV|WoO|Hob\.|KV|K\.|D\.|[Oo]p\.|Sz\.)"
-                        r"\s?(?:[IVXL]+[a-z]?\s?:\s?)?\d")
+                        r"\s?(?:[IVXL]+[a-z]?\s?:\s?)?\d+[a-z]?")
 _PERFORMER_RELS = {"instrument", "vocal", "performer", "performing orchestra", "conductor", "chorus master",
                    "concertmaster"}
 
@@ -178,7 +178,8 @@ def is_classical(profile=None, rel=None, det=None, album=None) -> tuple:
         composers, performers = mb_people(rel)
         keys = [c["artist"].get("id") or fold(c["artist"].get("name")) for c in ac]
         names = [c.get("name") or c["artist"].get("name") or "" for c in ac]
-        semi = ";" in str(ac[0].get("joinphrase") or "")
+        # ("Composer, Composer; performers": the "; " after the composers, wherever it comes)
+        semi = any(";" in str(c.get("joinphrase") or "") for c in ac[:-1])
         for k, n in zip(keys, names):
             if k in composers and k not in performers:
                 strong.append(f"{n} composed the works and performs on none of them")
@@ -197,7 +198,7 @@ def is_classical(profile=None, rel=None, det=None, album=None) -> tuple:
     titles = _mb_titles(rel) + _dg_titles(det) + [str(t.get("title") or "") for t in tracks]
     cat = next((m.group(0) for m in (_CATALOGUE.search(t) for t in titles) if m), "")
     if cat:
-        weak["catalogue"] = f"works' catalogue numbers in the titles ({cat.strip()}...)"
+        weak["catalogue"] = f"works' catalogue numbers in the titles ({cat.strip()} ...)"
     if any("classical extras" in str(t.get("clue_text") or "").casefold() for t in tracks):
         weak["classical_extras"] = "your files carry Classical Extras' tags"
     reasons = strong + ambiguous + list(weak.values())
@@ -206,6 +207,13 @@ def is_classical(profile=None, rel=None, det=None, album=None) -> tuple:
     if (ambiguous and weak) or len(weak) >= 2:
         return True, reasons
     return False, reasons
+
+
+def composer_first_form(rel) -> bool:
+    """MusicBrainz's classical credit form "Composer; performers": the release credit's first
+    joins is a "; " ("Alfred Schnittke, Arvo Pärt; Chor des Bayerischen Rundfunks")."""
+    ac = [c for c in (rel or {}).get("artist-credit") or () if isinstance(c, dict)]
+    return len(ac) >= 2 and any(";" in str(c.get("joinphrase") or "") for c in ac[:-1])
 
 
 def why_line(reasons) -> str:

@@ -232,7 +232,7 @@ ROW_STATES = {"waiting": N_("Waiting…"), "looking": N_("Looking up…"), "appl
 
 
 RETRY_CODES = {"musicbrainz_unavailable", "discogs_unavailable", "web_unavailable", "rate_limited",
-               "missing_credentials"}
+               "missing_credentials", "lookup_failed"}
 
 
 def release_pages(a) -> list:
@@ -2026,6 +2026,9 @@ class Overview(QWidget):
         roots = dict(getattr(self, "roots", {}))
 
         at = {k: i for i, k in enumerate(k for ks in groups.values() for k in ks)}    # (its row: _lookup_order)
+        every = frozenset(self.album_key(a) for a in self.model.albums)
+        unsent = []                                         # (albums an internal error left not looked up)
+        self._lookup_unsent = unsent
 
         def work(w):
             batches = []
@@ -2042,12 +2045,30 @@ class Overview(QWidget):
                 e.force = forced
                 e.file_anyway = {f for f, n in file_anyway.items() if n == name}
                 e.seed_claims = seed
+                e.listed_keys = every                       # (every row's: a changed album never takes another's)
                 e.offer_file_anyway = True                  # (MOV-5: here you can ask)
                 e.lookup_workers = workers
+                told = set()
+
+                def emit(k, plan):
+                    told.add(k)
+                    report("partial", (name, k, plan))
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
-                return plan_each(e, where, kr, lambda k, plan: report("partial", (name, k, plan)),
-                                 progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
-                                 cancel=lambda: w.cancelled, meta=META_STORE)
+                try:
+                    return plan_each(e, where, kr, emit,
+                                     progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
+                                     cancel=lambda: w.cancelled, meta=META_STORE)
+                except Exception as exc:
+                    # (an internal error the engine did not keep to one album: logged, and the
+                    # look-up goes on with the other folders' albums; the albums of this one it
+                    # had not sent keep their rows, not looked up - never another album's error)
+                    if not w.cancelled:
+                        import logging
+                        logging.getLogger("tagmender.gui").error(
+                            "looking up the albums in %s stopped: %s: %s", where, type(exc).__name__, exc,
+                            exc_info=exc)
+                        unsent.extend(k for k in kr if k not in told)
+                    return len(told)
             return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
                                lambda a: w.progress.emit(*a))
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
@@ -2196,6 +2217,10 @@ class Overview(QWidget):
                 was = self.queue.pop(k, None)
                 self.queue[k] = (mode, ag or bool(was and was[1]))
         self.looking = {}
+        unsent, self._lookup_unsent = getattr(self, "_lookup_unsent", None) or [], []
+        if unsent:
+            self.win.statusBar().showMessage(tr("{0} could not be looked up: internal error (see log).").format(
+                plural(len(set(unsent)), tr("album"), tr("albums"))), 10000)
         self.request_fit()                                 # (the rows' words now: fitted once)
         self.check_stale()
         if getattr(self, "apply_worker", None) is None:

@@ -39,6 +39,7 @@ CODES = {
     "write_failed": "the tags could not be written or verified",
     "partially_tagged": "some files already carry IDs from another release",
     "two_rips": "two rips of one record are mixed in one folder; sort them into a folder each",
+    "lookup_failed": "the album could not be looked up (an error, written to the log); it is tried again",
     "other": "see the words after the codes",
 }
 

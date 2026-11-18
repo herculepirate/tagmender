@@ -461,8 +461,11 @@ class DSC10Review(DSC10Base):
             return real(g, names)
         eng._identify = broken
         props = eng.proposals(self.lib)
-        self.assertEqual(sorted((p.status, len(p.files)) for p in props),
+        # (0.8.75: a folder whose look-up failed is planned with no files - nothing of it is
+        # written, marked or moved - its own files kept for its row)
+        self.assertEqual(sorted((p.status, len(p.files) or len(getattr(p, "group_files", ()))) for p in props),
                          [("identified", 3), ("identified", 3), ("unresolved", 3)], self.summary(props))
+        self.assertEqual([len(p.files) for p in props if p.status == "unresolved"], [0])
         self.assertTrue(any("unreadable" in p.reason for p in props))
 
     def test_DSC10_nothing_claiming_each_folder_keeps_its_own_plan(self):

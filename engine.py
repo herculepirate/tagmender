@@ -1525,7 +1525,10 @@ def _albums_of_keys(eng, path, keys, skip=()) -> list[Group]:
         groups = list(_albums_iter(eng, path, skip, within=folders))
         if keys <= {group_key(g.folder, g.files) for g in groups}:
             return groups
-    return eng.albums_in(path, skip)
+    # (the engine's own whole scan, never eng.albums_in: in plan_each that is the look-up's
+    # stand-in, which reads through this function - a key not found asked it again and again,
+    # "maximum recursion depth exceeded" one album at a time, a deadlock with several at once)
+    return list(_albums_iter(eng, path, skip))
 
 
 def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> list[Group]:
@@ -6075,6 +6078,29 @@ class Engine:
             # under its own key - a joined set's row looked up again when it no longer joins
             # gives every folder's row back)
             asked = {id(g) for g in groups if group_key(g.folder, g.files) in only}
+            # (an album changed since it was listed - a track added, one renamed: its key is no
+            # album's now. Its folder's album that no row of this look-up is listed as - when
+            # exactly one is left - is looked up in its place, under the key its row was listed
+            # with; an album another row is listed as is that row's, never taken. plan_each tells
+            # the keys of all its rows: _listed_keys, and the app every row of its list's)
+            have = {group_key(g.folder, g.files) for g in groups}
+            claimed = set(only) | set(getattr(self, "_listed_keys", None) or ())
+            self.kept_rows = {}
+            changed = {}
+            for k in only:
+                if k and k not in have:
+                    changed.setdefault(k.split("|", 1)[0], []).append(k)
+            listed_as = {}
+            for folder, stale in changed.items():
+                free = [g for g in groups if os.path.realpath(str(g.folder)) == folder
+                        and group_key(g.folder, g.files) not in claimed]
+                if len(stale) == 1 and len(free) == 1:
+                    asked.add(id(free[0]))
+                    listed_as[id(free[0])] = stale[0]
+                elif os.path.isdir(folder):
+                    # (which album is its row's cannot be told: the row stays as listed, saying
+                    # so - never left out of the plan, which takes it off the list)
+                    self.kept_rows.update({k: CHANGED_SINCE_LISTED for k in stale})
             asked |= {id(m) for g in groups if id(g) in asked for m in getattr(g, "siblings", None) or ()}
             groups = [g for g in groups if id(g) in asked]
         out, told = [], set()
@@ -6087,6 +6113,8 @@ class Engine:
             # (the album as found and listed: every disc or version it is planned as keeps it,
             # so a later Look Up or Refresh of those rows asks for this album again)
             key = group_key(g.folder, g.files)
+            if only is not None:
+                key = listed_as.get(id(g), key)
             start = time.monotonic()
             try:
                 # PRF-1: where the album's time went, one line in the log (stagetimes)
@@ -6106,9 +6134,13 @@ class Engine:
                         log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
             except Exception as exc:                          # one bad album never stops the run
                 log.exception("identifying %s failed", g.folder)
-                p = planmod.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
-                                     status="unresolved", reason=f"error: {exc}", reason_codes=["other"])
+                # (nothing of it is written, moved or marked: an Unresolved row saying so)
+                p = planmod.Proposal(source_dir=str(g.folder), files=[], status="unresolved",
+                                     reason=f"could not be looked up: {_short(exc)} (see log)",
+                                     reason_codes=["lookup_failed"])
                 p.group_key = key
+                p.group_files = [str(f) for f in g.files]
+                p.failed_row = True
                 out.append(p)
             self.reached.add(key)
         return out
@@ -6198,14 +6230,21 @@ class Engine:
                                    file_anyway=getattr(self, "file_anyway", None),
                                    seed_claims=getattr(self, "seed_claims", None),
                           offer_file_anyway=getattr(self, "offer_file_anyway", False))
-        done = []                                        # (key, its proposals)
+        done, kept = [], {}                              # (key, its proposals); rows kept as listed
+        # (proposals: a changed album never takes another row's - this look-up's or, from the
+        # app, any row of its list: listed_keys)
+        self._listed_keys = set(keys) | set(getattr(self, "listed_keys", None) or ())
         try:
             for i, k in enumerate(keys):
                 if cancel and cancel():
                     break
-                with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
-                    props = self.proposals(path, (lambda _i, _n, what, i=i: progress(i, what)) if progress else None,
-                                           cancel, only={k})
+                try:
+                    with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+                        props = self.proposals(path, (lambda _i, _n, what, i=i: progress(i, what)) if progress else None,
+                                               cancel, only={k})
+                except Exception as exc:                 # (one album's internal error: its row says so)
+                    self.reached = set() if cancel and cancel() else {k}
+                    props = _failed_album(k, exc, self._logger())
                 if k not in getattr(self, "reached", ()) and cancel and cancel():
                     break                                # (cancelled before it: its rows stay)
                 for q in props:                          # (as plan.build: absolute paths)
@@ -6214,9 +6253,11 @@ class Engine:
                 out, (props,) = _build_despite_gone(planner, [props], getattr(self, "log", None))   # (shown at once; replaced below)
                 done.append((k, props))
                 with_keys(out["albums"], props)
+                _keep_row(self, k, props, out, kept)
                 out["provider_notes"] = notes()
                 emit(k, out)
         finally:
+            self.__dict__.pop("_listed_keys", None)
             if prev is not None:
                 self.albums_in = prev
             else:
@@ -6227,7 +6268,7 @@ class Engine:
             with_keys(whole["albums"], allp)
             whole["provider_notes"] = notes()
             for k, ps in done:
-                emit(k, dict(whole, albums=[a for a in whole["albums"] if a.get("key") == k]))
+                emit(k, dict(whole, albums=[a for a in whole["albums"] if a.get("key") == k] + kept.get(k, [])))
         return len(done)
 
 
@@ -6259,6 +6300,7 @@ class Engine:
         for item in enumerate(keys):
             tasks.put(item)
         failed = threading.Event()
+        kept = {}                                        # (rows kept as listed: _keep_row)
 
         def planner(e):
             return planmod.Planner(e.profile, e.job, extra_roots=[root], edits=getattr(e, "edits", None),
@@ -6275,6 +6317,7 @@ class Engine:
                 for name in ("edits", "force", "file_anyway", "seed_claims", "offer_file_anyway"):
                     if name in self.__dict__:
                         setattr(e, name, self.__dict__[name])
+                e._listed_keys = set(keys) | set(getattr(self, "listed_keys", None) or ())    # (as plan_each)
                 # (PRF-4: only the folders holding KEYS are read, once for them all)
                 scan = (lambda p, skip=(), e=e: _albums_of_keys(e, p, keys, skip)) if e._own_scan() else e.albums_in
 
@@ -6290,9 +6333,13 @@ class Engine:
                         i, k = tasks.get_nowait()
                     except queue.Empty:
                         break
-                    with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
-                        props = e.proposals(path, lambda _i, _n, what, i=i: results.put(("progress", i, what)),
-                                            cancel, only={k})
+                    try:
+                        with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+                            props = e.proposals(path, lambda _i, _n, what, i=i: results.put(("progress", i, what)),
+                                                cancel, only={k})
+                    except Exception as exc:             # (one album's internal error: its row says so)
+                        e.reached = set() if cancel and cancel() else {k}
+                        props = _failed_album(k, exc, e._logger())
                     if k not in e.reached and cancel and cancel():
                         break                            # (cancelled before it: its rows stay)
                     for q in props:
@@ -6300,6 +6347,7 @@ class Engine:
                         q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
                     out, (props,) = _build_despite_gone(lambda: planner(e), [props], e.log)
                     with_keys(out["albums"], props)
+                    _keep_row(e, k, props, out, kept)
                     out["provider_notes"] = notes(e)
                     results.put(("done", i, k, props, out))
             except BaseException as exc:                 # (reported, and raised, by the coordinator)
@@ -6341,7 +6389,7 @@ class Engine:
             whole["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **notes(self), **told}
             for i in sorted(done):
                 k = done[i][0]
-                emit(k, dict(whole, albums=[a for a in whole["albums"] if a.get("key") == k]))
+                emit(k, dict(whole, albums=[a for a in whole["albums"] if a.get("key") == k] + kept.get(k, [])))
         return len(done)
 
 
@@ -6379,6 +6427,87 @@ def group_key(folder, files) -> str:
     return "|".join([os.path.realpath(str(folder))] + sorted(os.path.realpath(str(f)) for f in files))
 
 
+LOOKUP_FAILED = "could not be looked up: internal error (see log)"
+FOLDER_UNREAD = "could not be looked up: folder could not be read (see log)"
+CHANGED_SINCE_LISTED = "changed since it was listed: add its folder again"
+
+
+def _short(exc, most=120) -> str:
+    """An error in a few words for a row's reason (the log has it whole)."""
+    words = (str(exc).strip().splitlines() or [""])[0].strip() or type(exc).__name__
+    return words if len(words) <= most else words[:most - 1].rstrip() + "…"
+
+
+def _keep_row(e, key, props, out, kept):
+    """A row whose album changed since it was listed, when which of its folder's albums is its
+    own cannot be told (Engine.proposals' kept_rows): it stays in OUT as listed, saying so -
+    nothing of it can be applied, and it is not taken off the list."""
+    note = (getattr(e, "kept_rows", None) or {}).get(key)
+    if not note or props:
+        return
+    parts = key.split("|")
+    row = {"source_dir": parts[0], "status": "listed", "label": "", "rule": None,
+           "identification": {"status": "listed", "reason": note}, "release": {}, "files": [],
+           "companions": [], "artwork": None, "conflicts": [], "skipped": [], "notes": [note],
+           "album_files": parts[1:], "key": key, "changed_since_listed": True}
+    out["albums"] = list(out.get("albums") or []) + [row]
+    kept[key] = [row]
+
+
+def _failed_album(key, exc, log=None, props=None) -> list:
+    """The album of KEY (or the proposals PROPS of one album), after an error while it was
+    looked up or planned: a row saying so, Unresolved - "could not be looked up: internal error
+    (see log)", or "... folder could not be read" when its folder could not be read - the error
+    logged with its traceback. Planned with no files: nothing of it is written, moved or marked,
+    and Apply has nothing to do for it; its row's key and files are kept (with_keys)."""
+    why = FOLDER_UNREAD if isinstance(exc, OSError) else LOOKUP_FAILED
+    if log is not None:
+        log.error("looking up %s failed (%s): %s: %s", (key or "").split("|", 1)[0] or
+                  (str(props[0].source_dir) if props else "?"), why, type(exc).__name__, exc, exc_info=exc)
+    if not props:
+        parts = (key or "").split("|")
+        props = [planmod.Proposal(source_dir=parts[0], files=parts[1:], status="unresolved", reason="")]
+    out = []
+    for q in props:
+        p = planmod.Proposal(source_dir=str(q.source_dir), files=[], status="unresolved", reason=why,
+                             reason_codes=["lookup_failed"])
+        p.group_key = getattr(q, "group_key", None) or key
+        p.group_files = [str(f) for f in getattr(q, "group_files", None) or q.files]
+        p.failed_row = True
+        out.append(p)
+    return out
+
+
+def _culprit(planner, groups):
+    """The album (its index in GROUPS) whose planning raised: one that fails planned alone, else
+    the last of the shortest run of them, from the first, that fails planned together (found
+    by halving: a few plans, not one per album). None when none is found."""
+    if len(groups) == 1:
+        return 0
+    for i, g in enumerate(groups):
+        try:
+            planner().build(list(g))
+        except Exception:
+            return i
+
+    def fails(n):
+        try:
+            planner().build([q for g in groups[:n] for q in g])
+            return False
+        except Exception:
+            return True
+    lo, hi = 2, len(groups)
+    if not fails(hi):
+        return None
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if fails(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return hi - 1
+
+
 def _build_despite_gone(planner, groups, log=None) -> tuple:
     """(the plan of these albums, the albums as planned). groups: each album's proposals. An album
     a file of which cannot be read while it is planned (a network share that lost it for a moment, a
@@ -6387,7 +6516,7 @@ def _build_despite_gone(planner, groups, log=None) -> tuple:
     groups = [list(g) for g in groups]
     for _try in range(sum(len(q.files) + 1 for g in groups for q in g)):
         try:
-            return planner().build([q for g in groups for q in g]), groups
+            return _unresolved_rows(planner().build([q for g in groups for q in g]), groups), groups
         except OSError as exc:
             where = str(exc.filename or "")
             spots = [(g, i) for g in groups for i in range(len(g)) if g[i].files]
@@ -6407,7 +6536,29 @@ def _build_despite_gone(planner, groups, log=None) -> tuple:
             p.group_key = getattr(q, "group_key", None)
             p.group_files = [str(f) for f in getattr(q, "group_files", None) or q.files]      # (its row's key: with_keys)
             g[i] = p
-    return planner().build([q for g in groups for q in g]), groups
+        except Exception as exc:
+            # (an internal error planning one album: that album's rows say so, the others are
+            # planned. Out of memory: never planned again to find which - only one album's is)
+            if isinstance(exc, MemoryError) and len(groups) > 1:
+                raise
+            bad = _culprit(planner, groups)
+            if bad is None or all(getattr(q, "failed_row", False) for q in groups[bad]):
+                raise
+            groups[bad] = _failed_album(None, exc, log, props=groups[bad])
+    return _unresolved_rows(planner().build([q for g in groups for q in g]), groups), groups
+
+
+def _unresolved_rows(plan, groups=()) -> dict:
+    """An album that could not be looked up (reason code lookup_failed: _failed_album, Engine.
+    proposals' error), planned with no files, is Unresolved saying why - not Skipped, as an
+    album with nothing to do is. Told by its code, whatever the length of its words."""
+    import reasons
+    for a in plan.get("albums") or []:
+        ident = a.get("identification") or {}
+        codes = set(ident.get("reason_codes") or ()) | set(reasons.parse(ident.get("reason") or "")[0])
+        if a.get("status") == "skipped" and not a.get("files") and "lookup_failed" in codes:
+            a["status"], a["label"] = "unresolved", "Unresolved"
+    return plan
 
 
 def with_keys(entries, props):

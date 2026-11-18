@@ -452,7 +452,7 @@ class LookUpReadsItsFolders(Base):
         w = self.lib / "A Band" / "1977 - The Stranger"
         with self.assertLogs("tagmender.engine", "ERROR"):
             out = e.proposals(w)
-        self.assertEqual([(p.status, p.reason) for p in out], [("unresolved", "error: no network here")])
+        self.assertEqual([(p.status, p.reason) for p in out], [("unresolved", "could not be looked up: no network here (see log)")])
 
     def test_plan_each_reads_only_the_folders_of_its_albums(self):
         listed = self.e.listing(self.lib)["albums"]

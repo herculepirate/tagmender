@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.8.73
+
+**Classical music**
+- TagMender now recognises a classical album by itself - Discogs's genre Classical, a classical MusicBrainz genre, MusicBrainz's "Composer; performers" credit, a composer who performs on none of the tracks; classical labels and catalogue numbers (BWV, Op.) only count together with something stronger. The album's Why tab says why. Neo-classical, classical crossover, symphonic metal, rock operas and non-western classical traditions are not taken for it (CLS-2).
+- A classical album is tagged in full: Work is the whole work with its year ("Symphony no. 4 in D minor, op. 120 (1841)"), Movement Name keeps its numeral ("I. Andante con moto - Allegro di molto"), with Movement, Movement Total and Show Movement; Composer (at Basic too), Conductor, soloists, ensembles and choirs from the recordings' and works' credits; Artist is who performs, Album Artist the release's whole credit, names in Latin script; librettists and text writers as lyricists (CLS-3, CLS-4).
+- A film score or other album whose credited artist composed and performs it keeps that artist ("Hans Zimmer"); on a mixed album this is decided track by track.
+- Work fields that Classical Extras already wrote in your files are kept and only filled where empty (CLS-5).
+- A new example profile, Classical (`tagmender profiles examples`), for a classical library: every album read as classical, names as the release credits them, and folders named by the release's credit as written ("Schumann; Musica Viva, Alexander Rudin/2004 - ..."). Your own profiles are not changed.
+
 ## 0.8.72
 
 **Edit tags without a look-up**

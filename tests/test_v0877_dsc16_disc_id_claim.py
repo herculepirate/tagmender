@@ -36,7 +36,7 @@ def log_text(k):
 def release(rid, title, discs):
     rel = te.mb_release(rid, "Band J", title)
     rel["date"] = "1991-11-21"
-    rel["media"] = [{"format": "CD", "position": p, "discs": [{"id": ma.mb_discid(mb_toc(k))}] if k != 2 else [],
+    rel["media"] = [{"format": "CD", "position": p, "discs": [{"id": ma.mb_discid(mb_toc(k))}],
                      "tracks": [{"id": f"{rid}-{k}-t{i}", "position": i + 1, "title": f"D{k}-{i}",
                                  "length": (s * 75 + (k if i == 0 else 0)) * 1000 // 75,
                                  "recording": {"id": f"rec-{k}-{i}", "title": f"D{k}-{i}"}}
@@ -46,8 +46,8 @@ def release(rid, title, discs):
 
 
 class DiscIdHttp(SetHttp):
-    """MusicBrainz's disc ID look-up: disc 1's ID on the box (medium 1), disc 2's on nothing, disc
-    3's on the box (medium 3) and on the single."""
+    """MusicBrainz's disc ID look-up: discs 1 and 2 on the box, disc 3's on the box (medium 3) and
+    on the single."""
 
     def get_json(self, url, host):
         if host == "mb" and "/ws/2/discid/" in url:
@@ -55,7 +55,8 @@ class DiscIdHttp(SetHttp):
             did = url.split("/ws/2/discid/")[1].split("?")[0]
             ids = {ma.mb_discid(mb_toc(k)): k for k in LENS}
             k = ids.get(did)
-            on = {1: [("mb-box", 1, 3)], 3: [("mb-box", 3, 3), ("mb-single", 1, 1)]}.get(k)
+            on = {1: [("mb-box", 1, 3)], 2: [("mb-box", 2, 3)],
+                  3: [("mb-box", 3, 3), ("mb-single", 1, 1)]}.get(k)
             if not on:
                 return None
             return {"id": did, "releases": [{"id": rid, "media": [
@@ -65,14 +66,28 @@ class DiscIdHttp(SetHttp):
 
 
 class DSC16_DiscIdClaim(te.Base):
+    def setUp(self):
+        super().setUp()
+        # (DSC-10's claim alone: in the library the set's other discs' IDs are not all on the box -
+        # Joy Division's "Unknown Pleasures" and "Still" - so DSC-14's intersection never joins it)
+        import engine
+        self._was = engine.Engine._disc_id_set
+        engine.Engine._disc_id_set = lambda self, folder, parts: None
+
+    def tearDown(self):
+        import engine
+        engine.Engine._disc_id_set = self._was
+        super().tearDown()
+
     def make(self):
         top = self.lib / "Band J - 1977-1980 - 1991 - FLAC"
         for k, name in ((1, "1 - Alpha"), (2, "2 - Beta"), (3, "3 - Single")):
             d = top / name
             for i, secs in enumerate(LENS[k]):
                 flac(d, f"{i + 1:02d}.flac", secs + (k if i == 0 else 0) / 75, freq=300 + 40 * k + 10 * i,
-                     title=f"D{k}-{i}", album=("Single" if k == 3 else f"1977-1980 {name[4:]}"), albumartist="Band J", artist="Band J",
-                     track=str(i + 1), disc="1/1")
+                     title=f"D{k}-{i}", album=name[4:], albumartist="Band J", artist="Band J",
+                     track=str(i + 1), disc="1/1",
+                     )
             (d / f"{name}.log").write_text(log_text(k))
         return top
 

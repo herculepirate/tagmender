@@ -2794,6 +2794,7 @@ class Engine:
             if len(discs) < 2:
                 continue
             mapping, fits = {dir_of[i]: int(next(iter(own)))}, {}
+            proven = {dir_of[i]}                         # (DSC-16: each folder's disc proven on its own)
             for j, other, ops in per:
                 if j == i:
                     continue
@@ -2810,6 +2811,7 @@ class Engine:
                 if on:
                     if len(on) == 1:
                         fits[d] = on[0]
+                        proven.add(d)
                     continue
                 if proof and len(self._fits_discs(d, other.files, cand, tight=True)) != 1:
                     continue                             # (its disc ID proves another release, and its
@@ -2820,6 +2822,7 @@ class Engine:
                           for q in same for t in q.targets or []}
                 if len(ops) == 1 and same and len(theirs) == 1 and next(iter(theirs)).isdigit():
                     found = [int(next(iter(theirs)))]
+                    proven.add(d)
                 else:
                     found = self._fits_discs(d, other.files, cand)
                 found = [n for n in found if n not in mapping.values()]
@@ -2828,7 +2831,7 @@ class Engine:
             taken = list(fits.values())
             mapping.update({d: n for d, n in fits.items() if taken.count(n) == 1})
             if set(mapping.values()) == discs and len(mapping) == len(discs):
-                claims.append((len(mapping), key, p, mapping))
+                claims.append((len(mapping), key, p, mapping, proven))
         self._set_arriving(parts, per)
         if not claims:
             return None
@@ -2837,7 +2840,7 @@ class Engine:
             self.log.info("%s: %s and %s each claim %d folders: each planned alone", folder,
                           claims[0][1], claims[1][1], claims[0][0])
             return None
-        _n, (kind, rid), claimer, mapping = claims[0]
+        _n, (kind, rid), claimer, mapping, proven = claims[0]
         every = [f for q in parts for f in q.files]
         files = [f for d, _n2 in sorted(mapping.items(), key=lambda x: x[1]) for f in every if Path(f).parent == d]
         joined = Group(folder, files, [f for f in every if f not in files])
@@ -2845,6 +2848,16 @@ class Engine:
         prop = self._forced(joined, ref, discs=mapping, claimed=claimer, release=(kind, rid))
         # (proven as one album at the auto threshold, as any album: never on weaker evidence than
         # its folders' own plans had)
+        # DSC-16: or every folder's disc proven on its own - its own sure match this release's disc,
+        # or its exact disc ID on that disc - the joined album's lengths all agreeing: its score falls
+        # only by the set's title, which no disc's tags carry ("Unknown Pleasures" for "1977–1980")
+        if not self._sure(prop) and set(proven) == set(mapping) and prop.status == "identified" \
+                and planmod.tier_of(prop) == "exact" and _discs_as(prop, mapping) and self._complete(prop) \
+                and self._sure(claimer):
+            prop.confidence = max(float(prop.confidence or 0), float(claimer.confidence or 0))
+            prop.evidence = list(prop.evidence or []) + [
+                f"every disc proven on its own: {len(mapping)} folders, each its own match or its disc ID "
+                f"on this release (DSC-16)"]
         if not self._sure(prop) or not _discs_as(prop, mapping) or not self._complete(prop):
             self.log.info("%s: the claim of %s is not proven as one album: %s %s", folder, ref,
                           prop.reason, f"{prop.confidence:.1f}")

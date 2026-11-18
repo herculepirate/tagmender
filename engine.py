@@ -4109,6 +4109,9 @@ class Engine:
         doubt = (info["doubt"] if info.get("doubt")
                  else "your scans name another pressing" if info.get("scans")
                  else info["edition"] if info.get("edition")
+                 # (MED-2: your audio is none of the pressings listed - a hi-res download of an
+                 # album listed only on CD and vinyl)
+                 else f"{info['media']}, and no pressing listed is of your audio's kind" if info.get("media") and len(tied) == 1
                  else f"{len(tied)} pressings fit equally")
         p.why = list(p.why) + [f"pressing unknown ({doubt}): album tags only; "
                                "release IDs, catalogue number, barcode and every field of one pressing left empty"] \

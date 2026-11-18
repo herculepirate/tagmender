@@ -511,6 +511,31 @@ class Pipeline(unittest.TestCase):
         self.assertTrue(asked)
         self.assertEqual(len(asked), len(set(asked)), asked)
 
+    def test_BAR4_a_barcode_whose_investigation_search_failed_is_never_unlisted(self):
+        """BAR-4: the investigation's barcode, its database search failed: never weighed as one
+        on no release (asked of nobody as unlisted); with the searches answered, it is."""
+        for failed in (True, False):
+            with self.subTest(failed=failed):
+                http = ShopHttp()
+                seen = []
+
+                def investigate(http_, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out, notes, *rest):
+                    album["barcodes"] = {OTHER_UPC}
+                    if failed:
+                        album["investigation_search_failed"] = True
+                    return mb_res, dg_res, final, ocr_txt
+
+                def unlisted(http_, album, results, args=None):
+                    seen.append(set(album.get("barcodes") or ()))
+                    return set()
+                with mock.patch.object(ma, "_needs_investigation", return_value=True), \
+                        mock.patch.object(ma, "investigate", side_effect=investigate), \
+                        mock.patch.object(ma, "unlisted_scan_barcodes", side_effect=unlisted):
+                    self.https.append(http)
+                    row = make_album(self.root, f"Erstes Licht {int(failed)}", barcode="")
+                    ma.process(row, http, CFG, self.dm, types.SimpleNamespace(ocr=True, max_images=8))
+                self.assertEqual(any(OTHER_UPC in b for b in seen), not failed, seen)
+
     def test_shops_asked_once_when_the_investigation_finds_no_new_barcode(self):
         http = ShopHttp()
         with mock.patch.object(ma, "_needs_investigation", return_value=True), \

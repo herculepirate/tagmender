@@ -1249,12 +1249,14 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
     "Neil Young & Crazy Horse" are two artists), clusters of SET_TRIAL_MAX_DISCS at most (a
     larger one is read as before, and logged)."""
     pairs = one_release_pairs(names)                 # (first: most folders' names pair with none)
-    if not pairs:
+    if not pairs and _ALBUM_FOLDER_NAME.match(d.name) and 2 <= len(names) <= SET_TRIAL_MAX_DISCS:
+        # (DSC-11: the discs of an album folder named by their own titles - titled_disc_set; its
+        # name and size asked first, so an artist's folder at a library root lists nothing more)
         got = sc.listed(d)
-        # (DSC-11: the discs of an album folder named by their own titles - titled_disc_set)
-        if got and titled_disc_set(d.name, [n for n in names if _album_like(sc, d / n)], bool(got[1])):
+        if got and not got[1]:
             kids = sorted(n for n in names if _album_like(sc, d / n))
-            pairs = [(kids[0], k) for k in kids[1:]]
+            if titled_disc_set(d.name, kids):
+                pairs = [(kids[0], k) for k in kids[1:]]
     if not pairs:
         return []
     try:
@@ -4093,7 +4095,8 @@ class Engine:
         same_recordings = self._tied_recordings_agree(tied, p.targets)
         targets = []
         for t in p.targets:
-            t = mc.album_only_tags(t, tied, same_recordings, other_kind=bool(info.get("other_kind")))
+            t = mc.album_only_tags(t, tied, same_recordings, other_kind=bool(info.get("other_kind")),
+                                   media_held=bool(info.get("media")))               # (MED-2)
             # the year every tied pressing shares, else the album's first release: never the
             # day of one pressing
             # (and not the year of a pressing your scans contradict)
@@ -4111,7 +4114,7 @@ class Engine:
                     for k in ("originaldate", "originalyear"):
                         t.pop(k, None)
             if len(years) == 1 and None not in years and "" not in years and not info.get("scans") \
-                    and not info.get("edition") and not info.get("doubt"):
+                    and not info.get("edition") and not info.get("doubt") and not info.get("media"):
                 t["date"] = [str(next(iter(years)))]
             else:
                 first = t.get("originaldate") or t.get("originalyear")

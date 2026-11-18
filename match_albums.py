@@ -542,6 +542,7 @@ def _scored_again(res, extra, name, album, cfg, text=""):
     if not cands:
         return res
     mc.settle_title_numbers(album, cands)
+    mc.note_titles(album, cands)                       # (FLD-1)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, text) for c in cands], cfg, text)
     return dict(mc.classify(scored, cfg), scored=scored, source=name)
 
@@ -2796,7 +2797,12 @@ def sacd_disc_catnos(album_dir, album_folder) -> list:
                 continue
             for c in _SACD_CATALOG.findall(m.group(1)):
                 c = c.strip()
-                if len(re.sub(r"\W", "", c)) >= 5 and re.search(r"\d", c) and c not in out:
+                core = re.sub(r"\W", "", c)
+                # (a TOC field the mastering left filled with one character, "0000000000000000" or
+                # "----", is no number)
+                if len(set(core.casefold())) <= 1 or not re.sub(r"[\W0]", "", c):
+                    continue
+                if len(core) >= 5 and re.search(r"\d", c) and c not in out:
                     out.append(c)
         if out:
             break
@@ -8437,6 +8443,7 @@ def release_ids_view(final, results, album):
 
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
+    mc.note_titles(album, cands)                       # (FLD-1: one decision for every pressing)
     # (BAR-13: an entry carrying your code, too sparse to compare, scored with its full twin's tracks)
     mc.settle_title_numbers(album, cands)
     scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg, ocr_txt) for c in cands], cfg, ocr_txt)
@@ -8835,13 +8842,19 @@ def _investigate_codes(http, base, album, cfg, dm, mb_res, dg_res, final, text, 
     probe = dict(album, barcodes=set(new_b), catno_search=new_c, narrow_codes_first=True)
     if new_b or new_c:
         if use_mb:
-            found["mb"] = mb_search(http, probe, cfg)
+            try:
+                found["mb"] = mb_search(http, probe, cfg)
+            except Exception:
+                # (BAR-4: a barcode whose search failed is never "on no release")
+                album["investigation_search_failed"] = True
+                raise
         if use_discogs:
             try:
                 found["discogs"] = discogs_search(http, probe, cfg, dm)
             except AuthError:
                 raise
             except Exception as exc:
+                album["investigation_search_failed"] = True          # (BAR-4)
                 notes.append(f"Discogs search of codes from the investigation failed ({exc})")
     for c in codes["barcodes"] + codes["catnos"]:
         if c not in state["codes"]:
@@ -9505,6 +9518,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         except AuthError:
             raise
         except Exception as exc:
+            album["investigation_search_failed"] = True               # (BAR-4)
             source_notes.append(f"investigation of the scans failed ({type(exc).__name__}: {exc})")
         _note_found(album, seen_ids, (mb_res, dg_res), "scan_search")
         # a barcode only the deep reading found is asked of the shops too
@@ -9518,7 +9532,10 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         # printed number: _shop_sticker)
         # (one a shop sold, by the shop step's notes, is not asked again)
         shop_told = " ".join(out.get("shop_notes") or ())
+        # (... and only when both databases answered the investigation's searches too: a barcode
+        # whose search failed was never looked up, and is never "on no release")
         if (final["status"] != "auto" and not album.get("unlisted_barcodes")
+                and not album.get("investigation_search_failed")
                 and any(mc.barcode_key(b) not in shop_told for b in album.get("barcodes") or ())
                 and both_databases_answered(use_mb, use_discogs, provider_errors)):
             unlisted = unlisted_scan_barcodes(http, album, (mb_res, dg_res), args)
@@ -9784,7 +9801,15 @@ def _another_album(c, cand) -> bool:
     """BOX-4: C is a release of another album than CAND - both titled, the titles apart (a box's
     disc's own album, "Birds Of Fire", beside "The Complete Columbia Albums Collection")."""
     a, b = str(c.get("title") or ""), str(cand.get("title") or "")
-    return bool(a and b) and mc.title_sim(a, b) < 0.85
+    if not (a and b) or mc.title_sim(a, b) >= 0.85:
+        return False
+    # (only for a set, CAND of two discs or more, and only an album that is one of its discs - a
+    # disc's title, or a track's of it: another-language title of this same album still counts)
+    if (cand.get("disc_count") or 1) < 2:
+        return False
+    parts = [str(t) for t in (cand.get("disc_titles") or {}).values()] + \
+        [str(t.get("title") or "") for t in cand.get("tracks") or ()]
+    return any(p and mc.title_sim(a, p) >= 0.85 for p in parts)
 
 
 def scans_report(best, album, ocr_txt, results, had_scans):

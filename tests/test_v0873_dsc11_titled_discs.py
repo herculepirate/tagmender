@@ -52,17 +52,29 @@ class DSC11ArtistFolderStaysApart(DSC11TitledDiscFolders):
 
 
 class DSC11WordsNaming(DSC11Base):
-    def test_DSC11_a_naming_cutting_the_title_still_has_an_album_folder(self):
+    def planned(self, template):
         self.both()
         self.dest = self.tmp / "library"
         self.dest.mkdir(exist_ok=True)
         eng = self.engine(self.http(), operation="move", destination=str(self.dest),
-                          naming={"preset": "", "template": "%albumartist%/$words(%album%,1)/Disc %discnumber%/"
-                                                            "%tracknumber%. %title%"})
+                          naming={"preset": "", "template": template})
         plan = eng.plan(self.artist())
         [x] = plan["albums"]
+        return x, plan
+
+    def test_DSC11_a_naming_cutting_the_title_still_has_an_album_folder(self):
+        x, plan = self.planned("%albumartist%/$words(%album%,1)/Disc %discnumber%/%tracknumber%. %title%")
         self.assertEqual(x["status"], "ready", pl.preview(plan))
         self.assertFalse(any("DSC-11" in c for c in x["conflicts"]), x["conflicts"])
+
+    def test_DSC11_a_letter_folder_above_the_album_folder(self):
+        x, plan = self.planned("$left(%album%,1)/%albumartist%/%album%/Disc %discnumber%/%tracknumber%. %title%")
+        self.assertEqual(x["status"], "ready", pl.preview(plan))
+
+    def test_DSC11_a_letter_folder_and_no_album_folder_is_held(self):
+        x, plan = self.planned("$left(%album%,1)/%albumartist%/%album% CD %discnumber%/%tracknumber%. %title%")
+        self.assertEqual(x["status"], "blocked", pl.preview(plan))
+        self.assertTrue(any("DSC-11" in c for c in x["conflicts"]), x["conflicts"])
 
 
 if __name__ == "__main__":

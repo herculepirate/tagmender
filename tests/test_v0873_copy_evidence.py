@@ -18,7 +18,7 @@ import match_albums as ma  # noqa: E402
 import match_core as mc  # noqa: E402
 
 TAGS_CODE, BOX_CODE = "196500000322", "196500000414"
-HIRES = {"hires": True, "sacd": False, "cd_frames": False, "not_cd": True}
+HIRES = {"hires": True, "sacd": False, "cd_frames": False, "not_cd": False}     # (as real 24/96 audio reads)
 
 
 def tracks(*secs, disc=1):
@@ -61,6 +61,23 @@ class MED2_HiResOfAnAlbumListedOnOneCd(unittest.TestCase):
         self.assertEqual([t["id"] for t in known["tied"]], ["cd2"])
         self.assertEqual(known["media"], "hi-res audio cannot come from this CD")
 
+    def test_MED2_nothing_of_the_one_pressing_is_written(self):
+        import match_albums as ma_
+        a = self.hires_album()
+        r = res(a, [self.cd(label="Inside Out", country="Europe", year=2022)])
+        known = mc.album_only(r, CFG, ma_.tie_source(a, r))
+        self.assertTrue(known["other_kind"])
+        tags = {"album": ["Stardust We Are"], "media": ["CD"], "label": ["Inside Out"], "releasecountry": ["XE"],
+                "date": ["2022-03-04"], "originaldate": ["1997"], "tracknumber": ["1"], "totaltracks": ["10"],
+                "discnumber": ["1"], "totaldiscs": ["2"]}
+        kept = mc.album_only_tags(tags, known["tied"], other_kind=known["other_kind"], media_held=bool(known["media"]))
+        self.assertEqual(kept, {"album": ["Stardust We Are"], "date": ["1997"], "originaldate": ["1997"]})
+
+    def test_MED2_another_album_as_close_holds_it(self):
+        # (another album, its title apart but within the margin: "Firstlight Sessions" at 93.1)
+        r = res(self.hires_album(), [self.cd(), dict(self.cd(id="sessions"), title="Firstlight Sessions")])
+        self.assertIsNone(mc.album_only(r, CFG))
+
     def test_MED2_a_download_listed_is_weighed_instead(self):
         r = res(self.hires_album(), [self.cd(formats={"cd", "digital"})])
         self.assertIsNone(mc.album_only(r, CFG))
@@ -101,6 +118,21 @@ class FLD1_AlbumTitleIsNoCountryOnTheScans(unittest.TestCase):
         eu = cand(id="eu", title="Made In Japan (The Remastered Edition)", country="Europe")
         agree, _ = mc.pressing_clues(self.SCANS, eu)
         self.assertIn("EU", agree.get("country", ""))
+
+    def test_FLD1_a_japanese_entry_titled_otherwise_gets_no_clue(self):
+        # (Discogs: "Made In Japan = ライヴ・イン・ジャパン", "メイド・イン・ジャパン"; the copy the 1998 EU
+        # remaster, its back printing the title and "Made in the EU")
+        self.assertEqual(mc.countries_made_in("Made In Japan = ライヴ・イン・ジャパン"), {"JP"})
+        a = album(title="Made in Japan")
+        cands = [cand(id="jp1", title="Made In Japan = ライヴ・イン・ジャパン", country="Japan"),
+                 cand(id="jp2", title="メイド・イン・ジャパン", country="Japan"),
+                 cand(id="eu", title="Made In Japan", country="Europe")]
+        mc.note_titles(a, cands)
+        for c in cands:
+            s = mc.score_candidate(a, c, CFG, "DEEP PURPLE\nMADE IN JAPAN\nMade in the EU\n")
+            self.assertNotIn("made in Japan", str(s["clues"].get("country", "")), c["id"])
+        r = res(a, cands, "DEEP PURPLE\nMADE IN JAPAN\nMade in the EU\n")
+        self.assertNotIn(r["best"]["cand"]["id"], ("jp1", "jp2"))
 
     def test_FLD1_another_title_keeps_its_made_in(self):
         jp = cand(id="jp", title="Live In Tokyo", country="Japan")
@@ -192,6 +224,12 @@ class BAR4_MisreadOfTheBoxNumberIsNoBarcode(unittest.TestCase):
         s = mc.score_candidate(a, self.box(), CFG, "THE TURN OF A FRIENDLY CARD\n88007200550 5\n")
         self.assertTrue(s["conflict"])
 
+    def test_BAR4_the_start_of_a_longer_printed_run_is_not_printed(self):
+        self.assertTrue(mc.digits_printed("88697890552-5", "88697890552"))
+        self.assertTrue(mc.digits_printed("88697 89055 2", "88697890552"))
+        self.assertFalse(mc.digits_printed("88697890552 1234", "88697890552"))
+        self.assertFalse(mc.digits_printed("88697890552-5-7", "88697890552"))
+
     def test_BAR4_a_piece_of_a_longer_run_is_not_printed(self):
         a = album(barcodes={self.MISREAD}, unlisted_barcodes={self.MISREAD})
         s = mc.score_candidate(a, self.box(), CFG, "88007200550 5\n4886978905521\n")
@@ -207,18 +245,30 @@ class BOX4_ReplicaSleevesNameNoOtherPressing(unittest.TestCase):
 
     def pick(self, **kw):
         b = {"cand": cand(id="4649350", source="discogs", title="The Complete Columbia Albums Collection",
-                          catnos={"88697930342"}, barcodes={"886979303423"}, country="Europe"),
+                          catnos={"88697930342"}, barcodes={"886979303423"}, country="Europe", disc_count=5),
              "clues": {"label": "label Columbia on the scans"}, "clues_against": [], "code": "", "confidence": 97.5,
              "tracks_ok": True}
         b.update(kw)
         return b
 
-    def lp(self):
-        return {"cand": cand(id="2026637", source="discogs", title="Birds Of Fire", catnos={"kc31996"}),
+    def pick_tracks(self):
+        return [{"disc": 1, "title": "Meeting Of The Spirits", "secs": 400}, {"disc": 2, "title": "Birds Of Fire",
+                                                                             "secs": 345}]
+
+    def lp(self, title="Birds Of Fire"):
+        return {"cand": cand(id="2026637", source="discogs", title=title, catnos={"kc31996"}),
                 "clues": {}, "confidence": 18.8}
+
+    def test_BOX4_another_language_title_of_the_same_album_still_counts(self):
+        best = self.pick()
+        best["cand"]["tracks"] = self.pick_tracks()
+        report = ma.scans_report(best, album(), "KC 31996\n", [{"scored": [best, self.lp("Die Kolumbia-Sammlung")]}],
+                                 True)
+        self.assertIn("catalogue_number", report["against"])
 
     def test_BOX4_another_albums_number_is_not_against(self):
         best = self.pick()
+        best["cand"]["tracks"] = self.pick_tracks()
         report = ma.scans_report(best, album(), "BIRDS OF FIRE\nKC 31996\n", [{"scored": [best, self.lp()]}], True)
         self.assertNotIn("catalogue_number", report["against"])
 
@@ -234,6 +284,20 @@ class BOX4_ReplicaSleevesNameNoOtherPressing(unittest.TestCase):
                          clues_against=["scans say made in US, this pressing is from Europe"])
         report = {"state": "differs", "found": ["label"], "against": ["country"]}
         self.assertIsNone(mc.scans_name_another({"status": "auto", "best": best, "scored": [best]}, report))
+
+    def test_BOX4_another_pressing_agreeing_with_the_scans_keeps_them(self):
+        # (a US pressing of the same box, its "Made in USA" on the scans: they may be its own)
+        best = self.pick(clues={"disc TOC": "disc ID (track positions of the CD) matches"})
+        us = self.pick(cand=cand(id="222", source="discogs", title="The Complete Columbia Albums Collection",
+                                 country="US", disc_count=5), clues={"country": "made in US on the scans"})
+        report = {"state": "differs", "found": ["label"], "against": ["country"]}
+        self.assertIsNotNone(mc.scans_name_another({"status": "auto", "best": best, "scored": [best, us]}, report))
+
+    def test_BOX4_a_single_disc_keeps_the_old_way(self):
+        best = self.pick(clues={"disc TOC": "disc ID (track positions of the CD) matches"})
+        best["cand"] = dict(best["cand"], disc_count=1)
+        report = {"state": "differs", "found": ["label"], "against": ["country"]}
+        self.assertIsNotNone(mc.scans_name_another({"status": "auto", "best": best, "scored": [best]}, report))
 
     def test_BOX4_disc_id_two_entries_carry_tells_neither(self):
         best = self.pick(clues={"disc TOC": "disc ID (track positions of the CD) matches"})
@@ -276,6 +340,11 @@ class MED13_SacdLogNamesTheDiscsNumber(unittest.TestCase):
         other.mkdir()
         self.assertEqual(ma.sacd_disc_catnos(other, other.name), [])
 
+    def test_MED13_a_filled_field_is_no_number(self):
+        for junk in ("0000000000000000", "1111111111", "00-000-0000"):
+            (self.disc / "sacd_log.txt").write_text(self.LOG.replace("SICL-10001", junk))
+            self.assertEqual(ma.sacd_disc_catnos(self.disc, self.disc.name), [], junk)
+
     def test_MED13_no_disc_block_no_number(self):
         (self.disc / "sacd_log.txt").write_text("Album Information:\n\tCatalog Number: SICL-10001\nArea count: 2\n")
         self.assertEqual(ma.sacd_disc_catnos(self.disc, self.disc.name), [])
@@ -295,11 +364,12 @@ class TRK7_FeaturedArtistCreditsInTitles(unittest.TestCase):
     def test_TRK7_credit_forms(self):
         for a, b in (("Circle Eight (feat. Nanuk)", "Circle Eight"), ("Mother", "Mother (feat. Anggun)"),
                      ("Amen feat. Aquilo", "Amen"), ("Diving [ft. Someone]", "Diving"),
-                     ("Agnus Dei (featuring A Choir)", "Agnus Dei")):
+                     ("Agnus Dei (featuring A Choir)", "Agnus Dei"), ("Oxygen Red ft. Anggun", "Oxygen Red")):
             self.assertTrue(mc.track_titles_agree(a, b), (a, b))
 
     def test_TRK7_other_brackets_still_differ(self):
-        for a, b in (("Song (Live)", "Song"), ("Song (Remix)", "Song"), ("Feat Of Clay", "Clay")):
+        for a, b in (("Song (Live)", "Song"), ("Song (Remix)", "Song"), ("Feat Of Clay", "Clay"),
+                     ("Six Ft. Under", "Six"), ("Ten ft. tall", "Ten"), ("Walking 10 ft. Tall", "Walking 10")):
             self.assertFalse(mc.track_titles_agree(a, b), (a, b))
 
     def test_TRK7_titles_agree_counts_them(self):
@@ -336,6 +406,40 @@ class DSC12_YourNumberOnTheLongerRelease(unittest.TestCase):
     def test_DSC12_another_taggers_number_never_keeps_them(self):
         sc, whole, _slots = self.scored(slot_code=mc.TAGS_CATNO)
         self.assertIs(mc._full_fit_first(sc, CFG)[1], whole)
+
+
+class BAR4_ASearchThatFailedIsNoUnlistedBarcode(unittest.TestCase):
+    """BAR-4: a barcode the investigation read whose Discogs or MusicBrainz search failed was
+    never looked up: never "on no release", never ignored as a sticker."""
+
+    def investigate(self, mb=None, dg=None):
+        from unittest import mock
+        album_ = album(barcodes=set(), catno_search=[])
+        state = {"deep": "", "tried": set(), "asked": set(), "titled": False, "codes": [], "strong": [],
+                 "dg_ids": [], "mb_ids": [], "found": 0, "kept_text": " ", "rings": False}
+        with mock.patch.object(ma, "mb_search", side_effect=mb or (lambda *a: [])), \
+                mock.patch.object(ma, "discogs_search", side_effect=dg or (lambda *a: [])), \
+                mock.patch.object(ma, "web_engine", return_value=("none", None)), \
+                mock.patch.object(ma, "variant_release_links", return_value=([], [])):
+            try:
+                ma._investigate_codes(None, Path("/nonexistent"), album_, CFG, None, None, None,
+                                      {"status": "review", "best": None}, "8 80072 00550 5", state, [], True, True)
+            except RuntimeError:
+                pass
+        return album_
+
+    def test_BAR4_discogs_failing_is_recorded(self):
+        def boom(*a):
+            raise RuntimeError("discogs down")
+        self.assertTrue(self.investigate(dg=boom).get("investigation_search_failed"))
+
+    def test_BAR4_musicbrainz_failing_is_recorded(self):
+        def boom(*a):
+            raise RuntimeError("mb down")
+        self.assertTrue(self.investigate(mb=boom).get("investigation_search_failed"))
+
+    def test_BAR4_both_answering_is_not(self):
+        self.assertFalse(self.investigate().get("investigation_search_failed"))
 
 
 if __name__ == "__main__":

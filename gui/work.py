@@ -83,7 +83,15 @@ def short_traceback(exc, keep=SHOWN_FRAMES) -> str:
         head += f"  [{first} earlier lines not shown; the log has them all]\n"
     body = "".join(x if isinstance(x, str) else "".join(traceback.StackSummary.from_list([x]).format())
                    for x in shown)
-    return head + body + "".join(tb.format_exception_only())
+    causes, seen, x = [], {id(tb)}, tb
+    while True:                                            # (what it came from: a line each)
+        x, how = (x.__cause__, "caused by") if x.__cause__ is not None else \
+            (x.__context__, "while handling") if x.__context__ is not None and not x.__suppress_context__ else (None, "")
+        if x is None or id(x) in seen:
+            break
+        seen.add(id(x))
+        causes.append(f"  ({how}: {''.join(x.format_exception_only()).strip().splitlines()[-1]})\n")
+    return head + body + "".join(tb.format_exception_only()) + "".join(causes)
 
 
 def log_failure(exc):

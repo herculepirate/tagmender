@@ -2026,6 +2026,8 @@ class Overview(QWidget):
         roots = dict(getattr(self, "roots", {}))
 
         at = {k: i for i, k in enumerate(k for ks in groups.values() for k in ks)}    # (its row: _lookup_order)
+        unsent = []                                         # (albums an internal error left not looked up)
+        self._lookup_unsent = unsent
 
         def work(w):
             batches = []
@@ -2055,13 +2057,16 @@ class Overview(QWidget):
                                      progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
                                      cancel=lambda: w.cancelled, meta=META_STORE)
                 except Exception as exc:
-                    # (an internal error the engine did not keep to one album: the albums it had
-                    # not sent yet are Unresolved, saying so - the look-up goes on with the others)
-                    if w.cancelled:
-                        return len(told)
-                    for i, k in enumerate(k for k in kr if k not in told):
-                        emit(k, engine.failed_plan(e, k, exc, log=i == 0))
-                    return len(kr)
+                    # (an internal error the engine did not keep to one album: logged, and the
+                    # look-up goes on with the other folders' albums; the albums of this one it
+                    # had not sent keep their rows, not looked up - never another album's error)
+                    if not w.cancelled:
+                        import logging
+                        logging.getLogger("tagmender.gui").error(
+                            "looking up the albums in %s stopped: %s: %s", where, type(exc).__name__, exc,
+                            exc_info=exc)
+                        unsent.extend(k for k in kr if k not in told)
+                    return len(told)
             return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
                                lambda a: w.progress.emit(*a))
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
@@ -2210,6 +2215,10 @@ class Overview(QWidget):
                 was = self.queue.pop(k, None)
                 self.queue[k] = (mode, ag or bool(was and was[1]))
         self.looking = {}
+        unsent, self._lookup_unsent = getattr(self, "_lookup_unsent", None) or [], []
+        if unsent:
+            self.win.statusBar().showMessage(tr("{0} could not be looked up: internal error (see log).").format(
+                plural(len(set(unsent)), tr("album"), tr("albums"))), 10000)
         self.request_fit()                                 # (the rows' words now: fitted once)
         self.check_stale()
         if getattr(self, "apply_worker", None) is None:

@@ -90,6 +90,73 @@ class ChangedSinceListed(te.Base):
         self.assertEqual(len(got), 2)
 
 
+class TwoAlbumsOfOneFolder(te.Base):
+    """A folder holding two albums, X and Y, each a row: X changed or moved away never takes
+    Y's row (Y is looked up under its own key, X's row gets no album of Y's)."""
+    def setUp(self):
+        super().setUp()
+        self.mix = self.lib / "Mixed"
+        self.mix.mkdir(parents=True)
+        for who, n in (("X", 1), ("X", 2), ("X", 3), ("Y", 1), ("Y", 2), ("Y", 3)):
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                            f"sine=frequency={300 + 70 * n + (0 if who == 'X' else 500)}:duration={4 + n}",
+                            "-ar", "8000", "-ac", "1", "-metadata", f"title={who}{n}",
+                            "-metadata", f"album=Album {who}", "-metadata", f"albumartist=Band {who}",
+                            "-metadata", f"artist=Band {who}", "-metadata", f"track={n}",
+                            str(self.mix / f"{who.lower()}{n}.flac"), "-y"], check=True)
+        self.http = CloningHttp(dg=[te.dg_release(930, "Band X", "Album X"), te.dg_release(931, "Band Y", "Album Y")])
+
+    def keys(self, e):
+        keys = {("x" if "/x1.flac" in a["key"] else "y"): a["key"] for a in e.listing(str(self.lib))["albums"]}
+        self.assertEqual(sorted(keys), ["x", "y"])
+        return keys
+
+    def look_up(self, e, order, workers):
+        e.lookup_workers = workers
+        got = []
+        e.plan_each(str(self.lib), order, lambda k, p: got.append((k, p)))
+        return dict(got)
+
+    def test_x_moved_away_never_takes_y(self):
+        for workers in (1, 3):
+            for first in ("x", "y"):
+                with self.subTest(workers=workers, first=first):
+                    e = self.engine(self.http)
+                    keys = self.keys(e)
+                    gone = {f: f.read_bytes() for f in self.mix.glob("x*.flac")}
+                    for f in gone:
+                        f.unlink()                                   # (X applied: moved away)
+                    try:
+                        last = self.look_up(e, [keys[first], keys["y" if first == "x" else "x"]], workers)
+                    finally:
+                        for f, b in gone.items():
+                            f.write_bytes(b)
+                    self.assertEqual(last[keys["x"]]["albums"], [])  # (X's row: no album of Y's)
+                    ys = last[keys["y"]]["albums"]
+                    self.assertEqual([a["key"] for a in ys], [keys["y"]])
+                    self.assertTrue(all("y1.flac" in " ".join(a["album_files"]) for a in ys))
+
+    def test_x_changed_is_x_and_y_stays_y(self):
+        for workers in (1, 3):
+            for first in ("x", "y"):
+                with self.subTest(workers=workers, first=first):
+                    e = self.engine(self.http)
+                    keys = self.keys(e)
+                    added = self.mix / "x4.flac"
+                    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1300:duration=9",
+                                    "-ar", "8000", "-ac", "1", "-metadata", "title=X4", "-metadata", "album=Album X",
+                                    "-metadata", "albumartist=Band X", "-metadata", "artist=Band X",
+                                    "-metadata", "track=4", str(added), "-y"], check=True)
+                    try:
+                        last = self.look_up(e, [keys[first], keys["y" if first == "x" else "x"]], workers)
+                    finally:
+                        added.unlink()
+                    xs, ys = last[keys["x"]]["albums"], last[keys["y"]]["albums"]
+                    self.assertEqual([a["key"] for a in xs], [keys["x"]])      # (X, as it is now, its own row)
+                    self.assertIn(str(added), xs[0]["album_files"])
+                    self.assertEqual([a["key"] for a in ys], [keys["y"]])
+
+
 class OneAlbumsInternalError(te.Base):
     def setUp(self):
         super().setUp()
@@ -97,10 +164,12 @@ class OneAlbumsInternalError(te.Base):
         self.album("Band H", "Album H")
         self.http = CloningHttp(dg=[te.dg_release(920, "Band G", "Album G"), te.dg_release(921, "Band H", "Album H")])
 
-    def run_each(self, workers, patch):
-        e = self.engine(self.http)
+    def run_each(self, workers, patch, why=engine.LOOKUP_FAILED, logged="RecursionError", **prof):
+        e = self.engine(self.http, **prof)
         e.lookup_workers = workers
         keys = [a["key"] for a in e.listing(str(self.lib))["albums"]]
+        g_dir = self.lib / "Band G" / "2005 - Album G"
+        before = {f: f.read_bytes() for f in g_dir.iterdir()}
         got = []
         with patch, self.assertLogs("tagmender", "ERROR") as logs:
             n = e.plan_each(str(self.lib), keys, lambda k, p: got.append((k, p)))
@@ -111,18 +180,36 @@ class OneAlbumsInternalError(te.Base):
         g = rows[next(k for k in keys if "Album G" in k)]
         h = rows[next(k for k in keys if "Album H" in k)]
         self.assertEqual([a["status"] for a in g], ["unresolved"])
-        self.assertIn("internal error: maximum recursion depth exceeded", g[0]["identification"]["reason"])
-        self.assertEqual([a["status"] for a in h], ["ready"])
-        self.assertTrue(any("RecursionError" in x for x in logs.output), logs.output)   # (with its traceback)
+        self.assertIn(why, g[0]["identification"]["reason"])
+        self.assertEqual(g[0]["key"], next(k for k in keys if "Album G" in k))   # (its own row)
+        # (never applicable: nothing of it is written, marked or moved)
+        self.assertEqual(g[0]["files"], [])
+        self.assertFalse(planmod.has_work(g[0]))
+        self.assertIn([a["status"] for a in h], (["ready"], ["unchanged"]))    # (applied by a run before: as it is)
+        self.assertTrue(any(logged in x for x in logs.output), logs.output)   # (with its traceback)
+        import executor
+        whole = dict(last[keys[0]], albums=[a for k in keys for a in last[k]["albums"]])
+        executor.Executor(whole).run()
+        self.assertEqual({f: f.read_bytes() for f in g_dir.iterdir()}, before)
+        return g[0]
 
-    def looking_up_g_fails(self):
+    def looking_up_g_fails(self, exc=RecursionError("maximum recursion depth exceeded")):
         real = engine.Engine.proposals
 
         def proposals(e, path, progress=None, cancel=None, only=None):
             if only and any("Album G" in k for k in only):
-                raise RecursionError("maximum recursion depth exceeded")
+                raise exc
             return real(e, path, progress, cancel, only=only)
         return mock.patch.object(engine.Engine, "proposals", proposals)
+
+    def identifying_g_fails(self):
+        real = engine.Engine.identify_all
+
+        def identify_all(e, g):
+            if "Album G" in str(g.folder):
+                raise RuntimeError("the database said no")
+            return real(e, g)
+        return mock.patch.object(engine.Engine, "identify_all", identify_all)
 
     def planning_g_fails(self):
         real = planmod.Planner._album
@@ -144,6 +231,31 @@ class OneAlbumsInternalError(te.Base):
 
     def test_planning_one_several_at_once(self):
         self.run_each(3, self.planning_g_fails())
+
+    def test_a_folder_that_could_not_be_read_says_so(self):
+        self.run_each(1, self.looking_up_g_fails(OSError(5, "Input/output error")),
+                      why=engine.FOLDER_UNREAD, logged="OSError")
+
+    def test_marked_unresolved_never_applies_to_an_error_row(self):
+        for workers in (1, 3):
+            with self.subTest(workers=workers):
+                self.run_each(workers, self.looking_up_g_fails(), unresolved={"action": "mark"})
+                self.run_each(workers, self.planning_g_fails(), unresolved={"action": "mark"})
+
+    def test_moved_unresolved_never_moves_an_error_row(self):
+        holding = self.tmp / "unresolved"
+        holding.mkdir()
+        for workers in (1, 3):
+            with self.subTest(workers=workers):
+                self.run_each(workers, self.looking_up_g_fails(),
+                              unresolved={"action": "move", "move_to": str(holding)})
+        self.assertEqual(list(holding.iterdir()), [])
+
+    def test_an_album_whose_identification_failed_is_never_applicable_either(self):
+        for action in ({"action": "mark"}, {"action": "move", "move_to": str(self.tmp / "u")}):
+            with self.subTest(action=action["action"]):
+                self.run_each(1, self.identifying_g_fails(), why="error: the database said no",
+                              logged="RuntimeError", unresolved=action)
 
 
 def deep(n):
@@ -171,6 +283,17 @@ class FailureShown(tg.Gui):
         full = "\n".join(logs.output)
         self.assertGreater(full.count("in deeper"), 50)        # (the log: the whole traceback)
         self.assertIn("in run", full)
+
+    def test_a_chained_cause_is_one_line(self):
+        from gui import work
+        try:
+            try:
+                {}["x"]
+            except KeyError as exc:
+                raise ValueError("bad row") from exc
+        except ValueError as exc:
+            text = work.short_traceback(exc)
+        self.assertIn("ValueError: bad row\n  (caused by: KeyError: 'x')", text)
 
     def test_a_short_traceback_keeps_a_plain_one_as_it_is(self):
         from gui import work
@@ -215,34 +338,36 @@ class LookUpGoesOn(tg.Gui):
         self.assertEqual(failed, [])
         g = self.row("Album G")
         self.assertEqual(g["status"], "unresolved")
-        self.assertIn("internal error", g["identification"]["reason"])
+        self.assertIn("could not be looked up: internal error (see log)", g["identification"]["reason"])
+        from gui.models import can_apply
+        self.assertFalse(can_apply(g))                                    # (never ticked, never applied)
+        self.assertNotIn(g, ov.to_apply())
         self.assertNotEqual(self.row("Album N")["status"], "listed")      # (looked up all the same)
 
-    def test_an_error_the_engine_did_not_keep_to_one_album_still_leaves_rows(self):
+    def test_an_error_the_engine_did_not_keep_to_one_album_leaves_the_others_as_listed(self):
         ov = self.ov
 
         def plan_each(e, path, keys, emit, **kw):
-            emit(keys[0], engine.failed_plan(e, keys[0], RuntimeError("first"), log=False))
             raise RecursionError("maximum recursion depth exceeded")
-        failed = []
+        failed, said = [], []
         with mock.patch.object(engine.Engine, "plan_each", plan_each), \
                 mock.patch.object(type(ov), "oops", lambda s, msg: failed.append(msg)), \
-                self.assertLogs("tagmender", "ERROR"):
+                mock.patch.object(self.win.statusBar(), "showMessage", lambda m, *a: said.append(m)), \
+                self.assertLogs("tagmender", "ERROR") as logs:
             ov.look_up("profile", list(ov.model.albums))
             self.assertTrue(wait(lambda: not ov.running, self.app, timeout=60), ov.summary.text())
         self.assertEqual(failed, [])
-        g, n = self.row("Album G"), self.row("Album N")
-        self.assertEqual(g["status"], "unresolved")
-        self.assertIn("internal error: first", g["identification"]["reason"])
-        self.assertNotEqual(n["status"], "listed")                       # (a row for it all the same)
-        self.assertIn("internal error: maximum recursion", n["identification"]["reason"])
+        # (never looked up: as they were - no row names another album's error)
+        self.assertEqual([a["status"] for a in ov.model.albums], ["listed", "listed"])
+        self.assertTrue(any("could not be looked up: internal error (see log)" in m for m in said), said)
+        self.assertTrue(any("RecursionError" in x for x in logs.output))
 
     def test_cancel_still_stops_a_look_up(self):
         ov = self.ov
         gate, entered = threading.Event(), threading.Event()
         real = engine.Engine.proposals
 
-        def proposals(e, path, progress=None, cancel=None, only=None):
+        def proposals(e, path, progress=None, cancel=None, only=None):  # noqa: F811
             entered.set()
             gate.wait(30)
             if only and any("Album G" in k for k in only):

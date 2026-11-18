@@ -3874,8 +3874,14 @@ class Engine:
             # relationships (whatever the profile's Credits setting) and its works' parents,
             # tagged again as CLS-4 writes it (an album that is not classical asks nothing more)
             full_rel, rel, ps = self._classical_release(mbid, full_rel, ps, album, best)
-            if getattr(cls, "keep_artist", False):
-                ps["classical_keep_artist"] = True
+            # (the verdict on the release with its recordings' relationships: whether the album
+            # is classical by its genres alone, for CLS-4's credited composer-performers)
+            memo = self._classical_cache()
+            key = (_files_key(files), "full:" + str(full_rel.get("id") or ""), str((det or {}).get("id") or ""))
+            if key not in memo:
+                memo[key] = classical.is_classical(self.profile, full_rel, det, album)
+            if memo[key].genre_only:
+                ps["classical_genre_only"] = True
             tags_mb = mb_tags.release_tags(rel, ps)
             tags_mb = self._twin_slots(album, rel, tags_mb, best, len(files), ps)
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)

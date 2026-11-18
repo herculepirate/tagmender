@@ -392,7 +392,8 @@ def _work(work, m, s, instrumental, per_medium):
             _add(m, "language", lang)
     elif work.get("language"):
         _add(m, "language", work["language"])
-    if s.get("classical"):
+    full = s.get("classical") and not s.get("~works_capped")   # (past CLS-3's cap: CLS-1, track by track)
+    if full:
         _classical_work(work, m, s, instrumental, per_medium)
     elif work.get("title"):
         _add(m, "work", work["title"])
@@ -402,7 +403,7 @@ def _work(work, m, s, instrumental, per_medium):
         relations(work["relations"], m, s, instrumental, per_medium, entity="work")
         if s.get("classical"):
             _work_credits_from_parents(work, m, s, instrumental, per_medium)
-        else:
+        if not full:
             _movement(work, m)
     for iswc in work.get("iswcs") or []:
         if iswc:
@@ -489,8 +490,6 @@ def _classical_work(work, m, s, instrumental, per_medium):
     front, its numeral kept ("I. Andante con moto - Allegro di molto"), Movement its place
     among the parent's parts (the ordering-key), Movement Total the parent's parts, Show
     Movement 1."""
-    if s.get("~works_capped"):
-        return                  # (CLS-3: the album's works not all read - no work fields at all)
     chain = _work_chain(work, s)
     top = chain[-1][0] if chain else work
     title = str(top.get("title") or "").strip()
@@ -575,27 +574,37 @@ def _work_credits_from_parents(work, m, s, instrumental, per_medium):
 _PERFORMS = {"instrument": 0, "vocal": 0, "performer": 0, "performing orchestra": 1, "conductor": 2}
 
 
-_GROUP_TYPES = {"group", "orchestra", "choir"}
+_ENSEMBLE_TYPES = {"group", "orchestra"}
+
+
+def _members(a) -> set:
+    """The member IDs MusicBrainz lists for an ensemble ("member of band", where the lookup
+    carries the ensemble's relationships)."""
+    return {(r.get("artist") or {}).get("id") for r in a.get("relations") or ()
+            if isinstance(r, dict) and r.get("type") == "member of band" and r.get("direction") == "backward"} - {None}
 
 
 def _performers(rels, s) -> list:
     """CLS-4: (name, sort name, artist ID) of who performs, from relationships: the soloists
-    (instrument, vocal, performer), then orchestras, choirs and ensembles, then conductors.
-    An ensemble credited as a performer (a "performer" relationship naming no instrument, or
-    an artist MusicBrainz types as a group or choir) beside players credited by their
-    instruments stands for them: they are its members (the Emerson String Quartet and its
-    violinists). A performing orchestra's soloists (a concerto's) stay."""
-    found, ensemble = [], False
+    (instrument, vocal, performer - a person), then orchestras, ensembles (MusicBrainz's
+    group and orchestra types) and choirs (choir vocals, the choir type), then conductors. A
+    player is left out only when MusicBrainz lists them as a member of an ensemble credited
+    beside them (a piano trio's three, the trio named too); a soloist beside an orchestra or
+    an ensemble (a concerto's) always stays."""
+    found, members = [], set()
     for r in rels or ():
         a = r.get("artist") if isinstance(r, dict) and r.get("target-type") == "artist" else None
         if not isinstance(a, dict) or not a.get("name") or r.get("type") not in _PERFORMS:
             continue
         rank = _PERFORMS[r["type"]]
-        if r["type"] == "vocal" and any("choir" in str(x) or "chorus" in str(x) for x in r.get("attributes") or ()):
+        kind = str(a.get("type") or "").casefold()
+        if r["type"] == "vocal" and (kind == "choir" or any("choir" in str(x) or "chorus" in str(x)
+                                                            for x in r.get("attributes") or ())):
             rank = 1
-        if rank == 0 and (str(a.get("type") or "").casefold() in _GROUP_TYPES or
-                          (r["type"] == "performer" and not r.get("attributes"))):
-            rank, ensemble = 1, True              # (an ensemble credited as a performer)
+        if rank == 0 and kind in _ENSEMBLE_TYPES | {"choir"}:
+            rank = 1
+        if rank == 1:
+            members |= _members(a)
         name, sort = _translate_artist(a, s, r.get("target-credit"))
         if name == a.get("name") and r.get("target-credit") and r["target-credit"] != a["name"] and \
                 not should_standardize(s["standardize_artist_names"], r["target-credit"], a):
@@ -603,9 +612,22 @@ def _performers(rels, s) -> list:
         if any((a.get("id") and a.get("id") == f[3]) or _fold_name(name) == _fold_name(f[1]) for f in found):
             continue
         found.append((rank, name, sort, a.get("id") or ""))
-    if ensemble:
-        found = [f for f in found if f[0] != 0]
+    found = [f for f in found if not (f[0] == 0 and f[3] and f[3] in members)]
     return [(n, so, i) for _r, n, so, i in sorted(found, key=lambda f: f[0])]
+
+
+def _composer_performs_it(rec, r_ac, rel, composers) -> bool:
+    """CLS-4: an artist of the release's credit composed this track and performs this recording
+    (its recording credit, or a performer or conductor relationship of it)."""
+    credited = {(c.get("artist") or {}).get("id") for c in (rel or {}).get("artist-credit") or ()
+                if isinstance(c, dict)} - {None, ""}
+    mine = credited & composers
+    if not mine:
+        return False
+    plays = {(c.get("artist") or {}).get("id") for c in r_ac or () if isinstance(c, dict)}
+    plays |= {(r.get("artist") or {}).get("id") for r in rec.get("relations") or ()
+              if isinstance(r, dict) and r.get("target-type") == "artist" and r.get("type") in _PERFORMS}
+    return bool(mine & plays)
 
 
 def _classical_artist(d, rec, r_ac, rel, s):
@@ -626,8 +648,8 @@ def _classical_artist(d, rec, r_ac, rel, s):
         return all(_fold_name(n) in composers for n in names)
     if not composers_only(d.get("musicbrainz_artistid") or [], d.get("artists") or []):
         return
-    if s.get("classical_keep_artist"):
-        return                               # (Verdict.keep_artist: a score's composer stays)
+    if s.get("classical_genre_only") and _composer_performs_it(rec, r_ac, rel, composers):
+        return                    # (a film score's composer conducting it: his credit stays)
     if r_ac:
         # (a recording credited "Composer; performers" too: its performers - the composers
         # leading it left out, "Johann Sebastian Bach; Glenn Gould" -> "Glenn Gould")

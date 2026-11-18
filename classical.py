@@ -28,17 +28,23 @@ _STRONG_GENRE = re.compile(
     r"romantic classical|opera|operas|operetta|grand opera|opera buffa|opera seria|opera comique|symphony|"
     r"symphonies|symphonic|symphonic poem|tone poem|concerto|concertos|concerti|sonata|sonatas|oratorio|"
     r"oratorios|cantata|cantatas|chamber music|art song|lied|lieder|string quartet|requiem|mass|motet|"
-    r"madrigal|gregorian chant|plainchant|plainsong|polyphony|choral music)$")
+    r"madrigal|gregorian chant|plainchant|plainsong|polyphony|choral music|ballet|orchestral|orchestral music|"
+    r"zarzuela|singspiel|sacred music|serialism|twelve tone|dodecaphony|fugue|early)$")
 # classical-like, not proof alone: counts only beside a weak signal
 _AMBIGUOUS_GENRE = re.compile(
     r"^(?:contemporary|modern|post|minimal|new|20th century|21st century) classical(?: music)?$|"
-    r"^(?:choral|minimalism|impressionism|impressionist|romantic|romanticism|modern|contemporary)$")
+    r"^(?:choral|minimalism|impressionism|impressionist|romantic|romanticism|neo romantic|neoromanticism|modern|"
+    r"contemporary)$")
+# ("Romantic" stays ambiguous: a mood in other musics' genre lists as much as the era)
 # a genre beside which a classical one is no proof (a film score on a classical label, a
 # crossover tenor, ambient piano): MusicBrainz's genres; for Discogs any genre but Classical
+# (never "vocal", "folk" or "world": a lieder recital, a medieval album Discogs files under "Folk,
+# World, & Country" too, a brass band's "Brass & Military" stay classical)
 _OTHER_GENRE = re.compile(
-    r"\bneo|\bcrossover\b|\brock\b|\bmetal\b|\bpop\b|\bfolk\b|\bjazz\b|\belectronic|\bambient\b|"
-    r"\bsoundtrack|\bscore\b|\bfilm\b|\bstage and screen\b|\bnew age\b|\beasy listening\b|\bhip hop\b|"
-    r"\bworld\b|\bsinger songwriter\b|\bvocal\b|\bschlager\b|\bchanson\b|\bvideo game\b")
+    r"\bneo classical|\bneoclassical|\bcrossover\b|\brock\b|\bmetal\b|\bpop\b|\bjazz\b|\belectronic|"
+    r"\bambient\b|\bsoundtrack|\bscore\b|\bfilm\b|\bstage and screen\b|\bnew age\b|\beasy listening\b|"
+    r"\bhip hop\b|\bsinger songwriter\b|\bschlager\b|\bvideo game\b|\bfunk\b|\bsoul\b|\breggae\b|"
+    r"\bblues\b|\bnon music\b|\blatin\b")
 
 # labels that publish (almost) only classical music: a weak signal
 CLASSICAL_LABELS = {
@@ -100,11 +106,11 @@ class Verdict(tuple):
         return v
 
     @property
-    def keep_artist(self) -> bool:
-        """CLS-4: the track artist stays as credited - the album is classical by its genres
-        alone and its credited artist composed and performs it (D1 never names a score's
-        orchestra instead of its composer)."""
-        return bool(self[0]) and self.composer_performs and self.kinds <= {"genre"}
+    def genre_only(self) -> bool:
+        """Classical by its genres alone (no tradition, no "Composer; performers" credit):
+        CLS-4 then keeps a track's credit where its composer is the release's artist and
+        performs it (mb_tags._classical_artist: a film score's composer conducting)."""
+        return bool(self[0]) and "genre" in self.kinds and self.kinds <= {"genre"}
 
 
 def _names(items) -> list:
@@ -191,7 +197,7 @@ def is_classical(profile=None, rel=None, det=None, album=None) -> tuple:
     # Discogs: its genres and styles - a classical one beside another genre (Stage & Screen,
     # Electronic, Pop ...) is no proof: a film score, a crossover album
     dg_genres = _names((det or {}).get("genres"))
-    dg_other = [g for g in dg_genres if fold(g) != "classical"]
+    dg_other = [g for g in dg_genres if fold(g) != "classical" and _OTHER_GENRE.search(fold(g))]
     for g in dg_genres + _names((det or {}).get("styles")):
         kind = genre_kind(g)
         if kind == "strong" and not dg_other:

@@ -12,8 +12,9 @@ from pathlib import Path
 os.environ.setdefault("TAGMENDER_DISCOGS_PLUGIN", str(Path(__file__).resolve().parent.parent / "plugins_builtin" / "discogs"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_engine import Base  # noqa: E402
-from test_v0874_classical_recognition import (COMPOSER, ClassicalHttp, classical_release, credit,  # noqa: E402
-                                              top_work)
+import test_engine as te  # noqa: E402
+from test_v0874_classical_recognition import (COMPOSER, PARTS, TOP, ClassicalHttp, classical_release,  # noqa: E402
+                                              credit, top_work)
 import album_artist as aa  # noqa: E402
 import classical  # noqa: E402
 import match_albums as ma  # noqa: E402
@@ -62,9 +63,25 @@ class FalsePositives(unittest.TestCase):
         # names the score's performers instead)
         v = classical.is_classical(None, rel, {"id": 5, "genres": ["Classical"], "styles": ["Score"]})
         self.assertTrue(v[0])
-        self.assertTrue(v.keep_artist)
-        t = mb_tags.release_tags(copy.deepcopy(rel), dict(CLS, classical_keep_artist=v.keep_artist))[0]
+        self.assertTrue(v.genre_only)
+        t = mb_tags.release_tags(copy.deepcopy(rel), dict(CLS, classical_genre_only=v.genre_only))[0]
         self.assertEqual(t["artist"], ["Hans Zimmer"])
+        self.assertFalse(classical.Verdict(True, [], ()).genre_only)        # (no kinds: never "genre only")
+
+    def test_CLS4_a_conductors_album_names_the_performers_of_another_composers_tracks(self):
+        # (Bernstein conducting Copland and his own works, classical by genre alone: his own
+        # tracks keep his credit, Copland's name who performs them)
+        lb, ac_ = A("lb", "Leonard Bernstein", "Bernstein, Leonard"), A("ac", "Aaron Copland", "Copland, Aaron")
+        ny = A("ny", "New York Philharmonic", type="Orchestra")
+        cond = {"target-type": "artist", "type": "conductor", "attributes": [], "artist": lb}
+        orch = {"target-type": "artist", "type": "performing orchestra", "attributes": [], "artist": ny}
+        rel = release(credit((lb, "")), [
+            ("Candide Overture", credit((lb, "")), credit((lb, "")), [perf("w1", "Candide Overture", [comp(lb)]), cond, orch]),
+            ("Appalachian Spring", credit((ac_, "")), credit((ac_, "")), [perf("w2", "Appalachian Spring", [comp(ac_)]),
+                                                                       cond, orch])])
+        t = mb_tags.release_tags(rel, dict(CLS, classical_genre_only=True))
+        self.assertEqual(t[0]["artist"], ["Leonard Bernstein"])
+        self.assertEqual(t[1]["artist"], ["New York Philharmonic, Leonard Bernstein"])
 
     def test_CLS2_crossover_and_electronic_beside_classical_are_ambiguous(self):
         for det in ({"genres": ["Electronic", "Classical"], "styles": ["Modern Classical", "Ambient"]},
@@ -88,8 +105,17 @@ class FalsePositives(unittest.TestCase):
                   "Thai classical", "Korean classical", "Andalusian classical music", "Javanese classical", "Space Opera",
                   "Baroque Pop", "Chamber Pop", "Symphonic Metal", "Hindustani Classical", "Neo-Classical"):
             self.assertEqual(classical.genre_kind(g), "", g)
-        for g in ("Classical", "Baroque", "Opera", "Symphonic", "Concerti", "Gregorian Chant", "Lieder"):
+        for g in ("Classical", "Baroque", "Opera", "Symphonic", "Concerti", "Gregorian Chant", "Lieder", "Ballet",
+                  "Orchestral", "Zarzuela", "Singspiel", "Sacred Music", "Serialism", "Twelve-Tone", "Fugue", "Early"):
             self.assertEqual(classical.genre_kind(g), "strong", g)
+        for g in ("Romantic", "Neo-Romantic"):
+            self.assertEqual(classical.genre_kind(g), "ambiguous", g)
+        # (a lieder recital's "Vocal", medieval music under "Folk, World, & Country", a brass
+        # band's "Brass & Military" beside Classical: still classical)
+        for det in ({"genres": ["Classical"], "styles": ["Vocal", "Lied"]},
+                    {"genres": ["Classical", "Folk, World, & Country"], "styles": ["Medieval"]},
+                    {"genres": ["Classical", "Brass & Military"], "styles": []}):
+            self.assertTrue(classical.is_classical(None, det=det)[0], det)
         # (NAM-8's classical test reads the same genres: a bare "Symphonic" still counts)
         self.assertTrue(aa.classical([{"genre": ["Symphonic"]}], [], []))
         self.assertFalse(aa.classical([{"genre": ["Symphonic Rock"]}], [], []))
@@ -140,11 +166,40 @@ class Down(Base):
         self.assertNotEqual(p.status, "identified")
         self.assertIn("musicbrainz_unavailable", p.reason_codes)
 
-    def test_CLS3_past_the_lookup_cap_no_album_holds_work_fields(self):
+    def test_CLS3_past_the_lookup_cap_each_track_has_its_own_work_as_CLS1_writes_it(self):
         t = mb_tags.release_tags(copy.deepcopy(classical_release()),
                                  dict(CLS, **{"~works": {}, "~works_capped": True}))
-        self.assertFalse([k for k in classical.CE_FIELDS if k in t[0]])
+        plain = mb_tags.release_tags(copy.deepcopy(classical_release()), {"track_ars": True})
+        for k in classical.CE_FIELDS:
+            self.assertEqual(t[0].get(k), plain[0].get(k), k)
+        self.assertEqual(t[0]["work"], [f"{TOP}: {PARTS[0]}"])
         self.assertEqual(t[0]["albumartist"], ["Robert Schumann; Musica Viva, Alexander Rudin"])   # (the rest as ever)
+
+    def test_CLS4_a_film_score_with_track_relationships_off_keeps_its_composer(self):
+        # (the verdict that keeps the credit is taken on the release WITH its recordings'
+        # relationships, read for the classical album - not on the bare lookup)
+        d = self.album("Hans Zimmer", "Gladiator")
+        hz, lg = A("hz", "Hans Zimmer", "Zimmer, Hans"), A("lg", "Lisa Gerrard", "Gerrard, Lisa")
+        rels = [perf("w", "T0", [comp(hz)]), {"target-type": "artist", "type": "conductor", "attributes": [], "artist": hz},
+                {"target-type": "artist", "type": "vocal", "attributes": [], "artist": lg}]
+        full = te.mb_release("glad", "Hans Zimmer", "Gladiator", discogs=950)
+        full["artist-credit"] = credit((hz, ""))
+        for k, t in enumerate(full["media"][0]["tracks"]):
+            t["artist-credit"] = t["recording"]["artist-credit"] = credit((hz, ""))
+            t["recording"]["relations"] = [dict(r, work=dict(r["work"], id=f"w{k}")) if r["target-type"] == "work" else r
+                                           for r in rels]
+        bare = copy.deepcopy(full)
+        for t in bare["media"][0]["tracks"]:
+            t["recording"].pop("relations")
+        dg = te.dg_release(950, "Hans Zimmer", "Gladiator")
+        dg["genres"], dg["styles"], dg["labels"] = ["Classical"], ["Score"], [{"name": "Label MB", "catno": "CAT-1"}]
+        http = ClassicalHttp(bare, full, [], dg=[dg])
+        eng = self.engine(http)
+        p = eng.identify(eng.albums_in(d)[0])
+        self.assertEqual(p.status, "identified", p.why)
+        self.assertEqual(p.targets[0].get("~classical"), ["1"], p.why)
+        self.assertTrue([u for _h, u in http.calls if "recording-level-rels" in u])
+        self.assertEqual(p.targets[0]["artist"], ["Hans Zimmer"])
 
 
 class Names(unittest.TestCase):
@@ -163,16 +218,44 @@ class Names(unittest.TestCase):
                             mb_tags._settings({"classical": True}), False, {})
         self.assertEqual(m["conductor"], ["Mstislav Leopoldovich Rostropovich"])   # (a Cyrillic credit only)
 
-    def test_CLS4_an_ensemble_stands_for_its_members(self):
-        be, q = A("be", "Ludwig van Beethoven", "Beethoven, Ludwig van"), A("q", "Emerson String Quartet")
-        rels = [perf("w4", "String Quartet no. 1", [comp(be)])] + [
-            {"target-type": "artist", "type": "instrument", "attributes": [ins], "artist": A(i, n)}
-            for i, n, ins in (("m1", "Eugene Drucker", "violin"), ("m2", "Philip Setzer", "violin"))] + [
-            {"target-type": "artist", "type": "performer", "attributes": [], "artist": q}]
-        rel = release(credit((be, "; "), (q, "")), [("SQ1", credit((be, "")), credit((be, "")), rels)])
+    def test_CLS4_an_ensemble_stands_for_its_listed_members(self):
+        be = A("be", "Ludwig van Beethoven", "Beethoven, Ludwig van")
+        players = (("m1", "Daniel Barenboim", "piano"), ("m2", "Pinchas Zukerman", "violin"),
+                   ("m3", "Jacqueline du Pré", "cello"))
+        trio = A("t", "The Trio", type="Group", relations=[
+            {"type": "member of band", "direction": "backward", "artist": {"id": i, "name": n}} for i, n, _x in players])
+        rels = [perf("w4", "Piano Trio", [comp(be)])] + [
+            {"target-type": "artist", "type": "instrument", "attributes": [ins], "artist": A(i, n, type="Person")}
+            for i, n, ins in players] + [{"target-type": "artist", "type": "performer", "attributes": [], "artist": trio}]
+        rel = release(credit((be, "; "), (trio, "")), [("PT", credit((be, "")), credit((be, "")), rels)])
         t = mb_tags.release_tags(rel, CLS)[0]
-        self.assertEqual(t["artist"], ["Emerson String Quartet"])
-        self.assertEqual(t["performer:violin"], ["Eugene Drucker", "Philip Setzer"])   # (their credits stay)
+        self.assertEqual(t["artist"], ["The Trio"])
+        self.assertEqual(t["performer:cello"], ["Jacqueline du Pré"])        # (their credits stay)
+
+    def performers(self, rels):
+        return [n for n, _so, _i in mb_tags._performers(rels, mb_tags._settings({"classical": True}))]
+
+    def test_CLS4_soloists_beside_ensembles_and_choirs_stay(self):
+        def r(kind, a, *attrs):
+            return {"target-type": "artist", "type": kind, "attributes": list(attrs), "artist": a}
+        P = lambda i, n: A(i, n, type="Person")                              # noqa: E731
+        # (a concerto with a period ensemble: soloist, ensemble, conductor)
+        self.assertEqual(self.performers([r("instrument", P("vm", "Viktoria Mullova"), "violin"),
+                                          r("performer", A("iga", "Il Giardino Armonico", type="Group")),
+                                          r("conductor", P("ga", "Giovanni Antonini"))]),
+                         ["Viktoria Mullova", "Il Giardino Armonico", "Giovanni Antonini"])
+        # (two players, one credited as a plain performer: both)
+        self.assertEqual(self.performers([r("performer", P("gg", "Glenn Gould")),
+                                          r("instrument", P("ym", "Yehudi Menuhin"), "violin")]),
+                         ["Glenn Gould", "Yehudi Menuhin"])
+        # (a soprano, a choir MusicBrainz types as a choir, an orchestra)
+        self.assertEqual(self.performers([r("vocal", P("s", "Soprano X"), "soprano vocals"),
+                                          r("vocal", A("ch", "RIAS Kammerchor", type="Choir")),
+                                          r("performing orchestra", A("o", "Akademie", type="Orchestra"))]),
+                         ["Soprano X", "RIAS Kammerchor", "Akademie"])
+        # (the composer at the piano with an ensemble)
+        self.assertEqual(self.performers([r("instrument", P("mr", "Max Richter"), "piano"),
+                                          r("performer", A("acme", "ACME"))]), ["Max Richter", "ACME"])
 
     def test_CLS4_a_composer_first_recording_credit_gives_its_performers(self):
         bach, gg = A("jsb", "Johann Sebastian Bach", "Bach, Johann Sebastian"), A("gg", "Glenn Gould", "Gould, Glenn")

@@ -72,8 +72,11 @@ class V084MatchColumns(tg.Gui):
         self.wide()
         self.win.go("Watched folders")
         w = self.win.pages["Watched folders"]
-        with mock.patch("watcher.recent", return_value=rows), mock.patch("watcher.pending_plans", return_value=[]):
-            w.reload()
+        # (patched for the whole test: a timer's reload after the patch ended read the real state)
+        for p in (mock.patch("watcher.recent", return_value=rows), mock.patch("watcher.pending_plans", return_value=[])):
+            p.start()
+            self.addCleanup(p.stop)
+        w.reload()
         self.app.processEvents()
         return w
 

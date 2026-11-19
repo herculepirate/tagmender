@@ -2,6 +2,7 @@
 # - the toolbar's count ("1 of 15") is a label beside the thin progress bar, wide enough for it;
 # - Look Up asked while a look-up runs is queued and starts when it ends (Cancel clears the queue;
 #   an album already running or queued is not asked twice; a changed album profile is queued);
+#   LKP-1 (0.8.84): one it can look up as its own (its sources, profile, folder) joins it instead;
 # - each album's row shows what was found as soon as that album is looked up, not at the end;
 # - while it runs, a row says Waiting…, Looking up… or Applying…; Apply says which file of which album.
 import os
@@ -69,8 +70,9 @@ class V084Overview(tg.Gui):
         g = self.gate("Album G")
         ov.look_up("profile", [self.row("Album G")])
         self.assertTrue(ov.running)
-        ov.look_up("profile", [self.row("Album H")])                   # (the button, while it runs)
-        ov.look_up("profile", [self.row("Album H"), self.row("Album G")])   # (neither asked twice)
+        ov.look_up("discogs_only", [self.row("Album H")])              # (the button, while it runs)
+        ov.look_up("discogs_only", [self.row("Album H")])              # (neither asked twice)
+        ov.look_up("profile", [self.row("Album G")])
         self.assertEqual(list(ov.queue), [ov.album_key(self.row("Album H"))])
         self.assertIn("1 album queued", ov.summary.text())
         g.set()
@@ -87,9 +89,10 @@ class V084Overview(tg.Gui):
         g = self.gate("Album G")
         ov.look_up("profile", [self.row("Album G")])
         ov.table.clearSelection()
+        ov.sources.setCurrentIndex(ov.sources.findData("discogs_only"))    # (other sources: queued, LKP-1)
         ov.reload()                                                     # (Refresh: every album, again)
-        self.assertEqual(set(ov.queue), {ov.album_key(a) for a in ov.model.albums} -
-                         {ov.album_key(self.row("Album G"))})
+        # (Album G too: it is being looked up with the profile's sources, not these)
+        self.assertEqual(set(ov.queue), {ov.album_key(a) for a in ov.model.albums})
         self.assertFalse(ov.set_path(str(self.d)))                      # (a new folder: not while it runs)
         g.set()
         self.assertTrue(wait(lambda: not ov.running and not ov.queue and
@@ -100,7 +103,7 @@ class V084Overview(tg.Gui):
         self.listed()
         g = self.gate("Album G")
         ov.look_up("profile", [self.row("Album G")])
-        ov.look_up("profile", [self.row("Album H")])
+        ov.look_up("discogs_only", [self.row("Album H")])                # (other sources: queued, LKP-1)
         self.assertTrue(ov.queue)
         ov.cancel()
         self.assertEqual(ov.queue, {})

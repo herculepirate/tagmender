@@ -142,9 +142,10 @@ def run_batches(batches, run, cancelled, partial, progress, workers=None) -> int
     return n
 
 
-def plan_each(e, path, keys, emit, progress=None, cancel=None, meta=None) -> int:
-    """Engine E's plan of KEYS an album at a time (engine.Engine.plan_each)."""
-    return e.plan_each(path, keys, emit, progress=progress, cancel=cancel, meta=meta)
+def plan_each(e, path, keys, emit, progress=None, cancel=None, meta=None, feed=None) -> int:
+    """Engine E's plan of KEYS an album at a time (engine.Engine.plan_each); FEED: the albums
+    that join it while it runs (LKP-1)."""
+    return e.plan_each(path, keys, emit, progress=progress, cancel=cancel, meta=meta, feed=feed)
 
 
 # Look Up's sources (List first): the profile's, or one of them alone
@@ -392,6 +393,7 @@ class Overview(QWidget):
         # and the albums the running look-up has (album key -> (profile, sources))
         self.queue = {}
         self.looking = {}
+        self._running_lookup = None                         # (LKP-1: what an album joining it needs)
         # APL-1: the Apply run beside a look-up (its worker, its albums in order) and whether the
         # look-up ended meanwhile (the work ends with the Apply then)
         self.apply_worker, self._side, self._ended_meanwhile = None, None, False
@@ -1398,9 +1400,12 @@ class Overview(QWidget):
             return
         mode = self.sources.currentData() or "profile"
         if self.running:
-            for a in fresh:
+            # (LKP-1: during a look-up they join it when they can, else wait for it)
+            for a in (self.join_look_up(mode, fresh)[0] if self.looking else fresh):
                 self.queue.setdefault(self.album_key(a), (mode, False))
             self.model.refresh_rows()                        # (their rows: Waiting…)
+            if self.looking and getattr(self, "_lookup_n", 0):
+                self.summary.setText(self.lookup_words(self._lookup_i, self._lookup_name))
         else:
             self.look_up(mode, fresh, queued=True)
 
@@ -2001,8 +2006,9 @@ class Overview(QWidget):
         MusicBrainz, only Discogs, or only the web; what they find replaces their rows, each
         album's as soon as it is found. An album already looked up the same way is skipped
         unless AGAIN (Refresh). Each album is looked up with its own profile (its row's choice,
-        else the one chosen above). Asked while a look-up runs: queued, and looked up when it
-        ends (QUEUED: such a look-up, now started; it asks nothing)."""
+        else the one chosen above). Asked while a look-up runs: it joins that look-up when it
+        can (LKP-1: join_look_up), else it is queued and looked up when that one ends (QUEUED:
+        such a look-up, now started; it asks nothing)."""
         import engine
         chosen = albums if albums is not None else self.selected_albums()
         if not chosen or not self.path:
@@ -2048,10 +2054,14 @@ class Overview(QWidget):
         # is not filed where another row of the list is
         looked_now = {k for ks in groups.values() for k in ks}
         # (never a row left out of Apply: it files nothing)
-        seed = [c for a in self.model.albums if self.album_key(a) not in looked_now
-                and a.get("status") in ("ready", "unchanged") and not PlanModel.left_out(a)
-                for c in a.get("claims") or []]
+        seed, seed_of = [], {}
+        for a in self.model.albums:
+            if self.album_key(a) not in looked_now and a.get("status") in ("ready", "unchanged") and \
+                    not PlanModel.left_out(a):
+                seed += a.get("claims") or []
+                seed_of.setdefault(self.album_key(a), []).extend(a.get("claims") or [])
         total = sum(len(ks) for ks in groups.values())
+        count = [total]                                     # (LKP-1: albums that join count too)
 
         roots = dict(getattr(self, "roots", {}))
 
@@ -2059,17 +2069,25 @@ class Overview(QWidget):
         every = frozenset(self.album_key(a) for a in self.model.albums)
         unsent = []                                         # (albums an internal error left not looked up)
         self._lookup_unsent = unsent
+        untaken = []                                        # (albums that joined and were never started)
+        batches, feeds = [], {}
+        for name, ks in groups.items():
+            by_root = {}                                    # (the folder each album is read from)
+            for k in ks:
+                by_root.setdefault(roots.get(k) or path, []).append(k)
+            for where, kr in by_root.items():
+                # LKP-1: the batch's albums, which an album asked for meanwhile (this profile, these
+                # sources, this folder) joins: started as soon as one of its workers is free
+                feeds[(name, where)] = engine.LookupFeed(kr)
+                batches.append((name, where, kr, feeds[(name, where)]))
+        # (what an album joining must be looked up with to be looked up as these are: join_look_up)
+        self._running_lookup = {"mode": mode, "profs": profs, "stamps": stamps, "feeds": feeds, "at": at,
+                                "count": count, "seed_of": seed_of, "path": path, "library": self.library,
+                                "same": (ocr, edits, forced, file_anyway), "untaken": untaken, "fed": {}}
 
         def work(w):
-            batches = []
-            for name, ks in groups.items():
-                by_root = {}                                # (the folder each album is read from)
-                for k in ks:
-                    by_root.setdefault(roots.get(k) or path, []).append(k)
-                batches += [(name, where, kr) for where, kr in by_root.items()]
-
             def one_batch(batch, report, workers):
-                name, where, kr = batch
+                name, where, kr, feed = batch
                 e = engine.engine_for_thread(profs[name], ocr=True if ocr else None)
                 e.edits = edits
                 e.force = forced
@@ -2085,9 +2103,10 @@ class Overview(QWidget):
                     report("partial", (name, k, plan))
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
                 try:
+                    # (album i: the feed's i-th, one that joined too)
                     return plan_each(e, where, kr, emit,
-                                     progress=lambda i, what: report("progress", (at[kr[i]], total, what)),
-                                     cancel=lambda: w.cancelled, meta=META_STORE)
+                                     progress=lambda i, what: report("progress", (at[feed.keys[i]], count[0], what)),
+                                     cancel=lambda: w.cancelled, meta=META_STORE, feed=feed)
                 except Exception as exc:
                     # (an internal error the engine did not keep to one album: logged, and the
                     # look-up goes on with the other folders' albums; the albums of this one it
@@ -2097,8 +2116,12 @@ class Overview(QWidget):
                         logging.getLogger("tagmender.gui").error(
                             "looking up the albums in %s stopped: %s: %s", where, type(exc).__name__, exc,
                             exc_info=exc)
-                        unsent.extend(k for k in kr if k not in told)
+                        unsent.extend(k for k in dict.fromkeys(kr + feed.taken()) if k not in told)
                     return len(told)
+                finally:
+                    # (no album joins any more; one that joined and was never started - by a
+                    # plan_each that does not take them - is looked up after: look_up_ended)
+                    untaken.extend(feed.close())
             return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
                                lambda a: w.progress.emit(*a))
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
@@ -2121,13 +2144,15 @@ class Overview(QWidget):
                             partial=one)
 
     def enqueue(self, mode, albums, again=False):
-        """Look Up asked while a look-up runs: the albums wait for it, with these sources (an
-        album it is looking up the same way, or already waiting, is not asked twice). After
-        Cancel, until the cancelled look-up ends, nothing is queued: Cancel stops it all."""
+        """Look Up asked while a look-up runs: the albums join it when they can (LKP-1:
+        join_look_up), else they wait for it, with these sources (an album it is looking up the
+        same way, or already waiting, is not asked twice). After Cancel, until the cancelled
+        look-up ends, nothing is queued: Cancel stops it all."""
         if self.worker is not None and getattr(self.worker, "cancelled", False):
             self.win.statusBar().showMessage(tr("Cancelling; Look Up again when it has stopped."), 4000)
             return 0
-        n = 0
+        albums, joined, waits = self.join_look_up(mode, albums, again)
+        n, why = 0, {}
         for a in albums:
             k = self.album_key(a)
             if self.looking.get(k) == (self.profile_of(a), mode) and k not in self.queue:
@@ -2135,11 +2160,98 @@ class Overview(QWidget):
             was = self.queue.pop(k, None)
             self.queue[k] = (mode, again or bool(was and was[1]))
             n += was is None
-        if n:
+            if was is None and k in waits:
+                why[waits[k]] = None
+        if n or joined:
             self.model.refresh_rows()                       # (their rows: Waiting…)
             self.summary.setText(self.lookup_words(self._lookup_i, self._lookup_name))
-            self.win.statusBar().showMessage(tr("{0} queued: looked up when this look-up ends.").format(
-                plural(n, tr("album"), tr("albums"))), 5000)
+        said = []
+        if joined:
+            said.append(tr("{0} joined this look-up: looked up as soon as a worker is free.").format(
+                plural(joined, tr("album"), tr("albums"))))
+        if n:
+            said.append(tr("{0} queued: looked up when this look-up ends ({1}).").format(
+                plural(n, tr("album"), tr("albums")), ", ".join(tr(self.WAIT_WHY[x]) for x in why))
+                        if why else tr("{0} queued: looked up when this look-up ends.").format(
+                plural(n, tr("album"), tr("albums"))))
+        if said:
+            self.win.statusBar().showMessage(" ".join(said), 6000)
+
+    # LKP-1: why an album asked for during a look-up waits for it to end, rather than joining it
+    WAIT_WHY = {"sources": N_("other sources than this look-up's"), "profile": N_("another profile"),
+                "folder": N_("read from another folder"), "changed": N_("settings changed since it started"),
+                "busy": N_("being looked up now")}
+
+    def join_look_up(self, mode, albums, again=False) -> tuple:
+        """LKP-1: of ALBUMS asked for while a look-up runs, those it can look up exactly as it
+        looks up its own join it (engine.LookupFeed): each starts as soon as one of its workers is
+        free - at most engine.LOOKUP_WORKERS albums at once in all - and is planned with its
+        albums, as one look-up of them all. An album joins when it has the look-up's sources, a
+        profile and folder it is looking up albums of (the profile's settings unchanged), and
+        your edits, chosen releases, asks to file and OCR are as they were when it started. Not
+        once it is cancelled or stopping for Apply. An album already looked up the same way is
+        skipped (not AGAIN), as a queued look-up skips it. Returns (the albums left to queue,
+        how many joined, {key: why it waits - a WAIT_WHY code})."""
+        run = getattr(self, "_running_lookup", None)
+        w = self.worker
+        if not run or not self.looking or w is None or getattr(w, "cancelled", False) or \
+                getattr(self, "_apply_next", False):
+            return list(albums), 0, {}
+        same = (self.ocr.isChecked(), self.win.inspector.edits_for_preview(), dict(self.forced),
+                dict(self.file_anyway))
+        if same != run["same"] or self.path != run["path"] or self.library != run["library"]:
+            return list(albums), 0, {self.album_key(a): "changed" for a in albums}
+        left, why, by_feed = [], {}, {}
+        stamps = {}
+        for a in albums:
+            k, name = self.album_key(a), self.profile_of(a)
+            # (one it has in hand, or queued already: as before - looked up after it)
+            wait = "busy" if k in self.looking or k in self.queue else "sources" if mode != run["mode"] \
+                else "profile" if name not in run["profs"] else None
+            if wait:
+                left.append(a)
+                why[k] = wait
+                continue
+            if name not in stamps:
+                try:
+                    stamps[name] = self.lookup_stamp(self.planning_profile(mode, name), mode, name)
+                except pf.ProfileError:
+                    stamps[name] = None
+            if stamps[name] != run["stamps"][name]:
+                left.append(a)
+                why[k] = "changed"
+                continue
+            if not again and self.looked.get(k) == stamps[name]:
+                continue                                    # (looked up the same way: as a queued look-up)
+            # (another folder's albums are another plan, which could not see the claims of the
+            # albums this look-up has still in hand (MOV-4): they wait, and see them then)
+            feed = run["feeds"].get((name, self.roots.get(k) or self.path))
+            if feed is None:
+                left.append(a)
+                why[k] = "folder"
+                continue
+            mine = by_feed.setdefault(id(feed), (feed, name, {}))[2]
+            mine.setdefault(k, a)
+        joined = 0
+        order = self._lookup_order
+        for feed, name, mine in by_feed.values():
+            keys = list(mine)
+            for j, k in enumerate(keys):                    # (its row, before a worker can start it)
+                run["at"][k] = len(order) + j
+            # (MOV-4: their rows' claims, which the look-up's other albums saw, are theirs no more)
+            drop = [c for k in keys for c in run["seed_of"].get(k, ())]
+            if not feed.add(keys, drop):                    # (it has ended meanwhile: they wait)
+                left += list(mine.values())
+                continue
+            for k in keys:
+                order.append(k)
+                self.looking[k] = (name, run["mode"])
+                self.states[k] = "waiting"
+                run["fed"][k] = again
+            run["count"][0] += len(keys)
+            self._lookup_n += len(keys)
+            joined += len(keys)
+        return left, joined, why
 
     def run_queue(self) -> bool:
         """The look-ups queued while the last one ran: the albums with the same sources at once.
@@ -2238,14 +2350,29 @@ class Overview(QWidget):
         (stopped for Apply: the albums it did not reach wait, and Apply asks first)."""
         apply_next, self._apply_next = getattr(self, "_apply_next", False), False
         only, self._apply_only = getattr(self, "_apply_only", None), None
+        run, self._running_lookup = getattr(self, "_running_lookup", None) or {}, None
+        fed = run.get("fed") or {}                         # (LKP-1: the albums that joined it, AGAIN each)
+        for f in (run.get("feeds") or {}).values():
+            f.close()
         if apply_next:
             left = [k for k in getattr(self, "_lookup_order", []) if k in self.states and k in self.looking]
             again = bool(getattr(self, "_lookup_again", False))
             ahead = dict(self.queue)
-            self.queue = {k: (self.looking[k][1], again) for k in left}
+            self.queue = {k: (self.looking[k][1], again or fed.get(k, False)) for k in left}
             for k, (mode, ag) in ahead.items():          # (asked meanwhile: theirs wins, Refresh kept)
                 was = self.queue.pop(k, None)
                 self.queue[k] = (mode, ag or bool(was and was[1]))
+        else:
+            # (LKP-1: an album that joined and was never started, not cancelled - the look-up of
+            # its folder had ended - is looked up next, first)
+            unsent_now = set(getattr(self, "_lookup_unsent", None) or ())
+            late = [k for k in dict.fromkeys(run.get("untaken") or ()) if k in fed and k not in unsent_now
+                    and self.states.get(k) == "waiting" and k in self.looking]
+            if late:
+                ahead = dict(self.queue)
+                self.queue = {k: (self.looking[k][1], fed[k]) for k in late}
+                for k, v in ahead.items():
+                    self.queue.setdefault(k, v)
         self.looking = {}
         unsent, self._lookup_unsent = getattr(self, "_lookup_unsent", None) or [], []
         if unsent:
@@ -2330,6 +2457,9 @@ class Overview(QWidget):
 
     def lookup_failed(self, msg):
         self._apply_next, self._apply_only = False, None
+        run, self._running_lookup = getattr(self, "_running_lookup", None) or {}, None
+        for f in (run.get("feeds") or {}).values():
+            f.close()                                      # (nothing joins it either)
         self.looking, self.queue = {}, {}                  # (nothing queued starts after a failure)
         self._later_list_only = bool(self.later)           # (folders dropped meanwhile: listed, not looked up)
         self.oops(msg)
@@ -3364,6 +3494,8 @@ class Overview(QWidget):
         if self.worker:
             self.worker.cancelled = True
             self._apply_next, self._apply_only = False, None   # (Cancel stops it all, Apply too)
+            for f in ((getattr(self, "_running_lookup", None) or {}).get("feeds") or {}).values():
+                f.close()                                  # (LKP-1: nor is an album that joined it started)
             n = len(self.queue)
             self.queue = {}                                # (nor is what waited for it looked up)
             if self.later:                                 # (nor are the folders dropped meanwhile added)

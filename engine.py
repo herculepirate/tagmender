@@ -7133,7 +7133,7 @@ class Engine:
         p["provider_notes"] = {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
         return p
 
-    def plan_each(self, path, keys, emit, progress=None, cancel=None, meta=None) -> int:
+    def plan_each(self, path, keys, emit, progress=None, cancel=None, meta=None, feed=None) -> int:
         """plan(PATH, only=KEYS) made an album at a time, KEYS in order: emit(key, plan) as soon
         as one album is identified (a folder split per version, or a set planned per disc, comes
         as several rows of one plan), then - the albums known together - emit(key, plan) again
@@ -7142,22 +7142,26 @@ class Engine:
         folder is scanned once. progress(i, folder): album i (0-based) is being looked up.
         Cancelled: the albums not reached are not emitted; those reached are planned together.
         Returns how many albums were looked up.
-        lookup_workers > 1: several albums at once (_plan_each_at_once), the same results."""
-        clones = self._thread_clones(min(self.lookup_workers, len(keys)))
-        if clones:
-            return self._plan_each_at_once(path, keys, emit, clones, progress, cancel, meta)
-        root = Path(os.path.abspath(Path(path).expanduser()))
-        found = {}
-        prev = self.__dict__.get("albums_in")
-        # (PRF-4: only the folders holding KEYS are read, once for them all)
-        scan = (lambda p, skip=(): _albums_of_keys(self, p, keys, skip)) if self._own_scan() else self.albums_in
+        lookup_workers > 1: several albums at once (_plan_each_at_once), the same results.
+        feed: a LookupFeed holding KEYS (LKP-1): the albums that join it while this runs are
+        looked up too, as if given after KEYS (their i: their place in feed.keys), each as soon
+        as a worker is free - so lookup_workers work from the start, even for one album."""
+        given = feed is not None
+        feed = feed if given else LookupFeed(keys)
+        try:
+            clones = self._thread_clones(self.lookup_workers if given else min(self.lookup_workers, len(keys)))
+            if clones:
+                return self._plan_each_at_once(path, keys, emit, clones, progress, cancel, meta, feed)
+            return self._plan_each_in_turn(path, keys, emit, progress, cancel, meta, feed)
+        finally:
+            feed.close()                                 # (one asked now: the caller's, after)
 
-        def albums_in(p, skip=()):                       # (the same folder: its albums as found once)
-            k = (str(p), tuple(sorted(str(x) for x in skip)))
-            if k not in found:
-                found[k] = scan(p, skip)
-            return list(found[k])
-        self.albums_in = albums_in
+    def _plan_each_in_turn(self, path, keys, emit, progress, cancel, meta, feed) -> int:
+        """plan_each an album at a time, on this thread."""
+        root = Path(os.path.abspath(Path(path).expanduser()))
+        prev = self.__dict__.get("albums_in")
+        # (PRF-4: only the folders holding the albums are read, once for them all)
+        self.albums_in = _scan_of_feed(self, feed, {}, threading.Lock())
 
         def notes():
             return {**outage_notes(getattr(self, "http", None)), **getattr(self, "run_notes", {}), **self.notes}
@@ -7165,34 +7169,40 @@ class Engine:
         def planner():
             return planmod.Planner(self.profile, self.job, extra_roots=[root], edits=getattr(self, "edits", None),
                                    file_anyway=getattr(self, "file_anyway", None),
-                                   seed_claims=getattr(self, "seed_claims", None),
+                                   seed_claims=feed.seed(getattr(self, "seed_claims", None)),
                           offer_file_anyway=getattr(self, "offer_file_anyway", False))
         done, kept = [], {}                              # (key, its proposals); rows kept as listed
         # (proposals: a changed album never takes another row's - this look-up's or, from the
         # app, any row of its list: listed_keys)
         self._listed_keys = set(keys) | set(getattr(self, "listed_keys", None) or ())
         try:
-            for i, k in enumerate(keys):
-                if cancel and cancel():
+            while True:
+                got = feed.take(cancel)
+                if got is None:
                     break
+                i, k = got
                 try:
-                    with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
-                        props = self.proposals(path, (lambda _i, _n, what, i=i: progress(i, what)) if progress else None,
-                                               cancel, only={k})
-                except Exception as exc:                 # (one album's internal error: its row says so)
-                    self.reached = set() if cancel and cancel() else {k}
-                    props = _failed_album(k, exc, self._logger())
-                if k not in getattr(self, "reached", ()) and cancel and cancel():
-                    break                                # (cancelled before it: its rows stay)
-                for q in props:                          # (as plan.build: absolute paths)
-                    q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
-                    q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
-                out, (props,) = _build_despite_gone(planner, [props], getattr(self, "log", None))   # (shown at once; replaced below)
-                done.append((k, props))
-                with_keys(out["albums"], props)
-                _keep_row(self, k, props, out, kept)
-                out["provider_notes"] = notes()
-                emit(k, out)
+                    self._listed_keys.add(k)             # (LKP-1: one that joined)
+                    try:
+                        with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+                            props = self.proposals(path, (lambda _i, _n, what, i=i: progress(i, what)) if progress
+                                                   else None, cancel, only={k})
+                    except Exception as exc:             # (one album's internal error: its row says so)
+                        self.reached = set() if cancel and cancel() else {k}
+                        props = _failed_album(k, exc, self._logger())
+                    if k not in getattr(self, "reached", ()) and cancel and cancel():
+                        break                            # (cancelled before it: its rows stay)
+                    for q in props:                      # (as plan.build: absolute paths)
+                        q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
+                        q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
+                    out, (props,) = _build_despite_gone(planner, [props], getattr(self, "log", None))   # (shown at once; replaced below)
+                    done.append((k, props))
+                    with_keys(out["albums"], props)
+                    _keep_row(self, k, props, out, kept)
+                    out["provider_notes"] = notes()
+                    emit(k, out)
+                finally:
+                    feed.done()
         finally:
             self.__dict__.pop("_listed_keys", None)
             if prev is not None:
@@ -7225,28 +7235,48 @@ class Engine:
             out.append(c)
         return out
 
-    def _plan_each_at_once(self, path, keys, emit, clones, progress, cancel, meta) -> int:
+    def _plan_each_at_once(self, path, keys, emit, clones, progress, cancel, meta, feed) -> int:
         """plan_each with len(clones) albums looked up at the same time. An album's work belongs
         to one worker with its own Engine (an Engine holds the album it is on) and connection;
         the providers' pace and back-off are shared by the clones, so the requests per second
-        do not change. Only this thread reports, and the plan of them all is made once, in KEYS
-        order, as plan_each's."""
+        do not change. Only this thread reports, and the plan of them all is made once, in the
+        FEED's order (KEYS, then those that joined), as plan_each's."""
         root = Path(os.path.abspath(Path(path).expanduser()))
         found, found_lock = {}, threading.Lock()
-        tasks, results = queue.SimpleQueue(), queue.SimpleQueue()
-        for item in enumerate(keys):
-            tasks.put(item)
+        results = queue.SimpleQueue()
         failed = threading.Event()
         kept = {}                                        # (rows kept as listed: _keep_row)
 
         def planner(e):
             return planmod.Planner(e.profile, e.job, extra_roots=[root], edits=getattr(e, "edits", None),
                                    file_anyway=getattr(e, "file_anyway", None),
-                                   seed_claims=getattr(e, "seed_claims", None),
+                                   seed_claims=feed.seed(getattr(e, "seed_claims", None)),
                                    offer_file_anyway=getattr(e, "offer_file_anyway", False))
 
         def notes(e):
             return {**getattr(e, "run_notes", {}), **e.notes}     # (outages: the clones' shared state, below)
+
+        def one(e, i, k) -> bool:
+            """Album K (i) looked up by worker engine E; False: cancelled before it."""
+            e._listed_keys.add(k)                        # (LKP-1: one that joined)
+            try:
+                with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+                    props = e.proposals(path, lambda _i, _n, what, i=i: results.put(("progress", i, what)),
+                                        cancel, only={k})
+            except Exception as exc:                     # (one album's internal error: its row says so)
+                e.reached = set() if cancel and cancel() else {k}
+                props = _failed_album(k, exc, e._logger())
+            if k not in e.reached and cancel and cancel():
+                return False                             # (cancelled before it: its rows stay)
+            for q in props:
+                q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
+                q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
+            out, (props,) = _build_despite_gone(lambda: planner(e), [props], e.log)
+            with_keys(out["albums"], props)
+            _keep_row(e, k, props, out, kept)
+            out["provider_notes"] = notes(e)
+            results.put(("done", i, k, props, out))
+            return True
 
         def worker(clone):
             try:
@@ -7255,38 +7285,19 @@ class Engine:
                     if name in self.__dict__:
                         setattr(e, name, self.__dict__[name])
                 e._listed_keys = set(keys) | set(getattr(self, "listed_keys", None) or ())    # (as plan_each)
-                # (PRF-4: only the folders holding KEYS are read, once for them all)
-                scan = (lambda p, skip=(), e=e: _albums_of_keys(e, p, keys, skip)) if e._own_scan() else e.albums_in
-
-                def albums_in(p, skip=()):               # (the folder is scanned once, for them all)
-                    k = (str(p), tuple(sorted(str(x) for x in skip)))
-                    with found_lock:
-                        if k not in found:
-                            found[k] = scan(p, skip)
-                        return list(found[k])
-                e.albums_in = albums_in
-                while not failed.is_set() and not (cancel and cancel()):
-                    try:
-                        i, k = tasks.get_nowait()
-                    except queue.Empty:
+                # (PRF-4: only the folders holding the albums are read, once for them all)
+                e.albums_in = _scan_of_feed(e, feed, found, found_lock)
+                while True:
+                    # (LKP-1: the next album given, or one that joined; waits while another
+                    # worker is on an album, as one may join meanwhile)
+                    got = feed.take(lambda: failed.is_set() or bool(cancel and cancel()))
+                    if got is None:
                         break
                     try:
-                        with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
-                            props = e.proposals(path, lambda _i, _n, what, i=i: results.put(("progress", i, what)),
-                                                cancel, only={k})
-                    except Exception as exc:             # (one album's internal error: its row says so)
-                        e.reached = set() if cancel and cancel() else {k}
-                        props = _failed_album(k, exc, e._logger())
-                    if k not in e.reached and cancel and cancel():
-                        break                            # (cancelled before it: its rows stay)
-                    for q in props:
-                        q.source_dir = os.path.abspath(os.path.expanduser(str(q.source_dir)))
-                        q.files = [os.path.abspath(os.path.expanduser(str(f))) for f in q.files]
-                    out, (props,) = _build_despite_gone(lambda: planner(e), [props], e.log)
-                    with_keys(out["albums"], props)
-                    _keep_row(e, k, props, out, kept)
-                    out["provider_notes"] = notes(e)
-                    results.put(("done", i, k, props, out))
+                        if not one(e, *got):
+                            break
+                    finally:
+                        feed.done()
             except BaseException as exc:                 # (reported, and raised, by the coordinator)
                 failed.set()
                 results.put(("failed", exc))
@@ -7333,6 +7344,104 @@ class Engine:
 # albums looked up at once: enough to use the waiting on scans, images and files, few enough
 # for a home machine and a network share (the providers' pace is shared and does not change)
 LOOKUP_WORKERS = 3
+
+
+class LookupFeed:
+    """LKP-1: the albums (keys) of one plan_each, which more can join while it runs: an album
+    asked for meanwhile, of the same profile, sources and folder, starts as soon as a worker is
+    free rather than when the whole look-up ends. Thread-safe. Albums join it until it is closed:
+    by plan_each when every album given is done and no worker is busy (one added then is the
+    caller's to look up after), or by close(), or on Cancel. keys: every album given, in the
+    order given (an album's index here is its i in progress(i, folder))."""
+
+    def __init__(self, keys=()):
+        self.keys = list(keys)
+        self._next = 0                                   # (the first album not yet taken)
+        self._busy = 0                                   # (albums taken, not yet done)
+        self._closed = False
+        self._dropped = set()                            # (ids of seed claims no longer the others')
+        self._cond = threading.Condition()
+
+    def add(self, keys, drop_claims=()) -> bool:
+        """KEYS join the look-up (in order), unless it is closed: False, and none joins.
+        drop_claims: the MOV-4 seed claims of their rows as listed (Engine.seed_claims holds
+        the rows not looked up: these now are)."""
+        with self._cond:
+            if self._closed:
+                return False
+            self.keys += [k for k in keys if k not in self.keys]
+            self._dropped |= {id(c) for c in drop_claims}
+            self._cond.notify_all()
+            return True
+
+    def take(self, stop=None):
+        """(i, key) of the next album to look up, waiting while a worker is still on an album
+        (more may join meanwhile); None: every album done, or STOP() (cancelled, a worker
+        failed) - closed then. The album taken is the caller's until done()."""
+        with self._cond:
+            while True:
+                if stop is not None and stop():
+                    self._closed = True
+                    self._cond.notify_all()
+                    return None
+                if self._next < len(self.keys):
+                    i = self._next
+                    self._next += 1
+                    self._busy += 1
+                    return i, self.keys[i]
+                if self._closed or not self._busy:
+                    self._closed = True                  # (nothing more can come: no one adds now)
+                    self._cond.notify_all()
+                    return None
+                self._cond.wait(0.1)                     # (STOP is a question, not a signal: asked again)
+
+    def known(self) -> list:
+        """Every album given so far, in order."""
+        with self._cond:
+            return list(self.keys)
+
+    def taken(self) -> list:
+        """The albums a worker has started, in order."""
+        with self._cond:
+            return self.keys[:self._next]
+
+    def done(self):
+        """The album last taken is done (looked up, failed, or left at Cancel)."""
+        with self._cond:
+            self._busy -= 1
+            self._cond.notify_all()
+
+    def close(self) -> list:
+        """No album joins any more; returns those added and never taken."""
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+            return self.keys[self._next:]
+
+    def seed(self, claims):
+        """CLAIMS (Engine.seed_claims) without those of the albums that joined."""
+        with self._cond:
+            dropped = set(self._dropped)
+        return [c for c in claims or () if id(c) not in dropped] if dropped else claims
+
+
+def _scan_of_feed(e, feed, found, lock):
+    """E.albums_in for plan_each: a folder scanned once for the albums of FEED (PRF-4: only the
+    folders holding them; FOUND, under LOCK, shared by the workers), and again, for them all,
+    only when albums have joined since (LKP-1) - the scan a look-up of them all would make."""
+    own, base = e._own_scan(), e.albums_in
+
+    def albums_in(p, skip=()):
+        k = (str(p), tuple(sorted(str(x) for x in skip)))
+        with lock:
+            now = frozenset(feed.known()) if own else frozenset()
+            if k not in found or not now <= found[k][0]:
+                # (the engine's own scan: never base when it is its own - see _albums_of_keys)
+                found[k] = (now, _albums_of_keys(e, p, now, skip) if own else base(p, skip))
+            return list(found[k][1])
+    return albums_in
+
+
 _ALBUMS_IN = Engine.albums_in                  # (the engine's own scan: Engine._own_scan)
 _MAKING = threading.Lock()
 

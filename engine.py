@@ -2650,9 +2650,9 @@ class Engine:
         Show: The Brick", 13 CDs) that the exact disc ID of one of them at least is on, at that
         folder's own place, no folder's disc ID on it at another place. Every other disc whose ID
         MusicBrainz knows: on other releases only, it joins only when the box's medium at its
-        place has no disc ID attached and its every track is that medium's, title and length to
-        the second (the box's disc is that volume: The Brick's discs 1-8, their IDs on the
-        standalone volumes); else no join (its own album). A disc whose ID is on no release rides
+        place has no disc ID attached and its every track is that medium's to the second, in order
+        (the box's disc is that volume: The Brick's discs 1-8, their IDs on the standalone
+        volumes, some tracks named otherwise in the box); else no join (its own album). A disc whose ID is on no release rides
         along as the match decides (Engine._box_unproven holds it when its lengths do not fit).
         The releases so named and proven, else []. A name that names no release (a bare CD count,
         box words alone, "Band - Original Albums") never joins this way."""
@@ -2675,8 +2675,8 @@ class Engine:
                 media = self._medium_disc_ids(r)
                 cand = self._release_cand("mb", r) if media is not None else None
                 ok = cand is not None and all(
-                    not media.get(i) and i in self._fits_discs(d, [f for q in parts for f in q.files
-                                                                   if Path(f).parent == d], cand, tight=True)
+                    not media.get(i) and self._lengths_are(d, [f for q in parts for f in q.files
+                                                               if Path(f).parent == d], cand, i)
                     for i, d in others)
                 if not ok:
                     self.log.info("%s: a disc's ID is on other releases only and its disc of %s is not it: "
@@ -2684,6 +2684,22 @@ class Engine:
                     continue
             out.append(r)
         return out
+
+    def _lengths_are(self, folder: Path, files, cand, disc) -> bool:
+        """DSC-14b: folder's tracks are disc DISC of cand to the second, every one in order (as one
+        disc's table of contents measures them: TIGHT_S), three tracks or ten minutes at least -
+        whatever their titles (a box listing a volume's tracks by other names: The Brick's "Rio de
+        Janeiro" for "Flight To Brazil 1")."""
+        mine = {str(f) for f in files}
+        album = ma.read_album(folder, folder.parent.name, folder.name)
+        tracks = [t for t in album.get("tracks") or [] if str(t.get("path")) in mine]
+        ct = [t for t in cand.get("tracks") or [] if int(t.get("disc") or 1) == disc]
+        if len(tracks) != len(mine) or len(ct) != len(tracks):
+            return False
+        if len(tracks) < self.FIT_MIN_TRACKS and sum(float(t.get("secs") or 0) for t in tracks) < self.FIT_MIN_SECONDS:
+            return False
+        return all(float(a.get("secs") or 0) > 0 and float(b.get("secs") or 0) > 0
+                   and abs(float(a["secs"]) - float(b["secs"])) <= self.TIGHT_S for a, b in zip(tracks, ct))
 
     def _medium_disc_ids(self, rid):
         """DSC-14b: {medium position: [disc IDs]} of a MusicBrainz release's audio media (one look-up

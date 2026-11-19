@@ -8631,7 +8631,14 @@ def discid_less_tie(http, album, res, cfg, at_most=3):
     if not best or not album.get("exact_toc_releases") or not mc._exact_toc(best):
         return res
     n = len(best["cand"].get("tracks") or ())
+    # (pressings of this one release's title and shape - never a one-disc album beside a box's disc
+    # view, DSC-12a decides those)
+    if best["cand"].get("box_disc"):
+        return res
     pool = [s for s in res.get("scored") or () if s is not best and s["cand"].get("source") == "mb"
+            and not s["cand"].get("box_disc")
+            and mc.title_sim(str(s["cand"].get("title") or ""), str(best["cand"].get("title") or "")) >= 0.85
+            and (s["cand"].get("disc_count") or 1) == (best["cand"].get("disc_count") or 1)
             and not mc._exact_toc(s) and s.get("tracks_ok") and len(s["cand"].get("tracks") or ()) == n
             and abs(float(s["confidence"]) - float(best["confidence"])) < cfg["auto_min_margin"]
             and str(s["cand"]["id"]) not in (album.get("discid_less") or ())]

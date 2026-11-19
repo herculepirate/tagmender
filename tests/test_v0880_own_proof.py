@@ -374,6 +374,13 @@ class DSC14b_TheBoxTheNameNames(te.Base):
         plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", self.on(), tweak=other)
         self.assertGreater(len(plan["albums"]), 1)
 
+    def test_DSC14b_a_box_naming_a_volumes_tracks_otherwise_still_joins_by_their_lengths(self):
+        def renamed(rel):
+            for i, t in enumerate(rel["media"][0]["tracks"]):
+                t["title"] = f"Rio {i}"
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", self.on(), tweak=renamed)
+        self.assertEqual([len(a["files"]) for a in plan["albums"]], [12])
+
     def test_DSC14b_a_disc_on_its_own_release_where_the_box_disc_has_another_id_stays_apart(self):
         def other_id(rel):
             rel["media"][1]["discs"] = [{"id": "SomeOtherDiscId0000000000000-"}]

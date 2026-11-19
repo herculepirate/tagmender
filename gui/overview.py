@@ -2950,6 +2950,7 @@ class Overview(QWidget):
         words = (tr("Job {0}: ").format(res["job"]) if res.get("job") else "") + \
             (counts_text(res["counts"]) or tr("Nothing was changed"))
         self.win.statusBar().showMessage(words, 10000)
+        self.summary.setText(words)                         # (its progress line never left behind)
         notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))
         self.win.pages["Jobs"].reload()
         self.win.refresh_attention_badge(self.path)
@@ -2965,6 +2966,7 @@ class Overview(QWidget):
     def apply_alongside_failed(self, msg):
         self.apply_bar.finish(0, error=True)
         self.alongside_ended()
+        self.summary.setText(tr("The apply beside the look-up did not finish"))
         sheets.warning(self, tr("That did not work."), msg)
 
     def apply(self):

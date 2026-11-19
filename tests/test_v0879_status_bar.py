@@ -34,6 +34,23 @@ class StatusBarText(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(ov.counts_line.isVisibleTo(bar))
 
+    def test_the_counts_stay_off_other_pages_after_a_message(self):
+        ov = self.win.pages["Overview"]
+        bar = self.win.statusBar()
+        self.win.go("History")
+        self.app.processEvents()
+        bar.showMessage("x", 50)
+        bar.clearMessage()
+        self.app.processEvents()
+        self.assertFalse(ov.counts_line.isVisibleTo(bar))
+        bar.showMessage("y")
+        self.win.go("Overview")
+        self.app.processEvents()
+        self.assertFalse(ov.counts_line.isVisibleTo(bar))       # (back on the Overview, a message up)
+        bar.clearMessage()
+        self.app.processEvents()
+        self.assertTrue(ov.counts_line.isVisibleTo(bar))
+
     def test_apply_beside_a_look_up_says_its_progress_in_the_summary(self):
         import inspect
         from gui import overview

@@ -205,7 +205,7 @@ class Main(QMainWindow):
         self.statusBar().addWidget(ov.counts_line)
         # (a temporary message is drawn where the counts are: they step aside while it shows, and
         # come back when it ends - two texts never drawn over each other)
-        self.statusBar().messageChanged.connect(lambda m, w=ov.counts_line: w.setVisible(not m))
+        self.statusBar().messageChanged.connect(lambda _m: self.show_counts_line())
         self.statusBar().addPermanentWidget(ov.apply_bar)   # (an Apply's progress: shown while it runs)
         self.statusBar().addPermanentWidget(ov.summary, 1)
         ov.panes.bottom.addActions([self.commands[k] for k in actmod.SCOPED if k != "play_pause"])
@@ -634,6 +634,13 @@ class Main(QMainWindow):
         from . import script_editor
         return script_editor.open_editor(self, name, album)
 
+    def show_counts_line(self):
+        """The Overview's counts at the status bar's left end: shown on the Overview only, and not
+        while a temporary message is drawn there (never two texts over each other)."""
+        ov = self.pages.get("Overview") if hasattr(self, "pages") else None
+        if ov is not None and hasattr(ov, "counts_line"):
+            ov.counts_line.setVisible(self.showing("Overview") and not self.statusBar().currentMessage())
+
     def update_album_actions(self):
         """Every command is enabled only where it can act: the page shown and its selection."""
         if not hasattr(self, "stack"):
@@ -711,8 +718,9 @@ class Main(QMainWindow):
         on_album_page = any(page is self.pages.get(n) for n in ALBUM_PAGES)
         for k in ("show_inspector", "tab_tags", "tab_artwork", "tab_evidence"):
             self.commands[k].setEnabled(on_album_page)
-        for w in (ov.counts_line, ov.summary) if ov is not None else ():
-            w.setVisible(on_ov)
+        if ov is not None:
+            ov.summary.setVisible(on_ov)
+        self.show_counts_line()
         for k in ("search_web", "open_folder", "copy_path"):
             self.commands[k].setEnabled(bool(kind) and idle)
         self.commands["use_release"].setEnabled(kind == "overview" and idle)

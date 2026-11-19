@@ -2897,11 +2897,13 @@ class Overview(QWidget):
             self.states[id(a)] = "applying"
             self.model.refresh_rows()
             self.apply_bar.album_started(i)
-            self.win.statusBar().showMessage(tr("Beside the look-up: {name}").format(name=Path(news[3]).name))
+            # (in the status bar's own label, as an Apply alone says it: a temporary message would be
+            # drawn over the album counts at its left end)
+            self.summary.setText(tr("Beside the look-up: {name}").format(name=Path(news[3]).name))
         elif kind == "file":
             _k, _i, j, n, f = news
             self.apply_bar.file(i, j, n)
-            self.win.statusBar().showMessage(tr("Beside the look-up: {name} — file {0} of {m}").format(
+            self.summary.setText(tr("Beside the look-up: {name} — file {0} of {m}").format(
                 j + 1, name=Path(a["source_dir"]).name, m=n))
         elif kind == "album":
             self.mark_applied(a, news[2])
@@ -2948,6 +2950,7 @@ class Overview(QWidget):
         words = (tr("Job {0}: ").format(res["job"]) if res.get("job") else "") + \
             (counts_text(res["counts"]) or tr("Nothing was changed"))
         self.win.statusBar().showMessage(words, 10000)
+        self.summary.setText(words)                         # (its progress line never left behind)
         notify(self.win, "finished", tr("Apply finished"), counts_text(res["counts"]))
         self.win.pages["Jobs"].reload()
         self.win.refresh_attention_badge(self.path)
@@ -2963,6 +2966,7 @@ class Overview(QWidget):
     def apply_alongside_failed(self, msg):
         self.apply_bar.finish(0, error=True)
         self.alongside_ended()
+        self.summary.setText(tr("The apply beside the look-up did not finish"))
         sheets.warning(self, tr("That did not work."), msg)
 
     def apply(self):

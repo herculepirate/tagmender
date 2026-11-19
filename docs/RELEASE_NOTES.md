@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.8.83
+
+- An album is no longer called "Mono" because one disc of its box holds a few mono tracks. Discogs's "Mono" names the version only when nothing else in the release says Stereo, Quadraphonic or Multichannel (ED-9). A deluxe SACD set whose bonus CD mixes mono demos with stereo live takes was filed "[Remastered, Mono]"; it is "[Remastered]".
+
 ## 0.8.82
 
 - The Cover pane shows the cover you choose. A cover chosen for the album shown (Choose Cover…, a found cover, an image file or link) was taken, and Apply would have written it, but the pane beside the tags kept showing the cover it had read before. It now shows your image at once, its size and "your image" with it.

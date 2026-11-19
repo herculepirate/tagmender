@@ -8257,11 +8257,25 @@ def _mb_version(rel) -> tuple:
     return _title_marks(rel.get("title")), ""
 
 
+# (ED-9: a release whose formats also say Stereo or a multichannel layout is no mono version:
+# "Mono" there describes some of its tracks or one disc of the box - a bonus CD of mono demos
+# and stereo live takes, "CD, Compilation, Stereo, Mono" - not the album's sound)
+_NOT_MONO = {"stereo", "quadraphonic", "multichannel", "surround"}
+
+
+def _mixed_mono(words) -> bool:
+    """WORDS (a release's format descriptions, folded) say Mono beside Stereo or multichannel."""
+    w = set(words)
+    return "mono" in w and bool(w & _NOT_MONO)
+
+
 def _dg_format_key(fmt_text, title="") -> str:
     """A Discogs version's key from its format text ("CD, Album, Remastered" in a master's
     version list; the release's descriptions and free text) and its title."""
-    parts = [x.strip() for x in str(fmt_text or "").split(",")]
-    words = sorted({mc.fold(x) for x in parts if mc.fold(x) in DISCOGS_VERSIONS or _version_key(x)})
+    parts = [x.strip() for x in re.split(r"[,;]", str(fmt_text or ""))]
+    mixed = _mixed_mono(mc.fold(x) for x in parts)
+    words = sorted({mc.fold(x) for x in parts if (mc.fold(x) in DISCOGS_VERSIONS or _version_key(x))
+                    and not (mixed and mc.fold(x) == "mono")})
     return " ".join(words + ([_title_marks(title)] if _title_marks(title) else []))
 
 
@@ -8280,10 +8294,13 @@ def _dg_version(det, text_only=False) -> tuple:
     texts = [str(f.get("text") or "").strip() for f in fmts]
     descs = [str(d) for f in fmts for d in f.get("descriptions") or []]
     key = _dg_format_key(", ".join(descs + texts), det.get("title"))
-    parts = [p for t in texts for p in _version_parts(t) if not text_only or _named_version(p)]
+    mixed = _mixed_mono(mc.fold(d) for d in descs)
+    parts = [p for t in texts for p in _version_parts(t) if (not text_only or _named_version(p))
+             and not (mixed and mc.fold(p) == "mono")]
     shown = ", ".join(dict.fromkeys(parts))
     if not shown and not text_only:
-        shown = ", ".join(dict.fromkeys(DISCOGS_VERSIONS[mc.fold(d)] for d in descs if mc.fold(d) in DISCOGS_VERSIONS))
+        shown = ", ".join(dict.fromkeys(DISCOGS_VERSIONS[mc.fold(d)] for d in descs if mc.fold(d) in DISCOGS_VERSIONS
+                                        and not (mixed and mc.fold(d) == "mono")))
     return (key, shown) if shown else ("", "")
 
 

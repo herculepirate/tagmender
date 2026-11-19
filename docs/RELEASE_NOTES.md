@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.8.80
+
+**Multi-disc sets: your copy's own proof decides**
+- Checked on 67 multi-disc sets against their evidence (disc IDs from the rip logs, barcodes, track lengths): 9 were wrong in 0.8.78, none now; 50 are matched, 17 held with a stated reason.
+- What your copy proves wins over quirks of the database listings: a release ID already in your tags is always a candidate (and a broken database answer is asked again); a box's video discs no longer hold its CDs; a disc marker ("CD10") is never taken for a catalogue number; a set's discs crediting their own performers stay one set; your scanned barcode decides; another edition's scans in their own dated folder are not your copy's print.
+- Boxes named as such are matched as the box when their disc IDs or rip logs prove it (13-CD and 4-CD sets of separate albums included); separate releases are never joined, and a disc that only its track lengths place in a box holds the album for your decision, its note saying where each disc's ID really lies. Ticked, it is written disc by disc ("disc 2 of 13") and recorded as your choice.
+- Track lengths alone never prove a disc or a pressing; two pressings that fit equally are proposed, not written; nothing below your profile's confidence threshold is written unasked.
+- Tracks the release puts on another disc move into that disc's folder (with its logs when a whole disc moves).
+
 ## 0.8.79
 
 - The status bar never draws two texts over each other: applying beside a look-up said its progress over the album counts ("Beside the look-up: ..." on top of "1 album ready ..."). Its progress is now said where an Apply's always is, the counts step aside while any message shows, and they stay off other pages.

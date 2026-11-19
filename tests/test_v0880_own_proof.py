@@ -227,6 +227,18 @@ class DSC2b_PerDiscAlbumArtists(te.Base):
                          [("ready", "mb-bach", 9)], [a["identification"].get("why") for a in plan["albums"]])
 
 
+class NAM12_RolesInBrackets(unittest.TestCase):
+    def test_NAM12_a_performers_role_is_no_part_of_the_name(self):
+        a = "Wieland Kuijken (violoncello, violoncello piccolo, basse de viole)"
+        self.assertGreaterEqual(mc.artist_sim(a, "Wieland Kuijken"), 0.95)
+        self.assertGreaterEqual(mc.artist_sim(a + ", Piet Kuijken (clavecin)", "Wieland Kuijken, Piet Kuijken"), 0.95)
+        self.assertLess(mc.artist_sim("Anna Other (violin)", "Wieland Kuijken"), 0.5)
+
+    def test_NAM12_a_credit_with_brackets_of_its_own_is_compared_whole(self):
+        self.assertEqual(mc.artist_sim("Band (UK)", "Band (UK)"), 1.0)
+        self.assertLess(mc.artist_sim("Prince (2)", "Prince"), 0.9)      # (a Discogs number: not a role)
+
+
 # ---- DSC-14b -------------------------------------------------------------------------------
 class DSC14b_TheBoxTheNameNames(te.Base):
     BOX = "Band Q Medicine Show: The Brick"

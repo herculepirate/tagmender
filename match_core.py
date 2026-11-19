@@ -585,9 +585,22 @@ def expand_initials(tag_artist, cand_artist):
     return out
 
 
+_ROLE_BRACKETS = re.compile(r"\s*\((?=[^)]*[a-z])[^()]*\)")
+
+
 def artist_sim(tag_artist, cand_artist):
     """Order-insensitive; ignores joiners ("&", "and", "feat."), so
-    'Max Corbacho; Bruno Sanfilippo' ~ 'Bruno Sanfilippo & Max Corbacho'."""
+    'Max Corbacho; Bruno Sanfilippo' ~ 'Bruno Sanfilippo & Max Corbacho'. NAM-12: each name's
+    role in brackets ("Wieland Kuijken (violoncello, basse de viole), Piet Kuijken (clavecin)")
+    is no part of the name when the database's credit gives none."""
+    if "(" in str(tag_artist or "") and "(" not in str(cand_artist or ""):
+        bare = _ROLE_BRACKETS.sub("", str(tag_artist)).strip()
+        if bare and bare != str(tag_artist).strip():
+            return max(_artist_sim(tag_artist, cand_artist), _artist_sim(bare, cand_artist))
+    return _artist_sim(tag_artist, cand_artist)
+
+
+def _artist_sim(tag_artist, cand_artist):
     tag_artist = expand_initials(tag_artist, cand_artist)
     a, b = _artist_tokens(tag_artist), _artist_tokens(cand_artist)
     if not a or not b:

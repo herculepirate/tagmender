@@ -203,6 +203,9 @@ class Main(QMainWindow):
         self.statusBar().addPermanentWidget(self.service_badge)
         ov = self.pages["Overview"]
         self.statusBar().addWidget(ov.counts_line)
+        # (a temporary message is drawn where the counts are: they step aside while it shows, and
+        # come back when it ends - two texts never drawn over each other)
+        self.statusBar().messageChanged.connect(lambda m, w=ov.counts_line: w.setVisible(not m))
         self.statusBar().addPermanentWidget(ov.apply_bar)   # (an Apply's progress: shown while it runs)
         self.statusBar().addPermanentWidget(ov.summary, 1)
         ov.panes.bottom.addActions([self.commands[k] for k in actmod.SCOPED if k != "play_pause"])

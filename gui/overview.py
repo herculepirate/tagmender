@@ -957,6 +957,7 @@ class Overview(QWidget):
             return
         self._profile_pane = "folders"
         self.show_profile_choice()
+        self.show_ready()                                 # (APL-2: what Apply would carry out has changed)
         self.win.update_album_actions()
 
     def leave_out(self, out):
@@ -973,7 +974,11 @@ class Overview(QWidget):
         if self.running and self.may_apply_now():
             # (an album the look-up brings in meanwhile is not among them: left out when it ends)
             self._apply_only = {self.album_key(a) for a in chosen}
-        self.apply()
+        self._apply_exact = ids                         # (APL-2: exactly these, not others highlighted)
+        try:
+            self.apply()
+        finally:
+            self._apply_exact = None
 
     def remove_selected(self):
         """Take the selected albums out of this preview (their folders and files are not touched)."""
@@ -1144,7 +1149,7 @@ class Overview(QWidget):
         # (EDT-2: Save Tags writes files in the list's folders - what is dropped meanwhile waits for it
         # and is added when it ends, never read while it writes)
         applying = getattr(self, "_applying", False) and kind != "save"
-        side = getattr(self, "apply_worker", None) is not None      # (APL-1: an Apply beside the look-up)
+        side = getattr(self, "apply_worker", None) is not None      # (APL-2: an Apply beside the look-up)
         # (a look-up, an Apply not touching them, or folders being added - not overlapping those:
         # read now, put under the list, queued. A refile waits: its albums take their rows' places
         # when it ends, and a folder of them read meanwhile would be listed twice)
@@ -2221,9 +2226,12 @@ class Overview(QWidget):
         was = self.selected()
         rows = [r for r, a in enumerate(self.model.albums) if self.album_key(a) in keys]
         out = {self.album_key(self.model.albums[r]) for r in rows if self.model.albums[r].get(PlanModel.LEAVE_OUT)}
+        wait = {self.album_key(self.model.albums[r]) for r in rows if self.model.albums[r].get(PlanModel.AWAIT)}
         for a in found:
             if self.album_key(a) in out:
                 a[PlanModel.LEAVE_OUT] = True
+            if self.album_key(a) in wait:
+                a[PlanModel.AWAIT] = True
         mine = was is not None and any(was is self.model.albums[r] for r in rows)
         at = self.model.replace_rows(rows, found)
         self.plan["listed"] = any(a["status"] == "listed" for a in self.model.albums)
@@ -2255,7 +2263,7 @@ class Overview(QWidget):
         self.check_stale()
         if getattr(self, "apply_worker", None) is None:
             self.sort_by_status()
-        # (APL-1: an Apply beside it goes on - the rows stay put, not sorted: sorted once it ends)
+        # (APL-2: an Apply beside it goes on - the rows stay put, not sorted: sorted once it ends)
         self.show_counts()
         self.refresh_overrides()
         self.busy(False)
@@ -2713,15 +2721,42 @@ class Overview(QWidget):
         self._counts_memo = None
 
     def to_apply(self):
-        """The albums Apply carries out: those with changes, unless left out (unticked); with
-        rows you highlighted, only those of them, even one (the others stay as they are: a row
-        highlighted only to show it, show_row, chooses nothing; nor does one just unticked)."""
+        """The albums Apply carries out (APL-2): every ticked album with changes, and every album
+        you highlighted - its row in Albums as they will be, or its folder or a file of it in Your
+        files - even one you unticked, in the list's order. A row highlighted only to show it
+        (show_row) chooses nothing. Apply This Album… / Apply Selected Albums… carry out exactly
+        theirs (_apply_exact)."""
         albums = self.applicable()
-        chosen = self.selected_albums() if hasattr(self, "table") and getattr(self, "_rows_chosen", False) else []
-        if chosen and not all(PlanModel.left_out(a) for a in chosen):
-            ids = {id(a) for a in chosen}
-            albums = [a for a in albums if id(a) in ids]
-        return albums
+        exact = getattr(self, "_apply_exact", None)
+        if exact is not None:
+            return [a for a in albums if id(a) in exact]
+        # (MOV-6: an Unresolved album is filed by its own tick or Use … and File It…, never by a
+        # highlight - a click to look at it)
+        ids = {id(a) for a in self.highlighted_albums() if self.highlight_applies(a)}
+        if not ids:
+            return albums
+        ticked = {id(a) for a in albums}
+        return [a for a in (self.plan or {}).get("albums") or [] if id(a) in ticked or id(a) in ids]
+
+    @staticmethod
+    def highlight_applies(a) -> bool:
+        """APL-2: a highlight adds album A to Apply - unless TagMender waits for your tick on it: an
+        Unresolved album (MOV-6), one held (WEB-1), one whose filing is offered (MOV-6: the tick is
+        the ask, a highlight would only tag it where it is), or a release you chose shown to be
+        checked first (Use … and File It…)."""
+        from .models import offered
+        return can_apply(a) and a.get("status") != "unresolved" and not planmod.held(a) and not offered(a) \
+            and not a.get(PlanModel.AWAIT)
+
+    def highlighted_albums(self) -> list:
+        """The albums you highlighted in either pane (APL-2), once each."""
+        if not hasattr(self, "table"):
+            return []
+        out = list(self.selected_albums()) if getattr(self, "_rows_chosen", False) else []
+        if self.panes.folder_view.selectionModel().hasSelection():
+            seen = {id(a) for a in out}
+            out += [a for a in self.panes.folder_albums() if id(a) not in seen]
+        return out
 
     def apply_words(self):
         """The Apply sheet: (headline, what changes, how to undo, button), from each album's own
@@ -2771,7 +2806,7 @@ class Overview(QWidget):
                 tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), tr("Apply {n} {0}").format(word, n=n))
 
     def may_apply_now(self) -> bool:
-        """Apply can be asked: nothing runs, or a look-up does (APL-1: alongside it, or it stops
+        """Apply can be asked: nothing runs, or a look-up does (APL-2: alongside it, or it stops
         after its album first); not while an Apply runs alongside a look-up already."""
         if getattr(self, "apply_worker", None) is not None:
             return False
@@ -3360,7 +3395,7 @@ class Overview(QWidget):
 
     def cancel(self):
         if getattr(self, "apply_worker", None) is not None:
-            self.apply_worker.cancelled = True              # (APL-1: the Apply beside it stops too)
+            self.apply_worker.cancelled = True              # (APL-2: the Apply beside it stops too)
         if self.worker:
             self.worker.cancelled = True
             self._apply_next, self._apply_only = False, None   # (Cancel stops it all, Apply too)
@@ -3506,6 +3541,7 @@ class Overview(QWidget):
         for f in files:
             self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
         a[PlanModel.LEAVE_OUT] = True                       # (its new row: unticked until you tick it)
+        a[PlanModel.AWAIT] = True                          # (APL-2: no highlight applies it)
         self.edited(a)
         self.look_up(self.sources.currentData() or "profile", self.with_versions([a]), again=True)
         self.win.statusBar().showMessage(tr("Showing {0} for {1}: tick it to apply.").format(
@@ -3555,6 +3591,7 @@ class Overview(QWidget):
             for f in mine:
                 self.file_anyway.pop(f, None)
             a[PlanModel.LEAVE_OUT] = True                   # (looked up again: not applied unasked meanwhile)
+            a[PlanModel.AWAIT] = True                          # (APL-2: no highlight applies it)
         self.look_up(self.sources.currentData() or "profile", self.with_versions(albums), again=True)
         self.win.statusBar().showMessage(tr("Release choice undone for {0}: looked up again.").format(
             plural(len(albums), tr("album"), tr("albums"))), 10000)

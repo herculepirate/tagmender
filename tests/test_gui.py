@@ -219,7 +219,8 @@ class Gui(te.Base):
         self.assertEqual(tagio.read(self.d / "01.flac")["discogs_release_id"], ["920"])
 
     def test_apply_with_rows_highlighted_applies_only_those(self):
-        from PySide6.QtCore import QItemSelectionModel
+        # (APL-2, 2026-11-19: the ticked albums AND the highlighted ones, even unticked; the name
+        # is kept for the classes that inherit it)
         ov = self.win.pages["Overview"]
         a1 = {"source_dir": "/x/A", "status": "ready", "files": [{"src": "/x/A/1.flac", "dst": "/x/A/1.flac",
               "op": "tag", "changes": {"title": ["t"]}, "diff": []}], "conflicts": [], "identification": {}, "notes": []}
@@ -228,34 +229,22 @@ class Gui(te.Base):
         ov.plan = {"albums": [a1, a2, a3], "profile": "Auto"}
         ov.model.set_plan(ov.plan)
         ov.table.clearSelection()
+        self.assertEqual(len(ov.to_apply()), 3)                       # (none highlighted: every ticked album)
         ov.table.selectRow(0)
-        self.assertEqual(ov.to_apply(), [a1])                         # (one row: only that one)
+        self.assertEqual(len(ov.to_apply()), 3)                       # (a highlight never takes a tick away)
+        ov.model.set_left_out([a2, a3], True)
+        self.assertEqual(ov.to_apply(), [a1])
         self.assertIn("1 album", ov.apply_words()[0])
+        ov.table.selectRow(1)                                         # (highlighted though unticked: applied)
+        self.assertEqual(ov.to_apply(), [a1, a2])
         ov.table.clearSelection()
-        self.assertEqual(len(ov.to_apply()), 3)                       # (none: every ticked album)
-        ov.show_row(0)
-        self.assertEqual(len(ov.to_apply()), 3)                       # (highlighted only to show it)
-        ov.table.selectRow(1)
-        self.assertEqual(ov.to_apply(), [a2])
-        ov.model.set_left_out([a2], True)                             # (just unticked: the ticks decide)
-        self.assertEqual(ov.to_apply(), [a1, a3])
-        ov.model.set_left_out([a2], False)
-        done = dict(a1, status="done", source_dir="/x/D")
-        ov.plan = {"albums": [a1, a2, a3, done], "profile": "Auto"}
-        ov.model.set_plan(ov.plan)
-        ov.table.selectRow(ov.proxy.mapFromSource(ov.model.index(3, 0)).row())
-        self.assertEqual(ov.to_apply(), [])                           # (a row with nothing to apply: nothing)
-        ov.plan = {"albums": [a1, a2, a3], "profile": "Auto"}
-        ov.model.set_plan(ov.plan)
-        ov.table.clearSelection()
-        ov.table.selectRow(0)
-        for a in (a1, a3):
-            ov.table.selectionModel().select(ov.proxy.mapFromSource(ov.model.index(ov.model.albums.index(a), 0)),
-                                             QItemSelectionModel.Select | QItemSelectionModel.Rows)
-        ov.table.selectionModel().select(ov.proxy.mapFromSource(ov.model.index(ov.model.albums.index(a2), 0)),
-                                         QItemSelectionModel.Deselect | QItemSelectionModel.Rows)
-        self.assertEqual({a["source_dir"] for a in ov.to_apply()}, {"/x/A", "/x/C"})
+        self.assertEqual(ov.to_apply(), [a1])
+        ov.show_row(1)
+        self.assertEqual(ov.to_apply(), [a1])                         # (highlighted only to show it: nothing)
+        ov.table.selectRow(2)
+        self.assertEqual(ov.to_apply(), [a1, a3])                     # (ticked plus highlighted, in order)
         self.assertIn("2 albums", ov.apply_words()[0])
+        ov.model.set_left_out([a1, a2, a3], False)
         ov.plan = None
         ov.model.set_plan(None)
 

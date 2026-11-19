@@ -105,18 +105,51 @@ class DSC14_DiscIdSets(te.Base):
         self.assertEqual({g.set_shape for g in gs}, {""})
 
     def test_DSC14_disc_ids_all_on_one_release_join_past_eight_folders(self):
+        # (each disc's ID also on a one-disc release of another title - a promo, a sampler - but
+        # on no release of its own album's title: the set)
         top = sessions(self.lib)
-        on = {k: [("mb-set", k, N), (f"mb-vol{k}", 1, 1)] for k in range(1, N + 1)}
+        on = {k: [("mb-set", k, N), (f"mb-promo{k}", 1, 1)] for k in range(1, N + 1)}
         http = DiscIdHttp(on, mb=[the_set("mb-set")])
         _eng, plan = self.plan_of(http, top)
         self.assertEqual(len(plan["albums"]), 1, [a.get("status") for a in plan["albums"]])
         a = plan["albums"][0]
-        self.assertEqual((a["identification"]["release_id"], len(a["files"])), ("mb-set", 3 * N), a.get("notes"))
+        self.assertEqual((a["identification"]["release_id"], len(a["files"])), ("mb-set", 3 * N), (a["status"], a.get("notes"), a["identification"]))
         self.assertTrue(any("disc IDs all on MusicBrainz release mb-set" in x for x in a.get("notes") or []),
                         a.get("notes"))
         discs = [(Path(f["src"]).parent.name, (f.get("changes") or {}).get("discnumber", ["?"])[0])
                  for f in a["files"]]
         self.assertEqual(sorted(set(discs)), sorted({(f"Disc {k}", str(k)) for k in range(1, N + 1)}))
+
+    def test_DSC14_standalone_albums_also_boxed_stay_apart(self):
+        # (each disc's ID on the box AND on a one-disc release of its own album's title, the folder
+        # saying no set: the standalone albums they are - never the box)
+        top = sessions(self.lib)
+        on = {k: [("mb-set", k, N), (f"Medicine Show {k}", 1, 1)] for k in range(1, N + 1)}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set")]), top)
+        self.assertGreater(len(plan["albums"]), 1)
+        self.assertFalse(any("disc IDs all on" in n for a in plan["albums"] for n in a.get("notes") or []))
+
+    def test_DSC14_one_standalone_album_also_boxed_keeps_them_all_apart(self):
+        # (disc 1's ID on the box only - its own album's release has none attached - discs 2 and 3
+        # on the box and on their own albums' releases: any one such disc keeps them apart)
+        top = sessions(self.lib, n=3, name="Band Q - Original Albums")
+        on = {1: [("mb-set", 1, 3)], 2: [("mb-set", 2, 3), ("Medicine Show 2", 1, 1)],
+              3: [("mb-set", 3, 3), ("Medicine Show 3", 1, 1)]}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set", n=3)]), top)
+        self.assertGreater(len(plan["albums"]), 1)
+        self.assertFalse(any("disc IDs all on" in n for a in plan["albums"] for n in a.get("notes") or []))
+
+    def test_DSC14_standalone_albums_also_boxed_in_a_folder_named_a_box_join(self):
+        top = sessions(self.lib, name="Band Q - The Brick [10CD Box Set]")
+        on = {k: [("mb-set", k, N), (f"Medicine Show {k}", 1, 1)] for k in range(1, N + 1)}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set")]), top)
+        self.assertEqual(len(plan["albums"]), 1)
+
+    def test_DSC14_an_artists_folder_joins_only_when_named_as_the_set(self):
+        top = sessions(self.lib, n=3, name="Band Q - Discografia")
+        on = {k: [("mb-set", k, 3)] for k in range(1, 4)}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set", n=3)]), top)
+        self.assertEqual(len(plan["albums"]), 3)
 
     def test_DSC14_several_pressings_holding_them_all_are_joined_never_guessed(self):
         top = sessions(self.lib, n=3)

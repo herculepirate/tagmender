@@ -77,6 +77,40 @@ class TRK8_ReleaseView(unittest.TestCase):
                          (2, 4, "Bonus", 100, ()))
         self.assertIsNone(mc.release_view(album, cand(D1, D2)))
 
+    def test_TRK8_a_title_on_two_discs_is_never_placed_by_likeness(self):
+        # (a studio disc and a live disc with the same songs, the folders labelled the wrong way
+        # round: "Song A" fits both discs' "Song A" - their lengths 2 s apart tell nothing)
+        rel = [track(1, "Song A", 240), track(1, "Song B", 200), track(1, "Studio Only", 300),
+               track(2, "Song A", 242), track(2, "Song B", 203), track(2, "Live Only", 310)]
+        album = files_of((1, 1, "Song A", 242, ()), (1, 2, "Song B", 203, ()), (1, 3, "Live Only", 310, ()),
+                         (2, 1, "Song A", 240, ()), (2, 2, "Song B", 200, ()), (2, 3, "Studio Only", 300, ()))
+        self.assertIsNone(mc.release_view(album, cand(rel[:3], rel[3:])))
+
+    def test_TRK8_a_title_on_two_discs_is_placed_by_its_id_or_lengths_far_apart(self):
+        d1 = [track(1, "Song A", 240), track(1, "Song B", 200), track(1, "Studio Only", 300)]
+        d2 = [track(2, "Song A", 420), track(2, "Song B", 380), track(2, "Live Only", 310)]
+        album = files_of((1, 1, "Song A", 420, ()), (1, 2, "Song B", 380, ()), (1, 3, "Live Only", 310, ()),
+                         (2, 1, "Song A", 240, ()), (2, 2, "Song B", 200, ()), (2, 3, "Studio Only", 300, ()))
+        self.assertEqual(mc.release_view(album, cand(d1, d2))["slots"], [3, 4, 5, 0, 1, 2])
+        near = [track(2, "Song A", 242), track(2, "Song B", 203), track(2, "Live Only", 310)]
+        album = files_of((1, 1, "Song A", 242, ["rec-Song A-live"]), (1, 2, "Song B", 203, ["trk-live-b"]),
+                         (1, 3, "Live Only", 310, ()), (2, 1, "Song A", 240, ()), (2, 2, "Song B", 200, ()),
+                         (2, 3, "Studio Only", 300, ()))
+        c = cand(d1, near)
+        c["tracks"][3]["rec_id"], c["tracks"][4]["track_id"] = "rec-Song A-live", "trk-live-b"
+        self.assertIsNone(mc.release_view(album, c))      # (two files by ID; "Song A" 240 s still ambiguous)
+
+    def test_TRK8_a_26_disc_box_is_looked_at_in_well_under_a_second(self):
+        import time
+        tracks = [track(d, f"Track {d}-{i} title words", 180 + (d * 7 + i * 13) % 120)
+                  for d in range(1, 27) for i in range(1, 16)]
+        files = [dict(t, num=(k % 15) + 1, ids=[]) for k, t in enumerate(tracks)]
+        files[0], files[1] = files[1], files[0]
+        t0 = time.monotonic()
+        v = mc.release_view({"tracks": files}, {"tracks": tracks})
+        self.assertLess(time.monotonic() - t0, 1.0)
+        self.assertEqual(v["slots"][:2], [1, 0])
+
     def test_DSC15_disc_marker_with_the_discs_years_is_the_same_album(self):
         t = engine._album_title
         titles = {t({"album": [a]}) for a in ("My Lives [Disc 1]", "My Lives (Disc 2)", "My Lives (Disc 3) 1989-1999",
@@ -86,6 +120,15 @@ class TRK8_ReleaseView(unittest.TestCase):
         self.assertNotEqual(t({"album": ["Hits 1999"]}), t({"album": ["Hits"]}))
 
 
+class DSC15_Years(unittest.TestCase):
+    def test_DSC15_years_join_only_discs_of_different_numbers(self):
+        m = lambda a: {"album": [a], "albumartist": ["X"]}  # noqa: E731
+        metas = {"a": m("Hits (CD 2) 1999"), "b": m("Hits (CD 2) 2001")}
+        self.assertEqual(len(set(engine.album_keys(list(metas), "/x", metas).values())), 2)
+        metas = {"a": m("My Lives [Disc 1]"), "b": m("My Lives (Disc 3) 1989-1999")}
+        self.assertEqual(len(set(engine.album_keys(list(metas), "/x", metas).values())), 1)
+
+
 class TRK8_DSC15_Engine(te.Base):
     def test_TRK8_mislabelled_disc_folders_are_tagged_as_their_own_tracks(self):
         # (the second disc's tracks ripped into "CD1", the first's into "CD2")
@@ -93,7 +136,8 @@ class TRK8_DSC15_Engine(te.Base):
         for folder, prefix, n in (("CD1", "U", 2), ("CD2", "T", 1)):
             for i in range(3):
                 flac(top / folder, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 100 * n + 10 * i,
-                     title=f"{prefix}{i}", album="Double", albumartist="Band", artist="Band", track=str(i + 1))
+                     title=f"{prefix}{i}", album="Double", albumartist="Band", artist="Band", track=str(i + 1),
+                     barcode="0123456789012")             # (the release proven by more than its name)
         eng = self.engine(SetHttp(mb=[two_cd_release("mb-2", "Band", "Double")]))
         [g] = eng.albums_in(self.lib)
         p = eng.identify(g)

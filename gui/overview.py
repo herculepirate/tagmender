@@ -2075,6 +2075,9 @@ class Overview(QWidget):
             by_root = {}                                    # (the folder each album is read from)
             for k in ks:
                 by_root.setdefault(roots.get(k) or path, []).append(k)
+            # DSC-10/DSC-11: sibling album folders a release may join, each read from its own
+            # folder (added one by one), are looked up from their parent, as a plan of it would
+            by_root = engine.set_sibling_roots(profs[name], by_root)
             for where, kr in by_root.items():
                 # LKP-1: the batch's albums, which an album asked for meanwhile (this profile, these
                 # sources, this folder) joins: started as soon as one of its workers is free

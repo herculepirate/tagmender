@@ -1656,6 +1656,82 @@ def _album_like(sc, folder: Path) -> bool:
     return bool(audio) or any(_disc_like(folder, x) for x in dirs)
 
 
+def _own_roots(prof) -> set:
+    """DSC-11: the profile's own folders themselves - its library (filing roots) and watched
+    folders - real paths: never the parent of one release's album folders."""
+    try:
+        import profiles
+        roots = {os.path.realpath(os.path.expanduser(str(r))) for r in
+                 profiles.filing_roots(getattr(prof, "data", prof)) if r}
+        roots |= {os.path.realpath(os.path.expanduser(str(x.get("path"))))
+                  for x in (prof.get("sources") or []) if isinstance(x, dict) and x.get("path")}
+    except Exception:
+        roots = set()
+    return roots
+
+
+def set_sibling_roots(prof, by_root) -> dict:
+    """DSC-10/DSC-11: the albums of one look-up by the folder each is read from (BY_ROOT, {root:
+    [album keys]}: the app reads a folder added to its list from that folder), with the albums
+    whose album folders are siblings a release may join - their names one release's
+    (one_release_pairs; an album-named parent's titled discs, titled_disc_set), or each beginning
+    with its own number or disc word (DSC-10's numbered folders, release_set_shape) - read
+    from their common parent when they were read from different folders: planned from their
+    own folders, nothing is below them to join, while a plan of the parent joins them (each
+    stays its own album unless the release proves them one: Engine.identify_all decides, as
+    always). Only the names are asked here (no folder is read); never a parent that is the
+    profile's library or a watched folder (_own_roots), as _one_release_units; siblings read
+    from one folder already keep it, and the others their own. Returns {root: [keys]}."""
+    folder_of = {k: Path(str(k).split("|", 1)[0]) for ks in by_root.values() for k in ks if k}
+    root_of = {k: r for r, ks in by_root.items() for k in ks}
+    by_parent = {}
+    for k, d in folder_of.items():
+        if d.parent != d:
+            by_parent.setdefault(d.parent, {}).setdefault(d.name, []).append(k)
+    own, move = None, {}
+    for parent, names in by_parent.items():
+        if len(names) < 2:
+            continue
+        up = {n: n for n in names}
+
+        def top(n):
+            while up[n] != n:
+                up[n] = up[up[n]]
+                n = up[n]
+            return n
+        for x, y in one_release_pairs(list(names)):
+            up[top(y)] = top(x)
+        if titled_disc_set(parent.name, names):              # (DSC-11: "2016 - Title/The Album", "/The Story")
+            for n in names:
+                up[top(n)] = top(min(names))
+        lead = {n: _LEAD_NUMBER.match(n) for n in names}
+        numbered = [n for n in names if lead[n]]
+        if 2 <= len(numbered) <= SET_TRIAL_MAX_DISCS and \
+                len({int(lead[n][1]) for n in numbered}) == len(numbered):     # (DSC-10: each number once)
+            for n in numbered:
+                up[top(n)] = top(numbered[0])
+        clusters = {}
+        for n in names:
+            clusters.setdefault(top(n), []).append(n)
+        for ms in clusters.values():
+            keys = [k for n in ms for k in names[n]]
+            if len(ms) < 2 or len(ms) > SET_TRIAL_MAX_DISCS or len({root_of[k] for k in keys}) < 2:
+                continue
+            if own is None:
+                own = _own_roots(prof)
+            if os.path.realpath(str(parent)) in own:
+                continue
+            for k in keys:
+                move[k] = str(parent)
+    if not move:
+        return by_root
+    out = {}
+    for r, ks in by_root.items():
+        for k in ks:
+            out.setdefault(move.get(k, r), []).append(k)
+    return out
+
+
 def _one_release_units(eng, sc, d: Path, names) -> list:
     """DSC-11: the sub-folders of D read together because a release may join them
     (one_release_pairs): album-like folders only (_album_like), never in a watched folder, a
@@ -1673,16 +1749,7 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
                 pairs = [(kids[0], k) for k in kids[1:]]
     if not pairs:
         return []
-    try:
-        import profiles
-        prof = eng.profile
-        roots = {os.path.realpath(os.path.expanduser(str(r))) for r in
-                 profiles.filing_roots(getattr(prof, "data", prof)) if r}
-        roots |= {os.path.realpath(os.path.expanduser(str(x.get("path"))))
-                  for x in (prof.get("sources") or []) if isinstance(x, dict) and x.get("path")}
-    except Exception:
-        roots = set()
-    if os.path.realpath(str(d)) in roots:
+    if os.path.realpath(str(d)) in _own_roots(eng.profile):
         return []
     like = {}
 

@@ -552,6 +552,9 @@ class Overview(QWidget):
         fv.customContextMenuRequested.connect(lambda pos: self.context_menu(pos, folders=True))
         fv.selectionModel().selectionChanged.connect(self.folders_chosen)
         self.model.ticked.connect(self.win.update_album_actions)
+        self._sel_ticked = set()                              # (APL-2: keys of albums ticked by their highlight)
+        self.model.box_set.connect(lambda albums: self._sel_ticked.difference_update(
+            self.album_key(a) for a in albums))
         # the list's own keys, as in a folder: Delete (or Backspace) takes the selected albums out of
         # the list, Escape lets go of the selection. Taken before the menus' shortcuts (Remove Tag is
         # Del too: two shortcuts on one key and Qt runs neither)
@@ -955,10 +958,16 @@ class Overview(QWidget):
         self.show_profile_choice()
 
     def folders_chosen(self, *_):
-        if self.panes._quiet:
+        if self.panes._quiet:                               # (the album shown, highlighted there too)
+            if not self.panes.folder_view.selectionModel().hasSelection():
+                self._folders_by_you = False                # (let go of with the list's selection)
+                self.sync_ticks()
             return
+        self._folders_by_you = self.panes.folder_view.selectionModel().hasSelection()
         self._profile_pane = "folders"
+        self.sync_ticks()
         self.show_profile_choice()
+        self.show_ready()                                 # (APL-2: what Apply would carry out has changed)
         self.win.update_album_actions()
 
     def leave_out(self, out):
@@ -2351,9 +2360,12 @@ class Overview(QWidget):
         was = self.selected()
         rows = [r for r, a in enumerate(self.model.albums) if self.album_key(a) in keys]
         out = {self.album_key(self.model.albums[r]) for r in rows if self.model.albums[r].get(PlanModel.LEAVE_OUT)}
+        wait = {self.album_key(self.model.albums[r]) for r in rows if self.model.albums[r].get(PlanModel.AWAIT)}
         for a in found:
             if self.album_key(a) in out:
                 a[PlanModel.LEAVE_OUT] = True
+            if self.album_key(a) in wait:
+                a[PlanModel.AWAIT] = True
         mine = was is not None and any(was is self.model.albums[r] for r in rows)
         at = self.model.replace_rows(rows, found)
         self.plan["listed"] = any(a["status"] == "listed" for a in self.model.albums)
@@ -2861,15 +2873,56 @@ class Overview(QWidget):
         self._counts_memo = None
 
     def to_apply(self):
-        """The albums Apply carries out: those with changes, unless left out (unticked); with
-        rows you highlighted, only those of them, even one (the others stay as they are: a row
-        highlighted only to show it, show_row, chooses nothing; nor does one just unticked)."""
-        albums = self.applicable()
-        chosen = self.selected_albums() if hasattr(self, "table") and getattr(self, "_rows_chosen", False) else []
-        if chosen and not all(PlanModel.left_out(a) for a in chosen):
-            ids = {id(a) for a in chosen}
-            albums = [a for a in albums if id(a) in ids]
-        return albums
+        """The albums Apply carries out: the ticked ones with changes (APL-2: a highlighted album is
+        ticked, sync_ticks). An album whose filing you asked for by its tick (MOV-6, offered) waits
+        for the plan that files it: never applied from the plan that only tags it where it is."""
+        from .models import offered
+        return [a for a in self.applicable() if not offered(a)]
+
+    @staticmethod
+    def highlight_applies(a) -> bool:
+        """APL-2: a highlight adds album A to Apply - unless TagMender waits for your tick on it: an
+        Unresolved album (MOV-6), one held (WEB-1), one whose filing is offered (MOV-6: the tick is
+        the ask, a highlight would only tag it where it is), or a release you chose shown to be
+        checked first (Use … and File It…)."""
+        from .models import offered
+        return can_apply(a) and a.get("status") != "unresolved" and not planmod.held(a) and not offered(a) \
+            and not a.get(PlanModel.AWAIT)
+
+    def sync_ticks(self):
+        """APL-2 (2026-11-19): a highlighted album is ticked, and its highlight taken away, the
+        tick it gave goes too (kept by album key: a look-up's new row of it is the same album).
+        A box you clicked is yours (box_set): kept as you set it. Albums TagMender waits for your
+        tick on (highlight_applies) are not ticked by a highlight."""
+        if not hasattr(self, "table") or getattr(self, "_syncing", False):
+            return
+        if not self._sel_ticked and not getattr(self, "_rows_chosen", False) and \
+                not getattr(self, "_folders_by_you", False):
+            return
+        lit = {self.album_key(a): a for a in self.highlighted_albums() if self.highlight_applies(a)}
+        now = {self.album_key(a): a for a in self.model.albums}
+        on = [a for k, a in lit.items() if k not in self._sel_ticked and PlanModel.left_out(a)]
+        off = [now[k] for k in self._sel_ticked if k not in lit and k in now and not PlanModel.left_out(now[k])]
+        self._sel_ticked = {k for k in self._sel_ticked if k in lit and k in now} | \
+            {self.album_key(a) for a in on}
+        self._syncing = True
+        try:
+            if on:
+                self.model.set_left_out(on, False)
+            if off:
+                self.model.set_left_out(off, True)
+        finally:
+            self._syncing = False
+
+    def highlighted_albums(self) -> list:
+        """The albums you highlighted in either pane (APL-2), once each."""
+        if not hasattr(self, "table"):
+            return []
+        out = list(self.selected_albums()) if getattr(self, "_rows_chosen", False) else []
+        if getattr(self, "_folders_by_you", False) and self.panes.folder_view.selectionModel().hasSelection():
+            seen = {id(a) for a in out}
+            out += [a for a in self.panes.folder_albums() if id(a) not in seen]
+        return out
 
     def apply_words(self):
         """The Apply sheet: (headline, what changes, how to undo, button), from each album's own
@@ -3549,8 +3602,14 @@ class Overview(QWidget):
     def selection_changed(self, *_):
         from PySide6.QtWidgets import QApplication
         self._rows_chosen = not getattr(self, "_showing_row", False) and self.table.selectionModel().hasSelection()
+        if getattr(self.panes, "mirroring", None) is not self.panes.folder_view and \
+                (self._rows_chosen or getattr(self, "_showing_row", False)):
+            # (APL-2: chosen here, or a row shown by TagMender - Your files' highlight is then the
+            # album shown, no choice of yours)
+            self._folders_by_you = False
         if self._rows_chosen:
             self._profile_pane = "albums"
+        self.sync_ticks()
         self.show_profile_choice()
         self.show_ready()                                 # (what Apply would carry out has changed)
         self.win.update_album_actions()
@@ -3656,6 +3715,7 @@ class Overview(QWidget):
         for f in files:
             self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
         a[PlanModel.LEAVE_OUT] = True                       # (its new row: unticked until you tick it)
+        a[PlanModel.AWAIT] = True                          # (APL-2: no highlight applies it)
         self.edited(a)
         self.look_up(self.sources.currentData() or "profile", self.with_versions([a]), again=True)
         self.win.statusBar().showMessage(tr("Showing {0} for {1}: tick it to apply.").format(
@@ -3705,6 +3765,7 @@ class Overview(QWidget):
             for f in mine:
                 self.file_anyway.pop(f, None)
             a[PlanModel.LEAVE_OUT] = True                   # (looked up again: not applied unasked meanwhile)
+            a[PlanModel.AWAIT] = True                          # (APL-2: no highlight applies it)
         self.look_up(self.sources.currentData() or "profile", self.with_versions(albums), again=True)
         self.win.statusBar().showMessage(tr("Release choice undone for {0}: looked up again.").format(
             plural(len(albums), tr("album"), tr("albums"))), 10000)

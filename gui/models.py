@@ -237,7 +237,6 @@ def unresolved_reason(a, action="") -> str:
 ASK_WORDS = N_("Tick it, or choose Move into Library Anyway, to have it filed.")
 ASK_WORDS_COPY = N_("Tick it, or choose Copy into Library Anyway, to have it copied.")
 # (an album Apply tags where it is: its box says that already, the command files it)
-ASK_WORDS_TAGGED = N_("Choose Move into Library Anyway to have it filed.")
 
 
 def not_filed_reason(a) -> str:
@@ -255,9 +254,9 @@ def not_filed_reason(a) -> str:
     else:
         why = tr("its score {0:.0f} is below the {1:g} this profile asks for to file an album").format(
             float(bf.get("confidence") or 0), float(bf.get("floor") or 0))
-    ask = ASK_WORDS_COPY if copy else ASK_WORDS_TAGGED if can_apply(a) else ASK_WORDS
-    if can_apply(a):                                   # (its tags not written yet: Apply writes them there)
-        tagged = tr("Apply tags it where it is")
+    ask = ASK_WORDS_COPY if copy else ASK_WORDS             # (MOV-6: its tick is the ask, tags to write or not)
+    if can_apply(a):                                   # (its tags not written yet: unticked, nothing is written)
+        tagged = tr("Not ticked: nothing written yet")
     return tr("{0}; {1} because {2}.").format(tagged, where, why) + " " + tr(ask)
 
 
@@ -346,8 +345,10 @@ class PlanModel(QAbstractTableModel):
     SCANS = 7
     PROFILE = 6                        # (the album's profile: its own, or the one chosen above)
     LEAVE_OUT = "_leave_out"           # (an album's own mark: unticked, so Apply leaves it as it is)
+    AWAIT = "_await_tick"              # (unticked by TagMender until you tick it: no highlight applies it, APL-2)
     ticked = Signal()
     file_asked = Signal(list)          # (MOV-6: offered albums you ticked - to be filed as you ask)
+    box_set = Signal(list)             # (albums whose box you clicked: APL-2, the tick is then yours)
     ASKED = "_asked_file"              # (ticked, its filing asked for: shown ticked while planned again)
 
     def __init__(self):
@@ -396,13 +397,14 @@ class PlanModel(QAbstractTableModel):
         if role != Qt.CheckStateRole or idx.column() != 1:
             return False
         self.set_left_out([self.albums[idx.row()]], Qt.CheckState(value) != Qt.Checked)
+        self.box_set.emit([self.albums[idx.row()]])
         return True
 
     @classmethod
     def left_out(cls, a) -> bool:
         """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it); an
         album with nothing to apply where it is but its filing offered: until you tick it (MOV-6)."""
-        if offered(a) and not can_apply(a):
+        if offered(a):                     # (MOV-6: its tick is the ask to file it, changes or not)
             return not a.get(cls.ASKED)
         return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
 
@@ -414,7 +416,7 @@ class PlanModel(QAbstractTableModel):
     def set_left_out(self, albums, out):
         asked = []
         for a in albums:
-            if offered(a) and not can_apply(a):     # (MOV-6: ticked, it is the ask to file it)
+            if offered(a):                          # (MOV-6: ticked, it is the ask to file it)
                 if out:
                     a.pop(self.ASKED, None)
                     a[self.LEAVE_OUT] = True
@@ -429,6 +431,7 @@ class PlanModel(QAbstractTableModel):
                     a.pop("held_ok", None)
                 else:
                     a.pop(self.LEAVE_OUT, None)
+                    a.pop(self.AWAIT, None)
                     if a.get("held"):          # (WEB-1: ticked - you chose to apply it)
                         a["held_ok"] = True
         self.dataChanged.emit(self.index(0, 0), self.index(max(0, len(self.albums) - 1), len(self.COLS) - 1))

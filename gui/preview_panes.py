@@ -2001,6 +2001,7 @@ class PreviewPanes(QWidget):
     def show_scope(self, album=None, kind="album", key=None, source=None):
         self.scope = (album, kind, key) if album is not None else None
         self._quiet = True
+        self.mirroring = source                              # (the pane the choice came from, while shown)
         try:
             if source is not self.folder_view:
                 self._highlight(self.folder_view, self._folder_node(album, kind, key))
@@ -2013,6 +2014,7 @@ class PreviewPanes(QWidget):
                     self._show_in_list(node)
         finally:
             self._quiet = False
+            self.mirroring = None
         self.release_btn.setEnabled(album is not None)
         self.show_offer(album)
         self.show_why(album)

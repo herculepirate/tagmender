@@ -231,15 +231,15 @@ class MOV6_App(Dirs, t864.Base):
         idx = t.index_of(t.node_of(ov.model.albums[0]), 0)
         self.assertTrue(t.flags(idx) & Qt.ItemIsUserCheckable)
 
-    def test_MOV6_a_ready_row_below_the_floor_stays_ticked_to_tag_in_place(self):
-        # (its box already says Apply tags it where it is; the command files it)
+    def test_MOV6_a_ready_row_below_the_floor_starts_unticked_its_tick_files_it(self):
+        # (0.8.84: the tick is the ask to file it, also when it has tags to write - before, it
+        # started ticked and Apply only tagged it where it was)
         from PySide6.QtCore import Qt
         prof = self.profile(operation="move", destination=str(self.dest))
         plan = pl.build([self.proposal(conf=91)], prof, offer_file_anyway=True)
         ov = self.show(plan)
-        self.assertEqual(ov.model.data(ov.model.index(0, 1), Qt.CheckStateRole), Qt.Checked)
-        self.assertIn("Choose Move into Library Anyway", ov.model.data(ov.model.index(0, 0), Qt.ToolTipRole))
-        self.assertTrue(self.win.commands["apply"].isEnabled())
+        self.assertEqual(ov.model.data(ov.model.index(0, 1), Qt.CheckStateRole), Qt.Unchecked)
+        self.assertIn("Tick it, or choose Move into Library Anyway", ov.model.data(ov.model.index(0, 0), Qt.ToolTipRole))
 
     def test_MOV6_an_unresolved_row_with_changes_is_tickable_one_without_is_not(self):
         from PySide6.QtCore import Qt

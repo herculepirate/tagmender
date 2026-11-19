@@ -115,6 +115,22 @@ class EVI11_OtherEditionsScans(unittest.TestCase):
         got = sorted(str(Path(p).relative_to(base)) for p in paths)
         self.assertEqual(got, ["CD1 2004 Suites/front.jpg", "front.jpg", "scans/front.jpg"])
 
+    def test_EVI11_only_a_folder_named_for_another_edition(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp(prefix="tm-evi11-"))
+        cases = [("Bach - 6 Suites (W. Kuijken) (2015 [2004])", "scans, A 421 (2004)", True),
+                 ("Band - 1979 - Album (2009 Remaster)", "Scans (2009 Remaster)", False),
+                 ("Band - Album (1979) [2009 Remaster]", "Scans 2009", False),
+                 ("Band - Album (2009)", "Covers 2000x2000", False),
+                 ("Band - Album (2009)", "2048px", False),
+                 ("Band - Album (2015)", "Scans (1990 Japan)", True),
+                 ("Band - Album (2015)", "Scans 1990 reissue", True),
+                 ("Band - Album (2015)", "Scans 1990", False),
+                 ("Band - Album [ABC 1234]", "Scans ABC 1234", False)]
+        for base, sub, want in cases:
+            (root / base / sub).mkdir(parents=True, exist_ok=True)
+            self.assertEqual(ma.other_edition_scans(root / base, root / base / sub), want, (base, sub))
+
     def test_EVI11_no_year_in_the_album_folder_reads_them_all(self):
         import tempfile
         base = Path(tempfile.mkdtemp(prefix="tm-evi11-")) / "Bach - 6 Suites"

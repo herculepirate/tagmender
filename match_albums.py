@@ -6050,33 +6050,50 @@ def packaging_evidence(album_dir):
 
 
 _EDITION_YEAR = re.compile(r"(?<![\d.])(?:19[5-9]\d|20\d\d)(?![\d.])")
+# EVI-11: an image size in a folder's name ("Covers 2000x2000", "2048px", "600 dpi"): no year
+_IMAGE_SIZE = re.compile(r"\d+\s*[x\u00d7]\s*\d+|\d+\s*(?:px|dpi|ppi)\b", re.I)
+_EDITION_WORD = re.compile(r"\b(?:re-?issue|edition|re-?master(?:ed)?|re-?press(?:ing)?|pressing|original|first press)\b",
+                           re.I)
+# a catalogue number written in a folder's name, outside brackets too ("scans, A 421 (2004)")
+_FOLDER_CODE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{1,6})[ -]?(\d{3,6})(?![\d])")
+
+
+def _folder_codes(name) -> set:
+    return {f"{m.group(1)}{m.group(2)}".casefold() for m in _FOLDER_CODE.finditer(_IMAGE_SIZE.sub(" ", str(name or "")))
+            if not _EDITION_YEAR.fullmatch(m.group(2))}
 
 
 def other_edition_scans(base, folder) -> bool:
-    """EVI-11: a sub-folder of the album folder whose name gives another year than the album
-    folder's own edition (its first year): the scans of that other edition, kept beside the copy
-    for reference ("Bach - 6 Suites ... (2015 [2004])/scans, A 421 (2004)": the 2004 CD's scans
-    beside the 2015 box's) - never your copy's print, so its barcode and numbers are not read.
-    Only a folder holding no audio (a box's disc folder "CD01 1971 Cold Spring Harbor" is your
-    copy's disc, its sleeve your copy's). False when the album folder names no year, or the
-    sub-folder names its year or none."""
+    """EVI-11: a sub-folder of the album folder, holding no audio, named for another edition: the
+    scans of that edition, kept for reference ("Bach - 6 Suites ... (2015 [2004])/scans, A 421
+    (2004)": the 2004 CD's) - never your copy's print, so its barcode and numbers are not read.
+    Another edition's name: a catalogue number the album folder's name does not carry ("A 421"),
+    or a year the album folder's name gives nowhere together with an edition word ("reissue",
+    "edition", "remaster" ...) or a country. Image sizes ("2000x2000", "2048px") are no years; a
+    disc folder holding audio is your copy's disc."""
     try:
         rel = Path(folder).relative_to(base)
     except ValueError:
         return False
-    own = _EDITION_YEAR.search(Path(base).name)
-    if not rel.parts or not own:
+    if not rel.parts:
         return False
+    own = _IMAGE_SIZE.sub(" ", Path(base).name)
+    own_years, own_codes = set(_EDITION_YEAR.findall(own)), _folder_codes(own)
     at = Path(base)
     for part in rel.parts:
         at = at / part
-        years = set(_EDITION_YEAR.findall(part))
-        if years and own.group(0) not in years:
-            try:
-                if not any(q.suffix.lower() in AUDIO_EXT for q in at.iterdir()):
-                    return True
-            except OSError:
-                return False
+        bare = _IMAGE_SIZE.sub(" ", part)
+        years = set(_EDITION_YEAR.findall(bare))
+        country = any(len(w) > 3 and w in mc._COUNTRY_NAMES for w in re.findall(r"[a-z]+", bare.casefold()))
+        named = bool(_folder_codes(bare) - own_codes) or bool(
+            years and not years & own_years and (_EDITION_WORD.search(bare) or country))
+        if not named:
+            continue
+        try:
+            if not any(q.suffix.lower() in AUDIO_EXT for q in at.iterdir()):
+                return True
+        except OSError:
+            return False
     return False
 
 

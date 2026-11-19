@@ -38,7 +38,7 @@ def log_text(k):
 def release(rid, title, discs, barcode="0123456789012"):
     rel = te.mb_release(rid, "Band J", title)
     rel["barcode"] = barcode
-    rel["media"] = [{"format": "CD", "position": p, "discs": [{"id": ma.mb_discid(mb_toc(k))}] if rid == "mb-box" else [],
+    rel["media"] = [{"format": "CD", "position": p, "discs": [{"id": ma.mb_discid(mb_toc(k))}] if rid == "mb-box" or k > 1 else [],
                      "tracks": [{"id": f"{rid}-{k}-t{i}", "position": i + 1, "title": f"{TITLES[k]} {i}",
                                  "length": (s * 75 + k) * 1000 // 75,
                                  "recording": {"id": f"rec-{k}-{i}", "title": f"{TITLES[k]} {i}"}}
@@ -63,6 +63,22 @@ class Http(SetHttp):
         if host == "mb" and "/ws/2/release/" in url and "/ws/2/release/?" not in url:
             if url.split("/release/")[1].split("?")[0] in self.skip:
                 return None
+        return super().get_json(url, host)
+
+
+class SetIdHttp(Http):
+    """E12: disc 1's ID on the box only; discs 2 and 3 on the box and on their own albums' releases."""
+
+    def get_json(self, url, host):
+        if host == "mb" and "/ws/2/discid/" in url:
+            did = url.split("/ws/2/discid/")[1].split("?")[0]
+            k = {ma.mb_discid(mb_toc(k)): k for k in LENS}.get(did)
+            if k is None:
+                return None
+            rels = [("mb-box", "1979\u20131981", k, 3)] + ([(f"mb-{TITLES[k].lower()}", TITLES[k], 1, 1)] if k > 1 else [])
+            return {"id": did, "releases": [{"id": rid, "title": t, "media": [
+                {"position": p, "format": "CD", "discs": [{"id": did}] if p == pos else []}
+                for p in range(1, n + 1)]} for rid, t, pos, n in rels]}
         return super().get_json(url, host)
 
 
@@ -103,6 +119,25 @@ class DSC12a_DiscNotBox(te.Base):
         a = self.plan(self.folder(parent="Band J - Heart (3CD)", name="CD1 - Alpha"))
         self.assertEqual((a["identification"]["release_id"], a["identification"]["tier"]), ("mb-box", "exact"))
 
+
+    def test_DSC12a_a_disc_of_siblings_gone_to_their_own_releases_is_alone(self):
+        # (E12: "Band J - Discography 1979-1981 (3CD)/1 - Alpha" .. "3 - Gamma"; the siblings matched
+        # to their own albums, not to the box: "1 - Alpha" is its own album's release too)
+        top = self.lib / "Band J - Discography 1979-1981 (3CD)"
+        for k in (1, 2, 3):
+            d = top / f"{k} - {TITLES[k]}"
+            for i, secs in enumerate(LENS[k]):
+                flac(d, f"{i + 1:02d}.flac", secs + k / 75, freq=300 + 40 * k + 10 * i, title=f"{TITLES[k]} {i}",
+                     album=TITLES[k], albumartist="Band J", artist="Band J", track=str(i + 1), disc="1/1")
+            (d / f"{TITLES[k]}.log").write_text(log_text(k))
+        mb = [release("mb-alpha", "Alpha", [1]), release("mb-beta", "Beta", [2]), release("mb-gamma", "Gamma", [3]),
+              release("mb-box", "1979\u20131981", [1, 2, 3], barcode="999")]
+        plan = self.engine(SetIdHttp(mb=mb)).plan(top)
+        got = {Path(a["source_dir"]).name if Path(a["source_dir"]) != top else Path(a["files"][0]["src"]).parent.name:
+               a["identification"].get("release_id") for a in plan["albums"]}
+        self.assertEqual(got.get("1 - Alpha"), "mb-alpha", [(a["source_dir"], a["identification"].get("release_id"),
+                                                            a.get("notes")) for a in plan["albums"]])
+        self.assertNotIn("mb-box", got.values())
 
 if __name__ == "__main__":
     import unittest

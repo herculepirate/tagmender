@@ -2443,7 +2443,7 @@ class Engine:
             if any(self._choice_for(part, alone(part)) for _i, part, _ps in per):
                 return out                               # (a release you chose for one of them)
             if g.set_shape == "discids":
-                return out                               # (DSC-14: by their disc IDs only - none joined them)
+                return self._alone_discs(parts, out)     # (DSC-14: by their disc IDs only - none joined them)
             got = self._claim(folder, parts, per)
             if got is None and g.set_shape == "discs" and len(per) == len(parts):
                 got = self._set_search(folder, parts, per)
@@ -2452,7 +2452,7 @@ class Engine:
             if albums:
                 self.force = was_force
         if got is None:
-            return out
+            return self._alone_discs(parts, out)
         prop, mapping, how = got
         names = ", ".join(f"'{d.name}' -> disc {n}" for d, n in sorted(mapping.items(), key=lambda x: x[1]))
         note = f"one release, {len(mapping)} discs: {names} ({_release_words(prop)}{how})"
@@ -3356,12 +3356,28 @@ class Engine:
             prop = self._disc_not_box(g, prop)           # DSC-12a
         return [prop] + list(getattr(prop, "parts", None) or [])
 
+    def _alone_discs(self, parts, out) -> dict:
+        """DSC-12a: sibling folders not joined to one release - each planned alone - are each alone
+        for DSC-12a too: a folder matched only as a disc of a box none of its siblings is matched to
+        (they went to their own releases) is looked at as one folder (_disc_not_box). Folders whose
+        siblings are matched to that same box stay as DSC-10, 14 and 16 left them. out, changed."""
+        keys = {i: {self._release_of(p) for p in ps} for i, ps in out["own"].items() if isinstance(ps, list)}
+        for i, ps in list(out["own"].items()):
+            if not isinstance(ps, list) or len(ps) != 1:
+                continue
+            k = self._release_of(ps[0])
+            if k is None or any(k in v for j, v in keys.items() if j != i):
+                continue
+            out["own"][i] = [self._disc_not_box(parts[i], ps[0])]
+        return out
+
     def _disc_not_box(self, g: Group, prop):
         """DSC-12a: a disc ID proves the disc, not the box. One folder matched exactly to a release
         of more discs (DSC-12) only as one of its discs, when nothing else says it is the box - no
         barcode, catalogue number or release ID of it in the files, no other disc of it beside it
-        (no sibling folders), neither the folder's nor its parent's name saying a set or naming the
-        release, its album tag neither the release's title nor its medium's: (1) a one-disc release
+        (no sibling folder matched to it: _alone_discs), neither the folder's nor its parent's name
+        having box words or naming the release (a bare CD count says nothing), its album tag
+        neither the release's title nor its medium's: (1) a one-disc release
         by the same artist, of its own album's title, whose tracks it fits (exact), is its match -
         the box listed as "also issued as disc N of ..." (that release lacking the disc ID is no
         evidence against it); else (2) the box's disc is proposed, album known, below the auto
@@ -3380,7 +3396,7 @@ class Engine:
         if codes & mine:
             return prop                                  # (the files say the box)
         for name in (g.folder.name, g.folder.parent.name):
-            if box_cd_count(name) or says_box(name) or _names_release(name, title):
+            if says_box(name) or _names_release(name, title):   # (box words; a bare CD count says nothing)
                 return prop
         album = _title_fold(next((_first(m, "album") for m in metas if _first(m, "album")), ""))
         mediums = {_title_fold(str((t.get("discsubtitle") or [""])[0])) for t in ts} - {""}

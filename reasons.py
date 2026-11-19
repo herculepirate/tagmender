@@ -42,6 +42,10 @@ CODES = {
     "lookup_failed": "the album could not be looked up (an error, written to the log); it is tried again",
     "disc_id_box_disc": "the disc ID is on one disc of a box only, and nothing else says it is the box's: "
                         "tick it to tag it as that disc",
+    "lengths_box_disc": "only its track lengths fit one disc of a box; nothing of your copy says it is that "
+                        "disc: tick it to tag it as that disc",
+    "disc_not_proven": "the folder is one release's discs, but some discs are proven only by their track "
+                       "lengths: tick it to tag it as that release",
     "other": "see the words after the codes",
 }
 

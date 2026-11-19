@@ -207,7 +207,9 @@ _NOT_CATNO_WORD = re.compile(
     # CAT-1: an SACD's audio format ("DSD64", "DST64", "DXD", "2ch", "ISO"), never a number
     r"ds[dt]\d*|dxd|pcm|lpcm|iso|mch|multi-?ch(?:annel)?|"
     # a bit depth and sample rate ("ECM 24-96", "[24/192]", "16-44.1"): the audio, not a number
-    r"(?:16|20|24|32)\s*[-/]\s*(?:44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384))$", re.I)
+    r"(?:16|20|24|32)\s*[-/]\s*(?:44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384)|"
+    # CAT-8: a disc marker with its number ("(CD10)", "[Disc11]", "CD-2"): the disc, never a number
+    r"(?:cd|dis[ck])-?\d{1,2})$", re.I)
 # words that, followed by a number, mean something else ("Volume 5", "Live 1996")
 _NUMBER_WORDS = {"vol", "volume", "part", "pt", "no", "nr", "op", "opus", "chapter", "book",
                  "side", "live", "by", "disc", "disk", "cd", "track", "edition", "session",
@@ -1165,6 +1167,50 @@ def version_view(album, cand):
                 version_media={d: chosen[d][0].get("position") for d in discs},
                 version_unsure="; ".join(unsure), version_notes=notes, full_tracks=len(cand.get("tracks") or []),
                 disc_count=len(discs))
+
+
+def medium_view(album, cand):
+    """MED-17b: a box rip whose discs are numbered as the release's media (its own disc tags: King
+    Crimson - The Complete 1969 Recordings, CDs 1-18, 25 and 26 and the DVD's audio as disc 20)
+    and that holds a video disc's audio: each disc of yours is the medium of its number, the
+    video medium's tracks taken as audio files. Only when every disc of yours is a medium of the
+    release holding exactly as many tracks as your disc has files, and at least one of them is a
+    video medium (else the release's audio media are compared as usual). The view, as
+    version_view's, keeps the release's ID: "version_tracks" [[medium position, track index]],
+    "version_media" {disc: position}; lengths are compared as for any candidate. None otherwise."""
+    media = cand.get("media_info") or []
+    tracks = album.get("tracks") or []
+    if not media or not tracks or album.get("version_discs") or cand.get("version_media"):
+        return None
+    by_pos = {}
+    for k, m in enumerate(media, 1):
+        by_pos.setdefault(int(m.get("position") or k), m)
+    mine = {}
+    for t in tracks:
+        mine.setdefault(int(t.get("disc") or 1), []).append(t)
+    if len(mine) < 2 or set(mine) - set(by_pos):
+        return None
+    if not any(medium_type(by_pos[d].get("format")) == "video" for d in mine):
+        return None
+    if any(len(mine[d]) != len(by_pos[d].get("tracks") or ()) for d in mine):
+        return None
+    order = []
+    for t in tracks:                                  # (the album's order: discs not interleaved)
+        d = int(t.get("disc") or 1)
+        if not order or order[-1] != d:
+            if d in order:
+                return None
+            order.append(d)
+    view, where = [], []
+    for d in order:
+        m = by_pos[d]
+        view += [{"disc": d, "title": x.get("title", ""), "secs": x.get("secs") or 0.0} for x in m["tracks"]]
+        where += [[m.get("position") or d, x.get("index")] for x in m["tracks"]]
+    videos = sorted(d for d in mine if medium_type(by_pos[d].get("format")) == "video")
+    note = "; ".join(f"your disc {d} is the {by_pos[d].get('format')}'s audio" for d in videos)
+    return dict(cand, tracks=view, version_tracks=where, version_media={d: by_pos[d].get("position") or d for d in order},
+                version_unsure="", version_notes=[note], medium_view=True,
+                full_tracks=len(cand.get("tracks") or []), disc_count=len(order))
 
 
 def barcode_key(value):
@@ -2470,6 +2516,9 @@ def cover_clue(cover_text, cand, clues):
 
 
 TOC_CLUE = "disc ID (track positions of the CD) matches"
+# CONF-1: the tracks a release must have for a fingerprint or ISRC proof (the recordings) to
+# excuse a confidence under the auto threshold when its title or artist differs from yours
+RECORDINGS_EXCUSE_MIN_TRACKS = 3
 EXACT_TOC_CLUE = TOC_CLUE + ", and MusicBrainz has that very disc ID attached to this release"
 FUZZY_TOC_CLUE = ("disc ID lookup found this release only by a near match (a CD of about these lengths, "
                   "not your disc ID): not proof of the pressing")
@@ -4314,7 +4363,15 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         if view:
             cand = view
             n_cand = len(cand["tracks"])
-    if cand.get("version_media"):          # (a view scored again: told again)
+    if n_file and n_file != n_cand and not box_note and not cand.get("version_media"):
+        # MED-17b: your discs numbered as the release's media, a video disc's audio among them
+        view = medium_view(album, cand)
+        if view:
+            cand = view
+            n_cand = len(cand["tracks"])
+    if cand.get("medium_view"):
+        box_note = "; ".join(cand.get("version_notes") or [])
+    elif cand.get("version_media"):          # (a view scored again: told again)
         fmts = {m.get("position"): m.get("format") for m in cand.get("media_info") or ()}
         labels = album.get("version_labels") or {}
         box_note = "; ".join([f"your {labels.get(d) or (album.get('version_discs') or {}).get(d, '')} folder is "
@@ -5776,7 +5833,13 @@ def classify(scored, cfg):
         best["notes"] = best["notes"] + ["every track title matches and only one length is off (ALB-1)"]
     elif best["confidence"] < cfg["auto_min_confidence"] and not lengths_excused and not (
             proven and (best["artist_sim"] < cfg["auto_min_artist"] or best["title_sim"] < cfg["auto_min_title"])
-            and not split_credit):
+            and not split_credit
+            # (CONF-1: a fingerprint or ISRC proves the recordings, not the release: it excuses a name
+            # that differs only on a release of RECORDINGS_EXCUSE_MIN_TRACKS tracks at least, all there
+            # - a single's one or two recordings recur on many releases: Joy Division - "Transmission
+            # session II" against the 2020 digital single "Transmission", 87.8 < 90, held)
+            and (proof not in ("audio fingerprint", "ISRC")
+                 or (best["tracks_ok"] and n_tracks >= RECORDINGS_EXCUSE_MIN_TRACKS))):
         why.append(f"confidence {best['confidence']} < {cfg['auto_min_confidence']}")
     if best["cand"].get("version_unsure"):
         # (which tracks of the release each version folder is rests on order or on CD-like
@@ -5788,6 +5851,13 @@ def classify(scored, cfg):
         # BAR-8: your barcode names this version (Guru Guru - Live & Unreleased, the Spalax CD)
         best["notes"] = best["notes"] + [f"the release is the {best['other_version']} version, which your folder "
                                          "and tags do not say; your barcode is this release's (BAR-8)"]
+    elif best.get("other_version") and (best.get("clues") or {}).get("disc TOC") == EXACT_TOC_CLUE \
+            and best["tracks_ok"] and not best.get("conflict") and (best.get("dur_frac") or 0) >= 0.5:
+        # TOC-1: your disc's exact disc ID is on this release - its table of contents, every
+        # track's length to the sector: a version word in its title ("Raw Medicine: Madlib
+        # Remixes") is the album's own title, never another recording than your disc
+        best["notes"] = best["notes"] + [f"the release's title names a {best['other_version']} version, which your "
+                                         "folder and tags do not say; your disc's exact disc ID is this release's"]
     elif best.get("other_version"):
         why.append(f"the release is the {best['other_version']} version, which your folder and tags do not say")
     if best.get("copy_version") and not barcode_proves(best):
@@ -6507,6 +6577,20 @@ def _proof_left_unsure(mb_result, dg_result, prefer=None):
         elif (_exact_toc(ob) and not _exact_toc(sb) and not preferred
               and not _toc_maybe_download(mb_best, dg_best, mb_result, dg_result)):
             proof = "exact disc ID"
+            rival = other.get("runner_up")
+            if _exact_toc(rival) and not has_evidence(ob, rival):
+                # TIE-1 / TOC-3: the unsure database is unsure because its runner-up carries your
+                # exact disc ID too (Keith Jarrett - Testament: the US and the German ECM 2130-32,
+                # margin 0.0): the disc ID proves the disc, not the pressing - no dispute to settle
+                # by Sources; the preferred database's pick is suggested, album known, never written
+                # as proven
+                # (with no preference set, the dispute is a review as before: _disputed)
+                if prefer == ("musicbrainz" if other is mb_result else "discogs"):
+                    pick = dict(other, status="auto", best=dict(ob, tie_guess={
+                        "by": "", "pick": pressing_facts(ob), "others": [pressing_facts(rival)]}))
+                    return _guessed_between(pick, sb, f"your exact disc ID is on {ob['cand']['id']} and "
+                                                      f"{rival['cand']['id']} alike; Sources prefers "
+                                                      f"{'MusicBrainz' if other is mb_result else 'Discogs'}")
         else:
             continue
         if same_pressing(mb_best["cand"], dg_best["cand"]) or any(s is mb_best for s in mb_twins(mb_result, dg_result)):

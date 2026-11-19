@@ -1203,6 +1203,45 @@ def _proven(prop) -> bool:
         and not getattr(prop, "suggested", None) and not getattr(prop, "held", "")   # (DSC-12a: a held box disc)
 
 
+_DISC_FOLDER_NUMBER = re.compile(r"^(?:cd|disc|disk)\s*[-_.]?\s*0*(\d{1,3})\s*$", re.I)    # (a bare disc folder)
+
+
+def _disc_folder_moves(entry) -> None:
+    """DSC-19: an album tagged where it is whose files sit in disc folders ("Disc 1", "Disc 2",
+    "Disc 3"), the release putting a file on another disc than its folder names (Umphrey's McGee -
+    Red Rocks 2016: folders of 8, 5 and 4 tracks from an earlier split, the release's discs 8, 7
+    and 2 - "August" and "Hurt Bird Bath" disc 2 tracks 6 and 7, in "Disc 3"): the file moves into
+    the album's folder of that disc beside it, so folder and tags agree; with no such folder (or
+    its name taken there) it stays, said in the notes."""
+    stay = []
+    for fe in entry.get("files") or ():
+        if fe.get("op") not in ("tag", "none") or fe.get("dst") != fe.get("src"):
+            continue
+        new = str(((fe.get("changes") or {}).get("discnumber") or [""])[0]).partition("/")[0].strip().lstrip("0")
+        src = Path(fe["src"])
+        m = _DISC_FOLDER_NUMBER.match(src.parent.name)
+        if not new.isdigit() or not m or m[1] == new:
+            continue
+        home = None
+        try:
+            for d in sorted(src.parent.parent.iterdir()):
+                k = _DISC_FOLDER_NUMBER.match(d.name)
+                if d.is_dir() and k and k[1] == new and d != src.parent:
+                    home = d if home is None else False   # (two folders of that disc: neither)
+        except OSError:
+            home = None
+        dst = home / src.name if home else None
+        if not dst or dst.exists() or any(str(dst) == str(x.get("dst")) for x in entry.get("files") or ()):
+            stay.append(f"{src.parent.name}/{src.name} (disc {new})")
+            continue
+        fe["dst"], fe["op"] = str(dst), "move"
+        entry.setdefault("notes", []).append(f"{src.parent.name}/{src.name} is disc {new} of the release: "
+                                             f"moved into {home.name} (DSC-19)")
+    if stay:
+        entry.setdefault("notes", []).append("the release puts these files on another disc than their folder "
+                                             "names, and no folder of that disc is beside it: " + ", ".join(stay))
+
+
 def _lone_discs(prop) -> bool:
     """DSC-12: an album proven exactly (_proven) that brings some discs only of a release of two or more."""
     if not _proven(prop):
@@ -3021,6 +3060,8 @@ class Planner:
             entry["files"].append(fe)
         if identified:
             self._join_files(entry, prop)
+        if identified and op == "in_place" and not renaming:
+            _disc_folder_moves(entry)                     # DSC-19
         if identified:
             # MED-22c: never two layers of one disc in one folder - in this plan, or beside a copy of
             # another layer already there (a CD layer's "Disc 01" for an SACD layer's files)

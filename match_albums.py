@@ -2229,6 +2229,13 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     for p, i in infos:
         i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else \
             i["disc"] or folder_disc.get(p.parent) or tag_disc.get(p, 1)
+    # DSC-18: albums ripped from fewer CDs than they are ("Seven Classic Albums [4CD]": 7 album
+    # folders, 4 rip logs): each file is the track of the CD its place in the folders' order gives
+    split = None if versions else cd_split(album_dir, infos)
+    if split:
+        for p, i in infos:
+            i["disc_eff"], i["num"] = split[p]
+            i["disc"] = split[p][0]
     # (or, filed already as discs of their release, by the layout each disc's tags name)
     if versions:
         found = {(folder_disc.get(d, 1) if folder_disc else 1): v for d, v in versions.items()}
@@ -3407,6 +3414,47 @@ def tag_tocs(infos):
         if len(tocs) == 1 and toc_fits_disc(next(iter(tocs)), tracks):
             out[len(out) + 1] = next(iter(tocs))
     return out
+
+
+def cd_split(album_dir, infos):
+    """DSC-18: {file: (CD, track)} for albums filed as the original records they were (one folder
+    each: Buddy Rich - Seven Classic Albums [4CD], "Disc 1" .. "Disc 7" each an LP of its own) but
+    ripped from fewer CDs, whose rip logs say so: two or more logs with a table of contents, fewer
+    than the folders (three at least), each lying in a folder that holds a track of its CD, their
+    track counts adding up to the files - and, the files taken in the folders' order (each
+    folder's tracks by number), every CD's run of files fits its log's table of contents to the
+    sector (toc_fits_audio), at least one CD's run crossing from one folder into the next. None
+    otherwise (the folders are the discs, as before)."""
+    album_dir = Path(album_dir)
+    folders = sorted({p.parent for p, _i in infos if album_dir in p.parents},
+                     key=lambda d: _natural_key(d.relative_to(album_dir).as_posix()))
+    if len(folders) < 3 or len(folders) != len({p.parent for p, _i in infos}):
+        return None
+    logs, seen = [], set()
+    for log in rip_logs(album_dir):
+        if log["toc"] and log["toc"] not in seen:
+            seen.add(log["toc"])
+            logs.append(log)
+    if not 2 <= len(logs) < len(folders):
+        return None
+    counts = [len(_toc_lengths(log["toc"])) for log in logs]
+    if sum(counts) != len(infos):
+        return None
+    place = {d: k for k, d in enumerate(folders)}
+    seq = sorted(infos, key=lambda x: (place[x[0].parent], x[1].get("num") or 9999, _natural_key(x[0].name)))
+    out, at, crosses = {}, 0, False
+    for k, (log, n) in enumerate(zip(logs, counts), 1):
+        part = seq[at:at + n]
+        at += n
+        dirs = {p.parent for p, _i in part}
+        if Path(log["path"]).parent not in dirs | {album_dir}:
+            return None                                   # (a log away from its CD's tracks)
+        if not toc_fits_audio(log["toc"], [i for _p, i in part]):
+            return None
+        crosses = crosses or len(dirs) > 1
+        for j, (p, _i) in enumerate(part, 1):
+            out[p] = (k, j)
+    return out if crosses else None
 
 
 def fitting_logs(infos, logs):
@@ -4786,6 +4834,15 @@ class Http:
             except (OSError, _HTTPException, ValueError) as e:
                 # a broken answer (connection reset, incomplete read, SSL error, not UTF-8)
                 last_err = f"{type(e).__name__}: {e}"
+                # EVI-10: a cut-off answer from a database itself (a large box's release page
+                # read in part, a reset connection) is asked again, twice: one broken read must
+                # not leave a release your files name unfetched. (Not text that is not UTF-8:
+                # asked again, it comes back the same.)
+                if (host not in self.OPTIONAL_HOSTS and not isinstance(e, ValueError)
+                        and attempt < min(2, attempts - 1)):
+                    _tell(f"    {host} broken answer ({type(e).__name__}), asking again")
+                    self._pause(2 * (attempt + 1) + random.uniform(0, 1))
+                    continue
                 if host in self.OPTIONAL_HOSTS:
                     self.host_failed(host)
                 if trial:                                   # the trial got no answer: open again

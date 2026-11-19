@@ -1,5 +1,17 @@
 # Release notes
 
+## 0.8.77
+
+**Applying, at a glance**
+- An album you applied is unmistakable: a filled green check in place of its checkbox, "Applied · moved" (or "Applied" when tagged in place) and a light green wash over its row; its tooltip names the folder it now lives in. While it is being applied, its row says "Applying…".
+- A progress bar at the bottom of the window, in TagMender's colours, while you apply or save tags: "Applying 3 of 12 albums · 214 of 1,030 files", then "Applied 12 albums" (failures in red) for a few seconds; Cancel shows "Stopped after N of M".
+- Clear Done is back on the toolbar, beside Look Up (and in Edit > Clear Done Albums).
+
+**What you ask for is filed (MOV-6)**
+- Any album with tags to write can be applied when you tick it, whatever its score: an album found only on the web (Partial) or one scoring below your profile's threshold is tagged and filed into your library layout like any other, keeping its mark. Unticked, nothing changes from before; watched folders still file only what they are sure of.
+- An album not filed explains why, in the Inspector and above its tags, with a "Move into Library Anyway" button ("Copy …" on a copy profile); a greyed Apply says why too.
+- An Unresolved album is never filed by a tick: choose "Use <the closest release> and File It…" to see that release's tags first, then tick and apply. Album > Change Release > Undo Release Choice takes a choice back. A release you choose is kept as your choice on later look-ups; automatic picks are never recorded as yours.
+
 ## 0.8.76
 
 **Box sets and other sets of disc folders**

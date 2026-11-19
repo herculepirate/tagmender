@@ -2350,6 +2350,11 @@ class Planner:
             # TAG-3: your copy proves this release over the one your files' IDs name: its tags
             # replace that release's (edition, folder name and all, from here on)
             conf = max(conf, _threshold(p, "replace_min_confidence"))
+        if identified and getattr(prop, "held", ""):
+            # (a held album - DSC-12a, DSC-14b, DSC-16 - is applied only when you tick it: its row is
+            # what ticking writes, its disc n of N from the set's folders included, never the old
+            # "1 of 1" kept for a confidence held below the threshold on purpose)
+            conf = max(conf, _threshold(p, "replace_min_confidence"))
         tag_conf = conf                    # (the custom tags' gate: the score, or TAG-3's raise)
         organize_ok = identified and not partial and conf >= _threshold(p, "organize_min_confidence")
         op = p["operation"]

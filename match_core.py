@@ -7320,8 +7320,13 @@ def album_only_tags(tags, tied, same_recordings=False, other_kind=False, media_h
     same = lambda vals: len(vals) == 1 and "" not in vals and None not in vals   # noqa: E731
     if other_kind or not (same({",".join(t.get("formats") or ()) for t in tied})
                           and same({",".join(str(n) for n in t.get("layout") or ()) for t in tied})):
+        # (DSC-13/14/16: the disc numbers stay where every tied pressing has as many discs - a set's
+        # disc n of N is its own, whatever tracks one pressing adds to a disc)
+        discs_agree = not other_kind and same({",".join(t.get("formats") or ()) for t in tied}) and \
+            same({len(t.get("layout") or ()) for t in tied}) and all(t.get("layout") for t in tied)
         for k in TRACK_NUMBER_FIELDS:
-            out.pop(k, None)
+            if not (discs_agree and k in ("discnumber", "totaldiscs")):
+                out.pop(k, None)
     if not same_recordings:
         for k in list(out):
             if k in RECORDING_FIELDS or k.startswith("performer:"):

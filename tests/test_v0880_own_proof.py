@@ -400,6 +400,10 @@ class DSC14b_TheBoxTheNameNames(te.Base):
         self.assertTrue(planmod.held(a), a.get("notes"))
         self.assertIn("'Disc 4' (disc 4)", a["held"])
         self.assertEqual(a["identification"]["reason_codes"], ["disc_not_proven"])
+        # (ticked, each folder is its disc n of 4 - never the volumes' own "1 of 1" kept)
+        got = {(Path(f["src"]).parent.name, (f["changes"].get("discnumber") or ["kept"])[0],
+                (f["changes"].get("totaldiscs") or ["kept"])[0]) for f in a["files"]}
+        self.assertEqual(got, {(f"Disc {k}", str(k), "4") for k in range(1, 5)}, got)
 
     def test_DSC14b_the_folders_own_title_must_be_the_releases(self):
         self.assertTrue(engine._own_title_is("Madlib - Madlib Medicine Show-The Brick [2012] [FLAC]",
@@ -702,6 +706,19 @@ class TOC3_PressingWithNoDiscIds(unittest.TestCase):
         a, r = self.run_with({"id": "b16", "media": [{"format": "CD", "discs": [{"id": "other"}]}]})
         self.assertFalse(a.get("discid_less"))
         self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b12"))
+
+
+class DSC14_AlbumKnownKeepsDiscNumbers(unittest.TestCase):
+    def test_DSC14_tied_pressings_of_one_disc_count_keep_disc_n_of_n(self):
+        tags = {"album": ["The Brick"], "discnumber": ["2"], "totaldiscs": ["13"], "tracknumber": ["3"],
+                "totaltracks": ["9"], "musicbrainz_albumid": ["b12"]}
+        tied = [{"formats": ["cd"], "layout": [17, 9], "label": "L", "country": "US", "year": 2012},
+                {"formats": ["cd"], "layout": [17, 10], "label": "L", "country": "US", "year": 2016}]
+        out = mc.album_only_tags(tags, tied)
+        self.assertEqual((out.get("discnumber"), out.get("totaldiscs")), (["2"], ["13"]))
+        self.assertNotIn("tracknumber", out)
+        tied[1]["layout"] = [17, 9, 3]
+        self.assertNotIn("discnumber", mc.album_only_tags(tags, tied))
 
 
 # ---- DSC-19 --------------------------------------------------------------------------------

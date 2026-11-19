@@ -911,6 +911,11 @@ def _own_job_files(job):
         # (CHG-1: a release you chose is recorded as yours, whatever other clue the job also had)
         said = [str(e) for e in ident.get("evidence") or () if str(e).startswith("pressing chosen by ")]
         decided = "pressing chosen by you" if "pressing chosen by you" in said else (said[0] if said else "")
+        # (DSC-12a / DSC-14b / DSC-16: a held box or disc you ticked is your choice - kept by a later
+        # run as a release you chose is, unless a barcode or catalogue number of yours disagrees)
+        if a.get("held") and a.get("held_ok") and set(ident.get("reason_codes") or ()) & {
+                "disc_not_proven", "disc_id_box_disc", "lengths_box_disc"}:
+            decided = "pressing chosen by you"
         albums.append((a.get("source_dir"), exact, files, decided))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)
@@ -2229,6 +2234,13 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     for p, i in infos:
         i["disc_eff"] = folder_disc.get(p.parent, 1) if versions else \
             i["disc"] or folder_disc.get(p.parent) or tag_disc.get(p, 1)
+    # DSC-18: albums ripped from fewer CDs than they are ("Seven Classic Albums [4CD]": 7 album
+    # folders, 4 rip logs): each file is the track of the CD its place in the folders' order gives
+    split = None if versions else cd_split(album_dir, infos)
+    if split:
+        for p, i in infos:
+            i["disc_eff"], i["num"] = split[p]
+            i["disc"] = split[p][0]
     # (or, filed already as discs of their release, by the layout each disc's tags name)
     if versions:
         found = {(folder_disc.get(d, 1) if folder_disc else 1): v for d, v in versions.items()}
@@ -3407,6 +3419,47 @@ def tag_tocs(infos):
         if len(tocs) == 1 and toc_fits_disc(next(iter(tocs)), tracks):
             out[len(out) + 1] = next(iter(tocs))
     return out
+
+
+def cd_split(album_dir, infos):
+    """DSC-18: {file: (CD, track)} for albums filed as the original records they were (one folder
+    each: Buddy Rich - Seven Classic Albums [4CD], "Disc 1" .. "Disc 7" each an LP of its own) but
+    ripped from fewer CDs, whose rip logs say so: two or more logs with a table of contents, fewer
+    than the folders (three at least), each lying in a folder that holds a track of its CD, their
+    track counts adding up to the files - and, the files taken in the folders' order (each
+    folder's tracks by number), every CD's run of files fits its log's table of contents to the
+    sector (toc_fits_audio), at least one CD's run crossing from one folder into the next. None
+    otherwise (the folders are the discs, as before)."""
+    album_dir = Path(album_dir)
+    folders = sorted({p.parent for p, _i in infos if album_dir in p.parents},
+                     key=lambda d: _natural_key(d.relative_to(album_dir).as_posix()))
+    if len(folders) < 3 or len(folders) != len({p.parent for p, _i in infos}):
+        return None
+    logs, seen = [], set()
+    for log in rip_logs(album_dir):
+        if log["toc"] and log["toc"] not in seen:
+            seen.add(log["toc"])
+            logs.append(log)
+    if not 2 <= len(logs) < len(folders):
+        return None
+    counts = [len(_toc_lengths(log["toc"])) for log in logs]
+    if sum(counts) != len(infos):
+        return None
+    place = {d: k for k, d in enumerate(folders)}
+    seq = sorted(infos, key=lambda x: (place[x[0].parent], x[1].get("num") or 9999, _natural_key(x[0].name)))
+    out, at, crosses = {}, 0, False
+    for k, (log, n) in enumerate(zip(logs, counts), 1):
+        part = seq[at:at + n]
+        at += n
+        dirs = {p.parent for p, _i in part}
+        if Path(log["path"]).parent not in dirs | {album_dir}:
+            return None                                   # (a log away from its CD's tracks)
+        if not toc_fits_audio(log["toc"], [i for _p, i in part]):
+            return None
+        crosses = crosses or len(dirs) > 1
+        for j, (p, _i) in enumerate(part, 1):
+            out[p] = (k, j)
+    return out if crosses else None
 
 
 def fitting_logs(infos, logs):
@@ -4786,6 +4839,15 @@ class Http:
             except (OSError, _HTTPException, ValueError) as e:
                 # a broken answer (connection reset, incomplete read, SSL error, not UTF-8)
                 last_err = f"{type(e).__name__}: {e}"
+                # EVI-10: a cut-off answer from a database itself (a large box's release page
+                # read in part, a reset connection) is asked again, twice: one broken read must
+                # not leave a release your files name unfetched. (Not text that is not UTF-8:
+                # asked again, it comes back the same.)
+                if (host not in self.OPTIONAL_HOSTS and not isinstance(e, ValueError)
+                        and attempt < min(2, attempts - 1)):
+                    _tell(f"    {host} broken answer ({type(e).__name__}), asking again")
+                    self._pause(2 * (attempt + 1) + random.uniform(0, 1))
+                    continue
                 if host in self.OPTIONAL_HOSTS:
                     self.host_failed(host)
                 if trial:                                   # the trial got no answer: open again
@@ -5992,6 +6054,54 @@ def packaging_evidence(album_dir):
     return out or ({"jewel"} if jewel_parts else set())
 
 
+_EDITION_YEAR = re.compile(r"(?<![\d.])(?:19[5-9]\d|20\d\d)(?![\d.])")
+# EVI-11: an image size in a folder's name ("Covers 2000x2000", "2048px", "600 dpi"): no year
+_IMAGE_SIZE = re.compile(r"\d+\s*[x\u00d7]\s*\d+|\d+\s*(?:px|dpi|ppi)\b", re.I)
+_EDITION_WORD = re.compile(r"\b(?:re-?issue|edition|re-?master(?:ed)?|re-?press(?:ing)?|pressing|original|first press)\b",
+                           re.I)
+# a catalogue number written in a folder's name, outside brackets too ("scans, A 421 (2004)")
+_FOLDER_CODE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{1,6})[ -]?(\d{3,6})(?![\d])")
+
+
+def _folder_codes(name) -> set:
+    return {f"{m.group(1)}{m.group(2)}".casefold() for m in _FOLDER_CODE.finditer(_IMAGE_SIZE.sub(" ", str(name or "")))
+            if not _EDITION_YEAR.fullmatch(m.group(2))}
+
+
+def other_edition_scans(base, folder) -> bool:
+    """EVI-11: a sub-folder of the album folder, holding no audio, named for another edition: the
+    scans of that edition, kept for reference ("Bach - 6 Suites ... (2015 [2004])/scans, A 421
+    (2004)": the 2004 CD's) - never your copy's print, so its barcode and numbers are not read.
+    Another edition's name: a catalogue number the album folder's name does not carry ("A 421"),
+    or a year the album folder's name gives nowhere together with an edition word ("reissue",
+    "edition", "remaster" ...) or a country. Image sizes ("2000x2000", "2048px") are no years; a
+    disc folder holding audio is your copy's disc."""
+    try:
+        rel = Path(folder).relative_to(base)
+    except ValueError:
+        return False
+    if not rel.parts:
+        return False
+    own = _IMAGE_SIZE.sub(" ", Path(base).name)
+    own_years, own_codes = set(_EDITION_YEAR.findall(own)), _folder_codes(own)
+    at = Path(base)
+    for part in rel.parts:
+        at = at / part
+        bare = _IMAGE_SIZE.sub(" ", part)
+        years = set(_EDITION_YEAR.findall(bare))
+        country = any(len(w) > 3 and w in mc._COUNTRY_NAMES for w in re.findall(r"[a-z]+", bare.casefold()))
+        named = bool(_folder_codes(bare) - own_codes) or bool(
+            years and not years & own_years and (_EDITION_WORD.search(bare) or country))
+        if not named:
+            continue
+        try:
+            if not any(q.suffix.lower() in AUDIO_EXT for q in at.iterdir()):
+                return True
+        except OSError:
+            return False
+    return False
+
+
 def list_images(base, max_n, inventory=None):
     """Every image under the album folder (subfolders included), most likely
     to carry a barcode or catalogue number first (ocr_order: the roles whose scans paid
@@ -6006,6 +6116,8 @@ def list_images(base, max_n, inventory=None):
     import hashlib
     found = []
     for dirpath, _d, names in os.walk(base):
+        if other_edition_scans(base, dirpath):
+            continue                                     # EVI-11
         for n in sorted(names):
             p = Path(dirpath) / n
             if p.suffix.lower() in IMAGE_EXT and not web_image(p):
@@ -8512,6 +8624,48 @@ def release_ids_view(final, results, album):
             "printed": printed[:60000]}
 
 
+def discid_less_tie(http, album, res, cfg, at_most=3):
+    """TOC-3 / TIE-1: MusicBrainz's pick carries your exact disc ID, and a pressing within the
+    margin of it, of as many tracks, does not: when that pressing has no disc ID attached to any
+    of its audio media (one look-up of its disc IDs, cached; at most AT_MOST), the disc ID's
+    absence from it is unknown, not another disc (Madlib - Medicine Show: The Brick, the 2016
+    reissue d9c407e9 beside the 2012 box 7bc10ce4) - album["discid_less"] names it and the
+    candidates are scored again, so the tie rules propose a pressing (album known), never the
+    disc ID choosing it. res, or the result scored again."""
+    best = (res or {}).get("best")
+    if not best or not album.get("exact_toc_releases") or not mc._exact_toc(best):
+        return res
+    n = len(best["cand"].get("tracks") or ())
+    # (pressings of this one release's title and shape - never a one-disc album beside a box's disc
+    # view, DSC-12a decides those)
+    if best["cand"].get("box_disc"):
+        return res
+    pool = [s for s in res.get("scored") or () if s is not best and s["cand"].get("source") == "mb"
+            and not s["cand"].get("box_disc")
+            and mc.title_sim(str(s["cand"].get("title") or ""), str(best["cand"].get("title") or "")) >= 0.85
+            and (s["cand"].get("disc_count") or 1) == (best["cand"].get("disc_count") or 1)
+            and not mc._exact_toc(s) and s.get("tracks_ok") and len(s["cand"].get("tracks") or ()) == n
+            and abs(float(s["confidence"]) - float(best["confidence"])) < cfg["auto_min_margin"]
+            and str(s["cand"]["id"]) not in (album.get("discid_less") or ())]
+    found = set()
+    for s in pool[:at_most]:
+        rid = str(s["cand"]["id"])
+        try:
+            det = http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}?inc=discids&fmt=json", "mb")
+        except ProviderUnavailable:
+            continue
+        media = [m for m in (det or {}).get("media") or () if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
+        # (an answer listing each medium's disc IDs - none on any: "discs": [] each)
+        if media and all("discs" in m for m in media) and not any(m["discs"] for m in media):
+            found.add(rid)
+    if not found:
+        return res
+    album["discid_less"] = set(album.get("discid_less") or ()) | found
+    cands = [_whole(s) for s in res.get("scored") or ()]
+    scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg) for c in cands], cfg)
+    return dict(mc.classify(scored, cfg), scored=scored, source=res.get("source") or "mb")
+
+
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
     mc.note_titles(album, cands)                       # (FLD-1: one decision for every pressing)
@@ -8884,6 +9038,7 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
                                     "duplicates": inventory.get("duplicates", 0),
                                     "left_out": inventory.get("left_out", 0),
                                     "unreadable": inventory.get("unreadable", 0), "stopped": stopped}
+    web_codes = _codes_of_this_album(web_codes, new_final, (mb_res, dg_res))     # EVI-12
     if new_final.get("best"):
         new_final["best"]["notes"] = new_final["best"]["notes"] + [
             f"investigated: {read_again}; codes "
@@ -9331,6 +9486,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 source_notes.append(f"MusicBrainz lookup failed ({exc}); result is Discogs-only")
                 if provider_errors is not None:
                     provider_errors["musicbrainz"] = exc.kind
+        mb_res = discid_less_tie(http, album, mb_res, cfg)     # TOC-3 / TIE-1
     else:
         mb_res = None
     # each failed disc or link lookup: a note (a MusicBrainz one is a source note, the
@@ -9885,6 +10041,29 @@ def _another_album(c, cand) -> bool:
     return any(p and mc.title_sim(a, p) >= 0.85 for p in parts)
 
 
+def _another_artist(c, cand) -> bool:
+    """EVI-12: C is credited to another artist than CAND (both credited, the names apart)."""
+    a, b = str(c.get("artist") or ""), str(cand.get("artist") or "")
+    return bool(a and b) and mc.artist_sim(a, b) < 0.85 and mc.artist_sim(b, a) < 0.85
+
+
+def _codes_of_this_album(codes, final, results):
+    """EVI-12: the codes read off the scans, without those whose search found only other artists'
+    records (OCR noise, "SSV19" for Time Travel's Spandangle Selection): the evidence line names
+    no code that says nothing of this album."""
+    best = ((final or {}).get("best") or {}).get("cand")
+    if not best:
+        return list(codes)
+    scored = [s["cand"] for res in results for s in (res or {}).get("scored") or ()]
+    out = []
+    for c in codes:
+        hits = [x for x in scored if x.get("catnos") and mc.catnos_agree([c], x["catnos"])]
+        if hits and all(_another_artist(x, best) for x in hits):
+            continue
+        out.append(c)
+    return out
+
+
 def scans_report(best, album, ocr_txt, results, had_scans):
     """What the album's scans (and the barcodes decoded off them) showed about BEST, the
     scored pick: {"state", "found", "against"}, or None when the folder has no scans or
@@ -9936,9 +10115,12 @@ def scans_report(best, album, ocr_txt, results, had_scans):
         # carry - a box's replica sleeve printing its disc's original LP number (Mahavishnu
         # Orchestra - The Complete Columbia Albums Collection: "KC 31996", Birds Of Fire) - names
         # no other pressing of the box
+        # EVI-12: and only a pressing of this artist - OCR noise ("SSV19" off a booklet's text) that
+        # a code search matched to another artist's record names no pressing of this album
         others = [s["cand"].get("catnos") or () for res in results for s in (res or {}).get("scored") or ()
                   if s.get("cand") is not cand and str(s["cand"].get("id")) != str(cand.get("id"))
-                  and not _another_album(s["cand"], cand)]
+                  and not _another_album(s["cand"], cand)
+                  and not _another_artist(s["cand"], cand)]
         others_number = any(not mc.catnos_agree([c], theirs) and any(mc.catnos_agree([c], o) for o in others)
                             for c in mine)
         if others_number and not unlisted_download:

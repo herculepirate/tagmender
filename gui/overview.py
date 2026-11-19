@@ -552,9 +552,9 @@ class Overview(QWidget):
         fv.customContextMenuRequested.connect(lambda pos: self.context_menu(pos, folders=True))
         fv.selectionModel().selectionChanged.connect(self.folders_chosen)
         self.model.ticked.connect(self.win.update_album_actions)
-        self._sel_ticked = set()                              # (APL-2: keys of albums ticked by their highlight)
-        self.model.box_set.connect(lambda albums: self._sel_ticked.difference_update(
-            self.album_key(a) for a in albums))
+        self._sel_ticked = {}                                 # (APL-2: key -> album ticked by its highlight)
+        self.model.box_set.connect(self.boxes_yours)
+        self.model.modelReset.connect(self.forget_highlight_ticks)
         # the list's own keys, as in a folder: Delete (or Backspace) takes the selected albums out of
         # the list, Escape lets go of the selection. Taken before the menus' shortcuts (Remove Tag is
         # Del too: two shortcuts on one key and Qt runs neither)
@@ -852,9 +852,9 @@ class Overview(QWidget):
             for text, slot, on in ((tr("Apply Selected Albums…") if n > 1 else tr("Apply This Album…"),
                                     lambda c=chosen: self.apply_selected(c),
                                     any(can_apply(a) for a in chosen) and self.may_apply_now()),
-                                   (tr("Leave Out of Apply"), lambda c=chosen: self.model.set_left_out(c, True),
+                                   (tr("Leave Out of Apply"), lambda c=chosen: self.set_boxes(c, True),
                                     any(can_apply(a) and not PlanModel.left_out(a) for a in chosen)),
-                                   (tr("Include in Apply"), lambda c=chosen: self.model.set_left_out(c, False),
+                                   (tr("Include in Apply"), lambda c=chosen: self.set_boxes(c, False),
                                     any(PlanModel.left_out(a) for a in chosen)),
                                    (tr("Remove from List"), lambda c=chosen: self._take_out(c), not self.running)):
                 act = QAction(text, self)
@@ -971,7 +971,7 @@ class Overview(QWidget):
         self.win.update_album_actions()
 
     def leave_out(self, out):
-        self.model.set_left_out(self.selected_albums(), out)
+        self.set_boxes(self.selected_albums(), out)
 
     def apply_selected(self, chosen=None):
         """Apply only the selected albums: the others are left out of this Apply (not of the list)."""
@@ -1043,6 +1043,7 @@ class Overview(QWidget):
         else:                                               # (all applied: the rows shown, no plan behind)
             self.model.set_plan({"albums": left})
         self.removed |= {os.path.realpath(a["source_dir"]) for a in chosen}    # (dropped again: listed again)
+        self.boxes_yours(chosen)                            # (APL-2: gone from the list, no tick of theirs kept)
         self.summary.setText(tr("{0} taken out of this preview; nothing on disk changed.")
                              .format(plural(len(chosen), tr("album"), tr("albums"))))
         self.win.update_album_actions()
@@ -2368,6 +2369,7 @@ class Overview(QWidget):
                 a[PlanModel.AWAIT] = True
         mine = was is not None and any(was is self.model.albums[r] for r in rows)
         at = self.model.replace_rows(rows, found)
+        self.sync_ticks()                                   # (APL-2: a highlighted row replaced: ticked as it is)
         self.plan["listed"] = any(a["status"] == "listed" for a in self.model.albums)
         if mine:                                          # (the album shown: shown as found now)
             if found and not self.table.selectionModel().hasSelection():
@@ -2889,6 +2891,23 @@ class Overview(QWidget):
         return can_apply(a) and a.get("status") != "unresolved" and not planmod.held(a) and not offered(a) \
             and not a.get(PlanModel.AWAIT)
 
+    def boxes_yours(self, albums):
+        """APL-2: boxes you set (a click, Leave Out of / Include in Apply): yours, never undone by a
+        highlight moving on."""
+        for a in albums:
+            self._sel_ticked.pop(self.album_key(a), None)
+
+    def forget_highlight_ticks(self, *_):
+        """A new list (a preview, the plan set again): no tick of it came from a highlight."""
+        self._sel_ticked = {}
+        self._rows_chosen = False
+        self._folders_by_you = False
+
+    def set_boxes(self, albums, out):
+        """Leave Out of Apply / Include in Apply: as clicking their boxes."""
+        self.model.set_left_out(albums, out)
+        self.boxes_yours(albums)
+
     def sync_ticks(self):
         """APL-2 (2026-11-19): a highlighted album is ticked, and its highlight taken away, the
         tick it gave goes too (kept by album key: a look-up's new row of it is the same album).
@@ -2900,11 +2919,20 @@ class Overview(QWidget):
                 not getattr(self, "_folders_by_you", False):
             return
         lit = {self.album_key(a): a for a in self.highlighted_albums() if self.highlight_applies(a)}
-        now = {self.album_key(a): a for a in self.model.albums}
-        on = [a for k, a in lit.items() if k not in self._sel_ticked and PlanModel.left_out(a)]
-        off = [now[k] for k in self._sel_ticked if k not in lit and k in now and not PlanModel.left_out(now[k])]
-        self._sel_ticked = {k for k in self._sel_ticked if k in lit and k in now} | \
-            {self.album_key(a) for a in on}
+        ids = {id(a) for a in self.model.albums}
+        by_key = None
+        kept = {}                                          # (key -> its album now: a look-up may have replaced it)
+        for k, a in self._sel_ticked.items():
+            if id(a) not in ids:
+                if by_key is None:                         # (only then: every album's key, once)
+                    by_key = {self.album_key(x): x for x in self.model.albums}
+                a = by_key.get(k)
+            if a is not None:
+                kept[k] = a
+        on = [a for k, a in lit.items() if k not in kept and PlanModel.left_out(a)]
+        off = [a for k, a in kept.items() if k not in lit and not PlanModel.left_out(a)]
+        self._sel_ticked = {k: a for k, a in kept.items() if k in lit}
+        self._sel_ticked.update({self.album_key(a): a for a in on})
         self._syncing = True
         try:
             if on:

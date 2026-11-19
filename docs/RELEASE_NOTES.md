@@ -1,5 +1,21 @@
 # Release notes
 
+## 0.8.84
+
+**Ticks follow your highlight**
+- Highlighting an album, in either pane, ticks it; when the highlight goes, so does the tick it gave. A box you tick or untick yourself (or Leave Out of / Include in Apply) stays as you set it. Apply carries out exactly the ticked albums (APL-2).
+- Albums TagMender waits for your tick on are never ticked by a click: an Unresolved album, a held one, one whose filing is offered, and a release you chose shown to be checked first. An album only shown (after a preview or a look-up) is not highlighted by you and is not ticked.
+
+**What you tick is filed**
+- An album below the profile's score for filing now starts unticked even when it has tags to write; ticking it is the ask, and it is tagged and moved into the library. Before, it started ticked and Apply only tagged it where it was (MOV-6).
+
+**Look-ups**
+- Albums you add or look up while a look-up runs join it as soon as a worker is free (up to three at once), instead of waiting for it to end. Albums from another folder, with other sources or profile, or in a folder Apply is working on still wait, and the status bar says why (LKP-1).
+- Two folders of one release added one by one (an SACD's layers beside its CD rip) are looked up together and filed as one album, as when their parent folder is looked up (DSC-10/DSC-11).
+
+**Also**
+- Tests run on their own never write into your settings or History.
+
 ## 0.8.83
 
 - An album is no longer called "Mono" because one disc of its box holds a few mono tracks. Discogs's "Mono" names the version only when nothing else in the release says Stereo, Quadraphonic or Multichannel (ED-9). A deluxe SACD set whose bonus CD mixes mono demos with stereo live takes was filed "[Remastered, Mono]"; it is "[Remastered]".

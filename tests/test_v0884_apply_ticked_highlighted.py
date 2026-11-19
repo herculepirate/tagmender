@@ -136,6 +136,29 @@ class ApplyTickedAndHighlighted(_keys.Base):
         self.assertTrue(PlanModel.left_out(c))
         self.assertNotIn(id(c), self.ids(self.ov.to_apply()))
 
+    def test_APL2_a_new_preview_keeps_no_tick_of_an_old_highlight(self):
+        import gui_screens
+        from gui.models import PlanModel
+        _a, _b, c = self.ready[:3]
+        self.ov.model.set_left_out([c], True)
+        self.highlight_row(c)                                         # (ticked by its highlight)
+        self.ov.planned(gui_screens.sample_plan(Path(self.ov.path)))   # (previewed again)
+        _keys.settle(self.app)
+        new = [x for x in self.ov.model.albums if x["source_dir"] == c["source_dir"]]
+        self.assertTrue(new and not PlanModel.left_out(new[0]))
+        self.highlight_row(self.ov.model.albums[0])
+        self.assertFalse(PlanModel.left_out(new[0]))                  # (a click elsewhere: still ticked)
+
+    def test_APL2_include_in_apply_from_the_menu_is_yours(self):
+        from gui.models import PlanModel
+        _a, _b, c = self.ready[:3]
+        self.ov.model.set_left_out([c], True)
+        self.highlight_row(c)
+        self.ov.set_boxes([c], True)
+        self.ov.set_boxes([c], False)                                 # (Include in Apply)
+        self.highlight_row(self.ready[0])
+        self.assertFalse(PlanModel.left_out(c))
+
 
 if __name__ == "__main__":
     unittest.main()

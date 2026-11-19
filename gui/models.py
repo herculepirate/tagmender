@@ -434,7 +434,10 @@ class PlanModel(QAbstractTableModel):
                     a.pop(self.AWAIT, None)
                     if a.get("held"):          # (WEB-1: ticked - you chose to apply it)
                         a["held_ok"] = True
-        self.dataChanged.emit(self.index(0, 0), self.index(max(0, len(self.albums) - 1), len(self.COLS) - 1))
+        ids = {id(a) for a in albums}                 # (their rows only: a click on 2000 rows stays quick)
+        rows = [r for r, a in enumerate(self.albums) if id(a) in ids]
+        if rows:
+            self.dataChanged.emit(self.index(min(rows), 0), self.index(max(rows), len(self.COLS) - 1))
         self.ticked.emit()
         if asked:
             self.file_asked.emit(asked)

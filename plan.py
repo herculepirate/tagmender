@@ -1200,7 +1200,7 @@ def _set_total(prop) -> int:
 def _proven(prop) -> bool:
     """DSC-12: an album proven exactly - never a pressing guessed, a tie-break's suggestion, album known."""
     return prop.status == "identified" and tier_of(prop) == "exact" and not getattr(prop, "guessed_pick", False) \
-        and not getattr(prop, "suggested", None)
+        and not getattr(prop, "suggested", None) and not getattr(prop, "held", "")   # (DSC-12a: a held box disc)
 
 
 def _lone_discs(prop) -> bool:

@@ -102,13 +102,44 @@ class DSC12a_DiscNotBox(te.Base):
         self.assertTrue(any("also issued as disc 1 of 'Heart'" in n for n in a["notes"]), a["notes"])
 
     def test_DSC12a_without_its_own_release_the_box_disc_is_only_proposed(self):
+        # (held, unticked, below auto; the row shows what ticking writes: the box disc's own tags)
         a = self.plan(self.folder(), skip={"mb-alpha"})
         self.assertEqual(a["identification"]["release_id"], "mb-box")
-        self.assertEqual(a["identification"]["tier"], "album_only")
         self.assertTrue(planmod.held(a), a)
         self.assertLess(a["identification"]["confidence"], 90)
-        self.assertTrue(any("its disc ID is on 'Heart' disc 1 of 3 only; your tags call it 'Alpha'" in n
-                            for n in a["notes"]), a["notes"])
+        self.assertEqual(a["held"], "Its disc ID is on 'Heart' disc 1 of 3 only; your tags call it 'Alpha'. "
+                                    "Tick to tag it as disc 1 of 'Heart'.")
+        self.assertIn("disc_id_box_disc", a["identification"]["reason_codes"])
+        ch = a["files"][0]["changes"]
+        self.assertEqual((ch.get("album"), ch.get("musicbrainz_albumid"), ch.get("totaldiscs")),
+                         (["Heart"], ["mb-box"], ["3"]), ch)
+        self.assertEqual(ch.get("tagmender"), ["Resolved"])        # (a proper box disc once ticked, not Partial)
+
+    def test_DSC12a_a_held_box_disc_writes_nothing_unticked(self):
+        import executor
+        d = self.folder()
+        before = {f.name: f.read_bytes() for f in d.glob("*.flac")}
+        http = Http(mb=[release("mb-alpha", "Alpha", [1]), release("mb-box", "Heart", [1, 2, 3], barcode="999")],
+                    skip={"mb-alpha"})
+        eng = self.engine(http)
+        plan = eng.plan(d)
+        self.assertTrue(planmod.held(plan["albums"][0]))
+        executor.Executor(plan).run()                       # (nothing ticked: the held album is left)
+        self.assertEqual({f.name: f.read_bytes() for f in d.glob("*.flac")}, before)
+
+    def test_DSC12a_its_own_release_is_found_whatever_edition_words(self):
+        # (a tag naming a dated remaster the box is not - "Alpha [2009 Remaster]" - leaves the box
+        # unmatched already: no DSC-12 match to look at)
+        for i, (tag, own) in enumerate((("Alpha (Remastered)", "Alpha"), ("Alpha - Deluxe Edition", "Alpha"))):
+            with self.subTest(tag=tag, own=own):
+                d = self.lib / "Band J" / f"e{i}"
+                for j, secs in enumerate(LENS[1]):
+                    flac(d, f"{j + 1:02d}.flac", secs + 1 / 75, freq=340 + 10 * j, title=f"Alpha {j}", album=tag,
+                         albumartist="Band J", artist="Band J", track=str(j + 1))
+                (d / "rip.log").write_text(log_text(1))
+                http = Http(mb=[release("mb-alpha", own, [1]), release("mb-box", "Heart", [1, 2, 3], barcode="999")])
+                [a] = self.engine(http).plan(d)["albums"]
+                self.assertEqual(a["identification"]["release_id"], "mb-alpha", a.get("notes"))
 
     def test_DSC12a_the_box_barcode_in_the_files_keeps_the_box(self):
         a = self.plan(self.folder(barcode="999"))

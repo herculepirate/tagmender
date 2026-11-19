@@ -722,6 +722,15 @@ def disc_id_set_shape(folder: Path, dirs, keys, found) -> str:
     return "discids"
 
 
+def _bare_title(title) -> str:
+    """DSC-12a: a title without its edition or version words ("Alpha (Remastered)", "Alpha [2009
+    Remaster]", "Alpha - Deluxe Edition" -> "alpha"), folded (match_core.strip_edition)."""
+    t = mc.strip_edition(str(title or ""))
+    t = re.sub(r"\s*[-\u2013:]\s*(?:deluxe|expanded|anniversary|remaster(?:ed)?|special|collector'?s)\b.*$", "", t,
+               flags=re.I)
+    return _title_fold(t) or _title_fold(title)
+
+
 def _names_release(name, title, year="", label="", codes=(), discs=0) -> bool:
     """DSC-16: a folder's name names a release's title ("Joy Division - 1977-1980 - 1991 - FLAC"
     for "1977–1980"): the title's words, in order, within the name's. A title of years only
@@ -3416,6 +3425,9 @@ class Engine:
         also = f"also issued as disc {disc} of '{title}' ({total} discs)"
         # (1) its own album's one-disc release, by the same artist, its tracks fitting
         artist = _title_fold(first("albumartist") or first("artist"))
+        # (titles compared without edition or version words on either side: "Alpha (Remastered)",
+        # "Alpha [2009 Remaster]", "Alpha - Deluxe Edition" are "Alpha")
+        bare = _bare_title(next((_album_title(m) for m in metas if _first(m, "album")), ""))
         own = []
         for c in getattr(prop, "candidates", None) or ():
             kind = "mb" if c.get("source") == "musicbrainz" else "discogs" if c.get("source") == "discogs" else None
@@ -3425,14 +3437,14 @@ class Engine:
             # (only a candidate named as its own album by its artist is looked at: "Band J - Alpha")
             c_artist, _sep, c_title = str(c.get("title") or "").partition(" - ")
             c_title = re.sub(r"\s*\((?:19|20)\d\d\)\s*$", "", c_title if _sep else c_artist)
-            if _title_fold(c_title) != album or (artist and _sep and _title_fold(c_artist) != artist):
+            if _bare_title(c_title) != bare or (artist and _sep and _title_fold(c_artist) != artist):
                 continue
             q = self._forced(g, str(c.get("url") or cid), release=(kind, cid))
             qt = q.targets or [{}]
             qtitle = _title_fold(str((qt[0].get("album") or [""])[0]))
             qartist = _title_fold(str((qt[0].get("albumartist") or qt[0].get("artist") or [""])[0]))
             if q.status == "identified" and planmod.tier_of(q) == "exact" and planmod._set_total(q) in (0, 1) \
-                    and qtitle and qtitle == album \
+                    and qtitle and _bare_title(qtitle) == bare \
                     and (not artist or qartist == artist):
                 own.append(q)
         if own:
@@ -3441,16 +3453,16 @@ class Engine:
                                                    f"album's release (DSC-12a)"]
             self.log.info("%s: %s; matched as its own album's release (DSC-12a)", g.folder, also)
             return best
-        # (2) the box's disc, proposed only
+        # (2) the box's disc, proposed only: its row shows what ticking writes - the box disc's
+        # own tags, whole - held (unticked), below auto; ticked, it is that disc (DSC-12)
         tag = next((_first(m, "album") for m in metas if _first(m, "album")), "")
-        note = f"its disc ID is on '{title}' disc {disc} of {total} only; your tags call it '{tag}' (DSC-12a)"
-        prop.tier = "album_only"
+        note = (f"Its disc ID is on '{title}' disc {disc} of {total} only; your tags call it '{tag}'. "
+                f"Tick to tag it as disc {disc} of '{title}'.")
         thr = planmod._threshold(self.profile, "auto_min_confidence")
         prop.confidence = min(float(prop.confidence or 0), max(0.0, float(thr) - 0.1))
         prop.held = note                                 # (planned, unticked: plan.Planner shows it as its note)
-        for t in prop.targets or ():                     # (no disc of the box written: neither number nor total)
-            for k in ("discnumber", "totaldiscs", "disctotal"):
-                t.pop(k, None)
+        prop.reason_codes = ["disc_id_box_disc"]
+        prop.reason = reasons.encode(note, ["disc_id_box_disc"])
         return prop
 
     def _finish(self, prop, g: Group):

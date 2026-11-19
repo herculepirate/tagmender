@@ -150,8 +150,11 @@ class DSC16_DiscIdClaim(te.Base):
         n = engine._names_release
         self.assertTrue(n("Joy Division - 1977-1980 - 1991 - FLAC", "1977–1980", "1991"))
         self.assertFalse(n("Band J - Discography 1979-1981", "1979–1981", "1991"))
-        self.assertTrue(n("Band J - 1979-1981 (3CD)", "1979–1981", "1991", discs=3))
-        self.assertTrue(n("Band J - 1979-1981 [CAT-9]", "1979–1981", "1991", codes=("CAT-9",)))
+        self.assertFalse(n("Band J - 1979-1981 (3CD)", "1979–1981", "1991", discs=3))   # (a count alone: no)
+        self.assertTrue(n("Band J - 1979-1981 [CAT-90]", "1979–1981", "1991", codes=("CAT-90",)))
+        self.assertTrue(n("Band J - 1979-1981 [CK 34987]", "1979–1981", "1991", codes=("CK34987",)))
+        self.assertFalse(n("Band J - 1979-1981 [C-9]", "1979–1981", "1991", codes=("C-9",)))  # (too short)
+        self.assertFalse(n("Band J - 1979-1981 [XCAT-900]", "1979–1981", "1991", codes=("CAT-900",)))  # (not whole)
         self.assertTrue(n("Band J - Heart Box", "Heart"))
         self.assertFalse(n("Band J - Albums", "Heart"))
 

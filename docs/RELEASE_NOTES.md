@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.8.78
+
+**Box sets: never two releases made one**
+- 0.8.76's box-set matching could join folders that are separate releases. Fixed, and checked by an independent review: a discography folder whose name gives a CD count ("Discography 1990-1999 (3CD)") stays separate albums; a box with a stray single beside its discs is the box plus the single; standalone albums whose disc IDs are also on a box stay standalone unless the folder names the box or says it is a set; a dated artist folder ("Albums 1979-1981") is not taken for a box titled by its years.
+- A single CD whose disc ID is on a box is matched to its own release when that release fits, with the note "also issued as disc 1 of '<box>'". When its own release cannot be found, the box's disc is proposed, unticked: "Its disc ID is on '<box>' disc 1 of 3 only; your tags call it '<title>'. Tick to tag it as disc 1 of '<box>'." A disc tagged with the box's own title ("Heart (Disc 1)", "Heart [CD1]") is the box's disc as before (DSC-12a).
+- Joy Division - 1977-1980 (the 1991 Japanese 5-CD box) is now one album: a short disc whose exact disc ID is on the box belongs to it, even when it is also a single (DSC-16).
+- Files placed across a set's discs never swap a studio and a live version of the same song; a title on two discs is placed only by its IDs or a clearly different length (TRK-8). Large boxes are matched much faster (a 26-disc box: 8 s to under 0.5 s per candidate).
+
 ## 0.8.77
 
 **Applying, at a glance**

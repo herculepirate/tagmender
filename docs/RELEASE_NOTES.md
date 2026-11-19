@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.8.82
+
+- The Cover pane shows the cover you choose. A cover chosen for the album shown (Choose Cover…, a found cover, an image file or link) was taken, and Apply would have written it, but the pane beside the tags kept showing the cover it had read before. It now shows your image at once, its size and "your image" with it.
+
 ## 0.8.81
 
 - Any album can be taken out of the list from either pane. Delete (or Backspace) in Your files did nothing; it now takes out the albums its selected folders and files hold, as it does in Albums as they will be, ticked or not. Escape there lets go of the selection.

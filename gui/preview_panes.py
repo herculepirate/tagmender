@@ -741,6 +741,12 @@ def _stamp(a) -> tuple:
     return id(a), id(a.get("files")), len(a.get("files") or []), a.get("status"), id(a.get("identification"))
 
 
+def _cover_art(album) -> tuple:
+    """What the cover strip shows of ALBUM's new front: chosen by you or found, which image."""
+    art = (album or {}).get("artwork") or {}
+    return art.get("front"), art.get("by"), art.get("source"), art.get("width"), art.get("height")
+
+
 class AlbumsModel(LazyTree):
     """The albums as they will be: one top row per album of the Overview's list - ROWS, its sorted
     and filtered rows (gui.models.SortedRows): its order, its filter, its selection - and under each
@@ -1547,6 +1553,7 @@ class PreviewPanes(QWidget):
         self.covers = []                             # the cover strip's choices (covers_find.Choice)
         self.opened_at = None
         self._cover_album = None                     # (the album the cover strip shows)
+        self._cover_art = None                       # (and its new front as read: _cover_art)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -2012,8 +2019,8 @@ class PreviewPanes(QWidget):
         self.read_tags()
         self.fill_tags()
         self.show_rating()
-        if album is not self._cover_album or album is None:
-            self.load_covers()
+        if album is not self._cover_album or album is None or self._cover_art != _cover_art(album):
+            self.load_covers()                               # (another album, or this one's new cover changed)
 
     def _show_in_list(self, node):
         """The albums pane's row for NODE highlighted only to show it (the Overview: show_row)."""
@@ -2430,6 +2437,7 @@ class PreviewPanes(QWidget):
         folder = album.get("source_dir") or ""
         files = [fe["src"] for fe in album.get("files") or []]
         art = dict(album.get("artwork") or {})
+        self._cover_art = _cover_art(album)
         self.cover_note.setText(tr("Reading the album's pictures…"))
 
         def work(w):

@@ -434,6 +434,25 @@ class DSC12a_LengthsOnlyLoneDisc(te.Base):
         self.assertIn("nothing of your copy", out.held)
         self.assertLess(out.confidence, 90)
 
+    def test_DSC12a_an_own_titled_release_the_matcher_scored_low_is_never_forced(self):
+        # (a 5-track release titled as the folder's album - a bootleg of more tracks, scored 43 -
+        # is no "own album's release" to tag it as: the box disc stays proposed, held)
+        top = self.folder("Band Y - Complete Studio Recordings (fan)")
+        own = te.mb_release("mb-own", "Band Y", "Alpha sessions", lens=[10000, 20000, 30000, 40000, 50000])
+        eng = self.engine(te.FakeHttp(mb=[own]))
+        prop = self.prop(top)
+        prop.candidates = [{"source": "musicbrainz", "id": "mb-own", "url": "https://musicbrainz.org/release/mb-own",
+                            "title": "Band Y - Alpha sessions (1979)", "score": 43.0}]
+        out = eng._disc_not_box(engine.Group(top, sorted(top.glob("*.flac"))), prop)
+        self.assertEqual(out.release_id, "mb-box")
+        self.assertTrue(getattr(out, "held", ""), out)
+        prop = self.prop(top)
+        prop.candidates = [dict(c, score=100.0) for c in [{"source": "musicbrainz", "id": "mb-own",
+                                                           "url": "https://musicbrainz.org/release/mb-own",
+                                                           "title": "Band Y - Alpha sessions (1979)"}]]
+        out = eng._disc_not_box(engine.Group(top, sorted(top.glob("*.flac"))), prop)
+        self.assertEqual(out.release_id, "mb-own")        # (scored at the threshold: the forced match, as before)
+
     def test_DSC12a_a_folder_naming_the_release_stands(self):
         top = self.folder("Band Y - Heart Of The Box")
         eng = self.engine(te.FakeHttp())

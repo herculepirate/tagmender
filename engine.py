@@ -3619,6 +3619,11 @@ class Engine:
             c_title = re.sub(r"\s*\((?:19|20)\d\d\)\s*$", "", c_title if _sep else c_artist)
             if _bare_title(c_title) != bare or (artist and _sep and _title_fold(c_artist) != artist):
                 continue
+            # (its tracks fitting: the matcher's own score of it at the auto threshold - never a
+            # release of more tracks taken because its name is the folder's: Joy Division - Complete
+            # Studio Recordings/07, a 19-track bootleg "Unknown Pleasures Sessions" scored 43)
+            if float(c.get("score") or 0) < float(planmod._threshold(self.profile, "auto_min_confidence")):
+                continue
             q = self._forced(g, str(c.get("url") or cid), release=(kind, cid))
             qt = q.targets or [{}]
             qtitle = _title_fold(str((qt[0].get("album") or [""])[0]))

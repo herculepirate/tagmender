@@ -526,33 +526,39 @@ class TIE1_SharedDiscIdDisputesNothing(unittest.TestCase):
 
 # ---- DSC-19 --------------------------------------------------------------------------------
 class DSC19_DiscFolderAgreesWithTags(unittest.TestCase):
-    def test_DSC19_a_file_of_another_disc_moves_into_its_folder(self):
+    def album(self, folders, total, moved="Disc 3", disc="2"):
         import tempfile
         root = Path(tempfile.mkdtemp(prefix="tm-dsc19-"))
-        for d in ("Disc 1", "Disc 2", "Disc 3"):
+        files, targets = [], {}
+        for d in folders:
             (root / d).mkdir()
-        f = root / "Disc 3" / "301.A.flac"
-        f.write_bytes(b"x")
-        g = root / "Disc 3" / "303.MO.flac"
-        g.write_bytes(b"x")
-        entry = {"files": [{"src": str(f), "dst": str(f), "op": "tag", "changes": {"discnumber": ["2"]}},
-                           {"src": str(g), "dst": str(g), "op": "tag", "changes": {"tracknumber": ["1"]}}],
-                 "notes": []}
-        planmod._disc_folder_moves(entry)
-        self.assertEqual((entry["files"][0]["op"], entry["files"][0]["dst"]), ("move", str(root / "Disc 2" / f.name)))
-        self.assertEqual(entry["files"][1]["dst"], str(g))
+            f = root / d / f"{d[-1]}01.x.flac"
+            f.write_bytes(b"x")
+            changes = {"discnumber": [disc]} if d == moved else {}
+            files.append({"src": str(f), "dst": str(f), "op": "tag", "changes": changes})
+            targets[f] = {"discnumber": [disc if d == moved else d[-1]], "totaldiscs": [str(total)]}
+        return root, {"files": files, "notes": []}, targets
+
+    def test_DSC19_a_file_of_another_disc_moves_into_its_folder(self):
+        root, entry, targets = self.album(["Disc 1", "Disc 2", "Disc 3"], 3)
+        planmod._disc_folder_moves(entry, targets)
+        fe = entry["files"][2]
+        self.assertEqual((fe["op"], fe["dst"]), ("move", str(root / "Disc 2" / "301.x.flac")))
+        self.assertEqual([x["op"] for x in entry["files"][:2]], ["tag", "tag"])
         self.assertTrue(any("moved into Disc 2" in n for n in entry["notes"]))
 
     def test_DSC19_no_folder_of_that_disc_keeps_it_and_says_so(self):
-        import tempfile
-        root = Path(tempfile.mkdtemp(prefix="tm-dsc19-"))
-        (root / "Disc 3").mkdir()
-        f = root / "Disc 3" / "301.A.flac"
-        f.write_bytes(b"x")
-        entry = {"files": [{"src": str(f), "dst": str(f), "op": "tag", "changes": {"discnumber": ["2"]}}], "notes": []}
-        planmod._disc_folder_moves(entry)
-        self.assertEqual(entry["files"][0]["dst"], str(f))
+        root, entry, targets = self.album(["Disc 1", "Disc 2", "Disc 3"], 3, disc="4")
+        planmod._disc_folder_moves(entry, targets)
+        self.assertEqual(entry["files"][2]["dst"], entry["files"][2]["src"])
         self.assertTrue(any("no folder of that disc" in n for n in entry["notes"]))
+
+    def test_DSC19_folders_that_are_records_not_discs_stay(self):
+        # (DSC-18: three LP folders of a 2-CD release - the folders are the albums, never moved)
+        root, entry, targets = self.album(["Disc 1", "Disc 2", "Disc 3"], 2, disc="2")
+        planmod._disc_folder_moves(entry, targets)
+        self.assertEqual([x["op"] for x in entry["files"]], ["tag", "tag", "tag"])
+        self.assertEqual(entry["notes"], [])
 
 
 if __name__ == "__main__":

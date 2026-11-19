@@ -1206,14 +1206,28 @@ def _proven(prop) -> bool:
 _DISC_FOLDER_NUMBER = re.compile(r"^(?:cd|disc|disk)\s*[-_.]?\s*0*(\d{1,3})\s*$", re.I)    # (a bare disc folder)
 
 
-def _disc_folder_moves(entry) -> None:
+def _disc_folder_moves(entry, targets=None) -> None:
     """DSC-19: an album tagged where it is whose files sit in disc folders ("Disc 1", "Disc 2",
     "Disc 3"), the release putting a file on another disc than its folder names (Umphrey's McGee -
     Red Rocks 2016: folders of 8, 5 and 4 tracks from an earlier split, the release's discs 8, 7
     and 2 - "August" and "Hurt Bird Bath" disc 2 tracks 6 and 7, in "Disc 3"): the file moves into
     the album's folder of that disc beside it, so folder and tags agree; with no such folder (or
-    its name taken there) it stays, said in the notes."""
+    its name taken there) it stays, said in the notes. Only where the folders are the discs - bare
+    disc folders numbered 1 to N, N the release's disc total: albums filed by the records they were
+    (DSC-18, "Disc 1" .. "Disc 7" of a 4-CD set) stay in their folders."""
     stay = []
+    nums, totals = set(), set()
+    for fe in entry.get("files") or ():
+        m = _DISC_FOLDER_NUMBER.match(Path(fe["src"]).parent.name)
+        if not m:
+            return
+        nums.add(int(m[1]))
+        t = (targets or {}).get(Path(fe["src"])) or (targets or {}).get(str(fe["src"])) or {}
+        total = str((_vals(t.get("totaldiscs")) or _vals((fe.get("changes") or {}).get("totaldiscs")) or [""])[0])
+        if total.strip().isdigit():
+            totals.add(int(total))
+    if len(totals) != 1 or nums != set(range(1, next(iter(totals)) + 1)):
+        return
     for fe in entry.get("files") or ():
         if fe.get("op") not in ("tag", "none") or fe.get("dst") != fe.get("src"):
             continue
@@ -3061,7 +3075,7 @@ class Planner:
         if identified:
             self._join_files(entry, prop)
         if identified and op == "in_place" and not renaming:
-            _disc_folder_moves(entry)                     # DSC-19
+            _disc_folder_moves(entry, targets)            # DSC-19
         if identified:
             # MED-22c: never two layers of one disc in one folder - in this plan, or beside a copy of
             # another layer already there (a CD layer's "Disc 01" for an SACD layer's files)

@@ -438,7 +438,18 @@ _COMPILATION_WORD = re.compile(r"\bcompilations?\b|^\s*(?:va|v\.a\.|various(?:\s
 _VARIOUS = ("various artists", "various", "va", "")
 
 
+# DSC-13: what a set's name says beside its title - box words, a CD count, years ("The Set Box Set
+# 3CD 2011" -> "The Set")
+_BOX_COUNT_YEARS = re.compile(r"\bbox[\s_-]*sets?\b|\bboxset\b|\bbox\b|" + _BOX_CD_COUNT.pattern +
+                              r"|(?<!\d)(?:19|20)\d\d(?!\d)", re.I)
+
+
 def said_set(box: Path, found: dict, metas: dict) -> bool:
+    """DSC-13: said_set_dirs found the set's disc folders (all of FOLDER's, or all but a stray one)."""
+    return bool(said_set_dirs(box, found, metas))
+
+
+def said_set_dirs(box: Path, found: dict, metas: dict) -> list:
     """DSC-13: a folder whose name says it is a set - a CD count ("14 CD", even one fewer than its
     disc folders: the box's own bonus disc) or box words ("Box Set", "BoxSet", "Complete Albums
     Collection") - is one album, its discs, whatever album each disc is tagged as, when every sign
@@ -457,26 +468,32 @@ def said_set(box: Path, found: dict, metas: dict) -> bool:
     count = box_cd_count(name)
     words = says_box(name)
     if not (count or words) or box in found:
-        return False                                    # (the name first: most folders say no set)
+        return []                                    # (the name first: most folders say no set)
     dirs = [d for d in found if box in d.parents]
     if len(dirs) < 2 or any(d.parent != box or mc.version_layout(d.name) for d in dirs):
-        return False                                    # (audio deeper down: no one level of discs)
+        return []                                    # (audio deeper down: no one level of discs)
     numbers = {}
     for d in dirs:
         m = _LEAD_NUMBER.match(d.name)
         if not m:
-            return False
+            return []
         numbers[d] = int(m[1])
     n = len(dirs)
     disc_words = all(is_disc_dir(d) for d in dirs)
     if sorted(numbers.values()) != list(range(1, n + 1)) or (count and n not in (count, count + 1)):
-        return False
+        return []
     if count and n == count + 1 and not disc_words:
-        return False                                    # (a box and a stray album numbered on: never one)
+        # (a box and a stray album numbered on - "CD1" .. "CD3" and "04 - Single" in "(3CD)": the
+        # disc-worded folders, as many as the count, numbered 1 to N, are the box; the stray one
+        # stays the album it is)
+        worded = [d for d in dirs if is_disc_dir(d)]
+        if len(worded) == count and sorted(numbers[d] for d in worded) == list(range(1, count + 1)):
+            return said_set_dirs(box, {d: fs for d, fs in found.items() if d not in dirs or d in worded}, metas)
+        return []
     files = [f for d in dirs for f in found[d]]
     keys = album_keys(files, box, metas)
     if any(k[0] != "tags" for k in keys.values()):
-        return False                                    # (an untagged disc)
+        return []                                    # (an untagged disc)
     # (an album of two discs or more within the set, in folders side by side - "cd7 - Live (I)" and
     # "cd8 - Live (II)" both tagged as "CD 7&8 - Live (I & II)", discs 1/2 and 2/2: its own numbering)
     runs = {}
@@ -489,35 +506,37 @@ def said_set(box: Path, found: dict, metas: dict) -> bool:
                 inner[d] = (str(i), str(len(run)))
     for d in dirs:
         if len({keys[f] for f in found[d]}) != 1:
-            return False                                # (a folder of two albums)
+            return []                                # (a folder of two albums)
         for f in found[d]:
             meta = metas.get(f) or {}
             num, total = _disc_tag(meta)
             if num not in ("", "1", str(numbers[d])) and (num, total) != inner.get(d):
-                return False                            # (a disc tag against the folder's number)
+                return []                            # (a disc tag against the folder's number)
             if num == "1" and total == "1" and (
                     _first(meta, "musicbrainz_albumid") or _first(meta, "barcode")):
-                return False                            # (a standalone release's own disc 1 of 1)
+                return []                            # (a standalone release's own disc 1 of 1)
     artists = {k[1] for k in keys.values()}
     if artists & set(_VARIOUS):
         if not (artists <= set(_VARIOUS) and (words or _COMPILATION_WORD.search(name))):
-            return False
+            return []
     elif len(artists) > 1:
         who = _title_fold(_folder_artist(name))
         if not who or not all(re.search(rf"(?<!\w){re.escape(who)}(?!\w)", _title_fold(a)) for a in artists):
-            return False                                # (two artists' albums)
+            return []                                # (two artists' albums)
     if len(artists) == 1 and not artists & set(_VARIOUS) and _artist_folder(box, next(iter(artists))) \
             and not disc_words:
-        return False                                    # (an artist's folder of numbered albums, a count or not)
-    if not disc_words:
+        return []                                    # (an artist's folder of numbered albums, a count or not)
+    if not disc_words and not words:
         # (folders "01 - Alpha", "02 - Beta" each tagged as an album of its own, none naming the
-        # set: albums numbered in a folder, never one box's discs)
+        # set, in a folder that gives only a count: albums numbered in a folder, never one box's
+        # discs - "Box Set" in the name says otherwise)
         titles = {k[2] for k in keys.values()}
-        own = _title_fold(_bare_name(name.split(" - ", 1)[1] if " - " in name else name))
+        own = _bare_name(name.split(" - ", 1)[1] if " - " in name else name)
+        own = _title_fold(_BOX_COUNT_YEARS.sub(" ", own))
         named = own and any(own in _title_fold(t) or own in _title_fold(d.name) for t in titles for d in dirs)
         if len(titles) == n and not named:
-            return False
-    return True
+            return []
+    return sorted(dirs)
 
 
 def _folder_artist(name) -> str:
@@ -703,11 +722,27 @@ def disc_id_set_shape(folder: Path, dirs, keys, found) -> str:
     return "discids"
 
 
-def _names_release(name, title) -> bool:
+def _names_release(name, title, year="", label="", codes=(), discs=0) -> bool:
     """DSC-16: a folder's name names a release's title ("Joy Division - 1977-1980 - 1991 - FLAC"
-    for "1977–1980"): the title's words, in order, within the name's."""
+    for "1977–1980"): the title's words, in order, within the name's. A title of years only
+    ("1979–1981") names it only when the name also carries something of that release's own: its
+    year of release ("1991" beside "1977-1980"), its label, a catalogue number or barcode, or its
+    CD count - "Band - Discography 1979-1981" names no box called "1979–1981"."""
     t = _title_fold(str(title or "").replace("\u2013", "-"))
-    return bool(t) and f" {t} " in f" {_title_fold(name)} "
+    folded = f" {_title_fold(name)} "
+    if not t or f" {t} " not in folded:
+        return False
+    if not re.fullmatch(r"[\d\s]+", t):
+        return True
+    rest = folded.replace(f" {t} ", " ", 1)
+    if year and re.search(rf"(?<!\d){re.escape(str(year)[:4])}(?!\d)", rest):
+        return True
+    if label and f" {_title_fold(label)} " in rest:
+        return True
+    plain = re.sub(r"\W", "", str(name or "")).casefold()
+    if any(c and re.sub(r"\W", "", str(c)).casefold() in plain for c in codes):
+        return True
+    return bool(discs) and box_cd_count(name) == discs
 
 
 def _left_out(profile, box: Path, dirs, path) -> bool:
@@ -1802,8 +1837,16 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
     parents = {d.parent for d in found if (d.parent == path or path in d.parent.parents) and d.parent != d}
     # DSC-13: a folder whose name says it is a set ("14 CD Box Set"), its disc folders each tagged
     # as an album of its own, every other sign agreeing (said_set)
-    named = {b for b in parents if titled_box(b, found, metas) or volume_set(b, found, metas)
-             or said_set(b, found, metas)}
+    said = {}
+    named = set()
+    for b in parents:
+        if titled_box(b, found, metas) or volume_set(b, found, metas):
+            named.add(b)
+        else:
+            got = said_set_dirs(b, found, metas)
+            if got:
+                named.add(b)
+                said[b] = set(got)                   # (DSC-13: a stray album beside the box stays its own)
     for box in sorted(near | named, key=lambda a: len(a.parts)):
         if any(b in box.parents for b in whole_boxes) or not (
                 numbered_box(box, found, metas) or box in named):
@@ -1812,7 +1855,7 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
             continue                                 # (a disc you excluded or ignored: no box)
         whole_boxes.add(box)
         for d in found:
-            if box in d.parents:
+            if box in d.parents and (box not in said or d in said[box]):
                 owner_of[d] = box
     own_key = {}
     for d in found:
@@ -2443,7 +2486,29 @@ class Engine:
             if r.get("id") and pos:
                 out[str(r["id"])] = (pos, audio)
                 self.__dict__.setdefault("_disc_id_titles", {})[str(r["id"])] = str(r.get("title") or "")
+                self.__dict__.setdefault("_disc_id_info", {})[str(r["id"])] = (
+                    str(r.get("date") or "")[:4],
+                    "; ".join(str((i.get("label") or {}).get("name") or "") for i in r.get("label-info") or ()),
+                    tuple(x for x in [r.get("barcode")] + [i.get("catalog-number") for i in r.get("label-info") or ()] if x))
         return out
+
+    def _own_album_released(self, parts) -> bool:
+        """DSC-14 / DSC-16: a folder of PARTS whose rip log's disc ID is on a one-disc release of its
+        own album's title (a standalone album, its disc also boxed)."""
+        titles = getattr(self, "_disc_id_titles", None)
+        for q in parts:
+            dirs = {Path(f).parent for f in q.files}
+            if len(dirs) != 1:
+                continue
+            toc = log_toc_of(next(iter(dirs)))
+            rels = self._disc_id_releases(toc) if toc else None
+            album = _title_fold(_first(ex.read_meta(q.files[0]), "album"))
+            titles = getattr(self, "_disc_id_titles", {})
+            for r, (_pos, audio) in (rels or {}).items():
+                t = _title_fold(titles.get(r, ""))
+                if audio == 1 and album and t and (album in t or t in album):
+                    return True
+        return False
 
     def _named_artist(self, folder: Path, parts) -> bool:
         """DSC-14 / DSC-16: FOLDER is named as the one album artist's folder of PARTS' files."""
@@ -2502,20 +2567,22 @@ class Engine:
             return None
         titles = getattr(self, "_disc_id_titles", {})
         if not (box_cd_count(folder.name) or says_box(folder.name)):
-            # (DSC-14: standalone albums whose discs were also boxed - every folder's disc ID on a
-            # one-disc release of its own album's title too - in a folder that says no set: the
-            # albums they are, never the box; when in doubt, apart)
+            # (DSC-14: standalone albums whose discs were also boxed - a folder's disc ID on a
+            # one-disc release of its own album's title too, any one of them - in a folder that says
+            # no set: the albums they are, never the box; when in doubt, apart)
             def own_release(d):
                 album = _title_fold(_first(ex.read_meta(next(f for q in parts for f in q.files
                                                             if Path(f).parent == d)), "album"))
                 return album and any(per[d][r][1] == 1 and (album in _title_fold(titles.get(r, ""))
                                                              or _title_fold(titles.get(r, "")) in album)
                                      and _title_fold(titles.get(r, "")) for r in per[d])
-            if all(own_release(d) for d in order):
-                self.log.info("%s: each disc's ID is on its own album's release too: each folder planned alone",
+            if any(own_release(d) for d in order):
+                self.log.info("%s: a disc's ID is on its own album's release too: each folder planned alone",
                               folder)
                 return None
-        if self._named_artist(folder, parts) and not any(_names_release(folder.name, titles.get(r, "")) for r in fits):
+        info = getattr(self, "_disc_id_info", {})
+        if self._named_artist(folder, parts) and not any(
+                _names_release(folder.name, titles.get(r, ""), *info.get(r, ("", "", ())), discs=n) for r in fits):
             return None                                  # (an artist's folder: only one named as the set)
         files = [f for d in order for q in parts for f in q.files if Path(f).parent == d]
         joined = Group(folder, files, [])
@@ -2950,7 +3017,15 @@ class Engine:
                           claims[0][1], claims[1][1], claims[0][0])
             return None
         _n, (kind, rid), claimer, mapping, proven, by_id, cand = claims[0]
-        named = _names_release(folder.name, (cand or {}).get("title") or "")
+        c = cand or {}
+        named = _names_release(folder.name, c.get("title") or "", c.get("year") or "", c.get("label") or "",
+                               tuple(c.get("catnos") or ()) + tuple(c.get("barcodes") or ()),
+                               discs=len(mapping))
+        says = bool(box_cd_count(folder.name) or says_box(folder.name))
+        if not (says or named) and self._own_album_released(parts):
+            # (DSC-14's guard here too: a disc of its own album's release, the name saying no set)
+            self.log.info("%s: a disc's ID is on its own album's release too: each planned alone", folder)
+            return None
         if self._named_artist(folder, parts) and not named:
             # (DSC-16: an artist's folder is one set only when its name names that release:
             # "Joy Division - 1977-1980 - 1991 - FLAC" for "1977–1980")
@@ -2966,7 +3041,7 @@ class Engine:
         # DSC-16: or every folder's disc proven on its own - its own sure match this release's disc,
         # or its exact disc ID on that disc - the joined album's lengths all agreeing: its score falls
         # only by the set's title, which no disc's tags carry ("Unknown Pleasures" for "1977–1980")
-        if not self._sure(prop) and set(proven) == set(mapping) and (named or not by_id) \
+        if not self._sure(prop) and set(proven) == set(mapping) and (named or says) \
                 and prop.status == "identified" \
                 and planmod.tier_of(prop) == "exact" and _discs_as(prop, mapping) and self._complete(prop) \
                 and self._sure(claimer):

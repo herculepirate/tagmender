@@ -3643,6 +3643,10 @@ def toc_releases(http, album):
         exact = None if failed else bool(data and data.get("id") == did)
         discids.append((did, toc, exact))
         _discid_releases(data, did, exact, found, exact_found, media, toc, on)
+        for r in (data or {}).get("releases") or ():      # (DSC-14: their codes, to fetch yours first)
+            if r.get("id"):
+                album.setdefault("toc_release_codes", {})[r["id"]] = {mc.norm_code(x) for x in [r.get("barcode")] + [
+                    i.get("catalog-number") for i in r.get("label-info") or ()] if x}
         get_text = getattr(http, "get_text", None)
         if get_text:
             try:
@@ -5159,11 +5163,17 @@ def mb_search(http, album, cfg):
     # Releases whose disc ID matches the files are fetched whatever their title
     # (a freeDB-style lookup finds an album the folder names differently).
     have = {r["id"] for r in chosen}
-    # (DSC-14: those carrying the most of the album's disc IDs first - a box holding every disc
-    # before each disc's own single - then those carrying one exactly, then by ID)
+    # (DSC-14: those whose barcode or catalogue number is your files' first, then those carrying
+    # the most of the album's disc IDs - a box holding every disc before each disc's own single -
+    # then those carrying one exactly, then by ID)
     on, exact = album.get("exact_toc_on") or {}, album.get("exact_toc_releases") or set()
+    yours = {mc.norm_code(x) for x in (album.get("barcodes") or ())} | \
+        {mc.norm_code(x) for x in (album.get("catnos") or ())}
+    yours.discard("")
+    codes = album.get("toc_release_codes") or {}
     chosen += [{"id": rid} for rid in sorted(album.get("toc_releases") or (),
-                                             key=lambda r: (-len(on.get(r) or ()), r not in exact, r))
+                                             key=lambda r: (not (codes.get(r, set()) & yours),
+                                                            -len(on.get(r) or ()), r not in exact, r))
                if rid not in have][:6]
     have = {r["id"] for r in chosen}
     chosen += [{"id": rid} for rid in sorted((album.get("link_releases") or set()) |

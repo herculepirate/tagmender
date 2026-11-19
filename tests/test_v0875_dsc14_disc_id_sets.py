@@ -129,6 +129,16 @@ class DSC14_DiscIdSets(te.Base):
         self.assertGreater(len(plan["albums"]), 1)
         self.assertFalse(any("disc IDs all on" in n for a in plan["albums"] for n in a.get("notes") or []))
 
+    def test_DSC14_one_standalone_album_also_boxed_keeps_them_all_apart(self):
+        # (disc 1's ID on the box only - its own album's release has none attached - discs 2 and 3
+        # on the box and on their own albums' releases: any one such disc keeps them apart)
+        top = sessions(self.lib, n=3, name="Band Q - Original Albums")
+        on = {1: [("mb-set", 1, 3)], 2: [("mb-set", 2, 3), ("Medicine Show 2", 1, 1)],
+              3: [("mb-set", 3, 3), ("Medicine Show 3", 1, 1)]}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set", n=3)]), top)
+        self.assertGreater(len(plan["albums"]), 1)
+        self.assertFalse(any("disc IDs all on" in n for a in plan["albums"] for n in a.get("notes") or []))
+
     def test_DSC14_standalone_albums_also_boxed_in_a_folder_named_a_box_join(self):
         top = sessions(self.lib, name="Band Q - The Brick [10CD Box Set]")
         on = {k: [("mb-set", k, N), (f"Medicine Show {k}", 1, 1)] for k in range(1, N + 1)}

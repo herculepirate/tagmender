@@ -135,6 +135,26 @@ class DSC16_DiscIdClaim(te.Base):
         self.assertFalse(any(a["status"] == "ready" and a["identification"].get("release_id") == "mb-box"
                              and len(a["files"]) == 8 for a in plan["albums"]))
 
+    def test_DSC16_a_year_titled_box_needs_more_than_its_years_in_the_name(self):
+        # ("Band J - Discography 1979-1981" names no box called "1979-1981" released in 1991; the
+        # name "Band J - 1977-1980 - 1991 - FLAC" with the box's year does: the first test)
+        from test_v0877_dsc16_disc_id_claim import release as rel
+        top = self.make()
+        top = top.rename(top.parent / "Band J - Discography 1977-1980")
+        http = DiscIdHttp(mb=[rel("mb-box", "1977-1980", [1, 2, 3]), rel("mb-single", "Single", [3])])
+        plan = self.engine(http).plan(top)
+        self.assertGreater(len(plan["albums"]), 1, [a["identification"].get("release_id") for a in plan["albums"]])
+
+    def test_DSC16_names_release(self):
+        import engine
+        n = engine._names_release
+        self.assertTrue(n("Joy Division - 1977-1980 - 1991 - FLAC", "1977–1980", "1991"))
+        self.assertFalse(n("Band J - Discography 1979-1981", "1979–1981", "1991"))
+        self.assertTrue(n("Band J - 1979-1981 (3CD)", "1979–1981", "1991", discs=3))
+        self.assertTrue(n("Band J - 1979-1981 [CAT-9]", "1979–1981", "1991", codes=("CAT-9",)))
+        self.assertTrue(n("Band J - Heart Box", "Heart"))
+        self.assertFalse(n("Band J - Albums", "Heart"))
+
     def test_DSC16_an_artists_folder_without_rip_logs_is_no_set(self):
         # (an artist's folder of albums numbered 1 to 3: no logs, no set - as before)
         import engine

@@ -4049,6 +4049,34 @@ def _rv_similarity(f, t, bound=False):
     return sum(v * w for v, w in parts) / total if total else 0.0
 
 
+def _rv_could_reach(f, t, floor):
+    """TRK-8: whether track t's likeness to file f could exceed FLOOR - every field but the title
+    scored, the title given the most it could still add (its quick bound): most tracks are ruled
+    out before any title is compared."""
+    w = _RV_WEIGHTS
+    got, total = 0.0, 0
+    if f.get("artist") and t.get("artist"):
+        got += w["artist"] * _rv_ratio(f["artist"], t["artist"], bound=True)
+        total += w["artist"]
+    if f.get("num") and t.get("num"):
+        got += w["tracknumber"] * (int(f["num"]) == int(t["num"]))
+        total += w["tracknumber"]
+    if f.get("disc") and t.get("disc"):
+        got += w["discnumber"] * (int(f["disc"]) == int(t["disc"]))
+        total += w["discnumber"]
+    ls = _rv_length_score(f.get("secs"), t.get("secs"))
+    if ls is not None:
+        got += w["length"] * ls
+        total += w["length"]
+    if f.get("title") and t.get("title"):
+        total += w["title"]
+        need = floor * total - got
+        if need > w["title"]:
+            return False
+        return w["title"] * _rv_ratio(f["title"], t["title"], bound=True) > need
+    return total > 0 and got / total > floor
+
+
 # TRK-8: a file whose title is two tracks' or more (a song on the studio disc and the live disc) is
 # placed only by its ID, or by a length within RV_SAME_S of one of them and every other such track
 # more than RV_APART_S away; else nothing is moved
@@ -4124,9 +4152,8 @@ def release_view(album, cand, cfg=None):
             best = _rv_similarity(f, nums[j])
             if best < _RV_THRESHOLD:
                 return None
-            for k in near - {j}:                         # (no other track as close: a cheap bound first)
-                if _rv_similarity(f, nums[k], bound=True) > best - _RV_MARGIN and \
-                        _rv_similarity(f, nums[k]) > best - _RV_MARGIN:
+            for k in near - {j}:                         # (no other track as close: the title's share last)
+                if _rv_could_reach(f, nums[k], best - _RV_MARGIN) and _rv_similarity(f, nums[k]) > best - _RV_MARGIN:
                     return None
             pick = j
         slots.append(pick)

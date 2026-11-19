@@ -1206,15 +1206,22 @@ def _proven(prop) -> bool:
 _DISC_FOLDER_NUMBER = re.compile(r"^(?:cd|disc|disk)\s*[-_.]?\s*0*(\d{1,3})\s*$", re.I)    # (a bare disc folder)
 
 
-def _disc_folder_moves(entry, targets=None) -> None:
+def _disc_folder_moves(entry, targets=None, proven=True) -> None:
     """DSC-19: an album tagged where it is whose files sit in disc folders ("Disc 1", "Disc 2",
-    "Disc 3"), the release putting a file on another disc than its folder names (Umphrey's McGee -
-    Red Rocks 2016: folders of 8, 5 and 4 tracks from an earlier split, the release's discs 8, 7
-    and 2 - "August" and "Hurt Bird Bath" disc 2 tracks 6 and 7, in "Disc 3"): the file moves into
-    the album's folder of that disc beside it, so folder and tags agree; with no such folder (or
-    its name taken there) it stays, said in the notes. Only where the folders are the discs - bare
-    disc folders numbered 1 to N, N the release's disc total: albums filed by the records they were
-    (DSC-18, "Disc 1" .. "Disc 7" of a 4-CD set) stay in their folders."""
+    "Disc 3"), matched exactly (proven: plan._proven), the release putting a file on another disc
+    than its folder names (Umphrey's McGee - Red Rocks 2016: folders of 8, 5 and 4 tracks from an
+    earlier split, the release's discs 8, 7 and 2 - "August" and "Hurt Bird Bath" disc 2 tracks 6
+    and 7, in "Disc 3"). A folder keeping other tracks: each such file moves into the album's
+    folder of its disc beside it (its rip log and cue stay with the tracks that stay). A folder
+    whose every track goes to one other disc: a swap - only when that disc's folder's every track
+    comes the other way, and then each folder's every file (its rip log, cue sheet and scans
+    too: the TOC evidence goes with its audio) moves into the other, no name in both; otherwise
+    nothing moves and the notes say so. No folder of that disc, or its name taken there: the file
+    stays, said in the notes. Only where the folders are the discs - bare disc folders numbered 1
+    to N, N the release's disc total: albums filed by the records they were (DSC-18, "Disc 1" ..
+    "Disc 7" of a 4-CD set) stay in their folders."""
+    if not proven:
+        return
     stay = []
     nums, totals = set(), set()
     for fe in entry.get("files") or ():
@@ -1228,32 +1235,76 @@ def _disc_folder_moves(entry, targets=None) -> None:
             totals.add(int(total))
     if len(totals) != 1 or nums != set(range(1, next(iter(totals)) + 1)):
         return
+    notes = entry.setdefault("notes", [])
+    folder_of = {}                                    # disc number -> its folder
+    for fe in entry.get("files") or ():
+        src = Path(fe["src"])
+        folder_of.setdefault(int(_DISC_FOLDER_NUMBER.match(src.parent.name)[1]), src.parent)
+
+    def new_disc(fe):
+        t = (targets or {}).get(Path(fe["src"])) or (targets or {}).get(str(fe["src"])) or {}
+        v = str((_vals((fe.get("changes") or {}).get("discnumber")) or _vals(t.get("discnumber")) or [""])[0])
+        v = v.partition("/")[0].strip().lstrip("0")
+        return int(v) if v.isdigit() else None
+
+    by_folder = {}
     for fe in entry.get("files") or ():
         if fe.get("op") not in ("tag", "none") or fe.get("dst") != fe.get("src"):
             continue
-        new = str(((fe.get("changes") or {}).get("discnumber") or [""])[0]).partition("/")[0].strip().lstrip("0")
-        src = Path(fe["src"])
-        m = _DISC_FOLDER_NUMBER.match(src.parent.name)
-        if not new.isdigit() or not m or m[1] == new:
+        by_folder.setdefault(Path(fe["src"]).parent, []).append(fe)
+    number = {d: int(_DISC_FOLDER_NUMBER.match(d.name)[1]) for d in by_folder}
+    goes = {d: {new_disc(fe) for fe in fes} for d, fes in by_folder.items()}
+    whole = {d: next(iter(g)) for d, g in goes.items()
+             if len(g) == 1 and None not in g and next(iter(g)) != number[d]}
+    swapped = set()
+    for d, m in whole.items():
+        if d in swapped:
             continue
-        home = None
+        e = folder_of.get(m)
+        if e is None or whole.get(e) != number[d]:
+            notes.append(f"the release puts every track of {d.name} on disc {m}, but {e.name if e else 'no folder'} "
+                         "does not come the other way: left as it is (DSC-19)")
+            swapped.add(d)
+            continue
         try:
-            for d in sorted(src.parent.parent.iterdir()):
-                k = _DISC_FOLDER_NUMBER.match(d.name)
-                if d.is_dir() and k and k[1] == new and d != src.parent:
-                    home = d if home is None else False   # (two folders of that disc: neither)
+            here, there = sorted(d.iterdir()), sorted(e.iterdir())
         except OSError:
-            home = None
-        dst = home / src.name if home else None
-        if not dst or dst.exists() or any(str(dst) == str(x.get("dst")) for x in entry.get("files") or ()):
-            stay.append(f"{src.parent.name}/{src.name} (disc {new})")
             continue
-        fe["dst"], fe["op"] = str(dst), "move"
-        entry.setdefault("notes", []).append(f"{src.parent.name}/{src.name} is disc {new} of the release: "
-                                             f"moved into {home.name} (DSC-19)")
+        if {q.name for q in here} & {q.name for q in there} or any(q.is_dir() for q in here + there):
+            notes.append(f"the release swaps discs {number[d]} and {m} ({d.name}, {e.name}), but files of one "
+                         "name are in both: rename the two folders (DSC-19)")
+            swapped |= {d, e}
+            continue
+        audio = {str(fe["src"]): fe for fe in by_folder[d] + by_folder[e]}
+        for src_dir, dst_dir, items in ((d, e, here), (e, d, there)):
+            for q in items:
+                fe = audio.get(str(q))
+                if fe is not None:
+                    fe["dst"], fe["op"] = str(dst_dir / q.name), "move"
+                else:
+                    entry.setdefault("companions", []).append(
+                        {"src": str(q), "dst": str(dst_dir / q.name), "op": "move", "fingerprint": _fp(q)})
+        notes.append(f"{d.name} and {e.name} hold each other's disc of the release: their files swapped, "
+                     "rip logs and cue sheets with them (DSC-19)")
+        swapped |= {d, e}
+    for d, fes in by_folder.items():
+        if d in whole:
+            continue                                   # (a whole folder: swapped or left above)
+        for fe in fes:
+            new = new_disc(fe)
+            if new is None or new == number[d]:
+                continue
+            src = Path(fe["src"])
+            home = folder_of.get(new)
+            dst = home / src.name if home else None
+            if not dst or dst.exists() or any(str(dst) == str(x.get("dst")) for x in entry.get("files") or ()):
+                stay.append(f"{src.parent.name}/{src.name} (disc {new})")
+                continue
+            fe["dst"], fe["op"] = str(dst), "move"
+            notes.append(f"{src.parent.name}/{src.name} is disc {new} of the release: moved into {home.name} (DSC-19)")
     if stay:
-        entry.setdefault("notes", []).append("the release puts these files on another disc than their folder "
-                                             "names, and no folder of that disc is beside it: " + ", ".join(stay))
+        notes.append("the release puts these files on another disc than their folder "
+                     "names, and no folder of that disc is beside it: " + ", ".join(stay))
 
 
 def _lone_discs(prop) -> bool:
@@ -3075,7 +3126,7 @@ class Planner:
         if identified:
             self._join_files(entry, prop)
         if identified and op == "in_place" and not renaming:
-            _disc_folder_moves(entry, targets)            # DSC-19
+            _disc_folder_moves(entry, targets, _proven(prop))   # DSC-19
         if identified:
             # MED-22c: never two layers of one disc in one folder - in this plan, or beside a copy of
             # another layer already there (a CD layer's "Disc 01" for an SACD layer's files)

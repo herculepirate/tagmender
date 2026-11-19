@@ -158,6 +158,21 @@ class Proposal:
     held: str = ""
 
 
+SET_HOLD_CODES = ("disc_not_proven", "disc_id_box_disc", "lengths_box_disc")
+# (what a ticked set hold writes as its reason: your choice, CHG-1 - match_albums reads it back)
+HELD_FILED = "filed because you asked"
+
+
+def _set_hold(prop) -> bool:
+    """DSC-12a / DSC-14b / DSC-16: a held proposal of a box or one of its discs - its reason one of
+    SET_HOLD_CODES, or an exact match held - whose row is written as the release when ticked."""
+    if not getattr(prop, "held", ""):
+        return False
+    prov = str(getattr(prop, "provider", "") or "")
+    return bool(set(getattr(prop, "reason_codes", None) or ()) & set(SET_HOLD_CODES)) or (
+        tier_of(prop) == "exact" and prov.startswith(("musicbrainz", "discogs")))
+
+
 def held(entry: dict) -> bool:
     """WEB-1: the album is held - planned, but applied only once you ticked it (held_ok)."""
     return bool(entry.get("held")) and not entry.get("held_ok")
@@ -2350,10 +2365,14 @@ class Planner:
             # TAG-3: your copy proves this release over the one your files' IDs name: its tags
             # replace that release's (edition, folder name and all, from here on)
             conf = max(conf, _threshold(p, "replace_min_confidence"))
-        if identified and getattr(prop, "held", ""):
-            # (a held album - DSC-12a, DSC-14b, DSC-16 - is applied only when you tick it: its row is
-            # what ticking writes, its disc n of N from the set's folders included, never the old
-            # "1 of 1" kept for a confidence held below the threshold on purpose)
+        set_hold = ""
+        if identified and _set_hold(prop):
+            code = next((c for c in getattr(prop, "reason_codes", None) or () if c in SET_HOLD_CODES), "")
+            set_hold = f"{HELD_FILED}: " + (f"{code}: {reasons.CODES.get(code, '')}" if code else "held")
+            # (a held box or disc - DSC-12a, DSC-14b, DSC-16 - is applied only when you tick it: its row
+            # is what ticking writes, its disc n of N from the set's folders included, never the old
+            # "1 of 1" kept for a confidence held below the threshold on purpose. Not WEB-1's held web
+            # album: ticked, it still only fills what your tags lack)
             conf = max(conf, _threshold(p, "replace_min_confidence"))
         tag_conf = conf                    # (the custom tags' gate: the score, or TAG-3's raise)
         organize_ok = identified and not partial and conf >= _threshold(p, "organize_min_confidence")
@@ -2684,6 +2703,10 @@ class Planner:
                 target.setdefault("tagmender", ["Resolved"])
                 if not before.get("tagmender_reason"):
                     target.setdefault("tagmender_reason", [])
+            if identified and set_hold and target.get("tagmender"):
+                # (a held box or disc is written only when you tick it: said so - your choice, which a
+                # later run keeps as it keeps a release you chose (CHG-1), never proof of the copy)
+                target["tagmender_reason"] = [set_hold]
             if not identified and p["unresolved"]["action"] in ("mark", "move"):
                 target = {"tagmender": ["Unresolved"], "tagmender_reason": [entry["identification"]["reason"]]}
             removals = ["tagmender_reason"] if identified and not (partial or album_only) and \

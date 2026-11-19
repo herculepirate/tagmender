@@ -911,6 +911,11 @@ def _own_job_files(job):
         # (CHG-1: a release you chose is recorded as yours, whatever other clue the job also had)
         said = [str(e) for e in ident.get("evidence") or () if str(e).startswith("pressing chosen by ")]
         decided = "pressing chosen by you" if "pressing chosen by you" in said else (said[0] if said else "")
+        # (DSC-12a / DSC-14b / DSC-16: a held box or disc you ticked is your choice - kept by a later
+        # run as a release you chose is, unless a barcode or catalogue number of yours disagrees)
+        if a.get("held") and a.get("held_ok") and set(ident.get("reason_codes") or ()) & {
+                "disc_not_proven", "disc_id_box_disc", "lengths_box_disc"}:
+            decided = "pressing chosen by you"
         albums.append((a.get("source_dir"), exact, files, decided))
     with _OWN_LOCK:
         _OWN_JOBS[job] = (mtime, albums)

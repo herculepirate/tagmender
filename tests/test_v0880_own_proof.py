@@ -770,6 +770,50 @@ class DSC14_AlbumKnownKeepsDiscNumbers(unittest.TestCase):
         self.assertNotIn("discnumber", mc.album_only_tags(tags, tied))
 
 
+class HeldSetsWriteTheRelease(te.Base):
+    """A held box or disc (DSC-12a / 14b / 16) is written as the release when ticked - its disc n of
+    N over the old "1 of 1", its reason "filed because you asked"; WEB-1's held web album still only
+    fills what your tags lack."""
+
+    def folder(self):
+        d = self.lib / "Band H - Box" / "Disc 2"
+        for i, s in enumerate(te.LENS):
+            flac(d, f"{i + 1:02d}.flac", s / 1000, freq=300 + 10 * i, title=f"Old {i}", album="Old Album",
+                 albumartist="Band H", artist="Band H", track=str(i + 1), disc="1/1")
+        return d
+
+    def prop(self, d, **kw):
+        files = [str(f) for f in sorted(d.glob("*.flac"))]
+        base = dict(source_dir=str(d), files=files, status="identified", confidence=89.9)
+        base.update(kw)
+        return planmod.Proposal(**base)
+
+    def test_set_hold_is_written_as_the_release_when_ticked(self):
+        d = self.folder()
+        p = self.prop(d, tier="exact", provider="musicbrainz", release_id="mb-box", held="One album of 'Box' ...",
+                      reason_codes=["disc_not_proven"],
+                      targets=[{"album": ["Box"], "title": [f"T{i}"], "discnumber": ["2"], "totaldiscs": ["3"],
+                                "tracknumber": [str(i + 1)], "musicbrainz_albumid": ["mb-box"]} for i in range(3)])
+        self.assertTrue(planmod._set_hold(p))
+        a = planmod.build([p], self.engine(te.FakeHttp()).profile)["albums"][0]
+        self.assertTrue(planmod.held(a))
+        ch = a["files"][0]["changes"]
+        self.assertEqual((ch.get("discnumber"), ch.get("totaldiscs"), ch.get("album")), (["2"], ["3"], ["Box"]), ch)
+        self.assertEqual(ch.get("tagmender"), ["Resolved"])
+        self.assertTrue(ch["tagmender_reason"][0].startswith("filed because you asked: disc_not_proven: "), ch)
+
+    def test_a_held_web_album_still_only_fills_what_is_empty(self):
+        d = self.folder()
+        p = self.prop(d, tier="partial", provider="web:Deezer", held="held: found on Deezer, but Unresolved is set to "
+                      "\"leave\" in this profile", reason_codes=[],
+                      targets=[{"album": ["Web Album"], "title": [f"W{i}"], "genre": ["Jazz"]} for i in range(3)])
+        self.assertFalse(planmod._set_hold(p))
+        a = planmod.build([p], self.engine(te.FakeHttp()).profile)["albums"][0]
+        ch = a["files"][0]["changes"]
+        self.assertNotIn("album", ch)
+        self.assertNotIn("title", ch)
+
+
 # ---- DSC-19 --------------------------------------------------------------------------------
 class DSC19_DiscFolderAgreesWithTags(unittest.TestCase):
     def album(self, layout, total, companions=()):

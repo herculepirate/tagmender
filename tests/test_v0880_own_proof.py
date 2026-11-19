@@ -276,6 +276,26 @@ class DSC2b_PerDiscAlbumArtists(te.Base):
         disc(top / "CD2", 2, "Hits", "Band B")
         self.assertEqual(len(self.groups(top)), 2)
 
+    def test_DSC2b_two_artists_greatest_hits_stay_apart(self):
+        top = self.lib / "Greatest Hits"
+        disc(top / "CD1", 1, "Greatest Hits", "Queen")
+        disc(top / "CD2", 2, "Greatest Hits", "ABBA")
+        self.assertEqual(len(self.groups(top)), 2)
+        top = self.lib / "Queen - Greatest Hits"
+        disc(top / "CD1", 1, "Greatest Hits", "Queen")
+        disc(top / "CD2", 2, "Greatest Hits", "ABBA")
+        self.assertEqual(len(self.groups(top)), 2)
+
+    def test_DSC2b_a_name_shared_only_further_on_is_no_lead(self):
+        top = self.lib / "Beethoven - Symphonies"
+        disc(top / "CD1", 1, "Symphonies", "Herbert von Karajan, Berliner Philharmoniker")
+        disc(top / "CD2", 2, "Symphonies", "Claudio Abbado, Berliner Philharmoniker")
+        self.assertEqual(len(self.groups(top)), 2)
+        top = self.lib / "Various - MTV Unplugged"
+        disc(top / "CD1", 1, "MTV Unplugged", "Nirvana")
+        disc(top / "CD2", 2, "MTV Unplugged", "Eric Clapton")
+        self.assertEqual(len(self.groups(top)), 2)
+
     def test_DSC2b_the_whole_set_meets_its_barcode(self):
         top = self.lib / "Bach - 6 Suites (W. Kuijken, P. Kuijken) (2015)"
         for n, aa in ((1, "W. Kuijken (cello)"), (2, "W. Kuijken (cello)"), (3, "W. Kuijken (cello), P. Kuijken")):

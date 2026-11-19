@@ -632,6 +632,14 @@ def _credited_names(artist) -> set:
     return {_ascii_fold(x) for x in parts if _ascii_fold(x)}
 
 
+def _lead_name(artist) -> str:
+    """DSC-2b: the first name an album artist credits, its role in brackets aside ("Wieland
+    Kuijken (violoncello), Piet Kuijken" -> "wieland kuijken")."""
+    bare = re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", str(artist or ""))
+    parts = re.split(r"\s*(?:,|;|/|&|\band\b|\bfeat\.?|\bwith\b)\s*", bare, flags=re.I)
+    return next((_ascii_fold(x) for x in parts if _ascii_fold(x)), "")
+
+
 def _folder_title(folder: Path) -> str:
     """DSC-2b: the album title a folder's name gives ("Arvo Part - The Collection - 2021" -> "the
     collection"): its year in front, brackets, years standing alone as a part and the artist
@@ -671,7 +679,7 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
     if sorted(numbers.values()) != list(range(1, n + 1)):
         return False
     who = _ascii_fold(_folder_artist(folder.name))
-    titles, artists = set(), set()
+    titles, artists, led = set(), set(), False
     for d, fs in by_dir.items():
         ks = {keys[f] for f in fs}
         if len(ks) != 1:
@@ -681,6 +689,7 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
         for lead in {who, *(_ascii_fold(x) for x in _credited_names(k[1]))} - {""}:
             if title.startswith(lead + " ") and len(title) > len(lead) + 1:
                 title = title[len(lead) + 1:].strip()
+                led = led or lead == who               # (the album tag names the folder's artist)
                 break
         if not title:
             return False
@@ -695,8 +704,15 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
         return False
     if len(artists) <= 1:
         return True
-    shared = set.intersection(*(_credited_names(a) for a in artists))
-    return bool(shared) or _folder_title(folder) == next(iter(titles))
+    # (each disc's LEAD credited name the same - "Wieland Kuijken (...)" and "Wieland Kuijken (...),
+    # Piet Kuijken (...)" - never a name only shared further on: Karajan's and Abbado's "Berliner
+    # Philharmoniker"; or, the leads differing (each disc's performers), the folder named as the
+    # album's title and the album tags themselves naming the folder's artist as the album's:
+    # "Arvo Part - The Collection - 2021" with "Arvo Part - The Collection - CD2". Queen's and ABBA's
+    # "Greatest Hits" in one folder stay apart)
+    if len({_lead_name(a) for a in artists}) == 1:
+        return True
+    return bool(led and who) and _folder_title(folder) == next(iter(titles))
 
 
 # DSC-10: at most this many sibling folders are tried as one set, and at most this many whole-set

@@ -1,5 +1,9 @@
 # Release notes
 
+## 0.8.79
+
+- The status bar never draws two texts over each other: applying beside a look-up said its progress over the album counts ("Beside the look-up: ..." on top of "1 album ready ..."). Its progress is now said where an Apply's always is, the counts step aside while any message shows, and they stay off other pages.
+
 ## 0.8.78
 
 **Box sets: never two releases made one**

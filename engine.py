@@ -3366,8 +3366,14 @@ class Engine:
             if not isinstance(ps, list) or len(ps) != 1:
                 continue
             k = self._release_of(ps[0])
-            if k is None or any(k in v for j, v in keys.items() if j != i):
+            if k is None:
                 continue
+            parent = Path(parts[i].folder).parent if Path(parts[i].folder) in {Path(f).parent for f in parts[i].files} \
+                else Path(parts[i].folder)
+            title = str(((ps[0].targets or [{}])[0].get("album") or [""])[0])
+            if any(k in v for j, v in keys.items() if j != i) and (says_box(parent.name)
+                                                                    or _names_release(parent.name, title)):
+                continue                                 # (a set's discs, named so: DSC-10, 14, 16 decide)
             out["own"][i] = [self._disc_not_box(parts[i], ps[0])]
         return out
 
@@ -3398,7 +3404,9 @@ class Engine:
         for name in (g.folder.name, g.folder.parent.name):
             if says_box(name) or _names_release(name, title):   # (box words; a bare CD count says nothing)
                 return prop
-        album = _title_fold(next((_first(m, "album") for m in metas if _first(m, "album")), ""))
+        # (the album tag without its disc marker - "Heart (Disc 1)", "Heart, Disc One", "Heart
+        # (Disc 1) 1979-1980" are the box's "Heart" - as DSC-15 groups it)
+        album = _title_fold(next((_album_title(m) for m in metas if _first(m, "album")), ""))
         mediums = {_title_fold(str((t.get("discsubtitle") or [""])[0])) for t in ts} - {""}
         if not album or album == _title_fold(title) or album in mediums:
             return prop
@@ -3414,12 +3422,17 @@ class Engine:
             cid = str(c.get("id") or "")
             if not kind or not cid or cid == rid:
                 continue
+            # (only a candidate named as its own album by its artist is looked at: "Band J - Alpha")
+            c_artist, _sep, c_title = str(c.get("title") or "").partition(" - ")
+            c_title = re.sub(r"\s*\((?:19|20)\d\d\)\s*$", "", c_title if _sep else c_artist)
+            if _title_fold(c_title) != album or (artist and _sep and _title_fold(c_artist) != artist):
+                continue
             q = self._forced(g, str(c.get("url") or cid), release=(kind, cid))
             qt = q.targets or [{}]
             qtitle = _title_fold(str((qt[0].get("album") or [""])[0]))
             qartist = _title_fold(str((qt[0].get("albumartist") or qt[0].get("artist") or [""])[0]))
             if q.status == "identified" and planmod.tier_of(q) == "exact" and planmod._set_total(q) in (0, 1) \
-                    and qtitle and (qtitle == album or qtitle in album or album in qtitle) \
+                    and qtitle and qtitle == album \
                     and (not artist or qartist == artist):
                 own.append(q)
         if own:
@@ -3435,6 +3448,9 @@ class Engine:
         thr = planmod._threshold(self.profile, "auto_min_confidence")
         prop.confidence = min(float(prop.confidence or 0), max(0.0, float(thr) - 0.1))
         prop.held = note                                 # (planned, unticked: plan.Planner shows it as its note)
+        for t in prop.targets or ():                     # (no disc of the box written: neither number nor total)
+            for k in ("discnumber", "totaldiscs", "disctotal"):
+                t.pop(k, None)
         return prop
 
     def _finish(self, prop, g: Group):

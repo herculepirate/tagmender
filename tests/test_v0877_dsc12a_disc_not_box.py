@@ -139,6 +139,51 @@ class DSC12a_DiscNotBox(te.Base):
                                                             a.get("notes")) for a in plan["albums"]])
         self.assertNotIn("mb-box", got.values())
 
+    def test_DSC12a_a_box_disc_tagged_with_its_disc_marker_stays_the_box(self):
+        for i, album in enumerate(("Heart", "Heart (Disc 1)", "Heart [CD1]", "Heart - CD 1", "Heart CD1",
+                                   "Heart, Disc One", "Heart (Disc 1) 1979-1980")):
+            with self.subTest(album=album):
+                d = self.lib / "Band J" / f"rip{i}"
+                for j, secs in enumerate(LENS[1]):
+                    flac(d, f"{j + 1:02d}.flac", secs + 1 / 75, freq=340 + 10 * j, title=f"Alpha {j}", album=album,
+                         albumartist="Band J", artist="Band J", track=str(j + 1))
+                (d / "rip.log").write_text(log_text(1))
+                a = self.plan(d, skip={"mb-alpha"})
+                self.assertEqual((a["identification"]["release_id"], a["identification"]["tier"]), ("mb-box", "exact"))
+                self.assertFalse(planmod.held(a))
+
+    def test_DSC12a_siblings_each_matched_only_as_the_boxs_discs_are_each_alone(self):
+        # (E10: "Band J - Original Albums/01 - Alpha" .. "03 - Gamma": disc 1's ID on the box only,
+        # discs 2 and 3 on the box and their own albums' releases, which cannot be had; DSC-14 and
+        # the claim decline, the parent saying no set: no filing them together as the box - disc 1
+        # is its own album, discs 2 and 3 only proposed)
+        top = self.lib / "Band J - Original Albums"
+        for k in (1, 2, 3):
+            d = top / f"0{k} - {TITLES[k]}"
+            for i, secs in enumerate(LENS[k]):
+                flac(d, f"{i + 1:02d}.flac", secs + k / 75, freq=300 + 40 * k + 10 * i, title=f"{TITLES[k]} {i}",
+                     album=TITLES[k], albumartist="Band J", artist="Band J", track=str(i + 1), disc="1/1")
+            (d / f"{TITLES[k]}.log").write_text(log_text(k))
+
+        class BoxOnly(Http):
+            def get_json(self, url, host):
+                if host == "mb" and "/ws/2/discid/" in url:
+                    did = url.split("/ws/2/discid/")[1].split("?")[0]
+                    k = {ma.mb_discid(mb_toc(k)): k for k in LENS}.get(did)
+                    if not k:
+                        return None
+                    rels = [("mb-box", "Heart", k, 3)] + ([(f"mb-{TITLES[k].lower()}", TITLES[k], 1, 1)] if k > 1 else [])
+                    return {"id": did, "releases": [{"id": rid, "title": t, "media": [
+                        {"position": p, "format": "CD", "discs": [{"id": did}] if p == pos else []}
+                        for p in range(1, n + 1)]} for rid, t, pos, n in rels]}
+                return super().get_json(url, host)
+        mb = [release("mb-alpha", "Alpha", [1]), release("mb-box", "Heart", [1, 2, 3], barcode="999")]
+        plan = self.engine(BoxOnly(mb=mb, skip={"mb-beta", "mb-gamma"})).plan(top)
+        rows = [(a["identification"].get("release_id"), a["identification"].get("tier"), planmod.held(a))
+                for a in plan["albums"]]
+        self.assertIn(("mb-alpha", "exact", False), rows)
+        self.assertFalse(any(r == "mb-box" and t == "exact" and not h for r, t, h in rows), rows)
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

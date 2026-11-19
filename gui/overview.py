@@ -550,6 +550,9 @@ class Overview(QWidget):
         fv.customContextMenuRequested.connect(lambda pos: self.context_menu(pos, folders=True))
         fv.selectionModel().selectionChanged.connect(self.folders_chosen)
         self.model.ticked.connect(self.win.update_album_actions)
+        self._sel_ticked = set()                              # (APL-2: keys of albums ticked by their highlight)
+        self.model.box_set.connect(lambda albums: self._sel_ticked.difference_update(
+            self.album_key(a) for a in albums))
         # the list's own keys, as in a folder: Delete (or Backspace) takes the selected albums out of
         # the list, Escape lets go of the selection. Taken before the menus' shortcuts (Remove Tag is
         # Del too: two shortcuts on one key and Qt runs neither)
@@ -953,9 +956,14 @@ class Overview(QWidget):
         self.show_profile_choice()
 
     def folders_chosen(self, *_):
-        if self.panes._quiet:
+        if self.panes._quiet:                               # (the album shown, highlighted there too)
+            if not self.panes.folder_view.selectionModel().hasSelection():
+                self._folders_by_you = False                # (let go of with the list's selection)
+                self.sync_ticks()
             return
+        self._folders_by_you = self.panes.folder_view.selectionModel().hasSelection()
         self._profile_pane = "folders"
+        self.sync_ticks()
         self.show_profile_choice()
         self.show_ready()                                 # (APL-2: what Apply would carry out has changed)
         self.win.update_album_actions()
@@ -974,11 +982,7 @@ class Overview(QWidget):
         if self.running and self.may_apply_now():
             # (an album the look-up brings in meanwhile is not among them: left out when it ends)
             self._apply_only = {self.album_key(a) for a in chosen}
-        self._apply_exact = ids                         # (APL-2: exactly these, not others highlighted)
-        try:
-            self.apply()
-        finally:
-            self._apply_exact = None
+        self.apply()
 
     def remove_selected(self):
         """Take the selected albums out of this preview (their folders and files are not touched)."""
@@ -1149,7 +1153,7 @@ class Overview(QWidget):
         # (EDT-2: Save Tags writes files in the list's folders - what is dropped meanwhile waits for it
         # and is added when it ends, never read while it writes)
         applying = getattr(self, "_applying", False) and kind != "save"
-        side = getattr(self, "apply_worker", None) is not None      # (APL-2: an Apply beside the look-up)
+        side = getattr(self, "apply_worker", None) is not None      # (APL-1: an Apply beside the look-up)
         # (a look-up, an Apply not touching them, or folders being added - not overlapping those:
         # read now, put under the list, queued. A refile waits: its albums take their rows' places
         # when it ends, and a folder of them read meanwhile would be listed twice)
@@ -2263,7 +2267,7 @@ class Overview(QWidget):
         self.check_stale()
         if getattr(self, "apply_worker", None) is None:
             self.sort_by_status()
-        # (APL-2: an Apply beside it goes on - the rows stay put, not sorted: sorted once it ends)
+        # (APL-1: an Apply beside it goes on - the rows stay put, not sorted: sorted once it ends)
         self.show_counts()
         self.refresh_overrides()
         self.busy(False)
@@ -2721,22 +2725,11 @@ class Overview(QWidget):
         self._counts_memo = None
 
     def to_apply(self):
-        """The albums Apply carries out (APL-2): every ticked album with changes, and every album
-        you highlighted - its row in Albums as they will be, or its folder or a file of it in Your
-        files - even one you unticked, in the list's order. A row highlighted only to show it
-        (show_row) chooses nothing. Apply This Album… / Apply Selected Albums… carry out exactly
-        theirs (_apply_exact)."""
-        albums = self.applicable()
-        exact = getattr(self, "_apply_exact", None)
-        if exact is not None:
-            return [a for a in albums if id(a) in exact]
-        # (MOV-6: an Unresolved album is filed by its own tick or Use … and File It…, never by a
-        # highlight - a click to look at it)
-        ids = {id(a) for a in self.highlighted_albums() if self.highlight_applies(a)}
-        if not ids:
-            return albums
-        ticked = {id(a) for a in albums}
-        return [a for a in (self.plan or {}).get("albums") or [] if id(a) in ticked or id(a) in ids]
+        """The albums Apply carries out: the ticked ones with changes (APL-2: a highlighted album is
+        ticked, sync_ticks). An album whose filing you asked for by its tick (MOV-6, offered) waits
+        for the plan that files it: never applied from the plan that only tags it where it is."""
+        from .models import offered
+        return [a for a in self.applicable() if not offered(a)]
 
     @staticmethod
     def highlight_applies(a) -> bool:
@@ -2748,12 +2741,37 @@ class Overview(QWidget):
         return can_apply(a) and a.get("status") != "unresolved" and not planmod.held(a) and not offered(a) \
             and not a.get(PlanModel.AWAIT)
 
+    def sync_ticks(self):
+        """APL-2 (2026-11-19): a highlighted album is ticked, and its highlight taken away, the
+        tick it gave goes too (kept by album key: a look-up's new row of it is the same album).
+        A box you clicked is yours (box_set): kept as you set it. Albums TagMender waits for your
+        tick on (highlight_applies) are not ticked by a highlight."""
+        if not hasattr(self, "table") or getattr(self, "_syncing", False):
+            return
+        if not self._sel_ticked and not getattr(self, "_rows_chosen", False) and \
+                not getattr(self, "_folders_by_you", False):
+            return
+        lit = {self.album_key(a): a for a in self.highlighted_albums() if self.highlight_applies(a)}
+        now = {self.album_key(a): a for a in self.model.albums}
+        on = [a for k, a in lit.items() if k not in self._sel_ticked and PlanModel.left_out(a)]
+        off = [now[k] for k in self._sel_ticked if k not in lit and k in now and not PlanModel.left_out(now[k])]
+        self._sel_ticked = {k for k in self._sel_ticked if k in lit and k in now} | \
+            {self.album_key(a) for a in on}
+        self._syncing = True
+        try:
+            if on:
+                self.model.set_left_out(on, False)
+            if off:
+                self.model.set_left_out(off, True)
+        finally:
+            self._syncing = False
+
     def highlighted_albums(self) -> list:
         """The albums you highlighted in either pane (APL-2), once each."""
         if not hasattr(self, "table"):
             return []
         out = list(self.selected_albums()) if getattr(self, "_rows_chosen", False) else []
-        if self.panes.folder_view.selectionModel().hasSelection():
+        if getattr(self, "_folders_by_you", False) and self.panes.folder_view.selectionModel().hasSelection():
             seen = {id(a) for a in out}
             out += [a for a in self.panes.folder_albums() if id(a) not in seen]
         return out
@@ -2806,7 +2824,7 @@ class Overview(QWidget):
                 tr("Every change can be undone: Edit > Undo Last Job, or Jobs."), tr("Apply {n} {0}").format(word, n=n))
 
     def may_apply_now(self) -> bool:
-        """Apply can be asked: nothing runs, or a look-up does (APL-2: alongside it, or it stops
+        """Apply can be asked: nothing runs, or a look-up does (APL-1: alongside it, or it stops
         after its album first); not while an Apply runs alongside a look-up already."""
         if getattr(self, "apply_worker", None) is not None:
             return False
@@ -3395,7 +3413,7 @@ class Overview(QWidget):
 
     def cancel(self):
         if getattr(self, "apply_worker", None) is not None:
-            self.apply_worker.cancelled = True              # (APL-2: the Apply beside it stops too)
+            self.apply_worker.cancelled = True              # (APL-1: the Apply beside it stops too)
         if self.worker:
             self.worker.cancelled = True
             self._apply_next, self._apply_only = False, None   # (Cancel stops it all, Apply too)
@@ -3434,8 +3452,14 @@ class Overview(QWidget):
     def selection_changed(self, *_):
         from PySide6.QtWidgets import QApplication
         self._rows_chosen = not getattr(self, "_showing_row", False) and self.table.selectionModel().hasSelection()
+        if getattr(self.panes, "mirroring", None) is not self.panes.folder_view and \
+                (self._rows_chosen or getattr(self, "_showing_row", False)):
+            # (APL-2: chosen here, or a row shown by TagMender - Your files' highlight is then the
+            # album shown, no choice of yours)
+            self._folders_by_you = False
         if self._rows_chosen:
             self._profile_pane = "albums"
+        self.sync_ticks()
         self.show_profile_choice()
         self.show_ready()                                 # (what Apply would carry out has changed)
         self.win.update_album_actions()

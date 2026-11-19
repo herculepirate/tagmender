@@ -348,6 +348,7 @@ class PlanModel(QAbstractTableModel):
     AWAIT = "_await_tick"              # (unticked by TagMender until you tick it: no highlight applies it, APL-2)
     ticked = Signal()
     file_asked = Signal(list)          # (MOV-6: offered albums you ticked - to be filed as you ask)
+    box_set = Signal(list)             # (albums whose box you clicked: APL-2, the tick is then yours)
     ASKED = "_asked_file"              # (ticked, its filing asked for: shown ticked while planned again)
 
     def __init__(self):
@@ -396,6 +397,7 @@ class PlanModel(QAbstractTableModel):
         if role != Qt.CheckStateRole or idx.column() != 1:
             return False
         self.set_left_out([self.albums[idx.row()]], Qt.CheckState(value) != Qt.Checked)
+        self.box_set.emit([self.albums[idx.row()]])
         return True
 
     @classmethod

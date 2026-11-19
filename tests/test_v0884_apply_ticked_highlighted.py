@@ -48,15 +48,15 @@ class ApplyTickedAndHighlighted(_keys.Base):
         return self.ov.tree.index_of(node)
 
     def highlight_row(self, album):
-        self.ov.table.selectionModel().select(self.row_of(album),
-                                              QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+        self.ov.table.selectionModel().setCurrentIndex(self.row_of(album),         # (as a click does)
+                                                       QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
         _keys.settle(self.app)
 
     def highlight_folder(self, album):
         fv = self.ov.panes.folder_view
         node = self.ov.panes._folder_node(album, "album", None)
-        fv.selectionModel().select(fv.model().index_of(node),
-                                   QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+        fv.selectionModel().setCurrentIndex(fv.model().index_of(node),             # (as a click does)
+                                            QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
         _keys.settle(self.app)
 
     def ids(self, albums):
@@ -96,6 +96,45 @@ class ApplyTickedAndHighlighted(_keys.Base):
         self.ov.apply = lambda: seen.setdefault("albums", self.ov.to_apply())
         self.ov.apply_selected([a])
         self.assertEqual(self.ids(seen["albums"]), {id(a)})
+
+    def test_APL2_a_highlight_ticks_and_its_going_unticks(self):
+        from gui.models import PlanModel
+        a, b, c = self.ready[:3]
+        self.ov.model.set_left_out([b, c], True)
+        _keys.settle(self.app)
+        self.highlight_row(c)
+        self.assertFalse(PlanModel.left_out(c))                      # (highlighted: ticked)
+        self.highlight_folder(b)                                      # (Your files: b's; c let go of)
+        self.assertFalse(PlanModel.left_out(b))
+        self.assertTrue(PlanModel.left_out(c))                       # (its highlight gone: unticked again)
+        self.ov.table.clearSelection()                                # (the panes let go together)
+        _keys.settle(self.app)
+        self.assertTrue(PlanModel.left_out(b))
+        self.assertFalse(PlanModel.left_out(a))                      # (your own tick: never touched)
+
+    def test_APL2_a_box_you_click_stays_as_you_set_it(self):
+        from PySide6.QtCore import Qt
+        from gui.models import PlanModel
+        _a, b, _c = self.ready[:3]
+        self.ov.model.set_left_out([b], True)
+        _keys.settle(self.app)
+        self.highlight_row(b)
+        self.assertFalse(PlanModel.left_out(b))
+        r = self.ov.model.albums.index(b)
+        self.ov.model.setData(self.ov.model.index(r, 1), Qt.Checked, Qt.CheckStateRole)   # (you tick it)
+        self.ov.table.clearSelection()
+        _keys.settle(self.app)
+        self.assertFalse(PlanModel.left_out(b))                      # (yours: stays ticked)
+
+    def test_APL2_an_album_only_shown_is_never_ticked_nor_applied(self):
+        from gui.models import PlanModel
+        _a, _b, c = self.ready[:3]
+        self.ov.model.set_left_out([c], True)
+        _keys.settle(self.app)
+        self.ov.show_row(self.ov.proxy.mapFromSource(self.ov.model.index(self.ov.model.albums.index(c), 0)).row())
+        _keys.settle(self.app)
+        self.assertTrue(PlanModel.left_out(c))
+        self.assertNotIn(id(c), self.ids(self.ov.to_apply()))
 
 
 if __name__ == "__main__":

@@ -52,3 +52,4 @@ if not os.environ.get("TAGMENDER_TESTS_RUNNER"):
     for _k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
         os.environ[_k] = os.path.join(_home, _k.split("_")[1].lower())
         os.makedirs(os.environ[_k], exist_ok=True)
+    os.environ["TAGMENDER_TESTS_RUNNER"] = "1"     # (its child processes keep these folders)

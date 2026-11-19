@@ -270,9 +270,16 @@ class NAM12_RolesInBrackets(unittest.TestCase):
 class DSC14b_TheBoxTheNameNames(te.Base):
     BOX = "Band Q Medicine Show: The Brick"
 
-    def plan(self, name, on, n=4):
+    def plan(self, name, on, n=4, tweak=None):
         top = sessions(self.lib, n=n, name=name)
         box = self.BOX
+        rel = the_set("mb-set", n=n, title=box)
+        boxed = {pos for v in on.values() for rid, pos, _n in v if rid == "mb-set"}
+        for m in rel["media"]:
+            if m["position"] not in boxed:
+                m["discs"] = []                      # (the box's media 1, 2: no disc ID attached, as The Brick's)
+        if tweak:
+            tweak(rel)
 
         class Http(DiscIdHttp):
             def get_json(self, url, host):
@@ -281,7 +288,7 @@ class DSC14b_TheBoxTheNameNames(te.Base):
                     for r in out.get("releases") or ():
                         r["title"] = box if r["id"] == "mb-set" else r["id"]
                 return out
-        return self.engine(Http(on, mb=[the_set("mb-set", n=n, title=box)])).plan(top)
+        return self.engine(Http(on, mb=[rel])).plan(top)
 
     def on(self, box_at=None):
         # (discs 1 and 2: on their own volumes only; 3 and 4 on the box too)
@@ -296,6 +303,40 @@ class DSC14b_TheBoxTheNameNames(te.Base):
         self.assertEqual([(a["identification"]["release_id"], len(a["files"])) for a in plan["albums"]],
                          [("mb-set", 12)], [a.get("notes") for a in plan["albums"]])
         self.assertTrue(any("the folder's name names it" in x for x in plan["albums"][0].get("notes") or []))
+
+    def test_DSC14b_a_disc_on_its_own_release_whose_box_disc_differs_stays_apart(self):
+        # (disc 2's ID on its own volume only; the box's disc 2 is other tracks)
+        def other(rel):
+            for i, t in enumerate(rel["media"][1]["tracks"]):
+                t["length"], t["title"] = (100 + 90 * i) * 1000, f"Other {i}"
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", self.on(), tweak=other)
+        self.assertGreater(len(plan["albums"]), 1)
+
+    def test_DSC14b_a_disc_on_its_own_release_where_the_box_disc_has_another_id_stays_apart(self):
+        def other_id(rel):
+            rel["media"][1]["discs"] = [{"id": "SomeOtherDiscId0000000000000-"}]
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", self.on(), tweak=other_id)
+        self.assertGreater(len(plan["albums"]), 1)
+
+    def test_DSC14b_a_disc_with_no_id_whose_lengths_differ_holds_the_box(self):
+        # (disc 4: no disc ID on any release, its box disc's lengths not its own - The Brick's disc 9)
+        on = self.on({3: 3})
+        on[4] = []
+
+        def longer(rel):
+            for t in rel["media"][3]["tracks"]:
+                t["length"] += 40000
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", on, tweak=longer)
+        [a] = [a for a in plan["albums"] if len(a["files"]) == 12]
+        self.assertTrue(planmod.held(a), a.get("notes"))
+        self.assertIn("'Disc 4' (disc 4)", a["held"])
+        self.assertEqual(a["identification"]["reason_codes"], ["disc_not_proven"])
+
+    def test_DSC14b_the_folders_own_title_must_be_the_releases(self):
+        self.assertTrue(engine._own_title_is("Madlib - Madlib Medicine Show-The Brick [2012] [FLAC]",
+                                             "Madlib Medicine Show: The Brick"))
+        self.assertFalse(engine._own_title_is("Band J - The Greatest Live Recordings", "Live Recordings"))
+        self.assertTrue(engine._own_title_is("Band J - Live Recordings 1999", "Live Recordings"))
 
     def test_DSC14b_a_name_naming_no_release_stays_apart(self):
         plan = self.plan("Band Q - Medicine Sessions [2012]", self.on())

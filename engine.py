@@ -824,6 +824,21 @@ def disc_id_set_shape(folder: Path, dirs, keys, found) -> str:
     return "discids"
 
 
+def _own_title_is(name, title) -> bool:
+    """DSC-14b: a folder's own title - its name after "Artist - ", brackets and standing years
+    aside ("Madlib - Madlib Medicine Show-The Brick [2012] [FLAC]" -> "madlib medicine show the
+    brick") - is the release's title (its years aside too); never a title merely inside it
+    ("The Greatest Live Recordings" is no "Live Recordings")."""
+    def bare(t):
+        t = re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", str(t or "").replace("\u2013", "-"))
+        return " ".join(w for w in _title_fold(t).split() if not re.fullmatch(r"(?:19|20)\d\d", w))
+    want = bare(title)
+    if not want:
+        return False
+    head, sep, rest = re.sub(r"^\s*(?:19|20)\d\d\s*[-.\u2013]\s*", "", str(name or "")).partition(" - ")
+    return want in {bare(name), bare(rest) if sep else ""} - {""}
+
+
 def _bare_title(title) -> str:
     """DSC-12a: a title without its edition or version words ("Alpha (Remastered)", "Alpha [2009
     Remaster]", "Alpha - Deluxe Edition" -> "alpha"), folded (match_core.strip_edition)."""
@@ -2611,33 +2626,74 @@ class Engine:
                     tuple(x for x in [r.get("barcode")] + [i.get("catalog-number") for i in r.get("label-info") or ()] if x))
         return out
 
-    def _named_box(self, folder: Path, order, per) -> list:
+    def _named_box(self, folder: Path, order, per, parts=()) -> list:
         """DSC-14b: the box the folder's own name names, proven by the disc IDs it has: FOLDER's
-        disc folders ("Disc 1" .. "Disc 13", named as discs, numbered 1 to N) whose name names a
-        MusicBrainz release of exactly N audio discs (Madlib - Madlib Medicine Show-The Brick
-        [2012]: "Madlib Medicine Show: The Brick", 13 CDs) that the exact disc ID of one of them
-        at least is on, at that folder's own place, and no folder's disc ID is on it at another
-        place: the box, whatever album each disc is tagged as ("1 of 1" each), its other discs'
-        IDs missing from it or on their standalone volumes too (the box's discs are those
-        volumes). The releases so named and proven, else []. A name that names no release (a
-        bare CD count, box words alone, "Band - Original Albums") never joins this way: DSC-14's
-        guard keeps standalone albums apart."""
+        disc folders ("Disc 1" .. "Disc 13", named as discs, numbered 1 to N) whose own title (the
+        name after its artist, brackets and years aside) is the title of a MusicBrainz release of
+        exactly N audio discs (Madlib - Madlib Medicine Show-The Brick [2012]: "Madlib Medicine
+        Show: The Brick", 13 CDs) that the exact disc ID of one of them at least is on, at that
+        folder's own place, no folder's disc ID on it at another place. Every other disc whose ID
+        MusicBrainz knows: on other releases only, it joins only when the box's medium at its
+        place has no disc ID attached and its every track is that medium's, title and length to
+        the second (the box's disc is that volume: The Brick's discs 1-8, their IDs on the
+        standalone volumes); else no join (its own album). A disc whose ID is on no release rides
+        along as the match decides (Engine._box_unproven holds it when its lengths do not fit).
+        The releases so named and proven, else []. A name that names no release (a bare CD count,
+        box words alone, "Band - Original Albums") never joins this way."""
         n = len(order)
         if n < 2 or not all(is_disc_dir(d) for d in order) or not _numbered_one_to_k(order):
             return []
         titles = getattr(self, "_disc_id_titles", {})
-        info = getattr(self, "_disc_id_info", {})
         out = []
         for r in sorted({r for d in order for r in per[d]}):
             on = [(i, d) for i, d in enumerate(order, 1) if r in per[d]]
             if not on or any(per[d][r][1] != n or i not in per[d][r][0] for i, d in on):
                 continue
-            # (a title alone of years or of one word names nothing for sure: "1977–1980" needs
-            # its year too, _names_release; a box's title of one word - "Box" - none)
+            # (a title of one word - "Box" - names nothing for sure; the folder's own title must be
+            # the release's: "The Greatest Live Recordings" is no "Live Recordings")
             t = _title_fold(titles.get(r, ""))
-            if len(t.split()) < 2 or not _names_release(folder.name, titles.get(r, ""), *info.get(r, ("", "", ()))):
+            if len(t.split()) < 2 or not _own_title_is(folder.name, titles.get(r, "")):
                 continue
+            others = [(i, d) for i, d in enumerate(order, 1) if per[d] and r not in per[d]]
+            if others:
+                media = self._medium_disc_ids(r)
+                cand = self._release_cand("mb", r) if media is not None else None
+                ok = cand is not None and all(
+                    not media.get(i) and i in self._fits_discs(d, [f for q in parts for f in q.files
+                                                                   if Path(f).parent == d], cand, tight=True)
+                    for i, d in others)
+                if not ok:
+                    self.log.info("%s: a disc's ID is on other releases only and its disc of %s is not it: "
+                                  "no join", folder, r)
+                    continue
             out.append(r)
+        return out
+
+    def _medium_disc_ids(self, rid):
+        """DSC-14b: {medium position: [disc IDs]} of a MusicBrainz release's audio media (one look-up
+        with its disc IDs, cached); None when it cannot be read."""
+        try:
+            det = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}?inc=discids&fmt=json", "mb")
+        except Exception:
+            return None
+        if not det:
+            return None
+        return {int(m.get("position") or k): [x.get("id") for x in m.get("discs") or ()]
+                for k, m in enumerate(det.get("media") or (), 1)
+                if str(m.get("format") or "").lower() not in ma._MB_VIDEO_FORMATS}
+
+    def _box_unproven(self, rid, order, per, parts) -> list:
+        """DSC-14b / DSC-16: the folders of a named box whose disc nothing of your copy proves: no
+        disc ID of theirs on any release, and their tracks not the box's medium at their place
+        (each title and length within the matcher's tolerance) - [(disc, folder)]."""
+        cand = self._release_cand("mb", rid)
+        out = []
+        for i, d in enumerate(order, 1):
+            if per[d]:
+                continue
+            files = [f for q in parts for f in q.files if Path(f).parent == d]
+            if cand is None or i not in self._fits_discs(d, files, cand):
+                out.append((i, d))
         return out
 
     def _own_album_released(self, parts) -> bool:
@@ -2713,7 +2769,7 @@ class Engine:
                       if per[order[0]][r][1] == n and all(i in per[d][r][0] for i, d in enumerate(order, 1)))
         named_box = False
         if not fits:
-            fits = self._named_box(folder, order, per)  # DSC-14b
+            fits = self._named_box(folder, order, per, parts)  # DSC-14b
             named_box = bool(fits)
         if not fits:
             return None                                  # (no release holds them all)
@@ -2750,6 +2806,22 @@ class Engine:
             self.log.info("%s: its disc IDs name %s, the match %s: each folder planned alone", folder,
                           ", ".join(fits), prop.release_id)
             return None
+        if named_box and prop.status == "identified":
+            # DSC-14b / DSC-16: a disc no disc ID and no fitting lengths prove never rides along as
+            # exact, nor does a named box below auto: the album held, the discs named
+            loose = self._box_unproven(fits[0], order, per, parts)
+            if loose or not self._sure(prop):
+                why = "; ".join(f"'{d.name}' (disc {i}): no disc ID of it on any release, and its track lengths "
+                                f"are not the release's disc {i}" for i, d in loose) or \
+                    f"the match is not sure ({float(prop.confidence or 0):.1f})"
+                held = (f"One album of '{getattr(self, '_disc_id_titles', {}).get(fits[0]) or fits[0]}' "
+                        f"({n} discs), but not every disc is proven by your copy: {why}. "
+                        "Tick to tag the folder as this release.")
+                thr = planmod._threshold(self.profile, "auto_min_confidence")
+                prop.confidence = min(float(prop.confidence or 0), max(0.0, float(thr) - 0.1))
+                prop.held = held
+                prop.reason_codes = ["disc_not_proven"]
+                prop.reason = reasons.encode(held, ["disc_not_proven"])
         names = ", ".join(f"'{d.name}' -> disc {i}" for i, d in enumerate(order, 1))
         on = sum(1 for d in order if any(r in per[d] for r in fits))
         how = (f"the folder's name names it; {on} of its {n} disc IDs on it, each at its folder's place"

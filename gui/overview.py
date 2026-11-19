@@ -2077,12 +2077,17 @@ class Overview(QWidget):
                 by_root.setdefault(roots.get(k) or path, []).append(k)
             # DSC-10/DSC-11: sibling album folders a release may join, each read from its own
             # folder (added one by one), are looked up from their parent, as a plan of it would
+            was = by_root
             by_root = engine.set_sibling_roots(profs[name], by_root)
             for where, kr in by_root.items():
                 # LKP-1: the batch's albums, which an album asked for meanwhile (this profile, these
                 # sources, this folder) joins: started as soon as one of its workers is free
-                feeds[(name, where)] = engine.LookupFeed(kr)
-                batches.append((name, where, kr, feeds[(name, where)]))
+                feed = engine.LookupFeed(kr)
+                if kr == was.get(where):
+                    feeds[(name, where)] = feed
+                    batches.append((name, where, kr, feed, None))
+                else:                                       # (siblings from their parent: none joins them)
+                    batches.append((name, where, kr, feed, {r: ks for r, ks in was.items() if set(ks) <= set(kr)}))
         # (what an album joining must be looked up with to be looked up as these are: join_look_up)
         self._running_lookup = {"mode": mode, "profs": profs, "stamps": stamps, "feeds": feeds, "at": at,
                                 "count": count, "seed_of": seed_of, "path": path, "library": self.library,
@@ -2090,8 +2095,14 @@ class Overview(QWidget):
 
         def work(w):
             def one_batch(batch, report, workers):
-                name, where, kr, feed = batch
+                name, where, kr, feed, alone = batch
                 e = engine.engine_for_thread(profs[name], ocr=True if ocr else None)
+                if alone and not engine.siblings_kept(e, where, kr, meta=META_STORE):
+                    # (DSC-10/DSC-11: the parent's scan makes them one album - "Box/Disc 01" and
+                    # "/Disc 02" - none of the albums listed: each looked up from its own folder)
+                    feed.close()
+                    return sum(one_batch((name, r, ks, engine.LookupFeed(ks), None), report, workers)
+                               for r, ks in alone.items() if not w.cancelled)
                 e.edits = edits
                 e.force = forced
                 e.file_anyway = {f for f, n in file_anyway.items() if n == name}
@@ -2183,7 +2194,7 @@ class Overview(QWidget):
     # LKP-1: why an album asked for during a look-up waits for it to end, rather than joining it
     WAIT_WHY = {"sources": N_("other sources than this look-up's"), "profile": N_("another profile"),
                 "folder": N_("read from another folder"), "changed": N_("settings changed since it started"),
-                "busy": N_("being looked up now")}
+                "busy": N_("being looked up now"), "applying": N_("in a folder Apply is working on")}
 
     def join_look_up(self, mode, albums, again=False) -> tuple:
         """LKP-1: of ALBUMS asked for while a look-up runs, those it can look up exactly as it
@@ -2206,11 +2217,15 @@ class Overview(QWidget):
             return list(albums), 0, {self.album_key(a): "changed" for a in albums}
         left, why, by_feed = [], {}, {}
         stamps = {}
+        applying = getattr(self, "apply_worker", None) is not None
         for a in albums:
             k, name = self.album_key(a), self.profile_of(a)
-            # (one it has in hand, or queued already: as before - looked up after it)
-            wait = "busy" if k in self.looking or k in self.queue else "sources" if mode != run["mode"] \
-                else "profile" if name not in run["profs"] else None
+            # (one it has in hand, or queued already: as before - looked up after it. APL-1: one
+            # an Apply beside the look-up has in hand, or in a folder it works on, waits for it -
+            # never read while Apply moves its files)
+            wait = "busy" if k in self.looking or k in self.queue else \
+                "applying" if applying and self.touches_apply([a["source_dir"]]) else \
+                "sources" if mode != run["mode"] else "profile" if name not in run["profs"] else None
             if wait:
                 left.append(a)
                 why[k] = wait

@@ -343,6 +343,25 @@ class FeedOverview(tg.Gui):
                              self.app), ov.summary.text())
         self.assertEqual(ov.queue, {})
 
+    def test_LKP1_APL1_an_album_in_a_folder_apply_works_on_waits_for_it(self):
+        """APL-1: an Apply beside the look-up has it in hand (or works in its folder): it never
+        joins - it waits, as before, and the status bar says why."""
+        ov = self.ov
+        self.listed()
+        g = self.gate("2005 - Album G")
+        ov.look_up("profile", [self.row("2005 - Album G")])
+        h = self.row("2005 - Album H")
+        busy = os.path.realpath(h["source_dir"])
+        with mock.patch.object(ov, "apply_worker", object(), create=True), \
+                mock.patch.object(ov, "touches_apply", lambda paths: any(os.path.realpath(p) == busy for p in paths)):
+            ov.look_up("profile", [h, self.row("2005 - Album K")])
+            self.assertEqual(list(ov.queue), [ov.album_key(h)])
+            self.assertIn(ov.album_key(self.row("2005 - Album K")), ov.looking)      # (another folder: joins)
+            self.assertIn("in a folder Apply is working on", self.win.statusBar().currentMessage())
+        g.set()
+        self.assertTrue(wait(lambda: not ov.running and self.row("2005 - Album H")["status"] != "listed", self.app),
+                        ov.summary.text())                       # (looked up after it, as queued)
+
     def test_LKP1_an_album_already_looked_up_the_same_way_is_not_asked_again(self):
         ov = self.ov
         self.listed()

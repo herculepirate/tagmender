@@ -1680,13 +1680,15 @@ def set_sibling_roots(prof, by_root) -> dict:
     own folders, nothing is below them to join, while a plan of the parent joins them (each
     stays its own album unless the release proves them one: Engine.identify_all decides, as
     always). Only the names are asked here (no folder is read); never a parent that is the
-    profile's library or a watched folder (_own_roots), as _one_release_units; siblings read
-    from one folder already keep it, and the others their own. Returns {root: [keys]}."""
+    profile's library or a watched folder (_own_roots), as _one_release_units. Only albums read
+    from their own album folder itself (added one by one) are moved: one read from a folder of
+    more albums keeps it (its MOV-4 claims with them, MOV-3's folder you named). The caller
+    asks siblings_kept before planning them so. Returns {root: [keys]}."""
     folder_of = {k: Path(str(k).split("|", 1)[0]) for ks in by_root.values() for k in ks if k}
     root_of = {k: r for r, ks in by_root.items() for k in ks}
     by_parent = {}
     for k, d in folder_of.items():
-        if d.parent != d:
+        if d.parent != d and os.path.realpath(str(root_of[k])) == str(d) and len(by_root[root_of[k]]) == 1:
             by_parent.setdefault(d.parent, {}).setdefault(d.name, []).append(k)
     own, move = None, {}
     for parent, names in by_parent.items():
@@ -1730,6 +1732,22 @@ def set_sibling_roots(prof, by_root) -> dict:
         for k in ks:
             out.setdefault(move.get(k, r), []).append(k)
     return out
+
+
+def siblings_kept(eng, parent, keys, meta=None) -> bool:
+    """DSC-10/DSC-11 (set_sibling_roots): a scan of PARENT, within the folders of KEYS only,
+    still finds each of KEYS as an album of its own - never when it makes them one album there
+    ("Box/Disc 01" and "Box/Disc 02" one album's discs, DSC-1; versions "2.0/", "5.1/"; "CD1/",
+    "CD2/"): then a look-up from PARENT would find none of the albums listed, and each is looked
+    up from its own folder, as listed."""
+    folders = sorted({str(k).split("|", 1)[0] for k in keys})
+    try:
+        with ex.meta_memo(meta, False) if meta is not None else contextlib.nullcontext():
+            groups = list(_albums_iter(eng, parent, (), within=folders)) if eng._own_scan() else \
+                list(eng.albums_in(Path(parent)))
+    except Exception:
+        return False
+    return set(keys) <= {group_key(g.folder, g.files) for g in groups}
 
 
 def _one_release_units(eng, sc, d: Path, names) -> list:

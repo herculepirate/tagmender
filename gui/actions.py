@@ -56,7 +56,7 @@ COMMANDS = {
     "copy": (N_("&Copy"), QKeySequence.StandardKey.Copy, None, N_("Copy the selection")),
     "paste": (N_("&Paste"), QKeySequence.StandardKey.Paste, None, N_("Paste")),
     "select_all": (N_("Select A&ll"), QKeySequence.StandardKey.SelectAll, None, N_("Select all")),
-    "clear_done": (N_("Clear Done Al&bums"), None, None,
+    "clear_done": (N_("Clear Done Al&bums"), None, "circle-check",
                    N_("Take every album marked Done out of the list; nothing on disk changes")),
     "copy_path": (N_("Copy Album Pat&h"), "Ctrl+Shift+C", None, N_("Copy the selected album's folder")),
     "find": (N_("&Find"), "Ctrl+F", "search", N_("Search the page shown")),
@@ -106,6 +106,14 @@ COMMANDS = {
                     N_("File this album into the profile's layout though its score is below the floor for "
                        "moving or copying (Extra-careful matching's raised floor too); it is looked up again, "
                        "nothing is written until you apply")),
+    # MOV-6: an Unresolved album's closest release, shown to be filed (its text names the release)
+    "use_candidate": (N_("Use the Closest Release &and File It…"), None, None,
+                      N_("Show the tags of the closest release found for this Unresolved album, to be filed "
+                         "into the profile's layout: it is looked up again with that release, nothing is "
+                         "written until you tick it and apply")),
+    "undo_release_choice": (N_("&Undo Release Choice"), None, None,
+                            N_("Forget the release you chose for this album in this preview; it is looked up again. Once "
+                               "applied, the album keeps its release until you undo the job (History › Undo)")),
     "exclude_again": (N_("&Exclude Again"), None, None,
                       N_("The rules exclude this album again (undoes Process Anyway)")),
     "retry": (N_("&Retry in Overview"), "Ctrl+Shift+T", "refresh-cw", N_("Preview this album again in Overview")),
@@ -195,7 +203,7 @@ TAG_MENU = ("edit_tag", "revert_tag", "use_suggested", "remove_tag", None, "add_
             (N_("Ra&ting"), RATING_MENU))
 COVER_MENU = ("find_covers", "choose_cover", "cover_link", "suggested_cover")
 # the Album > Change Release submenu (and the inspector's Change Release button)
-RELEASE_MENU = ("use_release", *_search.MENU)
+RELEASE_MENU = ("use_release", *_search.MENU, None, "undo_release_choice")
 # commands whose keys act only where focus is in the inspector's Tags (Delete and F2 elsewhere stay
 # theirs: a rule's Delete, a cell's F2), or in the album tables (Space still presses a focused button
 # or ticks a box elsewhere); the other commands' keys work in the whole window
@@ -210,8 +218,8 @@ MENUS = (
     (N_("&View"), ("@pages", None, "show_sidebar", "show_inspector", None, "tab_tags", "tab_artwork", "tab_evidence",
                None, "refresh")),
     (N_("&Album"), ((N_("&Change Release"), RELEASE_MENU), (N_("Pro&file"), ()), "use_suggested_pressing", "match_files", "tags_from_filenames", None, (N_("&Tag"), TAG_MENU),
-                (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "exclude_again", "retry", None,
-                "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
+                (N_("Artwor&k"), COVER_MENU), None, "process_anyway", "file_anyway", "use_candidate",
+                "exclude_again", "retry", None, "add_to_collection", "submit_ratings", "submit_acoustids", None, "file_info", "search_web",
                 "open_folder", "copy_path")),
     (N_("&Controls"), ("play_pause", "next_track", "previous_track", "stop_playing", None, "skip_forward",
                        "skip_back", None, "volume_up", "volume_down", "mute")),
@@ -224,8 +232,8 @@ MENUS = (
     (N_("&Help"), ("help", "setup", "shortcuts", None, "report", "about")),
 )
 CHECKABLE = ("read_scans", "show_sidebar", "show_inspector", "toggle_rule")
-TOOLBAR = ("add_folder", "look_up")                     # (then the window's: progress, Cancel, the filter ...)
-TOOLBAR_TEXT = {"add_folder": N_(" Add Folder")}           # (its icon fills its box: a space keeps the gap)
+TOOLBAR = ("add_folder", "look_up", "clear_done")       # (then the window's: progress, Cancel, the filter ...)
+TOOLBAR_TEXT = {"add_folder": N_(" Add Folder"), "clear_done": N_(" Clear Done")}   # (a space keeps the gap after the icon)
 SPRING = "|"                                           # (in toolbar_end's list: the room that is left, shared)
 ICON_ROLE = {"apply": "on_accent"}                      # (the prominent button: its icon as its label)
 # the pages in the View menu, with their letters (the page's name stays the key)

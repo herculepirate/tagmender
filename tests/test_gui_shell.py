@@ -152,6 +152,7 @@ class Shell(unittest.TestCase):
                                      "zoom", "main_window", "report", "about", "undo_selected", "show_job_albums",
                                      "setup",                             # (the Setup page itself: Alt+7)
                                      "exclude_again", "file_anyway",
+                                     "use_candidate", "undo_release_choice",   # (MOV-6: Album menu, the album's menu)
                                      "choose_library", "clear_done",      # (0.8.71: the bars' controls, now in menus)
                                      "use_suggested_pressing",            # (TIE-1: Album menu, the album's menu)
                                      "check_folder", "change_watch", "process_again", "show_plan", "apply_all_plans",
@@ -1232,7 +1233,8 @@ class Shell(unittest.TestCase):
         album = menu["Album"]
         self.assertEqual(self.win.menus["Album"].actions()[0].menu(), self.win.menus["Change Release"])
         self.assertEqual(menu["Change Release"], ["use_release", "search_release", "other_versions",
-                                                  "choose_pressing"])
+                                                  "choose_pressing",
+                                                  "undo_release_choice"])     # (MOV-6, 0.8.77)
         self.assertIn("file_info", album)
         for key in ("edit_scripts", "tags_from_filenames"):
             self.assertIn(key, menu["Tools"])
@@ -1246,14 +1248,15 @@ class Shell(unittest.TestCase):
         self.assertEqual(self.win.act("find").shortcut().toString(), "Ctrl+F")     # (Find keeps Ctrl+F)
         # (0.8.71: Add Folder and Look Up; then the window's progress and Cancel (while work runs),
         # the filter, the profile, search, Inspector, and Apply last - Preview is File › Preview, Ctrl+P)
-        self.assertEqual(self.gui.actions.TOOLBAR, ("add_folder", "look_up"))
+        self.assertEqual(self.gui.actions.TOOLBAR, ("add_folder", "look_up", "clear_done"))
         bar = self.win.toolbar.actions()
         self.assertIs(bar[-1], self.win.act("apply"))
         self.assertIs(bar[-2], self.win.act("show_inspector"))
         # the inspector's Change Release: its menu is the Album menu's Change Release, in the same words
         b = self.win.inspector.buttons["release"]
-        self.assertEqual([a.objectName() for a in b.menu().actions()],
-                         ["use_release", "search_release", "other_versions", "choose_pressing"])
+        self.assertEqual([a.objectName() for a in b.menu().actions() if not a.isSeparator()],
+                         ["use_release", "search_release", "other_versions", "choose_pressing",
+                          "undo_release_choice"])                                # (MOV-6, 0.8.77)
         # the album table's menu
         ov = self.show_plan()
         self.select(ov, "ready")

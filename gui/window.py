@@ -203,6 +203,7 @@ class Main(QMainWindow):
         self.statusBar().addPermanentWidget(self.service_badge)
         ov = self.pages["Overview"]
         self.statusBar().addWidget(ov.counts_line)
+        self.statusBar().addPermanentWidget(ov.apply_bar)   # (an Apply's progress: shown while it runs)
         self.statusBar().addPermanentWidget(ov.summary, 1)
         ov.panes.bottom.addActions([self.commands[k] for k in actmod.SCOPED if k != "play_pause"])
         self.ov_inspector = True                              # the Overview's inspector pane: shown at first
@@ -289,6 +290,8 @@ class Main(QMainWindow):
             "tags_from_filenames": self.tags_from_filenames,
             "process_anyway": lambda: ov().process_anyway(),
             "file_anyway": lambda: ov().file_anyway_selected(),
+            "use_candidate": lambda: ov().use_candidate(),
+            "undo_release_choice": lambda: ov().undo_release_choice(),
             "exclude_again": lambda: ov().exclude_again(),
             "retry": lambda: self.pages["Needs attention"].retry(),
             "search_web": lambda: self.album_do("web"),
@@ -472,7 +475,10 @@ class Main(QMainWindow):
         b = self.inspector.buttons["release"]
         m = QMenu(b)
         for k in actmod.RELEASE_MENU:
-            m.addAction(self.commands[k])
+            if k is None:
+                m.addSeparator()
+            else:
+                m.addAction(self.commands[k])
         actmod.mac_menu(m)
         b.setMenu(m)
         b.setPopupMode(QToolButton.InstantPopup)
@@ -657,6 +663,7 @@ class Main(QMainWindow):
             saves = ov.may_save_tags() if plain else False
             self.commands["apply"].setEnabled(on_ov and bool(ov.plan) and (
                 (ov.may_apply_now() and n > 0) or (n == 0 and saves)))
+            self.apply_tip(ov, on_ov)
             # (Ctrl+S is Save Profile's on Profiles: never both on at once)
             self.commands["save_tags"].setEnabled(on_ov and saves and not self.showing("Profiles"))
             self._apply_n = n if on_ov else 0
@@ -730,6 +737,14 @@ class Main(QMainWindow):
         fa = self.commands["file_anyway"]
         fa.setEnabled(kind == "overview" and idle and bool(ov is not None and ov.may_file_anyway(x)))
         fa.setText(file_anyway_words(x if kind == "overview" else None))
+        # MOV-6: an Unresolved album's closest release, shown to be filed; a release you chose, forgotten
+        from .models import use_candidate_words
+        uc = self.commands["use_candidate"]
+        uc.setEnabled(kind == "overview" and idle and bool(ov is not None and ov.may_use_candidate(x)))
+        words = use_candidate_words(x) if kind == "overview" else ""
+        actmod.retitle(uc, words or tr("Use the Closest Release &and File It…"))
+        self.commands["undo_release_choice"].setEnabled(kind == "overview" and idle and bool(
+            ov is not None and ov.chosen_release(x)))
         self.commands["retry"].setEnabled(kind == "attention" and idle)
         self.inspector.buttons["release"].setEnabled(kind == "overview" and idle)
         for k in ("open", "web"):
@@ -906,6 +921,26 @@ class Main(QMainWindow):
             b.setAccessibleName(words if not n and saves else tr("Apply 1 album") if n == 1 else
                                 tr("Apply {0} albums").format(n) if n else tr("Apply"))
         return True
+
+    def apply_tip(self, ov, on_ov):
+        """Apply's tooltip: when it is off for the albums selected, why (MOV-6: up to date, or kept
+        out of your library for want of evidence - and how to have them filed)."""
+        from .models import can_apply, offered
+        a = self.commands["apply"]
+        if a.property("plain_tip") is None:
+            a.setProperty("plain_tip", a.toolTip())
+        tip = a.property("plain_tip")
+        if on_ov and ov.plan and not a.isEnabled() and not getattr(ov, "running", False):
+            chosen = ov.selected_albums()
+            kept = [x for x in chosen if offered(x) and not can_apply(x)]
+            if kept:
+                copy = all((x.get("below_floor") or {}).get("op") == "copy" for x in kept)
+                tip = (tr("Nothing to apply: not copied into your library: use Copy into Library Anyway") if copy
+                       else tr("Nothing to apply: not moved into your library: use Move into Library Anyway"))
+            elif chosen and all(x.get("status") in ("unchanged", "done") for x in chosen):
+                tip = tr("Nothing to apply: the selected albums are up to date")
+        if a.toolTip() != tip:
+            a.setToolTip(tip)
 
     # ---- the toolbar's filter: All / Ready / Needs Attention ---------------------------------
     def show_filter(self, kind):
@@ -1128,14 +1163,16 @@ class Main(QMainWindow):
         """The toolbar never hides its Inspector or Apply button in its overflow menu: when the window
         is too narrow for everything (its narrowest width, the progress bar shown during work), the
         Inspector button loses its word, the search field, the profile pop-up and the progress bar
-        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone."""
+        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone. Clear Done
+        gives up its word first."""
         bar = getattr(self, "toolbar", None)
         b = bar.widgetForAction(self.commands["show_inspector"]) if bar is not None else None
         if b is None:
             return
         # (inspector's word, search's widest, profile pop-up, progress bar, compact filter, icons alone,
         # the narrowest: no "Profile" word before the pop-up, Apply's count without "Albums")
-        steps = ((True, 200, 200, 120, False, False, False), (False, 160, 180, 120, False, False, False),
+        steps = ((True, 200, 200, 120, False, False, False), (True, 200, 200, 120, False, None, False),
+                 (False, 160, 180, 120, False, False, False),
                  (False, 140, 150, 100, True, False, False), (False, 110, 130, 80, True, True, False),
                  (False, 90, 110, 60, True, True, False), (False, 80, 100, 40, True, True, True))
         others = [bar.widgetForAction(self.commands[k]) for k in actmod.TOOLBAR] + [self.cancel_button]
@@ -1149,9 +1186,13 @@ class Main(QMainWindow):
             self.search_box.setMaximumWidth(search)
             self.profile_box.setFixedWidth(profile)
             self.progress.setFixedWidth(progress)
+            clear = bar.widgetForAction(self.commands["clear_done"]) if "clear_done" in self.commands else None
             for w in others:
                 if w is not None:
-                    w.setToolButtonStyle(Qt.ToolButtonIconOnly if bare else Qt.ToolButtonTextBesideIcon)
+                    # (bare None: only Clear Done shows its icon alone - it gives its word up first, from
+                    # the second step on, before the Inspector button gives up its own)
+                    alone = bare or (w is clear and (bare is None or n >= 1))
+                    w.setToolButtonStyle(Qt.ToolButtonIconOnly if alone else Qt.ToolButtonTextBesideIcon)
             if compact != getattr(self, "_compact_filter", False):
                 self._compact_filter = compact
                 ov = getattr(self, "pages", {}).get("Overview")

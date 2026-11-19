@@ -1,6 +1,8 @@
 """gui/models.py - The plan as a table."""
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import QAbstractItemModel, QAbstractProxyModel, QAbstractTableModel, QModelIndex, Qt, Signal
 
 from .common import album_words, label_for, planmod, plural, reasons, suggested_pressing
@@ -112,15 +114,176 @@ def changes_text(files) -> str:
     return tr("{0}, {1}").format(head, ", ".join(parts))
 
 
+# an album applied (its status "done"): its row's words, by where its files went
+APPLIED = N_("Applied")
+APPLIED_MOVED = N_("Applied · moved")
+APPLYING = N_("Applying…")                 # (the page's row state while its files are written: overview.ROW_STATES)
+
+
+def applied_moved(a) -> bool:
+    """The album's files were moved or copied to another folder by Apply (a file's dst in a
+    folder other than its src's); False when it was tagged (or renamed) in place."""
+    for fe in (a or {}).get("files") or []:
+        if fe.get("op") in ("move", "copy") and fe.get("dst") and fe.get("src") and \
+                os.path.dirname(os.path.normpath(fe["dst"])) != os.path.dirname(os.path.normpath(fe["src"])):
+            return True
+    return False
+
+
+def applied_folder(a) -> str:
+    """The folder album A lives in once applied: where its files went (a set's Disc 01, Disc 02
+    folders: the album's folder that holds them), or its own folder when tagged in place."""
+    if not applied_moved(a):
+        return (a or {}).get("source_dir") or ""
+    from .jobs import DISC_DIR
+    dsts = [os.path.dirname(fe["dst"]) for fe in a.get("files") or []
+            if fe.get("op") in ("move", "copy") and fe.get("dst")]
+    try:
+        dest = os.path.commonpath(dsts)
+    except ValueError:
+        dest = dsts[0]
+    while DISC_DIR.match(os.path.basename(dest)):
+        dest = os.path.dirname(dest)
+    return dest
+
+
+def status_words(a) -> str:
+    """The Status column's words for album A: "Applied · moved" / "Applied" once it is applied,
+    else its status as label_for says it."""
+    if a.get("status") == "done":
+        return tr(APPLIED_MOVED) if applied_moved(a) else tr(APPLIED)
+    return label_for(a)[1]
+
+
+def applied_tip(a) -> str:
+    folder = applied_folder(a)
+    return (tr("Applied: moved to {0}") if applied_moved(a) else tr("Applied: tagged in place, in {0}")).format(folder)
+
+
 def below_floor_text(a) -> str:
     """MOV-5: an album tagged where it is (or not copied) only because its score is below the
     profile's floor for filing: "not moved (score 92 < 95)". "" for any other album."""
     bf = (a or {}).get("below_floor") or {}
     if not bf or (a or {}).get("status") == "done":
         return ""
+    if bf.get("reason") == "partial":                 # (MOV-6: no release proven)
+        return tr("not copied (no release proven)") if bf.get("op") == "copy" else tr("not moved (no release proven)")
     words = tr("not copied (score {0:.0f} < {1:g})") if bf.get("op") == "copy" else \
         tr("not moved (score {0:.0f} < {1:g})")
     return words.format(float(bf.get("confidence") or 0), float(bf.get("floor") or 0))
+
+
+def offered(a) -> bool:
+    """MOV-5/MOV-6: the album was kept where it is (or not copied) only for want of evidence - its
+    score below the floor, or no release proven - and filing it is yours to ask: its row's box
+    (ticking it is the ask), Move into the Library Layout Anyway."""
+    return bool((a or {}).get("below_floor")) and (a or {}).get("status") != "done"
+
+
+def best_candidate(a) -> dict:
+    """MOV-6: an Unresolved album's closest release the sources found (its identification's first
+    candidate with a release link: {"ref", "title", "score", ...}); {} when there is none."""
+    if (a or {}).get("status") != "unresolved":
+        return {}
+    for c in ((a.get("identification") or {}).get("candidates") or []):
+        if isinstance(c, dict) and c.get("ref"):
+            return c
+    return {}
+
+
+def release_offered(a) -> bool:
+    """MOV-6: an Unresolved album whose closest release can be shown and filed - only by its
+    own command ("Use … and File It…"), after its tags are shown; never by its box."""
+    return bool(best_candidate(a))
+
+
+def candidate_words(c) -> str:
+    """A candidate release in a few words: "Real Band – Real Album (2005, CD, Germany, CAT-1)"."""
+    import re
+    title = str(c.get("title") or c.get("ref") or "")
+    m = re.match(r"^(.*?)\s*\((\d{4})\)\s*$", title)
+    head, year = (m.group(1), m.group(2)) if m else (title, "")
+    head = head.replace(" - ", " – ", 1)
+    facts = [year] + [x.strip() for x in str(c.get("details") or "").split("·")]
+    facts = [x for x in facts if x]
+    return f"{head} ({', '.join(facts)})" if facts else head
+
+
+def use_candidate_words(a) -> str:
+    """The command that shows an Unresolved album's closest release, to file it: "Use … and File It…"."""
+    c = best_candidate(a)
+    return tr("Use {0} &and File It…").format(candidate_words(c).replace("&", "&&")) if c else ""
+
+
+UNRESOLVED_ACTION_WORDS = {"mark": N_("Apply marks it Unresolved where it is"),
+                           "move": N_("Apply moves it to your unresolved folder"),
+                           "leave": N_("Apply leaves it as it is")}
+
+
+def unresolved_reason(a, action="") -> str:
+    """Why an Unresolved album is not tagged from a release, and how to have it filed."""
+    if (a or {}).get("status") != "unresolved":
+        return ""
+    c = best_candidate(a)
+    did = tr(UNRESOLVED_ACTION_WORDS[action]) + ". " if action in UNRESOLVED_ACTION_WORDS else ""
+    if not c:
+        return tr("Unresolved: no release the sources found fits it, so there are no tags to file it with. "
+                  "Choose its release with Change Release.") + (" " + did.strip() if did else "")
+    return tr("Unresolved: no release is proven; the closest found is {0} (score {1:.0f}). ").format(
+        candidate_words(c), float(c.get("score") or 0)) + did + \
+        tr("To file it with that release's tags, choose “Use … and File It…”: its tags are shown first.")
+
+
+ASK_WORDS = N_("Tick it, or choose Move into Library Anyway, to have it filed.")
+ASK_WORDS_COPY = N_("Tick it, or choose Copy into Library Anyway, to have it copied.")
+# (an album Apply tags where it is: its box says that already, the command files it)
+ASK_WORDS_TAGGED = N_("Choose Move into Library Anyway to have it filed.")
+
+
+def not_filed_reason(a) -> str:
+    """Why an offered album (offered) is not filed unasked, in plain words; "" for any other."""
+    if not offered(a):
+        return ""
+    bf = a["below_floor"]
+    copy = bf.get("op") == "copy"
+    where = tr("not copied into your library") if copy else tr("not moved into your library")
+    tagged = tr("Tagged as far as the sources allow") if a.get("status") != "skipped" else tr("Nothing written")
+    if bf.get("reason") == "partial":
+        prov = str((a.get("identification") or {}).get("provider") or "")
+        why = tr("it isn't on MusicBrainz or Discogs") if ("web" in prov or not prov) else \
+            tr("no single release of it is proven")
+    else:
+        why = tr("its score {0:.0f} is below the {1:g} this profile asks for to file an album").format(
+            float(bf.get("confidence") or 0), float(bf.get("floor") or 0))
+    ask = ASK_WORDS_COPY if copy else ASK_WORDS_TAGGED if can_apply(a) else ASK_WORDS
+    if can_apply(a):                                   # (its tags not written yet: Apply writes them there)
+        tagged = tr("Apply tags it where it is")
+    return tr("{0}; {1} because {2}.").format(tagged, where, why) + " " + tr(ask)
+
+
+def offer_of(a, page=None):
+    """What the bar over an album's tags (and the Inspector) offers: (words, button, enabled,
+    kind) - kind "file" (MOV-5/MOV-6: Move/Copy into Library Anyway) or "use" (an Unresolved
+    album's closest release, shown to be filed); ("", "", False, "") for none. PAGE: the Overview."""
+    if a is None:
+        return "", "", False, ""
+    words = not_filed_reason(a)
+    if words:
+        copy = (a.get("below_floor") or {}).get("op") == "copy"
+        return (words, tr("Copy into Library Anyway") if copy else tr("Move into Library Anyway"),
+                bool(page is not None and page.may_file_anyway(a)), "file")
+    if release_offered(a):
+        action = page.unresolved_action(a) if page is not None and hasattr(page, "unresolved_action") else ""
+        return (unresolved_reason(a, action), use_candidate_words(a),
+                bool(page is not None and page.may_use_candidate(a)), "use")
+    return "", "", False, ""
+
+
+def tickable(a) -> bool:
+    """MOV-6: the row's box can be ticked: it has changes Apply would make (can_apply), or its
+    filing is offered (ticking it asks for it). An Unresolved album's box keeps its meaning
+    (ticked: its unresolved action; unticked: nothing done)."""
+    return can_apply(a) or offered(a)
 
 
 def album_changes_text(a) -> str:
@@ -184,6 +347,8 @@ class PlanModel(QAbstractTableModel):
     PROFILE = 6                        # (the album's profile: its own, or the one chosen above)
     LEAVE_OUT = "_leave_out"           # (an album's own mark: unticked, so Apply leaves it as it is)
     ticked = Signal()
+    file_asked = Signal(list)          # (MOV-6: offered albums you ticked - to be filed as you ask)
+    ASKED = "_asked_file"              # (ticked, its filing asked for: shown ticked while planned again)
 
     def __init__(self):
         super().__init__()
@@ -199,10 +364,11 @@ class PlanModel(QAbstractTableModel):
         # set by the page: album -> what is being done with it now ("Waiting…", "Looking up…",
         # "Applying…"; "": nothing), shown in its Status column until it is done (never in the plan)
         self.state_of = None
+        self.unresolved_action = None   # (set by the page: album -> its profile's unresolved action)
 
     def flags(self, idx):
         f = super().flags(idx)
-        if idx.isValid() and idx.column() == 1 and can_apply(self.albums[idx.row()]):
+        if idx.isValid() and idx.column() == 1 and tickable(self.albums[idx.row()]):
             f |= Qt.ItemIsUserCheckable                  # (ticked: applied; unticked: left out)
         if idx.isValid() and idx.column() == self.PROFILE and self.choose_profile and not self.locked:
             f |= Qt.ItemIsEditable                       # (an album applied too: filed again with it)
@@ -234,11 +400,29 @@ class PlanModel(QAbstractTableModel):
 
     @classmethod
     def left_out(cls, a) -> bool:
-        """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it)."""
+        """Unticked: left out by you, or held (WEB-1: planned, unticked until you tick it); an
+        album with nothing to apply where it is but its filing offered: until you tick it (MOV-6)."""
+        if offered(a) and not can_apply(a):
+            return not a.get(cls.ASKED)
         return bool(a.get(cls.LEAVE_OUT)) or planmod.held(a)
 
+    @classmethod
+    def shows_ticked(cls, a) -> bool:
+        """The row's box shows ticked."""
+        return not cls.left_out(a)
+
     def set_left_out(self, albums, out):
+        asked = []
         for a in albums:
+            if offered(a) and not can_apply(a):     # (MOV-6: ticked, it is the ask to file it)
+                if out:
+                    a.pop(self.ASKED, None)
+                    a[self.LEAVE_OUT] = True
+                elif not a.get(self.ASKED):
+                    a[self.ASKED] = True
+                    a.pop(self.LEAVE_OUT, None)
+                    asked.append(a)
+                continue
             if can_apply(a):
                 if out:
                     a[self.LEAVE_OUT] = True
@@ -249,6 +433,8 @@ class PlanModel(QAbstractTableModel):
                         a["held_ok"] = True
         self.dataChanged.emit(self.index(0, 0), self.index(max(0, len(self.albums) - 1), len(self.COLS) - 1))
         self.ticked.emit()
+        if asked:
+            self.file_asked.emit(asked)
 
     def set_plan(self, plan):
         self.beginResetModel()
@@ -302,7 +488,7 @@ class PlanModel(QAbstractTableModel):
         a = self.albums[idx.row()]
         c = idx.column()
         if c == 0 and role == R_DISPLAY:                   # (first: what the list is sorted by)
-            return (self.state_of(a) if self.state_of else "") or label_for(a)[1]
+            return (self.state_of(a) if self.state_of else "") or status_words(a)
         ident = a["identification"]
         now = self.state_of(a) if self.state_of and c == 0 and role in (
             R_DISPLAY, R_TOOLTIP, R_ACCESSIBLETEXT) else ""
@@ -310,7 +496,7 @@ class PlanModel(QAbstractTableModel):
             return now
         if role == R_DISPLAY:
             if c == 0:
-                return label_for(a)[1]                        # (the icon is the DecorationRole)
+                return status_words(a)                        # (the icon is the DecorationRole)
             if c == 1:
                 return album_words(a["source_dir"])
             if c == 2:
@@ -335,9 +521,23 @@ class PlanModel(QAbstractTableModel):
                 return "; ".join(ident.get("why") or [])[:120]
         if role == R_FOREGROUND and c == 0 and a["status"] in ("blocked", "failed", "conflict"):
             return status_color(a["status"])               # (only what stops Apply in colour; the icon says the rest)
+        if role == R_FOREGROUND and c == 0 and a["status"] == "done":
+            from PySide6.QtGui import QColor
+            from .style import color
+            return QColor(color("applied"))
         if role == R_DECORATION and c == 0:
             from . import icons
+            if self.state_of and self.state_of(a) == tr(APPLYING):
+                return icons.icon("loader-circle", "accent", 14)     # (its files being written now)
+            if a["status"] == "done":
+                return icons.icon("circle-check", "applied", 14)
             return icons.icon(status_icon(a["status"]), a["status"], 14)
+        if role == R_TOOLTIP and c == 0 and a["status"] == "done":
+            return applied_tip(a)
+        if role == R_TOOLTIP and c == 0 and offered(a):
+            return not_filed_reason(a)
+        if role == R_TOOLTIP and c == 0 and a["status"] == "unresolved":
+            return unresolved_reason(a, self.unresolved_action(a) if self.unresolved_action else "")
         if role == R_TOOLTIP and c == 0:
             tier = (ident or {}).get("tier")
             if a["status"] not in ("unresolved", "excluded", "skipped") and tier in TIER_TIPS:
@@ -408,9 +608,9 @@ class PlanModel(QAbstractTableModel):
             # (the band in words too: its tint alone says nothing to a screen reader)
             return f"{self.data(idx, R_DISPLAY) or ''}, {tr(SCORE_BANDS[score_band(a)][1]).split(':')[0]}"
         if role == R_ACCESSIBLETEXT and c == 0:
-            return label_for(a)[1]
-        if role == R_CHECKSTATE and c == 1 and can_apply(a):
-            return Qt.Unchecked if self.left_out(a) else Qt.Checked
+            return status_words(a)
+        if role == R_CHECKSTATE and c == 1 and tickable(a):
+            return Qt.Checked if self.shows_ticked(a) else Qt.Unchecked
         if role == R_USER:
             return a
         return None

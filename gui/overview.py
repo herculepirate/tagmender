@@ -17,7 +17,7 @@ from .common import (album_words, counts_by_label, counts_text, ex, load_profile
 from .i18n import N_, tr
 from .work import start
 from .models import PlanModel, SortedRows, can_apply
-from .widgets import ElidedPath as _Elided, SleeveDrop
+from .widgets import ApplyProgress, ElidedPath as _Elided, SleeveDrop
 from .preview_panes import _held
 
 STREAM_MS = 100                                       # ms: albums read meanwhile are put in the list this often
@@ -43,6 +43,12 @@ def run_report(plan, res):
 
 # what an album that changed nothing ended as: a job of only these has nothing to undo
 NOTHING_DONE = {"conflict", "failed", "cancelled", "unchanged"}
+
+
+def planned_files(albums) -> list:
+    """Each album's files Apply is to write, move or copy, as planned (the status bar's progress
+    counts them; the executor tells the count it has as each album starts)."""
+    return [sum(1 for fe in a.get("files") or [] if fe.get("op", "none") != "none") for a in albums]
 
 
 def merge_results(plans, run, cancelled=lambda: False) -> dict:
@@ -519,6 +525,8 @@ class Overview(QWidget):
         self.model.profile_of = lambda a: (self.profile_of(a), bool(self.own_profile(a)))
         self.model.choose_profile = self.set_album_profile
         self.model.state_of = self.state_of
+        self.model.file_asked.connect(self.file_anyway_for)  # (MOV-6: an offered row ticked)
+        self.model.unresolved_action = self.unresolved_action
         self.shown_kind = "all"                              # the toolbar's All / Ready / Needs Attention
         # 0.8.71: the list is the albums pane itself (Albums as they will be: an album a row, its
         # discs and tracks under it), beside Your files, over the inspector pane (gui/preview_panes.py)
@@ -580,6 +588,7 @@ class Overview(QWidget):
         self.summary.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.summary.setAccessibleDescription(tr("Summary"))    # (no fixed name: the words are what is read)
         self.ready_line = self.counts_line
+        self.apply_bar = ApplyProgress()                  # (the status bar's: an Apply's or Save Tags' progress)
         self.views.addWidget(self.results)
         self.detail = self.panes.evidence.full            # (Why This Release > Full preview text)
         self.refresh_profiles()
@@ -803,7 +812,7 @@ class Overview(QWidget):
             items = []
         else:
             keys = ("@release", "use_suggested_pressing", "match_files", None, "file_info", "tags_from_filenames", None, "process_anyway",
-                    "file_anyway", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
+                    "file_anyway", "use_candidate", "exclude_again", None, "play_pause", None, "search_web", "open_folder",
                     "copy_path")
             # (the four ways to choose the release: the Album menu's Change Release submenu, as there)
             release = self.win.menus["Change Release"].menuAction() if "Change Release" in getattr(
@@ -2436,8 +2445,10 @@ class Overview(QWidget):
         self.bar.setAccessibleDescription(words)
         if self._applying and self.running:                 # (Apply: which album; file_progress: which file)
             self.applying_row(i)
+            self.apply_bar.album_started(i)
             self._apply_at = (i, n, Path(what).name)
-            self.summary.setText(tr("Applying album {0} of {n}: {name}…").format(i + 1, n=n, name=Path(what).name))
+            # (the counts are the status bar's progress's own words: here only which album)
+            self.summary.setText(tr("{name}…").format(name=Path(what).name))
         elif getattr(self, "_lookup_n", 0) and self.running:  # (Look Up: which album, under the list)
             self._lookup_i, self._lookup_name = i, Path(what).name
             self.summary.setText(self.lookup_words(i, Path(what).name))
@@ -2471,6 +2482,7 @@ class Overview(QWidget):
         if not (self._applying and 0 <= i < len(mine)):
             return
         self.mark_applied(mine[i], r)
+        self.apply_bar.album_done(i, (r or {}).get("status") == "done")
         self.model.refresh_rows()
 
     def file_progress(self, i, j, n, path):
@@ -2478,10 +2490,13 @@ class Overview(QWidget):
         if not (self._applying and self.running):
             return
         self.applying_row(i)
+        self.apply_bar.file(i, j, n)
         _i, total, name = getattr(self, "_apply_at", (i, 0, ""))
         words = tr("Applying album {0} of {n}: {name} — file {1} of {m}: {file}").format(
             i + 1, j + 1, n=total, name=name, m=n, file=Path(path).name)
-        self.summary.setText(words)
+        # (beside the progress, which says "Applying 1 of 2 albums · 4 of 6 files": which file only)
+        self.summary.setText(tr("{name} — file {0} of {m}: {file}").format(j + 1, name=name, m=n,
+                                                                           file=Path(path).name))
         self.bar.setToolTip(words)
         self.bar.setAccessibleDescription(words)
 
@@ -2862,6 +2877,7 @@ class Overview(QWidget):
         for a in order:
             self.states[id(a)] = "waiting"
         self.model.refresh_rows()
+        self.apply_bar.start(planned_files(order))
         self.apply_worker = start(self, work, self.applied_alongside, None, self.apply_alongside_failed,
                                   partial=self.alongside_news)
         self.win.update_album_actions()
@@ -2880,15 +2896,16 @@ class Overview(QWidget):
                     self.states.pop(id(b))               # (the one before: finished, said by "album")
             self.states[id(a)] = "applying"
             self.model.refresh_rows()
-            self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name}")
-                                             .format(i + 1, n=news[2], name=Path(news[3]).name))
+            self.apply_bar.album_started(i)
+            self.win.statusBar().showMessage(tr("Beside the look-up: {name}").format(name=Path(news[3]).name))
         elif kind == "file":
             _k, _i, j, n, f = news
-            self.win.statusBar().showMessage(tr("Applying album {0} of {n} while the look-up goes on: {name} — "
-                                                "file {1} of {m}").format(i + 1, j + 1, n=len(side),
-                                                                          name=Path(a["source_dir"]).name, m=n))
+            self.apply_bar.file(i, j, n)
+            self.win.statusBar().showMessage(tr("Beside the look-up: {name} — file {0} of {m}").format(
+                j + 1, name=Path(a["source_dir"]).name, m=n))
         elif kind == "album":
             self.mark_applied(a, news[2])
+            self.apply_bar.album_done(i, (news[2] or {}).get("status") == "done")
             self.model.refresh_rows()
 
     def mark_applied(self, a, r):
@@ -2922,6 +2939,7 @@ class Overview(QWidget):
         for i, a in enumerate(side):
             if i in by_index:
                 self.mark_applied(a, by_index[i])
+        self.end_bar(res)
         names = [n for n in dict.fromkeys(self.planned_with.get(Overview.album_key(x)) for x in side)
                  if isinstance(n, str) and n]
         rep = run_report(dict(self.plan or {}, albums=side, **({"profile": ", ".join(names)} if names else {})),
@@ -2936,7 +2954,14 @@ class Overview(QWidget):
         if rep is not None:
             self.win.show_run_report(rep)
 
+    def end_bar(self, res):
+        """The status bar's progress ends: as many albums applied, failed, or stopped (cancelled)."""
+        counts = res.get("counts") or {}
+        self.apply_bar.finish(counts.get("done", 0), sum(counts.get(k, 0) for k in ("failed", "conflict")),
+                              stopped=bool(counts.get("cancelled")))
+
     def apply_alongside_failed(self, msg):
+        self.apply_bar.finish(0, error=True)
         self.alongside_ended()
         sheets.warning(self, tr("That did not work."), msg)
 
@@ -3005,6 +3030,7 @@ class Overview(QWidget):
         self.busy(True)
         self._work_kind = "apply"
         self._applying, self._apply_at = True, (0, total, "")
+        self.apply_bar.start(planned_files(order))
         self.summary.setText(tr("Applying…"))
         self.worker = start(self, work, self.applied, self.progress, self.apply_failed,
                             partial=self.apply_news)
@@ -3013,6 +3039,7 @@ class Overview(QWidget):
         """Apply stopped with an error: said as any failure; the albums a look-up was
         interrupted for (Apply during a look-up) are looked up still."""
         self._joined = False
+        self.apply_bar.finish(0, error=True)
         self.oops(msg)
         if self.queue and not self.running:
             self.run_queue()
@@ -3141,6 +3168,7 @@ class Overview(QWidget):
         self.busy(True)
         self._work_kind = "save"
         self._applying = True                                 # (EDT-1: no edit of any album while it runs)
+        self.apply_bar.start([None] * len(albums), kind="save")
         self.summary.setText(tr("Saving your edits…"))
         self.worker = start(self, work, self.saved, self.saving_progress, self.save_failed)
         return True
@@ -3151,6 +3179,7 @@ class Overview(QWidget):
             self.states = {k: v for k, v in self.states.items() if v != "applying"}
             self.states[id(mine[i])] = "applying"
             self.model.refresh_rows()
+            self.apply_bar.album_started(i)
         self.bar.setMaximum(max(n, 1))
         self.bar.setValue(i + 1)
         self.win.show_count(tr("{0} of {n}").format(i + 1, n=n))
@@ -3198,6 +3227,7 @@ class Overview(QWidget):
             a["files"] = []                                  # (its files read again when shown)
             for k in ("fingerprint", "renames"):
                 a.pop(k, None)
+        self.apply_bar.finish(len(ok), len(bad))
         self.busy(False)
         for a, _r in ok + bad:
             self.panes.album_changed(a)
@@ -3226,6 +3256,7 @@ class Overview(QWidget):
 
     def save_failed(self, msg):
         self._saving, self._save_then = None, None
+        self.apply_bar.finish(0, error=True)
         self.oops(msg)
 
     def may_drop_plain(self, then=None) -> bool:
@@ -3272,6 +3303,7 @@ class Overview(QWidget):
                 if r.get("label") in ("Ignored", "Skipped"):
                     a["label"] = r["label"]
         self.model.set_plan(self.plan)
+        self.end_bar(res)
         many = ", " in (res.get("job") or "")
         self.summary.setText((tr("Jobs {0}: ").format(res["job"]) if many else f"Job {res['job']}: " if res.get("job")
                               else "") + (counts_text(res["counts"]) or tr("Nothing was changed")) +
@@ -3422,6 +3454,93 @@ class Overview(QWidget):
         return bool(a and a.get("below_floor") and a.get("status") not in ("done",)
                     and not (getattr(self, "running", False) and not getattr(self, "looking", None)))
 
+    # ---- MOV-6: an Unresolved album's closest release, shown first, filed if you tick it -------
+    def may_use_candidate(self, a) -> bool:
+        from .models import release_offered
+        return bool(a and release_offered(a) and not (getattr(self, "running", False)
+                                                      and not getattr(self, "looking", None)))
+
+    def use_candidate(self, a=None):
+        """Album › Use … and File It…: the Unresolved album A (the selected one) looked up again
+        with its closest release as your choice (Change Release's way) and your ask to file it.
+        Its row comes back Ready, its tags shown - and unticked: nothing is written until you
+        tick it and apply."""
+        import engine
+        from .models import best_candidate, candidate_words
+        a = a if a is not None else self.selected()
+        if not self.may_use_candidate(a):
+            return
+        c = best_candidate(a)
+        files = engine.plan_entry_files(a)
+        key = os.path.realpath(a["source_dir"])
+        mine = {os.path.realpath(f) for f in files}
+        kept = [x for x in self.choices_at(key) if x.get("files") and
+                not mine & {os.path.realpath(f) for f in x.get("files") or []}]
+        self.forced[key] = kept + [dict({"ref": c["ref"], "files": files},
+                                        **({"only": True} if a.get("split") else {}))]
+        for f in files:
+            self.file_anyway[os.path.realpath(f)] = self.profile_of(a)
+        a[PlanModel.LEAVE_OUT] = True                       # (its new row: unticked until you tick it)
+        self.edited(a)
+        self.look_up(self.sources.currentData() or "profile", self.with_versions([a]), again=True)
+        self.win.statusBar().showMessage(tr("Showing {0} for {1}: tick it to apply.").format(
+            candidate_words(c), Path(a["source_dir"]).name), 15000)
+
+    def choices_at(self, key) -> list:
+        """The releases you chose in folder KEY, as [{"ref", "files"?, ...}] whatever way they were
+        kept (a plain link for the whole folder, one choice, or a list of them)."""
+        v = self.forced.get(key)
+        if isinstance(v, str):
+            return [{"ref": v}] if v else []
+        if isinstance(v, dict):
+            return [v]
+        return [x for x in v or [] if isinstance(x, dict)]
+
+    @staticmethod
+    def _choice_is_for(x, mine) -> bool:
+        """Choice X is album MINE's (its files): one with no files is the whole folder's."""
+        files = x.get("files")
+        return not files or bool(mine & {os.path.realpath(f) for f in files})
+
+    def chosen_release(self, a) -> dict:
+        """The release you chose for album A (Change Release, a pasted link, or Use … and File
+        It…), or {}."""
+        if not a or not a.get("source_dir"):
+            return {}
+        import engine
+        mine = {os.path.realpath(f) for f in engine.plan_entry_files(a)}
+        return next((x for x in self.choices_at(os.path.realpath(a["source_dir"])) if self._choice_is_for(x, mine)),
+                    {})
+
+    def undo_release_choice(self, albums=None):
+        """The release you chose for the selected albums forgotten (and your ask to file them):
+        each is looked up again as TagMender finds it - an Unresolved album Unresolved again."""
+        import engine
+        albums = [a for a in (albums if albums is not None else self.selected_albums()) if self.chosen_release(a)]
+        if not albums or (self.running and not self.looking):
+            return
+        for a in albums:
+            key = os.path.realpath(a["source_dir"])
+            mine = {os.path.realpath(f) for f in engine.plan_entry_files(a)}
+            left = [x for x in self.choices_at(key) if not self._choice_is_for(x, mine)]
+            if left:
+                self.forced[key] = left
+            else:
+                self.forced.pop(key, None)
+            for f in mine:
+                self.file_anyway.pop(f, None)
+            a[PlanModel.LEAVE_OUT] = True                   # (looked up again: not applied unasked meanwhile)
+        self.look_up(self.sources.currentData() or "profile", self.with_versions(albums), again=True)
+        self.win.statusBar().showMessage(tr("Release choice undone for {0}: looked up again.").format(
+            plural(len(albums), tr("album"), tr("albums"))), 10000)
+
+    def unresolved_action(self, a) -> str:
+        """What album A's profile does with an Unresolved album ("mark", "move", "leave"; "")."""
+        try:
+            return str(self.planning_profile(name=self.profile_of(a))["unresolved"]["action"])
+        except Exception:
+            return ""
+
     def drop_asks_of_other_profiles(self):
         """MOV-5: the profile chosen above changed: an ask made under another profile is dropped
         (a move asked for is no copy asked for). An album with a profile of its own keeps its."""
@@ -3433,7 +3552,15 @@ class Overview(QWidget):
         """Album > Move into the Library Layout Anyway: the selected albums kept in place for their
         score alone are looked up again with the floor lifted for their folders only (the rest of
         the list stays as it is). Nothing is written until Apply."""
-        chosen = [a for a in self.selected_albums() if self.may_file_anyway(a)]
+        self.file_anyway_for(self.selected_albums())
+
+    def file_anyway_for(self, albums):
+        """MOV-5/MOV-6: ALBUMS (those of them offered) looked up again to be filed as you ask - by
+        the command, or by ticking an offered row's box."""
+        chosen = [a for a in albums if self.may_file_anyway(a)]
+        for a in albums:                                     # (not now: its tick taken back)
+            if all(a is not c for c in chosen) and a.pop(PlanModel.ASKED, None):
+                self.edited(a)
         if not chosen:
             return
         import engine

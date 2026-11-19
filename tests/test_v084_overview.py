@@ -251,7 +251,10 @@ class V084Overview(tg.Gui):
             self.assertTrue(wait(lambda: "file 2 of 3" in ov.summary.text(), self.app, timeout=10), ov.summary.text())
             first = Path(ov.plan["albums"][ov._applied_rows[0]]["source_dir"]).name
             second = Path(ov.plan["albums"][ov._applied_rows[1]]["source_dir"]).name
-            self.assertIn(f"Applying album 1 of 2: {first} — file 2 of 3: ", ov.summary.text())
+            # (0.8.77: which album and file; the counts are the status bar's progress's own words)
+            self.assertIn(f"{first} — file 2 of 3: ", ov.summary.text())
+            self.assertNotIn("Applying", ov.summary.text())
+            self.assertIn("Applying 1 of 2 albums · 1 of 6 files", ov.apply_bar.text())
             self.assertEqual(self.status(first.split(" - ")[1]), "Applying…")
             self.assertEqual(self.status(second.split(" - ")[1]), "Waiting…")
             gate.set()
@@ -283,8 +286,9 @@ class V084Overview(tg.Gui):
             self.assertTrue(wait(lambda: held, self.app, timeout=30))
             first = Path(ov.plan["albums"][ov._applied_rows[0]]["source_dir"]).name
             second = Path(ov.plan["albums"][ov._applied_rows[1]]["source_dir"]).name
-            self.assertTrue(wait(lambda: self.status(first.split(" - ")[1]) == "Done", self.app, timeout=10),
-                            self.status(first.split(" - ")[1]))
+            # (0.8.77: an album applied reads "Applied" / "Applied · moved", no longer "Done")
+            self.assertTrue(wait(lambda: self.status(first.split(" - ")[1]) in ("Applied", "Applied · moved"),
+                                 self.app, timeout=10), self.status(first.split(" - ")[1]))
             self.assertEqual(self.status(second.split(" - ")[1]), "Applying…")
             gate.set()
             self.assertTrue(wait(lambda: not ov.running, self.app), ov.summary.text())

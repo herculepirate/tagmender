@@ -42,10 +42,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLay
                                QToolButton, QTreeView, QVBoxLayout, QWidget)
 
 from . import icons, style
-from .common import (_gui_prefs, _set_gui_pref, album_words, label_for, left_header, planmod, plural, popup_menu,
+from .common import (_gui_prefs, _set_gui_pref, album_words, left_header, planmod, plural, popup_menu,
                      profile_colour, reasons, say)
 from .i18n import N_, tr
-from .models import (PlanModel, can_apply, fill_roles, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
+from .models import (PlanModel, can_apply, fill_roles, status_words, tickable, R_ACCESSIBLETEXT, R_BACKGROUND, R_DECORATION, R_DISPLAY, R_EDIT, R_FONT, R_FOREGROUND, R_TEXTALIGNMENT,
                      R_TOOLTIP, R_USER)
 from .tagnames import display as tag_name
 from .widgets import Segmented
@@ -928,7 +928,10 @@ class AlbumsModel(LazyTree):
             if memo is None:
                 memo = top.data["memo"] = {}
             if "tint" not in memo:
-                memo["tint"] = tint_of(self._list(top, 6, R_DISPLAY))
+                # (an album applied: its row, and its discs' and tracks', on the applied wash - the
+                # badge and the word say it too, so the wash is never the only sign)
+                memo["tint"] = QColor(style.color("applied_bg")) if (top.album or {}).get("status") == "done" \
+                    else tint_of(self._list(top, 6, R_DISPLAY))
             return memo["tint"]
         if n.kind != "album":
             return self._data(idx, n, role)
@@ -955,7 +958,11 @@ class AlbumsModel(LazyTree):
                     return self._list(n, 6, R_DISPLAY) or ""
                 if role == R_ACCESSIBLETEXT:
                     sub = self.data(idx, SUB)
-                    return f"{album_title(a)}, {sub}" if sub else album_title(a)
+                    words = f"{album_title(a)}, {sub}" if sub else album_title(a)
+                    if a.get("status") == "done":           # (the badge in words: "Applied" / "Applied, moved")
+                        from .models import applied_moved
+                        words += ", " + (tr("Applied, moved") if applied_moved(a) else tr("Applied"))
+                    return words
                 if role == R_TOOLTIP:
                     return self.album_tip(n)
                 if role == R_FONT:
@@ -964,6 +971,9 @@ class AlbumsModel(LazyTree):
                     return f
                 if role == int(Qt.CheckStateRole):
                     return self._list(n, 1, role)
+                if role == R_DECORATION and a.get("status") == "done":
+                    # (applied: a filled check badge where its include box was - not a box to tick)
+                    return icons.badge("circle-check", "applied", "on_applied", 16)
                 return None
             src = self.SRC[c]
             if c == self.SCORE and role in (R_FONT, R_FOREGROUND):
@@ -971,8 +981,10 @@ class AlbumsModel(LazyTree):
                 # symbol and the word; how far to trust the score is in its tooltip and read out)
                 return QColor(style.color("muted")) if role == R_FOREGROUND else None
             if c == self.STATUS and role == R_FOREGROUND:
-                return style.status_color(a.get("status")) if not self._list(n, 0, R_DISPLAY) != \
-                    label_for(a)[1] else QColor(style.color("muted"))
+                if self._list(n, 0, R_DISPLAY) != status_words(a):        # (Waiting…, Applying…)
+                    return QColor(style.color("muted"))
+                return QColor(style.color("applied")) if a.get("status") == "done" else \
+                    style.status_color(a.get("status"))
             return self._list(n, src, role)
         if n.kind == "disc":
             d = n.data
@@ -1034,8 +1046,8 @@ class AlbumsModel(LazyTree):
         f = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled
         if idx.column() == self.NAME:
             if isinstance(self.rows.sourceModel(), PlanModel):
-                if n.album is not None and can_apply(n.album):
-                    f |= Qt.ItemIsUserCheckable                 # (as the list's: ticked, applied)
+                if n.album is not None and tickable(n.album):
+                    f |= Qt.ItemIsUserCheckable                 # (as the list's: ticked, applied or asked)
             else:
                 f |= self.rows.flags(self.rows.index(idx.row(), 1)) & Qt.ItemIsUserCheckable
         memo[key] = f
@@ -1619,6 +1631,24 @@ class PreviewPanes(QWidget):
         self.tabs.changed.connect(self.tab_changed)
         p.head_lay.insertWidget(0, self.tabs)
         p.subtitle.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        # MOV-5/MOV-6: an album kept where it is for want of evidence says why, and offers its
+        # filing (Album › Move into the Library Layout Anyway) over its tags
+        self.offer = QFrame()
+        self.offer.setObjectName("offerBar")
+        ol = QVBoxLayout(self.offer)                     # (the words over the button: a narrow pane cuts neither)
+        ol.setContentsMargins(12, 8, 12, 8)
+        ol.setSpacing(6)
+        self.offer_words = QLabel("")
+        self.offer_words.setWordWrap(True)
+        self.offer_btn = QToolButton()
+        self.offer_btn.setObjectName("offerButton")
+        self.offer_btn.setText(tr("Move into Library Anyway"))
+        self.offer_btn.setFocusPolicy(Qt.StrongFocus)
+        self.offer_btn.clicked.connect(self.file_anyway)
+        ol.addWidget(self.offer_words)
+        ol.addWidget(self.offer_btn, 0, Qt.AlignLeft)
+        self.offer.hide()
+        p.add(self.offer)
         self.stack = QStackedWidget()
         p.add(self.stack, 1)
         # Tags
@@ -1977,6 +2007,7 @@ class PreviewPanes(QWidget):
         finally:
             self._quiet = False
         self.release_btn.setEnabled(album is not None)
+        self.show_offer(album)
         self.show_why(album)
         self.read_tags()
         self.fill_tags()
@@ -2548,6 +2579,30 @@ class PreviewPanes(QWidget):
             sheets.run(dlg, "covers")
 
     # ---- the list's commands ----------------------------------------------------------------
+    def show_offer(self, album):
+        """MOV-5/MOV-6: why ALBUM is not filed (its score, no release proven) and the button that
+        asks for it; hidden for any other album."""
+        from .models import offer_of
+        owner = self.owner if hasattr(self.owner, "may_file_anyway") else None
+        words, button, on, self._offer_kind = offer_of(album, owner)
+        self.offer.setVisible(bool(words))
+        if not words:
+            return
+        self.offer_words.setText(words)
+        from .actions import plain
+        self.offer_btn.setText(plain(button).replace("&", "&&"))
+        self.offer_btn.setAccessibleName(plain(button))
+        self.offer_btn.setEnabled(on)
+
+    def file_anyway(self):
+        album = self.scope[0] if self.scope else None
+        if album is None or self.owner is None or not hasattr(self.owner, "file_anyway_for"):
+            return
+        if getattr(self, "_offer_kind", "") == "use":
+            self.owner.use_candidate(album)
+        else:
+            self.owner.file_anyway_for([album])
+
     def change_release(self):
         album = self.scope[0] if self.scope else None
         if album is None or self.owner is None:

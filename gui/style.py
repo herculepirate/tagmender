@@ -40,7 +40,12 @@ LIGHT = {"window": "#F6F7F9", "base": "#FFFFFF", "alt": "#F2F4F7", "sidebar": "#
          "diff_new_bg": "#D6E6FB", "diff_new_ink": "#0B3A75", "diff_old_bg": "#FBDCC6", "diff_old_ink": "#7A2E0E",
          # the segmented control (the toolbar's filter, the inspector pane's tabs): its track, the
          # chosen segment raised on it
-         "seg_track": "#E3E6EA", "seg_on": "#FFFFFF"}
+         "seg_track": "#E3E6EA", "seg_on": "#FFFFFF",
+         # an album applied (its files written, moved where they go): a deeper green than Ready's
+         # accent for its filled check badge (on_applied: the tick on it), and its row's light wash
+         # (ink, muted and the applied green at 4.5:1 at least on it); the status bar's Apply
+         # progress: its track (the fill is the accent)
+         "applied": "#0B6B33", "on_applied": "#FFFFFF", "applied_bg": "#E2F3E8", "progress_track": "#D9DEE4"}
 DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1C222A", "ink": "#E6EAF0",
         "muted": "#9AA5B1", "faint": "#4A535E", "separator": "rgba(255,255,255,0.10)", "line": "#323943",
         "accent": "#4CC777", "on_accent": "#0B2014", "identified": "#6CC08E", "attention": "#E3B25C",
@@ -49,7 +54,8 @@ DARK = {"window": "#1E2228", "base": "#16191E", "alt": "#1B1F25", "sidebar": "#1
         "brand_green": "rgba(48,209,88,0.70)", "brand_red": "rgba(255,69,58,0.60)",
         "field": "#6E7782",
         "diff_new_bg": "#1E3A5F", "diff_new_ink": "#D6E6FB", "diff_old_bg": "#4F2A16", "diff_old_ink": "#FBDCC6",
-        "seg_track": "#2A3038", "seg_on": "#4A535E"}
+        "seg_track": "#2A3038", "seg_on": "#4A535E",
+        "applied": "#5EE08F", "on_applied": "#0B2014", "applied_bg": "#1D3A27", "progress_track": "#323943"}
 
 # a profile's colour: every profile has one - yours, or one given automatically (gui.common.
 # profile_colour). name -> (words, light row tint, dark row tint, its dot). The washes keep ink, muted
@@ -412,6 +418,15 @@ def stylesheet():
     QToolButton#coverChoose::menu-indicator {{ image: none; width: 0; }}
     QProgressBar {{ border: none; background: {line}; border-radius: 3px; max-height: 6px; text-align: center; }}
     QProgressBar::chunk {{ background: {accent}; border-radius: 3px; }}
+    QFrame#offerBar {{ background: {t["seg_track"]}; border: none; border-bottom: 1px solid {line}; }}
+    QFrame#offerBar QLabel {{ color: {ink}; }}
+    QToolButton#offerButton {{ background: {accent}; color: {on}; border: none; border-radius: {CONTROL}px;
+                               padding: 4px 12px; font-weight: 600; }}
+    QToolButton#offerButton:disabled {{ background: {line}; color: {off}; }}
+    QToolButton#offerButton:focus {{ border: 2px solid {ring}; padding: 2px 10px; }}
+    QProgressBar#applyProgress {{ background: {t["progress_track"]}; border: none; border-radius: 7px;
+                                  min-height: 14px; max-height: 14px; min-width: 160px; max-width: 220px; }}
+    QProgressBar#applyProgress::chunk {{ background: {accent}; border-radius: 7px; }}
     QScrollArea {{ border: none; background: transparent; }}
     QScrollArea > QWidget > QWidget {{ background: transparent; }}
     QScrollBar:vertical {{ width: 10px; background: transparent; border: none; margin: 0; }}

@@ -459,3 +459,124 @@ class FlowLayout(QLayout):
             x += hint.width() + self.spacing()
             line = max(line, hint.height())
         return y + line - rect.y()
+
+
+class ApplyProgress(QFrame):
+    """The status bar's progress of an Apply (or a Save Tags) job: a rounded bar in the app's
+    accent on its track (style.py: QProgressBar#applyProgress) and its words beside it -
+    "Applying 3 of 12 albums · 214 of 1,030 files". It fills as each file and album is done, ends
+    full with "Applied 12 albums" (and the failures, in the error colour) for a few seconds, then
+    hides; a job cancelled ends with "Stopped after N of M"."""
+    SCALE = 1000
+    LINGER = 4000                        # ms the end is shown before the bar hides
+
+    def __init__(self, parent=None):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QProgressBar
+        super().__init__(parent)
+        self.setObjectName("applyProgressBox")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 0, 8, 0)
+        lay.setSpacing(8)
+        self.bar = QProgressBar()
+        self.bar.setObjectName("applyProgress")
+        self.bar.setRange(0, self.SCALE)
+        self.bar.setTextVisible(False)
+        self.bar.setAccessibleName(tr("Apply progress"))
+        self.words = QLabel("")
+        self.words.setTextFormat(Qt.RichText)
+        lay.addWidget(self.bar)
+        lay.addWidget(self.words)
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide)
+        self.kind = "apply"
+        self.albums = self.at = self.finished = 0
+        self.est = []                    # (each album's files, as planned: replaced by the count told)
+        self.files_done = 0
+        self.current = 0                 # (files of the album now being written, done so far)
+        self.hide()
+
+    def start(self, files_per_album, kind="apply"):
+        """A job of len(FILES_PER_ALBUM) albums starts (each its planned number of files to write
+        or move; None for none known: the words then count albums only)."""
+        self.timer.stop()
+        self.kind = kind
+        self.bar.setAccessibleName(tr("Save progress") if kind == "save" else tr("Apply progress"))
+        self.est = list(files_per_album)
+        self.albums, self.at, self.finished, self.done_at = len(self.est), 0, 0, 0
+        self.files_done, self.current = 0, 0
+        self.bar.setValue(0)
+        self.show_words()
+        self.show()
+
+    def album_started(self, i):
+        self.at = max(self.at, i)
+        if self.kind == "save":          # (Save Tags tells each album as it starts: those before it are done)
+            self.finished = max(self.finished, i)
+        self.current = 0
+        self.show_words()
+
+    def file(self, i, j, n):
+        """File J (0-based) of the N of album I is next: the ones before it are done."""
+        if 0 <= i < len(self.est):
+            self.est[i] = n
+        self.at = max(self.at, i)
+        self.current = j
+        self.show_words()
+
+    def album_done(self, i, ok=True):
+        """Album I is over: its files counted as done; OK: applied (a failed one is not finished)."""
+        if 0 <= i < len(self.est):
+            self.files_done += self.est[i] or 0
+        self.done_at = max(getattr(self, "done_at", 0), i + 1)
+        if ok:
+            self.finished += 1
+        self.current = 0
+        self.show_words()
+
+    def total_files(self) -> int:
+        return sum(n or 0 for n in self.est)
+
+    def show_words(self):
+        total = self.total_files()
+        done = min(total, self.files_done + self.current)
+        if total:
+            frac = done / total
+        else:
+            frac = self.finished / self.albums if self.albums else 0
+        self.bar.setValue(round(frac * self.SCALE))
+        n = min(self.albums, max(getattr(self, "done_at", 0), self.at) + 1) if self.albums else 0
+        head = (tr("Saving {0} of {1} albums") if self.kind == "save" else tr("Applying {0} of {1} albums")).format(
+            n, self.albums)
+        if total and self.kind != "save":
+            head += " · " + tr("{0} of {1} files").format(f"{done:,}", f"{total:,}")
+        self.set_words(head)
+
+    def set_words(self, text, bad=""):
+        """TEXT, then BAD (what failed) in the error colour; both read out and in the tooltip."""
+        import html
+        self.words.setText(html.escape(text) + (" · " if text and bad else "") + (
+            "<span style='color:{0}'>{1}</span>".format(style.color("error"), html.escape(bad)) if bad else ""))
+        whole = " · ".join(x for x in (text, bad) if x)
+        self.bar.setAccessibleDescription(whole)
+        self.setToolTip(whole)
+
+    def text(self) -> str:
+        return self.toolTip()
+
+    def finish(self, done, failed=0, stopped=False, error=False):
+        """The job ended: DONE albums applied, FAILED not (failed, in conflict), STOPPED: cancelled,
+        ERROR: the job itself failed."""
+        if error:
+            self.set_words("", tr("Failed after {0} of {1}").format(self.finished, self.albums))
+        elif stopped:
+            self.set_words(tr("Stopped after {0} of {1}").format(self.finished, self.albums))
+        else:
+            self.bar.setValue(self.SCALE)
+            word = tr("Saved {0}") if self.kind == "save" else tr("Applied {0}")
+            from .common import plural
+            self.set_words(word.format(plural(done, tr("album"), tr("albums"))),
+                           tr("{0} failed").format(failed) if failed else "")
+        self.show()
+        self.timer.start(self.LINGER)

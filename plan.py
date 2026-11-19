@@ -2064,7 +2064,7 @@ class Planner:
                 entry.pop("below_floor")
             if entry.get("filed_on_request") and not _moves_a_file(entry):
                 entry.pop("filed_on_request")
-                entry["notes"] = [n for n in entry["notes"] if not n.endswith("because you asked")]
+                entry["notes"] = [n for n in entry["notes"] if "because you asked" not in n]
             # MOV-4: an album folder is claimed for this album's discs only once its placement
             # is decided - an album blocked, skipped or not moved claims none
             if not (entry.get("status") in ("ready", "unchanged") and
@@ -2275,6 +2275,12 @@ class Planner:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
             entry["status"] = "unresolved"
             entry["label"] = "Unresolved"
+            if ua == "move" and self.file_anyway is not True and self.asked_to_file(prop):
+                # MOV-6: you asked for it to be filed (its closest release taken), yet no release
+                # could be had for it: it is not sent to the unresolved folder against your ask
+                entry["notes"].append("you asked for it to be filed, but no release could be had for it: "
+                                      "marked where it is, not moved to the unresolved folder")
+                ua = "mark"
             if (ua == "leave" or op == "copy") and not (getattr(prop, "restore", None) and op != "copy"):
                 for f in kept:
                     entry["files"].append({"src": str(f), "dst": str(f), "op": "none", "changes": {}, "diff": [],
@@ -2287,11 +2293,20 @@ class Planner:
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"
                 return entry
+        elif op in ("copy", "move") and partial and self.asked_to_file(prop):
+            # MOV-6: you asked for this Partial album to be filed: it is, from the tags it has
+            # (its mark stays Partial) - what you ask for is done
+            entry["notes"].append(("copied" if op == "copy" else "moved") + " because you asked (no release proven)")
+            entry["filed_on_request"] = {"confidence": round(conf, 1), "reason": "partial",
+                                         "floor": _threshold(p, "organize_min_confidence"), "op": op}
         elif op in ("copy", "move") and partial:
-            # (a Partial album is not proven enough to file: its name and folder could be another
-            # pressing's)
+            # (a Partial album is not proven enough to file unasked: its name and folder could be
+            # another pressing's)
             entry["notes"].append("Partial identification (no release proven): "
                                   + ("not copied" if op == "copy" else "tagged in place, not moved"))
+            # MOV-6: kept where it is for want of a proven release - you may ask for it to be filed
+            entry["below_floor"] = {"confidence": round(conf, 1), "reason": "partial",
+                                    "floor": _threshold(p, "organize_min_confidence"), "op": op}
             if op == "copy":
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"

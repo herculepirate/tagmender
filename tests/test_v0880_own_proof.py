@@ -551,6 +551,47 @@ class TIE1_SharedDiscIdDisputesNothing(unittest.TestCase):
         self.assertTrue({"mb-de", "dg-jp"} <= others | {out["best"]["cand"]["id"]}, others)
 
 
+class TOC3_PressingWithNoDiscIds(unittest.TestCase):
+    """The Brick: the 2012 box carries your disc IDs, the 2016 reissue has none attached at all."""
+    SECS = (200.0, 305.0, 410.0)
+
+    def album(self):
+        return {"artist": "Band Q", "title": "The Brick", "year": 2012, "discs": 1,
+                "tracks": [{"disc": 1, "num": i + 1, "title": f"T{i}", "secs": s} for i, s in enumerate(self.SECS)],
+                "barcodes": set(), "catnos": set(), "toc_releases": {"b12"}, "exact_toc_releases": {"b12"},
+                "tocs": {1: "1 3 69525 150 15150 38025"}}
+
+    def cand(self, rid, date, cat):
+        return {"source": "mb", "id": rid, "url": "u", "artist": "Band Q", "title": "The Brick", "year": int(date[:4]),
+                "date": date, "country": "US", "label": "Stones Throw", "catnos": set(cat), "barcodes": set(),
+                "disc_count": 1, "formats": {"cd"},
+                "tracks": [{"disc": 1, "title": f"T{i}", "secs": s} for i, s in enumerate(self.SECS)]}
+
+    def run_with(self, answer):
+        a = self.album()
+        sc = [mc.score_candidate(a, self.cand("b12", "2012-04-27", ["mmsbox101"]), CFG),
+              mc.score_candidate(a, self.cand("b16", "2016-09-09", ["mms001", "mmsbox101"]), CFG)]
+        r = dict(mc.classify(sc, CFG), scored=sc, source="mb")
+        self.assertIn("pressing chosen by disc ID", " ".join(r["best"]["notes"]))
+
+        class H:
+            def get_json(self, url, host):
+                assert "inc=discids" in url and "/b16?" in url, url
+                return answer
+        return a, ma.discid_less_tie(H(), a, r, CFG)
+
+    def test_TOC3_a_pressing_with_no_disc_id_at_all_is_not_told_apart_by_yours(self):
+        a, r = self.run_with({"id": "b16", "media": [{"format": "CD", "discs": []}]})
+        self.assertEqual(a["discid_less"], {"b16"})
+        self.assertNotIn("pressing chosen by disc ID", " ".join(r["best"]["notes"]))
+        self.assertNotEqual(r["status"], "auto")
+
+    def test_TOC3_a_pressing_with_other_disc_ids_stays_another_disc(self):
+        a, r = self.run_with({"id": "b16", "media": [{"format": "CD", "discs": [{"id": "other"}]}]})
+        self.assertFalse(a.get("discid_less"))
+        self.assertEqual((r["status"], r["best"]["cand"]["id"]), ("auto", "b12"))
+
+
 # ---- DSC-19 --------------------------------------------------------------------------------
 class DSC19_DiscFolderAgreesWithTags(unittest.TestCase):
     def album(self, folders, total, moved="Disc 3", disc="2"):

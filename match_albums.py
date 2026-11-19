@@ -8602,6 +8602,41 @@ def release_ids_view(final, results, album):
             "printed": printed[:60000]}
 
 
+def discid_less_tie(http, album, res, cfg, at_most=3):
+    """TOC-3 / TIE-1: MusicBrainz's pick carries your exact disc ID, and a pressing within the
+    margin of it, of as many tracks, does not: when that pressing has no disc ID attached to any
+    of its audio media (one look-up of its disc IDs, cached; at most AT_MOST), the disc ID's
+    absence from it is unknown, not another disc (Madlib - Medicine Show: The Brick, the 2016
+    reissue d9c407e9 beside the 2012 box 7bc10ce4) - album["discid_less"] names it and the
+    candidates are scored again, so the tie rules propose a pressing (album known), never the
+    disc ID choosing it. res, or the result scored again."""
+    best = (res or {}).get("best")
+    if not best or not album.get("exact_toc_releases") or not mc._exact_toc(best):
+        return res
+    n = len(best["cand"].get("tracks") or ())
+    pool = [s for s in res.get("scored") or () if s is not best and s["cand"].get("source") == "mb"
+            and not mc._exact_toc(s) and s.get("tracks_ok") and len(s["cand"].get("tracks") or ()) == n
+            and abs(float(s["confidence"]) - float(best["confidence"])) < cfg["auto_min_margin"]
+            and str(s["cand"]["id"]) not in (album.get("discid_less") or ())]
+    found = set()
+    for s in pool[:at_most]:
+        rid = str(s["cand"]["id"])
+        try:
+            det = http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}?inc=discids&fmt=json", "mb")
+        except ProviderUnavailable:
+            continue
+        media = [m for m in (det or {}).get("media") or () if str(m.get("format") or "").lower() not in _MB_VIDEO_FORMATS]
+        # (an answer listing each medium's disc IDs - none on any: "discs": [] each)
+        if media and all("discs" in m for m in media) and not any(m["discs"] for m in media):
+            found.add(rid)
+    if not found:
+        return res
+    album["discid_less"] = set(album.get("discid_less") or ()) | found
+    cands = [_whole(s) for s in res.get("scored") or ()]
+    scored = mc.code_twins(album, [mc.score_candidate(album, c, cfg) for c in cands], cfg)
+    return dict(mc.classify(scored, cfg), scored=scored, source=res.get("source") or "mb")
+
+
 def run_source(name, finder, album, cfg, ocr_txt=""):
     cands = finder()
     mc.note_titles(album, cands)                       # (FLD-1: one decision for every pressing)
@@ -9421,6 +9456,7 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                 source_notes.append(f"MusicBrainz lookup failed ({exc}); result is Discogs-only")
                 if provider_errors is not None:
                     provider_errors["musicbrainz"] = exc.kind
+        mb_res = discid_less_tie(http, album, mb_res, cfg)     # TOC-3 / TIE-1
     else:
         mb_res = None
     # each failed disc or link lookup: a note (a MusicBrainz one is a source note, the

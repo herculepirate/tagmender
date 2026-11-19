@@ -3317,8 +3317,12 @@ def _weigh(tied):
         for x in tied:
             if allc[id(x)].get("format") == HIRES_DIGITAL_CLUE:
                 allc[id(x)].pop("format")
+    # TOC-3 / TIE-1: a tied MusicBrainz pressing with no disc ID attached to any medium (The Brick's
+    # 2016 reissue beside the 2012 box carrying three of your disc IDs) is unknown, not another
+    # disc: your disc ID tells none of them apart then
+    no_ids = any(s.get("discid_less") for s in tied)
     for s in tied:
-        if s["cand"].get("source") == "discogs":
+        if s["cand"].get("source") == "discogs" or no_ids:
             allc[id(s)].pop("disc TOC", None)
         # A fuzzy disc ID match ("a CD of about these lengths") tells no pressing of the album
         # from another: the one that has disc IDs submitted would always win (Q5)
@@ -4778,6 +4782,9 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "files_name_artist": files_name_artist,
         "other_version": other_version(album, cand),
         "has_folder_catno": bool(album.get("catnos_from_folder")),
+        # (TOC-3: a MusicBrainz release with no disc ID attached to any medium: your disc ID's
+        # absence from it is unknown, not different - match_albums.discid_less_tie)
+        "discid_less": str(cand.get("id")) in (album.get("discid_less") or ()),
         "folder_catno_agrees": bool(inside) or catnos_agree(album.get("catnos_from_folder"), cand.get("catnos")),
         "folder_catno_absent": bool(album.get("catnos_from_folder") and cand.get("catnos") and not inside
                                     and not catnos_agree(set(album.get("catnos_from_folder") or ())

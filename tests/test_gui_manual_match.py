@@ -312,7 +312,8 @@ class Dropping(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_only_new_folders_are_added_and_the_rest_said(self):
-        plan = {"albums": [{"files": [{"src": str(self.tmp / "loose" / "x.flac")}]}]}
+        plan = {"albums": [{"files": [{"src": str(self.tmp / "lib" / "A" / "a.flac")}]},
+                           {"files": [{"src": str(self.tmp / "loose" / "x.flac")}]}]}
         page = self.Page(str(self.tmp / "lib"), plan)
         win = self.Win(page)
         got = mm.add_dropped(win, [str(self.tmp / "lib/A"), str(self.tmp / "loose/x.flac"), str(self.tmp / "other/C"),
@@ -321,9 +322,23 @@ class Dropping(unittest.TestCase):
         self.assertEqual(page.set, [str(self.tmp / "other/C")])
         self.assertIn("already in the preview: A, x.flac", win.bar.said[-1])
         page.set.clear()
-        self.assertEqual(mm.add_dropped(win, [str(self.tmp / "lib/B")]), [])
+        self.assertEqual(mm.add_dropped(win, [str(self.tmp / "lib/A")]), [])
         self.assertEqual(page.set, [])
-        self.assertEqual(win.bar.said[-1], "Already in the preview: B.")
+        self.assertEqual(win.bar.said[-1], "Already in the preview: A.")
+
+    def test_a_folder_inside_the_one_previewed_but_not_listed_is_new(self):
+        # DRP-1: folders copied into the previewed folder after it was listed (or left after Apply
+        # emptied the list) were refused as "Already in the preview" until TagMender restarted
+        plan = {"albums": [{"files": [{"src": str(self.tmp / "lib" / "A" / "a.flac")}]}]}
+        for listed in (plan, None):
+            page = self.Page(str(self.tmp / "lib"), listed)
+            self.assertEqual(mm.new_paths(page, [str(self.tmp / "lib/B")]), ([str(self.tmp / "lib/B")], []))
+        # (while that folder is being listed or previewed, the run reads it: held, never listed twice)
+        for kind, held in (("listing", True), ("preview", True), ("apply", False), ("lookup", False)):
+            page = self.Page(str(self.tmp / "lib"), None, running=True)
+            page._work_kind = kind
+            new, present = mm.new_paths(page, [str(self.tmp / "lib/B")])
+            self.assertEqual(bool(present), held, kind)
 
     def test_first_new_previewed_none_while_running_and_without_a_preview(self):
         page = self.Page(None)

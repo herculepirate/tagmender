@@ -1,5 +1,10 @@
 # Release notes
 
+## 0.8.85
+
+- Folders copied into the folder you previewed after it was listed can be dropped onto the window again. They were turned away as "Already in the preview" (during Apply and after it) until TagMender was restarted; now only an album actually in the list counts as already there (DRP-1).
+- A disc tagged with its set's title and a subtitle of its own after a colon stays with the set's other discs (DSC-2c). A three-disc set whose third disc was tagged "Reculer pour mieux sauter: Le souffle du destin (Disc 3)" was split into discs 1-2, unresolved, and a lone disc 3; it is one album of three discs again.
+
 ## 0.8.84
 
 **Ticks follow your highlight**

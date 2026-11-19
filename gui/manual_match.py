@@ -413,11 +413,13 @@ def can_match(album) -> bool:
 # --------------------------------------------------------------------------
 def new_paths(page, paths) -> tuple[list, list]:
     """(the dropped paths the preview does not hold yet, the ones it does). A path is held when
-    it is a file of an album listed, a folder holding one, or inside the folder previewed;
-    but not the folder of an album taken out of the list (Remove from List): dropped again, it is
-    listed again. (Each folder is resolved once, not each file: a list of thousands of albums
-    resolved every file's path on each drop.)"""
-    root = getattr(page, "path", None)
+    it is a file of an album listed or a folder holding one. Being inside the folder previewed is
+    not enough once it has been read: a folder copied there after it was listed, or one left
+    after Apply emptied the list, is new (DRP-1); an album taken out of the list (Remove from
+    List) is listed again. Only while that folder is being listed or previewed is everything
+    inside it held (the run reads it; read again, it would be listed twice).
+    (Each folder is resolved once, not each file: a list of thousands of albums resolved every
+    file's path on each drop.)"""
     plan = getattr(page, "plan", None) or {}
     # (each folder resolved once per call, never kept from one drop to the next: a folder held
     # wrongly as new is listed, and applied, twice)
@@ -434,8 +436,9 @@ def new_paths(page, paths) -> tuple[list, list]:
     held = {real(f) for a in plan.get("albums") or []
             for f in [fe.get("src") for fe in a.get("files") or []] + list(a.get("album_files") or []) if f}
     folders = {os.path.dirname(f) for f in held}
-    removed = {os.path.realpath(str(d)) for d in getattr(page, "removed", None) or ()}
-    top = os.path.realpath(str(root)) if root else ""
+    root = getattr(page, "path", None)
+    reading = getattr(page, "running", False) and getattr(page, "_work_kind", None) in ("listing", "preview")
+    top = os.path.realpath(str(root)) if root and reading else ""
 
     def within(p, r):                                   # (both resolved already)
         return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
@@ -445,9 +448,7 @@ def new_paths(page, paths) -> tuple[list, list]:
         if rp in seen:
             continue
         seen.add(rp)
-        # (inside the folder previewed: held, unless an album of it was taken out of the list)
-        inside = rp in held or any(within(d, rp) for d in folders) or (
-            bool(top) and within(rp, top) and not any(within(d, rp) or within(rp, d) for d in removed))
+        inside = rp in held or any(within(d, rp) for d in folders) or (bool(top) and within(rp, top))
         (present if inside else new).append(str(p))
     return new, present
 

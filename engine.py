@@ -679,21 +679,31 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
     if sorted(numbers.values()) != list(range(1, n + 1)):
         return False
     who = _ascii_fold(_folder_artist(folder.name))
-    titles, artists, led = set(), set(), False
-    for d, fs in by_dir.items():
-        ks = {keys[f] for f in fs}
-        if len(ks) != 1:
-            return False                                   # (a disc folder of two albums)
-        k = next(iter(ks))
-        title = _ascii_fold(k[2])
+    titles, heads, artists, led = set(), {}, set(), False
+
+    def bare(text, k):
+        nonlocal led
+        title = _ascii_fold(text)
         for lead in {who, *(_ascii_fold(x) for x in _credited_names(k[1]))} - {""}:
             if title.startswith(lead + " ") and len(title) > len(lead) + 1:
                 title = title[len(lead) + 1:].strip()
                 led = led or lead == who               # (the album tag names the folder's artist)
                 break
+        return title
+    for d, fs in by_dir.items():
+        ks = {keys[f] for f in fs}
+        if len(ks) != 1:
+            return False                                   # (a disc folder of two albums)
+        k = next(iter(ks))
+        title = bare(k[2], k)
         if not title:
             return False
         titles.add(title)
+        # (DSC-2c: "Reculer pour mieux sauter: Le souffle du destin" - the set's title, this disc's
+        # own subtitle after a colon)
+        head, colon, _sub = str(k[2] or "").partition(":")
+        if colon and _sub.strip():
+            heads[title] = bare(head, k)
         if k[1]:
             artists.add(k[1])
         for f in fs:
@@ -701,7 +711,13 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
             if num not in ("", str(numbers[d])) or total not in ("", str(n)):
                 return False                               # (a disc tag against the folder's number)
     if len(titles) != 1:
-        return False
+        # DSC-2c: discs tagged with the set's title, some with a disc subtitle of their own after a
+        # colon ("Reculer pour mieux sauter" twice, "Reculer pour mieux sauter: Le souffle du
+        # destin"): one title, when at least one disc carries it alone
+        plain = {t for t in titles if t not in heads}
+        if len(plain) != 1 or any(heads[t] not in plain for t in titles - plain):
+            return False
+        titles = plain
     if len(artists) <= 1:
         return True
     # (each disc's LEAD credited name the same - "Wieland Kuijken (...)" and "Wieland Kuijken (...),

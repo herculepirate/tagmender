@@ -571,8 +571,8 @@ class PerfGui(Base):
         ov.plan = {"albums": [dict(entry(link / "A", "la"), album_files=[str(link / "A" / "01.flac")])]}
         new, present = manual_match.new_paths(ov, [str(self.other / "A"), str(self.other / "A" / "01.flac"),
                                                    str(self.first / "B"), str(self.third)])
-        self.assertEqual(present, [str(self.other / "A"), str(self.other / "A" / "01.flac"), str(self.first / "B")])
-        self.assertEqual(new, [str(self.third)])
+        self.assertEqual(present, [str(self.other / "A"), str(self.other / "A" / "01.flac")])
+        self.assertEqual(new, [str(self.first / "B"), str(self.third)])      # (DRP-1: not listed, so new)
         ov.plan = None
 
     def test_the_target_of_a_linked_album_file_is_held(self):

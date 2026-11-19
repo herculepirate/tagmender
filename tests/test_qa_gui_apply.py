@@ -133,7 +133,7 @@ class DropWhileApplying(Base):
         settle(self.app, 0.2)
         super().tearDown()
 
-    def apply_with_a_drop(self, list_first=False):
+    def apply_with_a_drop(self, list_first=False, folder=None):
         import executor
         import threading
         gate = threading.Event()
@@ -150,7 +150,8 @@ class DropWhileApplying(Base):
             self.ov.apply()
             settle(self.app)
             self.assertTrue(self.ov._applying)
-            self.assertEqual(self.win.dropped([str(self.other.parent.parent)]), [str(self.other.parent.parent)])
+            folder = str(folder or self.other.parent.parent)
+            self.assertEqual(self.win.dropped([folder]), [folder])
             end = time.time() + 20
             while time.time() < end and len(self.ov.model.albums) < 2:
                 settle(self.app)
@@ -177,6 +178,16 @@ class DropWhileApplying(Base):
         self.assertEqual(seen["after"], [(self.album.name, "done"), ("2003 - Other Album", "listed")])
         self.assertEqual(seen["looked_up"], [["2003 - Other Album"]])
         self.assertEqual(self.ov.later, [])
+
+    def test_a_folder_copied_into_the_folder_previewed_is_listed(self):
+        # DRP-1: a folder that arrived in the previewed folder after it was listed was refused as
+        # "Already in the preview" (during Apply and after it) until TagMender was restarted
+        from test_executor import audio
+        sib = self.album.parent / "2004 - Copied In Later"
+        audio(sib / "01 y.flac", 600, album="Copied In Later", artist="Some Artist", title="y")
+        seen = self.apply_with_a_drop(folder=sib)
+        self.assertEqual(seen["rows"], [self.album.name, sib.name])
+        self.assertEqual(seen["looked_up"], [[sib.name]])
 
     def test_a_folder_apply_is_working_in_waits_for_it(self):
         # (the folder the album is being moved into, or one holding it: read once Apply is done)

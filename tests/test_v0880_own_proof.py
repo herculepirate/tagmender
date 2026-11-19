@@ -302,6 +302,27 @@ class DSC2b_PerDiscAlbumArtists(te.Base):
         disc(top / "CD2", 2, "MTV Unplugged", "Eric Clapton")
         self.assertEqual(len(self.groups(top)), 2)
 
+    def test_DSC2c_a_disc_with_its_own_subtitle_after_a_colon_stays_in_the_set(self):
+        # Wim Mertens - Gave Van Niets, Part IV (TWI 1006): disc 3 tagged "Reculer pour mieux
+        # sauter: Le souffle du destin (Disc 3)" was split from discs 1 and 2
+        top = self.lib / "Part IV - Reculer pour mieux sauter"
+        disc(top / "Disc 1", 1, "Reculer pour mieux sauter", "Wim Mertens", k=2)
+        disc(top / "Disc 2", 2, "Reculer pour mieux sauter (Disc 2)", "Wim Mertens", k=4)
+        disc(top / "Disc 3", 3, "Reculer pour mieux sauter: Le souffle du destin (Disc 3)", "Wim Mertens", k=5)
+        self.assertEqual([len(g.files) for g in self.groups(top)], [11])
+
+    def test_DSC2c_subtitles_with_no_disc_tagged_by_the_title_alone_stay_apart(self):
+        top = self.lib / "Band - Live"
+        disc(top / "CD1", 1, "Live: Paris", "Band")
+        disc(top / "CD2", 2, "Live: Tokyo", "Band")
+        self.assertEqual(len(self.groups(top)), 2)
+
+    def test_DSC2c_a_subtitle_of_another_title_stays_apart(self):
+        top = self.lib / "Band - Two Albums"
+        disc(top / "CD1", 1, "Alpha", "Band")
+        disc(top / "CD2", 2, "Beta: The Sequel", "Band")
+        self.assertEqual(len(self.groups(top)), 2)
+
     def test_DSC2b_the_whole_set_meets_its_barcode(self):
         top = self.lib / "Bach - 6 Suites (W. Kuijken, P. Kuijken) (2015)"
         for n, aa in ((1, "W. Kuijken (cello)"), (2, "W. Kuijken (cello)"), (3, "W. Kuijken (cello), P. Kuijken")):

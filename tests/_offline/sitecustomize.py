@@ -40,3 +40,15 @@ if os.environ.get("TAGMENDER_TESTS_NETWORK") != "1":
 
     socket.socket.connect = connect
     socket.socket.connect_ex = connect_ex
+
+
+# A test file run on its own (python -m unittest tests.x, with this folder on PYTHONPATH) gets
+# throwaway settings, state, data and cache folders as under run_tests.sh, never your own: such a
+# run once wrote two "Ignored" rows of a test's /tmp folders into the app's History.
+# run_tests.sh sets TAGMENDER_TESTS_RUNNER; its runner gives each file folders of its own.
+if not os.environ.get("TAGMENDER_TESTS_RUNNER"):
+    import tempfile as _tempfile
+    _home = _tempfile.mkdtemp(prefix="tagmender-test-xdg-")
+    for _k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
+        os.environ[_k] = os.path.join(_home, _k.split("_")[1].lower())
+        os.makedirs(os.environ[_k], exist_ok=True)

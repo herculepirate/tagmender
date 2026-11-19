@@ -23,5 +23,6 @@ export PYTHONDONTWRITEBYTECODE=1
 # no test reaches the network (tests/_offline/sitecustomize.py)
 export PYTHONPATH="$PWD/tests/_offline${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHON="$PY"
+export TAGMENDER_TESTS_RUNNER=1                 # (tests/_offline/sitecustomize.py: the runner isolates each file)
 # each file in its own process with its own settings, state, data and cache folders: tests/_runner.py
 exec "$PY" tests/_runner.py "$@"

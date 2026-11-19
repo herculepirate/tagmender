@@ -318,6 +318,11 @@ class NAM12_RolesInBrackets(unittest.TestCase):
         self.assertGreaterEqual(mc.artist_sim(a + ", Piet Kuijken (clavecin)", "Wieland Kuijken, Piet Kuijken"), 0.95)
         self.assertLess(mc.artist_sim("Anna Other (violin)", "Wieland Kuijken"), 0.5)
 
+    def test_NAM12_brackets_naming_no_role_stay(self):
+        for a, b in (("Bob Marley (and the Wailers)", "Bob Marley"), ("Fleetwood Mac (Peter Green)", "Fleetwood Mac"),
+                     ("Vangelis (Classical)", "Vangelis")):
+            self.assertLess(mc.artist_sim(a, b), 0.85, a)
+
     def test_NAM12_a_credit_with_brackets_of_its_own_is_compared_whole(self):
         self.assertEqual(mc.artist_sim("Band (UK)", "Band (UK)"), 1.0)
         self.assertLess(mc.artist_sim("Prince (2)", "Prince"), 0.9)      # (a Discogs number: not a role)

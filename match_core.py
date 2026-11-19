@@ -585,7 +585,15 @@ def expand_initials(tag_artist, cand_artist):
     return out
 
 
-_ROLE_BRACKETS = re.compile(r"\s*\((?=[^)]*[a-z])[^()]*\)")
+# NAM-12: a performer's role in brackets - an instrument, a voice, a conductor's part
+_ROLE_WORDS = re.compile(
+    r"\b(?:violin|violino|viola|viole|viol|violoncello|cello|contrabass|double bass|bass|piano|pianoforte|"
+    r"fortepiano|harpsichord|clavecin|cembalo|clavichord|organ|orgel|guitar|lute|theorbo|harp|flute|"
+    r"recorder|oboe|clarinet|bassoon|horn|trumpet|trombone|tuba|saxophone|sax|percussion|drums|"
+    r"timpani|keyboards?|synthesi[sz]er|accordion|mandolin|gamba|continuo|soprano|mezzo(?:-soprano)?|"
+    r"alto|contralto|countertenor|tenor|baritone|voice|vocals?|conductor|dirigent|direction|director|"
+    r"soloist|piccolo|chorus master)\b", re.I)
+_ROLE_BRACKETS = re.compile(r"\s*\(([^()]*)\)")
 
 
 def artist_sim(tag_artist, cand_artist):
@@ -594,7 +602,8 @@ def artist_sim(tag_artist, cand_artist):
     role in brackets ("Wieland Kuijken (violoncello, basse de viole), Piet Kuijken (clavecin)")
     is no part of the name when the database's credit gives none."""
     if "(" in str(tag_artist or "") and "(" not in str(cand_artist or ""):
-        bare = _ROLE_BRACKETS.sub("", str(tag_artist)).strip()
+        bare = _ROLE_BRACKETS.sub(lambda m: "" if _ROLE_WORDS.search(m.group(1)) else m.group(0),
+                                  str(tag_artist)).strip()
         if bare and bare != str(tag_artist).strip():
             return max(_artist_sim(tag_artist, cand_artist), _artist_sim(bare, cand_artist))
     return _artist_sim(tag_artist, cand_artist)

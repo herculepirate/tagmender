@@ -1221,8 +1221,14 @@ def medium_view(album, cand):
         where += [[m.get("position") or d, x.get("index")] for x in m["tracks"]]
     videos = sorted(d for d in mine if medium_type(by_pos[d].get("format")) == "video")
     note = "; ".join(f"your disc {d} is the {by_pos[d].get('format')}'s audio" for d in videos)
+    # (a DVD's or Blu-ray's audio is often 24-bit/48 kHz: hi-res audio on that disc is no sign
+    # against the release's CDs - when your discs of its CDs are CD audio, 16-bit/44.1 kHz)
+    cd_audio = all(int((t.get("audio") or {}).get("rate") or 44100) == 44100
+                   and int((t.get("audio") or {}).get("bits") or 16) <= 16
+                   for d in order if d not in videos for t in mine[d])
     return dict(cand, tracks=view, version_tracks=where, version_media={d: by_pos[d].get("position") or d for d in order},
                 version_unsure="", version_notes=[note], medium_view=True,
+                hires_media=bool(cand.get("hires_media")) or cd_audio,
                 full_tracks=len(cand.get("tracks") or []), disc_count=len(order))
 
 

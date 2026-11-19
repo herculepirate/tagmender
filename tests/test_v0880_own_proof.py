@@ -142,6 +142,12 @@ class MED17b_VideoDiscAudioByNumber(te.Base):
         self.assertEqual(view["version_media"], {1: 1, 2: 2, 3: 3, 5: 5})
         self.assertEqual(len(view["tracks"]), 10)
         self.assertEqual(view["version_tracks"][6:8], [[3, 0], [3, 1]])
+        # (the DVD's audio hi-res, your CDs CD audio: no sign against the release's CDs)
+        hi = {"tracks": [dict(t, audio={"rate": 48000 if t["disc"] == 3 else 44100, "bits": 24 if t["disc"] == 3 else 16})
+                         for t in album["tracks"]]}
+        self.assertTrue(mc.medium_view(hi, cand)["hires_media"])
+        allhi = {"tracks": [dict(t, audio={"rate": 96000, "bits": 24}) for t in album["tracks"]]}
+        self.assertFalse(mc.medium_view(allhi, cand)["hires_media"])
         # (no video medium among your discs: the audio media as usual)
         plain = {"tracks": [t for t in album["tracks"] if t["disc"] != 3]}
         self.assertIsNone(mc.medium_view(plain, cand))

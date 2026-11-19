@@ -10011,6 +10011,12 @@ def _another_album(c, cand) -> bool:
     return any(p and mc.title_sim(a, p) >= 0.85 for p in parts)
 
 
+def _another_artist(c, cand) -> bool:
+    """EVI-12: C is credited to another artist than CAND (both credited, the names apart)."""
+    a, b = str(c.get("artist") or ""), str(cand.get("artist") or "")
+    return bool(a and b) and mc.artist_sim(a, b) < 0.85 and mc.artist_sim(b, a) < 0.85
+
+
 def scans_report(best, album, ocr_txt, results, had_scans):
     """What the album's scans (and the barcodes decoded off them) showed about BEST, the
     scored pick: {"state", "found", "against"}, or None when the folder has no scans or
@@ -10062,9 +10068,12 @@ def scans_report(best, album, ocr_txt, results, had_scans):
         # carry - a box's replica sleeve printing its disc's original LP number (Mahavishnu
         # Orchestra - The Complete Columbia Albums Collection: "KC 31996", Birds Of Fire) - names
         # no other pressing of the box
+        # EVI-12: and only a pressing of this artist - OCR noise ("SSV19" off a booklet's text) that
+        # a code search matched to another artist's record names no pressing of this album
         others = [s["cand"].get("catnos") or () for res in results for s in (res or {}).get("scored") or ()
                   if s.get("cand") is not cand and str(s["cand"].get("id")) != str(cand.get("id"))
-                  and not _another_album(s["cand"], cand)]
+                  and not _another_album(s["cand"], cand)
+                  and not _another_artist(s["cand"], cand)]
         others_number = any(not mc.catnos_agree([c], theirs) and any(mc.catnos_agree([c], o) for o in others)
                             for c in mine)
         if others_number and not unlisted_download:

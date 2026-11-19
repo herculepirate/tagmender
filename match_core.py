@@ -1582,13 +1582,26 @@ def _other_country_follows(text, m):
     return bool(named) and _EU_POSTAL[m.group(1)] not in named
 
 
+# EVI-12: an address in a recording credit ("Mixed and Edited at Studio Weinberg, Weinberg 1,
+# A-4292 Kefermarkt/Austria") is the studio's, never where the copy was made or its label's office
+_STUDIO_CREDIT = re.compile(r"\b(?:recorded|mixed|edited|mastered|remastered|engineered|produced|cut)\b"
+                            r"[^.\n]{0,40}\bat\b|\bstudios?\b", re.I)
+
+
+def _studio_address(text, m) -> bool:
+    return bool(_STUDIO_CREDIT.search(text[max(0, m.start() - 70):m.start()]))
+
+
 def countries_from_addresses(ocr_text):
-    """Countries whose postal address is printed on the scans."""
+    """Countries whose postal address is printed on the scans (EVI-12: not a studio's, named in
+    a recording credit just before it)."""
     text = str(ocr_text or "")
-    out = {_EU_POSTAL[m.group(1)] for m in _EU_POSTAL_RE.finditer(text) if not _other_country_follows(text, m)}
+    out = {_EU_POSTAL[m.group(1)] for m in _EU_POSTAL_RE.finditer(text)
+           if not _other_country_follows(text, m) and not _studio_address(text, m)}
     # "Hauptstrasse 109, 73072 Donzdorf": a German street address (5 digits; Austria has 4)
     for m in _STREET_RE.finditer(text):
-        out.add("DE" if len(m.group(1)) == 5 else "AT")
+        if not _studio_address(text, m):
+            out.add("DE" if len(m.group(1)) == 5 else "AT")
     if _US_ZIP_RE.search(text):
         out.add("US")
     for rx, near, code in ((_UK_POST_RE, _UK_NEAR, "GB"), (_CA_POST_RE, _CA_NEAR, "CA"),

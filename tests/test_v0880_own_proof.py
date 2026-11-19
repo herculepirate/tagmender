@@ -123,6 +123,27 @@ class EVI11_OtherEditionsScans(unittest.TestCase):
         self.assertEqual(len(ma.list_images(base, 20)[0]), 1)
 
 
+class EVI12_ScanNoiseNamesNoPressing(unittest.TestCase):
+    """Philip Glass - The Symphonies: "your scans name another pressing" rested on OCR noise ("SSV19"
+    matched another artist's record) and a mixing studio's Austrian address."""
+
+    def test_EVI12_a_studios_address_in_a_credit_is_no_country(self):
+        credit = "Mixed and Edited at Studio Weinberg, Weinberg 1, A-4292 Kefermarkt/Austria  Editing: E. Pintar"
+        self.assertEqual(mc.countries_from_addresses(credit), set())
+        self.assertEqual(mc.countries_from_addresses("Nuclear Blast GmbH, D-73072 Donzdorf"), {"DE"})
+        self.assertEqual(mc.countries_from_addresses("Label GmbH, Hauptstrasse 109, 73072 Donzdorf"), {"DE"})
+
+    def test_EVI12_a_scan_code_another_artists_record_carries_names_no_pressing(self):
+        best = {"cand": {"id": "p", "catnos": {"omm104"}, "artist": "Philip Glass", "title": "The Symphonies",
+                         "formats": {"cd"}, "barcodes": set()}, "clues": {}, "code": ""}
+
+        def report(artist, title):
+            res = [{"scored": [{"cand": {"id": "o", "catnos": {"ssv19"}, "artist": artist, "title": title}}]}]
+            return ma.scans_report(best, {"barcodes": set()}, "the booklet text SSV19 more words", res, True)
+        self.assertNotIn("catalogue_number", report("Time Travel", "Spandangle Selection Volume 19")["against"])
+        self.assertIn("catalogue_number", report("Philip Glass", "The Symphonies")["against"])
+
+
 # ---- CAT-8 ---------------------------------------------------------------------------------
 class CAT8_DiscMarkerIsNoNumber(unittest.TestCase):
     def test_CAT8_disc_markers_in_brackets(self):

@@ -154,6 +154,7 @@ class Shell(unittest.TestCase):
                                      "exclude_again", "file_anyway",
                                      "use_candidate", "undo_release_choice",   # (MOV-6: Album menu, the album's menu)
                                      "choose_library", "clear_done",      # (0.8.71: the bars' controls, now in menus)
+                                     "remove_from_list",                  # (its keys: Delete, Backspace in either pane)
                                      "use_suggested_pressing",            # (TIE-1: Album menu, the album's menu)
                                      "check_folder", "change_watch", "process_again", "show_plan", "apply_all_plans",
                                      "dismiss_plan", "edit_rule", "run_in_background", "cover_link",

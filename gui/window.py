@@ -234,6 +234,7 @@ class Main(QMainWindow):
             "look_up": lambda: ov().look_up_clicked(),
             "choose_library": lambda: (self.go("Overview"), ov().choose_library()),
             "clear_done": lambda: ov().clear_done(),
+            "remove_from_list": lambda: ov().remove_chosen(),
             "preview": lambda: ov().preview(),
             "apply": lambda: ov().apply(),
             "save_tags": lambda: ov().save_tags(),
@@ -667,6 +668,7 @@ class Main(QMainWindow):
             self.commands["look_up"].setEnabled(on_ov and bool(ov.path) and (idle or bool(ov.looking)))
             self.commands["choose_library"].setEnabled(idle and bool(ov.path) and not ov.in_place())
             self.commands["clear_done"].setEnabled(on_ov and ov.clear_done_btn.isEnabled())
+            self.commands["remove_from_list"].setEnabled(on_ov and idle and bool(ov.chosen_to_remove()))
             n = ov.actionable() if ov.plan else 0
             # EDT-2: nothing to apply but your plain edits of albums not looked up: Apply is Save Tags
             plain = len(ov.plain_albums()) if ov.plan and on_ov else 0

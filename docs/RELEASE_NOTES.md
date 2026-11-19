@@ -1,5 +1,10 @@
 # Release notes
 
+## 0.8.81
+
+- Any album can be taken out of the list from either pane. Delete (or Backspace) in Your files did nothing; it now takes out the albums its selected folders and files hold, as it does in Albums as they will be, ticked or not. Escape there lets go of the selection.
+- Edit › Remove from List does the same from the menu, for the pane you selected in. Nothing on disk changes.
+
 ## 0.8.80
 
 **Multi-disc sets: your copy's own proof decides**

@@ -554,6 +554,7 @@ class Overview(QWidget):
         # the list, Escape lets go of the selection. Taken before the menus' shortcuts (Remove Tag is
         # Del too: two shortcuts on one key and Qt runs neither)
         self.table.installEventFilter(self)
+        fv.installEventFilter(self)                          # (Your files: the same keys, for its albums)
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(0)
@@ -688,28 +689,34 @@ class Overview(QWidget):
     # list, Escape lets go of the selection
     LIST_KEYS = (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_Escape)
 
-    def list_key(self, e) -> bool:
+    def list_key(self, e, view=None) -> bool:
+        """Delete, Backspace and Escape in either pane (Albums as they will be, or Your files: the
+        albums its selected folders and files hold)."""
         from PySide6.QtCore import QEvent
+        view = view or self.table
         if e.key() not in self.LIST_KEYS or (e.modifiers() & ~Qt.KeypadModifier):
             return False
-        if e.key() == Qt.Key_Escape and not self.table.selectionModel().hasSelection():
+        if e.key() == Qt.Key_Escape and not view.selectionModel().hasSelection():
             return False                                    # (nothing selected: Escape is the window's)
         if e.type() == QEvent.ShortcutOverride:
             e.accept()                                      # (the list's key, before a menu shortcut's)
             return True
         if e.key() == Qt.Key_Escape:
-            self.table.clearSelection()
+            view.clearSelection()
         elif self.running:
             self.win.statusBar().showMessage(tr("Albums can be taken out of the list when the current "
                                                 "work ends."), 4000)
-        else:
+        elif view is self.table:
             self.remove_selected()
+        else:
+            self._take_out(self.panes.folder_albums())
         return True
 
     def eventFilter(self, obj, e):
         from PySide6.QtCore import QEvent
-        if hasattr(self, "table") and obj is self.table and e.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
-            if self.list_key(e):
+        if hasattr(self, "table") and e.type() in (QEvent.ShortcutOverride, QEvent.KeyPress) and (
+                obj is self.table or obj is self.panes.folder_view):
+            if self.list_key(e, obj):
                 return True
         return super().eventFilter(obj, e)
 
@@ -971,6 +978,20 @@ class Overview(QWidget):
     def remove_selected(self):
         """Take the selected albums out of this preview (their folders and files are not touched)."""
         self._take_out(self.selected_albums())
+
+    def chosen_to_remove(self) -> list:
+        """The albums Remove from List is for: those of the pane you last selected in (Your files: the
+        albums its selected folders and files hold)."""
+        if not hasattr(self, "table"):
+            return []
+        fv = self.panes.folder_view
+        if (fv.hasFocus() or getattr(self, "_profile_pane", "") == "folders") and fv.selectionModel().hasSelection():
+            return self.panes.folder_albums()
+        return self.selected_albums() or (self.panes.folder_albums() if fv.selectionModel().hasSelection() else [])
+
+    def remove_chosen(self):
+        """Edit › Remove from List: the selected albums out of the list (nothing on disk changes)."""
+        self._take_out(self.chosen_to_remove())
 
     def clear_done(self):
         """Take every album marked Done out of the list (their folders and files are not touched)."""

@@ -102,6 +102,27 @@ class EVI10_TheTaggedReleaseIsACandidate(te.Base):
                          [("ready", "bdfde30f-4598-42fb-8cd1-eaf0a9de5374")], [a["identification"].get("why") for a in plan["albums"]])
 
 
+class EVI11_OtherEditionsScans(unittest.TestCase):
+    def test_EVI11_a_scans_folder_of_another_editions_year_is_not_read(self):
+        import tempfile
+        base = Path(tempfile.mkdtemp(prefix="tm-evi11-")) / "Bach - 6 Suites (W. Kuijken) (2015 [2004])"
+        for sub in ("scans", "scans, A 421 (2004)", "CD1 2004 Suites"):
+            (base / sub).mkdir(parents=True)
+            (base / sub / "front.jpg").write_bytes(sub.encode())
+        (base / "CD1 2004 Suites" / "01.flac").write_bytes(b"x")       # (a disc folder: your copy's)
+        (base / "front.jpg").write_bytes(b"front")
+        paths, _key = ma.list_images(base, 20)
+        got = sorted(str(Path(p).relative_to(base)) for p in paths)
+        self.assertEqual(got, ["CD1 2004 Suites/front.jpg", "front.jpg", "scans/front.jpg"])
+
+    def test_EVI11_no_year_in_the_album_folder_reads_them_all(self):
+        import tempfile
+        base = Path(tempfile.mkdtemp(prefix="tm-evi11-")) / "Bach - 6 Suites"
+        (base / "scans (2004)").mkdir(parents=True)
+        (base / "scans (2004)" / "a.jpg").write_bytes(b"a")
+        self.assertEqual(len(ma.list_images(base, 20)[0]), 1)
+
+
 # ---- CAT-8 ---------------------------------------------------------------------------------
 class CAT8_DiscMarkerIsNoNumber(unittest.TestCase):
     def test_CAT8_disc_markers_in_brackets(self):

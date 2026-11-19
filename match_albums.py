@@ -6049,6 +6049,37 @@ def packaging_evidence(album_dir):
     return out or ({"jewel"} if jewel_parts else set())
 
 
+_EDITION_YEAR = re.compile(r"(?<![\d.])(?:19[5-9]\d|20\d\d)(?![\d.])")
+
+
+def other_edition_scans(base, folder) -> bool:
+    """EVI-11: a sub-folder of the album folder whose name gives another year than the album
+    folder's own edition (its first year): the scans of that other edition, kept beside the copy
+    for reference ("Bach - 6 Suites ... (2015 [2004])/scans, A 421 (2004)": the 2004 CD's scans
+    beside the 2015 box's) - never your copy's print, so its barcode and numbers are not read.
+    Only a folder holding no audio (a box's disc folder "CD01 1971 Cold Spring Harbor" is your
+    copy's disc, its sleeve your copy's). False when the album folder names no year, or the
+    sub-folder names its year or none."""
+    try:
+        rel = Path(folder).relative_to(base)
+    except ValueError:
+        return False
+    own = _EDITION_YEAR.search(Path(base).name)
+    if not rel.parts or not own:
+        return False
+    at = Path(base)
+    for part in rel.parts:
+        at = at / part
+        years = set(_EDITION_YEAR.findall(part))
+        if years and own.group(0) not in years:
+            try:
+                if not any(q.suffix.lower() in AUDIO_EXT for q in at.iterdir()):
+                    return True
+            except OSError:
+                return False
+    return False
+
+
 def list_images(base, max_n, inventory=None):
     """Every image under the album folder (subfolders included), most likely
     to carry a barcode or catalogue number first (ocr_order: the roles whose scans paid
@@ -6063,6 +6094,8 @@ def list_images(base, max_n, inventory=None):
     import hashlib
     found = []
     for dirpath, _d, names in os.walk(base):
+        if other_edition_scans(base, dirpath):
+            continue                                     # EVI-11
         for n in sorted(names):
             p = Path(dirpath) / n
             if p.suffix.lower() in IMAGE_EXT and not web_image(p):

@@ -9033,6 +9033,7 @@ def investigate(http, base, album, cfg, dm, mb_res, dg_res, final, ocr_txt, out,
                                     "duplicates": inventory.get("duplicates", 0),
                                     "left_out": inventory.get("left_out", 0),
                                     "unreadable": inventory.get("unreadable", 0), "stopped": stopped}
+    web_codes = _codes_of_this_album(web_codes, new_final, (mb_res, dg_res))     # EVI-12
     if new_final.get("best"):
         new_final["best"]["notes"] = new_final["best"]["notes"] + [
             f"investigated: {read_again}; codes "
@@ -10039,6 +10040,23 @@ def _another_artist(c, cand) -> bool:
     """EVI-12: C is credited to another artist than CAND (both credited, the names apart)."""
     a, b = str(c.get("artist") or ""), str(cand.get("artist") or "")
     return bool(a and b) and mc.artist_sim(a, b) < 0.85 and mc.artist_sim(b, a) < 0.85
+
+
+def _codes_of_this_album(codes, final, results):
+    """EVI-12: the codes read off the scans, without those whose search found only other artists'
+    records (OCR noise, "SSV19" for Time Travel's Spandangle Selection): the evidence line names
+    no code that says nothing of this album."""
+    best = ((final or {}).get("best") or {}).get("cand")
+    if not best:
+        return list(codes)
+    scored = [s["cand"] for res in results for s in (res or {}).get("scored") or ()]
+    out = []
+    for c in codes:
+        hits = [x for x in scored if x.get("catnos") and mc.catnos_agree([c], x["catnos"])]
+        if hits and all(_another_artist(x, best) for x in hits):
+            continue
+        out.append(c)
+    return out
 
 
 def scans_report(best, album, ocr_txt, results, had_scans):

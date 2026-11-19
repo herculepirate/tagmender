@@ -2653,7 +2653,7 @@ class Engine:
         place has no disc ID attached and its every track is that medium's to the second, in order
         (the box's disc is that volume: The Brick's discs 1-8, their IDs on the standalone
         volumes, some tracks named otherwise in the box); else no join (its own album). A disc whose ID is on no release rides
-        along as the match decides (Engine._box_unproven holds it when its lengths do not fit).
+        along, never proven by its lengths (Engine._box_discs_said: the album held).
         The releases so named and proven, else []. A name that names no release (a bare CD count,
         box words alone, "Band - Original Albums") never joins this way."""
         n = len(order)
@@ -2714,19 +2714,72 @@ class Engine:
                 for k, m in enumerate(det.get("media") or (), 1)
                 if str(m.get("format") or "").lower() not in ma._MB_VIDEO_FORMATS}
 
-    def _box_unproven(self, rid, order, per, parts) -> list:
-        """DSC-14b / DSC-16: the folders of a named box whose disc nothing of your copy proves: no
-        disc ID of theirs on any release, and their tracks not the box's medium at their place
-        (each title and length within the matcher's tolerance) - [(disc, folder)]."""
+    def _box_discs_said(self, rid, order, per, parts):
+        """DSC-14b: where each folder's disc stands against the named box RID - (the note's words of
+        where the disc IDs are, [(disc, folder, why it is not proven)]). Proven: its exact disc ID on
+        the box at its place (on other releases too, said), or the box's barcode, catalogue number or
+        release ID in its files. Not proven (each said): a disc whose ID is on other releases only,
+        the box's medium there listing no disc ID; a disc whose ID is on no release - its lengths the
+        box's disc's to the second, or not (how many tracks off, by up to how much), or the box's
+        disc there carrying another disc ID (another pressing of it)."""
+        titles = getattr(self, "_disc_id_titles", {})
         cand = self._release_cand("mb", rid)
-        out = []
+        media = self._medium_disc_ids(rid) or {}
+        codes = {mc.norm_code(x) for x in (cand or {}).get("barcodes") or ()} | \
+            {mc.norm_code(x) for x in (cand or {}).get("catnos") or ()} | {mc.norm_code(rid)}
+        on_box, also, only_other, none, loose = [], [], [], [], []
+
+        def named(rs):
+            return ", ".join(f"'{titles.get(r) or r}' ({r})" for r in sorted(rs)[:3])
         for i, d in enumerate(order, 1):
-            if per[d]:
-                continue
             files = [f for q in parts for f in q.files if Path(f).parent == d]
-            if cand is None or i not in self._fits_discs(d, files, cand):
-                out.append((i, d))
-        return out
+            if rid in per[d]:
+                on_box.append(i)
+                rest = set(per[d]) - {rid}
+                if rest:
+                    also.append(f"disc {i} also on {named(rest)}")
+                continue
+            mine = {mc.norm_code(x) for f in files[:1] for m in [ex.read_meta(f)]
+                    for k in ("barcode", "catalognumber", "musicbrainz_albumid") for x in m.get(k) or ()}
+            if mine & codes - {""}:
+                continue                                 # (the box's own code in its files)
+            off = self._lengths_off(d, files, cand, i) if cand else None
+            if per[d]:
+                only_other.append(i)
+                loose.append((i, d, f"its disc ID is on {named(per[d])}; the box's disc {i} lists no disc ID, "
+                                    "the same lengths"))
+                continue
+            none.append(i)
+            if media.get(i):
+                loose.append((i, d, f"its disc ID is on no release, and the box's disc {i} carries another disc ID - "
+                                    f"another pressing of it" + (f"; {off[0]} of {off[1]} tracks off, by up to "
+                                                                 f"{off[2]:.0f} s" if off and off[0] else "")))
+            elif off and off[0]:
+                loose.append((i, d, f"no disc ID of it on any release, and its track lengths are not the box's disc "
+                                    f"{i}: {off[0]} of {off[1]} tracks off, by up to {off[2]:.0f} s"))
+            else:
+                loose.append((i, d, f"no disc ID of it on any release; only its lengths are the box's disc {i}"))
+
+        def nums(xs):
+            return ", ".join(str(x) for x in xs) or "none"
+        said = (f"disc IDs on it at their own place: discs {nums(on_box)}"
+                + (f" ({'; '.join(also)})" if also else "")
+                + f"; on other releases only: discs {nums(only_other)}; on no release: discs {nums(none)}")
+        return said, loose
+
+    def _lengths_off(self, folder: Path, files, cand, disc):
+        """DSC-14b: (tracks off, tracks, the largest difference in s) of folder's files against disc
+        DISC of cand, beyond the matcher's tolerance; None when the counts differ."""
+        mine = {str(f) for f in files}
+        album = ma.read_album(folder, folder.parent.name, folder.name)
+        tracks = [t for t in album.get("tracks") or [] if str(t.get("path")) in mine]
+        ct = [t for t in cand.get("tracks") or [] if int(t.get("disc") or 1) == disc]
+        if not tracks or len(ct) != len(tracks):
+            return (len(tracks), len(tracks), 0.0) if tracks else None
+        tol_s, tol_pct = float(self.cfg.get("duration_tol_s", 3.0)), float(self.cfg.get("duration_tol_pct", 0.015))
+        diffs = [abs(float(a.get("secs") or 0) - float(b.get("secs") or 0)) for a, b in zip(tracks, ct)]
+        off = [x for x, b in zip(diffs, ct) if x > max(tol_s, tol_pct * float(b.get("secs") or 0))]
+        return (len(off), len(tracks), max(off) if off else 0.0)
 
     def _own_album_released(self, parts) -> bool:
         """DSC-14 / DSC-16: a folder of PARTS whose rip log's disc ID is on a one-disc release of its
@@ -2838,28 +2891,27 @@ class Engine:
             self.log.info("%s: its disc IDs name %s, the match %s: each folder planned alone", folder,
                           ", ".join(fits), prop.release_id)
             return None
-        if named_box and prop.status == "identified":
-            # DSC-14b / DSC-16: a disc no disc ID and no fitting lengths prove never rides along as
-            # exact, nor does a named box below auto: the album held, the discs named
-            loose = self._box_unproven(fits[0], order, per, parts)
-            if loose or not self._sure(prop):
-                why = "; ".join(f"'{d.name}' (disc {i}): no disc ID of it on any release, and its track lengths "
-                                f"are not the release's disc {i}" for i, d in loose) or \
+        names = ", ".join(f"'{d.name}' -> disc {i}" for i, d in enumerate(order, 1))
+        if named_box:
+            said, loose = self._box_discs_said(fits[0], order, per, parts)
+            how = f"the folder's name names it; {said}"
+            if prop.status == "identified" and (loose or not self._sure(prop)):
+                # DSC-14b / DSC-16: auto only when every disc is proven by your copy - its disc ID on
+                # the box at its place, or the box's own codes in its files; a rider (its disc ID on
+                # other releases only) or a disc only lengths fit: the album held, each disc named
+                box = getattr(self, "_disc_id_titles", {}).get(fits[0]) or fits[0]
+                why = "; ".join(f"'{d.name}' (disc {i}): {text}" for i, d, text in loose) or \
                     f"the match is not sure ({float(prop.confidence or 0):.1f})"
-                held = (f"One album of '{getattr(self, '_disc_id_titles', {}).get(fits[0]) or fits[0]}' "
-                        f"({n} discs), but not every disc is proven by your copy: {why}. "
-                        "Tick to tag the folder as this release.")
+                held = (f"One album of '{box}' ({n} discs), but not every disc is proven by your copy: {why}. "
+                        f"Ticked, each folder is written as its disc of '{box}' ({names}).")
                 thr = planmod._threshold(self.profile, "auto_min_confidence")
                 prop.confidence = min(float(prop.confidence or 0), max(0.0, float(thr) - 0.1))
                 prop.held = held
                 prop.reason_codes = ["disc_not_proven"]
                 prop.reason = reasons.encode(held, ["disc_not_proven"])
-        names = ", ".join(f"'{d.name}' -> disc {i}" for i, d in enumerate(order, 1))
-        on = sum(1 for d in order if any(r in per[d] for r in fits))
-        how = (f"the folder's name names it; {on} of its {n} disc IDs on it, each at its folder's place"
-               f" and none elsewhere" if named_box else
-               f"its {n} disc IDs all on MusicBrainz release {fits[0]}" if len(fits) == 1 else
-               f"its {n} disc IDs all on {len(fits)} pressings of one set")
+        else:
+            how = (f"its {n} disc IDs all on MusicBrainz release {fits[0]}" if len(fits) == 1 else
+                   f"its {n} disc IDs all on {len(fits)} pressings of one set")
         note = f"one release, {n} discs: {names} ({how})"
         prop.notes = list(prop.notes or []) + [note]
         self.log.info("%s: %s", folder, note)

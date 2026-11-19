@@ -149,6 +149,12 @@ class EVI12_ScanNoiseNamesNoPressing(unittest.TestCase):
         self.assertEqual(mc.countries_from_addresses("Nuclear Blast GmbH, D-73072 Donzdorf"), {"DE"})
         self.assertEqual(mc.countries_from_addresses("Label GmbH, Hauptstrasse 109, 73072 Donzdorf"), {"DE"})
 
+    def test_EVI12_the_evidence_line_drops_a_code_only_another_artist_carries(self):
+        final = {"best": {"cand": {"id": "p", "artist": "Philip Glass", "catnos": {"omm104"}}}}
+        res = ({"scored": [{"cand": {"id": "o", "artist": "Time Travel", "catnos": {"ssv19"}}},
+                           {"cand": {"id": "g", "artist": "Philip Glass", "catnos": {"omm95"}}}]},)
+        self.assertEqual(ma._codes_of_this_album(["ONES 40", "SSV19", "OMM 95"], final, res), ["ONES 40", "OMM 95"])
+
     def test_EVI12_a_scan_code_another_artists_record_carries_names_no_pressing(self):
         best = {"cand": {"id": "p", "catnos": {"omm104"}, "artist": "Philip Glass", "title": "The Symphonies",
                          "formats": {"cd"}, "barcodes": set()}, "clues": {}, "code": ""}
@@ -360,11 +366,40 @@ class DSC14b_TheBoxTheNameNames(te.Base):
             out[k] = [("mb-set", pos, 4)] + out[k]
         return out
 
-    def test_DSC14b_named_box_proven_by_some_disc_ids_joins(self):
+    def test_DSC14b_named_box_proven_by_some_disc_ids_joins_held(self):
+        # (discs 1, 2 ride along by their lengths, their IDs on their own volumes: one album, held -
+        # never exact while unticked; the note says where every disc ID is)
         plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", self.on())
         self.assertEqual([(a["identification"]["release_id"], len(a["files"])) for a in plan["albums"]],
                          [("mb-set", 12)], [a.get("notes") for a in plan["albums"]])
-        self.assertTrue(any("the folder's name names it" in x for x in plan["albums"][0].get("notes") or []))
+        a = plan["albums"][0]
+        self.assertTrue(planmod.held(a))
+        self.assertLess(a["identification"]["confidence"], 90)
+        self.assertIn("'Disc 1' (disc 1): its disc ID is on 'Medicine Show 1' (Medicine Show 1); the box's disc 1 "
+                      "lists no disc ID, the same lengths", a["held"])
+        self.assertIn("Ticked, each folder is written as its disc of", a["held"])
+        note = next(x for x in a["notes"] if "the folder's name names it" in x)
+        self.assertIn("disc IDs on it at their own place: discs 3, 4 (disc 3 also on 'Medicine Show 3' "
+                      "(Medicine Show 3); disc 4 also on 'Medicine Show 4' (Medicine Show 4)); on other releases "
+                      "only: discs 1, 2; on no release: discs none", note)
+        got = {(Path(f["src"]).parent.name, (f["changes"].get("discnumber") or ["kept"])[0]) for f in a["files"]}
+        self.assertEqual(got, {(f"Disc {k}", str(k)) for k in range(1, 5)})
+
+    def test_DSC14b_every_disc_on_the_named_box_at_its_place_is_written(self):
+        on = {k: [("mb-set", k, 4), (f"Medicine Show {k}", 1, 1)] for k in (1, 2, 3, 4)}
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", on)
+        [a] = plan["albums"]
+        self.assertFalse(planmod.held(a), a.get("held"))
+        self.assertEqual((a["status"], a["identification"]["release_id"]), ("ready", "mb-set"))
+
+    def test_DSC14b_a_disc_with_no_id_anywhere_riding_on_its_lengths_is_held(self):
+        on = self.on({1: 1, 2: 2, 3: 3})
+        on[4] = []
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", on)
+        [a] = plan["albums"]
+        self.assertTrue(planmod.held(a))
+        self.assertIn("'Disc 4' (disc 4): no disc ID of it on any release; only its lengths are the box's disc 4",
+                      a["held"])
 
     def test_DSC14b_a_disc_on_its_own_release_whose_box_disc_differs_stays_apart(self):
         # (disc 2's ID on its own volume only; the box's disc 2 is other tracks)
@@ -398,12 +433,26 @@ class DSC14b_TheBoxTheNameNames(te.Base):
         plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", on, tweak=longer)
         [a] = [a for a in plan["albums"] if len(a["files"]) == 12]
         self.assertTrue(planmod.held(a), a.get("notes"))
-        self.assertIn("'Disc 4' (disc 4)", a["held"])
+        self.assertIn("'Disc 4' (disc 4): no disc ID of it on any release, and its track lengths are not the box's "
+                      "disc 4: 3 of 3 tracks off, by up to 40 s", a["held"])
         self.assertEqual(a["identification"]["reason_codes"], ["disc_not_proven"])
         # (ticked, each folder is its disc n of 4 - never the volumes' own "1 of 1" kept)
         got = {(Path(f["src"]).parent.name, (f["changes"].get("discnumber") or ["kept"])[0],
                 (f["changes"].get("totaldiscs") or ["kept"])[0]) for f in a["files"]}
         self.assertEqual(got, {(f"Disc {k}", str(k), "4") for k in range(1, 5)}, got)
+
+    def test_DSC14b_a_disc_whose_box_disc_carries_another_disc_id_is_another_pressing(self):
+        # (The Brick's disc 11: its own disc ID on no release, the box's disc 11 another)
+        on = self.on({3: 3})
+        on[4] = []
+
+        def other(rel):
+            rel["media"][3]["discs"] = [{"id": "AnotherPressing00000000000000-"}]
+            rel["media"][3]["tracks"][2]["length"] += 18000
+        plan = self.plan("Band Q - Band Q Medicine Show-The Brick [2012] [FLAC]", on, tweak=other)
+        [a] = [a for a in plan["albums"] if len(a["files"]) == 12]
+        self.assertIn("'Disc 4' (disc 4): its disc ID is on no release, and the box's disc 4 carries another disc "
+                      "ID - another pressing of it; 1 of 3 tracks off, by up to 18 s", a["held"])
 
     def test_DSC14b_the_folders_own_title_must_be_the_releases(self):
         self.assertTrue(engine._own_title_is("Madlib - Madlib Medicine Show-The Brick [2012] [FLAC]",

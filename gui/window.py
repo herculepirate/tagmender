@@ -1171,11 +1171,19 @@ class Main(QMainWindow):
             return
         # (inspector's word, search's widest, profile pop-up, progress bar, compact filter, icons alone,
         # the narrowest: no "Profile" word before the pop-up, Apply's count without "Albums")
+        # (Clear Done first shows its icon alone, then steps aside - it stays in Edit > Clear Done
+        # Albums - before search and the profile pop-up narrow and the Inspector gives up its word;
+        # bare: False words, None Clear Done's icon alone, "gone" Clear Done aside, True icons alone)
         steps = ((True, 200, 200, 120, False, False, False), (True, 200, 200, 120, False, None, False),
-                 (False, 160, 180, 120, False, False, False),
+                 (True, 200, 200, 120, False, "gone", False), (True, 160, 180, 120, False, "gone", False),
+                 (True, 140, 150, 100, False, "gone", False),
+                 (False, 160, 180, 120, False, "gone", False),
                  (False, 140, 150, 100, True, False, False), (False, 110, 130, 80, True, True, False),
                  (False, 90, 110, 60, True, True, False), (False, 80, 100, 40, True, True, True))
-        others = [bar.widgetForAction(self.commands[k]) for k in actmod.TOOLBAR] + [self.cancel_button]
+        own = {a.objectName(): a for a in bar.actions()}
+        bar_act = lambda k: own.get(k + "_bar") or self.commands[k]          # noqa: E731
+        others = [bar.widgetForAction(bar_act(k)) for k in actmod.TOOLBAR] + [self.cancel_button]
+        clear_act = own.get("clear_done_bar")
         for n, (word, search, profile, progress, compact, bare, least) in enumerate(steps):
             self._narrowest = least
             if getattr(self, "profile_actions", None):
@@ -1186,12 +1194,12 @@ class Main(QMainWindow):
             self.search_box.setMaximumWidth(search)
             self.profile_box.setFixedWidth(profile)
             self.progress.setFixedWidth(progress)
-            clear = bar.widgetForAction(self.commands["clear_done"]) if "clear_done" in self.commands else None
+            clear = bar.widgetForAction(clear_act) if clear_act is not None else None
+            if clear_act is not None:
+                clear_act.setVisible(bare is False or bare is None)
             for w in others:
                 if w is not None:
-                    # (bare None: only Clear Done shows its icon alone - it gives its word up first, from
-                    # the second step on, before the Inspector button gives up its own)
-                    alone = bare or (w is clear and (bare is None or n >= 1))
+                    alone = bare is True or (w is clear and bare is not False)
                     w.setToolButtonStyle(Qt.ToolButtonIconOnly if alone else Qt.ToolButtonTextBesideIcon)
             if compact != getattr(self, "_compact_filter", False):
                 self._compact_filter = compact

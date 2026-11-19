@@ -233,6 +233,7 @@ MENUS = (
 )
 CHECKABLE = ("read_scans", "show_sidebar", "show_inspector", "toggle_rule")
 TOOLBAR = ("add_folder", "look_up", "clear_done")       # (then the window's: progress, Cancel, the filter ...)
+TOOLBAR_OWN = ("clear_done",)                           # (the toolbar's own copy: see build_toolbar)
 TOOLBAR_TEXT = {"add_folder": N_(" Add Folder"), "clear_done": N_(" Clear Done")}   # (a space keeps the gap after the icon)
 SPRING = "|"                                           # (in toolbar_end's list: the room that is left, shared)
 ICON_ROLE = {"apply": "on_accent"}                      # (the prominent button: its icon as its label)
@@ -372,6 +373,16 @@ def build_toolbar(win, acts):
     bar.setContextMenuPolicy(Qt.PreventContextMenu)
     for k in TOOLBAR:
         a = acts[k]
+        if k in TOOLBAR_OWN:
+            # (the toolbar's own copy of the command: it can step aside in a narrow window
+            # without the command leaving its menu; it follows the command's enabled state)
+            own = QAction(a.icon(), a.text(), bar)
+            own.setObjectName(k + "_bar")
+            own.setToolTip(a.toolTip())
+            own.setEnabled(a.isEnabled())
+            own.triggered.connect(a.trigger)
+            a.changed.connect(lambda own=own, a=a: own.setEnabled(a.isEnabled()))
+            a = own
         bar.addAction(a)
         words = tr(TOOLBAR_TEXT[k]) if k in TOOLBAR_TEXT else plain(a.text()).rstrip("…")
         a.setIconText(words)                              # (what the button shows, kept on every change)

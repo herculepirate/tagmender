@@ -384,11 +384,12 @@ class DSC16_LengthsProveNoDisc(te.Base):
         import test_v0877_dsc16_disc_id_claim as d16
 
         class Http(d16.DiscIdHttp):
-            # (disc 2's disc ID: on another pressing only, its lengths the box's)
+            # (disc 2's disc ID: on another pressing of its own album only - "Unknown Pleasures"
+            # ripped from POCD-1879 -, its lengths the box's disc 2)
             def get_json(self, url, host):
                 did = ma.mb_discid(d16.mb_toc(2))
                 if host == "mb" and "/ws/2/discid/" in url and did in url:
-                    return {"id": did, "releases": [{"id": "mb-other", "media": [
+                    return {"id": did, "releases": [{"id": "mb-other", "title": "Beta", "media": [
                         {"position": 1, "format": "CD", "discs": [{"id": did}]}]}]}
                 return super().get_json(url, host)
         top = d16.DSC16_DiscIdClaim.make(self)

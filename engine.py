@@ -3214,7 +3214,7 @@ class Engine:
         if not self._sure(prop) and set(mapping) - set(proven) and (named or says) \
                 and prop.status == "identified" and planmod.tier_of(prop) == "exact" \
                 and _discs_as(prop, mapping) and self._complete(prop) and self._sure(claimer) \
-                and set(proven) and not self._own_album_released(parts):
+                and set(proven):
             # DSC-16: the folder named as the release, every folder one of its discs, some discs
             # proven by their copy and the others fitted by lengths only (Joy Division - 1977-1980 -
             # 1991: "Unknown Pleasures" ripped from another pressing, its disc ID on POCD-1879;

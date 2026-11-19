@@ -483,7 +483,9 @@ class DSC16_LengthsProveNoDisc(te.Base):
         self.assertEqual(a["identification"]["release_id"], "mb-box")
         self.assertTrue(planmod.held(a), a.get("notes"))
         self.assertIn("disc_not_proven", a["identification"]["reason_codes"])
-        self.assertIn("'2 - Beta' (disc 2)", a["held"])
+        self.assertIn("'2 - Beta' (disc 2): its disc ID is on another pressing, Beta (mb-other), not on this "
+                      "release - ticking writes it as disc 2 of this release although its disc ID is that "
+                      "pressing's", a["held"])
 
 
 # ---- DSC-12a -------------------------------------------------------------------------------

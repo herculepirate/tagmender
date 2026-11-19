@@ -3292,7 +3292,18 @@ class Engine:
             # 1991: "Unknown Pleasures" ripped from another pressing, its disc ID on POCD-1879;
             # "Still" its disc ID on none): one album of it, held - proposed, never written unticked;
             # never each folder planned alone as a box disc of its own
-            why = "; ".join(f"'{d.name}' (disc {mapping[d]}): {unproven.get(d) or 'not proven by its copy'}"
+            def said(d):
+                # (its rip log's exact disc ID on another release only: your disc is that pressing's,
+                # against this release - said, with what ticking writes)
+                toc = log_toc_of(d)
+                rels = self._disc_id_releases(toc) if toc and key[0] == "mb" else None
+                if rels and str(key[1]) not in rels:
+                    names = getattr(self, "_disc_id_titles", {})
+                    them = ", ".join(f"{names.get(r) or r} ({r})" if names.get(r) else r for r in sorted(rels)[:2])
+                    return (f"its disc ID is on another pressing, {them}, not on this release - ticking writes "
+                            f"it as disc {mapping[d]} of this release although its disc ID is that pressing's")
+                return unproven.get(d) or "not proven by its copy"
+            why = "; ".join(f"'{d.name}' (disc {mapping[d]}): {said(d)}"
                             for d in sorted(set(mapping) - set(proven), key=lambda d: mapping[d]))
             note = (f"One album of '{c.get('title') or rid}' ({len(mapping)} discs), but not every disc is proven "
                     f"by your copy: {why}. Tick to tag the folder as this release.")

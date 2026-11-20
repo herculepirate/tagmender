@@ -1,4 +1,4 @@
-# 0.8.89: during a look-up the toolbar's bar and count say how many albums are DONE ("1 of 4 done"),
+# 0.8.89: during a look-up the toolbar's bar and count say how many albums are DONE ("1 of 4"),
 # never how many have started - with several looked up at once, "3 of 4" was shown while three rows
 # still said "Looking up…" and the fourth "Waiting…" (Koki Nakano, four albums).
 import os
@@ -35,13 +35,13 @@ class LookUpCount(unittest.TestCase):
     def test_started_albums_are_not_counted_as_done(self):
         p, said = page({"a": "looking", "b": "looking", "c": "looking", "d": "waiting"})
         Overview.lookup_count(p, 4)
-        self.assertEqual((said[-1], p.bar.value, p.bar.max), ("0 of 4 done", 0, 4))
+        self.assertEqual((said[-1], p.bar.value, p.bar.max), ("0 of 4", 0, 4))
 
     def test_a_finished_album_counts_at_once(self):
         p, said = page({"a": "looking", "b": "looking", "c": "looking", "d": "waiting"})
         p.states.pop("a")                                  # (looked_up_one: its result landed)
         Overview.lookup_count(p)
-        self.assertEqual((said[-1], p.bar.value), ("1 of 4 done", 1))
+        self.assertEqual((said[-1], p.bar.value), ("1 of 4", 1))
 
     def test_the_line_under_the_list_says_how_many_are_done(self):
         p, _said = page({"a": "looking", "b": "waiting"})

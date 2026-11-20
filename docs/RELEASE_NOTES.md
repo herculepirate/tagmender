@@ -3,7 +3,7 @@
 ## 0.8.89
 
 **Clearer progress and status**
-- While several albums are looked up at once, the count beside the toolbar now says how many are done ("1 of 4 done"). Before, it counted the albums started, so "3 of 4" showed while every row still said "Looking up…".
+- While several albums are looked up at once, the count beside the toolbar ("1 of 4") now counts the albums done, and the line under the list says "1 done". Before, it counted the albums started, so "3 of 4" showed while every row still said "Looking up…".
 - An album whose pressing was picked among equal ones now reads "Ready · Pressing guessed" in the list, not plain "Ready".
 
 **Documentation**

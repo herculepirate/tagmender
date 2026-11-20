@@ -2563,14 +2563,18 @@ class Overview(QWidget):
 
     def lookup_count(self, n=None):
         """The toolbar's bar and count during a look-up: the albums whose look-up is DONE of all it
-        has ("1 of 4 done"); an album still waiting or being looked up is not counted."""
+        has ("1 of 4"); an album still waiting or being looked up is not counted."""
         order = list(getattr(self, "_lookup_order", None) or [])
         n = int(n or len(order) or getattr(self, "_lookup_n", 0) or 0)
         done = sum(1 for k in order if self.states.get(k) not in ("waiting", "looking"))
         done = min(done, n)
         self.bar.setMaximum(max(n, 1))
         self.bar.setValue(done)
-        self.win.show_count(tr("{0} of {n} done").format(done, n=n))
+        # (beside the bar, as short as before - the toolbar has no room to spare: "1 of 4" counts the
+        # albums DONE; the tooltip and the line under the list say "done" in words)
+        self.win.show_count(tr("{0} of {n}").format(done, n=n))
+        if hasattr(self.bar, "setToolTip"):
+            self.bar.setToolTip(tr("{0} of {n} albums looked up").format(done, n=n))
 
     def looked_up_one(self, name, key, new, stamp=None):
         """Album KEY looked up with profile NAME (NEW: its plan, its rows): they take the

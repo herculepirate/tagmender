@@ -2722,6 +2722,11 @@ class Planner:
                     # ED-6: a version mark as general as "Remastered" says no more than the edition
                     # ("Bridge Of Sighs [Remastered]" + "1999 Remaster"): the edition takes its place
                     album = _GENERIC_VERSION_MARK.sub("", album) or album
+                named = naming.edition_name({"media": [tag_ed]})
+                if named:
+                    # ED-3b: the edition named with its year ("[2023 Deluxe Edition]") takes the place of
+                    # the same name in the title's brackets - never "(Deluxe Edition) [2023 Deluxe Edition]"
+                    album = re.sub(r"\s*[\(\[]" + re.escape(named) + r"[\)\]]", "", album, flags=re.I).strip() or album
                 if not album.endswith(f" [{tag_ed}]"):      # "I" -> "I [2019 Vinyl]", once
                     target["album"] = [f"{album} [{tag_ed}]"] + list(target["album"][1:])
             if held:

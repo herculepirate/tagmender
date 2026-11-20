@@ -243,11 +243,15 @@ class Plans(Base):
             p = self.plan([self.t(1, "A", album=[mark], **cd), self.t(2, "B", album=[mark], **cd)],
                           album_editions="edition_year")
             self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [1999 Remaster]"], mark)
-        # (a version that says more stays: "2009 Remaster", "Deluxe Edition", "Mono")
-        for mark in ("I [2009 Remaster]", "I [Deluxe Edition]", "I (Mono)"):
+        # (a version that says more stays: "2009 Remaster", "Mono")
+        for mark in ("I [2009 Remaster]", "I (Mono)"):
             p = self.plan([self.t(1, "A", album=[mark], **cd), self.t(2, "B", album=[mark], **cd)],
                           album_editions="edition_year")
             self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], [f"{mark} [1999 Remaster]"], mark)
+        # (ED-3b, 2026-11-20: a release naming its edition is labelled with that name, said once)
+        p = self.plan([self.t(1, "A", album=["I [Deluxe Edition]"], **cd), self.t(2, "B", album=["I [Deluxe Edition]"], **cd)],
+                      album_editions="edition_year")
+        self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [1999 Deluxe Edition]"])
         # (a vinyl edition is no remaster: the mark stays)
         p = self.plan([self.t(1, "A", album=["I [Remastered]"]), self.t(2, "B", album=["I [Remastered]"])],
                       album_editions="edition_year")

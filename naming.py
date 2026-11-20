@@ -122,9 +122,32 @@ def _pressing_year(tags) -> str:
     return y if y.isdigit() else ""
 
 
+# ED-3b: the edition names a release may call itself by ("Deluxe Edition" in Discogs's format, the
+# release's title or comment): the edition is labelled with that name, not "Remaster"
+_EDITION_NAME = re.compile(r"\b((?:super\s+)?deluxe|expanded|(?:\d{1,3}(?:st|nd|rd|th)\s+)?anniversary|special|"
+                           r"collector'?s|legacy|definitive|complete)\s+edition\b", re.I)
+
+
+def edition_name(tags) -> str:
+    """ED-3b: the edition name the release itself carries - its media (Discogs's "CD, Album, Deluxe
+    Edition, Stereo"), its comment or its title ("Echoes of Life (Deluxe Edition)") - in title case
+    ("Deluxe Edition", "25th Anniversary Edition"); "" for none."""
+    text = " ".join(str(x) for k in ("~edition_media", "media", "releasecomment", "~releasecomment", "album")
+                    for x in (tags.get(k) if isinstance(tags.get(k), list) else [tags.get(k) or ""]))
+    m = _EDITION_NAME.search(text)
+    if not m:
+        return ""
+    words = " ".join(m.group(0).split())
+    return " ".join(w if w[:1].isdigit() else w[:1].upper() + w[1:].lower() for w in words.split())
+
+
 def _reissue_word(tags) -> str:
     """ED-3: "Reissue" when the release calls itself a reissue and not a remaster, else
-    "Remaster"."""
+    "Remaster"; ED-3b (decided 2026-11-20): the release's own edition name when it carries one
+    ("Deluxe Edition")."""
+    named = edition_name(tags)
+    if named:
+        return named
     text = " ".join(str(x) for k in ("~edition_media", "media", "releasecomment", "~releasecomment")
                     for x in (tags.get(k) if isinstance(tags.get(k), list) else [tags.get(k) or ""])).lower()
     return "Reissue" if "reissue" in text and "remaster" not in text else "Remaster"

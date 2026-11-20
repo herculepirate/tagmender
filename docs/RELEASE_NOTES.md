@@ -1,5 +1,10 @@
 # Release notes
 
+## 0.8.88
+
+**Edition names**
+- A later CD or download that names its own edition is labelled with that name instead of "Remaster": Alice Sara Ott's 2023 two-CD set of Echoes of Life is filed as "Echoes of Life [2023 Deluxe Edition]", never "[2023 Remaster]". The name is said once, never "(Deluxe Edition) [2023 Deluxe Edition]". A release that names no edition is labelled as before.
+
 ## 0.8.87
 
 **Tags go ahead without asking**

@@ -86,22 +86,80 @@ def merge_results(plans, run, cancelled=lambda: False) -> dict:
     return {"job": ", ".join(jobs), "status": "partial" if partial else "done", "counts": counts, "albums": albums}
 
 
-def run_batches(batches, run, cancelled, partial, progress, workers=None) -> int:
+def claim_id(c) -> tuple:
+    """A MOV-4 claim (a plan entry's "claims" item) as a value: the same claim found again (an
+    album's rows replaced by its plan of them all) is the same."""
+    return (c.get("dir"), c.get("src"), tuple(c.get("ids") or ()), repr(c.get("discs")))
+
+
+class MoreBatches:
+    """LKP-1: the batches added to a look-up while run_batches runs it (albums added meanwhile,
+    read from a folder none of its batches reads): each started at once beside the others, its
+    albums taking the look-up's worker slots (engine.LookupSlots) as they are free. Thread-safe.
+    add() is refused once the look-up has ended (closed): those albums wait for it, as before."""
+
+    def __init__(self):
+        import threading
+        self._lock = threading.Lock()
+        self._todo, self._wake, self._closed = [], None, False
+
+    def add(self, batch) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            self._todo.append(batch)
+            if self._wake is not None:
+                self._wake()
+            return True
+
+    def attach(self, wake):
+        """run_batches: WAKE() is called (from any thread) when a batch is added."""
+        with self._lock:
+            self._wake = wake
+            if self._todo:
+                wake()
+
+    def taken(self) -> list:
+        """The batches added since last asked."""
+        with self._lock:
+            out, self._todo = self._todo, []
+            return out
+
+    def close_if_idle(self) -> bool:
+        """Closed - none can be added any more - unless one was added and is not taken yet."""
+        with self._lock:
+            if self._todo:
+                return False
+            self._closed = True
+            return True
+
+    def close(self) -> list:
+        """None is added any more; returns those added and never taken."""
+        with self._lock:
+            self._closed = True
+            out, self._todo = self._todo, []
+            return out
+
+
+def run_batches(batches, run, cancelled, partial, progress, workers=None, more=None) -> int:
     """The look-up's albums, in batches (a profile and the folder they are read from), at most
     WORKERS albums at once in all: one batch shares them among its albums, several (albums dropped
     from different folders) run side by side. run(batch, report, workers) -> albums looked up;
-    report(what, args) from any thread, emitted here, on the look-up's own thread, in order."""
+    report(what, args) from any thread, emitted here, on the look-up's own thread, in order.
+    MORE (a MoreBatches): batches added while it runs, each run beside the others on a thread
+    of its own with WORKERS workers (the feeds' shared LookupSlots keep it to WORKERS albums at
+    once in all); closed when every batch is done."""
     import engine
     import queue
     import threading
     workers = workers or engine.LOOKUP_WORKERS
-    if len(batches) < 2:
+    if len(batches) < 2 and more is None:
         n = 0
         for b in batches:
             if not cancelled():
                 n += run(b, lambda what, a: (partial if what == "partial" else progress)(a), workers)
         return n
-    each = max(1, workers // len(batches))
+    each = max(1, workers // max(1, len(batches)))
     todo, out = queue.SimpleQueue(), queue.SimpleQueue()
     for b in batches:
         todo.put(b)
@@ -120,15 +178,35 @@ def run_batches(batches, run, cancelled, partial, progress, workers=None) -> int
             out.put(("failed", exc))
         finally:
             out.put(("ended", None))
+    def joined(b):
+        try:
+            if not cancelled() and not failed.is_set():
+                out.put(("count", run(b, lambda what, a: out.put((what, a)), workers)))
+        except BaseException as exc:
+            failed.set()
+            out.put(("failed", exc))
+        finally:
+            out.put(("ended", None))
     threads = [threading.Thread(target=side, name=f"look-up-batch-{i}", daemon=True)
                for i in range(min(workers, len(batches)))]
+    if more is not None:
+        more.attach(lambda: out.put(("more", None)))
     for t in threads:
         t.start()
     n, error, live = 0, None, len(threads)
-    while live:
+    while True:
+        if not live:
+            if more is None or more.close_if_idle():
+                break
         what, a = out.get()
         if what == "ended":
             live -= 1
+        elif what == "more":
+            for b in more.taken():
+                t = threading.Thread(target=joined, args=(b,), name=f"look-up-batch-{len(threads)}", daemon=True)
+                threads.append(t)
+                live += 1
+                t.start()
         elif what == "failed":
             error = error or a
         elif what == "count":
@@ -2070,6 +2148,15 @@ class Overview(QWidget):
                     not PlanModel.left_out(a):
                 seed += a.get("claims") or []
                 seed_of.setdefault(self.album_key(a), []).extend(a.get("claims") or [])
+        # (MOV-4: an album looked up again for the claim of another found beside it - cross_claim -
+        # is planned with that claim, whatever that row's state now: held, unticked, taken out)
+        redo_seed = getattr(self, "_redo_seed", {})
+        have = {claim_id(c) for c in seed}
+        for k in looked_now:
+            for other, c in redo_seed.pop(k, ()):
+                if other not in looked_now and claim_id(c) not in have:
+                    have.add(claim_id(c))
+                    seed.append(c)
         total = sum(len(ks) for ks in groups.values())
         count = [total]                                     # (LKP-1: albums that join count too)
 
@@ -2080,7 +2167,11 @@ class Overview(QWidget):
         unsent = []                                         # (albums an internal error left not looked up)
         self._lookup_unsent = unsent
         untaken = []                                        # (albums that joined and were never started)
-        batches, feeds = [], {}
+        # LKP-1: every plan_each of this look-up takes its albums from these slots - at most
+        # engine.LOOKUP_WORKERS at once in all, a folder that joined meanwhile among them
+        slots = engine.LookupSlots(engine.LOOKUP_WORKERS)
+        more = MoreBatches()                                # (LKP-1: a folder an album added meanwhile is read from)
+        batches, feeds, folders = [], {}, {}
         for name, ks in groups.items():
             by_root = {}                                    # (the folder each album is read from)
             for k in ks:
@@ -2088,20 +2179,31 @@ class Overview(QWidget):
             # DSC-10/DSC-11: sibling album folders a release may join, each read from its own
             # folder (added one by one), are looked up from their parent, as a plan of it would
             was = by_root
+            folders[name] = {r: list(ks) for r, ks in was.items()}
             by_root = engine.set_sibling_roots(profs[name], by_root)
             for where, kr in by_root.items():
                 # LKP-1: the batch's albums, which an album asked for meanwhile (this profile, these
                 # sources, this folder) joins: started as soon as one of its workers is free
-                feed = engine.LookupFeed(kr)
+                feed = engine.LookupFeed(kr, slots)
                 if kr == was.get(where):
                     feeds[(name, where)] = feed
                     batches.append((name, where, kr, feed, None))
                 else:                                       # (siblings from their parent: none joins them)
                     batches.append((name, where, kr, feed, {r: ks for r, ks in was.items() if set(ks) <= set(kr)}))
-        # (what an album joining must be looked up with to be looked up as these are: join_look_up)
+        # (what an album joining must be looked up with to be looked up as these are: join_look_up.
+        # MOV-4: a plan is known by its plan_each's feed (id(feed), each feed kept alive in "alive"
+        # until the look-up ends, so no id is another's); "claims_of", every album found in this
+        # look-up: its plan and claims as found - kept when its row is applied or taken out
+        # (Clear Done); "seen", the claims each plan was planned with, by value - a plan of a
+        # folder that joined has its own: cross_claim)
         self._running_lookup = {"mode": mode, "profs": profs, "stamps": stamps, "feeds": feeds, "at": at,
                                 "count": count, "seed_of": seed_of, "path": path, "library": self.library,
-                                "same": (ocr, edits, forced, file_anyway), "untaken": untaken, "fed": {}}
+                                "same": (ocr, edits, forced, file_anyway), "untaken": untaken, "fed": {},
+                                "slots": slots, "more": more, "folders": folders, "own": {},
+                                "claims_of": {}, "seen": {}, "seen_all": frozenset(claim_id(c) for c in seed),
+                                "redo": set(), "alive": [b[3] for b in batches]}
+        own = self._running_lookup["own"]                   # (id(feed) -> (seed, listed keys) of a folder that joined)
+        alive = self._running_lookup["alive"]
 
         def work(w):
             def one_batch(batch, report, workers):
@@ -2111,20 +2213,25 @@ class Overview(QWidget):
                     # (DSC-10/DSC-11: the parent's scan makes them one album - "Box/Disc 01" and
                     # "/Disc 02" - none of the albums listed: each looked up from its own folder)
                     feed.close()
-                    return sum(one_batch((name, r, ks, engine.LookupFeed(ks), None), report, workers)
+
+                    def apart(ks):
+                        f = engine.LookupFeed(ks, slots)
+                        alive.append(f)                     # (its id is its plan's: never another's)
+                        return f
+                    return sum(one_batch((name, r, ks, apart(ks), None), report, workers)
                                for r, ks in alone.items() if not w.cancelled)
                 e.edits = edits
                 e.force = forced
                 e.file_anyway = {f for f, n in file_anyway.items() if n == name}
-                e.seed_claims = seed
-                e.listed_keys = every                       # (every row's: a changed album never takes another's)
+                e.seed_claims, e.listed_keys = own.get(id(feed), (seed, every))
+                # (listed_keys: every row's - a changed album never takes another's)
                 e.offer_file_anyway = True                  # (MOV-5: here you can ask)
                 e.lookup_workers = workers
                 told = set()
 
                 def emit(k, plan):
                     told.add(k)
-                    report("partial", (name, k, plan))
+                    report("partial", (name, k, plan, id(feed)))
                 # (each album's rows sent as soon as it is found; cancelled: the others stay as they were)
                 try:
                     # (album i: the feed's i-th, one that joined too)
@@ -2146,8 +2253,12 @@ class Overview(QWidget):
                     # (no album joins any more; one that joined and was never started - by a
                     # plan_each that does not take them - is looked up after: look_up_ended)
                     untaken.extend(feed.close())
-            return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
-                               lambda a: w.progress.emit(*a))
+            try:
+                return run_batches(batches, one_batch, lambda: w.cancelled, w.partial.emit,
+                                   lambda a: w.progress.emit(*a), more=more)
+            finally:
+                for b in more.close():                      # (added, never started: looked up after)
+                    untaken.extend(b[3].close())
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
         self._lookup_again = again                         # (Refresh: so is what Apply interrupts)
         self._lookup_order = [k for ks in groups.values() for k in ks]
@@ -2161,7 +2272,11 @@ class Overview(QWidget):
         self.summary.setText(self.lookup_words(0, ""))
         library = self.library
 
+        run = self._running_lookup
+
         def one(part):
+            if self.cross_claim(run, *part):               # (MOV-4: looked up again, after this look-up)
+                return
             self.plan_library = library
             self.looked_up_one(part[0], part[1], part[2], stamps[part[0]])
         self.worker = start(self, work, lambda _n: self.look_up_ended(), self.progress, self.lookup_failed,
@@ -2203,7 +2318,7 @@ class Overview(QWidget):
 
     # LKP-1: why an album asked for during a look-up waits for it to end, rather than joining it
     WAIT_WHY = {"sources": N_("other sources than this look-up's"), "profile": N_("another profile"),
-                "folder": N_("read from another folder"), "changed": N_("settings changed since it started"),
+                "folder": N_("its folder is read with another one this look-up reads"), "changed": N_("settings changed since it started"),
                 "busy": N_("being looked up now"), "applying": N_("in a folder Apply is working on")}
 
     def join_look_up(self, mode, albums, again=False) -> tuple:
@@ -2211,11 +2326,17 @@ class Overview(QWidget):
         looks up its own join it (engine.LookupFeed): each starts as soon as one of its workers is
         free - at most engine.LOOKUP_WORKERS albums at once in all - and is planned with its
         albums, as one look-up of them all. An album joins when it has the look-up's sources, a
-        profile and folder it is looking up albums of (the profile's settings unchanged), and
-        your edits, chosen releases, asks to file and OCR are as they were when it started. Not
-        once it is cancelled or stopping for Apply. An album already looked up the same way is
-        skipped (not AGAIN), as a queued look-up skips it. Returns (the albums left to queue,
-        how many joined, {key: why it waits - a WAIT_WHY code})."""
+        profile it is looking up albums with (the profile's settings unchanged), and your edits,
+        chosen releases, asks to file and OCR are as they were when it started. Not once it is
+        cancelled or stopping for Apply. Read from a folder the look-up reads: planned with that
+        folder's albums. Read from another folder: a plan of its own in the look-up (MoreBatches),
+        sharing its workers, planned with the claims of the rows ready when it joined; MOV-4
+        between it and the albums still in hand then is cross_claim's. Not a folder a release may
+        join one the look-up reads (DSC-10/DSC-11 siblings): that one waits, to be read with it.
+        An album already looked up the same way is skipped (not AGAIN), as a queued look-up skips
+        it. Returns (the albums left to queue, how many joined, {key: why it waits - a WAIT_WHY
+        code})."""
+        import engine
         run = getattr(self, "_running_lookup", None)
         w = self.worker
         if not run or not self.looking or w is None or getattr(w, "cancelled", False) or \
@@ -2251,25 +2372,37 @@ class Overview(QWidget):
                 continue
             if not again and self.looked.get(k) == stamps[name]:
                 continue                                    # (looked up the same way: as a queued look-up)
-            # (another folder's albums are another plan, which could not see the claims of the
-            # albums this look-up has still in hand (MOV-4): they wait, and see them then)
-            feed = run["feeds"].get((name, self.roots.get(k) or self.path))
-            if feed is None:
+            root = self.roots.get(k) or self.path
+            feed = run["feeds"].get((name, root))
+            if feed is None and (run.get("more") is None or root in run["folders"].get(name, {})):
+                # (a folder read from its parent with its siblings: its albums wait for it)
                 left.append(a)
                 why[k] = "folder"
                 continue
-            mine = by_feed.setdefault(id(feed), (feed, name, {}))[2]
+            # (another folder: a plan of its own, beside the look-up's - new_plan below)
+            mine = by_feed.setdefault(id(feed) if feed is not None else (name, root), (feed, name, {}, root))[2]
             mine.setdefault(k, a)
+        # DSC-10/DSC-11: a folder a release may join one this look-up reads (or another just
+        # added) is read from their parent in a look-up of them: it waits, to be read with them
+        for name in {n for f, n, _m, _r in by_feed.values() if f is None}:
+            new = {r: list(m) for f, n, m, r in by_feed.values() if f is None and n == name}
+            kept = engine.set_sibling_roots(run["profs"][name], {**run["folders"].get(name, {}), **new})
+            for r, keys in new.items():
+                if kept.get(r) != keys:
+                    mine = by_feed.pop((name, r))[2]
+                    left += list(mine.values())
+                    why.update(dict.fromkeys(mine, "folder"))
         joined = 0
         order = self._lookup_order
-        for feed, name, mine in by_feed.values():
+        for feed, name, mine, root in by_feed.values():
             keys = list(mine)
             for j, k in enumerate(keys):                    # (its row, before a worker can start it)
                 run["at"][k] = len(order) + j
             # (MOV-4: their rows' claims, which the look-up's other albums saw, are theirs no more)
-            drop = [c for k in keys for c in run["seed_of"].get(k, ())]
-            if not feed.add(keys, drop):                    # (it has ended meanwhile: they wait)
-                left += list(mine.values())
+            drop = [c for k in keys for c in run["seed_of"].get(k, ())] + \
+                [c for a in self.model.albums if self.album_key(a) in mine for c in a.get("claims") or ()]
+            if not (feed.add(keys, drop) if feed is not None else self.new_plan(run, name, root, keys, drop)):
+                left += list(mine.values())                 # (it has ended meanwhile: they wait)
                 continue
             for k in keys:
                 order.append(k)
@@ -2280,6 +2413,99 @@ class Overview(QWidget):
             self._lookup_n += len(keys)
             joined += len(keys)
         return left, joined, why
+
+    def new_plan(self, run, name, root, keys, drop=()) -> bool:
+        """LKP-1: albums KEYS of profile NAME, read from ROOT - a folder the running look-up RUN
+        does not read -, looked up in it as a plan of their own (a batch of MoreBatches), as soon
+        as one of its workers is free. Planned with the claims (MOV-4) of the rows ready now -
+        the look-up's albums found already among them -, not those it has still in hand:
+        cross_claim checks those when each lands. False: the look-up has ended (they wait)."""
+        import engine
+        busy = self.still_looked_up() | set(keys)
+        dropped = {id(c) for c in drop}
+        seed = [c for a in self.model.albums if self.album_key(a) not in busy and
+                a.get("status") in ("ready", "unchanged") and not PlanModel.left_out(a)
+                for c in a.get("claims") or () if id(c) not in dropped]
+        # (and every claim this look-up has found so far: a row applied and taken out since too)
+        have = {claim_id(c) for c in seed}
+        for k, (_p, cs) in run["claims_of"].items():
+            if k in busy or k in run["redo"]:
+                continue
+            for c in cs:
+                if claim_id(c) not in have:
+                    have.add(claim_id(c))
+                    seed.append(c)
+        feed = engine.LookupFeed(keys, run["slots"])
+        run["alive"].append(feed)                          # (its id is its plan's: never another's)
+        run["feeds"][(name, root)] = feed                  # (more of this folder join it)
+        run["folders"].setdefault(name, {})[root] = list(keys)
+        run["own"][id(feed)] = (seed, frozenset(self.album_key(a) for a in self.model.albums) | set(keys))
+        run["seen"][id(feed)] = frozenset(claim_id(c) for c in seed)
+        if run["more"].add((name, root, list(keys), feed, None)):
+            return True
+        run["feeds"].pop((name, root), None)
+        run["folders"][name].pop(root, None)
+        run["own"].pop(id(feed), None)
+        run["seen"].pop(id(feed), None)
+        return False
+
+    def cross_claim(self, run, name, key, new, plan) -> bool:
+        """MOV-4 between the plans of one look-up (RUN): album KEY found (NEW, by PLAN - its
+        plan_each's feed) claims an album folder an album found by another of its plans claimed
+        (run["claims_of"]: every album found in this look-up, its row applied or taken out since
+        too), one of the two plans a folder that joined the look-up (new_plan), and neither plan
+        was planned with the other's claim (each sees only the claims of the albums found or
+        ready when it started). Then its rows are not shown: it is looked up again once this
+        look-up ends (queued, Waiting…), planned with the other's claim (_redo_seed) as any
+        look-up is - a second copy tagged where it is, a disc joining its set - never two rows
+        filed into one album folder. Its later word from this plan is dropped too. Cancelled
+        (not stopped for Apply): dropped, and nothing queued - Cancel stops it all. True: so. A
+        row Apply has (done, or beside the look-up) is APL-1's: looked_up_one keeps it."""
+        if key in run["redo"]:
+            return True
+        found = new.get("albums") or []
+        side = getattr(self, "_side", None) or []
+        here = [a for a in self.model.albums if self.album_key(a) == key]
+        if any(a.get("status") == "done" or any(a is b for b in side) for a in here):
+            return False
+        mine = {}
+        for a in found:
+            for c in a.get("claims") or ():
+                mine.setdefault(c.get("dir"), set()).add(claim_id(c))
+        rec = run["claims_of"]
+
+        def seen(p):
+            return run["seen"].get(p, run["seen_all"])
+        keys = {key} | {self.album_key(a) for a in found}
+        # (an album of another plan of this look-up - one of them a folder that joined it: the
+        # look-up's own folders are planned apart as before -, its claim on one of this album's
+        # folders not one this plan was planned with, nor this album's claim there one the
+        # other's plan was)
+        hit = [(k, c) for k, (other, cs) in rec.items() if mine and other != plan and k not in keys and
+               k not in run["redo"] and (plan in run["seen"] or other in run["seen"])
+               for c in cs if c.get("dir") in mine and claim_id(c) not in seen(plan) and
+               not mine[c.get("dir")] <= seen(other)]
+        if hit:
+            run["redo"].add(key)
+            w = self.worker
+            if w is not None and getattr(w, "cancelled", False) and not getattr(self, "_apply_next", False):
+                return True                               # (Cancel: not shown, not asked again)
+            if not hasattr(self, "_redo_seed"):
+                self._redo_seed = {}
+            self._redo_seed.setdefault(key, []).extend(hit)
+            self.states[key] = "waiting"
+            was = self.queue.pop(key, None)
+            self.queue[key] = (run["mode"], True)
+            if was is None:
+                self.model.refresh_rows()
+                where = here[0]["source_dir"] if here else found[0]["source_dir"] if found else ""
+                self.win.statusBar().showMessage(
+                    tr("{0}: another album of this look-up goes into the same album folder; looked up again "
+                       "when this look-up ends, to be filed beside it or kept apart.").format(Path(where).name), 8000)
+            return True
+        for k in keys:
+            rec[k] = (plan, [c for a in found if self.album_key(a) == k for c in a.get("claims") or ()])
+        return False
 
     def run_queue(self) -> bool:
         """The look-ups queued while the last one ran: the albums with the same sources at once.
@@ -2493,6 +2719,7 @@ class Overview(QWidget):
         for f in (run.get("feeds") or {}).values():
             f.close()                                      # (nothing joins it either)
         self.looking, self.queue = {}, {}                  # (nothing queued starts after a failure)
+        self._redo_seed = {}
         self._later_list_only = bool(self.later)           # (folders dropped meanwhile: listed, not looked up)
         self.oops(msg)
 
@@ -3597,6 +3824,7 @@ class Overview(QWidget):
                 f.close()                                  # (LKP-1: nor is an album that joined it started)
             n = len(self.queue)
             self.queue = {}                                # (nor is what waited for it looked up)
+            self._redo_seed = {}
             if self.later:                                 # (nor are the folders dropped meanwhile added)
                 from .manual_match import _names
                 self.win.statusBar().showMessage(tr("Not added: {0}.").format(_names(self.later)), 6000)

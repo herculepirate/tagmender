@@ -28,6 +28,7 @@ Missing credentials, an outage or throttling at one provider is recorded on the 
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
 import copy
 import heapq
@@ -691,6 +692,7 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
         return False
     who = _ascii_fold(_folder_artist(folder.name))
     titles, heads, artists, led = set(), {}, set(), False
+    counted = True                      # (DSC-2d: every file's own disc tag gives its number and N)
 
     def bare(text, k):
         nonlocal led
@@ -721,6 +723,7 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
             num, total = _disc_tag(metas.get(f) or ex.read_meta(f))
             if num not in ("", str(numbers[d])) or total not in ("", str(n)):
                 return False                               # (a disc tag against the folder's number)
+            counted = counted and num == str(numbers[d]) and total == str(n)
     if len(titles) != 1:
         # DSC-2c: discs tagged with the set's title, some with a disc subtitle of their own after a
         # colon ("Reculer pour mieux sauter" twice, "Reculer pour mieux sauter: Le souffle du
@@ -739,7 +742,16 @@ def same_title_disc_set(folder: Path, files, keys, metas=None) -> bool:
     # "Greatest Hits" in one folder stay apart)
     if len({_lead_name(a) for a in artists}) == 1:
         return True
-    return bool(led and who) and _folder_title(folder) == next(iter(titles))
+    if not who or _folder_title(folder) != next(iter(titles)):
+        return False
+    if led:
+        return True
+    # DSC-2d (decided 2026-11-20): a classical rip's album artist written as each disc's composers
+    # and then the performer ("Francesco Tristano, Frederic Chopin, ...; Alice Sara Ott" and "Johann
+    # Sebastian Bach, John Field, ...; Alice Sara Ott" in "Alice Sara Ott - Echoes of Life - 2023"):
+    # the leads differ, but every disc credits the folder's own artist, the folder is named as the
+    # album's title, and every file's disc tag gives its own folder's number and the set's count N
+    return counted and all(who in _credited_names(a) for a in artists)
 
 
 # DSC-10: at most this many sibling folders are tried as one set, and at most this many whole-set
@@ -4086,14 +4098,23 @@ class Engine:
             prov = {"mb": "musicbrainz"}.get(out["best"]["source"], out["best"]["source"])
             try:
                 p = self._identified(out, album, files, base)
+                if (out["best"] or {}).get("tie_guess"):
+                    # TIE-1 (decided 2026-11-20): a pressing only a tie-break chose is written in
+                    # full, marked Partial "pressing guessed"
+                    return self._tie_guessed(p, out, album)
+                still = self._still_guessed(files, out)
+                if still:
+                    # (TIE-1: TagMender's own guess, kept now only because your files carry it - the
+                    # IDs its job wrote are no evidence: still a guess, still marked so)
+                    q = self._one_release(p, out, album)
+                    if q.status == "identified" and planmod.tier_of(q) == "exact":
+                        q.guessed = still
+                        words = (f"pressing guessed ({still['by']}): kept as TagMender's earlier guess; nothing "
+                                 "of your copy proves it (TIE-1)")
+                        q.why = list(q.why) + [words]
+                        q.notes = list(getattr(q, "notes", None) or []) + [words]
+                    return q
                 withdrawn = self._own_guess_withdrawn(p, out)
-                guess = (out["best"] or {}).get("tie_guess")
-                if withdrawn is not None and guess and withdrawn.status == "identified":
-                    # (TAG-1's album only, its pick a tie-break's: still yours to confirm - TIE-1)
-                    withdrawn.suggested = suggestion_of(guess, out["best"])
-                if withdrawn is None:
-                    # TIE-1: a pressing only a tie-break chose is proposed; the album is album known
-                    withdrawn = self._tie_suggested(p, out, album)
                 return withdrawn if withdrawn is not None else self._one_release(p, out, album)
             except ma.ProviderUnavailable as exc:             # fetching the release failed: retry later
                 self.log.warning("tags for %s: %s", g.folder, exc)
@@ -5433,6 +5454,65 @@ class Engine:
             + ("; what TagMender's earlier job wrote of that pressing is taken back" if p.restore else "")]
         return p
 
+    _KEPT_WORDS = ("release your files are tagged with",)
+
+    def _still_guessed(self, files, out) -> dict:
+        """TIE-1: the matcher kept the release your files are tagged with (TAG-1, _choose_pressing's
+        "tagged release", combine's _tagged_one) and that release is the one TagMender's own earlier
+        job wrote as a guess - the files marked Partial, "pressing guessed (<tie-break>): <release>".
+        Its IDs are TagMender's own, never evidence: {"by", "ref", "source", "id", "others": []} to
+        keep it a guess; {} otherwise (a pick your copy proves, or one you chose)."""
+        best = (out or {}).get("best") or {}
+        notes = " ".join(str(n) for n in list(best.get("notes") or []) + list((out or {}).get("evidence") or []))
+        if not any(w in notes for w in self._KEPT_WORDS) or not files:
+            return {}
+        import tagio
+        try:
+            t = tagio.read(files[0])
+        except Exception:
+            return {}
+        if str((t.get("tagmender") or [""])[0]).casefold() != "partial":
+            return {}
+        m = re.search(r"pressing guessed: (\S+)(?: \((.*?)\)?)?\s*$", " ".join(map(str, t.get("tagmender_reason") or ())))
+        if not m or m.group(1) == "?":
+            return {}
+        ref = m.group(1)
+        ids = {str(best.get("id") or ""), str(best.get("mb_id") or ""), str(best.get("discogs_id") or "")} - {""}
+        if not any(x and x in ref for x in ids):
+            return {}                                     # (another release than the guess: as before)
+        source = "discogs" if ref.startswith("discogs:") else "musicbrainz"
+        rid = ref.split(":", 1)[1].split("+")[0] if source == "discogs" else ref
+        return {"by": m.group(2) or "a tie-break", "ref": ref, "source": source, "id": rid, "others": []}
+
+    def _tie_guessed(self, p, out, album=None):
+        """TIE-1 (decided 2026-11-20, replacing the 2026-11-17 proposal): the matcher's pick among
+        pressings of the album was made by a tie-break alone (your country order, the original
+        release date, your preferred release types or formats, the database's earliest entry:
+        match_core.tie_guess), every clue of your copy having been tried. The pick is written in
+        full as any release is (_one_release: both databases as your Sources setting merges them,
+        its release IDs, barcode, catalogue number, label, country, date and media), and marked
+        TAGMENDER=Partial with the reason "pressing guessed": never taken for proof, and a later
+        look-up that finds your copy's evidence (a barcode, disc ID, scans or rip log naming
+        another pressing) replaces it."""
+        guess = ((out or {}).get("best") or {}).get("tie_guess")
+        if guess and p.status == "identified" and planmod.tier_of(p) == "exact" and not self._accepts("album"):
+            # (a profile that accepts exact releases only: a guess is no exact release - held with
+            # the pick named, as before)
+            held = self._tie_suggested(p, out, album)
+            if held is not None:
+                return held
+        p = self._one_release(p, out, album)
+        if not guess or p.status != "identified" or planmod.tier_of(p) != "exact":
+            return p
+        sg = suggestion_of(guess, (out or {}).get("best") or {})
+        p.guessed = dict(sg)
+        n = 1 + len(sg.get("others") or [])
+        words = (f"pressing guessed ({sg.get('by')}): nothing of your copy tells these {n} pressings apart; "
+                 "written in full, marked Partial until your copy proves a pressing (TIE-1)")
+        p.why = list(p.why) + [words]
+        p.notes = list(getattr(p, "notes", None) or []) + [words]
+        return p
+
     def _tie_suggested(self, p, out, album=None):
         """TIE-1 (decided 2026-11-17): the matcher's pick among pressings of the album was made by
         a tie-break alone (your country order, the original release date, your preferred release
@@ -5980,8 +6060,16 @@ class Engine:
         """Every tied pressing is a release of the MusicBrainz release group the tags name,
         with the same recording on each track: only then are the pick's recording IDs, ISRCs
         and recording credits the album's (a Discogs pressing says nothing of recordings)."""
-        if not tied or any(t.get("source") != "mb" for t in tied):
+        # (ALB-5: Discogs's pressings tied beside MusicBrainz's say nothing of recordings - the
+        # MusicBrainz ones decide, all of them sharing each track's recording)
+        tied = [t for t in tied or () if t.get("source") == "mb"]
+        if not tied:
             return False
+        # (and the release whose recordings would be written - the twin ALB-5 brings along, which
+        # may be of another kind than your copy and so not among the tied)
+        own = {str(v) for t in targets for v in ([t.get("musicbrainz_albumid")] if isinstance(
+            t.get("musicbrainz_albumid"), str) else t.get("musicbrainz_albumid") or []) if v}
+        tied = tied + [{"source": "mb", "id": x} for x in sorted(own - {str(t.get("id")) for t in tied})]
         groups = {g for t in targets for g in ([t.get("musicbrainz_releasegroupid")]
                                                if isinstance(t.get("musicbrainz_releasegroupid"), str)
                                                else t.get("musicbrainz_releasegroupid") or [])}
@@ -7691,21 +7779,59 @@ class Engine:
 LOOKUP_WORKERS = 3
 
 
+class LookupSlots:
+    """LKP-1: the albums one look-up has in hand at once, in all its plan_each runs (one per
+    folder its albums are read from, and one for each folder an album added meanwhile is read
+    from): at most N. A worker waiting for a slot gets it in the order it asked (a folder that
+    joined starts as soon as one album of the others is done, never behind all of them).
+    Thread-safe."""
+
+    def __init__(self, n=None):
+        self._free = max(1, int(n if n is not None else LOOKUP_WORKERS))
+        self._waiting = collections.deque()
+        self._lock = threading.Lock()
+
+    def try_take(self, token) -> bool:
+        """A slot for TOKEN (one ask: kept in line until it is given one, or withdraw())."""
+        with self._lock:
+            if token not in self._waiting:
+                self._waiting.append(token)
+            if self._free > 0 and self._waiting[0] is token:
+                self._waiting.popleft()
+                self._free -= 1
+                return True
+            return False
+
+    def withdraw(self, token):
+        with self._lock:
+            try:
+                self._waiting.remove(token)
+            except ValueError:
+                pass
+
+    def give_back(self):
+        with self._lock:
+            self._free += 1
+
+
 class LookupFeed:
     """LKP-1: the albums (keys) of one plan_each, which more can join while it runs: an album
     asked for meanwhile, of the same profile, sources and folder, starts as soon as a worker is
     free rather than when the whole look-up ends. Thread-safe. Albums join it until it is closed:
     by plan_each when every album given is done and no worker is busy (one added then is the
     caller's to look up after), or by close(), or on Cancel. keys: every album given, in the
-    order given (an album's index here is its i in progress(i, folder))."""
+    order given (an album's index here is its i in progress(i, folder)). slots: a LookupSlots
+    shared with the look-up's other feeds - an album is taken only with a slot, given back when
+    it is done (None: as many at once as plan_each has workers)."""
 
-    def __init__(self, keys=()):
+    def __init__(self, keys=(), slots=None):
         self.keys = list(keys)
         self._next = 0                                   # (the first album not yet taken)
         self._busy = 0                                   # (albums taken, not yet done)
         self._closed = False
         self._dropped = set()                            # (ids of seed claims no longer the others')
         self._cond = threading.Condition()
+        self._slots = slots
 
     def add(self, keys, drop_claims=()) -> bool:
         """KEYS join the look-up (in order), unless it is closed: False, and none joins.
@@ -7723,22 +7849,33 @@ class LookupFeed:
         """(i, key) of the next album to look up, waiting while a worker is still on an album
         (more may join meanwhile); None: every album done, or STOP() (cancelled, a worker
         failed) - closed then. The album taken is the caller's until done()."""
+        token = object()                                 # (this ask's place in the slots' line)
         with self._cond:
-            while True:
-                if stop is not None and stop():
-                    self._closed = True
-                    self._cond.notify_all()
-                    return None
-                if self._next < len(self.keys):
-                    i = self._next
-                    self._next += 1
-                    self._busy += 1
-                    return i, self.keys[i]
-                if self._closed or not self._busy:
-                    self._closed = True                  # (nothing more can come: no one adds now)
-                    self._cond.notify_all()
-                    return None
-                self._cond.wait(0.1)                     # (STOP is a question, not a signal: asked again)
+            try:
+                while True:
+                    if stop is not None and stop():
+                        self._closed = True
+                        self._cond.notify_all()
+                        return None
+                    if self._next < len(self.keys):
+                        if self._slots is not None and not self._slots.try_take(token):
+                            self._cond.wait(0.05)        # (another folder's album holds it: asked again)
+                            continue
+                        i = self._next
+                        self._next += 1
+                        self._busy += 1
+                        token = None                     # (its slot is the album's now: done() gives it back)
+                        return i, self.keys[i]
+                    if self._closed or not self._busy:
+                        self._closed = True              # (nothing more can come: no one adds now)
+                        self._cond.notify_all()
+                        return None
+                    if self._slots is not None:
+                        self._slots.withdraw(token)      # (no album to take: not in line meanwhile)
+                    self._cond.wait(0.1)                 # (STOP is a question, not a signal: asked again)
+            finally:
+                if token is not None and self._slots is not None:
+                    self._slots.withdraw(token)
 
     def known(self) -> list:
         """Every album given so far, in order."""
@@ -7755,6 +7892,8 @@ class LookupFeed:
         with self._cond:
             self._busy -= 1
             self._cond.notify_all()
+        if self._slots is not None:
+            self._slots.give_back()
 
     def close(self) -> list:
         """No album joins any more; returns those added and never taken."""

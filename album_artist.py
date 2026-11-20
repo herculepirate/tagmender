@@ -154,6 +154,9 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
     if len(names) >= 2 and " : " in credit:
         after = fold(credit.rsplit(" : ", 1)[1])
         band_at = next((k for k, n in enumerate(names) if fold(n) == after), -1)
+    joined = credit if not split else _first(t, "~albumartist_credit")
+    if band_at < 0 and band_then_lineup(joined, names, ids, dg, members_of, discogs_members_of):
+        band_at = 0                  # NAM-1b: "Bill Bruford's Earthworks - Django Bates, ...": the band
     if band_at >= 0:
         aligned = lambda xs: xs[band_at] if len(xs) == len(names) else ""   # noqa: E731
         lead = (names[band_at], aligned(sorts), aligned(ids), aligned(dg))
@@ -162,7 +165,6 @@ def choose(t: dict, profile, members_of=None, discogs_members_of=None, find_ids=
         # "feat."/"with"/"presents" credit names its lead first, whatever the members say)
         # (the credit as one text: the album artist itself, or - written one value per artist -
         # the database's credit the engine passes along unwritten)
-        joined = credit if not split else _first(t, "~albumartist_credit")
         if not mapped(names[0])[0] and guest_after_partners(joined, names):
             return None              # (partners first, a guest after: the whole credit)
         equals = None if mapped(names[0])[0] or lead_credit(joined, names) \
@@ -236,6 +238,34 @@ def joins(credit, names):
             out.append(str(credit)[pos:i])
         pos = i + len(n)
     return out
+
+
+# NAM-1b: the join a credit puts between a band and its line-up ("Bill Bruford's Earthworks -
+# Django Bates, Iain Ballamy, Bill Bruford, Mick Hutton"; Discogs writes an en dash)
+_LINEUP_JOIN = re.compile(r"^\s+[-\u2013\u2014]\s+$")
+
+
+def band_then_lineup(credit, names, ids=(), dg=(), members_of=None, discogs_members_of=None) -> bool:
+    """NAM-1b: a credit naming a band and then, after " - ", its line-up for this record: every
+    other name joined by commas or "&"/"and", and - where MusicBrainz (else Discogs) lists the
+    band's members - at least one of them a member. The band is the album artist, never its first
+    member nor the whole line-up."""
+    js = joins(credit, names) if credit and len(names) >= 3 else None
+    if not js or not _LINEUP_JOIN.match(js[0]):
+        return False
+    if any(_LEAD_JOIN.search(j) or not re.fullmatch(r"\s*(?:,|&|and)\s*", j, re.I) for j in js[1:]):
+        return False
+    for some_id, ask in ((ids[0] if len(ids) == len(names) else "", members_of),
+                         (dg[0] if len(dg) == len(names) else "", discogs_members_of)):
+        if not some_id or not ask:
+            continue
+        members = ask(some_id)
+        if members:                           # (the database lists the band's members: one is credited)
+            listed = {fold(m[0]) for m in members}
+            return any(fold(n) in listed for n in names[1:])
+        if members is not None:
+            return False                      # (the first name is no band with members)
+    return True
 
 
 def lead_credit(credit, names) -> bool:

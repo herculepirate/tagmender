@@ -1,5 +1,27 @@
 # Release notes
 
+## 0.8.87
+
+**Tags go ahead without asking**
+- When nothing about your copy tells the pressings of an album apart, TagMender now writes the pressing it picks in full: release IDs, barcode, catalogue number, label, country, date and media, from MusicBrainz and Discogs as your Sources setting merges them. It is picked by your country order, then the original release, then your release types and formats, and finally the database's earliest entry, so a pick is always made. Such an album is marked Partial with the reason "pressing guessed", and a later look-up that finds proof on your copy replaces the guess. Before, only the album's shared tags were written and the pressing was offered for you to confirm.
+- An identified album scoring below your profile's move threshold is now moved into your library like any other (a new profile setting, on by default; Extra-careful matching keeps asking).
+- Album-known and other Partial results are written by default, also in watched folders, marked Partial.
+- File > Add Files… adds single audio files; a lone track is identified by its fingerprint.
+
+**Adding a folder while albums are being looked up**
+- A folder you add from anywhere while a look-up runs is now looked up as soon as one of its workers is free, and can be ticked and applied as soon as its row is ready, instead of waiting for the whole look-up to finish. If it turns out to be another copy of an album being looked up at the same time, it is looked up again once the look-up ends, so the two are never filed into one folder.
+
+**Album artists and the folders they name**
+- An album's folder now follows its album artist. An album tagged from one database and later from another (MusicBrainz's three names, then Discogs's one) no longer stays filed under the old names, and changing the album artist yourself now also changes the folder and the album artists' names written with it.
+- A band credited before the musicians who played on the record ("Bill Bruford's Earthworks - Django Bates, Iain Ballamy, Bill Bruford, Mick Hutton") is the album artist, never the whole line-up or its first member.
+
+**Two-disc sets**
+- Disc folders tagged with each disc's composers and then the performer ("...; Alice Sara Ott") are one album, numbered as their tags say, when the set's folder is named after that performer and album. Such a set is searched and compared by the performer every disc credits, so its two-CD release is found.
+- A Discogs track title that repeats itself ("In The Beginning Was | In The Beginning Was") is written once.
+
+**When only the pressing is unknown**
+- An album both databases know, each with several pressings that fit equally, now gets MusicBrainz's album facts too: release group, artist, work and recording IDs and the credits, where before only Discogs's were written. Fields of one pressing (label, barcode, catalogue number, release IDs) are still left out unless every pressing that fits agrees.
+
 ## 0.8.86
 
 **Albums the databases know are no longer given back with nothing written.** A review of every way an album could end with nothing, and of how MusicBrainz, Discogs and the web are searched. Of 78 albums in a large library that had been left Unresolved or Partial, every one now gets tags: 38 their exact release, 21 their album's tags (pressing unknown), the rest the album's own facts or, by fingerprint, each track's recording.

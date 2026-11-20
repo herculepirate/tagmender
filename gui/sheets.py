@@ -274,6 +274,27 @@ def choose_folder(parent, title, start="") -> str:
     return out
 
 
+def choose_files(parent, title, start="", filters="") -> list:
+    """A picker of one or more existing files, window-modal, starting where choose_folder does
+    (Preferences › General › Music folder): the files chosen, or [] (offscreen: recorded, [])."""
+    from PySide6.QtWidgets import QFileDialog
+    if not start:
+        from .common import music_folder
+        start = music_folder()
+    dlg = _file_dialog(parent, title, start)
+    dlg.setFileMode(QFileDialog.ExistingFiles)
+    if filters:
+        dlg.setNameFilter(filters)
+    dlg.setLabelText(QFileDialog.Accept, tr("Add"))
+    if not blocking():
+        shown.append(("choose_files", title, ""))
+        dlg.deleteLater()
+        return []
+    out = list(dlg.selectedFiles()) if dlg.exec() == QDialog.Accepted else []
+    dlg.deleteLater()
+    return out
+
+
 def save_file(parent, title, start="", filters="") -> str:
     """A save-as picker, window-modal: the path chosen, or "" (offscreen: recorded, "")."""
     from PySide6.QtWidgets import QFileDialog

@@ -2023,6 +2023,35 @@ def album_tag_discs(infos) -> tuple:
     return found, min(bases)
 
 
+_CREDIT_SPLIT = re.compile(r"\s*(?:,|;|/|&|\band\b|\bfeat\.?|\bwith\b)\s*", re.I)
+
+
+def set_artist(infos, folder="") -> str:
+    """DSC-2d: the artist a set whose discs credit different album artists is compared and searched
+    by - the one name every disc's album artist credits ("Francesco Tristano, Frederic Chopin, ...;
+    Alice Sara Ott" and "Johann Sebastian Bach, John Field, ...; Alice Sara Ott" -> "Alice Sara
+    Ott"), as written - only the name the album's FOLDER is named after ("Alice Sara Ott - Echoes of
+    Life - 2023"), so a composer on every disc ("Chilly Gonzales") is none. "" when the files credit
+    one album artist, or the folder's artist is not credited by every disc."""
+    credits = {str(i.get("artist") or "") for _p, i in infos} - {""}
+    if len({c.casefold() for c in credits}) < 2 or len({i["disc_eff"] for _p, i in infos}) < 2:
+        return ""
+    shared, spelled = None, {}
+    for c in credits:
+        names = {}
+        for x in _CREDIT_SPLIT.split(re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", c)):
+            if x.strip():
+                names.setdefault(mc.fold(x), x.strip())
+        spelled.update(names)
+        shared = set(names) if shared is None else shared & set(names)
+    shared = {n for n in shared or () if n}
+    # (only a set its folder names after that performer: "Alice Sara Ott - Echoes of Life - 2023";
+    # never an ordinary album whose discs credit "Bob Marley & The Wailers" and "Bob Marley")
+    head = mc.fold(str(folder or "").partition(" - ")[0]) if " - " in str(folder or "") else ""
+    shared = {head} & shared
+    return spelled[next(iter(shared))] if len(shared) == 1 else ""
+
+
 def _set_title(infos, folder_title) -> str:
     """DSC-2: the title a set is searched by when its disc folders each carry an album title of
     their own ("Holy Diver [2022 Barresi RMX]", "Holy Diver Live In Fresno CA 1983", ...): the
@@ -2462,9 +2491,9 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
             before_by_tagger.get(k) for k, v in before.items() if v)),
         # REP-1: the album title the files hold now, when it was read as before TagMender ("")
         "title_written": title_written[0][0] if title_written else "",
-        "artist": top("artist") or artist_folder, "title": title,
+        "artist": set_artist(infos, album_folder) or top("artist") or artist_folder, "title": title,
         # QRY-5: the title the folder name gives, when it is not the album tag's (searched too)
-        "folder_title": _folder_title_of(album_folder, title, top("artist") or artist_folder),
+        "folder_title": _folder_title_of(album_folder, title, set_artist(infos, album_folder) or top("artist") or artist_folder),
         # VAR-1: the files' own track artists, in order, when the album artist is "Various"
         "track_artists": (list(dict.fromkeys(i.get("track_artist") for _p, i in infos if i.get("track_artist")))
                           if _VARIOUS_HEAD.fullmatch((top("artist") or "").strip()) else []),
@@ -10197,6 +10226,13 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             ao = mc.unofficial_album_only(final, cfg, tie_source(album, final), (mb_res, dg_res))
         if ao:
             out["album_only"] = ao              # the album is certain, its pressing is not
+            twin = album_only_twin(final, mb_res, ao, album, cfg)
+            if twin and out.get("best") and not out["best"].get("mb_id"):
+                # ALB-5: MusicBrainz knows the album too, its own pressings tied: its release
+                # comes along for the album's own fields (release group, artist, work and
+                # recording IDs), every tied pressing of both databases deciding the rest
+                out["best"]["mb_id"] = twin["mb_id"]
+                ao["tied"] = list(ao.get("tied") or []) + twin["tied"]
     else:
         # (sure of a pressing your scans contradict; EDN-2: or of one on another label and year
         # than the edition your folder name or SACD rip log names)
@@ -10205,6 +10241,34 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
         if ao:
             out["album_only"], out["status"] = ao, "review"
     return out
+
+
+def album_only_twin(final, mb_res, ao, album, cfg):
+    """ALB-5 (decided 2026-11-20): FINAL is Discogs's pick of an album whose pressings tie (AO, its
+    album-only answer) and MusicBrainz's own answer is album-only too - its pick as sure as an
+    automatic one, its only doubt pressings of the same album - for the same album: the same title,
+    the same number of tracks, the artist agreeing (and, where the databases link them, one
+    release group and master). Then {"mb_id": MusicBrainz's pick, "tied": its tied pressings}: the
+    album's own fields are MusicBrainz's as well as Discogs's (Agalloch - Ashes Against the Grain,
+    a declipped mix: six Discogs pressings and six MusicBrainz ones tie, and none of MusicBrainz's
+    album, artist or recording IDs was written). None otherwise."""
+    best = (final or {}).get("best") or {}
+    mb_best = (mb_res or {}).get("best") or {}
+    if (best.get("cand") or {}).get("source") != "discogs" or not mb_best or \
+            (mb_best.get("cand") or {}).get("source") != "mb" or (mb_res or {}).get("status") == "auto":
+        return None
+    mine = mc.album_only(mb_res, cfg, tie_source(album, mb_res))
+    if not mine or mine.get("media") or mine.get("no_lengths"):
+        return None
+    c, d = mb_best["cand"], best["cand"]
+    if len(c.get("tracks") or ()) != len(d.get("tracks") or ()) or \
+            mc.title_sim(c.get("title") or "", d.get("title") or "") < 0.85 or \
+            mb_best.get("artist_sim", 0) < cfg["auto_min_artist"]:
+        return None
+    master, linked = str(d.get("master_id") or ""), str(c.get("discogs_master") or "")
+    if master and linked and master != linked:
+        return None                                      # (the databases link another album)
+    return {"mb_id": str(c["id"]), "tied": [t for t in mine["tied"] if t.get("source") == "mb"]}
 
 
 def _album_only_of(final, album, cfg, results):

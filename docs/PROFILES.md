@@ -70,6 +70,7 @@ numbers) and tags it the same way; only the folder follows that profile's own na
 | `mark_resolved` | `true` | `TAGMENDER=Resolved` in each file of an identified album; re-runs, checks and retries use it to find finished albums |
 | `remove_empty_dirs` | `true` | after a move, the folders it left empty are removed (undo puts them back) |
 | `allow_unverified_writes` | `false` | tags are written only to formats whose audio TagMender can check stayed the same after the write; `true` also writes the others |
+| `file_below_score` | `true` | an identified album scoring below `organize_min_confidence` is still renamed and moved into the library layout, in the app, the command line and watched folders (decided 2026-11-20); `false`: it is tagged where it is and the app offers the move |
 | `rename_in_place` | `false` | with `in_place`: an identified album's files are also renamed by the naming (the file names only; folders stay), at the rename level (`organize_min_confidence`), staged and undoable |
 | `on_existing` | `keep_both` | a different file already has the name a file is given: `keep_both` (the new one gets a second name, see `naming.duplicate_suffix`), `skip` (that file is left out, noted), `ask` (the album waits for your review; with `unattended` both are kept) |
 | `on_unwritable` | `skip_album` | a folder that cannot be written (a read-only share, no permission): `skip_album` leaves the album as it is, with the reason; `skip_file` leaves only those files out. A copy only reads its source |

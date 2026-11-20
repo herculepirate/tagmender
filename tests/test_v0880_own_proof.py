@@ -302,6 +302,35 @@ class DSC2b_PerDiscAlbumArtists(te.Base):
         disc(top / "CD2", 2, "MTV Unplugged", "Eric Clapton")
         self.assertEqual(len(self.groups(top)), 2)
 
+    # DSC-2d: Alice Sara Ott - Echoes of Life - 2023 ("CD1 - Original Album", "CD2 - Additional
+    # Works"), each disc's album artist its composers and then the performer
+    ECHO_1 = "Francesco Tristano, Frederic Chopin, Arvo Pärt, Alice Sara Ott; Alice Sara Ott"
+    ECHO_2 = "Johann Sebastian Bach, John Field, Valentin Silvestrov; Alice Sara Ott"
+
+    def test_DSC2d_discs_crediting_their_composers_then_the_folders_performer_are_one_set(self):
+        top = self.lib / "Alice Sara Ott - Echoes of Life - 2023"
+        disc(top / "CD1 - Original Album", 1, "Echoes of Life - CD1", self.ECHO_1, disc_tag="01/02")
+        disc(top / "CD2 - Additional Works", 2, "Echoes of Life - CD2", self.ECHO_2, disc_tag="02/02")
+        self.assertEqual([len(g.files) for g in self.groups(top)], [6])
+
+    def test_DSC2d_a_disc_not_crediting_the_folders_artist_stays_apart(self):
+        top = self.lib / "Alice Sara Ott - Echoes of Life - 2023"
+        disc(top / "CD1", 1, "Echoes of Life - CD1", self.ECHO_1, disc_tag="01/02")
+        disc(top / "CD2", 2, "Echoes of Life - CD2", "Johann Sebastian Bach; Glenn Gould", disc_tag="02/02")
+        self.assertEqual(len(self.groups(top)), 2)
+
+    def test_DSC2d_discs_whose_tags_do_not_count_the_set_stay_apart(self):
+        top = self.lib / "Alice Sara Ott - Echoes of Life - 2023"
+        disc(top / "CD1", 1, "Echoes of Life - CD1", self.ECHO_1)
+        disc(top / "CD2", 2, "Echoes of Life - CD2", self.ECHO_2)
+        self.assertEqual(len(self.groups(top)), 2)
+
+    def test_DSC2d_a_folder_named_otherwise_stays_apart(self):
+        top = self.lib / "Alice Sara Ott - Piano Recitals"
+        disc(top / "CD1", 1, "Echoes of Life - CD1", self.ECHO_1, disc_tag="01/02")
+        disc(top / "CD2", 2, "Echoes of Life - CD2", self.ECHO_2, disc_tag="02/02")
+        self.assertEqual(len(self.groups(top)), 2)
+
     def test_DSC2c_a_disc_with_its_own_subtitle_after_a_colon_stays_in_the_set(self):
         # Wim Mertens - Gave Van Niets, Part IV (TWI 1006): disc 3 tagged "Reculer pour mieux
         # sauter: Le souffle du destin (Disc 3)" was split from discs 1 and 2

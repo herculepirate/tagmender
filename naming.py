@@ -352,6 +352,41 @@ def _once(names) -> list:
     return out
 
 
+_DASHES = re.compile("[\u2010-\u2015\u2212]")
+_ROLE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+_CREDIT_SPLIT = re.compile(r"\s*(?:,|;|/|&|\band\b|\bfeat\.?|\bfeaturing\b|\bwith\b|\bx\b|\bvs\.?)\s*", re.I)
+
+
+def _artist_fold(s) -> str:
+    """A name compared without case, accents, a role in brackets or punctuation; letters of every
+    script kept ("坂本龍一"), every kind of hyphen one ("JAY-Z", "JAY\u2010Z")."""
+    import unicodedata
+    s = _ROLE.sub(" ", str(s or "").replace("\u2019", "'"))
+    s = unicodedata.normalize("NFKD", _DASHES.sub("-", s))
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return " ".join(re.sub(r"[^\w']+", " ", s.casefold()).split())
+
+
+def names_agree(credit, names) -> bool:
+    """NAM-13: whether the album artists' names (ALBUMARTISTS) still belong to the album artist
+    (ALBUMARTIST, one text or one value per artist). They do not - names left from another credit -
+    only when the album artist names some of them and nothing else: "Yelena Eckemoff" under
+    MusicBrainz's three names (another source's credit), "Bill Bruford" under the five credited
+    (your edit). Every name found in the album artist agrees ("Prince & The Revolution"); names
+    the album artist does not use at all (standardized names beside a credited spelling) are left
+    as they are."""
+    names = [n for n in (names or []) if _artist_fold(n)]
+    credit = [credit] if isinstance(credit, str) else list(credit or [])
+    text = " " + " ".join(_artist_fold(c) for c in credit) + " "
+    if len(names) < 2 or not text.strip():
+        return True
+    if all(" " + _artist_fold(n) + " " in text for n in names):
+        return True
+    mine = {_artist_fold(x) for c in credit for x in _CREDIT_SPLIT.split(_ROLE.sub(" ", str(c or "")))} - {""}
+    theirs = {_artist_fold(n) for n in names}
+    return not (mine and mine < theirs)
+
+
 class Ctx:
     """The variables a naming script sees: the tags (a "/" in a value made "_", as Picard
     does for file names), and TagMender's own: %_year%, %_albumartists_sorted%,
@@ -382,6 +417,11 @@ class Ctx:
         if y.isdigit():
             t["_year"] = [y]
         names = t.get("albumartists") or []
+        if names and t.get("albumartist") and not names_agree(t["albumartist"], names):
+            # NAM-13: names left from another credit (an earlier source, before your edit of the
+            # album artist): the album artist names the folder
+            names = list(t["albumartist"])
+            t["_albumartists"] = list(names)        # (the folder's inputs only; ALBUMARTISTS as it is)
         if not names:          # one credit: "Earth, Wind & Fire" is one band, never split
             aa = (t.get("albumartist") or t.get("artist") or [""])[0]
             names = [aa] if aa else []

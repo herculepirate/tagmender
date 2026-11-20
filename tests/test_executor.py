@@ -72,7 +72,10 @@ class Base(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def profile(self, **kw):
-        d = {"name": "t", "sources": [{"path": str(self.lib)}], "thresholds": {"organize_min_confidence": 95}}
+        # (file_below_score off: these tests are of the score gate itself; its default, on since
+        # 2026-11-20, is tested in tests/test_v0887_artist_folder.py)
+        d = {"name": "t", "sources": [{"path": str(self.lib)}], "thresholds": {"organize_min_confidence": 95},
+             "file_below_score": False}
         d.update(kw)
         return pf.from_dict(d)
 

@@ -141,6 +141,9 @@ class Proposal:
     # known: {"source", "id", "url", "ref", "label", "country", "formats", "year", "by", "why",
     # "others": [...]}; {} when none
     suggested: dict = field(default_factory=dict)
+    # TIE-1 (2026-11-20): the pressing a tie-break picked and the plan writes in full, marked
+    # Partial "pressing guessed" (same keys as suggested); {} when the pressing is proven
+    guessed: dict = field(default_factory=dict)
     # TAG-3: the release ID fields your files hold for another release, which your copy proves
     # this one over (engine._one_release): the plan writes the release at the replace threshold
     release_proven_over: list = field(default_factory=list)
@@ -346,6 +349,13 @@ def diff_tags(before: dict, target: dict, profile, confidence: float, extra_remo
     """(changes {field: [..] | None}, rows [{field, before, after, action}])."""
     changes, rows = {}, []
     replace_ok = confidence >= _threshold(profile, "replace_min_confidence")
+    if "albumartist" in target and "albumartists" not in target:
+        # NAM-13: the album artists' names an earlier credit left in the file (MusicBrainz's three,
+        # then Discogs's "Yelena Eckemoff") follow the album artist written now - never left to
+        # name the album's folder after another credit
+        old, now = _vals(before.get("albumartists")), _vals(target.get("albumartist"))
+        if old and now and not naming.names_agree(now, old):
+            target = dict(target, albumartists=now)
     fields = list(dict.fromkeys(list(target) + list(extra_removals)))
     # CLS-5: the work and movement fields Classical Extras curated in a file carrying its stamp
     # are kept - written only where the file has none
@@ -2022,9 +2032,16 @@ class Planner:
         # MOV-5: the albums you asked to have filed though their score is below
         # organize_min_confidence, by their audio files (realpaths: two albums of loose tracks in
         # one folder are two asks); True: every album of this run - the CLI's --file-below-score.
-        # Never set by the watcher or an unattended run.
+        # The watcher and unattended runs set it only through the profile (file_below_score, below).
         self.file_anyway = file_anyway if file_anyway is True else {
             os.path.realpath(os.path.expanduser(str(f))) for f in file_anyway or ()}
+        # MOV-5b (decided 2026-11-20): the profile's file_below_score files every
+        # identified album whatever its score - in the app, the command line and the watcher alike
+        # (never with Extra-careful matching: that profile asked to be asked)
+        # (the score gate only: a Partial album - no release proven - is still filed only when
+        # you ask; asked_to_file, partial=True)
+        self.file_below_score = bool(hasattr(profile, "get") and profile.get("file_below_score") is True and
+                                     not (profile.get("matching") or {}).get("extra_careful"))
         # MOV-4: the album folders the other rows of the list being looked up again already claim
         # (their plan entries' "claims"): an album planned alone sees them as one planned with them
         self._seed_claims = list(seed_claims or ())
@@ -2243,11 +2260,15 @@ class Planner:
         except Exception:
             return True                                    # (cannot tell: offered, as before)
 
-    def asked_to_file(self, prop) -> bool:
+    def asked_to_file(self, prop, partial=False) -> bool:
         """MOV-5: you asked for this album to be filed whatever its score: every one of its audio
         files is one you asked for (never another album of the same folder, nor an album the
-        files you asked for were grouped with since)."""
+        files you asked for were grouped with since). MOV-5b: the profile's file_below_score
+        files every album whatever its score - but never a Partial one (PARTIAL: no release proven)
+        nobody asked for."""
         if self.file_anyway is True:
+            return True
+        if not partial and getattr(self, "file_below_score", False):
             return True
         return bool(self.file_anyway and prop.files) and all(
             os.path.realpath(str(f)) in self.file_anyway for f in prop.files)
@@ -2310,6 +2331,10 @@ class Planner:
             # TIE-1: the pressing a tie-break proposed, for you to confirm (Use Suggested Pressing,
             # Change Release, `tagmender plan PATH --release REF`)
             entry["identification"]["suggested"] = dict(prop.suggested)
+        guessed = prop.status == "identified" and tier_of(prop) == "exact" and bool(getattr(prop, "guessed", None))
+        if guessed:
+            # TIE-1 (2026-11-20): the pressing a tie-break picked, written in full and marked Partial
+            entry["identification"]["guessed"] = dict(prop.guessed)
         partial = prop.status == "identified" and tier_of(prop) == "partial"
         # Album only (the album known, its pressing tied) is, like Partial, a release not proven
         # (levels.ALBUM_TIERS): marked TAGMENDER=Partial too, its reason "ambiguous_release:
@@ -2325,6 +2350,8 @@ class Planner:
             entry["identification"]["reason"] = reasons.encode(prop.reason, prop.reason_codes or None)
         elif album_only:
             entry["identification"]["reason"] = _album_only_reason(prop)
+        elif guessed:
+            entry["identification"]["reason"] = _guessed_reason(prop)
         # 1. rules, with what the files say and what identification found
         dec = ex.evaluate(files, self.rules, release=prop.release or None, overrides=self.overrides)
         if dec.excluded:
@@ -2403,7 +2430,7 @@ class Planner:
             ua = "move" if getattr(prop, "quality_move", False) else p["unresolved"]["action"]
             entry["status"] = "unresolved"
             entry["label"] = "Unresolved"
-            if ua == "move" and self.file_anyway is not True and self.asked_to_file(prop):
+            if ua == "move" and self.file_anyway is not True and self.asked_to_file(prop, partial=True):
                 # MOV-6: you asked for it to be filed (its closest release taken), yet no release
                 # could be had for it: it is not sent to the unresolved folder against your ask
                 entry["notes"].append("you asked for it to be filed, but no release could be had for it: "
@@ -2431,7 +2458,8 @@ class Planner:
                 entry["label"] = "Skipped"
                 return entry
             op = "in_place"
-        elif op in ("copy", "move") and partial and self.asked_to_file(prop) and not getattr(prop, "disc_folder", None):
+        elif op in ("copy", "move") and partial and self.asked_to_file(prop, partial=True) and \
+                not getattr(prop, "disc_folder", None):
             # MOV-6: you asked for this Partial album to be filed: it is, from the tags it has
             # (its mark stays Partial) - what you ask for is done
             entry["notes"].append(("copied" if op == "copy" else "moved") + " because you asked (no release proven)")
@@ -2473,9 +2501,12 @@ class Planner:
         elif op in ("copy", "move") and not organize_ok and self.asked_to_file(prop):
             # MOV-5: you asked for this album to be filed (the app's "… anyway", the CLI's
             # --file-below-score): the score gates what is done unasked, never what you ask for
+            asked = self.asked_to_file(prop, partial=True)        # (you, not only the profile)
             entry["notes"].append(f"confidence {conf:.1f} is below organize_min_confidence "
                                   f"{_organize_floor_words(p)}; "
-                                  + ("copied" if op == "copy" else "moved") + " because you asked")
+                                  + ("copied" if op == "copy" else "moved")
+                                  + (" because you asked" if asked else
+                                     " as the profile files every identified album (file_below_score)"))
             entry["filed_on_request"] = {"confidence": round(conf, 1),
                                          "floor": _threshold(p, "organize_min_confidence"), "op": op}
         elif op in ("copy", "move") and not organize_ok:
@@ -2712,6 +2743,11 @@ class Planner:
                 # (FBK-4: an album's files tagged as their recordings - no release, no album proven)
                 target["tagmender"] = ["Partial"]          # (its release not proven: see above)
                 target["tagmender_reason"] = [entry["identification"].get("reason") or prop.reason or ""]
+            elif guessed:
+                # TIE-1 (2026-11-20): the guessed pressing written in full is no proof: Partial, so a
+                # later run, the watcher and `tagmender unresolved` try it again
+                target["tagmender"] = ["Partial"]
+                target["tagmender_reason"] = [_guessed_reason(prop)]
             elif identified and p["mark_resolved"]:
                 target.setdefault("tagmender", ["Resolved"])
                 if not before.get("tagmender_reason"):
@@ -2722,7 +2758,7 @@ class Planner:
                 target["tagmender_reason"] = [set_hold]
             if not identified and p["unresolved"]["action"] in ("mark", "move"):
                 target = {"tagmender": ["Unresolved"], "tagmender_reason": [entry["identification"]["reason"]]}
-            removals = ["tagmender_reason"] if identified and not (partial or album_only) and \
+            removals = ["tagmender_reason"] if identified and not (partial or album_only or guessed) and \
                 before.get("tagmender_reason") and \
                 str((before.get("tagmender") or [""])[0]).lower() in ("unresolved", "partial") else []
             # an earlier run's gap list and web page, once the album as identified now carries
@@ -4655,6 +4691,15 @@ TIER_WORDS = {"exact": "exact release", "album_only": "album only (pressing unkn
               "ignored": "excluded by a rule"}
 
 
+def _guessed_reason(prop) -> str:
+    """TAGMENDER_REASON of an album whose pressing a tie-break picked and the plan writes in full
+    (TIE-1, 2026-11-20): "ambiguous_release: pressing guessed: <the release> (<the tie-break>)" - the
+    release first, so a reason cut at its length limit still names it (engine._still_guessed)."""
+    g = getattr(prop, "guessed", None) or {}
+    by = str(g.get("by") or "a tie-break").strip()
+    return reasons.encode(f"pressing guessed: {g.get('ref') or g.get('id') or '?'} ({by})", ["ambiguous_release"])
+
+
 def _album_only_reason(prop) -> str:
     """TAGMENDER_REASON of an album-only album: the album is known, its pressing is not."""
     tied = next((w for w in prop.why or [] if str(w).startswith("pressing unknown")), "")
@@ -4850,6 +4895,13 @@ def preview(plan: dict, verbose=False) -> str:
                 codes, words = reasons.parse(ident.get("reason", ""))
                 head += (f"\n    {'Partial' if tier == 'partial' else 'Album only (marked Partial)'}: "
                          f"{', '.join(codes)} — {words}")
+            gs = ident.get("guessed") or {}
+            if gs.get("id"):
+                # TIE-1 (2026-11-20): the pressing a tie-break picked, written in full, marked Partial
+                facts = ", ".join(str(x) for x in (gs.get("label"), gs.get("country"), gs.get("year")) if x)
+                head += (f"\n    pressing guessed: {gs.get('source')} {gs['id']}" + (f" ({facts})" if facts else "")
+                         + f" — {gs.get('by')}; {len(gs.get('others') or [])} other pressing(s) tie; "
+                           "written in full, marked Partial")
             sg = ident.get("suggested") or {}
             if sg.get("id"):
                 # TIE-1: the pressing a tie-break proposed, and how to confirm it
@@ -5121,6 +5173,25 @@ def _snapshot(entry):
     entry["auto_status"] = entry.get("status")
 
 
+def _names_follow(fe, wanted: dict):
+    """NAM-13: your edit of the album artist (ALBUMARTISTS not edited) sets the album artists'
+    names to it when the names planned or in the file are another credit's ("Bill Bruford" over
+    "Bill Bruford's Earthworks; Django Bates; ..."): the folder and the tags say one artist."""
+    val = wanted.get("albumartist")
+    if "albumartists" in wanted or val is None or val == KEEP or not _vals(val):
+        return
+    changes = fe.get("changes") or {}
+    if "albumartists" in changes:
+        names = _vals(changes.get("albumartists"))
+    else:
+        try:
+            names = _vals(tagio.read(fe["src"]).get("albumartists"))
+        except Exception:
+            names = []
+    if names and not naming.names_agree(_vals(val), names):
+        wanted["albumartists"] = _vals(val)
+
+
 def _edit_file(fe, wanted: dict, fmt: dict | None):
     """fe's changes and rows with your values for the fields in wanted."""
     src = fe["src"]
@@ -5325,6 +5396,7 @@ def apply_edits(entry: dict, edit: dict | None, profile=None, settings=None) -> 
         wanted = dict(album_tags, **(per_file.get(os.path.realpath(fe["src"])) or {}))
         if not wanted or fe.get("as_is"):
             continue
+        _names_follow(fe, wanted)
         fmt = fe.get("format")
         if fmt is None and settings is not None:
             try:

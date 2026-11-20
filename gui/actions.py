@@ -20,6 +20,8 @@ from .i18n import N_, tr
 COMMANDS = {
     # File
     "add_folder": (N_("&Add Folder…"), "Ctrl+O", "folder-plus", N_("Choose a music folder to preview")),
+    "add_files": (N_("Add &Files…"), "Ctrl+Alt+O", "file-plus",
+                  N_("Choose one or more audio files to add, as dropping them does")),
     "look_up": (N_("Loo&k Up"), "Ctrl+L", "search",
                 N_("Look up the selected albums, or every album when none is selected; nothing is written until "
                    "you apply")),
@@ -211,7 +213,7 @@ RELEASE_MENU = ("use_release", *_search.MENU, None, "undo_release_choice")
 # or ticks a box elsewhere); the other commands' keys work in the whole window
 SCOPED = ("edit_tag", "remove_tag", "play_pause")    # (Space: the album tables and the player bar only)
 MENUS = (
-    (N_("&File"), ("add_folder", "lookup_cd", None, "look_up", "preview", "apply", "save_tags", "cancel", "read_scans",
+    (N_("&File"), ("add_folder", "add_files", "lookup_cd", None, "look_up", "preview", "apply", "save_tags", "cancel", "read_scans",
                "choose_library", None, "watch_folder",
                "new_profile", "save_profile", None, "close_window", "quit")),
     (N_("&Edit"),
@@ -234,9 +236,9 @@ MENUS = (
     (N_("&Help"), ("help", "setup", "shortcuts", None, "report", "about")),
 )
 CHECKABLE = ("read_scans", "show_sidebar", "show_inspector", "toggle_rule")
-TOOLBAR = ("add_folder", "look_up", "clear_done")       # (then the window's: progress, Cancel, the filter ...)
+TOOLBAR = ("add_folder", "add_files", "look_up", "clear_done")       # (then the window's: progress, Cancel, the filter ...)
 TOOLBAR_OWN = ("clear_done",)                           # (the toolbar's own copy: see build_toolbar)
-TOOLBAR_TEXT = {"add_folder": N_(" Add Folder"), "clear_done": N_(" Clear Done")}   # (a space keeps the gap after the icon)
+TOOLBAR_TEXT = {"add_folder": N_(" Add Folder"), "add_files": N_(" Add Files"), "clear_done": N_(" Clear Done")}   # (a space keeps the gap after the icon)
 SPRING = "|"                                           # (in toolbar_end's list: the room that is left, shared)
 ICON_ROLE = {"apply": "on_accent"}                      # (the prominent button: its icon as its label)
 # the pages in the View menu, with their letters (the page's name stays the key)

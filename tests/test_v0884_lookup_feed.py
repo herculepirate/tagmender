@@ -124,6 +124,49 @@ class FeedStubs(unittest.TestCase):
                          [rows_of(p["albums"]) for _k, p in alone[6:]])
 
 
+    def test_LKP1_two_folders_share_the_workers_and_one_that_joined_is_not_last(self):
+        """2026-11-20: a plan_each for a folder added meanwhile (another feed, the same LookupSlots)
+        runs beside the look-up's: never more than the slots at once in all, and its album takes
+        the next free slot - not after every album of the other folder."""
+        prof = pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
+                             "artwork": {"enabled": False}})
+        slots = engine.LookupSlots(2)
+        a, b = engine.LookupFeed(self.keys[:5], slots), engine.LookupFeed(self.keys[5:], slots)
+        lock, now, most, order = threading.Lock(), [0], [0], []
+        first_in = threading.Event()
+
+        def identify(_s, g):
+            with lock:
+                now[0] += 1
+                most[0] = max(most[0], now[0])
+                order.append(g.folder.name)
+            first_in.set()
+            threading.Event().wait(0.2)
+            with lock:
+                now[0] -= 1
+            return [self.prop(g)]
+        done = {}
+
+        def run(feed, keys, tag):
+            e = engine.Engine(prof, http=CloningHttp())
+            e.lookup_workers = 2
+            done[tag] = e.plan_each("/none", keys, lambda k, plan: None, feed=feed)
+        with mock.patch.object(engine.Engine, "albums_in", lambda s, p, skip=(): list(self.groups)), \
+                mock.patch.object(engine.Engine, "identify_all", identify), \
+                mock.patch.object(engine.Engine, "add_artwork", lambda s, p: None), \
+                mock.patch.object(engine.Engine, "apply_level", lambda s, p: None):
+            ta = threading.Thread(target=run, args=(a, self.keys[:5], "a"))
+            ta.start()
+            self.assertTrue(first_in.wait(20))
+            tb = threading.Thread(target=run, args=(b, self.keys[5:], "b"))
+            tb.start()
+            ta.join(60)
+            tb.join(60)
+        self.assertEqual(done, {"a": 5, "b": 1})
+        self.assertLessEqual(most[0], 2)
+        self.assertLess(order.index("5"), 4, order)              # (among the first free slots)
+
+
 class FeedReal(te.Base):
     """plan_each with real albums (generated audio, a stand-in Discogs): the albums that joined
     are planned exactly as one look-up of them all plans them."""
@@ -400,6 +443,148 @@ class FeedOverview(tg.Gui):
                                  self.app), ov.summary.text())
         self.assertEqual(len(calls), 2)
         self.assertEqual(self.row("2005 - Album H")["status"], "ready")
+
+    # ---- an album read from another folder (decided 2026-11-20): a plan of its own inside the look-up ----
+    def add_other(self, artist, title, release=None, folder=None):
+        """A folder outside the one listed, added (Add Folder, look up added folders) while the
+        look-up runs: its album's row, once read and put under the list."""
+        import app_settings
+        app_settings.set_value("add_folder", "look_up")
+        d = self.album(artist, title, folder=str(self.tmp / "elsewhere" / artist / (folder or f"2005 - {title}")))
+        if release is not None:
+            self.http.dg[release] = te.dg_release(release, artist, title)
+        self.assertEqual(self.ov.add_later([str(d)]), [str(d)])
+        self.assertTrue(wait(lambda: any(Path(a["source_dir"]) == d for a in self.ov.model.albums) and
+                             not self.ov._reading, self.app, timeout=30), self.ov.summary.text())
+        return d
+
+    def test_LKP1_an_album_from_another_folder_joins_and_can_be_applied_before_the_look_up_ends(self):
+        """It is not held to the end of the look-up ("read from another folder"): looked up as a
+        plan of its own as soon as a worker is free, its row ready, ticked and applied beside the
+        look-up (APL-1) while the look-up's own album is still in hand."""
+        from gui import overview as govw
+        self.cloning()
+        ov = self.ov
+        self.listed()
+        g = self.gate("2005 - Album G")
+        ov.look_up("profile", [self.row("2005 - Album G")])
+        self.assertTrue(wait(lambda: self.status("2005 - Album G") == "Looking up…", self.app, timeout=30))
+        x = self.add_other("Band X", "Album X", 924)
+        key = ov.album_key(self.row(x.name))
+        self.assertIn(key, ov.looking)
+        self.assertNotIn(key, ov.queue)
+        self.assertIn((ov.profile_of(self.row(x.name)), str(x)), ov._running_lookup["feeds"])
+        self.assertTrue(wait(lambda: self.row(x.name)["status"] == "ready", self.app, timeout=30),
+                        (self.row(x.name)["status"], ov.summary.text()))
+        self.assertTrue(ov.running)                                          # (G is still at its gate)
+        self.assertEqual(self.row("2005 - Album G")["status"], "listed")
+        self.assertFalse(govw.PlanModel.left_out(self.row(x.name)))           # (ticked: Apply takes it)
+        with mock.patch.object(govw.sheets, "confirm", lambda *a, **k: True):
+            ov.apply()
+        self.assertIsNotNone(getattr(ov, "apply_worker", None))               # (beside the look-up)
+        self.assertTrue(wait(lambda: self.row(x.name)["status"] == "done", self.app, timeout=30),
+                        self.row(x.name).get("conflicts"))
+        self.assertTrue(ov.running)
+        self.assertTrue(any((self.dest / "Band X").rglob("*.flac")))
+        g.set()
+        self.assertTrue(wait(lambda: not ov.running and not ov.win.threads(), self.app), ov.summary.text())
+        self.assertEqual(self.row("2005 - Album G")["status"], "ready")
+        self.assertEqual((ov.queue, ov.looking), ({}, {}))
+
+    def test_LKP1_MOV4_a_copy_from_another_folder_and_one_in_hand_are_never_filed_together(self):
+        """The album that joined from another folder is planned without the claims of the album
+        the look-up has in hand (not found yet): found later, that one is seen claiming the same
+        album folder and is looked up again when the look-up ends, with the other's claim - one
+        copy filed, the other kept apart (MOV-4), never two rows filed into one album folder."""
+        self.cloning()
+        ov = self.ov
+        self.listed()
+        g = self.gate("2005 - Album G")
+        ov.look_up("profile", [self.row("2005 - Album G")])
+        self.assertTrue(wait(lambda: self.status("2005 - Album G") == "Looking up…", self.app, timeout=30))
+        x = self.add_other("Band G", "Album G", folder="2005 - Album G (CD rip)")     # (another copy of 920)
+        self.assertTrue(wait(lambda: any(Path(a["source_dir"]) == x and a["status"] == "ready" for a in ov.model.albums),
+                             self.app, timeout=30), ov.summary.text())
+        self.assertTrue(ov.running)                                           # (found before the look-up ends)
+        mine = next(a for a in ov.model.albums if Path(a["source_dir"]) == x)
+        self.assertTrue(mine.get("claims"))
+        redone, real = [], ov.cross_claim
+
+        def spy(run, name, key, new, plan):
+            out = real(run, name, key, new, plan)
+            if out and key not in redone:
+                redone.append(key)
+                self.assertIn(key, ov.queue)                                  # (Waiting…, never shown ready)
+            return out
+        ov.cross_claim = spy
+        g.set()
+        self.assertTrue(wait(lambda: not ov.running and self.row("2005 - Album G")["status"] != "listed",
+                             self.app, timeout=60), ov.summary.text())
+        self.assertEqual(redone, [ov.album_key(self.row("2005 - Album G"))])  # (caught: looked up again, after)
+        here = next(a for a in ov.model.albums if a["source_dir"] == str(self.lib / "Band G" / "2005 - Album G"))
+        rows = [here, mine]
+
+        def dirs(a):
+            return {str(Path(f["dst"]).parent) for f in a.get("files") or [] if f.get("op") in ("copy", "move")}
+        self.assertEqual([bool(dirs(a)) for a in rows].count(True), 1, [rows_of([a]) for a in rows])
+        self.assertIn("another copy of this release", " ".join(n for a in rows for n in a.get("notes") or []))
+
+    def copy_found_beside_g(self):
+        """G (the list's) looked up and held at its gate; another copy of its release, from
+        another folder, added and found meanwhile: (G's row, the copy's, a spy on cross_claim
+        listing the albums it caught)."""
+        self.cloning()
+        ov = self.ov
+        self.listed()
+        self.g_gate = self.gate("2005 - Album G")
+        ov.look_up("profile", [self.row("2005 - Album G")])
+        self.assertTrue(wait(lambda: self.status("2005 - Album G") == "Looking up…", self.app, timeout=30))
+        x = self.add_other("Band G", "Album G", folder="2005 - Album G (CD rip)")
+        self.assertTrue(wait(lambda: any(Path(a["source_dir"]) == x and a["status"] == "ready"
+                                         for a in ov.model.albums), self.app, timeout=30), ov.summary.text())
+        caught, real = [], ov.cross_claim
+
+        def spy(run, name, key, new, plan):
+            out = real(run, name, key, new, plan)
+            if out and key not in caught:
+                caught.append(key)
+            return out
+        ov.cross_claim = spy
+        return self.row("2005 - Album G"), next(a for a in ov.model.albums if Path(a["source_dir"]) == x), caught
+
+    def test_LKP1_MOV4_a_copy_applied_and_cleared_meanwhile_still_counts(self):
+        """The copy that joined is applied and taken out of the list (Clear Done, CLR-1) while the
+        look-up still has G in hand: G, found then, is still caught - the look-up keeps every
+        claim it found, not only those of the rows still listed."""
+        ov = self.ov
+        g, mine, caught = self.copy_found_beside_g()
+        d = {c["dir"] for c in mine["claims"]}
+        ov.mark_applied(mine, {"status": "done"})            # (as Apply beside the look-up leaves it;
+        ov.clear_done()                                      # its files not moved: only the claim tells)
+        self.assertFalse(any(a is mine for a in ov.model.albums))
+        self.g_gate.set()
+        self.assertTrue(wait(lambda: not ov.running and self.row("2005 - Album G")["status"] != "listed",
+                             self.app, timeout=60), ov.summary.text())
+        self.assertEqual(caught, [ov.album_key(g)])
+        here = self.row("2005 - Album G")
+        self.assertFalse({c["dir"] for c in here.get("claims") or ()} & d, rows_of([here]))
+        self.assertIn("another copy of this release", " ".join(here.get("notes") or []))
+
+    def test_LKP1_MOV4_cancel_is_not_undone_by_an_album_caught_late(self):
+        """Cancel, then G found and caught (its copy found meanwhile): it is not shown, and not
+        looked up again - Cancel stops it all, no look-up starts after."""
+        ov = self.ov
+        g, _mine, caught = self.copy_found_beside_g()
+        key = ov.album_key(g)
+        ov.cancel()
+        self.g_gate.set()
+        self.assertTrue(wait(lambda: not ov.running and not ov.win.threads(), self.app, timeout=60), ov.summary.text())
+        self.app.processEvents()
+        self.assertFalse(ov.running)
+        self.assertEqual(ov.queue, {})
+        self.assertEqual(caught, [key])                      # (found after Cancel, and caught)
+        self.assertEqual(self.row("2005 - Album G")["status"], "listed")
+        self.assertNotIn(key, getattr(ov, "_redo_seed", {}))
 
 
 for _n in dir(tg.Gui):                                  # (the base class's own tests run there)

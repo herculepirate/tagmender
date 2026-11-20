@@ -283,9 +283,10 @@ class OWN_Review(te.Base):
         out = {"release_ids": {"held": {"discogs_release_id": ["1"]}, "cands": {}, "pick": {}}}
         self.assertEqual(e._withdraw_own(["/x/01.flac"], out, errors={"musicbrainz": "outage"}), {})
 
-    def test_OWN_a_withdrawn_guess_stays_album_only_plan_after_plan(self):
-        # (after the first plan made it album only: the files are marked Partial with its reason,
-        # TagMender's IDs gone - a later plan's guess is album only again, and writes nothing)
+    def test_OWN_a_guessed_pressing_stays_guessed_plan_after_plan(self):
+        # (TIE-1, 2026-11-20: the guess is written in full, marked Partial "pressing guessed"; a later
+        # plan makes the same guess, still marked so - never Resolved for finding its own IDs - and
+        # has nothing left to write)
         d = self.album("Band D2", "Album D2", TAGMENDER="Partial", TAGMENDER_REASON=WITHDRAWN)
         def http():
             return te.FakeHttp(mb=[te.mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
@@ -297,24 +298,24 @@ class OWN_Review(te.Base):
             eng.cfg["prefer_source"] = ""
             return eng, eng.identify(eng.albums_in(d)[0])
         eng, p = identify()
-        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
+        self.assertEqual((p.tier, p.guessed.get("ref")), ("exact", "mb-d2"), (p.why, p.evidence))
         plan = pl.build([p], eng.profile)
         executor.Executor(plan).run()
         eng, p2 = identify()
-        self.assertEqual(p2.tier, "album_only")
+        self.assertEqual((p2.tier, p2.guessed.get("ref")), ("exact", "mb-d2"), (p2.why, p2.evidence))
         again = pl.build([p2], eng.profile)["albums"][0]
         self.assertEqual([fe["changes"] for fe in again["files"]], [{}] * len(again["files"]))
 
-    def test_OWN_a_fresh_album_tie_keeps_tie1(self):
-        # (TIE-1 as decided 2026-11-17: a fresh album's tie is album known with the country order's
-        # pick suggested - no withdrawal note, nothing of TagMender's taken back)
+    def test_OWN_a_fresh_album_tie_is_written_guessed(self):
+        # (TIE-1 as decided 2026-11-20: a fresh album's tie is written in full with the country
+        # order's pick, marked guessed - no withdrawal note, nothing of TagMender's taken back)
         d = self.album("Band D2", "Album D2")
         eng = self.engine(te.FakeHttp(mb=[te.mb_release("mb-d2", "Band D2", "Album D2", catno="OTHER-100", country="US")],
                                       dg=[te.dg_release(904, "Band D2", "Album D2", catno="CAT-901")]))
         eng.cfg["preferred_countries"] = ["US"]
         eng.cfg["prefer_source"] = ""
         p = eng.identify(eng.albums_in(d)[0])
-        self.assertEqual((p.tier, p.release_id, p.suggested.get("ref")), ("album_only", "", "mb-d2"))
+        self.assertEqual((p.tier, p.release_id, p.guessed.get("ref")), ("exact", "mb-d2", "mb-d2"))
         self.assertFalse(p.restore)
         self.assertFalse([n for n in p.notes or () if "TagMender chose this album's pressing earlier" in n])
 

@@ -1249,7 +1249,7 @@ class Shell(unittest.TestCase):
         self.assertEqual(self.win.act("find").shortcut().toString(), "Ctrl+F")     # (Find keeps Ctrl+F)
         # (0.8.71: Add Folder and Look Up; then the window's progress and Cancel (while work runs),
         # the filter, the profile, search, Inspector, and Apply last - Preview is File › Preview, Ctrl+P)
-        self.assertEqual(self.gui.actions.TOOLBAR, ("add_folder", "look_up", "clear_done"))
+        self.assertEqual(self.gui.actions.TOOLBAR, ("add_folder", "add_files", "look_up", "clear_done"))   # (Add Files: 2026-11-20)
         bar = self.win.toolbar.actions()
         self.assertIs(bar[-1], self.win.act("apply"))
         self.assertIs(bar[-2], self.win.act("show_inspector"))

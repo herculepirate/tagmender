@@ -86,7 +86,7 @@ class Filing(unittest.TestCase):
     def entry(self, careful=False, organize=None, **kw):
         prof = pf.from_dict(dict({"name": "t", "operation": "move", "destination": str(self.lib),
                                   "sources": [{"path": str(self.top / "in"), "watch": True}],
-                                  "matching": {"extra_careful": careful}},
+                                  "matching": {"extra_careful": careful}, "file_below_score": False},
                                  **({"thresholds": {"organize_min_confidence": organize}} if organize else {})))
         tags = {"album": ["Album"], "albumartist": ["Band"], "artist": ["Band"], "title": ["One"],
                 "tracknumber": ["1"], "date": ["2021"]}
@@ -234,10 +234,11 @@ class TimedPasses(unittest.TestCase):
     def proposal(self, **kw):
         return pl.Proposal(source_dir=str(self.d), files=[str(self.f)], **kw)
 
-    def passes(self, n, make, unattended, after_first=None):
+    def passes(self, n, make, unattended, after_first=None, **extra):
         """Runs N passes; returns what each one reported."""
         prof = pf.from_dict({"name": "t", "operation": "move", "destination": str(self.top / "lib"),
-                             "unattended": unattended, "sources": [{"path": str(self.top / "in"), "watch": True}]})
+                             "unattended": unattended, "sources": [{"path": str(self.top / "in"), "watch": True}],
+                             **dict({"file_below_score": False}, **extra)})
         g = types.SimpleNamespace(folder=self.d, files=[self.f], others=False, single=False)
         test = self
 
@@ -312,6 +313,18 @@ class TimedPasses(unittest.TestCase):
         self.assertEqual(len(first), 1)
         self.passes(3, make, unattended=False)
         self.assertEqual({p.name for p in self.plans()}, first)
+
+    def test_WCH_B_an_unattended_profile_writes_a_partial_album_without_asking(self):
+        """Gate B (decided 2026-11-20): with Unresolved "mark", an unattended profile writes a Partial
+        album itself - tagged, marked Partial - instead of leaving a plan waiting for approval."""
+        make = lambda: self.proposal(targets=[dict(TAGS)], status="identified", tier="partial", provider="web",   # noqa: E731
+                                     confidence=70)
+        self.passes(1, make, unattended=True, unresolved={"action": "mark"})
+        self.assertEqual([p.name for p in self.plans()], [])            # (no plan left waiting)
+        files = list((self.top).rglob("*.flac"))
+        self.assertEqual(len(files), 1)
+        import tagio
+        self.assertEqual(tagio.read(files[0]).get("tagmender"), ["Partial"])
 
 
 if __name__ == "__main__":

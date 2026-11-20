@@ -3376,6 +3376,35 @@ def _date_key(cand):
     return tuple(parts + [99] * (3 - len(parts)))
 
 
+def earliest_entry(tied):
+    """TIE-1's last tie-break (decided 2026-11-20): between pressings of one album that nothing of
+    your copy, your country order, the original date or your release types tell apart, the
+    database's earliest entry - on Discogs the lowest release number (entries are numbered as they
+    are added); on MusicBrainz, which gives no entry date, the earliest release date and then the
+    release ID, so the same pick is made each time. Agalloch - Ashes Against the Grain: two 2006 US
+    pressings, both TE070, no longer leave the pressing unpicked. None for fewer than two, other
+    albums, entries of both databases mixed, or a pressing your copy argues against."""
+    pool = [s for s in tied if not s.get("clues_against")]
+    if len(pool) < 2 or not same_album(pool):
+        return None
+    sources = {s["cand"].get("source") for s in pool}
+    if len(sources) != 1:
+        return None
+    # (never between an album and a compilation or a live recording of the same songs)
+    if len({tuple(sorted(str(t).casefold() for t in s["cand"].get("release_types") or ())) for s in pool}) > 1:
+        return None
+    if sources == {"discogs"}:
+        try:
+            pick = min(pool, key=lambda s: int(str(s["cand"].get("id"))))
+        except (TypeError, ValueError):
+            return None
+        why = f"the earliest Discogs entry of these pressings ({pick['cand']['id']})"
+    else:
+        pick = min(pool, key=lambda s: (_date_key(s["cand"]) or (9999, 99, 99), str(s["cand"].get("id"))))
+        why = f"the first of these MusicBrainz pressings by release date and ID ({pick['cand']['id']})"
+    return pick, {"earliest entry": why}
+
+
 def prefer_original(tied):
     """Between pressings nothing about your copy tells apart, the label's original:
     the first pressing released. Only a pressing strictly earlier than every other
@@ -3751,7 +3780,8 @@ def _choose_pressing(tied, preferred_countries=None, prefs=None):
         return (same_pressing_listed_twice(group) or prefer_country(group, preferred_countries)
                 or _country_listed_twice(group, preferred_countries)
                 or prefer_original(group)
-                or (prefer_type_and_format(group, prefs) if preferred_countries else None))
+                or (prefer_type_and_format(group, prefs) if preferred_countries else None)
+                or (earliest_entry(group) if preferred_countries else None))
     if all(s.get("own_catno_absent") for s in tied) and weight < CLUE_WEIGHTS["disc TOC"]:
         return None              # your copy's catalogue number is on none of them: only hard proof decides
     return pick, telling
@@ -5226,10 +5256,12 @@ def format_contradictions(best):
 
 # Tie-breaks that pick a pressing when nothing about your copy tells them apart
 FALLBACK_PICKS = ("country preference", "original pressing", "duplicate", "release type preference",
-                  "format preference")
+                  "format preference", "earliest entry")
 # TIE-1: of those, the ones that choose between pressings (not one pressing listed twice): a pick
-# made by them alone is a suggestion, never the pressing tagged
-GUESS_PICKS = ("country preference", "original pressing", "release type preference", "format preference")
+# made by them alone is a guess - written in full, marked Partial "pressing guessed" (decided
+# 2026-11-20; before, it was only suggested)
+GUESS_PICKS = ("country preference", "original pressing", "release type preference", "format preference",
+               "earliest entry")
 
 
 def pressing_facts(s) -> dict:

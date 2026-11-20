@@ -107,6 +107,17 @@ def album(**kw):
     return a
 
 
+
+def _no_preference_pick(self, got, msg=None):
+    """TIE-1 (2026-11-20): what a release type or format preference cannot decide is left to the
+    last tie-break, the database's earliest entry - never decided by the preference itself."""
+    if got is not None:
+        self.assertEqual(set(got[1]), {"earliest entry"}, msg or got[1])
+
+
+unittest.TestCase.assertNoPreferencePick = _no_preference_pick
+
+
 def cand(**kw):
     c = {"source": "mb", "id": "x1", "url": "u", "artist": "Ahab", "title": "The Divinity of Oceans",
          "year": 2009, "date": "2009", "country": "DE", "label": "Napalm", "catnos": set(),
@@ -229,14 +240,14 @@ class TieBreak(unittest.TestCase):
         a = album()
         cfg = cfg_with(preferred_release_formats=["Vinyl", "CD"])
         tied = [mc.score_candidate(a, c, cfg) for c in self.pair()]
-        self.assertIsNone(mc.choose_pressing(tied, ["CA", "US"]))                 # before: undecided
+        self.assertNoPreferencePick(mc.choose_pressing(tied, ["CA", "US"]))                 # before: undecided
         pick = mc.choose_pressing(tied, ["CA", "US"], mc.release_preferences(cfg))
         self.assertEqual(pick[0]["cand"]["id"], "lp1")
         self.assertIn("format preference", pick[1])
         # a sized vinyl by kind: unknown (the vinyl may be a 7")
         cfg = cfg_with(preferred_release_formats=['12" Vinyl', "CD"])
         tied = [mc.score_candidate(a, c, cfg) for c in self.pair()]
-        self.assertIsNone(mc.choose_pressing(tied, ["CA", "US"], mc.release_preferences(cfg)))
+        self.assertNoPreferencePick(mc.choose_pressing(tied, ["CA", "US"], mc.release_preferences(cfg)))
         # Picard's own format names per medium, when the entry carries them
         cd, lp = cand(id="cd1", media_formats=["CD"]), cand(id="lp1", formats={"vinyl"}, media_formats=['12" Vinyl'])
         tied = [mc.score_candidate(a, c, cfg) for c in (cd, lp)]
@@ -272,7 +283,7 @@ class TieBreak(unittest.TestCase):
                       (cand(id="1", release_types=["Album"]), cand(id="2", formats={"cd"}, release_types=["Album"])),
                       (cand(id="1"), cand(id="2"))):
             tied = [mc.score_candidate(a, c, cfg) for c in cands]
-            self.assertIsNone(mc.choose_pressing(tied, ["US"], prefs))
+            self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], prefs))
 
     def test_never_between_tied_albums(self):
         # two albums that tie on score (same tracks): Album vs Compilation, a studio album
@@ -288,7 +299,7 @@ class TieBreak(unittest.TestCase):
                  dict(id="cd1", release_group=None), dict(id="lp1", formats={"vinyl"}, release_group=None))):
             cfg = cfg_with(**prefs_cfg)
             tied = [mc.score_candidate(a, c, cfg) for c in (cand(**x), cand(**y))]
-            self.assertIsNone(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
+            self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
             self.assertEqual(run(a, cand(**x), cand(**y), cfg=cfg)["best"]["cand"]["id"],
                              run(a, cand(**x), cand(**y), cfg=cfg_with())["best"]["cand"]["id"])
         # one Discogs master is one album too
@@ -312,7 +323,7 @@ class TieBreak(unittest.TestCase):
         a = album()
         cfg = cfg_with(preferred_release_formats=["SACD", "Vinyl"])
         tied = [mc.score_candidate(a, c, cfg) for c in self.pair()]
-        self.assertIsNone(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
+        self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
         # by name, an SACD is told from a CD
         tied = [mc.score_candidate(a, c, cfg) for c in (cand(id="cd1", media_formats=["CD"]),
                                                          cand(id="sacd", media_formats=["SACD"]))]
@@ -345,7 +356,7 @@ class TieBreak(unittest.TestCase):
             if y.get("source") == "discogs":
                 x = dict(x, discogs_master="m1")
             tied = [mc.score_candidate(a, c, cfg) for c in (cand(**x), cand(**y))]
-            self.assertIsNone(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)), (pref, x["id"]))
+            self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)), (pref, x["id"]))
 
     def test_names_only_between_musicbrainz_pressings(self):
         # Discogs names a format "Vinyl" (the size in its descriptions), Picard's setting uses
@@ -355,7 +366,7 @@ class TieBreak(unittest.TestCase):
         dg = dict(source="discogs", release_group=None, master_id="m1")
         tied = [mc.score_candidate(a, c, cfg) for c in (cand(id="lp1", formats={"vinyl"}, media_formats=["Vinyl"], **dg),
                                                          cand(id="cd1", media_formats=["CD"], **dg))]
-        self.assertIsNone(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))   # never "the CD"
+        self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))   # never "the CD"
         cfg = cfg_with(preferred_release_formats=["Vinyl", "CD"])
         tied = [mc.score_candidate(a, c, cfg) for c in (cand(id="lp1", formats={"vinyl"}, media_formats=["Vinyl"], **dg),
                                                          cand(id="cd1", media_formats=["CD"], **dg))]
@@ -365,7 +376,7 @@ class TieBreak(unittest.TestCase):
         tied = [mc.score_candidate(a, c, cfg) for c in (
             cand(id="mb-lp", formats={"vinyl"}, media_formats=['12" Vinyl'], release_group=None, master_id="m1"),
             cand(id="dg-lp", formats={"vinyl"}, media_formats=["Vinyl"], **dg))]
-        self.assertIsNone(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
+        self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
 
     def test_discouraged_never_wins_on_format(self):
         # Picard skips a discouraged type; another pressing's unknown types do not bring it back
@@ -394,7 +405,7 @@ class TieBreak(unittest.TestCase):
         cfg = cfg_with(preferred_release_formats=["CD", '12" Vinyl'])
         tied = [mc.score_candidate(a, c, cfg) for c in (cand(id="v1", formats={"vinyl"}, media_formats=["Vinyl"]),
                                                          cand(id="v2", formats={"vinyl"}))]
-        self.assertIsNone(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
+        self.assertNoPreferencePick(mc.choose_pressing(tied, ["US"], mc.release_preferences(cfg)))
 
     def test_no_country_order_no_preference(self):
         # match_albums switches the country order off until every kind of evidence was tried;
@@ -402,7 +413,7 @@ class TieBreak(unittest.TestCase):
         a = album()
         cfg = cfg_with(preferred_release_formats=["Vinyl"])
         tied = [mc.score_candidate(a, c, cfg) for c in self.pair()]
-        self.assertIsNone(mc.choose_pressing(tied, [], mc.release_preferences(cfg)))
+        self.assertNoPreferencePick(mc.choose_pressing(tied, [], mc.release_preferences(cfg)))
 
     def test_evidence_beats_preference(self):
         a = album(barcodes={"9006180000000"})

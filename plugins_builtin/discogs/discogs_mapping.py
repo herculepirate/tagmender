@@ -1452,6 +1452,16 @@ def extract_disc_fields(disc: dict, total_discs: int) -> dict[str, str]:
 # Discogs tracklist or it comes from nowhere.
 
 
+def once_title(title) -> str:
+    """A Discogs track title that repeats itself around " | " ("In The Beginning Was | In The
+    Beginning Was", release 33658254) written once; any other title as it is."""
+    title = str(title or '').strip()
+    parts = [p.strip() for p in title.split(' | ')]
+    if len(parts) > 1 and all(p and p.casefold() == parts[0].casefold() for p in parts):
+        return parts[0]
+    return title
+
+
 def extract_track_fields(track: dict, position: int, total: int) -> dict[str, str]:
     """Tags for one audio track from a Discogs tracklist.
 
@@ -1462,7 +1472,7 @@ def extract_track_fields(track: dict, position: int, total: int) -> dict[str, st
     `tracknumber` tag can hold.
     """
     out: dict[str, str] = {}
-    title = str(track.get('title') or '').strip()
+    title = once_title(track.get('title'))
     if title:
         out['title'] = title
     out['tracknumber'] = str(position)

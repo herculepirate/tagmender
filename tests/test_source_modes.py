@@ -239,10 +239,10 @@ class Modes(Base):
         eng = self.engine(http)
         eng.cfg["preferred_countries"] = ["US"]
         a = eng.plan(d)["albums"][0]
-        # (TIE-1: the preference only suggests Discogs's pressing - album known - and another
-        # tagger's ID still decides nothing)
-        self.assertEqual((a["identification"]["provider"], a["identification"]["tier"]), ("discogs", "album_only"))
-        self.assertEqual(a["identification"]["suggested"]["ref"], "discogs:908")
+        # (TIE-1, 2026-11-20: the preference's pick, Discogs's pressing, is written in full and marked
+        # guessed - and another tagger's ID still decides nothing)
+        self.assertEqual((a["identification"]["provider"], a["identification"]["tier"]), ("discogs", "exact"))
+        self.assertEqual(a["identification"]["guessed"]["ref"], "discogs:908")
         self.assertFalse(any("kept the release your files are tagged with" in n
                              for n in a["identification"].get("evidence") or []), a["identification"])
 
@@ -282,10 +282,11 @@ class Modes(Base):
         eng.cfg["preferred_countries"] = ["US"]
         a = eng.plan(d)["albums"][0]
         ch = a["files"][0]["changes"]
-        # (TIE-1: nothing of your copy behind either pick, the preference only suggests 908 -
-        # album known: no release ID written, and none of yours removed)
-        self.assertNotIn("discogs_release_id", ch)
-        self.assertEqual(a["identification"]["suggested"]["ref"], "discogs:908")
+        # (TIE-1, 2026-11-20: nothing of your copy behind either pick, the preference's 908 is
+        # written in full, marked guessed - and none of your IDs nothing is known of removed)
+        self.assertEqual(ch["discogs_release_id"], ["908"])
+        self.assertEqual(ch["tagmender"], ["Partial"])
+        self.assertEqual(a["identification"]["guessed"]["ref"], "discogs:908")
         self.assertNotIn("musicbrainz_albumid", ch)
         self.assertNotIn("musicbrainz_trackid", ch)
 

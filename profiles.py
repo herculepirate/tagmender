@@ -202,6 +202,10 @@ DEFAULTS = {
         "replace_min_confidence": 90.0,   # replace a tag that already has a value
         "organize_min_confidence": 95.0,  # rename, copy or move files
     },
+    # MOV-5b (decided 2026-11-20): an identified album scoring below organize_min_confidence is
+    # still filed into the library layout (true, the default), as the CLI's --file-below-score does
+    # for one run; false: tagged where it is, the move offered in the app
+    "file_below_score": True,
     # what is written: basic | enthusiast | audiophile (see levels.py)
     "tag_level": "enthusiast",
     "level_fields": {"add": [], "drop": []},
@@ -717,6 +721,8 @@ def validate(data: dict) -> list[str]:
     for fld, v in (pol.get("fields") or {}).items():
         if v not in POLICIES:
             p.append(f"field_policy.fields.{fld} must be one of {', '.join(POLICIES)}")
+    if not isinstance(d.get("file_below_score", False), bool):
+        p.append("file_below_score must be true or false")
     th = d["thresholds"]
     for k, v in th.items():
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not 0 <= float(v) <= 100:

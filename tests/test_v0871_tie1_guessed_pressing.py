@@ -1,8 +1,9 @@
-"""TIE-1 (docs/MATCHING_RULES.md, decided 2026-11-17): a pressing chosen among the album's tied
-pressings by a tie-break alone - your country order, the original release date, your preferred
-release types or formats - is no proof: the album is tagged as album known (album_only), and the
-tie-break's pick is proposed (the plan's "suggested" release, with the other tied pressings) for you
-to confirm by choosing it (Album > Use Suggested Pressing, Change Release, `plan --release`). A
+"""TIE-1 (docs/MATCHING_RULES.md, decided 2026-11-20, replacing the 2026-11-17 proposal): a pressing
+chosen among the album's tied pressings by a tie-break alone - your country order, the original
+release date, your preferred release types or formats, the database's earliest entry - is no proof,
+but it is written in full (both databases as Sources merges them) and marked TAGMENDER=Partial
+"pressing guessed" (the plan's "guessed" release, with the other tied pressings); a profile that
+accepts exact releases only still holds it, the pick suggested. A
 pick your copy's evidence made - your barcode or catalogue number on it alone, your scans, an exact
 disc ID that only it carries - stays exact; a disc ID several pressings share proves the disc, not
 the pressing (TOC-3). Synthetic albums and candidates, mocked providers: no library, no network."""
@@ -280,33 +281,29 @@ class TIE1_Engine(te.Base):
         e.use_discogs = False
         return e
 
-    def test_TIE1_country_order_tie_is_album_known_with_a_suggestion(self):
+    def test_TIE1_country_order_tie_is_written_in_full_marked_guessed(self):
         d = self.album("Band T", "Album T")
         e = self.eng(self.http())
         p = e.identify(e.albums_in(d)[0])
-        self.assertEqual((p.status, p.tier, p.release_id), ("identified", "album_only", ""), (p.why, p.evidence))
-        self.assertEqual(p.suggested["ref"], CA)
-        self.assertEqual(p.suggested["url"], f"https://musicbrainz.org/release/{CA}")
-        self.assertEqual([x["ref"] for x in p.suggested["others"]], [US])
-        self.assertIn("country order", p.suggested["why"])
-        self.assertIn(f"--release {CA}", p.suggested["why"])
-        for t in p.targets:
-            self.assertFalse([k for k in PRESSING_FIELDS if k in t], t)
-            self.assertEqual(t["album"], ["Album T"])
-        # the plan: what is written, its reason, and the suggestion (CLI --json carries it)
+        self.assertEqual((p.status, p.tier, p.release_id), ("identified", "exact", CA), (p.why, p.evidence))
+        self.assertFalse(p.suggested)
+        self.assertEqual(p.guessed["ref"], CA)
+        self.assertEqual([x["ref"] for x in p.guessed["others"]], [US])
+        self.assertIn("country order", p.guessed["by"])
+        t = p.targets[0]
+        self.assertEqual((t["catalognumber"], t["barcode"], t["label"], t["musicbrainz_albumid"]),
+                         (["CA-100"], ["0000000000017"], ["Maple"], [CA]))
         built = pl.build([p], e.profile, "job", extra_roots=[self.lib])
         a = built["albums"][0]
         ident = a["identification"]
-        self.assertEqual((ident["tier"], ident["suggested"]["ref"]), ("album_only", CA))
-        self.assertTrue(ident["reason"].startswith("ambiguous_release"), ident["reason"])
-        written = {k for fe in a["files"] for k in (fe.get("changes") or {})}
-        self.assertFalse(written & set(PRESSING_FIELDS), written)
-        self.assertIn("tagmender", written)                         # (marked Partial, its reason)
-        text = pl.preview(built)
-        self.assertIn(f"suggested pressing: musicbrainz {CA}", text)
-        self.assertIn(f"--release {CA}", text)
+        self.assertEqual((ident["tier"], ident["guessed"]["ref"]), ("exact", CA))
+        self.assertTrue(ident["reason"].startswith("ambiguous_release: pressing guessed: "), ident["reason"])
+        ch = a["files"][0]["changes"]
+        self.assertEqual((ch.get("tagmender"), ch.get("catalognumber")), (["Partial"], ["CA-100"]))
+        self.assertTrue(str(ch["tagmender_reason"][0]).startswith("ambiguous_release: pressing guessed"))
+        self.assertIn(f"pressing guessed: musicbrainz {CA}", pl.preview(built))
 
-    def test_TIE1_original_date_tie_is_album_known_too(self):
+    def test_TIE1_original_date_tie_is_written_in_full_too(self):
         d = self.album("Band T", "Album T")
         first = self.rel(FIRST, "US", "US-1", "Eagle", "0000000000031")
         first["date"] = "1999-01-01"
@@ -315,10 +312,9 @@ class TIE1_Engine(te.Base):
         e = self.eng(te.FakeHttp(mb=[first, later]))
         e.cfg["preferred_countries"] = []
         p = e.identify(e.albums_in(d)[0])
-        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
-        self.assertEqual(p.suggested.get("ref"), FIRST)
-        self.assertIn("original pressing", p.suggested["by"])
-        self.assertFalse([k for k in PRESSING_FIELDS if k in p.targets[0]], p.targets[0])
+        self.assertEqual((p.tier, p.release_id), ("exact", FIRST), (p.why, p.evidence))
+        self.assertIn("original pressing", p.guessed["by"])
+        self.assertEqual(p.targets[0]["catalognumber"], ["US-1"])
 
     def test_TIE1_your_barcode_on_one_stays_exact(self):
         d = self.album("Band T", "Album T", barcode="0000000000024")
@@ -334,30 +330,29 @@ class TIE1_Engine(te.Base):
         p = e.identify(e.albums_in(d)[0])
         self.assertEqual((p.tier, p.release_id), ("exact", US), (p.why, p.evidence))
 
-    def test_TIE1_forcing_the_suggested_release_tags_it_in_full(self):
+    def test_TIE1_choosing_the_guessed_release_makes_it_yours(self):
         d = self.album("Band T", "Album T")
         e = self.eng(self.http())
         p = e.identify(e.albums_in(d)[0])
-        ref = p.suggested["ref"]
-        e.force = {os.path.realpath(str(d)): ref}                   # (Use Suggested Pressing, --release)
+        ref = p.guessed["ref"]
+        e.force = {os.path.realpath(str(d)): ref}                   # (Change Release, --release)
         q = e.identify(e.albums_in(d)[0])
         self.assertEqual((q.status, q.tier, q.release_id), ("identified", "exact", CA), q.why)
-        self.assertFalse(q.suggested)
-        t = q.targets[0]
-        self.assertEqual((t["catalognumber"], t["barcode"], t["label"], t["musicbrainz_albumid"]),
-                         (["CA-100"], ["0000000000017"], ["Maple"], [CA]))
+        self.assertFalse(q.guessed)
+        a = pl.build([q], e.profile, "job", extra_roots=[self.lib])["albums"][0]
+        self.assertNotEqual(a["files"][0]["changes"].get("tagmender"), ["Partial"])
 
-    def test_TIE1_unattended_plan_writes_no_pressing_fields(self):
-        """What a watched folder and `tagmender run` do: Engine.plan, nobody choosing."""
+    def test_TIE1_unattended_plan_writes_the_guessed_pressing(self):
+        """What a watched folder and `tagmender run` do (decided 2026-11-20: everywhere)."""
         d = self.album("Band T", "Album T")
         e = self.eng(self.http())
         plan = e.plan(str(d))
         a = plan["albums"][0]
-        self.assertEqual(a["identification"]["tier"], "album_only")
-        self.assertEqual(a["identification"]["suggested"]["ref"], CA)
+        self.assertEqual(a["identification"]["tier"], "exact")
+        self.assertEqual(a["identification"]["guessed"]["ref"], CA)
         written = {k for fe in a["files"] for k in (fe.get("changes") or {})}
-        self.assertTrue(written)
-        self.assertFalse(written & set(PRESSING_FIELDS), written)
+        self.assertTrue({"musicbrainz_albumid", "catalognumber", "barcode"} <= written, written)
+        self.assertEqual(a["files"][0]["changes"].get("tagmender"), ["Partial"])
 
     def test_TIE1_exact_only_profile_holds_it_with_the_suggestion(self):
         d = self.album("Band T", "Album T")
@@ -368,19 +363,14 @@ class TIE1_Engine(te.Base):
         self.assertEqual(p.suggested["ref"], CA)
         self.assertIn("pressing suggested", p.reason)
 
-    def test_TIE1_the_reason_names_the_suggestion(self):
+    def test_TIE1_the_reason_names_the_guessed_pressing(self):
         d = self.album("Band T", "Album T")
         e = self.eng(self.http())
         a = pl.build([e.identify(e.albums_in(d)[0])], e.profile, "job", extra_roots=[self.lib])["albums"][0]
         import reasons
         why = a["identification"]["reason"]
-        self.assertEqual(why, f"ambiguous_release: album known, pressing not established: "
-                              f"pressing suggested, not confirmed: {CA}")
+        self.assertTrue(why.startswith(f"ambiguous_release: pressing guessed: {CA} ("), why)
         self.assertLessEqual(len(why), reasons.MAX_LEN)
-        self.assertEqual(reasons.suggested_ref(why), CA)
-        self.assertEqual(reasons.suggested_ref("ambiguous_release: album known, pressing not established"), "")
-        # (written to the files as TAGMENDER_REASON)
-        self.assertEqual({str((fe["changes"].get("tagmender_reason") or [""])[0]) for fe in a["files"]}, {why})
 
     def test_TIE1_needs_attention_report_lists_it_to_confirm(self):
         import report
@@ -408,16 +398,16 @@ class TIE1_Engine(te.Base):
         e.cfg["prefer_source"] = prefer
         return e.identify(e.albums_in(d)[0])
 
-    def test_TIE1_the_sources_preference_alone_only_suggests(self):
+    def test_TIE1_the_sources_preference_alone_is_a_guess(self):
         """HF-2 / TIE-1: two different pressings, nothing of your copy behind either."""
         p = self.sources("musicbrainz")
-        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
-        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), (CA, ["discogs:904"]))
-        self.assertIn("Sources prefers MusicBrainz", p.suggested["by"])
-        self.assertFalse([k for k in PRESSING_FIELDS if k in p.targets[0]], p.targets[0])
+        self.assertEqual((p.tier, p.release_id), ("exact", CA), (p.why, p.evidence))
+        self.assertEqual((p.guessed["ref"], [x["ref"] for x in p.guessed["others"]]), (CA, ["discogs:904"]))
+        self.assertIn("Sources prefers MusicBrainz", p.guessed["by"])
         p = self.sources("discogs")
-        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
-        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), ("discogs:904", [CA]))
+        self.assertEqual(p.tier, "exact", (p.why, p.evidence))
+        self.assertEqual((p.guessed["ref"], [x["ref"] for x in p.guessed["others"]]), ("discogs:904", [CA]))
+        self.assertEqual(p.targets[0].get("discogs_release_id"), ["904"])
 
     def test_TIE1_the_two_databases_one_pressing_stays_exact(self):
         p = self.sources("musicbrainz", linked=True)
@@ -463,20 +453,17 @@ class TIE1_Engine(te.Base):
             import shutil
             shutil.rmtree(d)
 
-    def test_TIE1_a_suggested_discogs_pressing_confirms_with_its_musicbrainz_twin(self):
-        """M4: the suggestion names the Discogs pressing with MusicBrainz's entry of it; choosing it
-        tags from both, as the matcher's own pick would, though MusicBrainz links no Discogs entry."""
+    def test_TIE1_a_guessed_discogs_pressing_is_written_with_its_musicbrainz_twin(self):
+        """M4: the guess is the Discogs pressing with MusicBrainz's entry of it, tagged from both, as
+        the matcher's own pick would be, though MusicBrainz links no Discogs entry."""
         d, e = self.discogs_pair()
         p = e.identify(e.albums_in(d)[0])
-        self.assertEqual(p.tier, "album_only", (p.why, p.evidence))
-        ref = p.suggested["ref"]
+        self.assertEqual(p.tier, "exact", (p.why, p.evidence))
+        ref = p.guessed["ref"]
         self.assertEqual(ref, f"discogs:904+{CA}")
         self.assertEqual(engine.parse_release_ref(ref), ("discogs", "904"))
         self.assertEqual(engine.release_twin(ref), ("mb", CA))
-        e.force = {os.path.realpath(str(d)): ref}
-        q = e.identify(e.albums_in(d)[0])
-        self.assertEqual((q.status, q.tier), ("identified", "exact"), q.why)
-        t = q.targets[0]
+        t = p.targets[0]
         self.assertEqual((t.get("discogs_release_id"), t.get("musicbrainz_albumid")), (["904"], [CA]))
 
     def test_TIE1_exact_only_profile_reason_names_the_release_to_confirm(self):
@@ -491,18 +478,14 @@ class TIE1_Engine(te.Base):
         self.assertEqual(reasons.suggested_ref(a["identification"]["reason"]), CA)
         self.assertTrue(search.can_use_suggested(a))
 
-    def test_TIE1_tag1_withdrawal_keeps_the_suggestion(self):
-        """m2: TAG-1 withdrew TagMender's own pick and a tie-break chose in its place: album only,
-        the tie-break's pick still suggested."""
+    def test_TIE1_a_tie_break_pick_is_never_left_album_only_by_tag1(self):
+        """m2 (2026-11-20): a tie-break's pick is written in full, marked guessed - TAG-1's
+        album-only withdrawal is not asked."""
         d = self.album("Band T", "Album T")
         e = self.eng(self.http())
-
-        def withdrawn(p, out):
-            return e._album_only(p, {"tied": [{"source": "mb", "id": CA}, {"source": "mb", "id": US}],
-                                     "doubt": "TagMender chose this album's pressing earlier by ..."})
-        with mock.patch.object(e, "_own_guess_withdrawn", side_effect=withdrawn):
+        with mock.patch.object(e, "_own_guess_withdrawn", side_effect=AssertionError("not asked")):
             p = e.identify(e.albums_in(d)[0])
-        self.assertEqual((p.tier, p.suggested.get("ref")), ("album_only", CA))
+        self.assertEqual((p.tier, p.guessed.get("ref")), ("exact", CA))
 
     def test_TIE1_tools_reading_saved_results_treat_a_suggestion_as_album_known(self):
         """m4: tag_albums.py, web_tag.py, inbox.py read the matcher's saved results."""
@@ -521,7 +504,7 @@ class TIE1_Engine(te.Base):
 class TIE1_Set(DSC10Base):
     """DSC-10: a set searched for as a whole whose pressings tie is album known as one set."""
 
-    def test_TIE1_a_set_whose_pressings_tie_is_one_album_known(self):
+    def test_TIE1_a_set_whose_pressings_tie_is_one_album_guessed(self):
         top = self.voyage()
         rels = []
         for rid, country, code in ((VOY_DE, "DE", "0123456789012"), (VOY_US, "US", "0123456789029")):
@@ -534,12 +517,11 @@ class TIE1_Set(DSC10Base):
         props = eng.proposals(self.lib)
         self.assertEqual(len(props), 1, self.summary(props))           # (never each disc on its own)
         p = props[0]
-        self.assertEqual((p.status, p.tier, p.release_id, p.source_dir), ("identified", "album_only", "", str(top)),
+        self.assertEqual((p.status, p.tier, p.release_id, p.source_dir), ("identified", "exact", VOY_US, str(top)),
                          (p.why, p.notes))
-        self.assertEqual((p.suggested["ref"], [x["ref"] for x in p.suggested["others"]]), (VOY_US, [VOY_DE]))
+        self.assertEqual((p.guessed["ref"], [x["ref"] for x in p.guessed["others"]]), (VOY_US, [VOY_DE]))
         self.assertEqual([t["discnumber"][0] for t in p.targets], ["1"] * 3 + ["2"] * 3 + ["3"] * 3)
-        self.assertFalse([k for t in p.targets for k in PRESSING_FIELDS if k in t])
-        self.assertTrue(any("found searching for the set" in n for n in p.notes), p.notes)
+        self.assertEqual({t["catalognumber"][0] for t in p.targets}, {"V-US"})
 
 
 class TIE1_TAG3(te.Base):
@@ -556,7 +538,7 @@ class TIE1_TAG3(te.Base):
         e.cfg["preferred_countries"] = ["US"]
         return e
 
-    def test_TIE1_TAG3_tagmenders_writes_of_the_other_pressing_are_taken_back(self):
+    def test_TIE1_TAG3_the_guessed_pick_replaces_the_other_pressings_writes(self):
         y = "11111111-2222-3333-4444-555555555555"
         d = self.make(MUSICBRAINZ_ALBUMID=y, LABEL="Label MB", RELEASECOUNTRY="DE")
         files = sorted(str(f) for f in d.glob("*.flac"))
@@ -567,13 +549,12 @@ class TIE1_TAG3(te.Base):
         e = self.eng(http)
         with mock.patch.object(t3.ma, "tagmender_pressing_writes", return_value=writes):
             p = e.identify(e.albums_in(d)[0])
-        self.assertEqual((p.tier, p.suggested.get("ref")), ("album_only", "discogs:904"), (p.why, p.notes))
-        self.assertEqual(set(p.restore), set(files))
+        self.assertEqual((p.tier, p.guessed.get("ref")), ("exact", "discogs:904"), (p.why, p.notes))
         ch = pl.build([p], e.profile)["albums"][0]["files"][0]["changes"]
-        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"), "TagMender's own ID of the other pressing goes")
-        self.assertEqual(ch.get("label"), ["PDU"], "the label as it was before TagMender's job")
-        self.assertIsNone(ch.get("releasecountry", "kept"))
-        self.assertNotIn("discogs_release_id", ch)
+        self.assertEqual(ch.get("discogs_release_id"), ["904"])
+        self.assertIsNone(ch.get("musicbrainz_albumid", "kept"), "the other pressing's ID never stays beside it")
+        self.assertNotEqual(ch.get("label"), ["Label MB"])
+        self.assertNotEqual(ch.get("releasecountry"), ["DE"])
 
     def test_TIE1_TAG3_your_barcode_proves_the_pick_and_replaces_the_other_pressing(self):
         d = self.make(MUSICBRAINZ_ALBUMID=t3.OLD_MB, BARCODE=t3.PICK_BARCODE)

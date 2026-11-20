@@ -18,7 +18,7 @@ from . import style
 from .common import HERE
 
 DIR = HERE / "assets" / "icons" / "lucide"
-NAMES = ("folder-plus", "folder-open", "eye", "check", "x", "search", "panel-right",
+NAMES = ("folder-plus", "file-plus", "folder-open", "eye", "check", "x", "search", "panel-right",
          "library", "triangle-alert", "history", "folder-sync", "list-checks", "sliders-horizontal",
          "circle-check", "circle-alert", "ban", "circle-x", "circle-dot", "loader-circle",
          "tag", "image", "info", "external-link", "globe", "disc-3", "refresh-cw", "undo-2", "rotate-ccw",

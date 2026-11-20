@@ -26,8 +26,9 @@ An album is processed when:
     pass until it is filed.
 
 An interrupted job found at start is recovered first. An `unattended` profile applies an
-album only when every part of it is Ready (identified for sure); one it is not sure of is
-planned and waits, as every album of a profile that is not `unattended` does: the plans wait in ~/.local/state/tagmender/plans/ for approval
+album when every part of it is Ready - a Partial or album-known album too, marked Partial, unless
+the profile's Unresolved is "leave", which holds it; one held or unresolved is planned and waits,
+as every album of a profile that is not `unattended` does: the plans wait in ~/.local/state/tagmender/plans/ for approval
 (`tagmender watch --approve`, or Apply on the app's Watched folders page).
 """
 from __future__ import annotations
@@ -170,7 +171,10 @@ def _is_partial(entry) -> bool:
     """A plan entry tagged Partial (its album known, its release not; an album-only one, its
     album known and its pressing tied, is tagged Partial too): tried again later, as an
     unresolved album is."""
-    return (entry.get("identification") or {}).get("tier") in levels.ALBUM_TIERS
+    ident = entry.get("identification") or {}
+    # (TIE-1, 2026-11-20: a pressing a tie-break guessed is written in full, its tier exact, but it is
+    # marked Partial and tried again as one)
+    return ident.get("tier") in levels.ALBUM_TIERS or bool(ident.get("guessed"))
 
 
 # which status a set of albums is remembered by: the one most in need of another look first
@@ -979,8 +983,9 @@ class Watcher:
                 for w in x.get("attention") or ():
                     self.log.info("%s: %s (DSC-12)", x.get("source_dir"), w)
             res = None
-            # "File albums without asking" files only what it is sure of: an album it is not
-            # (Unresolved, Partial, a pressing it could not tell) waits for your approval
+            # "File albums without asking" files what it identified - a Partial or album-known album
+            # too, marked Partial, unless the profile's Unresolved is "leave" (then it is held and
+            # waits for your approval); an Unresolved album waits
             # (DSC-12: another copy of an album you have, kept where it is, is yours to decide)
             sure = all(x["status"] == "ready" and not x.get("attention_decide")
                        for x in plan["albums"] if planmod.has_work(x))
@@ -988,6 +993,7 @@ class Watcher:
             # (only a proven release: an album-known result never takes the place of a filed one)
             if recheck and not (sure and has_work and all(
                     (x.get("identification") or {}).get("tier") == "exact"
+                    and not (x.get("identification") or {}).get("guessed")       # (TIE-1: a guess is no proof)
                     for x in plan["albums"] if planmod.has_work(x))):
                 self.seen_again(db, k)                 # (nothing better known of it: it stays as filed)
                 return

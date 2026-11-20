@@ -1,5 +1,34 @@
 # Release notes
 
+## 0.8.86
+
+**Albums the databases know are no longer given back with nothing written.** A review of every way an album could end with nothing, and of how MusicBrainz, Discogs and the web are searched. Of 78 albums in a large library that had been left Unresolved or Partial, every one now gets tags: 38 their exact release, 21 their album's tags (pressing unknown), the rest the album's own facts or, by fingerprint, each track's recording.
+
+**Searching harder before giving up**
+- MusicBrainz is searched by a title's words as well as its exact wording ("The Exuviae of Gods, Pt. 2" finds "..., Part II").
+- Albums tagged "Various" are searched by their track artists; a wrong album tag no longer hides the folder's title; catalogue numbers are tried in their other spellings ("TWI1006", "TWI 1006").
+- Releases of other labels found by a bare catalogue number no longer end a search before the title is asked.
+- A same-titled single or compilation no longer hides the album's other release group or master.
+- Versions with a track more or fewer than your files (a hidden track ripped apart) are compared, those your folder's edition words name first ("2020 Remix / Remaster").
+- An album with no barcode can be reached through the barcode Deezer sells it under; Discogs is searched by a distinctive track title when no result is titled as your album.
+
+**Matching what is found**
+- "Pt. 2", "Part II" and "Part 2" read alike; another part of a series is another album.
+- Album artist "Various": your track artists are compared with the release's credit (The Minimalists).
+- Catalogue numbers written "214/215" and "214/15" are one set's; MusicBrainz and Discogs entries of one pressing are paired by them.
+- Discogs works listed with a length but movements without one are compared by the work's whole length.
+- Discs tagged "Album CD1: subtitle", or one disc carrying its own subtitle, stay one album.
+- A track saved twice in a folder (a featured artist's credit, an accent or a second apart) counts once; a cover's credit or a bonus mark in brackets no longer makes titles disagree.
+- A date MusicBrainz gives later than your rip log, where Discogs's entry of the same pressing agrees with the log, is Discogs's.
+
+**When the exact release cannot be proven**
+- The album's own facts are written when its tracks prove it, even where the artist or title differs (a "Various" album, performers credited instead of the composer); a sound-alike album is never taken for the original.
+- A release listing few or no track lengths is matched by its track titles; a Discogs release with no master gives its album's facts.
+- Another album that does not fit your files no longer blocks these tags; entries of one album written differently on MusicBrainz and Discogs are one album.
+- When nothing else fits, files whose fingerprints identify their recordings get each recording's title, artist and IDs, marked Partial and left where they are.
+- A set whose discs are different albums can be tagged disc by disc from their albums.
+- With Unresolved set to "leave", these tags are now shown, unticked, for you to apply; before, they were worked out and thrown away.
+
 ## 0.8.85
 
 - Folders copied into the folder you previewed after it was listed can be dropped onto the window again. They were turned away as "Already in the preview" (during Apply and after it) until TagMender was restarted; now only an album actually in the list counts as already there (DRP-1).

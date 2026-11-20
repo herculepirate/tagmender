@@ -330,7 +330,7 @@ class Dropping(unittest.TestCase):
         # DRP-1: folders copied into the previewed folder after it was listed (or left after Apply
         # emptied the list) were refused as "Already in the preview" until TagMender restarted
         plan = {"albums": [{"files": [{"src": str(self.tmp / "lib" / "A" / "a.flac")}]}]}
-        for listed in (plan, None):
+        for listed in (plan, None, {"albums": []}):            # (None: Apply emptied it; []: Delete did)
             page = self.Page(str(self.tmp / "lib"), listed)
             self.assertEqual(mm.new_paths(page, [str(self.tmp / "lib/B")]), ([str(self.tmp / "lib/B")], []))
         # (while that folder is being listed or previewed, the run reads it: held, never listed twice)

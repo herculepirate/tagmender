@@ -522,7 +522,56 @@ def _ratio(a, b):
                difflib.SequenceMatcher(None, sorted_a, sorted_b).ratio())
 
 
+# TTL-1: a part, volume, number, chapter or book with its numeral, however written ("Pt. 2",
+# "Part II", "part two", "Vol.3", "Volume III"): the same numbered part reads the same, and two
+# titles naming different parts of one series are different albums
+_PART_WORDS = r"one|two|three|four|five|six|seven|eight|nine|ten"
+# (a numeral after its word with a dot or a space between; roman and word numerals only after part,
+# volume, chapter or book - "No One Knows", "Nov", "No Civil" are no numbered parts)
+_PART_NUM = re.compile(r"\b(?:(pt|part|vol|volume|chapter|chap|book|bk)(?:\.\s*|\s+)"
+                       r"(\d{1,3}|[IVXLC]{1,7}(?![a-z])|[ivxlc]{1,4}(?![a-z])|" + _PART_WORDS + r")"
+                       r"|(no|nr)(?:\.\s*|\s+)(\d{1,3}))\b", re.I)
+_PART_KIND = {"pt": "part", "part": "part", "vol": "volume", "volume": "volume", "no": "number", "nr": "number",
+              "chapter": "chapter", "chap": "chapter", "book": "book", "bk": "book"}
+_WORD_NUM = {w: i for i, w in enumerate(_PART_WORDS.split("|"), 1)}
+
+
+def _roman(text):
+    vals, total, prev = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}, 0, 0
+    for ch in reversed(text):
+        v = vals[ch]
+        total, prev = (total - v, prev) if v < prev else (total + v, v)
+    return total
+
+
+def part_numbers(title) -> tuple:
+    """TTL-1: ((kind, number), ...) a title names: "The Exuviae of Gods, Pt. 2" -> (("part", 2),)."""
+    out = []
+    for k1, n1, k2, n2 in _PART_NUM.findall(str(title or "")):
+        kind, n = (k1 or k2), (n1 or n2).casefold()
+        value = int(n) if n.isdigit() else _WORD_NUM.get(n) or _roman(n)
+        out.append((_PART_KIND[kind.casefold()], value))
+    return tuple(out)
+
+
+def _parts_read(title) -> str:
+    return _PART_NUM.sub(lambda m: "{} {}".format(*part_numbers(m.group(0))[0]), str(title or ""))
+
+
 def title_sim(tag_title, cand_title):
+    pa, pb = part_numbers(tag_title), part_numbers(cand_title)
+    if pa or pb:
+        best = _title_sim(_parts_read(tag_title), _parts_read(cand_title))
+        # (another part of the series: another album - of a kind both name, no number in common;
+        # "Symphony No. 5 & Piano Concerto No. 4" in either order is one coupling)
+        for k in {k for k, _ in pa} & {k for k, _ in pb}:
+            if not {v for x, v in pa if x == k} & {v for x, v in pb if x == k}:
+                best = min(best, 0.6)
+        return max(best, 0.0)
+    return _title_sim(tag_title, cand_title)
+
+
+def _title_sim(tag_title, cand_title):
     raw = _ratio(fold(tag_title), fold(cand_title))
     stripped = _ratio(fold(strip_edition(tag_title)), fold(strip_edition(cand_title)))
     bare = _ratio(fold(drop_trailing_brackets(tag_title)), fold(drop_trailing_brackets(cand_title)))
@@ -870,7 +919,9 @@ def catnos_agree(mine, theirs):
 # often a format or disc suffix ("COL 474161-2", "DOMO 71063-2", "ABC 1001-2"), so it names a
 # range only in a Japanese-style number (four letters, four or more digits) and is then only
 # ever the same as that range written with "~" (catno_range_same), never one of its numbers.
-_CATNO_RANGE = re.compile(r"^\s*([A-Za-z]{2,6})[\s-]?(\d{3,7})\s*([~\-])\s*(\d{1,7})\s*$")
+# CAT-9: "/" too - a two-disc set's numbers, "mode 214/215" (MusicBrainz) and "mode 214/15"
+# (Discogs) are mode 214 and mode 215 (The Minimalists)
+_CATNO_RANGE = re.compile(r"^\s*([A-Za-z]{2,6})[\s-]?(\d{3,7})\s*([~\-/])\s*(\d{1,7})\s*$")
 
 
 def catno_range(code, dash=True):
@@ -888,7 +939,7 @@ def catno_range(code, dash=True):
     last = first[:len(first) - len(end)] + end
     a, b = int(first), int(last)
     n = b - a + 1
-    if n < 2 or n > (20 if sep == "~" else 9):
+    if n < 2 or n > (20 if sep == "~" else 9):           # ("-" and "/": 2 to 9 discs)
         return []
     width = len(first)
     return [norm_code(f"{prefix}{str(x).zfill(width)}") for x in range(a, b + 1)]
@@ -1397,6 +1448,34 @@ def sleeve_times(known) -> bool:
         sum(1 for f, c in known if f - c >= 0.5) >= 0.75 * len(known)
 
 
+def work_lengths(album, cand, cfg):
+    """TRK-9: a candidate whose works list no movement lengths, only the work's (Discogs index
+    tracks: "City Life" 23:20 over five movements with none - The Minimalists, Discogs 14703366),
+    lined up track for track with the files: each such work's movements take their files' own
+    lengths when those files added up agree with the work's length, and the work's length shared
+    out evenly otherwise (they then disagree as they should). CAND unchanged when nothing is so
+    listed or the counts differ."""
+    files, ct = album.get("tracks") or [], cand.get("tracks") or []
+    if len(files) != len(ct) or not any(t.get("work_secs") and not t.get("secs") for t in ct):
+        return cand
+    tracks, i = [dict(t) for t in ct], 0
+    while i < len(tracks):
+        t = tracks[i]
+        if not (t.get("work_secs") and not t.get("secs")):
+            i += 1
+            continue
+        j = i
+        while j < len(tracks) and tracks[j].get("index") == t.get("index") and not tracks[j].get("secs"):
+            j += 1
+        mine = [float(files[k].get("secs") or 0) for k in range(i, j)]
+        whole = float(t["work_secs"])
+        fits = all(mine) and duration_ok(sum(mine), whole, cfg)
+        for k in range(i, j):
+            tracks[k]["secs"] = mine[k - i] if fits else whole / (j - i)
+        i = j
+    return dict(cand, tracks=tracks)
+
+
 def duration_ok(file_secs, cand_secs, cfg):
     tol = max(cfg["duration_tol_s"], cfg["duration_tol_pct"] * cand_secs)
     return abs(file_secs - cand_secs) <= tol
@@ -1450,8 +1529,17 @@ def track_titles_agree(a, b):
     if _ratio(fold(strip_edition(a or "")), fold(strip_edition(b or ""))) >= 0.9:
         return True
     fa, fb = strip_featuring(a), strip_featuring(b)
-    return (fa, fb) != (str(a or ""), str(b or "")) and \
-        _ratio(fold(strip_edition(fa)), fold(strip_edition(fb))) >= 0.9
+    if (fa, fb) != (str(a or ""), str(b or "")) and _ratio(fold(strip_edition(fa)), fold(strip_edition(fb))) >= 0.9:
+        return True
+    # TRK-11: a cover's credit or a bonus mark in brackets on either side left out too ("Your
+    # Mistake [Agnostic Front cover] [bonus track]" is MusicBrainz's "Your Mistake")
+    ca, cb = _CREDIT_BRACKETS.sub("", str(fa or "")).strip(), _CREDIT_BRACKETS.sub("", str(fb or "")).strip()
+    return bool(ca and cb) and (ca, cb) != (str(fa or ""), str(fb or "")) and \
+        _ratio(fold(strip_edition(ca)), fold(strip_edition(cb))) >= 0.9
+
+
+_CREDIT_BRACKETS = re.compile(r"\s*[\(\[][^\)\]]*\b(?:cover|covered|originally (?:by|performed)|written by|"
+                              r"bonus(?: track)?|hidden track)\b[^\)\]]*[\)\]]", re.I)
 
 
 def _title_or_its_start(a, b):
@@ -2689,7 +2777,7 @@ def rip_date_drop(scored, cfg):
     if first and log_year < first:
         for s in dated:
             s["rip_date_kept"] = (f"{RIP_DATE_AGAINST}{log_year}, before the album's first release ({first}): "
-                                  "its date is wrong, so it rules out nothing (DAT-3)")
+                                  "the log or the database is wrong, so it rules out nothing (DAT-3)")
         return scored, []
     not_later = [s for s in scored if not s.get("rip_date_later")]
     fits = [s for s in not_later if s["tracks_ok"] and not s.get("media_why") and not s.get("conflict")
@@ -4379,10 +4467,22 @@ def score_candidate(album, cand, cfg, ocr_text=""):
     notes = []
     # the hidden track before track 1, where the files have it as a file numbered 0
     cand = with_pregap(album, cand)
+    cand = work_lengths(album, cand, cfg)                # TRK-9
 
     a_sim = max(artist_sim(album["artist"], cand["artist"]),
                 artist_sim(album["artist"], cand.get("artist_alt") or ""),
                 artist_sim(album["artist"], cand.get("artist_sort") or ""))
+    # VAR-1: an album artist "Various" names nobody: the files' own track artists, each named in
+    # the release's credit ("Reich", "Gann", "Andriessen" ... in "Reich, Riley, Andriessen, Gann,
+    # Adams, Lang; Orkest de Volharding"), are the album's artists
+    names = album.get("track_artists") or []
+    if names and a_sim < 0.85:
+        joined = ", ".join(names)
+        by_tracks = max(artist_sim(joined, cand["artist"]), artist_sim(joined, cand.get("artist_alt") or ""),
+                        artist_sim(joined, ", ".join(cand.get("track_artists") or ())))
+        if by_tracks > a_sim:
+            a_sim = by_tracks
+            notes.append("album artist Various: your track artists are the release's")
     # learned from your library: albums by this artist are filed under that folder
     aliases = cfg.get("artist_aliases") or {}
     learned = [a for key in (album["artist"], album.get("artist_folder") or "")

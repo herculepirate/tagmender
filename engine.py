@@ -73,6 +73,17 @@ _DISC_SUFFIX = re.compile(r"\s*[\(\[\{]\s*(?:disc|disk|cd|dvd)\s*" + _DISC_WORD 
                           r"(?:\s*(?:of|/)\s*\d+)?(?:\s*[:\-\u2013]\s*[^\)\]\}]*)?\s*[\)\]\}]"
                           r"|\s*(?:[-:,\u2013]\s*)?\b(?:disc|disk|cd|dvd)\s*" + _DISC_WORD +
                           r"(?:\s*(?:of|/)\s*\d+)?\s*$", re.I)
+# DSC-15b: an unbracketed marker followed by the disc's own subtitle ("The Minimalists CD1:
+# Steve Reich, Kyle Gann, Louis Andriessen"), taken off only where a title of its own is left
+# before it (not "Mix CD 1: Pete Tong" beside "Mix CD 1: Sasha", nor "The CD 2: x")
+_DISC_SUBTITLE = re.compile(r"(?<=\S)\s+(?:[-,\u2013]\s*)?\b(?:disc|disk|cd|dvd)\s*" + _DISC_WORD +
+                            r"(?:\s*(?:of|/)\s*\d+)?\s*(?::|\s[-\u2013])\s*\S.*$", re.I)
+
+
+def _off_disc_subtitle(title: str) -> str:
+    head = _DISC_SUBTITLE.sub("", title).strip()
+    words = [w for w in re.findall(r"\w+", head) if w not in ("the", "a", "an")]
+    return head if head != title.strip() and len("".join(words)) >= 4 else title
 
 
 def _first(meta, k):
@@ -93,7 +104,7 @@ def _album_title(meta, years=True) -> str:
         album_y = _DISC_YEARS.sub("", album)
     else:
         album_y = album
-    return re.sub(r"\s+", " ", _DISC_SUFFIX.sub("", album_y)).strip() or album
+    return re.sub(r"\s+", " ", _DISC_SUFFIX.sub("", _off_disc_subtitle(album_y))).strip() or album
 
 
 _DISC_MARK_NUMBER = re.compile(r"\b(?:disc|disk|cd)\s*(\d+)", re.I)
@@ -4092,6 +4103,35 @@ class Engine:
                                         reason=f"identified, but the release could not be fetched: {exc}")
             except Exception as exc:                          # the release does not fit the files after all
                 self.log.warning("tags for %s: %s", g.folder, exc)
+                # FBK-3: what every pressing shares, when the album is established all the same -
+                # never nothing for an album the databases know (unless Partial is off)
+                ur = self.profile["unresolved"]
+                if ur.get("allow_partial", True) and not _provider_failed(errors) \
+                        and self._accepts("partial") and not getattr(self, "_disc_alone", False) and \
+                        not getattr(self, "_trialling", False):
+                    try:
+                        p = self._partial(dict(out, status="review"), album, files, base)
+                    except ma.ProviderUnavailable as exc2:        # (retried later, as the review path is)
+                        self.log.warning("partial tags for %s: %s", g.folder, exc2)
+                        host = {"mb": "musicbrainz"}.get(exc2.host, exc2.host)
+                        errors[host] = exc2.kind
+                        code = exc2.kind if exc2.kind == "rate_limited" else f"{host}_unavailable"
+                        return planmod.Proposal(**base, status="unresolved", reason_codes=[code],
+                                                reason=f"identified, but the release could not be fetched: {exc2}")
+                    except Exception as exc2:
+                        self.log.warning("partial tags for %s failed: %s", g.folder, exc2)
+                        p = None
+                    if p:
+                        p.notes = list(p.notes or []) + [
+                            f"the release's tracks did not line up with your files ({exc}); the album's "
+                            "own facts are written, not the release's (FBK-3)"]
+                        if ur.get("action") == "leave":       # (LVE-1)
+                            p.held = ("held: the album is established, its release's tracks do not line up; "
+                                      "Unresolved is set to \"leave\" in this profile: nothing is written "
+                                      "unless you tick it and apply")
+                        if (out or {}).get("own_disproved"):
+                            p.restore = self._withdraw_own(p.files, out, title=True, errors=errors)
+                        return p
                 return planmod.Proposal(**base, status="unresolved", reason_codes=["incomplete_album"],
                                         reason=f"matched, but the release's tracks do not line up with the files: {exc}")
         if trialling:
@@ -4150,7 +4190,9 @@ class Engine:
         # held part must not let the set's other parts be filed)
         hold = (not partial_ok and ur.get("action") == "leave" and ur.get("allow_partial", True)
                 and not _provider_failed(errors) and self._accepts("partial") and not alone)
-        if (partial_ok or hold) and not alone and out and out.get("status") in PARTIAL_FROM and out.get("best"):
+        disc_partial = alone and partial_ok and getattr(self, "_disc_partial_ok", False)    # (FBK-9)
+        if (partial_ok or hold) and (not alone or disc_partial) and out and out.get("status") in PARTIAL_FROM \
+                and out.get("best"):
             # the album is established though its release is not: what every pressing shares
             # (never while MusicBrainz or Discogs failed: the album is retried, it may be matched
             # exactly once both answer)
@@ -4169,9 +4211,13 @@ class Engine:
                     p.restore = self._withdraw_own(p.files, out, title=True, errors=errors)
                 return p
             if p:
-                # (WEB-1: a database established the album: "leave" leaves it as it is, and
-                # the web, which would only rival that album, is not asked)
-                hold = False
+                # LVE-1: "leave" in this profile - the album's own facts are planned but held: shown,
+                # unticked, written only when you tick it (never by the watcher); the web, which would
+                # only rival that album, is not asked
+                p.held = ("held: the album is established on " + (p.provider or "the databases") +
+                          ", its release not proven; Unresolved is set to \"leave\" in this profile: "
+                          "nothing is written unless you tick it and apply")
+                return p
         # the album on the web only (MusicBrainz and Discogs established nothing): Partial. (A
         # web-only EP holding a track and its remix is matched here, before the folder is
         # called two versions mixed, below)
@@ -4213,6 +4259,16 @@ class Engine:
         known = self._known_from_own_tags(out, files, base) if partial_ok and not alone else None
         if known:
             return known
+        leave = ur.get("action") == "leave" and ur.get("allow_partial", True) and not _provider_failed(errors) \
+            and self._accepts("partial")
+        if (partial_ok or leave) and not alone and not names and len(files) > 1:
+            # FBK-4: no release and no album established: each file's recording, by its fingerprint
+            rp = self._recordings(files, base, errors)
+            if rp:
+                if not partial_ok:                        # (LVE-1: held, as any fallback under "leave")
+                    rp.held = ("held: recordings identified by fingerprint, no album; Unresolved is set to "
+                               "\"leave\" in this profile: nothing is written unless you tick it and apply")
+                return rp
         prop = self._unresolved(out, files, base, errors)
         if (out or {}).get("own_disproved"):
             # (TagMender's own earlier pick lost its standing and nothing decides now: its writes go)
@@ -4265,14 +4321,17 @@ class Engine:
             return None
         props = []
         self._disc_alone = True
+        # FBK-9: a disc established only as its album (Partial, from MusicBrainz or Discogs) is its
+        # own too, when every disc is so and no two are the same album
+        self._disc_partial_ok = True
         try:
             for d in discs:
                 sub = Group(d, [f for f in g.files if Path(f).parent == d])
                 # (the set's folder names for the disc: "[2CD]" said of the set, not of one disc)
                 p = self._identify(sub, names=(g.folder.parent.name, one_disc_name(g.folder.name)))
                 self.__dict__.setdefault("_disc_outs", []).append(getattr(self, "_last_out", None))
-                own = p.status == "identified" and (p.tier in ("", "exact") or
-                                                    (p.tier == "partial" and str(p.provider).startswith("web:")))
+                own = p.status == "identified" and p.tier in ("", "exact", "album_only", "partial") and \
+                    not getattr(p, "held", "")
                 if not own:
                     self.log.info("discs of %s not identified alone: %s %s", g.folder, d.name,
                                   p.reason or "; ".join(p.why or []))
@@ -4281,7 +4340,23 @@ class Engine:
                 props.append(p)
         finally:
             self._disc_alone = False
-        keys = [(p.provider, p.release_id or p.url or _release_words(p)) for p in props]
+            self._disc_partial_ok = False
+        tiers = {p.tier in ("album_only", "partial") for p in props}
+        if len(tiers) > 1:
+            # (FBK-9: one disc matched for sure, another only as its album - probably one album:
+            # every disc is its album's only when every one is so)
+            self.log.info("discs of %s: some matched for sure, some only as their album", g.folder)
+            return None
+
+        def key(p):
+            if p.release_id:
+                return (p.provider, p.release_id)
+            t = (p.targets or [{}])[0]
+            # (FBK-9: an album, not a release - its release group or master, else its title folded;
+            # never which databases answered)
+            return ("album", (t.get("musicbrainz_releasegroupid") or t.get("discogs_master_id") or
+                              [mc.fold((t.get("album") or [""])[0])])[0])
+        keys = [key(p) for p in props]
         if len(set(keys)) < len(keys):
             if all(is_version_dir(d, skips=self._skipper()) for d in discs):
                 # versions of one disc ("2.0/", "5.0/") that each fit the same release, whose
@@ -5096,6 +5171,9 @@ class Engine:
                         merged[fld], where[fld] = v, name
                         break
             merged, where = sorts_follow_names(merged, where, src)
+            if tags_mb and dg_i:
+                _rip_dated(merged, where, dg_i, album.get("rip_log_year"), self.profile["field_sources"] or {},
+                           mb=tags_mb[i])
             mb_media = (tags_mb[i].get("media") or [""])[0] if tags_mb else ""
             if tags_mb and tags_mb[i].get("~layer") and mb_tags._layer_kind(mb_media)[1] not in ("", "cd") \
                     and "media" not in (self.profile["field_sources"] or {}):
@@ -5916,6 +5994,79 @@ class Engine:
         recs = [by_id.get(t.get("id")) for t in tied]
         return all(r and all(r) for r in recs) and len({tuple(r) for r in recs}) == 1
 
+    def _recording_of(self, path):
+        """(tags, AcoustID result, recording) of the file's recording by its fingerprint (score 0.9
+        or more, no rival recording within 0.05, REC-1's length and cue checks), or None."""
+        fp = ma.fingerprint(str(path), self.http.db)
+        if not fp:
+            return None
+        key = ma.acoustid_key()
+        # (the matcher's own lookup of these files - acoustid_matches - is the same address: cached)
+        data = self.http.get_json(f"https://api.acoustid.org/v2/lookup?client={ma.q(key)}&format=json"
+                                  f"&meta=recordings+releaseids&duration={fp['duration']}"
+                                  f"&fingerprint={ma.q(fp['fingerprint'])}", "acoustid")
+        results = sorted((data or {}).get("results") or [], key=lambda r: -r.get("score", 0))
+        if not results or results[0].get("score", 0) < 0.9 or not results[0].get("recordings"):
+            return None
+        top, rec = results[0], results[0]["recordings"][0]
+        if len(results) > 1 and results[1].get("score", 0) > top["score"] - 0.05 and \
+                (results[1].get("recordings") or [{}])[0].get("id") != rec.get("id"):
+            return None
+        secs = float(fp.get("duration") or 0)
+        if rec.get("duration") and secs and abs(float(rec["duration"]) - secs) > max(10.0, 0.1 * secs):
+            return None                                   # (REC-1: the recording is not as long as your file)
+        if _cue_tracks_of(path) > 1 and not (rec.get("duration") and secs):
+            return None                                   # (REC-1: a file its cue sheet splits)
+        names = [a.get("name", "") for a in rec.get("artists") or []]
+        phrase = "".join(a.get("name", "") + (a.get("joinphrase") or "") for a in rec.get("artists") or [])
+        t = {"title": [rec.get("title", "")], "artist": [phrase] if phrase else [], "artists": names,
+             "musicbrainz_recordingid": [rec["id"]], "acoustid_id": [top["id"]],
+             "musicbrainz_artistid": [a["id"] for a in rec.get("artists") or [] if a.get("id")]}
+        return {k: v for k, v in t.items() if v}, top, rec
+
+    RECORDINGS_MAX = 60                                   # FBK-4: files fingerprinted for one album at most
+
+    def _recordings(self, files, base, errors=None):
+        """FBK-4: an album no release and no web album fits, whose files' recordings the
+        fingerprints identify: each identified file is tagged as its recording (title, artist,
+        recording and AcoustID IDs) - never an album, release, pressing or track-number field,
+        which nothing here proves. Most of the files (two in three, two at least) must be
+        identified, else None; the others are left as they are."""
+        if not (self.use_mb and ma.fingerprint_ready() and
+                ma.acoustid_mode(self.profile.get("acoustid", "unsure")) != "off"):
+            return None
+        if len(files) > self.RECORDINGS_MAX:
+            return None                                   # (a folder of hundreds: not fingerprinted whole)
+        targets, scores, found = [], [], 0
+        for k, f in enumerate(files):
+            if k == 3 and found < 2:
+                return None                               # (the first three: fewer than two known - given up)
+            try:
+                got = self._recording_of(Path(f))
+            except ma.ProviderUnavailable as exc:         # (AcoustID not answering: tried again later)
+                self.log.warning("fingerprint lookups for %s: %s", base.get("source_dir"), exc)
+                if errors is not None:
+                    errors[exc.host] = exc.kind
+                return None
+            except Exception as exc:                      # (a file that cannot be read: left as it is)
+                self.log.warning("fingerprint of %s: %s", f, exc)
+                got = None
+            if got:
+                targets.append(got[0])
+                scores.append(got[1]["score"])
+                found += 1
+            else:
+                targets.append({})
+        if found < 2 or 3 * found < 2 * len(files):
+            return None
+        why = [f"recordings only: {found} of {len(files)} files identified by their fingerprints; the album "
+               "and its release are not established, so no album field is written (FBK-4)"]
+        return planmod.Proposal(**base, targets=targets, status="identified", provider="acoustid",
+                                release_id="", url="", confidence=round(100 * min(scores), 1),
+                                evidence=["fingerprint"], why=why, tier="recording",
+                                reason=f"recordings only: {found} of {len(files)} files identified by "
+                                       "fingerprint; no album or release established (FBK-4)")
+
     def _single(self, path, base):
         """A standalone track: its recording, from the fingerprint. This proves the recording,
         not which album edition the file came from, so no album fields are written - but for
@@ -6056,7 +6207,7 @@ class Engine:
             if got.get("miss"):
                 first_miss.setdefault((src, rid), got["miss"])
                 continue
-            anchor = got
+            anchor = dict(got, album=album)          # (the files' album: FBK-8 compares the others with it)
             break
         if anchor is None:
             why = first_miss.get(best_key) or next(iter(first_miss.values()), "") or "album not established"
@@ -6125,8 +6276,9 @@ class Engine:
                 masters.discard(linked)
                 linked = ""
             masters.add(own)
-        if linked and not dg and not dgid and mb and self.dm is not None and (self.use_discogs or self.token) \
-                and not mb_only:
+        if linked and (not dg and not dgid or (dg or {}).get("standin")) and mb and self.dm is not None \
+                and (self.use_discogs or self.token) and not mb_only:
+            # (FBK-7: a Discogs twin with no master stands in only where MusicBrainz links no master)
             # (no Discogs twin: the master the release group links to gives its album facts)
             master = self.http.get_json(f"https://api.discogs.com/masters/{linked}", "discogs")
             if master:
@@ -6143,6 +6295,26 @@ class Engine:
             if how == "unseen":
                 unseen.append((src, rid))
             elif how.startswith("another"):
+                # FBK-2: a rival scored below the album that fits your files counts only when it is
+                # established against them itself: one whose tracks or artist and title do not fit
+                # them is no other album they could be (one scored above it still counts)
+                rec = self._record(src, rid, recs)
+                try:
+                    rc = (ma.mb_candidate(rec) if src == "mb" else ma.discogs_candidate(rec, self.dm)) if rec else None
+                except Exception:
+                    rc = None
+                fits_not = rc is not None and bool(self._established(album, rc, "MusicBrainz" if src == "mb"
+                                                                     else "Discogs")[1])
+                whole = len((anchor["sc"].get("map") or ())) == n
+                unlisted = not any(t.get("secs") for t in rc.get("tracks") or ()) if rc else False
+                if fits_not and (float(score) <= float(anchor["score"]) or
+                                 (whole and len(rc.get("tracks") or ()) < n) or
+                                 (whole and anchor["sc"].get("mode") == "lengths" and unlisted)):
+                    # (one scored above the album only when the album holds every file and the other
+                    # holds fewer - a part of them, The Parallax II beside the Parallax I & II box - or
+                    # lists no lengths while the album's all agree: an "(Instrumental)" edition)
+                    notes.append(f"{rid} scored about as well but does not fit your files (FBK-2)")
+                    continue
                 return no("; ".join(notes + [f"{how} ({rid}, {score}) fits about as well"]))
             elif how == "twice":
                 drop.add(src)
@@ -6354,9 +6526,33 @@ class Engine:
         if mc.fold(title) == mc.fold(album_title) and mc.fold(cand["artist"]) == mc.fold(mine["artist"]) \
                 and _same_tracks(cand["tracks"], mine["tracks"], self.cfg):
             return "twice"
+        def by_tracks():
+            # (titles worded otherwise - five tracks or more: no edition word apart ("Live",
+            # "Instrumental", "Remix" ...) and either both list most lengths, every one agreeing, or
+            # the other entry does not fit your files at all)
+            if len(mine["tracks"]) < 5:
+                return False
+            ew = {w for w in ma._edition_words({"title": title}) if not w.isdigit()}
+            if ew != {w for w in ma._edition_words({"title": album_title}) if not w.isdigit()}:
+                return False
+            both = [(x, y) for x, y in zip(cand["tracks"], mine["tracks"]) if x.get("secs") and y.get("secs")]
+            if len(both) >= 0.8 * len(mine["tracks"]):
+                return True
+            return bool(self._established(anchor["album"], cand, kind)[1]) if anchor.get("album") else False
+        if src != anchor["src"] and mc.artist_sim(cand["artist"], mine["artist"]) >= 0.85 and \
+                len(cand["tracks"]) == len(mine["tracks"]) and \
+                all(mc.track_titles_agree(x.get("title"), y.get("title")) and
+                    (not (x.get("secs") and y.get("secs")) or mc.duration_ok(x["secs"], y["secs"], self.cfg))
+                    for x, y in zip(cand["tracks"], mine["tracks"])) and \
+                _edition_of(title) == _edition_of(album_title) and \
+                (mc.title_sim(title, album_title) >= 0.9 or by_tracks()):
+            # FBK-8: the other database's entry of the album, written its own way ("Various" and
+            # "Various Artists", "Pt. 1" and "Part 1"), with no master link between them: the same
+            # album - every track's title agreeing, and its length where both list one - not another
+            return "twice"
         return f"another {kind} album fits about as well: {cand['artist']} - {cand['title']}"
 
-    def _established(self, album, cand, kind):
+    def _established(self, album, cand, kind, content=True):
         """Why `cand` is not the files' album ("" when it is). Established means, rescored
         against the files: artist and title at least as similar as an automatic pick needs
         (auto_min_artist / auto_min_title), a credit that leaves out none of the artists your
@@ -6373,8 +6569,21 @@ class Engine:
         [(file_i, track_j)] map, sc["mode"] "lengths" or "titles"."""
         sc = mc.score_candidate(album, cand, self.cfg)
         c = self.cfg
-        if sc["artist_sim"] < c["auto_min_artist"] or sc["title_sim"] < c["auto_min_title"]:
+        # FBK-1: one of artist and title short of an automatic pick's, the other agreeing - an
+        # album artist "Various" beside a composers' credit, performers credited instead of the
+        # composer, a translated title: the album still, when its tracks say so (below: every file
+        # in the map, every titled file's title agreeing, the lengths agreeing, 3 tracks or more).
+        # Both short: another album.
+        a_ok, t_ok = sc["artist_sim"] >= c["auto_min_artist"], sc["title_sim"] >= c["auto_min_title"]
+        if not (a_ok or t_ok) or not (a_ok and t_ok or content):
+            # (content=False: a web entry, which nobody reviews, needs both - FBK-1 is the databases')
             return dict(sc, gate="album"), f"the {kind} release's artist or title agree only partly"
+        weak = "" if (a_ok and t_ok) else f"the {kind} release's artist or title agree only partly"
+        if not a_ok and not (mc.artist_sim(album.get("artist") or "", "Various") >= 0.85 or sc["artist_sim"] >= 0.5):
+            # (an artist naming nobody of the release's credit - a sound-alike's "Thriller" by The
+            # Hit Crew - is another album, whatever its tracks: only "Various" or a credit sharing a
+            # name - performers credited for the composer - is excused)
+            return dict(sc, gate="album"), weak
         if sc.get("lacks"):               # (tagging from it would drop an artist your tags name)
             return dict(sc, gate="album"), f"the {kind} credit lacks {', '.join(sc['lacks'])}"
         files, ct = album.get("tracks") or [], (sc.get("cand") or cand)["tracks"]
@@ -6405,9 +6614,36 @@ class Engine:
                     if known and len(known) / len(pairs) >= c["min_duration_coverage"] else None)
         sc = dict(sc, map=pairs, mode="lengths", gate="")
         if frac is None or frac < c["auto_min_duration_frac"]:
-            if _titles_match(files, ct, pairs, c):
+            if not weak and _titles_match(files, ct, pairs, c):
                 return dict(sc, mode="titles"), ""
-            return dict(sc, gate="tracks"), f"too few of the {kind} release's track lengths agree"
+            listed = [(i, j) for i, j in pairs if ct[j].get("secs")]
+            agree = sum(1 for i, j in listed if mc.duration_ok(files[i]["secs"], ct[j]["secs"], c))
+            if not weak and content and frac is None and nf == nc >= 3 and len(listed) - agree <= 1 and \
+                    (len(listed) < 3 or agree >= 2) and 2 * agree >= len(listed) \
+                    and all(files[i].get("title") and mc.track_titles_agree(files[i]["title"], ct[j].get("title"))
+                            for i, j in pairs) \
+                    and _numbers_of(album.get("title")) == _numbers_of(cand.get("title")) \
+                    and _edition_of(album.get("title")) == _edition_of(cand.get("title")) \
+                    and 2 * sum(1 for _i, j in pairs if not _generic_title(ct[j].get("title"))) > len(pairs):
+                # FBK-6: a release listing no lengths, or too few to judge (Discogs 33596799, Jason
+                # Bieler - The Escapologist: none; 4493110, BTBAM - The Parallax I & II box: 3 of 15),
+                # half of those it lists agreeing: its artist and title yours, as many tracks, every
+                # title yours in order
+                return dict(sc, mode="titles", notes=list(sc.get("notes") or []) + [
+                    "the release lists too few track lengths to compare; every track's title agrees (FBK-6)"]), ""
+            return dict(sc, gate="tracks"), weak or f"too few of the {kind} release's track lengths agree"
+        if weak:
+            # FBK-1: the tracks prove the album the artist or title alone does not
+            titled = [(i, j) for i, j in pairs if files[i].get("title")]
+            if not (len(pairs) >= 3 and len(pairs) == nf and len(titled) == len(pairs)
+                    and all(mc.track_titles_agree(files[i]["title"], ct[j].get("title")) for i, j in titled)):
+                return dict(sc, gate="album"), weak
+            if not t_ok and not (len(pairs) >= 5 and frac >= 1.0):
+                # (the title differing - another release group's single or EP of the same recordings,
+                # a retitled edition: five tracks or more, every length agreeing)
+                return dict(sc, gate="album"), weak
+            sc = dict(sc, notes=list(sc.get("notes") or []) + [
+                "artist or title differ, but every track's title and length agree (FBK-1)"])
         return sc, ""
 
     def _partial_mb(self, rel, sc, album, n, notes, same_ids=None):
@@ -6533,7 +6769,7 @@ class Engine:
         dm, es = self.dm, self.profile.enrichment()
         master = discogs_without_repeats(master, dm)
         ids = [str(a["id"]) for a in master.get("artists") or [] if isinstance(a, dict) and a.get("id")]
-        alb = {"discogs_master_id": str(mid), "discogs_albumartist_id": ids}
+        alb = {"discogs_master_id": str(mid) if mid else "", "discogs_albumartist_id": ids}
         if master.get("genres"):
             alb["genre"] = dm.dedupe(master["genres"])
         if master.get("styles"):
@@ -6556,10 +6792,17 @@ class Engine:
         dm = self.dm
         mid = det.get("master_id")
         master = self.http.get_json(f"https://api.discogs.com/masters/{mid}", "discogs") if mid else None
-        if not master:
-            notes.append("the Discogs release has no master (its only version: no pressing-free facts)")
+        if mid and not master:
+            notes.append("the Discogs release's master could not be read")
             return None
-        versions = _discogs_versions(self.http, mid)
+        if not mid:
+            # FBK-7: a release with no master is its album's only version on Discogs: its album facts
+            # (title, artists, genres, styles, year, track titles) stand for the master's - never its
+            # ID, labels, catalogue numbers or barcode
+            # (its year left out: a release with no master may be a reissue - its year is no album's)
+            master = {k: det.get(k) for k in ("title", "artists", "genres", "styles", "tracklist")}
+            notes.append("the Discogs release has no master: its album facts are taken as the album's (FBK-7)")
+        versions = _discogs_versions(self.http, mid) if mid else {str(det.get("id"))}
         det, master = discogs_without_repeats(det, dm), discogs_without_repeats(master, dm)
         ids = [str(a["id"]) for a in master.get("artists") or [] if isinstance(a, dict) and a.get("id")]
         alb = self._master_album(mid, master)
@@ -6568,7 +6811,8 @@ class Engine:
         # each file's title on the established release (to compare with MusicBrainz's: _settle_titles)
         titles = {i: mine[j]["title"] for i, j in pairs if j < len(mine) and mine[j].get("title")}
         if not need_album:
-            return {"album": alb, "targets": [], "score": sc, "versions": versions or set(), "titles": titles}
+            return {"album": alb, "targets": [], "score": sc, "versions": versions or set(), "titles": titles,
+                    "standin": not mid}
         credit = dm.format_artist_credit(master.get("artists"))
         # the master's tracklist is its main release's: a title is kept only where the release
         # established against the files has the same one in that place
@@ -6722,7 +6966,7 @@ class Engine:
         for name, c in found:
             if not c.get("tracks"):
                 continue
-            sc, miss = self._established(album, c, name)
+            sc, miss = self._established(album, c, name, content=False)
             if not miss and c.get("source") == "gnudb":          # GNU-1
                 miss = _gnudb_titles_miss(album, c, sc)
             if miss:
@@ -8805,6 +9049,25 @@ def _lcs(a, b, eq) -> list:
     return out
 
 
+_GENERIC_TITLE = re.compile(r"(?i)^\s*(?:track|untitled|intro|outro|interlude|bonus(?: track)?|hidden(?: track)?|"
+                            r"movement|part|side|piece|no\.?|song)?\s*[\divxlc.\-:]*\s*$")
+
+
+def _generic_title(title) -> bool:
+    """FBK-6: a track title that names nothing ("Track 01", "Untitled 2", "Intro", "II.", "")."""
+    return bool(_GENERIC_TITLE.match(str(title or "")))
+
+
+def _edition_of(title) -> set:
+    """FBK-6: the edition words a title names ("Album P (Instrumental)" -> {"instrumental"}), years aside."""
+    return {w for w in ma._edition_words({"title": title}) if not w.isdigit()}
+
+
+def _numbers_of(title) -> tuple:
+    """FBK-6: the numbers an album title names (TTL-1's parts and volumes, and plain numbers)."""
+    return tuple(sorted(set(mc.part_numbers(title)) | {("n", int(x)) for x in re.findall(r"\d+", str(title or ""))}))
+
+
 def _titles_match(files, ct, pairs, cfg) -> bool:
     """A Partial match by titles (restored or remastered audio whose lengths moved): the map
     covers the shorter list, every mapped title agrees, at least 5 tracks, at least half the
@@ -10028,6 +10291,51 @@ def discogs_only_tags(album: dict, tracks) -> list[dict]:
 TRACK_ONLY = ("discnumber", "totaldiscs", "disctotal", "discsubtitle")
 # CRD-1c: the credits MusicBrainz gives of a track's work
 _WORK_CREDITS = ("composer", "lyricist", "writer")
+
+
+def _year_of(v) -> int:
+    m = re.match(r"\s*(\d{4})", str((v or [""])[0] if isinstance(v, list) else v or ""))
+    return int(m.group(1)) if m else 0
+
+
+def _one_pressing_tags(mb, dg) -> bool:
+    """DAT-4: MusicBrainz's and Discogs's tags name one pressing by themselves: a barcode on both,
+    the same; or none on one, and their catalogue numbers agree (CAT-9 ranges too) with no
+    country that differs."""
+    def first(t, k):
+        return str((t.get(k) or [""])[0] if isinstance(t.get(k), list) else t.get(k) or "")
+    ba, bb = mc.barcode_key(first(mb, "barcode")), mc.barcode_key(first(dg, "barcode"))
+    if ba and bb:
+        return ba == bb
+    ca, cb = first(mb, "catalognumber"), first(dg, "catalognumber")
+    if not (ca and cb and mc.catnos_agree(mc.split_codes(ca), mc.split_codes(cb))):
+        return False
+    xa, xb = mc.country_code(first(mb, "releasecountry")), mc.country_code(first(dg, "releasecountry"))
+    return not (xa and xb and xa != xb)
+
+
+def _rip_dated(merged, where, dg, log_year, field_sources, mb=None):
+    """DAT-4: MusicBrainz dates the release after your rip log was made, and Discogs's entry of
+    the same pressing (its tags and MusicBrainz's agree on barcode, or catalogue number and
+    country) no later - its own release date, never its master's first one: the release's date
+    is Discogs's, and its Original Date no later than it (The Minimalists, Mode 214/215:
+    MusicBrainz 2016-04-01, Discogs 2009, the EAC log 2009). A field your profile's field
+    sources choose a database for keeps that choice."""
+    try:
+        log = int(log_year or 0)
+    except (TypeError, ValueError):
+        return
+    if not log or "date" in field_sources or not _one_pressing_tags(mb or merged, dg):
+        return
+    theirs = dg.get("discogs_released")
+    mine = _year_of(merged.get("date"))
+    if not theirs or not mine or mine <= log or not 0 < _year_of(theirs) <= log:
+        return
+    merged["date"], where["date"] = list(theirs) if isinstance(theirs, list) else [theirs], "discogs"
+    for k in ("originaldate", "originalyear"):
+        if k in merged and k not in field_sources and _year_of(merged[k]) > _year_of(theirs):
+            v = merged["date"][0]
+            merged[k], where[k] = [v if k == "originaldate" else v[:4]], "discogs"
 
 
 def enrich(mb: dict, album: dict, track: dict | None, s: dict, disc_count: int, dm) -> dict:

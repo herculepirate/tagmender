@@ -2421,13 +2421,23 @@ class Planner:
                 entry["status"] = "skipped"
                 entry["label"] = "Skipped"
                 return entry
-        elif op in ("copy", "move") and partial and self.asked_to_file(prop):
+        elif op in ("copy", "move") and self._album_tier == "recording" and len(files) > 1:
+            # FBK-4: an album's files tagged as their recordings - no album is proven to file them
+            # under, and filed by each file's own artist they would be scattered (a compilation)
+            entry["notes"].append("tagged as its recordings only (no album proven): "
+                                  + ("not copied" if op == "copy" else "tagged in place, not moved"))
+            if op == "copy":
+                entry["status"] = "skipped"
+                entry["label"] = "Skipped"
+                return entry
+            op = "in_place"
+        elif op in ("copy", "move") and partial and self.asked_to_file(prop) and not getattr(prop, "disc_folder", None):
             # MOV-6: you asked for this Partial album to be filed: it is, from the tags it has
             # (its mark stays Partial) - what you ask for is done
             entry["notes"].append(("copied" if op == "copy" else "moved") + " because you asked (no release proven)")
             entry["filed_on_request"] = {"confidence": round(conf, 1), "reason": "partial",
                                          "floor": _threshold(p, "organize_min_confidence"), "op": op}
-        elif op in ("copy", "move") and partial:
+        elif op in ("copy", "move") and partial and not getattr(prop, "disc_folder", None):
             # (a Partial album is not proven enough to file unasked: its name and folder could be
             # another pressing's)
             entry["notes"].append("Partial identification (no release proven): "
@@ -2696,9 +2706,12 @@ class Planner:
                 # (always: what tells you, Picard and a later run that no release was proven)
                 target["tagmender"] = ["Partial"]
                 target["tagmender_reason"] = [entry["identification"]["reason"]]
-            elif album_only:
+            elif self._album_tier == "recording" and len(prop.files) > 1 and not target.get("musicbrainz_recordingid"):
+                pass                                       # (FBK-4: a file not identified: left as it is)
+            elif album_only or (self._album_tier == "recording" and len(prop.files) > 1):
+                # (FBK-4: an album's files tagged as their recordings - no release, no album proven)
                 target["tagmender"] = ["Partial"]          # (its release not proven: see above)
-                target["tagmender_reason"] = [entry["identification"]["reason"]]
+                target["tagmender_reason"] = [entry["identification"].get("reason") or prop.reason or ""]
             elif identified and p["mark_resolved"]:
                 target.setdefault("tagmender", ["Resolved"])
                 if not before.get("tagmender_reason"):

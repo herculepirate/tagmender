@@ -119,6 +119,16 @@ class TRK8_ReleaseView(unittest.TestCase):
         self.assertEqual(t({"album": ["Drops 1"]}), "drops 1")
         self.assertNotEqual(t({"album": ["Hits 1999"]}), t({"album": ["Hits"]}))
 
+    def test_DSC15b_a_bare_marker_before_the_discs_own_subtitle(self):
+        # The Minimalists (Mode 214/215): "The Minimalists CD1: Steve Reich, Kyle Gann, Louis
+        # Andriessen" and "... CD2: Terry Riley, David Lang, John Adams" were two albums
+        t = engine._album_title
+        self.assertEqual({t({"album": [a]}) for a in ("The Minimalists CD1: Steve Reich, Kyle Gann, Louis Andriessen",
+                                                      "The Minimalists CD2: Terry Riley, David Lang, John Adams",
+                                                      "The Minimalists - Disc 3 - Encores")}, {"the minimalists"})
+        for keep in ("CD1: Intro", "Disco Inferno", "Live at the CD release party", "Hits 1999: The Year"):
+            self.assertEqual(t({"album": [keep]}), keep.casefold(), keep)
+
 
 class DSC15_Years(unittest.TestCase):
     def test_DSC15_years_join_only_discs_of_different_numbers(self):
@@ -155,6 +165,16 @@ class TRK8_DSC15_Engine(te.Base):
                  albumartist="Band", artist="Band", track="1")
         gs = engine.Engine.albums_in(self.engine(te.FakeHttp()), self.lib)
         self.assertEqual([(g.folder, len(g.files)) for g in gs], [(top, 4)])
+
+    def test_DSC15b_disc_folders_each_with_their_own_subtitle_are_one_album(self):
+        top = self.lib / "The Minimalists"
+        for n, (album, k) in enumerate((("The Minimalists CD1: Steve Reich, Kyle Gann, Louis Andriessen", 3),
+                                        ("The Minimalists CD2: Terry Riley, David Lang, John Adams", 2)), 1):
+            for i in range(k):
+                flac(top / f"CD{n} - composers", f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 50 * n + 10 * i,
+                     title=f"D{n}-{i}", album=album, albumartist="Various", artist=f"C{i}", track=str(i + 1))
+        gs = engine.Engine.albums_in(self.engine(te.FakeHttp()), self.lib)
+        self.assertEqual([(g.folder, len(g.files)) for g in gs], [(top, 5)])
 
 
 if __name__ == "__main__":

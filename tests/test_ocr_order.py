@@ -242,7 +242,8 @@ class NarrowFirst(unittest.TestCase):
         http = FakeHttp({})
         ma.mb_search(http, dict(self.ALBUM), dict(mc.DEFAULT_CFG))
         searches = [u for u in http.asked if "catno" in u]
-        self.assertEqual(len(searches), 3, searches)                     # + label, + catno alone
+        self.assertEqual(len(searches), 6, searches)                     # + label, + catno alone,
+        self.assertTrue(all("artist" in u for u in searches[3:]))         # + QRY-6's 3 spellings, with the artist
         http = FakeHttp({"artist%3A%22Artist%22": hit})
         with mock.patch.object(ma, "mb_candidate", lambda det: {"id": det.get("id")}):
             ma.mb_search(http, dict(self.ALBUM, narrow_codes_first=False), dict(mc.DEFAULT_CFG))

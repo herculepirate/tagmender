@@ -160,7 +160,7 @@ class WebPartial(Base):
                         deezer_album(19, "Band U", "Album U!", [10, 20, 30])])
         eng = self.web_engine(http)
         with mock.patch.object(engine.Engine, "_established",
-                               side_effect=lambda album, c, kind: ({"mode": "lengths", "confidence": 95.0,
+                               side_effect=lambda album, c, kind, content=True: ({"mode": "lengths", "confidence": 95.0,
                                                                      "map": [(0, 0), (1, 1), (2, 2)]}, "")):
             pick, why = eng._web_album(ma.read_album(d, "Band U", d.name),
                                        [("Deezer", web_tag._cand("deezer", 1, "u1", "Band U", "Album U", "",

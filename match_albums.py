@@ -27,6 +27,7 @@ import json
 import os
 import random
 import re
+import unicodedata
 import shutil
 import sqlite3
 import sys
@@ -343,6 +344,12 @@ def deezer_isrc_releases(http, album):
         if len(tracks) != n or not all(abs((t.get("duration") or 0) - a["secs"]) <= 3
                                        for t, a in zip(tracks, album["tracks"])):
             continue                                   # not this album
+        if not album.get("barcodes") and not album.get("deezer_upc"):
+            # QRY-7: the UPC Deezer sells this album under (its lengths are your files'): a barcode
+            # to search the databases with - a clue, never your copy's barcode
+            upc = str((http.get_json(f"https://api.deezer.com/album/{hit['id']}", "deezer") or {}).get("upc") or "")
+            if upc.isdigit() and len(upc) >= 12:
+                album["deezer_upc"] = upc
         common = None
         for t in [tracks[0], tracks[-1]]:
             isrc = t.get("isrc") or (http.get_json(f"https://api.deezer.com/track/{t['id']}", "deezer") or {}).get("isrc")
@@ -1201,7 +1208,7 @@ def _before_tagmender(before, field, current):
 def read_file(path, before=None):
     """The tags and audio facts of one file. `before` (REP-1, tagmender_originals): the
     pressing details TagMender's own job wrote, read as they were before it."""
-    t = {"title": "", "num": 0, "disc": 0, "album": "", "artist": "", "year": 0,
+    t = {"title": "", "num": 0, "disc": 0, "album": "", "artist": "", "track_artist": "", "year": 0,
          "barcode": "", "barcode_from": "", "asin": "", "catno": "", "secs": 0.0,
          "label": "", "country": "", "media": "", "date": "",   # pressing details in the tags
          "rate": 0, "bits": 0, "samples": 0, "lossless": False,  # the audio itself
@@ -1242,7 +1249,9 @@ def read_file(path, before=None):
                 if k == "\xa9nam": t["title"] = _txt(v)
                 elif k == "\xa9alb": t["album"] = _txt(v)
                 elif k == "aART": t["artist"] = _names(v)
-                elif k == "\xa9ART" and not t["artist"]: t["artist"] = _txt(v)
+                elif k == "\xa9ART":
+                    t["track_artist"] = _txt(v)
+                    t["artist"] = t["artist"] or _txt(v)
                 elif k == "\xa9day": t["year"] = _int(v[0] if v else "")
                 elif k == "trkn" and v:
                     t["num"], t["tracktotal"] = v[0][0], (v[0][1] if len(v[0]) > 1 else 0)
@@ -1293,6 +1302,7 @@ def read_file(path, before=None):
             def names(fid):
                 x = tags.getall(fid)
                 return _names([str(s) for s in x[0].text]) if x else ""
+            t["track_artist"] = names("TPE1")
             t.update(title=fr("TIT2"), album=fr("TALB"), artist=names("TPE2") or names("TPE1"),
                      year=_int(fr("TDRC")), num=_int(fr("TRCK")), disc=_int(fr("TPOS")),
                      label=fr("TPUB"), media=fr("TMED"), date=fr("TDRL") or fr("TDRC"),
@@ -1343,6 +1353,7 @@ def read_file(path, before=None):
                 _release_id(t, k, _txt(low[k]))
         g = lambda k: _txt(low.get(k, ""))  # noqa: E731
         n = lambda k: _names(low.get(k, ""))  # noqa: E731
+        t["track_artist"] = n("artist")              # (VAR-1: each file's own, beside a "Various" album artist)
         t.update(title=g("title"), album=g("album"), artist=n("albumartist") or n("artist"),
                  year=_int(g("date") or g("year")), num=_int(g("tracknumber")),
                  disc=_int(g("discnumber")), barcode=g("barcode"),
@@ -1469,6 +1480,10 @@ def _track_key(p, i):
     t = i["title"].strip()
     if not t:
         t = re.sub(r"^[\d\s._\-]+", "", p.stem)
+    # (TRK-10: a featured artist in brackets and accents apart - "Le Détenteur [feat. Youri Raymond]"
+    # beside "Le Detenteur", the same length: one track saved twice, Beyond Creation - The Aura)
+    t = re.sub(r"\s*[\(\[]\s*(?:feat|ft|featuring)\b\.?[^\)\]]*[\)\]]", "", t, flags=re.I)
+    t = "".join(c for c in unicodedata.normalize("NFKD", t) if unicodedata.category(c) != "Mn") or t
     return re.sub(r"\W+", " ", t).strip().casefold()
 
 
@@ -1530,6 +1545,13 @@ def _drop_duplicate_tracks(files, info):
         md5 = info[p].get("audio_md5")
         if md5:
             buckets.setdefault(f"md5:{md5:x}", []).append(p)
+    # (TRK-10: a folder whose track numbers repeat with other titles is a set's discs side by side,
+    # no disc tags - its track 1s are each disc's, never another encode of one track)
+    by_num = {}
+    for p in files:
+        if info[p].get("num"):
+            by_num.setdefault((p.parent, info[p]["num"]), set()).add(_track_key(p, info[p]))
+    flat_set = any(len(keys) > 1 for keys in by_num.values())
     gone = []
     for key, group in buckets.items():
         group = [p for p in group if p not in gone]
@@ -1537,8 +1559,20 @@ def _drop_duplicate_tracks(files, info):
             continue
         kept = []
         by_title = not str(key).startswith("md5:")
+        def close(p, k):
+            # (TRK-10: the same title and the same track number - another encode of one track - within
+            # 1.5 s; otherwise copies of the same audio, within hundredths)
+            d = abs(info[p]["secs"] - info[k]["secs"])
+            if d <= _SAME_AUDIO_S:
+                return True
+            # (another encode: another format or folder, or both on one disc by their disc tags -
+            # never two files of one flat folder without disc tags, a two-disc set's track 1s)
+            apart = p.suffix.lower() != k.suffix.lower() or p.parent != k.parent or \
+                (info[p].get("disc") and info[p].get("disc") == info[k].get("disc")) or not flat_set
+            return bool(by_title and apart and info[p].get("num") and
+                        info[p].get("num") == info[k].get("num") and d <= 1.5)
         for p in sorted(group, key=preference):
-            if any(abs(info[p]["secs"] - info[k]["secs"]) <= _SAME_AUDIO_S
+            if any(close(p, k)
                    and not (by_title and (_other_disc(p, k, info) or _other_audio(p, k, info)))
                    for k in kept):
                 gone.append(p)
@@ -2429,6 +2463,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # REP-1: the album title the files hold now, when it was read as before TagMender ("")
         "title_written": title_written[0][0] if title_written else "",
         "artist": top("artist") or artist_folder, "title": title,
+        # QRY-5: the title the folder name gives, when it is not the album tag's (searched too)
+        "folder_title": _folder_title_of(album_folder, title, top("artist") or artist_folder),
+        # VAR-1: the files' own track artists, in order, when the album artist is "Various"
+        "track_artists": (list(dict.fromkeys(i.get("track_artist") for _p, i in infos if i.get("track_artist")))
+                          if _VARIOUS_HEAD.fullmatch((top("artist") or "").strip()) else []),
         "year": year or None, "discs": n_discs,
         "dropped_formats": dropped_formats, "dropped_tracks": dropped_tracks,
         "tracks": [{"disc": i["disc_eff"], "disc_tag": i["disc"] or 0, "num": i["num"], "title": i["title"],
@@ -3601,11 +3640,20 @@ def acoustid_releases(http, album, db=None, n=3):
     """MusicBrainz releases that hold the recordings AcoustID finds for several
     tracks of the album (first, middle and last): the releases common to all of
     them. Empty when fingerprinting is not set up or nothing is found."""
-    common = None
-    for _pos, _recs, rels in acoustid_matches(http, album, db, n):
-        if rels:
-            common = rels if common is None else common & rels
-    return common or set()
+    # FBK-5: the releases holding the most of the matched tracks, two at least where two or more
+    # matched - never only those holding every one: a track also on a compilation or a single made
+    # the common set empty, and the album went unfound
+    matched = [rels for _pos, _recs, rels in acoustid_matches(http, album, db, n) if rels]
+    # (those holding every matched track are proof - album["fp_proof"]; the others only candidates)
+    album["fp_proof"] = set.intersection(*map(set, matched)) if matched else set()
+    if not matched:
+        return set()
+    from collections import Counter
+    counts = Counter(r for rels in matched for r in rels)
+    most = max(counts.values())
+    if len(matched) >= 2 and most < 2:
+        return set()                                  # (no release holds two of them: nothing in common)
+    return {r for r, k in counts.items() if k == most}
 
 
 def mb_recordings(http, release_id):
@@ -5155,6 +5203,47 @@ def label_catnos(album, limit=4):
     return [(label, c) for label in labels for c in catnos][:limit]
 
 
+def _folder_title_of(album_folder, title, artist="") -> str:
+    """QRY-5: the album title the folder's name gives ("1999 - Hits 1999 [FLAC]" -> "Hits 1999"),
+    "" when it is the title already, names a disc or is too short to search."""
+    name = re.sub(r"[\(\[\{]\s*(?:19|20)\d\d\s*[\)\]\}]", " ", str(album_folder or ""))   # ("[1979] The Wall")
+    parts = [x.strip() for x in re.split(r"\s+[-\u2013]\s+", name) if x.strip()]
+    parts = [x for x in parts if not re.fullmatch(r"(?:19|20)\d\d", x)]                  # ("Artist - 1979 - Album")
+    if len(parts) >= 2 and artist and mc.artist_sim(parts[0], artist) >= 0.85:
+        parts = parts[1:]                                                                # ("Pink Floyd - The Wall")
+    ft = mc.search_title(" - ".join(parts)).strip()
+    ft = re.sub(r"(?i)[\s,\-]*\b(?:cd|disc|disk)\s*\d{1,2}\s*$", "", ft).strip()           # ("The Wall CD1")
+    if len(re.sub(r"\W", "", ft)) < 3 or re.fullmatch(r"(?i)(?:cd|disc|disk|dvd|side)\s*\w{0,3}|\d+", ft):
+        return ""
+    return "" if mc.title_sim(ft, title or "") >= 0.85 else ft
+
+
+_TITLE_STOP = {"the", "a", "an", "of", "and", "in", "on", "to", "for", "la", "le", "les", "de", "der", "die",
+               "das", "el", "los", "part", "pt", "vol", "volume", "no", "cd", "disc", "edition", "remastered"}
+
+
+_EDITION_WORDS = {"remix", "remixed", "remaster", "remastered", "deluxe", "expanded", "anniversary", "live",
+                  "acoustic", "mono", "stereo", "demo", "demos", "instrumental", "edition", "reissue", "bonus"}
+
+
+def _edition_words(album) -> set:
+    """QRY-9: the edition words and years an album's title, folder title and folder name give
+    ("The Silent Circus (2020 Remix / Remaster)" -> {"2020", "remix", "remaster"})."""
+    text = " ".join(str(album.get(k) or "") for k in ("title", "folder_title", "title_written", "folder"))
+    ws = set(re.findall(r"[a-z]+|(?:19|20)\d\d", text.casefold()))
+    return {w for w in ws if w in _EDITION_WORDS or w.isdigit()}
+
+
+def title_words(title, most=4) -> list:
+    """QRY-1: the title's distinctive words for a word search (no stop words, numbers or
+    punctuation; Lucene's own words dropped), longest first, at most MOST; [] for a title of
+    fewer than two such words (a one-word title is the exact-phrase search's)."""
+    ws = [w for w in re.findall(r"[^\W\d_]{3,}", str(title or "").casefold())
+          if w not in _TITLE_STOP and w not in ("and", "or", "not")]
+    ws = list(dict.fromkeys(ws))
+    return sorted(ws, key=len, reverse=True)[:most] if len(ws) >= 2 else []
+
+
 def mb_search(http, album, cfg):
     # Inside a quoted Lucene phrase only " and \ are special.
     title = mc.search_title(album["title"]).replace("\\", " ").replace('"', " ")
@@ -5192,23 +5281,62 @@ def mb_search(http, album, cfg):
         queries.append(f'release:"{short}" AND artist:"{first}"')
     queries.append(f'"{title}" AND "{first}"')
     n_files = len(album["tracks"])
+    # QRY-1: the title's words, not its exact phrase ("The Exuviae of Gods, Pt. 2" is listed as
+    # "..., Part II"; "Pt." read as "Part"), with the artist, then with the track count alone
+    words = title_words(title)
+    if words:
+        queries.append(f'release:({" AND ".join(words)}) AND artist:"{first}"')
+    # QRY-2: an album of "Various" credited by its track artists (VAR-1: The Minimalists, credited
+    # "Reich, Riley, Andriessen ..."): the title with the first of them, and with the track count
+    lead = next((a for a in album.get("track_artists") or () if a), "")
+    if lead:
+        lead = mc.artist_parts(lead)[0].replace("\\", " ").replace('"', " ")
+        queries.append(f'release:"{title}" AND artist:"{lead}"')
+    if words and (lead or _VARIOUS_HEAD.fullmatch(first.strip())):
+        queries.append(f'release:({" AND ".join(words)}) AND tracks:{n_files}')
+    ft = (album.get("folder_title") or "").replace("\\", " ").replace('"', " ").strip()
+    if ft:                                                  # QRY-5: the folder's title, the tag's another
+        queries.append(f'release:"{ft}" AND artist:"{first}"')
     seen, hits = set(), []
     # numbers read off scans (narrow_codes_first): a misread one matches some other
     # release when asked alone, so the wider queries go only when the artist's found nothing
     skip_wide = set(wide) if album.get("narrow_codes_first") and narrow else set()
-    narrow_found = False
+    narrow_found = coded_found = False
     for query in queries:
         if query in skip_wide and narrow_found:
             continue
         data = http.get_json(f"https://musicbrainz.org/ws/2/release/?query={q(query)}&fmt=json&limit=15", "mb")
         if query in narrow and (data or {}).get("releases"):
             narrow_found = True
+        if (query in narrow or query in wide) and (data or {}).get("releases"):
+            coded_found = True
         for r in (data or {}).get("releases", []):
             if r["id"] not in seen:
                 seen.add(r["id"])
                 hits.append(r)
-        if len(hits) >= 5 and any(_mb_hit_tracks(r) == n_files for r in hits):
+        # (QRY-3: a hit with your track count whose title is your album's - catalogue-number hits
+        # of other releases do not end the search before the title is asked)
+        if len(hits) >= 5 and any(_mb_hit_tracks(r) == n_files and mc.title_sim(album["title"], r.get("title") or "")
+                                  > 0.6 for r in hits):
             break
+    if catnos and not coded_found:
+        # QRY-6: your catalogue numbers found nothing as written: their other spellings, with the
+        # artist (MusicBrainz matches a number whole - "214/215" is not "mode 214/215")
+        def bare(x):
+            return re.sub(r"[\s\-.]", "", x).casefold()
+        for c in catnos[:2]:
+            # (a number from your tags or folder: its separators first, the O/0 and I/1 readings -
+            # a scan's misreadings - after)
+            vs = code_variants(c, limit=8)
+            for v in ([v for v in vs if bare(v) == bare(c)] + [v for v in vs if bare(v) != bare(c)])[:3]:
+                v = v.replace("\\", " ").replace('"', " ")
+                data = http.get_json(f"https://musicbrainz.org/ws/2/release/?query="
+                                     f"{q(f'catno:{chr(34)}{v}{chr(34)} AND artist:{chr(34)}{first}{chr(34)}')}"
+                                     "&fmt=json&limit=15", "mb")
+                for r in (data or {}).get("releases", []):
+                    if r["id"] not in seen:
+                        seen.add(r["id"])
+                        hits.append(r)
     same = [r for r in hits if _mb_hit_tracks(r) == n_files]
 
     def prio(r):
@@ -5250,6 +5378,7 @@ def mb_search(http, album, cfg):
     rg = next(((r.get("release-group") or {}).get("id") for r in (same or hits)
                if (r.get("release-group") or {}).get("id")), None)
     group = {}
+    rg2_info, data2 = None, None
     if rg:
         data = http.get_json(f"https://musicbrainz.org/ws/2/release?release-group={rg}"
                              f"&inc=media+labels&limit=100&fmt=json", "mb")
@@ -5262,10 +5391,39 @@ def mb_search(http, album, cfg):
         have = {r["id"] for r in chosen}
         chosen += [{"id": v["id"]} for v in sorted((v for v in versions if v["id"] not in have
                                                      and prio(v)[:2] != (1, 1)), key=prio)[:4]]
+        # QRY-9: versions within two tracks of yours (a hidden track ripped as a file of its own, a
+        # work in two files): the three your folder's edition words or year name first - "The Silent
+        # Circus (2020 Remix / Remaster)" is MusicBrainz's 10-track "2020 remix / remaster" for 11 files
+        have = {r["id"] for r in chosen}
+        words = _edition_words(album)
+        near = [v for v in versions if v["id"] not in have and v.get("id")
+                and 0 < abs(_mb_track_total(v) - n_files) <= 2]
+        near.sort(key=lambda v: (-len(words & _edition_words({"title": " ".join(
+            [str(v.get("disambiguation") or ""), str(v.get("title") or "")])}) | (
+            {str(v.get("date") or "")[:4]} & words)), prio(v)))
+        if not exact or any(words & _edition_words({"title": f"{v.get('disambiguation') or ''} "
+                                                              f"{str(v.get('date') or '')[:4]}"}) for v in near[:3]):
+            chosen += [{"id": v["id"]} for v in near[:3]]      # (only when none has your count, or one is named)
+        if not exact:
+            # QRY-4: no version of that group has your track count (a single or a compilation of the
+            # album's name came first: self-titled albums): the next group titled as your album too
+            rg2 = next((g["id"] for g in ((r.get("release-group") or {}) for r in hits)
+                        if g.get("id") and g["id"] != rg
+                        and mc.title_sim(album["title"], g.get("title") or "") > 0.85), None)
+            if rg2:
+                data2 = http.get_json(f"https://musicbrainz.org/ws/2/release?release-group={rg2}"
+                                      f"&inc=media+labels&limit=100&fmt=json", "mb")
+                rg2_info = next((r["release-group"] for r in hits if (r.get("release-group") or {}).get("id") == rg2), None)
+                have = {r["id"] for r in chosen}
+                more = sorted((v for v in (data2 or {}).get("releases", [])
+                               if v.get("id") not in have and _mb_track_total(v) == n_files), key=prio)
+                chosen += [{"id": v["id"]} for v in more[:4]]
     # Which album each release is a pressing of: the search hits name their release group
     # (with its types), the group's listing its members. A release lookup does not carry
     # it (inc=release-groups would change every cached lookup's address).
     groups = {r["id"]: r["release-group"] for r in hits if (r.get("release-group") or {}).get("id")}
+    if rg2_info:                                         # (QRY-4: the second group's releases are its)
+        groups.update({v["id"]: rg2_info for v in (data2 or {}).get("releases", []) if v.get("id")})
     if rg:
         # (YR-1: the album's first release - a folder year with no pressing named is the album's)
         # (asked only when some pressing's own year differs from the folder's: one request then)
@@ -5448,7 +5606,11 @@ def flatten_tracklist(tracklist, dm, parent_position=None, movements=True):
             if subs:
                 # one work: its rows are counted as one track where they list no lengths
                 n = len(out)
-                out.extend(dict(t, index=t.get("index", n)) for t in subs)
+                # TRK-9: movements listing no lengths, the work its own ("City Life" 23:20, its five
+                # movements none): the work's length, compared with its files' added up
+                whole = dm._parse_duration(e.get("duration")) if not any(t.get("secs") for t in subs) else 0
+                out.extend(dict(t, index=t.get("index", n), **({"work_secs": whole} if whole else {}))
+                           for t in subs)
                 continue
         pos = parent_position if parent_position is not None else (e.get("position") or "")
         if parent_position == "" and _HYPHEN_DISC.match(str(e.get("position") or "")):
@@ -5673,6 +5835,8 @@ def discogs_candidate(rel, dm, whole_works=False):
         tracks.append({"disc": int(m.group(1)) if m else 1, "title": t["title"], "secs": t["secs"]})
         if "index" in t:
             tracks[-1]["index"] = t["index"]          # a sub-track of an index track
+            if t.get("work_secs"):
+                tracks[-1]["work_secs"] = t["work_secs"]     # TRK-9: its work's length, its own none
         if not audio_video and _video_medium(t["position"], rel):
             tracks[-1]["video"] = True                # on a DVD or other video disc ("DVD1-3")
         if mixed_vinyl and _SIDE_POS.fullmatch(str(t["position"]).strip()):
@@ -5730,6 +5894,12 @@ def discogs_candidate(rel, dm, whole_works=False):
         "source": "discogs", "id": str(rel["id"]),
         "url": rel.get("uri") or f"https://www.discogs.com/release/{rel['id']}",
         "artist": artists or canonical, "artist_alt": canonical,
+        # VAR-1: the artists its tracks credit (a compilation's composers: "Steve Reich", "Kyle
+        # Gann" ... under performers credited on the release), each once, in order
+        "track_artists": list(dict.fromkeys(
+            dm.clean_artist_name(a.get("name")) for e in listed.get("tracklist") or [] if isinstance(e, dict)
+            for row in [e, *(x for x in e.get("sub_tracks") or [] if isinstance(x, dict))]
+            for a in row.get("artists") or [] if isinstance(a, dict) and a.get("name"))),
         "title": rel.get("title", ""), "year": year or None,
         "date": str(rel.get("released") or ""),
         "country": rel.get("country", ""),
@@ -5844,6 +6014,12 @@ def discogs_search(http, album, cfg, dm):
     searches.append(f"q={q(first + ' ' + title)}")
     if short != title:
         searches.append(f"artist={q(first)}&release_title={q(short)}")
+    # QRY-2: an album of "Various" credited by its track artists (VAR-1): the title with the first
+    lead = next((a for a in album.get("track_artists") or () if a), "")
+    if lead:
+        searches.append(f"artist={q(mc.artist_parts(lead)[0])}&release_title={q(title)}")
+    if album.get("folder_title"):                           # QRY-5: the folder's title, the tag's another
+        searches.append(f"artist={q(first)}&release_title={q(album['folder_title'])}")
     seen, results = set(), []
     must = []                       # (MED-13: the SACD search's own finds: always fetched, below)
     # RET-1: what a search by your copy's own barcode or catalogue number finds is always fetched
@@ -5874,8 +6050,26 @@ def discogs_search(http, album, cfg, dm):
             if s in coded_searches and len(hits) <= RET_CODED_MAX and r not in coded \
                     and all(c["id"] != r["id"] for c in coded):
                 coded.append(r)
-        if len(results) >= 8:
+        # (QRY-3: eight results, one of them titled as your album - a barcode's or number's finds
+        # of other releases do not end the search before the title is asked)
+        if len(results) >= 8 and any(mc.title_sim(album["title"], dm.split_discogs_title(r.get("title", ""))[1])
+                                     > 0.6 for r in results):
             break
+
+    by_track = set()
+    if not any(mc.title_sim(album["title"], dm.split_discogs_title(r.get("title", ""))[1]) > 0.6 for r in results):
+        # QRY-8: nothing titled as your album: the album tag may be wrong or missing - your most
+        # distinctive track title (the longest that names something) with the artist
+        named = sorted((t.get("title") or "" for t in album.get("tracks") or ()
+                        if len(title_words(t.get("title") or "", most=9)) >= 2), key=len, reverse=True)
+        if named and first.strip() and not _VARIOUS_HEAD.fullmatch(first.strip()):
+            data = http.get_json(f"https://api.discogs.com/database/search?type=release&per_page=15"
+                                 f"&artist={q(first)}&track={q(named[0])}", "discogs")
+            for r in (data or {}).get("results", [])[:3]:
+                if r["id"] not in seen:
+                    seen.add(r["id"])
+                    results.append(r)
+                    by_track.add(r["id"])
 
     def pre(r):
         a, t = dm.split_discogs_title(r.get("title", ""))
@@ -5887,8 +6081,9 @@ def discogs_search(http, album, cfg, dm):
     picked = results[:cfg["discogs_detail_fetch"]]
     picked += [r for r in must[:3] if r not in picked]       # (a 2016 SACD among the 1971 LPs)
     picked += [r for r in coded[:RET_CODED_MAX] if all(p["id"] != r["id"] for p in picked)]   # (RET-1)
+    picked += [r for r in results if r["id"] in by_track and all(p["id"] != r["id"] for p in picked)]   # (QRY-8)
     for r in picked:
-        if pre(r) < 0.5 and not album["barcodes"] and not album.get("catno_search"):
+        if pre(r) < 0.5 and not album["barcodes"] and not album.get("catno_search") and r["id"] not in by_track:
             continue
         det = http.get_json(f"https://api.discogs.com/releases/{r['id']}", "discogs")
         if det:
@@ -5943,6 +6138,23 @@ def discogs_search(http, album, cfg, dm):
                         or (hint and hint in (cand.get("formats") or ()))):
                     out.append(cand)
                 found = found or code
+    if master and not any(len(c["tracks"]) == n_files for c in out):
+        # QRY-4: none of that master's versions has your track count (a same-titled single's or
+        # compilation's master came first): the next master titled as your album too
+        master2 = next((r.get("master_id") for r in results if r.get("master_id")
+                        and str(r.get("master_id")) != str(master) and pre(r) >= 0.7), None)
+        if master2:
+            data2 = http.get_json(f"https://api.discogs.com/masters/{master2}/versions?per_page=100", "discogs")
+            have = {str(c["id"]) for c in out}
+            vs = sorted((v for v in (data2 or {}).get("versions", []) if str(v.get("id")) not in have),
+                        key=lambda v: version_priority(album, catnos=[v.get("catno") or ""], country=v.get("country"),
+                                                       formats=str(v.get("format") or "").split(",")))
+            for v in vs[:MASTER_VERSIONS]:
+                det = http.get_json(f"https://api.discogs.com/releases/{v['id']}", "discogs")
+                if det:
+                    cand = discogs_candidate(det, dm)
+                    if len(cand["tracks"]) == n_files:
+                        out.append(cand)
     counts = _digital_count(data, "versions", None,
                             lambda v: v.get("major_formats") or [v.get("format") or ""])
     out = [dict(c, **counts.get(str(c["id"]), {})) for c in out]
@@ -9696,7 +9908,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             rels = set()
             source_notes.append(f"fingerprint lookup failed ({exc})")
         if rels:
-            album["fp_releases"] = rels
+            # (FBK-5: proof only for the releases holding every matched track; the others are fetched
+            # as candidates to compare, nothing more)
+            album["fp_releases"] = set(album.get("fp_proof") or ())
             out["fingerprint_releases"] = len(rels)
             have = {s["cand"]["id"] for s in (mb_res or {}).get("scored", [])}
             new = []
@@ -9729,6 +9943,49 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
             if (mb_res or {}).get("scored") or new:
                 mb_res = _scored_again(mb_res, new, "mb", album, cfg, ocr_txt)
                 final = _combine(mb_res, dg_res)
+    if final["status"] != "auto" and album.get("deezer_upc") and not album.get("barcodes"):
+        # QRY-7: the shop's UPC of the album whose lengths are your files', searched as a barcode
+        # on MusicBrainz and Discogs: their releases under it are compared as any candidate (the
+        # code is the shop's, never your copy's: no barcode evidence)
+        upc = album["deezer_upc"]
+        try:
+            new_mb = []
+            if use_mb:
+                have = {s["cand"]["id"] for s in (mb_res or {}).get("scored", [])}
+                for form in mc.barcode_variants(upc):
+                    data = http.get_json(f"https://musicbrainz.org/ws/2/release/?query={q('barcode:' + form)}"
+                                         "&fmt=json&limit=15", "mb") or {}
+                    for r in data.get("releases") or []:
+                        if len(new_mb) >= 6:
+                            break
+                        if r["id"] not in have:
+                            have.add(r["id"])
+                            det = http.get_json(f"https://musicbrainz.org/ws/2/release/{r['id']}"
+                                                f"?inc=recordings+artist-credits+labels+url-rels&fmt=json", "mb")
+                            if det:
+                                new_mb.append(mb_candidate(det))
+            new_dg = []
+            if use_discogs and dm is not None:
+                have = {str(s["cand"]["id"]) for s in (dg_res or {}).get("scored", [])}
+                data = http.get_json(f"https://api.discogs.com/database/search?type=release&per_page=15"
+                                     f"&barcode={q(upc)}", "discogs") or {}
+                for r in (data.get("results") or [])[:5]:
+                    if str(r["id"]) not in have:
+                        det = http.get_json(f"https://api.discogs.com/releases/{r['id']}", "discogs")
+                        if det:
+                            new_dg.append(discogs_candidate(det, dm))
+            if new_mb or new_dg:
+                seen_ids = _cand_ids(mb_res, dg_res)
+                if new_mb:
+                    mb_res = _scored_again(mb_res, new_mb, "mb", album, cfg, ocr_txt)
+                if new_dg:
+                    dg_res = _scored_again(dg_res, new_dg, "discogs", album, cfg, ocr_txt)
+                _note_found(album, seen_ids, (mb_res, dg_res), "Deezer's barcode for the album")
+                final = _combine(mb_res, dg_res)
+        except AuthError:
+            raise
+        except Exception as exc:
+            source_notes.append(f"searching Deezer's barcode {upc} failed ({exc})")
     if album.get("discids"):
         out["discids"] = album["discids"]
 

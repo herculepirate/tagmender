@@ -231,8 +231,10 @@ class Drop(DropBase):
         settle(self.inbox)
         res = watcher.Watcher([prof], once=True).tick()
         self.assertEqual(len(res), 1, res)
-        # one track of a three-track release is not identified (the matcher's call): it waits
-        self.assertEqual(list(res.values()), ["unresolved"])
+        # one track of a three-track release: its release is not proven - the album's own facts
+        # are written where it is (FBK-7: the Discogs release, with no master, is its album's only
+        # version; it waited untagged before), never filed unasked
+        self.assertEqual(list(res.values()), ["partial"])
         self.assertTrue((self.inbox / one.name).exists())
 
     def test_unidentified_drop_stays_and_is_not_retried_every_pass(self):

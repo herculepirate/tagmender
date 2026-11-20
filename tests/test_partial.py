@@ -306,18 +306,19 @@ class Partial(Base):
         self.assertFalse(any("/ws/2/release" in u for _h, u in http.calls))
         self.assertTrue(pf.default()["unresolved"]["allow_partial"])            # on by default
 
-    def test_unresolved_action_leave_writes_no_partial_tags(self):
+    def test_unresolved_action_leave_holds_the_partial_tags(self):
+        # LVE-1 (2026-11-19; they were computed and thrown away before): with "leave", the album's
+        # own facts are planned but held - shown, unticked, written only when you tick it
         http = FakeHttp(mb=[mb_release("mb-a")])
         d = self.album()
         eng = self.engine(http, unresolved={"action": "leave", "move_to": ""})
         with mock.patch.object(ma, "process", return_value=review(MB_BEST)):
             plan = eng.plan(d)
         a = plan["albums"][0]
-        self.assertEqual((a["status"], a["identification"]["tier"]), ("unresolved", "unresolved"))
-        self.assertFalse(any(f["changes"] for f in a["files"]))
-        # (WEB-1: the release is looked up - a database that establishes the album keeps the
-        # web from being asked - but nothing is written and nothing is held)
-        self.assertNotIn("held", a)
+        self.assertEqual(a["identification"]["tier"], "partial")
+        self.assertIn("leave", a["held"])
+        self.assertTrue(pl.held(a))                                 # (not applied unless ticked)
+        self.assertTrue(any(f["changes"] for f in a["files"]))    # (what ticking it writes, shown)
 
     def test_an_error_is_retried_not_partial(self):
         http = FakeHttp(mb=[mb_release("mb-a")])
@@ -389,12 +390,18 @@ class Partial(Base):
         for gone in PRESSING:
             self.assertNotIn(gone, t)
 
-    def test_discogs_without_a_master_gives_nothing(self):
+    def test_discogs_without_a_master_gives_its_album_facts(self):
+        # FBK-7 (2026-11-19; it gave nothing before): the release is the album's only version
         best = {"source": "discogs", "id": 901, "url": "u", "confidence": 75.0, "notes": [], "mb_id": "",
                 "discogs_id": "", "artist": "Band P", "title": "Album P"}
         http = FakeHttp(dg=[dict(dg_release(901), master_id=None)])
         eng, p, _d = self.run_partial(http, review(best))
-        self.rejected(eng, p, "has no master")
+        self.assertEqual((p.status, p.tier), ("identified", "partial"), self.logged(eng))
+        t = p.targets[1]
+        self.assertEqual((t["album"], t["albumartist"], t["title"]), (["Album P"], ["Band P"], ["T1"]))
+        self.assertNotIn("discogs_master_id", t)
+        for gone in PRESSING:
+            self.assertNotIn(gone, t)
 
     def test_musicbrainz_and_discogs_disagreeing_on_the_year_leave_it_out(self):
         best = dict(MB_BEST, discogs_id=900)
@@ -1017,7 +1024,8 @@ class PoolPartial(Base):
     def test_another_album_in_the_pool_about_as_good_stops_it(self):
         # BTBAM - Automata II (its own release group, linked to master 1391831) beside
         # Automata I & II: another album with other tracks
-        other = mb_release("mb-z", rg="rg-ii", title="Album P II", titles=["X0", "X1", "X2"])
+        # (FBK-2: its tracks fit your files too - titled as yours - so it is an album they could be)
+        other = mb_release("mb-z", rg="rg-ii", title="Album P II")
         http = FakeHttp(mb=[mb_release("mb-a"), other], groups={"rg-p": links(500), "rg-ii": links(600)})
         out = dict(review(MB_BEST), pool=pool_of(("mb", "mb-a", 80.0), ("mb", "mb-z", 76.0)))
         eng, p, _d = self.run_partial(http, out)
@@ -1065,10 +1073,12 @@ class PoolPartial(Base):
         out = dict(review(best), pool=pool_of(("mb", "mb-a", 80.0), ("discogs", "900", 73.8)))
         _e, p, _d = self.run_partial(http, out)
         self.assertEqual(p.tier, "partial")
-        # and without the link it is not shown to be this album (its tracks differ): refused
+        # and without the link: scored below the album that fits, its tracks not your files' - no
+        # other album they could be (FBK-2, 2026-11-19; it refused the album before)
         http = FakeHttp(mb=[mb_release("mb-a")], dg=[wrong], masters=[dg_master(500)])
         eng, p, _d = self.run_partial(http, out)
-        self.rejected(eng, p, "another Discogs album fits about as well")
+        self.assertEqual(p.tier, "partial")
+        self.assertIn("does not fit your files (FBK-2)", self.logged(eng) + " ".join(p.why or []) + " ".join(p.notes or []))
 
     def test_a_higher_candidate_not_established_still_counts_against_it(self):
         # Voivod - Negatron: Discogs 100.0 above MB 80.8; when it is another album, no Partial

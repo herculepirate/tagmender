@@ -6,7 +6,7 @@
 - When nothing about your copy tells the pressings of an album apart, TagMender now writes the pressing it picks in full: release IDs, barcode, catalogue number, label, country, date and media, from MusicBrainz and Discogs as your Sources setting merges them. It is picked by your country order, then the original release, then your release types and formats, and finally the database's earliest entry, so a pick is always made. Such an album is marked Partial with the reason "pressing guessed", and a later look-up that finds proof on your copy replaces the guess. Before, only the album's shared tags were written and the pressing was offered for you to confirm.
 - An identified album scoring below your profile's move threshold is now moved into your library like any other (a new profile setting, on by default; Extra-careful matching keeps asking).
 - Album-known and other Partial results are written by default, also in watched folders, marked Partial.
-- File > Add Files… adds single audio files; a lone track is identified by its fingerprint.
+- File > Add Files… (Ctrl+Alt+O) adds single audio files; a lone track is identified by its fingerprint.
 
 **Adding a folder while albums are being looked up**
 - A folder you add from anywhere while a look-up runs is now looked up as soon as one of its workers is free, and can be ticked and applied as soon as its row is ready, instead of waiting for the whole look-up to finish. If it turns out to be another copy of an album being looked up at the same time, it is looked up again once the look-up ends, so the two are never filed into one folder.

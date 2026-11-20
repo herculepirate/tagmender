@@ -57,10 +57,7 @@ class AddFiles(tg.Gui):
         file_menu = next(m for m in self.win.menuBar().actions() if m.text().replace("&", "") == "File").menu()
         keys = [x.objectName() for x in file_menu.actions() if not x.isSeparator()]
         self.assertEqual(keys[keys.index("add_folder") + 1], "add_files")
-        bar = self.win.toolbar.actions()
-        self.assertEqual(bar.index(a), bar.index(self.win.act("add_folder")) + 1)
-        self.assertEqual(self.win.toolbar.widgetForAction(a).text(), " Add Files")
-        self.assertEqual(actions.TOOLBAR[:2], ("add_folder", "add_files"))
+        self.assertNotIn("add_files", actions.TOOLBAR)                # (the toolbar is full: File menu and Ctrl+Alt+O)
         # (its key is no other command's)
         taken = [k for k, spec in actions.COMMANDS.items() if k != "add_files" and str(spec[1]) == "Ctrl+Alt+O"]
         self.assertEqual(taken, [])

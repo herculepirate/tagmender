@@ -1190,8 +1190,8 @@ class Main(QMainWindow):
         """The toolbar never hides its Inspector or Apply button in its overflow menu: when the window
         is too narrow for everything (its narrowest width, the progress bar shown during work), the
         Inspector button loses its word, the search field, the profile pop-up and the progress bar
-        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone. Add Files
-        gives up its word first (it is in File > Add Files… too), then Clear Done."""
+        narrow, the filter says "Attention", and Add Folder and Look Up show their icons alone. Clear Done
+        gives up its word first."""
         bar = getattr(self, "toolbar", None)
         b = bar.widgetForAction(self.commands["show_inspector"]) if bar is not None else None
         if b is None:
@@ -1200,10 +1200,8 @@ class Main(QMainWindow):
         # the narrowest: no "Profile" word before the pop-up, Apply's count without "Albums")
         # (Clear Done first shows its icon alone, then steps aside - it stays in Edit > Clear Done
         # Albums - before search and the profile pop-up narrow and the Inspector gives up its word;
-        # bare: False words, "files" Add Files' icon alone, None Clear Done's too, "gone" Clear Done
-        # aside, True icons alone; Add Files keeps its icon alone from "files" on)
-        steps = ((True, 200, 200, 120, False, False, False), (True, 200, 200, 120, False, "files", False),
-                 (True, 200, 200, 120, False, None, False),
+        # bare: False words, None Clear Done's icon alone, "gone" Clear Done aside, True icons alone)
+        steps = ((True, 200, 200, 120, False, False, False), (True, 200, 200, 120, False, None, False),
                  (True, 200, 200, 120, False, "gone", False), (True, 160, 180, 120, False, "gone", False),
                  (True, 140, 150, 100, False, "gone", False),
                  (False, 160, 180, 120, False, "gone", False),
@@ -1213,7 +1211,6 @@ class Main(QMainWindow):
         bar_act = lambda k: own.get(k + "_bar") or self.commands[k]          # noqa: E731
         others = [bar.widgetForAction(bar_act(k)) for k in actmod.TOOLBAR] + [self.cancel_button]
         clear_act = own.get("clear_done_bar")
-        files = bar.widgetForAction(bar_act("add_files")) if "add_files" in actmod.TOOLBAR else None
         for n, (word, search, profile, progress, compact, bare, least) in enumerate(steps):
             self._narrowest = least
             if getattr(self, "profile_actions", None):
@@ -1226,11 +1223,10 @@ class Main(QMainWindow):
             self.progress.setFixedWidth(progress)
             clear = bar.widgetForAction(clear_act) if clear_act is not None else None
             if clear_act is not None:
-                clear_act.setVisible(bare is False or bare is None or bare == "files")
+                clear_act.setVisible(bare is False or bare is None)
             for w in others:
                 if w is not None:
-                    alone = bare is True or (w is files and bare is not False) or \
-                        (w is clear and bare is not False and bare != "files")
+                    alone = bare is True or (w is clear and bare is not False)
                     w.setToolButtonStyle(Qt.ToolButtonIconOnly if alone else Qt.ToolButtonTextBesideIcon)
             if compact != getattr(self, "_compact_filter", False):
                 self._compact_filter = compact

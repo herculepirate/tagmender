@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.90
+
+**Hybrid SACDs: every copy of a disc tagged alike**
+- A hybrid SACD's CD layer and its SACD stereo and multichannel layers are one disc, and every copy of a track is now tagged the same: title, credits, work, composer and language come from the CD layer's track, MusicBrainz and Discogs merged as your Sources setting says. Only what belongs to the layer differs: its media, SACD area, "HD Audio" mark, and the surround mix's own ISRC and recording. Before, the layers of Billy Joel's Piano Man 50th Anniversary (SICP 10151~4) were tagged with different titles, producers and performers, and the multichannel copy had no work or composer.
+- A surround layer whose tracks MusicBrainz titles "… (4.0 mix)" or "… (5.1 mix)" is now counted as a layer of its disc, not as another disc: a CD-layer rip of Billy Joel's Streetlife Serenade (2015 hybrid SACD) is "1 of 1", not "1 of 2".
+
 ## 0.8.89
 
 **Clearer progress and status**

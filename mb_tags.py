@@ -977,9 +977,19 @@ def _layer_count(m) -> int:
         return 0
 
 
-def _layer_titles(m) -> list:
+# MED-22e: a multichannel layer's mix mark closing a track title ("Streetlife Serenader (4.0 mix)",
+# "[5.1 Surround Mix]", "(quad mix)", "(Quadraphonic)", "(multichannel mix)"), left out when a disc's
+# layers' titles are compared - never written so. A channel count only with "mix"; never "(Mono
+# Version)", "(Stereo Mix)", "(2.0)", "(Surround)": versions of their own
+_MIX_MARK = re.compile(
+    r"\s*[(\[]\s*(?:\d\.\d\s+(?:surround\s+)?mix|quad(?:raphonic)?(?:\s+mix)?|(?:multi-?channel|surround)\s+mix)"
+    r"\s*[)\]]\s*$", re.I)
+
+
+def _layer_titles(m, marks=True) -> list:
     import match_core as mc
-    return [mc.fold(t.get("title")) for t in m.get("tracks") or ()]
+    return [mc.fold(_MIX_MARK.sub("", str(t.get("title") or "")) if marks else t.get("title"))
+            for t in m.get("tracks") or ()]
 
 
 def layer_groups(rel) -> list:
@@ -998,17 +1008,20 @@ def layer_groups(rel) -> list:
     is a disc of its own."""
     media = rel.get("media") or []
     counted = not all(m.get("tracks") for m in media if _layer_kind(m.get("format"))[1])
-    groups, loose = _group_layers(media, counted, bonus=True)
+    groups, loose = _group_layers(media, counted, bonus=True, marks=True)
     if (counted or loose) and _layer_astray(groups):
         # (a layer left without its disc: the layers' order is not the discs' - joined only
         # as their own titles or counts say, MED-22b; with counts alone nothing joined)
-        groups = [[x] for g in groups for x in g] if counted else _group_layers(media, False, bonus=False)[0]
+        groups = [[x] for g in groups for x in g] if counted else _group_layers(media, False, bonus=False,
+                                                                                 marks=False)[0]
     return [[m for m, _f, _k in g] for g in groups]
 
 
-def _group_layers(media, counted, bonus):
+def _group_layers(media, counted, bonus, marks=False):
     """MED-22: layer_groups's grouping, as [[(medium, family, kind), ...], ...], and whether a
-    layer joined on bonus tracks (MED-22b: its count other than its disc's CD layer's)."""
+    layer joined on bonus tracks (MED-22b: its count other than its disc's CD layer's) or on
+    titles the same only without their mix marks (MED-22e, MARKS: its titles' "(4.0 mix)" left
+    out) - such a join is checked as MED-22b's are (_layer_astray)."""
     groups, loose = [], False
     for m in media:
         family, kind = _layer_kind(m.get("format"))
@@ -1030,12 +1043,13 @@ def _group_layers(media, counted, bonus):
             # MED-22b: the same titles - or a CD layer's bonus tracks after its SACD layers' own
             # (Billy Joel - Streetlife Serenade 50th, SICP 10157: CD layer 14 tracks, its SACD
             # layers the first 10), the shorter list at least half the longer
-            a, b = _layer_titles(m), _layer_titles(head[0])
+            a, b = _layer_titles(m, marks), _layer_titles(head[0], marks)
             n = min(len(a), len(b))
-            same = a == b
-            join = same or (bonus and "cd" in (kind, head[2]) and n * 2 >= max(len(a), len(b))
-                            and a[:n] == b[:n] and (len(a) > n) == (kind == "cd"))
-            join = join and (twin is None or _layer_titles(twin) == a)
+            same = a == b and _layer_titles(m, False) == _layer_titles(head[0], False)
+            marked = a == b and not same
+            join = same or marked or (bonus and "cd" in (kind, head[2]) and n * 2 >= max(len(a), len(b))
+                                      and a[:n] == b[:n] and (len(a) > n) == (kind == "cd"))
+            join = join and (twin is None or _layer_titles(twin, marks) == a)
         if join:
             loose = loose or not same
             last.append((m, family, kind))

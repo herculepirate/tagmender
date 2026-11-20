@@ -5024,6 +5024,8 @@ class Engine:
         # MED-19: which Discogs tracks are a vinyl record's in a CD box (never written: a marker)
         dg_vinyl = [bool(t.pop("~box_vinyl", None)) for t in dparts[1]] \
             if dparts and dparts[1] is not None else []
+        # MED-22d: every Discogs track of the release, before your files' own are picked from them
+        dg_all = list(dparts[1]) if dparts and dparts[1] is not None else None
         n = len(files)
         slots, missing = best.get("slots"), _missing_of(best)
         vtracks = best.get("version_tracks")
@@ -5140,6 +5142,12 @@ class Engine:
             # physical disc and filed in a folder of that layer's own
             tags_mb = _layer_copy(full_rel, tags_mb, vtracks)
             tags_mb = _area_copy(full_rel, tags_mb, vtracks, album)
+            # MED-22d: the layers of one hybrid SACD are one physical disc: each layer's copy of a
+            # track takes the CD layer's track's values (its Discogs track too), only its own
+            # layer's fields (media, track ID, its own mix's recording and ISRC) kept
+            tags_mb, dg_one = _one_disc_tracks(full_rel, tags_mb, ps, dg_all)
+            if dg_one is not None and dparts:
+                dparts = (dparts[0], dg_one, dparts[2])
         if dparts and (dparts[1] is None or len(dparts[1]) != n):
             dparts = None if not tags_mb else (dparts[0], None, dparts[2])
         if tags_mb and dparts and es["merge_mode"] == "mb_only":
@@ -5201,7 +5209,8 @@ class Engine:
                 # MED-22: an SACD layer's copy is written its own layer's media ("Hybrid SACD (SACD
                 # layer, 2 channels)"), never the release's format the Discogs plugin writes for the
                 # disc ("SACD, Hybrid, Multichannel, Album" on the stereo layer: Kodo - One Earth Tour
-                # Special)
+                # Special). MED-22d: the CD layer's copy keeps its media as before (the edition reads
+                # SACD from the Discogs format: its folder stays "[2015 SACD]")
                 merged["media"], where["media"] = tags_mb[i]["media"], "musicbrainz"
             merged = latin_titles(merged, self.profile.picard_tags())
             # HF-5: a partial album's missing tracks are no tag of their own (no TAGMENDER_MISSING):
@@ -9860,6 +9869,101 @@ def _layer_copy(rel, tags, vtracks=None) -> list:
         label = mb_tags.layer_label(m.get("format")) if id(m) in joined else ""
         if label:
             t["~layer"] = [label]
+    return out
+
+
+# MED-22d: the fields a layer's copy of a track keeps as its own layer's (the rest are its
+# physical disc's: the CD layer's track's)
+_LAYER_OWN = {"musicbrainz_trackid", "musicbrainz_recordingid", "isrc", "media", "discnumber", "totaldiscs",
+              "tracknumber", "totaltracks", "~layer", "~version", "~absolutetracknumber", "~totalalbumtracks",
+              "~discpregap", "~length", "~video", "~recordingcomment", "~recording_firstreleasedate",
+              "~recordingtitle", "~musicbrainz_tracknumber"}
+
+
+def _one_disc_tracks(rel, tags, ps, dg_tracks):
+    """MED-22d (decided 2026-11-20): the layers of one hybrid SACD are one physical disc, so each
+    copy of a track - the CD layer's, the stereo or multichannel SACD layer's - carries the same
+    track-level values: its title, credits, work, composers, language and disc subtitle are the
+    CD layer's track's (an SACD's areas listed apart with no CD layer: its first area's, their
+    disc subtitle only where they share it), and its Discogs track the one the CD layer's copy
+    takes (Discogs lists the disc once: _one_disc_discogs). Only the layer's own fields stay (_LAYER_OWN: its media name, release track ID, numbering, and the
+    recording ID and ISRC of a mix the release lists as another recording - a quadraphonic mix
+    with no work links). TAGS are matched to the release by their release track IDs.
+    The CD layer's copy keeps its own media as before (a Discogs-preferred profile's "SACD,
+    Hybrid, ...": the edition reads SACD from it, so its folder stays "[2015 SACD]").
+    (tags, [the Discogs track of each file] or None to keep the matched ones)."""
+    groups = mb_tags.layer_groups(rel or {})
+    if not tags or not any(len(g) > 1 for g in groups):
+        return tags, None
+    where, ref_of = {}, {}
+    for d, g in enumerate(groups, 1):
+        for m in g:
+            for k, t in enumerate(m.get("tracks") or ()):
+                if t.get("id"):
+                    where[t["id"]] = (d, m, k)
+        if len(g) > 1:
+            kinds = [mb_tags._layer_kind(m.get("format"))[1] for m in g]
+            ref_of[d] = g[kinds.index("cd")] if "cd" in kinds else g[0]
+    locs = [where.get(str((t.get("musicbrainz_trackid") or [""])[0])) for t in tags]
+    layered = {i for i, loc in enumerate(locs) if loc and loc[0] in ref_of}
+    if not any(locs[i][1] is not ref_of[locs[i][0]] for i in layered):
+        return tags, None                          # (the CD layer's copy: its own values already)
+    whole = mb_tags.release_tags(rel, ps)
+    keys = mb_tags.track_keys(rel)
+    if len(keys) != len(whole):
+        return tags, None
+    at = {(int(p), int(k)): j for j, (p, k) in enumerate(keys)}
+    # (an SACD's areas listed apart with no CD layer: their disc subtitle is shared only where
+    # every area has the same - else each keeps its own medium's title, as before)
+    own_title = {d for d, g in enumerate(groups, 1) if d in ref_of and ref_of[d] is g[0]
+                 and "cd" not in [mb_tags._layer_kind(m.get("format"))[1] for m in g]
+                 and len({str(m.get("title") or "") for m in g}) > 1}
+    out = []
+    for i, t in enumerate(tags):
+        loc = locs[i]
+        ref = ref_of.get(loc[0]) if loc else None
+        j = at.get((int(ref.get("position") or 0), loc[2])) if ref is not None and ref is not loc[1] else None
+        if j is None:
+            out.append(t)
+            continue
+        keep = _LAYER_OWN | ({"discsubtitle"} if loc[0] in own_title else set())
+        same = {k: v for k, v in whole[j].items() if k not in keep}
+        same.update({k: v for k, v in t.items() if k in keep})
+        out.append(same)
+    return out, _one_disc_discogs(groups, ref_of, locs, out, dg_tracks)
+
+
+def _one_disc_discogs(groups, ref_of, locs, tags, dg_tracks):
+    """MED-22d: each file's Discogs track - the one the CD-layer copy of its disc takes, numbered
+    as the file's own layer is (a CD layer's bonus tracks are no SACD layer's: "3 of 3", never
+    "3 of 5") - or None to keep the matched ones. Discogs lists the disc once: its audio discs,
+    in order, are the release's physical ones, each only where it lists as many tracks as the
+    disc's CD layer and most of their titles are that layer's (a bonus CD listed first is not
+    disc 1)."""
+    audio = [d for d, g in enumerate(groups, 1)
+             if str(g[0].get("format") or "").casefold() not in mb_tags.VIDEO_FORMATS]
+    discs = list(dict.fromkeys(str(t.get("discnumber")) for t in dg_tracks or ()))
+    if not dg_tracks or len(discs) != len(audio) or not all(locs):
+        return None
+    by = {d: [t for t in dg_tracks if str(t.get("discnumber")) == x] for d, x in zip(audio, discs)}
+    fits = {}
+    out = []
+    for (d, m, k), t in zip(locs, tags):
+        own, lead = by.get(d), ref_of.get(d, m)
+        mine = lead.get("tracks") or ()
+        if own is None or len(own) != len(mine) or k >= len(own):
+            return None
+        if d not in fits:
+            same = sum(1 for a, b in zip(mine, own) if mc.title_sim(str(a.get("title") or ""),
+                                                                    str(b.get("title") or "")) >= 0.6)
+            fits[d] = 2 * same > len(mine)
+        if not fits[d]:
+            return None
+        x = copy.deepcopy(own[k])
+        for f in ("tracknumber", "totaltracks", "discnumber", "totaldiscs"):
+            if t.get(f):
+                x[f] = str(t[f][0])
+        out.append(x)
     return out
 
 

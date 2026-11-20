@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.8.88" src="https://img.shields.io/badge/version-0.8.88-0f7b7b">
+  <img alt="Version 0.8.89" src="https://img.shields.io/badge/version-0.8.89-0f7b7b">
   <img alt="Licence GPL-2.0-or-later" src="https://img.shields.io/badge/licence-GPL--2.0--or--later-blue">
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-informational">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
@@ -36,10 +36,12 @@ tells you why.
 - Matches against MusicBrainz and Discogs using tags, file and folder names, track lengths, disc IDs
   from rip logs and cue sheets, barcodes and catalogue numbers read from your scans, and AcoustID
   fingerprints.
-- Picks a release automatically only when the evidence proves it. When nothing of your copy tells
-  an album's pressings apart, the album is tagged as Album only and one pressing is suggested
-  (by your country order, or the original release); its barcode, catalogue number and label are
-  written only once you confirm it. Otherwise the album goes to review.
+- Picks a release automatically when the evidence proves it. When nothing of your copy tells an
+  album's pressings apart, it picks one by your country order, then the original release, then
+  the database's oldest entry. It writes that pressing in full, both databases merged by your
+  Sources setting, and marks it "pressing guessed", so a later look-up that finds proof replaces
+  it.
+- Joins a set's disc folders into one album, even when each disc credits other composers.
 - Tells apart versions in one folder (a remaster and a remix, for example) and splits them into
   separate albums.
 
@@ -53,13 +55,16 @@ tells you why.
   | Tier | Marked as | What gets written |
   |---|---|---|
   | Exact release | `TAGMENDER=Resolved` | Everything your level asks for, pressing details included |
-  | Album only | `TAGMENDER=Partial` | What the tied pressings share; a suggested pressing only once you confirm it |
+  | Pressing guessed | `TAGMENDER=Partial` | Everything, for the pressing picked among equal ones; the reason says it was guessed |
+  | Album only | `TAGMENDER=Partial` | What the tied pressings share, from both databases |
   | Partial | `TAGMENDER=Partial` | Artist, album, tracks and genres; never a barcode, label or release ID |
   | Unresolved | `TAGMENDER=Unresolved` | Nothing; the reason is kept and the album is retried later |
 
 **Organise**
 - Renames and moves albums with naming scripts or presets. Cover art, scans, logs and cue sheets
-  move with their album.
+  move with their album. The folder always follows the album artist.
+- Labels later issues by their own edition name, for example "[2023 Deluxe Edition]", or as a
+  remaster or reissue.
 - Keeps lossless and lossy files in separate libraries if you want. Duplicate copies go to a
   folder you name or to the Trash, and can be put back.
 
@@ -70,7 +75,11 @@ tells you why.
 - Every job can be undone, and an interrupted job is recovered.
 
 **Work your way**
-- A desktop app, a command line and watched folders that run unattended.
+- A desktop app, a command line and watched folders that run unattended. Watched folders file
+  every album they identify; only one that would mix with something already in your library
+  waits for you.
+- Add folders or single files (File › Add Files…) at any time. Each one is looked up as soon as
+  a slot is free, even while other albums are still being looked up.
 - Profiles hold every setting: source, target, audio formats and file operations. Presets and
   plain-language defaults are included. One setting can be copied to every profile at once.
 - Changed a setting after looking albums up? Refresh looks them up again with the new one, before
@@ -167,7 +176,7 @@ tagmender watch                           # process watched folders unattended
 tagmender doctor --connection             # check what is set up, and which services answer
 ```
 
-New to it? Start with the [Quick start](docs/QUICK_START.md) (ten minutes), then [First run](docs/FIRST_RUN.md) for a careful first session.
+New to it? Start with the [Quick start](docs/QUICK_START.md) (fifteen minutes, starting with your profiles), then [First run](docs/FIRST_RUN.md) for a careful first session.
 
 ## Keys and requirements
 
@@ -192,7 +201,7 @@ Flatpak. See [Building the packages](docs/USER_GUIDE.md#building-the-packages).
 |---|---|
 | [User guide](docs/USER_GUIDE.md) | Everything in detail |
 | [Setup](docs/SETUP.md) | Keys, logins and optional programs |
-| [Quick start](docs/QUICK_START.md) | Install, set up, look up and apply your first album |
+| [Quick start](docs/QUICK_START.md) | Profiles, keys, your first look-up and Apply, then watched folders |
 | [First run](docs/FIRST_RUN.md) | A safe first session |
 | [Profiles and naming](docs/PROFILES.md) | Every setting and its default, levels, naming scripts |
 | [Providers](docs/PROVIDERS.md) | Online services, limits and caching |

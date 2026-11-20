@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.8.89
+
+**Clearer progress and status**
+- While several albums are looked up at once, the count beside the toolbar now says how many are done ("1 of 4 done"). Before, it counted the albums started, so "3 of 4" showed while every row still said "Looking up…".
+- An album whose pressing was picked among equal ones now reads "Ready · Pressing guessed" in the list, not plain "Ready".
+
+**Documentation**
+- A new Quick start that begins with setting up your profiles, then keys, adding music, reading the results, Apply and Undo, and watched folders.
+- New screenshots of the current window, and the README and User Guide describe how pressings are guessed and written.
+
 ## 0.8.88
 
 **Edition names**

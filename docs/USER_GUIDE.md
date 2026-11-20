@@ -264,17 +264,22 @@ Each album ends in one tier, shown in the plan (after the score) and in the app'
    title: each file gets its real track number and the release's totals, and
    `TAGMENDER_MISSING` lists the tracks that are not there ("2, 4, 5, 7-10, 14"; "1:3, 2:5"
    as disc:track on several discs).
-2. **Album only** (`TAGMENDER=Partial`, `TAGMENDER_REASON` "ambiguous_release: album known,
-   pressing not established ..."): the album is certain, its pressings tie; what they all share,
-   no release IDs, catalogue number or barcode. When only a tie-break chose between the pressings
-   (your country order, the original release, your preferred release types or formats), that
-   pressing is suggested - the status reads "Album known · pressing suggested" and the plan names
-   it - and Album > Use Suggested Pressing (or `tagmender plan PATH --release REF`) tags it in full
-   (TIE-1). So too when only your Sources preference chose between MusicBrainz's and Discogs's
-   pressings. The files' `TAGMENDER_REASON` names the suggested release ("pressing suggested, not
-   confirmed: <release>"), and Needs attention lists such albums as "Pressing suggested — confirm",
-   with Use Suggested Pressing there too. Marked Partial, not Resolved, because no release is proven: `tagmender unresolved` lists it, `tagmender retry` and watched folders try it
-   again. `web_tag.py --apply` marks its album-only albums the same way.
+2. **Pressing guessed** (`TAGMENDER=Partial`, `TAGMENDER_REASON` "ambiguous_release: pressing
+   guessed: <release> (<tie-break>)"): the album is certain and its pressings tie, with nothing of
+   your copy telling them apart. A tie-break picks one: your country order, then the original
+   release, then your preferred release types or formats, then the database's oldest entry
+   (TIE-1). That pressing is written in full - release IDs, barcode, catalogue number, label,
+   country, date and media, MusicBrainz and Discogs merged as your Sources setting says - and the
+   status reads "Ready · Pressing guessed". It is marked Partial, not Resolved, because no release
+   is proven: a later look-up that finds proof on your copy (a barcode, disc ID, scans or rip log)
+   replaces it, and planning it again with nothing new keeps the same guess and writes nothing.
+   Choosing the release yourself (Album > Change Release, or `tagmender plan PATH --release REF`)
+   makes it Resolved. A profile that accepts exact releases only still holds such an album, the
+   pick suggested ("Album known · pressing suggested", Album > Use Suggested Pressing).
+   **Album only** (`TAGMENDER=Partial`, "ambiguous_release: album known, pressing not established"):
+   the pressings tie and none could be picked; what they all share is written, from both databases
+   (ALB-5), never a release ID, catalogue number or barcode. `tagmender unresolved` lists both,
+   `tagmender retry` and watched folders try them again.
 3. **Partial** (`TAGMENDER=Partial`, the reason in `TAGMENDER_REASON`): the matcher would not
    pick a release, but the best candidate is the same album - same track count, artist and title
    as close as an automatic pick needs, 80 % of the track lengths agreeing, and no other candidate
@@ -585,7 +590,7 @@ file until you apply it, through the same staged, verified and undoable path as 
 |---|---|
 | Album > Search for Release… (Ctrl+Shift+F) | Search MusicBrainz releases, recordings and artists, or Discogs releases; Use This Release previews the album again with it |
 | Album > Other Versions… (Ctrl+Shift+L) | Every release of the album's MusicBrainz release group and Discogs master, with how well each fits your files |
-| Album > Use Suggested Pressing | For an Album only album whose pressing a tie-break suggested (your country order, the original release; status "Album known · pressing suggested"): previews it again with that release, tagged in full - its barcode, catalogue number and label (TIE-1). Also in the album's menu and on the Why This Release tab (the Evidence tab on Needs attention); the toolbar's Needs Attention filter counts these albums |
+| Album > Use Suggested Pressing | For an album held with a suggested pressing - a profile that accepts exact releases only (status "Album known · pressing suggested"): previews it again with that release, tagged in full (TIE-1). Elsewhere a tie-break's pick is written at once, marked "Pressing guessed"; Album > Change Release makes another one yours |
 | Album > Choose Your Pressing… (Ctrl+Shift+P) | For an album whose pressing is not proven (Album only, Partial): only the pressings that fit equally, with the details that tell them apart highlighted and what to check on your copy |
 | Album > Info… (Ctrl+I) | A file's format, codec, bitrate, length, every tag as stored and its embedded pictures (read only) |
 | Inspector > Tags (Album > Tag) | The selection's tags, original and new; edit a value (double-click, Return or F2), revert it, use the suggested value, add or remove a tag (Delete), and rate the tracks, for the album, a disc or a track; Edit > Undo Edit (Ctrl+Z) takes back the last edit |

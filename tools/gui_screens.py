@@ -56,7 +56,10 @@ README_SHOTS = {"overview-evidence.png": ("light", "inspector-evidence"),
                 "report.png": ("light", "report"),
                 "manual-match.png": ("light", "m8-manual-match"),
                 "profile-editor.png": ("light", "profiles-names"),
-                "preferences-network-dark.png": ("dark", "preferences-network")}
+                "preferences-network-dark.png": ("dark", "preferences-network"),
+                # (docs/QUICK_START.md's pictures)
+                "setup.png": ("light", "setup"),
+                "apply-sheet.png": ("light", "sheet-apply")}
 TIDY = {"on": False}       # README look: albums by name, ~ for the made-up home, a tested connection
 
 
@@ -283,7 +286,7 @@ def profiles(tmp):
                           "sources": [{"path": str(tmp / "inbox"), "watch": True}]}))
     pf.save(pf.from_dict({"name": "In place", "description": "Fix tags where they are", "operation": "in_place"}))
     # (two profiles whose names give their rows a colour: light green, light orange - 0.8.71)
-    for name in ("LossyLess Unraid", "Extreme Unraid"):
+    for name in ("LossyLess Library", "Extreme Metal"):
         pf.save(pf.from_dict({"name": name, "description": "Rows tinted by the profile's name",
                               "operation": "move", "destination": str(tmp / "library")}))
 
@@ -504,7 +507,7 @@ def shoot_all(sh, gui, sheets, plan, attention, theme, size, QPoint, QColor, QPa
         """Some albums with a profile of their own (made-up keys, no look-up): every row tinted with its
         profile's colour, a dot of it before the profile's name on each (0.8.71)."""
         # (five profiles in all: two coloured by their names, the others by the automatic colours)
-        names = ("LossyLess Unraid", "LossyLess Unraid", "Extreme Unraid", "Extreme Unraid", "Inbox", "In place",
+        names = ("LossyLess Library", "LossyLess Library", "Extreme Metal", "Extreme Metal", "Inbox", "In place",
                  "Inbox")
         for a, name in zip(ov.model.albums, names):
             ov.album_profiles[ov.album_key(a)] = name

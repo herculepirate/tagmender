@@ -2528,7 +2528,11 @@ class Overview(QWidget):
     def lookup_words(self, i, name) -> str:
         """The line under the list while albums are looked up: which one of how many."""
         n = self._lookup_n
-        head = tr("Looking up album {0} of {n} with {w}").format(i + 1, n=n, w=self.looked_with) if name else \
+        # (several albums are looked up at once: how many are done, never which one was started last)
+        order = list(getattr(self, "_lookup_order", None) or [])
+        done = min(n, sum(1 for k in order if self.states.get(k) not in ("waiting", "looking")))
+        head = tr("Looking up {0} with {1}, {2} done").format(plural(n, tr("album"), tr("albums")),
+                                                              self.looked_with, done) if name else \
             tr("Looking up {0} with {1}").format(plural(n, tr("album"), tr("albums")), self.looked_with)
         tail = tr(": {0}").format(name) if name else ""
         skipped = getattr(self, "_lookup_skipped", 0)
@@ -2557,6 +2561,17 @@ class Overview(QWidget):
                 continue
             self.looked[a.get("key") or engine.group_key(a["source_dir"], a.get("album_files") or [])] = stamp
 
+    def lookup_count(self, n=None):
+        """The toolbar's bar and count during a look-up: the albums whose look-up is DONE of all it
+        has ("1 of 4 done"); an album still waiting or being looked up is not counted."""
+        order = list(getattr(self, "_lookup_order", None) or [])
+        n = int(n or len(order) or getattr(self, "_lookup_n", 0) or 0)
+        done = sum(1 for k in order if self.states.get(k) not in ("waiting", "looking"))
+        done = min(done, n)
+        self.bar.setMaximum(max(n, 1))
+        self.bar.setValue(done)
+        self.win.show_count(tr("{0} of {n} done").format(done, n=n))
+
     def looked_up_one(self, name, key, new, stamp=None):
         """Album KEY looked up with profile NAME (NEW: its plan, its rows): they take the
         places of the album's rows at once; the other rows stay as they were."""
@@ -2565,6 +2580,8 @@ class Overview(QWidget):
         if had or new.get("roots"):
             self.headers[name]["roots"] = list(dict.fromkeys(list(had) + list(new.get("roots") or [])))
         self.states.pop(key, None)
+        if getattr(self, "_lookup_n", 0) and self.running and not self._applying:
+            self.lookup_count()                            # (one more done: the count says so at once)
         found = list(new["albums"])
         keys = {key} | {self.album_key(a) for a in found}
         side = getattr(self, "_side", None) or []
@@ -2847,9 +2864,14 @@ class Overview(QWidget):
                 self.refresh_rows_of(lambda a: self.album_key(a) == key)    # (its row only: Looking up…)
             i = max(0, sum(1 for k in order if self.states.get(k) != "waiting") - 1)
         self.service_status()
-        self.bar.setMaximum(max(n, 1))
-        self.bar.setValue(i + 1)
-        self.win.show_count(tr("{0} of {n}").format(i + 1, n=n))     # (beside the bar: it is too thin for words)
+        if getattr(self, "_lookup_n", 0) and self.running and not self._applying:
+            # (several albums at once: the bar and its count say how many are DONE - "1 of 4 done" -
+            # never how many have started, which read as done while each still said Looking up…)
+            self.lookup_count(n)
+        else:
+            self.bar.setMaximum(max(n, 1))
+            self.bar.setValue(i + 1)
+            self.win.show_count(tr("{0} of {n}").format(i + 1, n=n))     # (beside the bar: it is too thin for words)
         words = tr("{0} of {n}: {name}").format(i + 1, n=n, name=Path(what).name)
         self.bar.setToolTip(words)
         self.bar.setAccessibleDescription(words)

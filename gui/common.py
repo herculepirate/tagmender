@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHeaderView, QLabel, Q
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 from .i18n import tr
-from .style import STATUS, SUGGESTED_LABEL, TIER_LABELS
+from .style import GUESSED_LABEL, STATUS, SUGGESTED_LABEL, TIER_LABELS
 
 
 HERE = Path(__file__).resolve().parent.parent       # the repo root (the engine modules)
@@ -71,6 +71,11 @@ def label_for(album):
         # (TIE-1: a pressing a tie-break proposed says so: "Ready · Album known · pressing suggested")
         known = tier == "album_only" and suggested_pressing(album)
         word = f"{word} · {tr(SUGGESTED_LABEL if known else TIER_LABELS[tier])}"
+    elif st not in ("unresolved", "excluded", "skipped") and \
+            ((album.get("identification") or {}).get("guessed") or {}).get("ref"):
+        # (TIE-1, 2026-11-20: a guessed pressing is written in full, its tier exact - never a plain
+        # "Ready" beside a proven one)
+        word = f"{word} · {tr(GUESSED_LABEL)}"
     return sym, word
 
 

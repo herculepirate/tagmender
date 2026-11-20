@@ -91,6 +91,8 @@ TIER_LABELS = {"album_only": N_("Album only"), "recording": N_("Recording only")
 # TIE-1: an album-only album whose pressing a tie-break proposed (your country order, the original
 # date): the album is known, the pressing only suggested until you confirm it
 SUGGESTED_LABEL = N_("Album known · pressing suggested")
+# TIE-1 (2026-11-20): a pressing a tie-break picked, written in full and marked Partial
+GUESSED_LABEL = N_("Pressing guessed")
 
 _forced = None                      # True/False when Preferences > Appearance says Dark/Light
 

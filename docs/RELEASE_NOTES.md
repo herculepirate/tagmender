@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.92
+
+**One album folder holding several copies of a disc**
+- A folder holding a hybrid SACD's CD layer and its SACD stereo and multichannel copies (Billy Joel's Piano Man 50th Anniversary: "Disc 01", "Disc 01 (SACD Stereo)", "Disc 01 (SACD Multichannel)", "Disc 02") added to the app is one album again, one row, each copy kept in its own folder. The copies are now looked up once together, not once per copy at the same time: about three minutes instead of twelve, and one copy that cannot be looked up no longer splits the album or fails the others.
+- A copy whose own tags say which SACD layer it is keeps that layer even when the database names none (a Discogs entry lists the disc once): it is never filed into the CD layer's "Disc 01".
+- Two copies of one disc are never put into one folder: if a plan would, the copy that does not belong there is held for your review, whichever row comes first.
+
 ## 0.8.91
 
 **Vinyl rips**

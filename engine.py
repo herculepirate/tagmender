@@ -1487,6 +1487,9 @@ class Group:
     set_shape: str = ""
     # MED-22c: why a copy of a disc's layers, read apart from the CD layer's, is held ("" for none)
     layer_hold: str = field(default="", compare=False)
+    # MED-22c: the SACD layer this copy's own files name ("SACD Stereo", "SACD Multichannel",
+    # "SACD": their media or SACD_AREA tag, else their folder's label); "" for the CD layer's copy
+    layer: str = field(default="", compare=False)
 
 
 def _slots_of(album, cand, sc):
@@ -2172,9 +2175,9 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
             # MED-22c: the CD layer's copy and SACD layers' copies of a disc filed side by side
             # ("Disc 01", "Disc 01 (SACD Stereo)"): each copy an album of its own, as filed
             mine = []
-            for members, hold in copies:
+            for members, hold, label in copies:
                 mine.append(Group(folder, members, [f for f in files if f not in members],
-                                  single=len(members) == 1, layer_hold=hold))
+                                  single=len(members) == 1, layer_hold=hold, layer=label))
             groups += mine
             if 2 <= len(mine) <= SET_TRIAL_MAX_DISCS:
                 # DSC-11: the copies of one release's discs and layers in one album folder (as a
@@ -2633,7 +2636,11 @@ class Engine:
         memo = self.__dict__.setdefault("_set_memo", {})
         sk = tuple(group_key(q.folder, q.files) for q in g.siblings)
         if sk not in memo:
-            memo[sk] = self._release_set(g)
+            # (LKP-1: plan_each's workers work a set out once between them - SharedSets - as one
+            # worker, or the command line's plan, does; never once per album of it at the same time)
+            shared = self.__dict__.get("_shared_sets")
+            memo[sk] = shared.work_out(sk, lambda: self._release_set(g), getattr(self, "_cancel", None)) \
+                if shared is not None else self._release_set(g)
         got = memo[sk]
         i = sk.index(group_key(g.folder, g.files))
         if i in got["members"]:
@@ -3722,7 +3729,7 @@ class Engine:
             for b in range(a + 1, len(slots)):
                 if self._slots_overlap(slots[a], slots[b]):
                     self.log.info("%s: '%s' and '%s' both hold a disc of %s: two copies, each planned alone", folder,
-                                  members[a][1].folder.name, members[b][1].folder.name, key[1])
+                                  _copy_name(members[a][1]), _copy_name(members[b][1]), key[1])
                     return out
         # VIN-1: rips of a record are copies, never layers: vinyl rips at another resolution or by
         # another ripper stay apart even where they hold different discs (side 1-2 by one ripper,
@@ -3822,7 +3829,7 @@ class Engine:
         if len(getattr(g, "siblings", None) or ()) > 1 and not getattr(self, "_in_set", False) and \
                 not getattr(self, "_set_alone", False):           # (the watcher: watcher.siblings_settled)
             return self._set_member(g)
-        prop = self.identify(g)
+        prop = _own_layer(self.identify(g), g)
         if getattr(g, "layer_hold", "") and prop.status != "identified":
             prop.reason = g.layer_hold + (f" ({prop.reason})" if prop.reason else "")   # (MED-22c)
         if not getattr(self, "_in_set", False) and not getattr(g, "siblings", None):
@@ -7484,6 +7491,7 @@ class Engine:
             groups = [g for g in groups if id(g) in asked]
         out, told = [], set()
         self.reached = set()                      # the group_key()s looked up (a run cancelled: not all)
+        self._cancel = cancel                     # (LKP-1: a worker waiting for a set another works out)
         for i, g in enumerate(groups):
             if cancel and cancel():
                 break
@@ -7511,6 +7519,8 @@ class Engine:
                             out.append(p)
                     finally:
                         log.info("%s", stagetimes.line(g.folder, time.monotonic() - start, secs))
+            except LookupCancelled:                           # (cancelled while it waited: not reached)
+                break
             except Exception as exc:                          # one bad album never stops the run
                 log.exception("identifying %s failed", g.folder)
                 # (nothing of it is written, moved or marked: an Unresolved row saying so)
@@ -7688,6 +7698,7 @@ class Engine:
         results = queue.SimpleQueue()
         failed = threading.Event()
         kept = {}                                        # (rows kept as listed: _keep_row)
+        shared = SharedSets()                            # (LKP-1: each set of sibling albums once)
 
         def planner(e):
             return planmod.Planner(e.profile, e.job, extra_roots=[root], edits=getattr(e, "edits", None),
@@ -7727,6 +7738,7 @@ class Engine:
                     if name in self.__dict__:
                         setattr(e, name, self.__dict__[name])
                 e._listed_keys = set(keys) | set(getattr(self, "listed_keys", None) or ())    # (as plan_each)
+                e._shared_sets = shared                  # (a set of sibling albums worked out once)
                 # (PRF-4: only the folders holding the albums are read, once for them all)
                 e.albums_in = _scan_of_feed(e, feed, found, found_lock)
                 while True:
@@ -7821,6 +7833,69 @@ class LookupSlots:
     def give_back(self):
         with self._lock:
             self._free += 1
+
+
+class LookupCancelled(Exception):
+    """The look-up was cancelled while this worker waited for a set another worker works out
+    (SharedSets): the album is not reached - its row stays as it was."""
+
+
+def _set_copy(got):
+    """A copy of a set's answer (Engine._release_set) for one worker: its Proposals copied, the
+    exceptions of albums that failed shared as they are (an exception is not copied: some take
+    other arguments than their message - ProviderUnavailable)."""
+    errors = {id(v): v for v in (got.get("own") or {}).values() if isinstance(v, BaseException)}
+    return copy.deepcopy(got, dict(errors))
+
+
+class SharedSets:
+    """LKP-1 / DSC-10 / DSC-11: the sets of sibling albums one plan_each works out (Engine
+    _release_set), shared by its workers: a set is worked out once, by the worker that asks
+    first, as a look-up of one worker or the command line's plan works it out. A worker asking
+    for a set another is working out waits for it, then takes a copy of it (each worker's own
+    Proposals: it adds their artwork and levels on its own). One whose working out raised, or
+    whose answer cannot be copied, is worked out by each worker that asks, as before. A worker
+    cancelled while it waits stops (LookupCancelled). Thread-safe."""
+
+    WAIT = 0.2                                   # seconds between looks at the cancel flag
+
+    def __init__(self):
+        self._done, self._busy, self._own = {}, {}, set()
+        self._lock = threading.Lock()
+
+    def work_out(self, key, make, cancel=None):
+        """make(): the set KEY worked out - here, or a copy of what another worker made of it."""
+        while True:
+            with self._lock:
+                if key in self._done:
+                    return _set_copy(self._done[key])
+                if key in self._own:             # (its answer could not be shared: each its own)
+                    break
+                ev = self._busy.get(key)
+                if ev is None:
+                    ev = self._busy[key] = threading.Event()
+                    break
+            while not ev.wait(self.WAIT):        # (another worker's: always ended, below)
+                if cancel is not None and cancel():
+                    raise LookupCancelled(key)
+        if key in self._own:
+            return make()
+        try:
+            got = make()
+            try:
+                snap = _set_copy(got)            # (taken before this worker changes its own)
+            except Exception:
+                snap = None
+            with self._lock:
+                if snap is None:
+                    self._own.add(key)
+                else:
+                    self._done[key] = snap
+            return got
+        finally:
+            with self._lock:
+                self._busy.pop(key, None)
+            ev.set()
 
 
 class LookupFeed:
@@ -9799,13 +9874,85 @@ def _layer_copies(files, metas):
                 for k, fs in bucket.items() if k for n, (t, hy) in discs(fs).items())
     if not twice:
         return None
-    out = [(bucket[k], "") for k in sorted(bucket) if k]
+    out = [(bucket[k], "", _LAYER_LABELS.get(k, "")) for k in sorted(bucket) if k]
     plain = [f for f in bucket[""] if Path(f).parent not in unsure]
     lost = "which SACD layer this disc is cannot be told (no SACD area or media tag names it)"
-    out += [([f for f in bucket[""] if Path(f).parent == d], lost) for d in sorted(unsure)]
+    out += [([f for f in bucket[""] if Path(f).parent == d], lost, "") for d in sorted(unsure)]
     if plain:
-        out.insert(0, (plain, ""))
+        out.insert(0, (plain, "", ""))
     return out
+
+
+def _copy_name(part) -> str:
+    """A copy of one release's discs or layers as a log names it: its album folder, with the
+    folders inside it that hold its files (MED-22c: three copies of one album folder are
+    "Album/Disc 01+Disc 02", "Album/Disc 01 (SACD Stereo)", never the album folder three times)."""
+    dirs = sorted({Path(f).parent for f in part.files})
+    if dirs and all(d != Path(part.folder) for d in dirs):
+        return f"{Path(part.folder).name}/" + "+".join(d.name for d in dirs)
+    return Path(part.folder).name
+
+
+# MED-22c: a layer copy's label (as _layer_copies buckets them) and the media its files are of
+_LAYER_LABELS = {"sacd stereo": "SACD Stereo", "sacd multichannel": "SACD Multichannel", "sacd": "SACD"}
+_LAYER_MEDIA = {"SACD Stereo": "Hybrid SACD (SACD layer, 2 channels)",
+                "SACD Multichannel": "Hybrid SACD (SACD layer, multichannel)", "SACD": "Hybrid SACD (SACD layer)"}
+
+
+def _own_layer(prop, g):
+    """MED-22c (decided 2026-11-21): a copy of an SACD layer beside its disc's CD-layer copy
+    (Group.layer) keeps the layer its own files name when the release names none for it - Discogs
+    lists the disc once, so a copy tagged from Discogs alone (MusicBrainz busy, or no MusicBrainz
+    entry) has none - or names the CD layer for it (a copy MusicBrainz's match aimed at the CD
+    layer's medium): "~layer" (its own folder, "Disc 01 (SACD Stereo)", never the CD layer's
+    "Disc 01") and its layer's media (its files' own media tag where that names the layer), never
+    the Discogs format of the disc. Its files' tags are its proof: their media or SACD_AREA tag
+    naming the layer; a folder's "(SACD Stereo)" alone counts only for DSD-derived audio (88.2 or
+    176.4 kHz, DSD) - a hi-res download in a folder you named so is left as it was. A target
+    naming an SACD layer of the release is left as it is. PROP (and its parts), changed."""
+    label = getattr(g, "layer", "")
+    if not label:
+        return prop
+    own, told = {}, False
+    for f in g.files:
+        m = ex.read_meta(f) or {}
+        media = str((m.get("media") or [""])[0])
+        area = mc.layout_of_channels(0, (m.get("sacd_area") or [""])[0])
+        if mb_tags.layer_label(media) == label:
+            own[os.path.realpath(str(f))] = media
+            told = True
+        elif area and _LAYER_LABELS.get(f"sacd {area}") == label:
+            told = True
+    if not told and not _dsd_derived(g.files):
+        return prop
+    fallback = _LAYER_MEDIA.get(label, "")
+    for q in [prop] + list(getattr(prop, "parts", None) or []):
+        for f, t in zip(q.files or [], q.targets or []):
+            kind = mb_tags._layer_kind(str((t.get("media") or [""])[0]))[1]
+            if (t.get("~layer") and kind != "cd") or kind not in ("", "cd"):
+                continue
+            t["~layer"] = [label]
+            media = own.get(os.path.realpath(str(f))) or fallback
+            if media:
+                t["media"] = [media]
+                if isinstance(getattr(q, "provenance", None), dict):
+                    q.provenance["media"] = "tagmender"
+    return prop
+
+
+def _dsd_derived(files) -> bool:
+    """MED-3: every one of these files is DSD, or DSD64 converted (88.2 or 176.4 kHz)."""
+    import mutagen
+    if not files:
+        return False
+    for f in files:
+        try:
+            rate = int(getattr(mutagen.File(f).info, "sample_rate", 0) or 0)
+        except Exception:
+            return False
+        if rate not in (88200, 176400) and rate < 2822400:
+            return False
+    return True
 
 
 def _hires_folder(files) -> bool:

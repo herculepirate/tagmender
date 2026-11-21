@@ -1432,6 +1432,34 @@ def _mixed_layers(files, targets) -> list:
     return sorted({d for (d, _n), kinds in seen.items() if len(kinds) > 1})
 
 
+def _copy_layer(src, t) -> str:
+    """MED-22c: which layer of its disc a file is a copy of - "" for a CD layer's or any plain
+    disc's copy, else "stereo", "multichannel" or "sacd": as its target names it ("~layer", a
+    layer's media), else as its own files do (their media or SACD_AREA tag, else their folder's
+    "(SACD Stereo)"), whatever the release says (a release listing the disc once names none). The
+    folder's label is asked before the tags are read; Planner._layers_apart asks only for folders
+    two albums of the plan fill."""
+    import match_core as mc
+    import mb_tags
+    t = t or {}
+    lay = str((_vals(t.get("~layer")) or [""])[0]).casefold()
+    kind = mb_tags._layer_kind(str((_vals(t.get("media")) or [""])[0]))[1]
+    if not lay and kind in ("", "cd"):
+        got = _LAYER_DIR.search(Path(str(src)).parent.name)
+        lay = got.group(0).casefold() if got else ""
+    if not lay and kind in ("", "cd"):
+        try:
+            m = ex.read_meta(src) or {}
+        except Exception:
+            m = {}
+        kind = mb_tags._layer_kind(str((m.get("media") or [""])[0]))[1]
+        if kind in ("", "cd"):
+            kind = mc.layout_of_channels(0, (m.get("sacd_area") or [""])[0]) or ""
+    if lay:
+        kind = "stereo" if "stereo" in lay else "multichannel" if "multi" in lay else "sacd"
+    return "" if kind in ("", "cd") else kind
+
+
 def _layer_there(folder: str, me: frozenset, disc, media: str, ignore: set) -> bool:
     """MED-22c: FOLDER already holds, on disk and outside this plan, music tagged as this release
     (a release ID shared) on disc DISC from another medium than MEDIA - another layer of the disc
@@ -2063,6 +2091,7 @@ class Planner:
         self._inodes = {}
         self._album_dirs = {}
         self._planned = set()
+        self._layer_use = {}              # MED-22c: id(prop) -> (its album, {(folder, disc): [(src, its tags)]})
         self._album_claims = {}           # MOV-4: album folder -> [(release IDs, source folder, discs)]
         for c in self._seed_claims:
             try:
@@ -3216,6 +3245,15 @@ class Planner:
             for d in _mixed_layers(entry["files"], by_src):
                 entry["conflicts"].append(f"{Path(d).name}: two layers (media) of one disc would share this "
                                           "folder; held for review (MED-22c)")
+            # MED-22c: nor by two albums of this plan (one copy of the disc's CD layer, another of an
+            # SACD layer the release names no layer for): which folders each fills, for _layers_apart
+            use_ = {}
+            for fe in entry["files"]:
+                if fe.get("dst"):
+                    src_ = fe.get("copy_of") or fe["src"]
+                    disc_, _m, _l = _layer_of(by_src.get(src_))
+                    use_.setdefault((os.path.dirname(fe["dst"]), disc_), []).append((src_, by_src.get(src_)))
+            self._layer_use[id(prop)] = (entry, use_)
             me_, checked = _release_ids(prop), set()
             for fe in entry["files"]:
                 disc_, media_, _l = _layer_of(by_src.get(fe.get("copy_of") or fe["src"]))
@@ -4652,6 +4690,7 @@ class Planner:
                 self._resident.append((fnm.fold(pr.source_dir), _release_ids(pr), pr.source_dir))
                 res_discs.setdefault(fnm.fold(pr.source_dir), set()).update(_prop_discs(pr))   # (MOV-4)
         albums = [self.album(pr) for pr in proposals]
+        self._layers_apart(albums)
         _split_together(albums)
         _sets_missing(albums)
         for a in albums:                                  # (your edits: kept by a new preview)
@@ -4667,6 +4706,36 @@ class Planner:
                 "library_roots": self.library_roots(), "albums": albums, "summary": counts,
                 "discogs_settings": _enrichment_summary(self.profile),
                 "preserve_timestamps": self.profile.preserve_timestamps()}
+
+    def _layers_apart(self, albums):
+        """MED-22c (decided 2026-11-21): two albums of this plan filling one folder with copies of
+        one disc: where their copies are of different layers (_copy_layer), the folder is the
+        layer its name says - a plain disc folder ("Disc 01", the album's own) the CD layer's or a
+        plain disc's copy, "Disc 01 (SACD Stereo)" the stereo layer's - and each album filing
+        another layer there (or layers it cannot tell apart: more than one) is held for review,
+        whatever their order in the plan. Albums held already are left as they are."""
+        listed = {id(a) for a in albums}
+        by = {}
+        for entry, use in self._layer_use.values():
+            if id(entry) not in listed:
+                continue                                 # (an entry planned again: its last is the album)
+            for key, files in use.items():
+                by.setdefault(key, []).append((entry, files))
+        for (folder, disc), users in sorted(by.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
+            if len(users) < 2:
+                continue
+            kinds = [(entry, {_copy_layer(src, t) for src, t in files}) for entry, files in users]
+            if len({frozenset(k) for _e, k in kinds}) < 2:
+                continue                                 # (the same layer: MOV-4's copies, as before)
+            got = _LAYER_DIR.search(Path(folder).name)
+            lay = got.group(0).casefold() if got else ""
+            want = ("stereo" if "stereo" in lay else "multichannel" if "multi" in lay else "sacd") if lay else ""
+            for entry, mine in kinds:
+                if mine == {want} or entry.get("status") not in ("ready", "unchanged"):
+                    continue
+                entry["status"] = "blocked"
+                entry["conflicts"].append(f"{Path(folder).name}: another album of this plan files another layer of "
+                                          f"disc {disc} in this folder; held for review (MED-22c)")
 
     def library_roots(self):
         """The profile's own folders (not a folder named on the command line)."""
